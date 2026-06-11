@@ -441,7 +441,7 @@ export const NotificationSettings: React.FC = () => {
     <div className="space-y-8">
 
         {/* --- Global Delivery Settings --- */}
-        <div className="mb-8">
+        <div data-settings-item="notifications.delivery" className="mb-8">
           <div className="mb-1 px-1">
               <h3 className="typography-ui-header font-medium text-foreground">
                 {t('settings.notifications.page.delivery.title')}
@@ -540,7 +540,7 @@ export const NotificationSettings: React.FC = () => {
         {nativeNotificationsEnabled && canShowNotifications && (
           <>
             {/* --- Events --- */}
-            <div className="mb-8">
+            <div data-settings-item="notifications.events" className="mb-8">
               <div className="mb-1 px-1">
                 <h3 className="typography-ui-header font-medium text-foreground">
                   {t('settings.notifications.page.events.title')}
@@ -672,7 +672,7 @@ export const NotificationSettings: React.FC = () => {
 
         {/* --- Background Push Notifications --- */}
         {isBrowser && (
-          <div className="mb-8">
+          <div data-settings-item="notifications.push" className="mb-8">
             <div className="mb-1 px-1">
               <h3 className="typography-ui-header font-medium text-foreground">
                 {t('settings.notifications.page.push.title')}

@@ -4,8 +4,14 @@ import type {
   FileSearchResult,
   FilesAPI,
 } from '@openchamber/ui/lib/api/types';
+import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
+import type { RuntimeUrlResolver } from '@openchamber/ui/lib/runtime-url';
 
 const normalizePath = (path: string): string => path.replace(/\\/g, '/');
+
+interface WebFilesAPIOptions {
+  urls: RuntimeUrlResolver;
+}
 
 type WebDirectoryEntry = {
   name?: string;
@@ -39,7 +45,7 @@ const toDirectoryListResult = (fallbackDirectory: string, payload: WebDirectoryL
   };
 };
 
-export const createWebFilesAPI = (): FilesAPI => ({
+export const createWebFilesAPI = ({ urls }: WebFilesAPIOptions): FilesAPI => ({
   async listDirectory(path: string, options): Promise<DirectoryListResult> {
     const target = normalizePath(path);
     const params = new URLSearchParams();
@@ -50,7 +56,7 @@ export const createWebFilesAPI = (): FilesAPI => ({
       params.set('respectGitignore', 'true');
     }
 
-    const response = await fetch(`/api/fs/list${params.toString() ? `?${params.toString()}` : ''}`);
+    const response = await runtimeFetch(urls.api('/api/fs/list', params));
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: response.statusText }));
@@ -77,7 +83,7 @@ export const createWebFilesAPI = (): FilesAPI => ({
       params.set('limit', String(payload.maxResults));
     }
 
-    const response = await fetch(`/api/find/file?${params.toString()}`);
+    const response = await runtimeFetch(urls.api('/api/find/file', params));
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: response.statusText }));
@@ -95,7 +101,7 @@ export const createWebFilesAPI = (): FilesAPI => ({
 
   async createDirectory(path: string): Promise<{ success: boolean; path: string }> {
     const target = normalizePath(path);
-    const response = await fetch('/api/fs/mkdir', {
+    const response = await runtimeFetch(urls.api('/api/fs/mkdir'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: target }),
@@ -119,7 +125,7 @@ export const createWebFilesAPI = (): FilesAPI => ({
     if (options?.allowOutsideWorkspace) {
       params.set('allowOutsideWorkspace', 'true');
     }
-    const response = await fetch(`/api/fs/stat?${params.toString()}`);
+    const response = await runtimeFetch(urls.api('/api/fs/stat', params));
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: response.statusText }));
@@ -144,7 +150,7 @@ export const createWebFilesAPI = (): FilesAPI => ({
     if (options?.optional) {
       params.set('optional', 'true');
     }
-    const response = await fetch(`/api/fs/read?${params.toString()}`, {
+    const response = await runtimeFetch(urls.api('/api/fs/read', params), {
       cache: options?.optional ? 'no-store' : 'default',
     });
 
@@ -159,7 +165,7 @@ export const createWebFilesAPI = (): FilesAPI => ({
 
   async writeFile(path: string, content: string): Promise<{ success: boolean; path: string }> {
     const target = normalizePath(path);
-    const response = await fetch('/api/fs/write', {
+    const response = await runtimeFetch(urls.api('/api/fs/write'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: target, content }),
@@ -179,7 +185,7 @@ export const createWebFilesAPI = (): FilesAPI => ({
 
   async delete(path: string): Promise<{ success: boolean }> {
     const target = normalizePath(path);
-    const response = await fetch('/api/fs/delete', {
+    const response = await runtimeFetch(urls.api('/api/fs/delete'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: target }),
@@ -195,7 +201,7 @@ export const createWebFilesAPI = (): FilesAPI => ({
   },
 
   async rename(oldPath: string, newPath: string): Promise<{ success: boolean; path: string }> {
-    const response = await fetch('/api/fs/rename', {
+    const response = await runtimeFetch(urls.api('/api/fs/rename'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ oldPath, newPath }),
@@ -214,7 +220,7 @@ export const createWebFilesAPI = (): FilesAPI => ({
   },
 
   async revealPath(targetPath: string): Promise<{ success: boolean }> {
-    const response = await fetch('/api/fs/reveal', {
+    const response = await runtimeFetch(urls.api('/api/fs/reveal'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: normalizePath(targetPath) }),
@@ -231,7 +237,7 @@ export const createWebFilesAPI = (): FilesAPI => ({
 
   async downloadFile(path: string): Promise<void> {
     const target = normalizePath(path);
-    const url = `/api/fs/raw?path=${encodeURIComponent(target)}&download=true`;
+    const url = urls.rawFile(target, { download: true });
     const a = document.createElement('a');
     a.href = url;
     a.download = target.split('/').pop() || 'file';

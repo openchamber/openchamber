@@ -33,6 +33,13 @@ const createMockResponse = () => {
       body = payload;
       return this;
     },
+    type() {
+      return this;
+    },
+    send(payload) {
+      body = payload;
+      return this;
+    },
     get statusCode() {
       return statusCode;
     },
@@ -125,6 +132,26 @@ const registerWrite = (fsPromises) => {
   return getRoute('POST', '/api/fs/write');
 };
 
+const registerRead = (fsPromises) => {
+  const { app, getRoute } = createRouteRegistry();
+  registerFsRoutes(app, {
+    os: { homedir: () => '/home/user' },
+    path: path.posix,
+    fsPromises: {
+      realpath: async (targetPath) => targetPath,
+      ...fsPromises,
+    },
+    spawn: vi.fn(),
+    crypto: { randomUUID: () => 'job-0' },
+    normalizeDirectoryPath: (p) => p,
+    resolveProjectDirectory: async () => ({ directory: '/repo' }),
+    buildAugmentedPath: () => '/usr/bin',
+    resolveGitBinaryForSpawn: () => 'git',
+    openchamberUserConfigRoot: '/home/user/.config',
+  });
+  return getRoute('GET', '/api/fs/read');
+};
+
 const callExec = async (handler, body) => {
   const res = createMockResponse();
   await handler({ body }, res);
@@ -134,6 +161,12 @@ const callExec = async (handler, body) => {
 const callWrite = async (handler, body) => {
   const res = createMockResponse();
   await handler({ body }, res);
+  return res;
+};
+
+const callRead = async (handler, query) => {
+  const res = createMockResponse();
+  await handler({ query }, res);
   return res;
 };
 
@@ -157,6 +190,8 @@ describe('fs write', () => {
       readFile: vi.fn(async () => 'old'),
       mkdir: vi.fn(async () => undefined),
       writeFile: vi.fn(async () => undefined),
+      rename: vi.fn(async () => undefined),
+      unlink: vi.fn(async () => undefined),
     };
     const handler = registerWrite(fsPromises);
 
@@ -164,7 +199,75 @@ describe('fs write', () => {
 
     expect(res.body).toEqual({ success: true, path: '/repo/file.txt' });
     expect(fsPromises.mkdir).toHaveBeenCalledWith('/repo', { recursive: true });
-    expect(fsPromises.writeFile).toHaveBeenCalledWith('/repo/file.txt', 'new', 'utf8');
+    const tmp = fsPromises.writeFile.mock.calls[0][0];
+    expect(tmp).toMatch(/^\/repo\/file\.txt\.tmp-/);
+    expect(fsPromises.writeFile).toHaveBeenCalledWith(tmp, 'new', 'utf8');
+    expect(fsPromises.rename).toHaveBeenCalledWith(tmp, '/repo/file.txt');
+    expect(fsPromises.unlink).not.toHaveBeenCalled();
+  });
+
+  it('writes through existing symlinks without replacing the link', async () => {
+    const fsPromises = {
+      realpath: vi.fn(async (targetPath) => {
+        if (targetPath === '/repo/link.txt') return '/repo/target.txt';
+        return targetPath;
+      }),
+      readFile: vi.fn(async () => 'old'),
+      mkdir: vi.fn(async () => undefined),
+      writeFile: vi.fn(async () => undefined),
+      rename: vi.fn(async () => undefined),
+      unlink: vi.fn(async () => undefined),
+    };
+    const handler = registerWrite(fsPromises);
+
+    const res = await callWrite(handler, { path: '/repo/link.txt', content: 'new' });
+
+    expect(res.body).toEqual({ success: true, path: '/repo/link.txt' });
+    expect(fsPromises.readFile).toHaveBeenCalledWith('/repo/target.txt', 'utf8');
+    const tmp = fsPromises.writeFile.mock.calls[0][0];
+    expect(tmp).toMatch(/^\/repo\/target\.txt\.tmp-/);
+    expect(fsPromises.rename).toHaveBeenCalledWith(tmp, '/repo/target.txt');
+    expect(fsPromises.rename).not.toHaveBeenCalledWith(expect.any(String), '/repo/link.txt');
+  });
+
+  it('rejects existing symlinks that resolve outside the workspace', async () => {
+    const fsPromises = {
+      realpath: vi.fn(async (targetPath) => {
+        if (targetPath === '/repo/link.txt') return '/outside/target.txt';
+        return targetPath;
+      }),
+      readFile: vi.fn(async () => 'old'),
+      mkdir: vi.fn(async () => undefined),
+      writeFile: vi.fn(async () => undefined),
+      rename: vi.fn(async () => undefined),
+      unlink: vi.fn(async () => undefined),
+    };
+    const handler = registerWrite(fsPromises);
+
+    const res = await callWrite(handler, { path: '/repo/link.txt', content: 'new' });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual({ error: 'Access denied' });
+    expect(fsPromises.writeFile).not.toHaveBeenCalled();
+    expect(fsPromises.rename).not.toHaveBeenCalled();
+  });
+});
+
+describe('fs read', () => {
+  it('logs when empty-read retries are exhausted after non-empty stat', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fsPromises = {
+      stat: vi.fn(async () => ({ isFile: () => true, size: 3 })),
+      readFile: vi.fn(async () => ''),
+    };
+    const handler = registerRead(fsPromises);
+
+    const res = await callRead(handler, { path: '/repo/file.txt' });
+
+    expect(res.body).toBe('');
+    expect(fsPromises.readFile).toHaveBeenCalledTimes(4);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Read retry exhausted for /repo/file.txt'));
+    warn.mockRestore();
   });
 });
 

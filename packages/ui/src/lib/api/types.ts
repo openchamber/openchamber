@@ -398,6 +398,8 @@ export interface CreateGitWorktreePayload {
   /** Optional remote provisioning (used for fork PR workflows). */
   ensureRemoteName?: string;
   ensureRemoteUrl?: string;
+  /** Return once the target directory exists and finish Git worktree setup in the background. */
+  returnAfterDirectoryCreated?: boolean;
 }
 
 export interface GitWorktreeCreateResult {
@@ -405,6 +407,8 @@ export interface GitWorktreeCreateResult {
   name: string;
   branch: string;
   path: string;
+  directoryCreated?: true;
+  bootstrapStatus?: GitWorktreeBootstrapStatus;
 }
 
 export interface RemoveGitWorktreePayload {
@@ -538,7 +542,7 @@ export interface GitAPI {
     cwd: string | null;
     branch: string | null;
     headState: 'branch' | 'detached' | 'unborn';
-    worktreeStatus: 'ready' | 'missing' | 'invalid' | 'not-a-repo';
+    worktreeStatus: 'pending' | 'ready' | 'missing' | 'invalid' | 'not-a-repo';
     legacy: boolean;
     degraded: boolean;
     attentionReason?: 'merge' | 'rebase' | 'cherry-pick' | 'revert' | 'bisect' | null;
@@ -648,7 +652,10 @@ export interface SettingsPayload {
   queueModeEnabled?: boolean;
   gitmojiEnabled?: boolean;
   inputSpellcheckEnabled?: boolean;
+  showOpenCodeUpdateNotifications?: boolean;
+  openCodeUpdateToastDismissedVersion?: string;
   showToolFileIcons?: boolean;
+  showTurnChangedFiles?: boolean;
   showExpandedBashTools?: boolean;
   showExpandedEditTools?: boolean;
   chatRenderMode?: 'sorted' | 'live';
@@ -663,6 +670,7 @@ export interface SettingsPayload {
   padding?: number;
   cornerRadius?: number;
   inputBarOffset?: number;
+  shortcutOverrides?: Record<string, string>;
   diffLayoutPreference?: 'dynamic' | 'inline' | 'side-by-side';
   diffViewMode?: 'single' | 'stacked';
   gitChangesViewMode?: 'flat' | 'tree';
@@ -716,6 +724,10 @@ export interface NotificationPayload {
   body?: string;
 
   tag?: string;
+  kind?: string;
+  sessionId?: string;
+  directory?: string;
+  requireHidden?: boolean;
 }
 
 export interface NotificationsAPI {
@@ -746,6 +758,9 @@ export interface VSCodeAPI {
   executeCommand(command: string, ...args: unknown[]): Promise<unknown>;
   openAgentManager(): Promise<void>;
   openExternalUrl(url: string): Promise<void>;
+  pickFiles?(): Promise<unknown>;
+  saveImage?(payload: unknown): Promise<unknown>;
+  saveMarkdown?(payload: unknown): Promise<unknown>;
 }
 
 export interface PushSubscribePayload {
@@ -1024,6 +1039,12 @@ export type GitHubAuthStatus = {
   user?: GitHubUserSummary | null;
   scope?: string;
   accounts?: GitHubAuthAccount[];
+  ghCli?: {
+    available: boolean;
+    disabled: boolean;
+    active: boolean;
+    user?: GitHubUserSummary | null;
+  } | null;
 };
 
 export type GitHubAuthAccount = {
@@ -1031,6 +1052,7 @@ export type GitHubAuthAccount = {
   user: GitHubUserSummary;
   scope?: string;
   current?: boolean;
+  source?: 'oauth' | 'gh-cli';
 };
 
 export type GitHubDeviceFlowStart = {
@@ -1053,6 +1075,7 @@ export interface GitHubAPI {
   authComplete(deviceCode: string): Promise<GitHubDeviceFlowComplete>;
   authDisconnect(): Promise<{ removed: boolean }>;
   authActivate(accountId: string): Promise<GitHubAuthStatus>;
+  authSetGhCliDisabled(disabled: boolean): Promise<{ disabled: boolean }>;
   me?(): Promise<GitHubUserSummary>;
 
   prStatus(directory: string, branch: string, remote?: string, options?: { force?: boolean }): Promise<GitHubPullRequestStatus>;
@@ -1061,18 +1084,49 @@ export interface GitHubAPI {
   prMerge(payload: GitHubPullRequestMergeInput): Promise<GitHubPullRequestMergeResult>;
   prReady(payload: GitHubPullRequestReadyInput): Promise<GitHubPullRequestReadyResult>;
 
-  prsList(directory: string, options?: { page?: number }): Promise<GitHubPullRequestsListResult>;
+  prsList(directory: string, options?: { page?: number; query?: string }): Promise<GitHubPullRequestsListResult>;
   prContext(
     directory: string,
     number: number,
     options?: { includeDiff?: boolean; includeCheckDetails?: boolean; sourceRepo?: GitHubRepoSelector | null }
   ): Promise<GitHubPullRequestContextResult>;
 
-  issuesList(directory: string, options?: { page?: number }): Promise<GitHubIssuesListResult>;
+  issuesList(directory: string, options?: { page?: number; query?: string }): Promise<GitHubIssuesListResult>;
   issueGet(directory: string, number: number, options?: { sourceRepo?: GitHubRepoSelector | null }): Promise<GitHubIssueGetResult>;
   issueComments(directory: string, number: number, options?: { sourceRepo?: GitHubRepoSelector | null }): Promise<GitHubIssueCommentsResult>;
   repoUpstream(directory: string): Promise<GitHubRepoUpstreamResult>;
   repoBranches(owner: string, repo: string): Promise<string[]>;
+}
+
+export interface RemoteClientRecord {
+  id: string;
+  label: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+  expiresAt?: string | null;
+  clientKind?: string | null;
+}
+
+export interface RemoteClientCreateResult {
+  client: RemoteClientRecord;
+  token: string;
+}
+
+export interface RemoteClientRevokeResult {
+  revoked: boolean;
+  client?: RemoteClientRecord;
+}
+
+export interface RemoteClientPurgeRevokedResult {
+  purged: number;
+}
+
+export interface ClientAuthAPI {
+  listClients(): Promise<RemoteClientRecord[]>;
+  createClient(input?: { label?: string }): Promise<RemoteClientCreateResult>;
+  purgeRevokedClients(): Promise<RemoteClientPurgeRevokedResult>;
+  revokeClient(id: string): Promise<RemoteClientRevokeResult>;
 }
 
 export interface RuntimeAPIs {
@@ -1086,6 +1140,7 @@ export interface RuntimeAPIs {
   github?: GitHubAPI;
   push?: PushAPI;
   diagnostics?: DiagnosticsAPI;
+  clientAuth?: ClientAuthAPI;
   tools: ToolsAPI;
   editor?: EditorAPI;
   vscode?: VSCodeAPI;

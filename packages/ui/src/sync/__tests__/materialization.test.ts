@@ -15,6 +15,22 @@ function part(id: string, messageID: string, type = "text", text = id): Part {
 }
 
 describe("materializeSessionSnapshots", () => {
+  test("marks an empty successful page as materialized", () => {
+    const result = materializeSessionSnapshots(
+      { message: {}, part: {} },
+      "ses_1",
+      [],
+    )
+
+    expect(result.message.ses_1).toEqual([])
+    expect(result.messagesChanged).toBe(true)
+    expect(getSessionMaterializationStatus(result, "ses_1")).toEqual({
+      hasMessages: true,
+      renderable: true,
+      missingPartMessageIDs: [],
+    })
+  })
+
   test("materializes messages and parts together", () => {
     const result = materializeSessionSnapshots(
       { message: {}, part: {} },

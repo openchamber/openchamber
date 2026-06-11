@@ -97,6 +97,21 @@ const rememberTurnModel = (key: string, value: { messages: ChatMessageEntry[]; m
     turnModelCache.set(key, value)
 }
 
+export const shouldAutoLoadEarlierForUnderfilledPinnedViewport = (input: {
+    sessionId: string | null;
+    isPinned: boolean;
+    canLoadEarlier: boolean;
+    isLoadingOlder: boolean;
+    pendingRevealWork: boolean;
+    scrollHeight: number;
+    clientHeight: number;
+}): boolean => {
+    if (!input.sessionId) return false;
+    if (!input.isPinned || !input.canLoadEarlier) return false;
+    if (input.isLoadingOlder || input.pendingRevealWork) return false;
+    return input.scrollHeight <= input.clientHeight + 1;
+};
+
 export const useChatTimelineController = ({
     sessionId,
     messages,
@@ -524,26 +539,32 @@ export const useChatTimelineController = ({
         void loadEarlier({ userInitiated: true });
     }, [loadEarlier, scrollRef]);
 
+    const loadEarlierIfPinnedViewportUnderfilled = React.useCallback(() => {
+        if (historyInteractionRef.current) return;
+        const container = scrollRef.current;
+        if (!container) return;
+        if (!shouldAutoLoadEarlierForUnderfilledPinnedViewport({
+            sessionId: sessionIdRef.current,
+            isPinned: isPinnedRef.current,
+            canLoadEarlier: historySignalsRef.current.canLoadEarlier,
+            isLoadingOlder: isLoadingOlderRef.current,
+            pendingRevealWork: pendingRevealWorkRef.current,
+            scrollHeight: container.scrollHeight,
+            clientHeight: container.clientHeight,
+        })) {
+            return;
+        }
+
+        void loadEarlier();
+    }, [loadEarlier, scrollRef]);
+
     React.useEffect(() => {
-        if (!sessionId || isLoadingOlder || pendingRevealWork) {
-            return;
-        }
-        if (!isPinned || !historySignals.canLoadEarlier) {
-            return;
-        }
         if (typeof window === 'undefined') {
             return;
         }
 
         const frame = window.requestAnimationFrame(() => {
-            const container = scrollRef.current;
-            if (!container) return;
-            if (!isPinnedRef.current) return;
-            if (!historySignalsRef.current.canLoadEarlier) return;
-            if (isLoadingOlderRef.current || pendingRevealWorkRef.current) return;
-            if (container.scrollHeight > container.clientHeight + 1) return;
-
-            void loadEarlier();
+            loadEarlierIfPinnedViewportUnderfilled();
         });
 
         return () => window.cancelAnimationFrame(frame);
@@ -551,12 +572,48 @@ export const useChatTimelineController = ({
         historySignals.canLoadEarlier,
         isLoadingOlder,
         isPinned,
-        loadEarlier,
+        loadEarlierIfPinnedViewportUnderfilled,
         pendingRevealWork,
         renderedMessages.length,
-        scrollRef,
         sessionId,
     ]);
+
+    React.useEffect(() => {
+        if (typeof window === 'undefined' || typeof ResizeObserver === 'undefined') {
+            return;
+        }
+
+        const container = scrollRef.current;
+        if (!container) {
+            return;
+        }
+
+        let frame: number | null = null;
+        const scheduleCheck = () => {
+            if (frame !== null) {
+                return;
+            }
+            frame = window.requestAnimationFrame(() => {
+                frame = null;
+                loadEarlierIfPinnedViewportUnderfilled();
+            });
+        };
+
+        const observer = new ResizeObserver(scheduleCheck);
+        observer.observe(container);
+        const content = container.firstElementChild;
+        if (content instanceof Element) {
+            observer.observe(content);
+        }
+        scheduleCheck();
+
+        return () => {
+            if (frame !== null) {
+                window.cancelAnimationFrame(frame);
+            }
+            observer.disconnect();
+        };
+    }, [loadEarlierIfPinnedViewportUnderfilled, scrollRef, sessionId]);
 
     const scrollToTurn = React.useCallback(async (
         turnId: string,

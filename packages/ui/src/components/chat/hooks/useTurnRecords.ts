@@ -6,6 +6,7 @@ import { streamPerfMeasure } from '@/stores/utils/streamDebug';
 interface UseTurnRecordsOptions {
     sessionKey?: string;
     showTextJustificationActivity: boolean;
+    showTurnChangedFiles: boolean;
 }
 
 export interface TurnRecordsResult {
@@ -23,13 +24,16 @@ export const useTurnRecords = (
     const streamingTurnRef = React.useRef<TurnRecord | undefined>(undefined);
     const previousSessionKeyRef = React.useRef<string | undefined>(options.sessionKey);
     const previousShowTextJustificationActivityRef = React.useRef(options.showTextJustificationActivity);
+    const previousShowTurnChangedFilesRef = React.useRef(options.showTurnChangedFiles);
 
     if (
         previousSessionKeyRef.current !== options.sessionKey
         || previousShowTextJustificationActivityRef.current !== options.showTextJustificationActivity
+        || previousShowTurnChangedFilesRef.current !== options.showTurnChangedFiles
     ) {
         previousSessionKeyRef.current = options.sessionKey;
         previousShowTextJustificationActivityRef.current = options.showTextJustificationActivity;
+        previousShowTurnChangedFilesRef.current = options.showTurnChangedFiles;
         previousProjectionRef.current = null;
         staticTurnsRef.current = [];
         streamingTurnRef.current = undefined;
@@ -39,18 +43,19 @@ export const useTurnRecords = (
         previousProjectionRef.current = null;
         staticTurnsRef.current = [];
         streamingTurnRef.current = undefined;
-    }, [options.sessionKey, options.showTextJustificationActivity]);
+    }, [options.sessionKey, options.showTextJustificationActivity, options.showTurnChangedFiles]);
 
     const projection = React.useMemo(() => {
         return streamPerfMeasure('ui.turns.projection_ms', () => {
             const nextProjection = projectTurnRecords(messages, {
                 previousProjection: previousProjectionRef.current,
                 showTextJustificationActivity: options.showTextJustificationActivity,
+                showTurnChangedFiles: options.showTurnChangedFiles,
             });
             previousProjectionRef.current = nextProjection;
             return nextProjection;
         });
-    }, [messages, options.showTextJustificationActivity]);
+    }, [messages, options.showTextJustificationActivity, options.showTurnChangedFiles]);
 
     const staticTurns = React.useMemo(() => {
         const nextStatic = projection.turns.length <= 1

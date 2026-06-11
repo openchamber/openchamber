@@ -118,7 +118,7 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
 
   return (
     <div
-      className={`group flex items-center gap-2 py-1.5 hover:bg-sidebar/40 cursor-pointer ${rowPaddingClassName ?? 'px-3'}`}
+      className={`group flex items-center gap-2 py-1.5 cursor-pointer ${rowPaddingClassName ?? 'px-3'}`}
       role="button"
       tabIndex={0}
       onClick={onViewDiff}

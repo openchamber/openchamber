@@ -14,21 +14,24 @@ import {
   type PasskeyStatus,
   type StoredPasskey,
 } from '@/lib/passkeys';
-import { useI18n } from '@/lib/i18n';
+import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
+import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 
-const formatTimestamp = (timestamp: number | null, neverUsedText: string) => {
+const formatTimestamp = (timestamp: number | null, neverUsedText: string, timeFormatPreference: TimeFormatPreference) => {
   if (!timestamp || !Number.isFinite(timestamp)) {
     return neverUsedText;
   }
 
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(getCurrentIntlLocale(), {
     dateStyle: 'medium',
     timeStyle: 'short',
+    hour12: timeFormatPreference === 'auto' ? undefined : timeFormatPreference === '12h',
   }).format(timestamp);
 };
 
 export const PasskeySettings: React.FC = () => {
   const { t } = useI18n();
+  const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const [supportsPasskeys, setSupportsPasskeys] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isRegistering, setIsRegistering] = React.useState(false);
@@ -230,10 +233,10 @@ export const PasskeySettings: React.FC = () => {
                   <span className="typography-meta text-muted-foreground truncate">
                     {passkey.lastUsedAt
                       ? t('settings.openchamber.passkeys.item.lastUsed', {
-                          time: formatTimestamp(passkey.lastUsedAt, t('settings.openchamber.passkeys.time.neverUsed')),
+                          time: formatTimestamp(passkey.lastUsedAt, t('settings.openchamber.passkeys.time.neverUsed'), timeFormatPreference),
                         })
                       : t('settings.openchamber.passkeys.item.added', {
-                          time: formatTimestamp(passkey.createdAt, t('settings.openchamber.passkeys.time.neverUsed')),
+                          time: formatTimestamp(passkey.createdAt, t('settings.openchamber.passkeys.time.neverUsed'), timeFormatPreference),
                         })}
                   </span>
                   <Button

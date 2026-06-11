@@ -3,6 +3,7 @@ import { redactSensitiveUrl } from '@/lib/desktopHosts';
 export type RecoveryVariant =
   | 'local-unavailable'
   | 'remote-unreachable'
+  | 'remote-incompatible'
   | 'remote-wrong-service'
   | 'remote-missing'
   | 'missing-default-host';
@@ -104,6 +105,27 @@ export function getDesktopRecoveryConfig(
         descriptionParams: host ? { host } : undefined,
         iconKey: 'remote',
         showRetry: false,
+        showUseLocal: true,
+        showUseRemote: true,
+        useLocalLabel: 'Use Local',
+        useLocalLabelKey: 'onboarding.desktopRecovery.common.useLocal',
+        useRemoteLabel: 'Use Remote',
+        useRemoteLabelKey: 'onboarding.desktopRecovery.common.useRemote',
+      };
+    }
+
+    case 'remote-incompatible': {
+      const host = formatHostDisplay(hostLabel, hostUrl);
+      return {
+        title: 'Server Update Required',
+        description: `The OpenChamber server at "${host || 'unknown'}" is not compatible with this app version. Update OpenChamber on the server, then try again.`,
+        titleKey: 'onboarding.desktopRecovery.remoteIncompatible.title',
+        descriptionKey: 'onboarding.desktopRecovery.remoteIncompatible.description',
+        descriptionParams: host ? { host } : undefined,
+        iconKey: 'remote',
+        showRetry: true,
+        retryLabel: 'Retry Connection',
+        retryLabelKey: 'onboarding.desktopRecovery.remoteUnreachable.retry',
         showUseLocal: true,
         showUseRemote: true,
         useLocalLabel: 'Use Local',

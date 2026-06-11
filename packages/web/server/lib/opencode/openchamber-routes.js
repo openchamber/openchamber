@@ -152,6 +152,10 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
           restartCmdFallback += ` --ui-password '${escapedPw}'`;
         }
       }
+      if (storedOptions.apiOnly === true) {
+        restartCmdPrimary += ' --api-only';
+        restartCmdFallback += ' --api-only';
+      }
       const restartCmd = isForegroundService ? '' : `(${restartCmdPrimary}) || (${restartCmdFallback})`;
       const updateLogPath = path.join(openchamberDataDir, 'update-install.log');
       const logPreamble = [

@@ -7,6 +7,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { setFilesViewShowGitignored, useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { useI18n } from '@/lib/i18n';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 export const GitSettings: React.FC = () => {
   const { t } = useI18n();
@@ -63,7 +64,7 @@ export const GitSettings: React.FC = () => {
 
         // 2. Fetch API (Web/server)
         if (!data) {
-          const response = await fetch('/api/config/settings', {
+          const response = await runtimeFetch('/api/config/settings', {
             method: 'GET',
             headers: { Accept: 'application/json' },
           });
@@ -121,7 +122,7 @@ export const GitSettings: React.FC = () => {
       </div>
 
       <section className="px-2 pb-2 pt-0 space-y-0.5">
-        <div className="pt-1 pb-1">
+        <div data-settings-item="git.changes-view" className="pt-1 pb-1">
           <h4 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.git.changesViewTitle')}</h4>
           <div role="radiogroup" aria-label={t('settings.openchamber.git.changesViewAria')} className="mt-0.5 space-y-0">
             {viewOptions.map((option) => {
@@ -156,6 +157,7 @@ export const GitSettings: React.FC = () => {
         </div>
 
         <div
+          data-settings-item="git.gitmoji"
           className="group flex cursor-pointer items-center gap-2 py-1.5"
           role="button"
           tabIndex={0}
@@ -181,6 +183,7 @@ export const GitSettings: React.FC = () => {
         </div>
 
         <div
+          data-settings-item="git.gitignored-files"
           className="group flex cursor-pointer items-center gap-2 py-1.5"
           role="button"
           tabIndex={0}

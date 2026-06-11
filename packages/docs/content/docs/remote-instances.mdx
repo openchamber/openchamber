@@ -24,6 +24,18 @@ OpenChamber walks through the steps — checking the connection, setting up the 
 
 You decide whether to save the SSH and UI passwords or enter them each time. If the connection drops, OpenChamber reports which step failed so you can fix it — see [Remote access](/troubleshooting/remote-access/).
 
+## Direct connection links
+
+If a remote machine already runs OpenChamber, create a connection link there and import it in **Settings → Remote Instances → Server links**:
+
+```bash
+openchamber connect-url --port 3000 --server http://your-host:3000 --qr
+```
+
+`connect-url` starts the server first if nothing is running on that port. Add `--api-only` for a headless server, `--lan` to bind to the LAN when starting, `--ui-password` to protect browser access, and `--name` to label the saved connection.
+
+The generated link contains a client token for OpenChamber apps. That token is separate from the browser UI password and survives server restarts until you revoke or delete it.
+
 ## Related
 
 - [OpenCode Server](/opencode-server/) — connect to a remote server on web or VS Code

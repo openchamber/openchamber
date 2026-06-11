@@ -24,6 +24,18 @@ OpenChamber 会引导你完成各个步骤 — 检查连接、设置远程、启
 
 你来决定是保存 SSH 和 UI 密码，还是每次都输入它们。如果连接断开，OpenChamber 会报告哪一步失败了，以便你修复它 — 参阅 [远程访问](/zh-cn/troubleshooting/remote-access/)。
 
+## 直接连接链接
+
+如果远程机器已经在运行 OpenChamber，请在那台机器上创建连接链接，然后在 **Settings → Remote Instances → Server links** 中导入：
+
+```bash
+openchamber connect-url --port 3000 --server http://your-host:3000 --qr
+```
+
+如果该端口上没有服务器，`connect-url` 会先启动服务器。使用 `--api-only` 可启动 headless 服务器，`--lan` 可在启动时绑定到 LAN，`--ui-password` 可保护浏览器访问，`--name` 可为保存的连接命名。
+
+生成的链接包含 OpenChamber 应用使用的 client token。这个 token 独立于浏览器 UI 密码，并会在服务器重启后继续有效，直到你撤销或删除它。
+
 ## 相关内容
 
 - [OpenCode Server](/zh-cn/opencode-server/) — 在网页端或 VS Code 中连接到远程服务器

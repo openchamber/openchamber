@@ -1,6 +1,11 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
+import { getCurrentIntlLocale } from '@/lib/i18n';
+import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 import type { SessionSummaryMeta } from './types';
+
+const t = (key: Parameters<typeof formatMessage>[1], params?: Parameters<typeof formatMessage>[2]) =>
+  formatMessage(useI18nStore.getState().dictionary, key, params);
 
 const formatDateLabel = (value: string | number) => {
   const targetDate = new Date(value);
@@ -14,12 +19,12 @@ const formatDateLabel = (value: string | number) => {
   yesterday.setDate(today.getDate() - 1);
 
   if (isSameDay(targetDate, today)) {
-    return 'Today';
+    return t('common.date.today');
   }
   if (isSameDay(targetDate, yesterday)) {
-    return 'Yesterday';
+    return t('common.date.yesterday');
   }
-  const formatted = targetDate.toLocaleDateString('en-US', {
+  const formatted = targetDate.toLocaleDateString(getCurrentIntlLocale(), {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -37,9 +42,9 @@ export const formatSessionDateLabel = (updatedMs: number): string => {
 
   if (isSameDay(updatedDate, today)) {
     const diff = Date.now() - updatedMs;
-    if (diff < 60_000) return 'Just now';
-    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}min ago`;
-    return `${Math.floor(diff / 3_600_000)}h ago`;
+    if (diff < 60_000) return t('common.relative.justNow');
+    if (diff < 3_600_000) return t('common.relative.minutesAgoShort', { count: Math.floor(diff / 60_000) });
+    return t('common.relative.hoursAgoShort', { count: Math.floor(diff / 3_600_000) });
   }
 
   return formatDateLabel(updatedMs);
@@ -62,15 +67,15 @@ export const formatSessionCompactDateLabel = (updatedMs: number): string => {
     return `${Math.floor(diff / hour)}h`;
   }
   if (diff < week) {
-    return `${Math.floor(diff / day)}d`;
+    return t('common.relative.daysAgoCompact', { count: Math.floor(diff / day) });
   }
   if (diff < 5 * week) {
-    return `${Math.floor(diff / week)}w`;
+    return t('common.relative.weeksAgoCompact', { count: Math.floor(diff / week) });
   }
   if (diff < year) {
     return `${Math.floor(diff / month)}mo`;
   }
-  return `${Math.floor(diff / year)}y`;
+  return t('common.relative.yearsAgoCompact', { count: Math.floor(diff / year) });
 };
 
 export const normalizePath = (value?: string | null) => {

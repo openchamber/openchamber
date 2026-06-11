@@ -12,6 +12,8 @@ import {
   setDesktopLaunchAtLogin,
 } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
+import { runtimeFetch } from '@/lib/runtime-fetch';
+import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 
 export const DesktopNetworkSettings: React.FC = () => {
   const { t } = useI18n();
@@ -37,7 +39,7 @@ export const DesktopNetworkSettings: React.FC = () => {
     let cancelled = false;
     void (async () => {
       try {
-        const response = await fetch('/api/config/settings', {
+        const response = await runtimeFetch('/api/config/settings', {
           method: 'GET',
           headers: { Accept: 'application/json' },
         });
@@ -123,7 +125,14 @@ export const DesktopNetworkSettings: React.FC = () => {
       return null;
     }
 
-    const parsed = Number(window.location.port);
+    const runtimeApiBaseUrl = getRuntimeApiBaseUrl();
+    const portSource = runtimeApiBaseUrl || window.location.href;
+    let parsed = 0;
+    try {
+      parsed = Number(new URL(portSource).port);
+    } catch {
+      parsed = Number(window.location.port);
+    }
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
   }, []);
   const lanUrl = draftValue && lanAddress && currentPort ? `http://${lanAddress}:${currentPort}` : null;
@@ -165,7 +174,7 @@ export const DesktopNetworkSettings: React.FC = () => {
     setError(null);
 
     try {
-      const response = await fetch('/api/config/settings', {
+      const response = await runtimeFetch('/api/config/settings', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -207,6 +216,7 @@ export const DesktopNetworkSettings: React.FC = () => {
       <section className="space-y-2 px-2 pb-2 pt-0">
         {launchAtLoginSupported ? (
           <div
+            data-settings-item="sessions.desktop-launch-at-login"
             className="group flex cursor-pointer items-start gap-2 py-1.5"
             role="button"
             tabIndex={0}
@@ -233,7 +243,7 @@ export const DesktopNetworkSettings: React.FC = () => {
           </div>
         ) : null}
 
-        <div className="space-y-1 py-1.5">
+        <div data-settings-item="sessions.desktop-ui-password" className="space-y-1 py-1.5">
           <label className="typography-ui-label text-foreground" htmlFor="desktop-ui-password">
             {t('settings.openchamber.desktopPassword.field.password')}
           </label>
@@ -252,6 +262,7 @@ export const DesktopNetworkSettings: React.FC = () => {
         </div>
 
         <div
+          data-settings-item="sessions.desktop-lan-access"
           className="group flex cursor-pointer items-start gap-2 py-1.5"
           role="button"
           tabIndex={0}

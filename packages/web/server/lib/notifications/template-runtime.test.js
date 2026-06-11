@@ -1,6 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createNotificationTemplateRuntime } from './template-runtime.js';
+
+const originalFetch = globalThis.fetch;
 
 const createRuntime = (settings = {}) => createNotificationTemplateRuntime({
   readSettingsFromDisk: async () => settings,
@@ -11,6 +13,10 @@ const createRuntime = (settings = {}) => createNotificationTemplateRuntime({
 });
 
 describe('notification template runtime zen models', () => {
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
   it('returns no selectable zen models after provider retirement', async () => {
     const runtime = createRuntime();
     const models = await runtime.fetchFreeZenModels();

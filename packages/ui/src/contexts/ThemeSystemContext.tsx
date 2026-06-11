@@ -7,7 +7,7 @@ import React, {
 import { flushSync } from 'react-dom';
 import type { Theme, ThemeMode } from '@/types/theme';
 import type { DesktopSettings } from '@/lib/desktop';
-import { isDesktopLocalOriginActive, isTauriShell, isVSCodeRuntime } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell as detectDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { setDesktopWindowTheme } from '@/lib/desktopNative';
 import { CSSVariableGenerator } from '@/lib/theme/cssGenerator';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -20,6 +20,7 @@ import {
 } from '@/lib/theme/themes';
 import { ThemeSystemContext, type ThemeContextValue } from './theme-system-context';
 import type { VSCodeThemePayload } from '@/lib/theme/vscode/adapter';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 type ThemePreferences = {
   themeMode: ThemeMode;
@@ -219,7 +220,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
   });
   const isVSCode = useMemo(() => isVSCodeRuntime(), []);
   const isLocalDesktopOrigin = useMemo(() => isDesktopLocalOriginActive(), []);
-  const isDesktopShell = useMemo(() => isTauriShell(), []);
+  const isDesktopShell = useMemo(() => detectDesktopShell(), []);
 
   const availableThemes = useMemo(() => {
     const merged: Theme[] = [];
@@ -283,7 +284,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
 
     setCustomThemesLoading(true);
     try {
-      const res = await fetch('/api/config/themes', {
+      const res = await runtimeFetch('/api/config/themes', {
         method: 'GET',
         credentials: isLocalDesktopOrigin ? 'omit' : 'include',
         headers: {
@@ -344,7 +345,9 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     if (typeof document === 'undefined') {
       return;
     }
-    const chromeColor = theme.colors.surface.background;
+    const hasMacVibrancy = document.documentElement.hasAttribute('data-oc-vibrancy')
+      || window.__OPENCHAMBER_ELECTRON__?.macVibrancy === true;
+    const chromeColor = hasMacVibrancy ? 'transparent' : theme.colors.surface.background;
 
     document.body.style.backgroundColor = chromeColor;
 

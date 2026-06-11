@@ -1,3 +1,5 @@
+import { runtimeFetch } from './runtime-fetch';
+
 export type MagicPromptId =
   | 'git.commit.generate.visible'
   | 'git.commit.generate.instructions'
@@ -27,6 +29,11 @@ export type MagicPromptId =
   | 'session.summary.instructions'
   | 'session.review.visible'
   | 'session.review.instructions'
+  | 'session.reviewHandoff.visible'
+  | 'session.reviewHandoff.instructions'
+  | 'session.reviewSession.visible'
+  | 'session.reviewFeedbackToImplementer.visible'
+  | 'session.implementationResponseToReviewer.visible'
   | 'session.plan.visible'
   | 'session.plan.instructions'
   | 'session.catchup.visible'
@@ -603,6 +610,76 @@ Output:
 Keep the review concise and practical. Respond in the same language the user uses.`,
   },
   {
+    id: 'session.reviewHandoff.visible',
+    title: 'Review Handoff Visible Prompt',
+    group: 'Session',
+    description: 'Visible user message sent by the /handoff-review command.',
+    template: 'Prepare a handoff for another agent to review this work.',
+  },
+  {
+    id: 'session.reviewHandoff.instructions',
+    title: 'Review Handoff Instructions',
+    group: 'Session',
+    description: 'Hidden instructions attached to the /handoff-review command. Produces a handoff for a separate review agent.',
+    template: `Produce a review handoff for another agent. Do not compact or mutate session history. Your output is an assistant message that OpenChamber will send to a separate reviewer agent.
+
+Include:
+- The user's original intent and any later clarifications that changed the intent
+- What was implemented and why
+- Files changed, with brief purpose per file
+- Important design decisions and tradeoffs
+- Validation/tests run, if known
+- Known gaps, uncertainty, or areas the reviewer should inspect closely
+
+Formatting:
+- Concise markdown with clear sections
+- No preamble like "Here is a handoff"
+- Do not mention OpenChamber metadata, linked sessions, session IDs, or routing
+- Respond in the same language the user used most in the conversation`,
+  },
+  {
+    id: 'session.reviewSession.visible',
+    title: 'Review Session Starter Prompt',
+    group: 'Session',
+    description: 'Visible user message sent to the generated review session.',
+    placeholders: [
+      { key: 'handoff', description: 'The generated implementation handoff.' },
+    ],
+    template: `Please review the changes described in this handoff.
+
+Focus on correctness, regressions, missing implementation, missing tests, and whether the implementation satisfies the stated intent. Provide concise, actionable feedback for the agent implementing the changes.
+
+{{handoff}}`,
+  },
+  {
+    id: 'session.reviewFeedbackToImplementer.visible',
+    title: 'Review Feedback Transfer Prompt',
+    group: 'Session',
+    description: 'Visible user message sent from a review session back to the implementing agent.',
+    placeholders: [
+      { key: 'review_feedback', description: 'Reviewer assistant feedback text.' },
+    ],
+    template: `Another agent reviewed your changes and left the feedback below.
+
+Please review the feedback, resolve the relevant issues, and explain what you changed.
+
+{{review_feedback}}`,
+  },
+  {
+    id: 'session.implementationResponseToReviewer.visible',
+    title: 'Implementation Response Transfer Prompt',
+    group: 'Session',
+    description: 'Visible user message sent from the implementing agent back to the review session.',
+    placeholders: [
+      { key: 'implementation_response', description: 'Implementing assistant response text.' },
+    ],
+    template: `The agent implementing the changes has responded to the previous review feedback.
+
+Please review the latest state again and report any remaining issues.
+
+{{implementation_response}}`,
+  },
+  {
     id: 'session.plan.visible',
     title: 'Feature Planning Visible Prompt',
     group: 'Session',
@@ -841,7 +918,7 @@ export const fetchMagicPromptOverrides = async (): Promise<Record<string, string
   }
 
   if (!inFlightOverridesRequest) {
-    inFlightOverridesRequest = fetch(API_ENDPOINT, {
+    inFlightOverridesRequest = runtimeFetch(API_ENDPOINT, {
       method: 'GET',
       headers: { Accept: 'application/json' },
     })
@@ -894,7 +971,7 @@ export const renderMagicPrompt = async (id: MagicPromptId, variables: Record<str
 };
 
 export const saveMagicPromptOverride = async (id: MagicPromptId, text: string): Promise<MagicPromptOverridesPayload> => {
-  const response = await fetch(`${API_ENDPOINT}/${encodeURIComponent(id)}`, {
+  const response = await runtimeFetch(`${API_ENDPOINT}/${encodeURIComponent(id)}`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
@@ -915,7 +992,7 @@ export const saveMagicPromptOverride = async (id: MagicPromptId, text: string): 
 };
 
 export const resetMagicPromptOverride = async (id: MagicPromptId): Promise<MagicPromptOverridesPayload> => {
-  const response = await fetch(`${API_ENDPOINT}/${encodeURIComponent(id)}`, {
+  const response = await runtimeFetch(`${API_ENDPOINT}/${encodeURIComponent(id)}`, {
     method: 'DELETE',
     headers: { Accept: 'application/json' },
   });
@@ -932,7 +1009,7 @@ export const resetMagicPromptOverride = async (id: MagicPromptId): Promise<Magic
 };
 
 export const resetAllMagicPromptOverrides = async (): Promise<MagicPromptOverridesPayload> => {
-  const response = await fetch(API_ENDPOINT, {
+  const response = await runtimeFetch(API_ENDPOINT, {
     method: 'DELETE',
     headers: { Accept: 'application/json' },
   });

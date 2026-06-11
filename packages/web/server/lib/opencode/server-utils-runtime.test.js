@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -5,8 +6,19 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createServerUtilsRuntime } from './server-utils-runtime.js';
 
 const originalPath = process.env.PATH;
+const tempDirs = [];
+
+const createTempDir = (prefix) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+};
 
 afterEach(() => {
+  for (const dir of tempDirs.splice(0)) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
   if (originalPath === undefined) {
     delete process.env.PATH;
     return;
@@ -15,11 +27,11 @@ afterEach(() => {
   process.env.PATH = originalPath;
 });
 
-const createRuntime = (loginShellPath) => createServerUtilsRuntime({
-  fs: {},
+const createRuntime = (loginShellPath, processLike = { platform: 'linux', env: process.env }) => createServerUtilsRuntime({
+  fs,
   os,
   path,
-  process,
+  process: processLike,
   openCodeReadyGraceMs: 0,
   longRequestTimeoutMs: 0,
   getRuntime: () => ({}),
@@ -86,6 +98,47 @@ describe('server utils runtime', () => {
       '/usr/bin',
       '/usr/local/bin',
       '/bin',
+    ].join(path.delimiter));
+  });
+
+  it('adds existing Windows package-manager directories to managed OpenCode PATH', () => {
+    const root = createTempDir('openchamber-win-path-');
+    const systemDir = path.join(root, 'System32');
+    const appData = path.join(root, 'Roaming');
+    const programFiles = path.join(root, 'Program Files');
+    const localAppData = path.join(root, 'Local');
+    const programData = path.join(root, 'ProgramData');
+    const userProfile = path.join(root, 'User');
+
+    const npmBin = path.join(appData, 'npm');
+    const nodeBin = path.join(programFiles, 'nodejs');
+    const pnpmHome = path.join(localAppData, 'pnpm');
+    const yarnBin = path.join(localAppData, 'Yarn', 'bin');
+    const chocoBin = path.join(programData, 'chocolatey', 'bin');
+
+    for (const dir of [systemDir, npmBin, nodeBin, pnpmHome, yarnBin, chocoBin]) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
+    const runtime = createRuntime(null, {
+      platform: 'win32',
+      env: {
+        PATH: systemDir,
+        APPDATA: appData,
+        ProgramFiles: programFiles,
+        LOCALAPPDATA: localAppData,
+        ProgramData: programData,
+        USERPROFILE: userProfile,
+      },
+    });
+
+    expect(runtime.buildManagedOpenCodePath()).toBe([
+      systemDir,
+      npmBin,
+      nodeBin,
+      pnpmHome,
+      yarnBin,
+      chocoBin,
     ].join(path.delimiter));
   });
 

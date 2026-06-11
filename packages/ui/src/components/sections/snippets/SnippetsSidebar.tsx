@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { useShallow } from 'zustand/react/shallow';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
@@ -19,6 +20,7 @@ export const SnippetsSidebar: React.FC<SnippetsSidebarProps> = ({ onItemSelect }
   const { t } = useI18n();
   const [confirmDeleteSnippet, setConfirmDeleteSnippet] = React.useState<Snippet | null>(null);
   const [openMenuName, setOpenMenuName] = React.useState<string | null>(null);
+  const [rightClickMenuName, setRightClickMenuName] = React.useState<string | null>(null);
   const { selectedSnippetName, snippets, setSelectedSnippet, setSnippetDraft, deleteSnippet, loadSnippets } = useSnippetsStore(useShallow((s) => ({
     selectedSnippetName: s.selectedSnippetName,
     snippets: s.snippets,
@@ -63,7 +65,7 @@ export const SnippetsSidebar: React.FC<SnippetsSidebarProps> = ({ onItemSelect }
         <h2 className="text-base font-semibold text-foreground mb-3">{t('settings.snippets.sidebar.title')}</h2>
         <div className="flex items-center justify-between gap-2">
           <span className="typography-meta text-muted-foreground">{t('settings.snippets.sidebar.total', { count: snippets.length })}</span>
-          <Button size="sm" variant="ghost" className="h-7 w-7 px-0 -my-1 text-muted-foreground" onClick={handleCreateNew} aria-label={t('settings.snippets.sidebar.actions.create')}>
+          <Button size="sm" data-settings-item="snippets.create" variant="ghost" className="h-7 w-7 px-0 -my-1 text-muted-foreground" onClick={handleCreateNew} aria-label={t('settings.snippets.sidebar.actions.create')}>
             <Icon name="add" className="h-3.5 w-3.5" />
           </Button>
         </div>
@@ -71,7 +73,8 @@ export const SnippetsSidebar: React.FC<SnippetsSidebarProps> = ({ onItemSelect }
 
       <ScrollableOverlay outerClassName="flex-1 min-h-0" className="space-y-1 px-3 py-2">
         {sortedSnippets.map((snippet) => (
-          <div key={`${snippet.source}:${snippet.filePath}`} className={cn('group relative flex items-center rounded-md px-1.5 py-1 transition-all duration-200 select-none', selectedSnippetName === snippet.name ? 'bg-interactive-selection' : 'hover:bg-interactive-hover')}>
+          <ContextMenu key={`${snippet.source}:${snippet.filePath}`} open={rightClickMenuName === snippet.name} onOpenChange={(open) => setRightClickMenuName(open ? snippet.name : null)}>
+            <ContextMenuTrigger render={<div className={cn('group relative flex items-center rounded-md px-1.5 py-1 transition-all duration-200 select-none', selectedSnippetName === snippet.name ? 'bg-interactive-selection' : 'hover:bg-interactive-hover')} onContextMenu={(event) => { event.preventDefault(); setRightClickMenuName(snippet.name); }} />}>
             <button onClick={() => { setSelectedSnippet(snippet.name); onItemSelect?.(); }} className="flex min-w-0 flex-1 flex-col gap-0 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50">
               <div className="flex items-center gap-2">
                 <span className="typography-ui-label font-normal truncate text-foreground">#{snippet.name}</span>
@@ -81,7 +84,7 @@ export const SnippetsSidebar: React.FC<SnippetsSidebarProps> = ({ onItemSelect }
                 {snippet.description || snippet.content.replace(/\s+/g, ' ').substring(0, 80)}
               </div>
             </button>
-            <DropdownMenu open={openMenuName === snippet.name} onOpenChange={(open) => setOpenMenuName(open ? snippet.name : null)}>
+            <DropdownMenu open={openMenuName === snippet.name} onOpenChange={(open) => { if (open) setRightClickMenuName(null); setOpenMenuName(open ? snippet.name : null); }}>
               <DropdownMenuTrigger asChild>
                 <Button size="sm" variant="ghost" className="h-6 w-6 px-0 flex-shrink-0 -mr-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100" aria-label={t('settings.snippets.sidebar.actions.more', { name: snippet.name })}>
                   <Icon name="more-2" className="h-3.5 w-3.5" />
@@ -94,7 +97,14 @@ export const SnippetsSidebar: React.FC<SnippetsSidebarProps> = ({ onItemSelect }
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-          </div>
+            </ContextMenuTrigger>
+            <ContextMenuContent className="w-fit min-w-20">
+              <ContextMenuItem onClick={(e) => { e.stopPropagation(); setConfirmDeleteSnippet(snippet); }} className="text-destructive focus:text-destructive">
+                <Icon name="delete-bin" className="h-4 w-4 mr-px" />
+                {t('settings.common.actions.delete')}
+              </ContextMenuItem>
+            </ContextMenuContent>
+          </ContextMenu>
         ))}
       </ScrollableOverlay>
 

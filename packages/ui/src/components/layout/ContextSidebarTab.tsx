@@ -10,7 +10,9 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessions, useSessionMessageRecords } from '@/sync/sync-context';
 import { copyTextToClipboard } from '@/lib/clipboard';
-import { useI18n } from '@/lib/i18n';
+import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
+import { formatDateTimeForPreference } from '@/lib/timeFormat';
+import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 
 type SessionMessage = { info: Message; parts: Part[] };
 
@@ -221,17 +223,21 @@ const computeContextBreakdown = (
   };
 };
 
-const formatNumber = (value: number): string => value.toLocaleString();
+const formatNumber = (value: number): string => value.toLocaleString(getCurrentIntlLocale());
 
 const formatMoney = (value: number): string => {
-  if (!Number.isFinite(value) || value <= 0) return '$0.00';
-  if (value < 0.01) return `$${value.toFixed(4)}`;
-  return `$${value.toFixed(2)}`;
+  if (!Number.isFinite(value) || value <= 0) return new Intl.NumberFormat(getCurrentIntlLocale(), { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(0);
+  return new Intl.NumberFormat(getCurrentIntlLocale(), {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: value < 0.01 ? 4 : 2,
+    maximumFractionDigits: value < 0.01 ? 4 : 2,
+  }).format(value);
 };
 
-const formatDateTime = (timestamp: number | null): string => {
+const formatDateTime = (timestamp: number | null, timeFormatPreference: TimeFormatPreference): string => {
   if (!timestamp || !Number.isFinite(timestamp)) return '-';
-  return new Date(timestamp).toLocaleString(undefined, {
+  return formatDateTimeForPreference(timestamp, timeFormatPreference, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -240,9 +246,9 @@ const formatDateTime = (timestamp: number | null): string => {
   });
 };
 
-const formatMessageDateMeta = (timestamp: number | null): string => {
+const formatMessageDateMeta = (timestamp: number | null, timeFormatPreference: TimeFormatPreference): string => {
   if (!timestamp || !Number.isFinite(timestamp)) return '-';
-  return new Date(timestamp).toLocaleString(undefined, {
+  return formatDateTimeForPreference(timestamp, timeFormatPreference, {
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
@@ -273,6 +279,7 @@ const resolveProviderAndModel = (
 export const ContextPanelContent: React.FC = () => {
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
+  const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const syntaxTheme = React.useMemo(() => generateSyntaxTheme(currentTheme), [currentTheme]);
   const [expandedRawMessages, setExpandedRawMessages] = React.useState<Record<string, boolean>>({});
   const [copiedRawMessageId, setCopiedRawMessageId] = React.useState<string | null>(null);
@@ -416,7 +423,7 @@ export const ContextPanelContent: React.FC = () => {
             {viewModel.createdAt && (
               <>
                 <span>&middot;</span>
-                <span>{formatDateTime(viewModel.createdAt)}</span>
+                <span>{formatDateTime(viewModel.createdAt, timeFormatPreference)}</span>
               </>
             )}
           </div>
@@ -547,7 +554,7 @@ export const ContextPanelContent: React.FC = () => {
                         <span className="typography-ui-label text-foreground shrink-0">{capitalizeRole(role)}</span>
                         <span className="min-w-0 truncate typography-micro text-muted-foreground">{message.info.id}</span>
                       </span>
-                      <span className="typography-micro text-muted-foreground shrink-0">{formatMessageDateMeta(messageCreatedAt)}</span>
+                      <span className="typography-micro text-muted-foreground shrink-0">{formatMessageDateMeta(messageCreatedAt, timeFormatPreference)}</span>
                     </div>
                   </button>
 

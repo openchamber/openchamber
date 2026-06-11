@@ -29,7 +29,7 @@ function getOpenChamberConfigDir() {
 }
 
 function sanitizeInstallScope(scope) {
-  if (scope === 'desktop-electron' || scope === 'desktop-tauri' || scope === 'vscode' || scope === 'web') return scope;
+  if (scope === 'desktop-electron' || scope === 'vscode' || scope === 'web') return scope;
   return 'web';
 }
 
@@ -65,7 +65,7 @@ function mapArch(value) {
 }
 
 function normalizeAppType(value) {
-  if (value === 'web' || value === 'desktop-electron' || value === 'desktop-tauri' || value === 'vscode') return value;
+  if (value === 'web' || value === 'desktop-electron' || value === 'vscode') return value;
   return 'web';
 }
 
