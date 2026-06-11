@@ -74,6 +74,7 @@ const MOBILE_TURN_MODEL_CACHE_MAX_MESSAGES = 30
 const HISTORY_RENDER_WAIT_TIMEOUT_MS = 250
 const HISTORY_INTERACTION_GUARD_MS = 2000
 const LOAD_ALL_HISTORY_TIMEOUT_MS = 30000
+const RESUME_TO_BOTTOM_SETTLE_TIMEOUT_MS = 1000
 const turnModelCache = new Map<string, { messages: ChatMessageEntry[]; model: TurnWindowModel }>()
 const getTurnModelCacheMax = () => {
     if (isVSCodeRuntime()) return VSCODE_TURN_MODEL_CACHE_MAX
@@ -873,12 +874,62 @@ export const useChatTimelineController = ({
 
         const shouldWaitForRender = nextStart !== turnStartRef.current;
         if (shouldWaitForRender) {
-            setTurnStart(nextStart);
-            await waitForNextRenderCommit();
+            const container = scrollRef.current;
+            if (!container) {
+                setTurnStart(nextStart);
+                await waitForNextRenderCommit();
+                goToBottom('smooth');
+                return;
+            }
+
+            let finalized = false;
+            const finalize = () => {
+                if (finalized) {
+                    return;
+                }
+                finalized = true;
+                container.removeEventListener('scrollend', handleScrollEnd);
+                if (settleTimeoutId !== null && typeof window !== 'undefined') {
+                    window.clearTimeout(settleTimeoutId);
+                }
+                settleTimeoutId = null;
+
+                if (sessionIdRef.current !== sessionId) {
+                    return;
+                }
+
+                const distanceFromBottom = Math.max(container.scrollHeight - container.scrollTop - container.clientHeight, 0);
+                if (distanceFromBottom > 1) {
+                    return;
+                }
+
+                setTurnStart(nextStart);
+                void waitForNextRenderCommit().then(() => {
+                    if (sessionIdRef.current !== sessionId) {
+                        return;
+                    }
+                    goToBottom('instant');
+                });
+            };
+
+            const handleScrollEnd = () => {
+                finalize();
+            };
+
+            let settleTimeoutId: number | null = null;
+            if (typeof window !== 'undefined') {
+                settleTimeoutId = window.setTimeout(() => {
+                    settleTimeoutId = null;
+                    finalize();
+                }, RESUME_TO_BOTTOM_SETTLE_TIMEOUT_MS);
+            }
+            container.addEventListener('scrollend', handleScrollEnd);
+            goToBottom('smooth');
+            return;
         }
 
         goToBottom('smooth');
-    }, [goToBottom, waitForNextRenderCommit]);
+    }, [goToBottom, scrollRef, sessionId, waitForNextRenderCommit]);
 
     const resumeToBottomInstant = React.useCallback(async () => {
         const nextStart = getInitialTurnStart(turnModelRef.current.turnCount);

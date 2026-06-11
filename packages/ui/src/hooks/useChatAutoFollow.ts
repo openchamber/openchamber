@@ -54,7 +54,7 @@ const SETTLE_FRAMES = 4;
 const TOUCH_FINGER_DOWN_THRESHOLD = 2;
 const SETTLE_BURST_DURATION_MS = 280;
 const REPIN_GRACE_AFTER_RELEASE_MS = 1200;
-const BOTTOM_SCROLL_FALLBACK_MS = 500;
+const BOTTOM_SCROLL_FALLBACK_POLL_MS = 120;
 const SMOOTH_HANDOFF_DURATION_MS = 180;
 
 // The bottom of the chat has an empty spacer (10vh on desktop, 40px on mobile)
@@ -362,14 +362,27 @@ export const useChatAutoFollow = ({
             bottomScrollCleanupRef.current = () => {
                 container.removeEventListener('scrollend', handleScrollEnd);
             };
-            bottomScrollTimeoutRef.current = window.setTimeout(finish, BOTTOM_SCROLL_FALLBACK_MS);
+            const scheduleFallbackCheck = () => {
+                bottomScrollTimeoutRef.current = window.setTimeout(() => {
+                    bottomScrollTimeoutRef.current = null;
+                    if (!bottomScrollAnimatingRef.current) {
+                        return;
+                    }
+                    if (isNearBottom(container, isMobile)) {
+                        finish();
+                        return;
+                    }
+                    scheduleFallbackCheck();
+                }, BOTTOM_SCROLL_FALLBACK_POLL_MS);
+            };
+            scheduleFallbackCheck();
             container.scrollTo({ top: target, behavior: 'smooth' });
             return;
         }
         const target = Math.max(0, container.scrollHeight - container.clientHeight);
         writeScrollTopInstant(target);
         startSettleBurst();
-    }, [markProgrammaticWrite, setStateValue, startFollowLoop, startSettleBurst, stopBottomScrollAnimation, stopFollowLoop, stopSettleBurst, writeScrollTopInstant]);
+    }, [isMobile, markProgrammaticWrite, setStateValue, startFollowLoop, startSettleBurst, stopBottomScrollAnimation, stopFollowLoop, stopSettleBurst, writeScrollTopInstant]);
 
     const flushSave = React.useCallback(() => {
         if (saveTimerRef.current !== null) {

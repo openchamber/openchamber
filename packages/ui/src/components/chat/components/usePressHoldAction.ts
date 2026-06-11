@@ -13,7 +13,17 @@ export const usePressHoldAction = ({
 }) => {
     const holdTimerRef = React.useRef<number | null>(null);
     const holdTriggeredRef = React.useRef(false);
+    const onClickRef = React.useRef(onClick);
+    const onHoldRef = React.useRef(onHold);
     const [isShaking, setIsShaking] = React.useState(false);
+
+    React.useEffect(() => {
+        onClickRef.current = onClick;
+    }, [onClick]);
+
+    React.useEffect(() => {
+        onHoldRef.current = onHold;
+    }, [onHold]);
 
     const clearHoldTimer = React.useCallback(() => {
         if (holdTimerRef.current === null || typeof window === 'undefined') {
@@ -38,10 +48,10 @@ export const usePressHoldAction = ({
             // Wait 300ms for the shake animation to complete before calling onHold
             window.setTimeout(() => {
                 setIsShaking(false);
-                onHold();
+                onHoldRef.current();
             }, 300);
         }, HOLD_ACTION_DELAY_MS);
-    }, [clearHoldTimer, disabled, onHold]);
+    }, [clearHoldTimer, disabled]);
 
     const handlePointerEnd = React.useCallback(() => {
         clearHoldTimer();
@@ -60,8 +70,8 @@ export const usePressHoldAction = ({
             event.stopPropagation();
             return;
         }
-        onClick();
-    }, [clearHoldTimer, disabled, onClick]);
+        onClickRef.current();
+    }, [clearHoldTimer, disabled]);
 
     React.useEffect(() => () => clearHoldTimer(), [clearHoldTimer]);
 

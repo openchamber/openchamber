@@ -8,6 +8,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { cn } from '@/lib/utils';
 import { getChatNavigationButtonPosition } from '../chatNavigationButtonPosition';
 import { useNavigationButtonTooltip, usePressHoldAction } from './usePressHoldAction';
+import { BusyDots } from '../message/parts/BusyDots';
 
 interface ScrollToTopButtonProps {
     visible: boolean;
@@ -41,23 +42,8 @@ const ScrollToTopButton: React.FC<ScrollToTopButtonProps> = ({ visible, onClick,
         handleOpenChange,
     } = useNavigationButtonTooltip({ enabled: interactionTooltipEnabled });
 
-    const [dotCount, setDotCount] = React.useState(0);
-
-    React.useEffect(() => {
-        if (!isLoadingHistory) {
-            setDotCount(0);
-            return;
-        }
-
-        const interval = window.setInterval(() => {
-            setDotCount((prev) => (prev + 1) % 4);
-        }, 300);
-
-        return () => window.clearInterval(interval);
-    }, [isLoadingHistory]);
-
     const currentLabel = isLoadingHistory
-        ? t('chat.loadAllHistory.aria') + ".".repeat(dotCount)
+        ? t('chat.loadAllHistory.aria')
         : isLongHover
         ? t('chat.jumpToPreviousMessage.hold')
         : label;
@@ -100,8 +86,9 @@ const ScrollToTopButton: React.FC<ScrollToTopButtonProps> = ({ visible, onClick,
                     </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" align="center" sideOffset={4}>
-                    <span key={isLoadingHistory ? 'loading' : isLongHover ? 'hold' : 'default'} className="inline-block animate-tooltip-fade-in">
-                        {currentLabel}
+                    <span key={isLoadingHistory ? 'loading' : isLongHover ? 'hold' : 'default'} className="inline-flex items-center animate-tooltip-fade-in">
+                        <span>{currentLabel}</span>
+                        {isLoadingHistory ? <BusyDots /> : null}
                     </span>
                 </TooltipContent>
             </Tooltip>
