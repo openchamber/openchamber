@@ -29,6 +29,7 @@ import { syncDebug } from "./debug"
 import { getReconnectCandidateSessionIds } from "./reconnect-recovery"
 import { opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
+import { useQuestionAutoAnswerStore } from "@/stores/useQuestionAutoAnswerStore"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { toast } from "@/components/ui"
@@ -1387,6 +1388,7 @@ function handleEvent(
   if (payload.type === "question.asked") {
     const question = payload.properties as QuestionRequest
     const sessionID = question.sessionID
+    useQuestionAutoAnswerStore.getState().schedule(question)
     const toastKey = getQuestionToastKey(sessionID, question.id)
     const isViewed = isViewedInCurrentSession(resolvedDirectory, sessionID)
     if (!isViewed && toastKey && !pendingQuestionToastIds.has(toastKey)) {
@@ -1407,6 +1409,9 @@ function handleEvent(
 
   if (payload.type === "question.replied" || payload.type === "question.rejected") {
     const props = payload.properties as { sessionID?: string; requestID?: string }
+    if (props.requestID) {
+      useQuestionAutoAnswerStore.getState().clear(props.requestID)
+    }
     const toastKey = getQuestionToastKey(props.sessionID, props.requestID)
     if (toastKey) {
       pendingQuestionToastIds.delete(toastKey)

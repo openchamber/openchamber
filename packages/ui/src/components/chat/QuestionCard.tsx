@@ -9,6 +9,7 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { toast } from '@/components/ui';
 import type { QuestionRequest } from '@/types/question';
 import { useUIStore } from '@/stores/useUIStore';
+import { useQuestionAutoAnswerStore } from '@/stores/useQuestionAutoAnswerStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessions } from '@/sync/sync-context';
 import * as sessionActions from '@/sync/session-actions';
@@ -59,6 +60,33 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
     setCustomText({});
     setHasResponded(false);
   }, [question.id]);
+
+  const autoAnswerDeadline = useQuestionAutoAnswerStore((state) => state.deadlines[question.id]);
+  const cancelAutoAnswer = useQuestionAutoAnswerStore((state) => state.cancel);
+  const [autoAnswerRemaining, setAutoAnswerRemaining] = React.useState<number | null>(null);
+
+  // Covers pending questions restored after a reload, where no
+  // question.asked event fires; schedule() ignores duplicates.
+  React.useEffect(() => {
+    useQuestionAutoAnswerStore.getState().schedule(question);
+  }, [question]);
+
+  React.useEffect(() => {
+    if (!autoAnswerDeadline) {
+      setAutoAnswerRemaining(null);
+      return;
+    }
+    const update = () => {
+      setAutoAnswerRemaining(Math.max(0, Math.ceil((autoAnswerDeadline - Date.now()) / 1000)));
+    };
+    update();
+    const interval = window.setInterval(update, 250);
+    return () => window.clearInterval(interval);
+  }, [autoAnswerDeadline]);
+
+  const handleCancelAutoAnswer = React.useCallback(() => {
+    cancelAutoAnswer(question.id);
+  }, [cancelAutoAnswer, question.id]);
 
   const tabs = React.useMemo(() => {
     const questionTabs = questions.map((q, index) => ({
@@ -248,7 +276,11 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
   }
 
   return (
-    <div className="group w-full pt-0 pb-2">
+    <div
+      className="group w-full pt-0 pb-2"
+      onPointerDownCapture={handleCancelAutoAnswer}
+      onKeyDownCapture={handleCancelAutoAnswer}
+    >
       <div className="chat-column">
         <div className="-mt-1 border border-border/30 rounded-xl bg-muted/10">
           {/* Header */}
@@ -506,6 +538,11 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
               <div className="ml-auto">
                 <div className="animate-spin h-3 w-3 border border-primary border-t-transparent rounded-full" />
               </div>
+            ) : autoAnswerDeadline && autoAnswerRemaining !== null ? (
+              <span className="ml-auto flex items-center gap-1 typography-micro text-muted-foreground">
+                <Icon name="time" className="h-3 w-3" />
+                {t('chat.questionCard.autoAnswerCountdown', { seconds: autoAnswerRemaining })}
+              </span>
             ) : null}
           </div>
         </div>

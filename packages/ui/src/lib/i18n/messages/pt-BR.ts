@@ -1676,6 +1676,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.questionCard.dismissFailed": "Falha ao descartar a pergunta",
   "chat.questionCard.noLongerPending": "Esta pergunta não está mais aguardando uma resposta.",
   "chat.questionCard.tryAgain": "Tente novamente em instantes.",
+  "chat.questionCard.autoAnswerCountdown": "Selecionando a primeira opção em {seconds}s — clique para cancelar",
   "chat.textSelection.toast.noProject": "Não foi encontrado projeto para esta sessão",
   "chat.textSelection.toast.addToNotesFailed": "Não foi possível adicionar às notas",
   "chat.textSelection.toast.addToNotesSuccess": "Texto selecionado adicionado às notas",
