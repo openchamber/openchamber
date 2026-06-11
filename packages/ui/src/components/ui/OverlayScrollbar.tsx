@@ -16,6 +16,7 @@ type OverlayScrollbarProps = {
   forceVisible?: boolean;
   pinVerticalToBottom?: boolean;
   style?: React.CSSProperties;
+  onDragEnd?: (axis: "vertical" | "horizontal", isAtEnd: boolean) => void;
 };
 
 type ThumbMetrics = {
@@ -54,6 +55,7 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
   forceVisible = false,
   pinVerticalToBottom = false,
   style,
+  onDragEnd,
 }) => {
   const scrollbarRef = React.useRef<HTMLDivElement>(null);
   const verticalThumbRef = React.useRef<HTMLDivElement>(null);
@@ -532,6 +534,16 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
       dragFrameRef.current = null;
     }
     flushDragScrollTarget();
+
+    const axis = dragAxisRef.current;
+    const container = containerRef.current;
+    if (onDragEnd && axis && container) {
+      const isAtEnd = axis === "vertical"
+        ? container.scrollTop >= Math.max(container.scrollHeight - container.clientHeight - 1, 0)
+        : container.scrollLeft >= Math.max(container.scrollWidth - container.clientWidth - 1, 0);
+      onDragEnd(axis, isAtEnd);
+    }
+
     dragScrollTargetRef.current.top = null;
     dragScrollTargetRef.current.left = null;
     event.currentTarget.releasePointerCapture(event.pointerId);
