@@ -9,8 +9,6 @@ vi.mock('node:child_process', () => ({
 // Mock node:fs so readOsReleaseId doesn't read real /etc/os-release
 // and detectPackageManager doesn't touch the real filesystem
 vi.mock('node:fs', () => {
-  const noent = new Error('ENOENT');
-  noent.code = 'ENOENT';
   const impl = {
     readFileSync: vi.fn(() => 'ID=linux\n'),
     writeFileSync: vi.fn(),
@@ -18,7 +16,6 @@ vi.mock('node:fs', () => {
     realpathSync: vi.fn((p) => p),
     realpathSyncNative: vi.fn((p) => p),
     existsSync: vi.fn(() => false),
-    readFileSync: vi.fn(() => 'ID=linux\n'),
   };
   return {
     default: impl,

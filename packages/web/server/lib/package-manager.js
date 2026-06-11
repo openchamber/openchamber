@@ -780,17 +780,9 @@ function readOsReleaseId() {
   }
 }
 
-function getToolchainInstallInstructions(platform, missing) {
+function getToolchainInstallInstructions(platform) {
   if (platform === 'darwin') {
     return 'Install Xcode Command Line Tools:\n  xcode-select --install';
-  }
-
-  if (platform === 'win32') {
-    return (
-      'Install Visual Studio Build Tools:\n' +
-      '  https://visualstudio.microsoft.com/visual-cpp-build-tools/\n' +
-      'Select "Desktop development with C++" workload.'
-    );
   }
 
   const id = readOsReleaseId();
@@ -844,7 +836,7 @@ export function checkNativeToolchain(options = {}) {
     return { ok: true };
   }
 
-  const instructions = getToolchainInstallInstructions(platform, missing);
+  const instructions = getToolchainInstallInstructions(platform);
   return { ok: false, missing, instructions };
 }
 

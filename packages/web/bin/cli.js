@@ -5491,6 +5491,30 @@ const commands = {
     }
     updateSpin?.message(`Updating to ${updateInfo.version || 'latest'}...`);
 
+    const toolchain = checkNativeToolchain();
+    if (!toolchain.ok && !options.force) {
+      updateSpin?.stop('Build toolchain missing');
+      if (isJsonMode(options)) {
+        printJson({
+          status: 'error',
+          error: 'missing-build-toolchain',
+          missing: toolchain.missing,
+          instructions: toolchain.instructions,
+        });
+        process.exit(EXIT_CODE.MISSING_DEPENDENCY);
+      }
+      if (showOutput) {
+        logStatus('error', `Missing build tools: ${toolchain.missing.join(', ')}`);
+        logStatus('info', 'Native npm dependencies (e.g. better-sqlite3) may compile via node-gyp when prebuilt binaries are unavailable.');
+        logStatus('info', toolchain.instructions);
+        logStatus('info', 'Pass --force to skip this check.');
+        clackOutro('update failed');
+        process.exit(EXIT_CODE.MISSING_DEPENDENCY);
+      }
+      process.stderr.write(`error: missing-build-toolchain: ${toolchain.missing.join(', ')}\n${toolchain.instructions}\nPass --force to skip this check.\n`);
+      process.exit(EXIT_CODE.MISSING_DEPENDENCY);
+    }
+
     if (runningInstances.length > 0) {
       updateSpin?.message(`Stopping ${runningInstances.length} running instance(s)...`);
       for (const instance of runningInstances) {
@@ -5508,35 +5532,6 @@ const commands = {
     }
 
     const pm = detectPackageManager();
-
-    const toolchain = checkNativeToolchain();
-    if (!toolchain.ok) {
-      updateSpin?.stop('Build toolchain missing');
-      if (isJsonMode(options)) {
-        printJson({
-          status: 'error',
-          error: 'missing-build-toolchain',
-          missing: toolchain.missing,
-          instructions: toolchain.instructions,
-        });
-        throw new TunnelCliError(
-          `Missing build tools: ${toolchain.missing.join(', ')}. Native npm dependencies (e.g. better-sqlite3) may compile via node-gyp.`,
-          EXIT_CODE.MISSING_DEPENDENCY,
-        );
-      }
-      if (showOutput) {
-        logStatus('error', `Missing build tools: ${toolchain.missing.join(', ')}`);
-        logStatus('info', 'Native npm dependencies (e.g. better-sqlite3) may compile via node-gyp when prebuilt binaries are unavailable.');
-        logStatus('info', toolchain.instructions);
-        clackOutro('update failed');
-      } else if (isQuietMode(options)) {
-        process.stderr.write(`error: missing-build-toolchain: ${toolchain.missing.join(', ')}\n${toolchain.instructions}\n`);
-      }
-      throw new TunnelCliError(
-        `Missing build tools: ${toolchain.missing.join(', ')}. Native npm dependencies may compile via node-gyp.`,
-        EXIT_CODE.MISSING_DEPENDENCY,
-      );
-    }
 
     const result = executeUpdate(pm, { silent: isJsonMode(options) || isQuietMode(options) });
     if (!result.success) {
