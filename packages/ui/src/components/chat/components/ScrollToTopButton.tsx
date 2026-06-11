@@ -7,7 +7,7 @@ import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { cn } from '@/lib/utils';
 import { getChatNavigationButtonPosition } from '../chatNavigationButtonPosition';
-import { usePressHoldAction } from './usePressHoldAction';
+import { useNavigationButtonTooltip, usePressHoldAction } from './usePressHoldAction';
 
 interface ScrollToTopButtonProps {
     visible: boolean;
@@ -27,60 +27,18 @@ const ScrollToTopButton: React.FC<ScrollToTopButtonProps> = ({ visible, onClick,
     const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
     const position = getChatNavigationButtonPosition({ alignment, isLeftSidebarOpen, isRightSidebarOpen, wideChatLayoutEnabled });
     const { isShaking, pressHoldProps } = usePressHoldAction({ disabled, onClick, onHold });
+    const {
+        open,
+        isHeld,
+        isLongHover,
+        handlePointerEnter,
+        handlePointerLeave,
+        handlePointerDown,
+        handlePointerUp,
+        handleOpenChange,
+    } = useNavigationButtonTooltip();
 
-    const [open, setOpen] = React.useState(false);
-    const [isHeld, setIsHeld] = React.useState(false);
-    const [isLongHover, setIsLongHover] = React.useState(false);
-    const hoverTimerRef = React.useRef<number | null>(null);
-    const holdHoverTimerRef = React.useRef<number | null>(null);
     const [dotCount, setDotCount] = React.useState(0);
-
-    const handlePointerEnter = React.useCallback(() => {
-        setIsLongHover(false);
-        if (hoverTimerRef.current !== null) {
-            window.clearTimeout(hoverTimerRef.current);
-        }
-        hoverTimerRef.current = window.setTimeout(() => {
-            setIsLongHover(true);
-        }, 1500);
-    }, []);
-
-    const handlePointerLeave = React.useCallback(() => {
-        if (hoverTimerRef.current !== null) {
-            window.clearTimeout(hoverTimerRef.current);
-            hoverTimerRef.current = null;
-        }
-    }, []);
-
-    const handlePointerDown = React.useCallback(() => {
-        setIsHeld(true);
-    }, []);
-
-    const handlePointerUp = React.useCallback(() => {
-        setIsHeld(false);
-    }, []);
-
-    const handleOpenChange = React.useCallback((nextOpen: boolean) => {
-        setOpen(nextOpen);
-    }, []);
-
-    React.useEffect(() => {
-        if (isHeld) {
-            holdHoverTimerRef.current = window.setTimeout(() => {
-                setIsLongHover(true);
-            }, 350);
-        } else {
-            if (holdHoverTimerRef.current !== null) {
-                window.clearTimeout(holdHoverTimerRef.current);
-                holdHoverTimerRef.current = null;
-            }
-        }
-        return () => {
-            if (holdHoverTimerRef.current !== null) {
-                window.clearTimeout(holdHoverTimerRef.current);
-            }
-        };
-    }, [isHeld]);
 
     React.useEffect(() => {
         if (!isLoadingHistory) {
@@ -94,30 +52,6 @@ const ScrollToTopButton: React.FC<ScrollToTopButtonProps> = ({ visible, onClick,
 
         return () => window.clearInterval(interval);
     }, [isLoadingHistory]);
-
-    React.useEffect(() => {
-        if (!isHeld) return;
-
-        const handleGlobalPointerUp = () => {
-            setIsHeld(false);
-        };
-
-        window.addEventListener('pointerup', handleGlobalPointerUp);
-        window.addEventListener('pointercancel', handleGlobalPointerUp);
-
-        return () => {
-            window.removeEventListener('pointerup', handleGlobalPointerUp);
-            window.removeEventListener('pointercancel', handleGlobalPointerUp);
-        };
-    }, [isHeld]);
-
-    React.useEffect(() => {
-        return () => {
-            if (hoverTimerRef.current !== null) {
-                window.clearTimeout(hoverTimerRef.current);
-            }
-        };
-    }, []);
 
     const currentLabel = isLoadingHistory
         ? t('chat.loadAllHistory.aria') + ".".repeat(dotCount)

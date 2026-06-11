@@ -23,6 +23,7 @@ import { useChatSurfaceMode } from './useChatSurfaceMode';
 import { useDeviceInfo } from '@/lib/device';
 import { Button } from '@/components/ui/button';
 import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
+import { cancelOverlayScrollbarScroll } from '@/components/ui/overlay-scrollbar-events';
 import { smoothWheelScrollElement } from '@/components/ui/smoothWheelScroll';
 import { Icon } from "@/components/icon/Icon";
 import type { PermissionRequest } from '@/types/permission';
@@ -170,6 +171,8 @@ type ChatViewportProps = {
     getAnimationHandlers: (messageId: string) => AnimationHandlers;
     handleHistoryScroll: () => void;
     scrollToBottom: () => void;
+    handleNavigationWheel: (event: React.WheelEvent<HTMLDivElement>) => void;
+    handleScrollInteractionStart: () => void;
     sessionQuestions: QuestionRequest[];
     sessionPermissions: PermissionRequest[];
 };
@@ -192,6 +195,8 @@ const ChatViewport = React.memo(({
     getAnimationHandlers,
     handleHistoryScroll,
     scrollToBottom,
+    handleNavigationWheel,
+    handleScrollInteractionStart,
     sessionQuestions,
     sessionPermissions,
 }: ChatViewportProps) => {
@@ -226,7 +231,9 @@ const ChatViewport = React.memo(({
                     hideTopShadow={isMobile && stickyUserHeader}
                     tabIndex={0}
                     onClick={focusScrollContainer}
+                    onPointerDownCapture={handleScrollInteractionStart}
                     onScroll={handleHistoryScroll}
+                    onWheelCapture={handleNavigationWheel}
                     data-scroll-shadow="true"
                     data-scrollbar="chat"
                 >
@@ -285,6 +292,8 @@ const ChatViewport = React.memo(({
         && prev.getAnimationHandlers === next.getAnimationHandlers
         && prev.handleHistoryScroll === next.handleHistoryScroll
         && prev.scrollToBottom === next.scrollToBottom
+        && prev.handleNavigationWheel === next.handleNavigationWheel
+        && prev.handleScrollInteractionStart === next.handleScrollInteractionStart
         && prev.sessionQuestions === next.sessionQuestions
         && prev.sessionPermissions === next.sessionPermissions;
 });
@@ -1086,6 +1095,10 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         smoothWheelScrollElement(scrollContainer, event);
     }, [isDesktopExpandedInput, scrollRef]);
 
+    const handleScrollInteractionStart = React.useCallback(() => {
+        cancelOverlayScrollbarScroll(scrollRef.current);
+    }, [scrollRef]);
+
 	if (!currentSessionId && !draftOpen) {
 		// With auto-open, the draft welcome opens on the next tick (effect below),
 		// so the empty state is only ever transient here — render a neutral
@@ -1259,6 +1272,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 getAnimationHandlers={getAnimationHandlers}
                 handleHistoryScroll={handleChatHistoryScroll}
                 scrollToBottom={resumeToLatestInstant}
+                handleNavigationWheel={handleNavigationWheel}
+                handleScrollInteractionStart={handleScrollInteractionStart}
                 sessionQuestions={sessionQuestions}
                 sessionPermissions={sessionPermissions}
             />

@@ -318,10 +318,7 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
     const container = containerRef.current;
     if (!container) return;
 
-    if (scrollAnimRef.current !== null) {
-      cancelAnimationFrame(scrollAnimRef.current);
-      scrollAnimRef.current = null;
-    }
+    cancelTrackScrollAnimation();
 
     const axis = dragAxisRef.current;
     if (axis === "vertical") {

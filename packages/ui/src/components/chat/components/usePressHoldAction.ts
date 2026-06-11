@@ -77,3 +77,93 @@ export const usePressHoldAction = ({
         },
     };
 };
+
+export const useNavigationButtonTooltip = () => {
+    const [open, setOpen] = React.useState(false);
+    const [isHeld, setIsHeld] = React.useState(false);
+    const [isLongHover, setIsLongHover] = React.useState(false);
+    const hoverTimerRef = React.useRef<number | null>(null);
+    const holdHoverTimerRef = React.useRef<number | null>(null);
+
+    const handlePointerEnter = React.useCallback(() => {
+        setIsLongHover(false);
+        if (hoverTimerRef.current !== null) {
+            window.clearTimeout(hoverTimerRef.current);
+        }
+        hoverTimerRef.current = window.setTimeout(() => {
+            setIsLongHover(true);
+        }, 1500);
+    }, []);
+
+    const handlePointerLeave = React.useCallback(() => {
+        if (hoverTimerRef.current !== null) {
+            window.clearTimeout(hoverTimerRef.current);
+            hoverTimerRef.current = null;
+        }
+    }, []);
+
+    const handlePointerDown = React.useCallback(() => {
+        setIsHeld(true);
+    }, []);
+
+    const handlePointerUp = React.useCallback(() => {
+        setIsHeld(false);
+    }, []);
+
+    const handleOpenChange = React.useCallback((nextOpen: boolean) => {
+        setOpen(nextOpen);
+    }, []);
+
+    React.useEffect(() => {
+        if (isHeld) {
+            holdHoverTimerRef.current = window.setTimeout(() => {
+                setIsLongHover(true);
+            }, 350);
+        } else {
+            if (holdHoverTimerRef.current !== null) {
+                window.clearTimeout(holdHoverTimerRef.current);
+                holdHoverTimerRef.current = null;
+            }
+        }
+        return () => {
+            if (holdHoverTimerRef.current !== null) {
+                window.clearTimeout(holdHoverTimerRef.current);
+            }
+        };
+    }, [isHeld]);
+
+    React.useEffect(() => {
+        if (!isHeld) return;
+
+        const handleGlobalPointerUp = () => {
+            setIsHeld(false);
+        };
+
+        window.addEventListener('pointerup', handleGlobalPointerUp);
+        window.addEventListener('pointercancel', handleGlobalPointerUp);
+
+        return () => {
+            window.removeEventListener('pointerup', handleGlobalPointerUp);
+            window.removeEventListener('pointercancel', handleGlobalPointerUp);
+        };
+    }, [isHeld]);
+
+    React.useEffect(() => {
+        return () => {
+            if (hoverTimerRef.current !== null) {
+                window.clearTimeout(hoverTimerRef.current);
+            }
+        };
+    }, []);
+
+    return {
+        open,
+        isHeld,
+        isLongHover,
+        handlePointerEnter,
+        handlePointerLeave,
+        handlePointerDown,
+        handlePointerUp,
+        handleOpenChange,
+    };
+};

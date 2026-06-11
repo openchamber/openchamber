@@ -4,6 +4,7 @@ type SmoothWheelState = {
   frame: number | null;
   target: number | null;
   animating: boolean;
+  lastAppliedTop: number | null;
 };
 
 const smoothWheelState = new WeakMap<HTMLElement, SmoothWheelState>();
@@ -14,7 +15,7 @@ const getState = (container: HTMLElement): SmoothWheelState => {
     return existing;
   }
 
-  const state: SmoothWheelState = { frame: null, target: null, animating: false };
+  const state: SmoothWheelState = { frame: null, target: null, animating: false, lastAppliedTop: null };
   smoothWheelState.set(container, state);
   return state;
 };
@@ -31,10 +32,15 @@ export const cancelSmoothWheelScroll = (container: HTMLElement): void => {
   state.frame = null;
   state.target = null;
   state.animating = false;
+  state.lastAppliedTop = null;
 };
 
 export const smoothWheelScrollElement = (container: HTMLElement, event: WheelLike): void => {
   const state = getState(container);
+  if (state.animating && state.lastAppliedTop !== null && Math.abs(container.scrollTop - state.lastAppliedTop) > 2) {
+    cancelSmoothWheelScroll(container);
+  }
+
   const maxScroll = container.scrollHeight - container.clientHeight;
   if (state.target === null) {
     state.target = container.scrollTop;
@@ -46,6 +52,14 @@ export const smoothWheelScrollElement = (container: HTMLElement, event: WheelLik
     state.frame = null;
     if (state.target === null) {
       state.animating = false;
+      state.lastAppliedTop = container.scrollTop;
+      return;
+    }
+
+    if (state.lastAppliedTop !== null && Math.abs(container.scrollTop - state.lastAppliedTop) > 2) {
+      state.target = null;
+      state.animating = false;
+      state.lastAppliedTop = container.scrollTop;
       return;
     }
 
@@ -54,10 +68,12 @@ export const smoothWheelScrollElement = (container: HTMLElement, event: WheelLik
       container.scrollTop = state.target;
       state.target = null;
       state.animating = false;
+      state.lastAppliedTop = container.scrollTop;
       return;
     }
 
     container.scrollTop += diff * 0.25;
+    state.lastAppliedTop = container.scrollTop;
     state.frame = requestAnimationFrame(smoothScroll);
   };
 
