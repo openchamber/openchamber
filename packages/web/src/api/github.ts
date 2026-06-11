@@ -88,6 +88,19 @@ export const createWebGitHubAPI = ({ urls }: WebGitHubAPIOptions): GitHubAPI => 
     return payload;
   },
 
+  async authSetGhCliDisabled(disabled: boolean): Promise<{ disabled: boolean }> {
+    const response = await runtimeFetch('/api/github/auth/gh-cli', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ disabled }),
+    });
+    const payload = await jsonOrNull<{ disabled?: boolean; error?: string }>(response);
+    if (!response.ok || !payload) {
+      throw new Error(payload?.error || response.statusText || 'Failed to update gh CLI setting');
+    }
+    return { disabled: Boolean(payload.disabled) };
+  },
+
   async me(): Promise<GitHubUserSummary> {
     const response = await runtimeFetch('/api/github/me', { method: 'GET', headers: { Accept: 'application/json' } });
     const payload = await jsonOrNull<GitHubUserSummary & { error?: string }>(response);

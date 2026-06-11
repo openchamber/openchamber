@@ -76,16 +76,25 @@ export function registerGitHubRoutes(app) {
 
   app.get('/api/github/auth/status', async (_req, res) => {
     try {
-      const { getGitHubAuth, getOctokitOrNull, clearGitHubAuth, getGitHubAuthAccounts } = await getGitHubLibraries();
+      const { getGitHubAuth, getOctokitOrNull, clearGitHubAuth, getGitHubAuthAccounts, isGhCliDisabled } = await getGitHubLibraries();
+      const { getGhCliToken } = await import('./gh-cli-credential.js');
+
       const auth = getGitHubAuth();
       const accounts = getGitHubAuthAccounts();
-      if (!auth?.accessToken) {
-        return res.json({ connected: false, accounts });
-      }
+      const ghCliDisabled = isGhCliDisabled();
+      const ghToken = getGhCliToken();
+      const usingOwnToken = Boolean(auth?.accessToken);
+
+      const buildGhCli = (activeUser = null) => ({
+        available: ghToken !== null,
+        disabled: ghCliDisabled,
+        active: !usingOwnToken && ghToken !== null && !ghCliDisabled,
+        ...(activeUser ? { user: activeUser } : {}),
+      });
 
       const octokit = getOctokitOrNull();
       if (!octokit) {
-        return res.json({ connected: false, accounts });
+        return res.json({ connected: false, accounts, ghCli: buildGhCli() });
       }
 
       let user = null;
@@ -93,23 +102,39 @@ export function registerGitHubRoutes(app) {
         user = await getGitHubUserSummary(octokit);
       } catch (error) {
         if (isGitHubAuthInvalid(error)) {
-          clearGitHubAuth();
-          return res.json({ connected: false, accounts: getGitHubAuthAccounts() });
+          if (usingOwnToken) clearGitHubAuth();
+          return res.json({ connected: false, accounts: getGitHubAuthAccounts(), ghCli: buildGhCli() });
         }
       }
 
-      const fallback = auth.user;
+      const fallback = usingOwnToken ? auth.user : null;
       const mergedUser = user || fallback;
+      const ghIsActive = !usingOwnToken && ghToken !== null && !ghCliDisabled;
 
       return res.json({
         connected: true,
         user: mergedUser,
-        scope: auth.scope,
+        scope: usingOwnToken ? auth.scope : undefined,
         accounts,
+        ghCli: buildGhCli(ghIsActive ? mergedUser : null),
       });
     } catch (error) {
       console.error('Failed to get GitHub auth status:', error);
       return res.status(500).json({ error: error.message || 'Failed to get GitHub auth status' });
+    }
+  });
+
+  app.post('/api/github/auth/gh-cli', async (req, res) => {
+    try {
+      const { setGhCliDisabled, isGhCliDisabled } = await getGitHubLibraries();
+      const { clearGhCliTokenCache } = await import('./gh-cli-credential.js');
+      const disabled = Boolean(req.body?.disabled);
+      setGhCliDisabled(disabled);
+      clearGhCliTokenCache();
+      return res.json({ disabled: isGhCliDisabled() });
+    } catch (error) {
+      console.error('Failed to update gh CLI setting:', error);
+      return res.status(500).json({ error: error.message || 'Failed to update gh CLI setting' });
     }
   });
 

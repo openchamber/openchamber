@@ -718,8 +718,7 @@ async function allocateManagedOpenCodePort(): Promise<number> {
   });
 }
 
-export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCodeManager {
-  void _context;
+export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCodeManager {
   let server: { url: string; close: () => void } | null = null;
   let managedApiUrlOverride: string | null = null;
   let managedPassword: string | null = null;
@@ -733,7 +732,7 @@ export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCo
   const listeners = new Set<(status: ConnectionStatus, error?: string) => void>();
   const workspaceDirectory = (): string =>
     normalizeWindowsDriveLetter(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir());
-  const serverWorkingDirectory = (): string => normalizeWindowsDriveLetter(os.homedir());
+  const serverWorkingDirectory = (): string => normalizeWindowsDriveLetter(context.globalStorageUri.fsPath);
   let workingDirectory: string = workspaceDirectory();
   let startCount = 0;
   let restartCount = 0;
@@ -897,6 +896,7 @@ export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCo
       const serverCwd = serverWorkingDirectory();
       const originalCwd = process.cwd();
       try {
+        fs.mkdirSync(serverCwd, { recursive: true });
         process.chdir(serverCwd);
         const port = await allocateManagedOpenCodePort();
         server = await spawnManagedOpenCodeServer(serverCwd, port, READY_CHECK_TIMEOUT_MS);

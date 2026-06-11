@@ -305,3 +305,41 @@ export function getGitHubScopes() {
 }
 
 export const GITHUB_AUTH_FILE = STORAGE_FILE;
+
+export function isGhCliDisabled() {
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+      return Boolean(parsed?.ghCliDisabled);
+    }
+  } catch {
+    // ignore
+  }
+  return false;
+}
+
+export function setGhCliDisabled(disabled) {
+  ensureStorageDir();
+  let settings = {};
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) {
+      settings = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) || {};
+    }
+  } catch {
+    // ignore
+  }
+  settings.ghCliDisabled = Boolean(disabled);
+  const tmpFile = `${SETTINGS_FILE}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(tmpFile, JSON.stringify(settings, null, 2), 'utf8');
+  try {
+    fs.chmodSync(tmpFile, 0o600);
+  } catch {
+    // best-effort
+  }
+  fs.renameSync(tmpFile, SETTINGS_FILE);
+  try {
+    fs.chmodSync(SETTINGS_FILE, 0o600);
+  } catch {
+    // best-effort
+  }
+}

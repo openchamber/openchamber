@@ -174,6 +174,30 @@ export const GitHubSettings: React.FC = () => {
     };
   }, [flow, pollIntervalMs, pollOnce, refreshStatus, runtimeGitHub, stopPolling, t]);
 
+  const toggleGhCli = React.useCallback(async (disabled: boolean) => {
+    setIsBusy(true);
+    try {
+      if (runtimeGitHub) {
+        await runtimeGitHub.authSetGhCliDisabled(disabled);
+      } else {
+        const response = await runtimeFetch('/api/github/auth/gh-cli', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ disabled }),
+        });
+        const body = (await response.json().catch(() => null)) as { error?: string } | null;
+        if (!response.ok) throw new Error(body?.error || response.statusText);
+      }
+      toast.success(disabled ? t('settings.github.page.toast.ghCliDisabled') : t('settings.github.page.toast.ghCliEnabled'));
+      await refreshStatus(runtimeGitHub, { force: true });
+    } catch (error) {
+      console.error('Failed to update gh CLI setting:', error);
+      toast.error(t('settings.github.page.toast.ghCliUpdateFailed'));
+    } finally {
+      setIsBusy(false);
+    }
+  }, [refreshStatus, runtimeGitHub, t]);
+
   const disconnect = React.useCallback(async () => {
     setIsBusy(true);
     try {
@@ -239,6 +263,7 @@ export const GitHubSettings: React.FC = () => {
   const connected = Boolean(status?.connected);
   const user = status?.user;
   const accounts = status?.accounts ?? [];
+  const ghCli = status?.ghCli ?? null;
 
   return (
     <div className="mb-8">
@@ -287,12 +312,23 @@ export const GitHubSettings: React.FC = () => {
                     {t('settings.github.page.label.scopes', { value: status.scope })}
                   </div>
                 )}
+                {ghCli?.active && (
+                  <div className="typography-micro text-muted-foreground/70 mt-0.5">
+                    {t('settings.github.page.ghCli.activeDescription')}
+                  </div>
+                )}
               </div>
             </div>
 
-            <Button size="sm" variant="outline" onClick={disconnect} disabled={isBusy} className={cn("text-[var(--status-error)] hover:text-[var(--status-error)]", isMobile ? "w-full" : undefined)}>
-              {t('settings.github.page.actions.disconnect')}
-            </Button>
+            {ghCli?.active ? (
+              <Button size="sm" variant="outline" onClick={() => toggleGhCli(true)} disabled={isBusy} className={cn(isMobile ? "w-full" : undefined)}>
+                {t('settings.github.page.ghCli.actions.disable')}
+              </Button>
+            ) : (
+              <Button size="sm" variant="outline" onClick={disconnect} disabled={isBusy} className={cn("text-[var(--status-error)] hover:text-[var(--status-error)]", isMobile ? "w-full" : undefined)}>
+                {t('settings.github.page.actions.disconnect')}
+              </Button>
+            )}
           </div>
         ) : (
           <div className="flex items-center justify-between gap-4 px-4 py-4">
@@ -409,6 +445,41 @@ export const GitHubSettings: React.FC = () => {
             }}>
               {t('settings.common.actions.cancel')}
             </Button>
+          </div>
+        </div>
+      )}
+
+      {ghCli?.available && !ghCli?.active && (
+        <div className="mt-6">
+          <h3 className="typography-ui-header font-semibold text-foreground mb-3 px-1">
+            {t('settings.github.page.ghCli.title')}
+          </h3>
+          <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden">
+            <div className={cn("px-4 py-3", isMobile ? "flex flex-col gap-3" : "flex items-center justify-between gap-4")}>
+              <div className={cn("flex min-w-0 items-center gap-4", isMobile ? "w-full" : undefined)}>
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[var(--interactive-border)] bg-[var(--surface-muted)]">
+                  <Icon name="terminal" className="h-4 w-4 text-muted-foreground" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className={cn("typography-meta text-muted-foreground", ghCli.disabled ? "opacity-60" : undefined)}>
+                    {ghCli.disabled
+                      ? t('settings.github.page.ghCli.disabledDescription')
+                      : t('settings.github.page.ghCli.fallbackDescription')}
+                  </div>
+                </div>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => toggleGhCli(!ghCli.disabled)}
+                disabled={isBusy}
+                className={cn(isMobile ? "w-full" : undefined)}
+              >
+                {ghCli.disabled
+                  ? t('settings.github.page.ghCli.actions.enable')
+                  : t('settings.github.page.ghCli.actions.disable')}
+              </Button>
+            </div>
           </div>
         </div>
       )}
