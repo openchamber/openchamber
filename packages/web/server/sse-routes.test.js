@@ -47,12 +47,23 @@ const createMockRequest = () => {
 
 const createMockResponse = () => {
   const headers = new Map();
+  const listeners = new Map();
   let statusCode = 200;
   let body = '';
   let flushed = false;
   let bodyFlushCount = 0;
 
   return {
+    on(event, handler) {
+      listeners.set(event, handler);
+      return this;
+    },
+    emit(event) {
+      const handler = listeners.get(event);
+      if (typeof handler === 'function') {
+        handler();
+      }
+    },
     setHeader(name, value) {
       headers.set(name.toLowerCase(), value);
     },
@@ -131,7 +142,7 @@ describe('local SSE routes', () => {
       expect(res.body).toContain(':heartbeat\n\n');
       expect(res.bodyFlushCount).toBe(2);
 
-      req.emit('close');
+      res.emit('error');
       expect(clients.has(res)).toBe(false);
       expect(vi.getTimerCount()).toBe(0);
 

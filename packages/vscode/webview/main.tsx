@@ -371,7 +371,11 @@ const buildProxiedResponse = (
     return new Response(proxied.bodyText, { status: proxied.status, headers: proxied.headers });
   }
 
-  const body = proxied.bodyBase64 ? decodeBase64(proxied.bodyBase64) : new Uint8Array();
+  const decoded = proxied.bodyBase64 ? decodeBase64(proxied.bodyBase64) : null;
+  const body = new ArrayBuffer(decoded?.byteLength ?? 0);
+  if (decoded) {
+    new Uint8Array(body).set(decoded);
+  }
   return new Response(body, { status: proxied.status, headers: proxied.headers });
 };
 
