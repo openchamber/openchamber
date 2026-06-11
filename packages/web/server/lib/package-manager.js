@@ -767,6 +767,88 @@ export async function checkForUpdates(options = {}) {
 }
 
 /**
+ * Read the OS release ID from /etc/os-release (Linux only).
+ * Returns lowercase distro id like 'ubuntu', 'debian', 'fedora', 'almalinux', etc.
+ */
+function readOsReleaseId() {
+  try {
+    const content = fs.readFileSync('/etc/os-release', 'utf8');
+    const match = content.match(/^ID=(.+)$/m);
+    return match ? match[1].trim().replace(/["']/g, '').toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+function getToolchainInstallInstructions(platform, missing) {
+  if (platform === 'darwin') {
+    return 'Install Xcode Command Line Tools:\n  xcode-select --install';
+  }
+
+  if (platform === 'win32') {
+    return (
+      'Install Visual Studio Build Tools:\n' +
+      '  https://visualstudio.microsoft.com/visual-cpp-build-tools/\n' +
+      'Select "Desktop development with C++" workload.'
+    );
+  }
+
+  const id = readOsReleaseId();
+  if (id === 'debian' || id === 'ubuntu' || id === 'linuxmint' || id === 'pop') {
+    return 'Debian/Ubuntu:\n  sudo apt-get update && sudo apt-get install -y build-essential python3 make';
+  }
+  if (id === 'fedora' || id === 'rhel' || id === 'centos' || id === 'almalinux' || id === 'rocky') {
+    return 'Fedora/RHEL/Alma/Rocky:\n  sudo dnf install -y gcc gcc-c++ make python3';
+  }
+  if (id === 'arch' || id === 'manjaro') {
+    return 'Arch:\n  sudo pacman -S --needed base-devel python';
+  }
+
+  return (
+    'Install a C/C++ compiler, make, and Python 3 for your distribution.\n' +
+    'Examples:\n' +
+    '  Debian/Ubuntu: sudo apt-get install build-essential python3 make\n' +
+    '  Fedora/RHEL:   sudo dnf install gcc gcc-c++ make python3\n' +
+    '  Arch:          sudo pacman -S --needed base-devel python'
+  );
+}
+
+/**
+ * Preflight check for native build toolchain (make, C/C++ compiler, Python).
+ * npm packages like better-sqlite3 may compile via node-gyp when prebuilt
+ * binaries are unavailable. Missing toolchain causes confusing deep-build errors.
+ */
+export function checkNativeToolchain(options = {}) {
+  const platform = options.platform ?? process.platform;
+
+  if (platform === 'win32') {
+    return { ok: true };
+  }
+
+  const checks = [
+    { name: 'make', candidates: ['make'] },
+    { name: 'cc', candidates: ['cc', 'gcc'] },
+    { name: 'c++', candidates: ['c++', 'g++'] },
+    { name: 'python3', candidates: ['python3', 'python'] },
+  ];
+
+  const missing = [];
+  for (const check of checks) {
+    const found = check.candidates.some((cmd) => isCommandAvailable(cmd));
+    if (!found) {
+      missing.push(check.name);
+    }
+  }
+
+  if (missing.length === 0) {
+    return { ok: true };
+  }
+
+  const instructions = getToolchainInstallInstructions(platform, missing);
+  return { ok: false, missing, instructions };
+}
+
+/**
  * Execute the update (used by CLI)
  */
 export function executeUpdate(pm = detectPackageManager(), options = {}) {

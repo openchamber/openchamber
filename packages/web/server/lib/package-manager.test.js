@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock child_process to prevent real spawnSync calls that would hang in tests
 vi.mock('node:child_process', () => ({
@@ -6,7 +6,27 @@ vi.mock('node:child_process', () => ({
   spawnSync: vi.fn(() => ({ status: 0, stdout: '/usr/local/bin', stderr: '' })),
 }));
 
-const { checkForUpdates } = await import('./package-manager.js');
+// Mock node:fs so readOsReleaseId doesn't read real /etc/os-release
+// and detectPackageManager doesn't touch the real filesystem
+vi.mock('node:fs', () => {
+  const noent = new Error('ENOENT');
+  noent.code = 'ENOENT';
+  const impl = {
+    readFileSync: vi.fn(() => 'ID=linux\n'),
+    writeFileSync: vi.fn(),
+    mkdirSync: vi.fn(),
+    realpathSync: vi.fn((p) => p),
+    realpathSyncNative: vi.fn((p) => p),
+    existsSync: vi.fn(() => false),
+    readFileSync: vi.fn(() => 'ID=linux\n'),
+  };
+  return {
+    default: impl,
+    ...impl,
+  };
+});
+
+const { checkForUpdates, checkNativeToolchain } = await import('./package-manager.js');
 
 /** Helper: create a fetch mock that routes by URL pattern */
 function createFetchMock() {
@@ -242,5 +262,180 @@ describe('checkForUpdates', () => {
     const result = await checkForUpdates({ currentVersion: '1.9.10' });
 
     expect(result.available).toBe(false);
+  });
+});
+
+// ── checkNativeToolchain ────────────────────────────────────────────
+
+describe('checkNativeToolchain', () => {
+  let childProcessModule;
+
+  beforeAll(async () => {
+    childProcessModule = await import('node:child_process');
+  });
+
+  beforeEach(() => {
+    vi.mocked(childProcessModule.spawnSync).mockReset();
+  });
+
+  function mockCommands(availableCommands) {
+    vi.mocked(childProcessModule.spawnSync).mockImplementation((cmd, args) => {
+      if (args?.[0] === '--version' && availableCommands.includes(cmd)) {
+        return { status: 0, stdout: '1.0.0\n', stderr: '' };
+      }
+      if (args?.[0] === '--version') {
+        return { status: 1, stdout: '', stderr: 'not found' };
+      }
+      throw new Error(`command not found: ${cmd}`);
+    });
+  }
+
+  it('returns ok=true when all tools are present on linux', () => {
+    mockCommands(['npm', 'make', 'cc', 'c++', 'python3']);
+
+    const result = checkNativeToolchain({ platform: 'linux' });
+    expect(result).toEqual({ ok: true });
+  });
+
+  it('returns ok=true when gcc substitutes for cc on linux', () => {
+    mockCommands(['npm', 'make', 'gcc', 'c++', 'python3']);
+
+    const result = checkNativeToolchain({ platform: 'linux' });
+    expect(result).toEqual({ ok: true });
+  });
+
+  it('returns ok=true when g++ substitutes for c++ on linux', () => {
+    mockCommands(['npm', 'make', 'cc', 'g++', 'python3']);
+
+    const result = checkNativeToolchain({ platform: 'linux' });
+    expect(result).toEqual({ ok: true });
+  });
+
+  it('returns ok=true when python substitutes for python3 on linux', () => {
+    mockCommands(['npm', 'make', 'cc', 'c++', 'python']);
+
+    const result = checkNativeToolchain({ platform: 'linux' });
+    expect(result).toEqual({ ok: true });
+  });
+
+  it('returns ok=true on windows regardless of tools', () => {
+    mockCommands([]);
+
+    const result = checkNativeToolchain({ platform: 'win32' });
+    expect(result).toEqual({ ok: true });
+  });
+
+  it('returns ok=true on macos when cc is available', () => {
+    mockCommands(['make', 'cc', 'c++', 'python3']);
+
+    const result = checkNativeToolchain({ platform: 'darwin' });
+    expect(result).toEqual({ ok: true });
+  });
+
+  it('reports missing cc when neither cc nor gcc is present', () => {
+    mockCommands(['make', 'c++', 'python3']);
+
+    const result = checkNativeToolchain({ platform: 'linux' });
+    expect(result.ok).toBe(false);
+    expect(result.missing).toContain('cc');
+    expect(result.missing).not.toContain('make');
+    expect(result.missing).not.toContain('c++');
+    expect(result.missing).not.toContain('python3');
+    expect(typeof result.instructions).toBe('string');
+    expect(result.instructions.length).toBeGreaterThan(0);
+  });
+
+  it('reports missing c++ when neither c++ nor g++ is present', () => {
+    mockCommands(['make', 'cc', 'python3']);
+
+    const result = checkNativeToolchain({ platform: 'linux' });
+    expect(result.ok).toBe(false);
+    expect(result.missing).toContain('c++');
+  });
+
+  it('reports missing make', () => {
+    mockCommands(['cc', 'c++', 'python3']);
+
+    const result = checkNativeToolchain({ platform: 'linux' });
+    expect(result.ok).toBe(false);
+    expect(result.missing).toContain('make');
+  });
+
+  it('reports missing python3 when neither python3 nor python is present', () => {
+    mockCommands(['make', 'cc', 'c++']);
+
+    const result = checkNativeToolchain({ platform: 'linux' });
+    expect(result.ok).toBe(false);
+    expect(result.missing).toContain('python3');
+  });
+
+  it('reports multiple missing tools', () => {
+    mockCommands(['cc']);
+
+    const result = checkNativeToolchain({ platform: 'linux' });
+    expect(result.ok).toBe(false);
+    expect(result.missing).toEqual(expect.arrayContaining(['make', 'c++', 'python3']));
+    expect(result.missing).not.toContain('cc');
+  });
+
+  it('includes macos install instructions on darwin', () => {
+    mockCommands([]);
+
+    const result = checkNativeToolchain({ platform: 'darwin' });
+    expect(result.ok).toBe(false);
+    expect(result.instructions).toContain('xcode-select --install');
+  });
+
+  it('includes debian/ubuntu instructions for debian id', async () => {
+    mockCommands([]);
+    const fs = await import('node:fs');
+    const spy = vi.spyOn(fs, 'readFileSync').mockImplementation((filepath) => {
+      if (filepath === '/etc/os-release') return 'ID=debian\n';
+      return '';
+    });
+
+    const result = checkNativeToolchain({ platform: 'linux' });
+    expect(result.instructions).toContain('apt-get');
+    spy.mockRestore();
+  });
+
+  it('includes fedora/rhel instructions for almalinux id', async () => {
+    mockCommands([]);
+    const fs = await import('node:fs');
+    const spy = vi.spyOn(fs, 'readFileSync').mockImplementation((filepath) => {
+      if (filepath === '/etc/os-release') return 'ID="almalinux"\n';
+      return '';
+    });
+
+    const result = checkNativeToolchain({ platform: 'linux' });
+    expect(result.instructions).toContain('dnf');
+    spy.mockRestore();
+  });
+
+  it('includes arch instructions for arch id', async () => {
+    mockCommands([]);
+    const fs = await import('node:fs');
+    const spy = vi.spyOn(fs, 'readFileSync').mockImplementation((filepath) => {
+      if (filepath === '/etc/os-release') return 'ID=arch\n';
+      return '';
+    });
+
+    const result = checkNativeToolchain({ platform: 'linux' });
+    expect(result.instructions).toContain('pacman');
+    spy.mockRestore();
+  });
+
+  it('falls back to generic linux instructions when os-release is unreadable', async () => {
+    mockCommands([]);
+    const fs = await import('node:fs');
+    const spy = vi.spyOn(fs, 'readFileSync').mockImplementation(() => {
+      throw new Error('ENOENT');
+    });
+
+    const result = checkNativeToolchain({ platform: 'linux' });
+    expect(result.instructions).toContain('apt-get');
+    expect(result.instructions).toContain('dnf');
+    expect(result.instructions).toContain('pacman');
+    spy.mockRestore();
   });
 });
