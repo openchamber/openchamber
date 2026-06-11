@@ -480,21 +480,24 @@ export const ContextPanelContent: React.FC = () => {
           <div className="typography-micro text-muted-foreground mb-2.5">{t('contextSidebar.section.lastAssistantMessage')}</div>
           <div className="grid grid-cols-3 gap-x-4 gap-y-2.5">
             {([
-              { label: t('contextSidebar.tokens.input'), value: viewModel.tokenBreakdown.input },
-              { label: t('contextSidebar.tokens.output'), value: viewModel.tokenBreakdown.output },
-              { label: t('contextSidebar.tokens.reasoning'), value: viewModel.tokenBreakdown.reasoning },
-              { label: t('contextSidebar.tokens.cacheRead'), value: viewModel.tokenBreakdown.cacheRead },
-              { label: t('contextSidebar.tokens.cacheWrite'), value: viewModel.tokenBreakdown.cacheWrite },
+              { label: t('contextSidebar.tokens.input'), value: viewModel.tokenBreakdown.input, format: 'count' },
+              { label: t('contextSidebar.tokens.output'), value: viewModel.tokenBreakdown.output, format: 'count' },
+              { label: t('contextSidebar.tokens.reasoning'), value: viewModel.tokenBreakdown.reasoning, format: 'count' },
+              { label: t('contextSidebar.tokens.cacheRead'), value: viewModel.tokenBreakdown.cacheRead, format: 'count' },
+              { label: t('contextSidebar.tokens.cacheWrite'), value: viewModel.tokenBreakdown.cacheWrite, format: 'count' },
               {
                 label: t('contextSidebar.tokens.cacheHit'),
                 value: viewModel.cacheHitRate.hasInput ? viewModel.cacheHitRate.percent : null,
+                format: 'percent',
               },
             ] as const).map((item) => (
               <div key={item.label}>
                 <div className="typography-micro text-muted-foreground/70">{item.label}</div>
                 <div className="mt-0.5 typography-ui-label tabular-nums text-foreground">
                   {item.value !== null && item.value !== undefined
-                    ? `${formatNumber(item.value)}%`
+                    ? item.format === 'percent'
+                      ? `${item.value.toFixed(1)}%`
+                      : formatNumber(item.value)
                     : '—'}
                 </div>
               </div>

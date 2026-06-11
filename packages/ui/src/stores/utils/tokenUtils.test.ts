@@ -51,7 +51,7 @@ describe("computeCacheHitRate", () => {
     expect(result).toEqual({ percent: 0, hasInput: true })
   })
 
-  test("clamps to 100% when cache.read is much larger than non-cached input", () => {
+  test("computes below 100% when cache.read is larger than non-cached input", () => {
     // total = 200 + 100 = 300, hit = 200 / 300 = 66.7% — not clamped
     const result = computeCacheHitRate({ input: 100, cache: { read: 200, write: 0 } })
     expect(Math.abs(result.percent - 66.67) < 1e-2).toBe(true)
