@@ -3,7 +3,7 @@ import path from 'path';
 import { pathToFileURL } from 'url';
 
 import { isModuleCliExecution, normalizeCliEntryPath } from './cli-entry.js';
-import { parseArgs } from './cli.js';
+import { assertAuthenticatedNetworkExposure, parseArgs } from './cli.js';
 
 describe('cli args', () => {
   it('accepts legacy daemon flags as no-ops', () => {
@@ -71,6 +71,37 @@ describe('cli args', () => {
 
     expect(parsed.options.hostname).toBe('app.example.com');
     expect(parsed.options.host).toBeUndefined();
+  });
+});
+
+describe('network-exposed auth validation', () => {
+  it('allows loopback without a UI password', () => {
+    expect(() => assertAuthenticatedNetworkExposure({ host: '127.0.0.1' })).not.toThrow();
+    expect(() => assertAuthenticatedNetworkExposure({ host: 'localhost' })).not.toThrow();
+    expect(() => assertAuthenticatedNetworkExposure({ host: '::1' })).not.toThrow();
+  });
+
+  it('requires a UI password for LAN and wildcard bind hosts', () => {
+    expect(() => assertAuthenticatedNetworkExposure({ host: '0.0.0.0' })).toThrow(/refuses to bind/);
+    expect(() => assertAuthenticatedNetworkExposure({ host: '192.168.1.10' })).toThrow(/refuses to bind/);
+  });
+
+  it('allows network-exposed bind hosts with a UI password', () => {
+    expect(() => assertAuthenticatedNetworkExposure({ host: '0.0.0.0', uiPassword: 'secret' })).not.toThrow();
+  });
+
+  it('allows explicit unsafe LAN override from process env only', () => {
+    const previous = process.env.OPENCHAMBER_ALLOW_UNAUTHENTICATED_LAN;
+    process.env.OPENCHAMBER_ALLOW_UNAUTHENTICATED_LAN = 'true';
+    try {
+      expect(() => assertAuthenticatedNetworkExposure({ host: '0.0.0.0' })).not.toThrow();
+    } finally {
+      if (typeof previous === 'string') {
+        process.env.OPENCHAMBER_ALLOW_UNAUTHENTICATED_LAN = previous;
+      } else {
+        delete process.env.OPENCHAMBER_ALLOW_UNAUTHENTICATED_LAN;
+      }
+    }
   });
 });
 

@@ -6,6 +6,11 @@ export {
   clearGitHubAuth,
   getGitHubClientId,
   getGitHubScopes,
+  GH_CLI_ACCOUNT_ID,
+  isGhCliDisabled,
+  isGhCliActive,
+  setGhCliActive,
+  setGhCliDisabled,
   GITHUB_AUTH_FILE,
 } from './auth.js';
 

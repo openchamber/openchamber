@@ -212,11 +212,54 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     }
   });
 
+  app.get('/api/opencode/health', async (_req, res) => {
+    try {
+      const healthResponse = await fetch(buildOpenCodeUrl('/global/health', ''), {
+        method: 'GET',
+        headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+      });
+      const health = await healthResponse.json().catch(() => null);
+      if (!healthResponse.ok) {
+        return res.status(healthResponse.status).json({
+          healthy: false,
+          error: health?.error || healthResponse.statusText || 'OpenCode health check failed',
+        });
+      }
+      return res.json({ healthy: health?.healthy === true });
+    } catch (error) {
+      return res.status(503).json({
+        healthy: false,
+        error: error instanceof Error ? error.message : 'OpenCode health check failed',
+      });
+    }
+  });
+
+  app.get('/api/opencode/version', async (_req, res) => {
+    try {
+      const healthResponse = await fetch(buildOpenCodeUrl('/global/health', ''), {
+        method: 'GET',
+        headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+      });
+      const health = await healthResponse.json().catch(() => null);
+      if (!healthResponse.ok) {
+        return res.status(healthResponse.status).json({
+          version: null,
+          error: health?.error || healthResponse.statusText || 'Failed to read OpenCode version',
+        });
+      }
+      const version = typeof health?.version === 'string' ? health.version.replace(/^v/, '') : null;
+      return res.json({ version });
+    } catch (error) {
+      return res.status(500).json({
+        version: null,
+        error: error instanceof Error ? error.message : 'Failed to read OpenCode version',
+      });
+    }
+  });
+
   app.put('/api/config/settings', async (req, res) => {
-    console.log('[API:PUT /api/config/settings] Received request');
     try {
       const updated = await persistSettings(req.body ?? {});
-      console.log(`[API:PUT /api/config/settings] Success, returning ${updated.projects?.length || 0} projects`);
       res.json(updated);
     } catch (error) {
       console.error('[API:PUT /api/config/settings] Failed to save settings:', error);

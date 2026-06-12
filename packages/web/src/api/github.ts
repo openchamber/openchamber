@@ -88,6 +88,19 @@ export const createWebGitHubAPI = ({ urls }: WebGitHubAPIOptions): GitHubAPI => 
     return payload;
   },
 
+  async authSetGhCliDisabled(disabled: boolean): Promise<{ disabled: boolean }> {
+    const response = await runtimeFetch('/api/github/auth/gh-cli', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ disabled }),
+    });
+    const payload = await jsonOrNull<{ disabled?: boolean; error?: string }>(response);
+    if (!response.ok || !payload) {
+      throw new Error(payload?.error || response.statusText || 'Failed to update gh CLI setting');
+    }
+    return { disabled: Boolean(payload.disabled) };
+  },
+
   async me(): Promise<GitHubUserSummary> {
     const response = await runtimeFetch('/api/github/me', { method: 'GET', headers: { Accept: 'application/json' } });
     const payload = await jsonOrNull<GitHubUserSummary & { error?: string }>(response);
@@ -191,10 +204,17 @@ export const createWebGitHubAPI = ({ urls }: WebGitHubAPIOptions): GitHubAPI => 
     return body.branches ?? [];
   },
 
-  async prsList(directory: string, options?: { page?: number }): Promise<GitHubPullRequestsListResult> {
+  async prsList(directory: string, options?: { page?: number; query?: string }): Promise<GitHubPullRequestsListResult> {
     const page = options?.page ?? 1;
+    const params = new URLSearchParams({
+      directory,
+      page: String(page),
+    });
+    if (options?.query) {
+      params.set('query', options.query);
+    }
     const response = await runtimeFetch(
-      `/api/github/pulls/list?directory=${encodeURIComponent(directory)}&page=${encodeURIComponent(String(page))}`,
+      `/api/github/pulls/list?${params.toString()}`,
       { method: 'GET', headers: { Accept: 'application/json' } }
     );
     const body = await jsonOrNull<GitHubPullRequestsListResult & { error?: string }>(response);
@@ -228,10 +248,17 @@ export const createWebGitHubAPI = ({ urls }: WebGitHubAPIOptions): GitHubAPI => 
     return body;
   },
 
-  async issuesList(directory: string, options?: { page?: number }): Promise<GitHubIssuesListResult> {
+  async issuesList(directory: string, options?: { page?: number; query?: string }): Promise<GitHubIssuesListResult> {
     const page = options?.page ?? 1;
+    const params = new URLSearchParams({
+      directory,
+      page: String(page),
+    });
+    if (options?.query) {
+      params.set('query', options.query);
+    }
     const response = await runtimeFetch(
-      `/api/github/issues/list?directory=${encodeURIComponent(directory)}&page=${encodeURIComponent(String(page))}`,
+      `/api/github/issues/list?${params.toString()}`,
       { method: 'GET', headers: { Accept: 'application/json' } }
     );
     const payload = await jsonOrNull<GitHubIssuesListResult & { error?: string }>(response);

@@ -9,6 +9,7 @@ import {
   checkoutCommit,
   cherryPick,
   getStatus,
+  removeWorktree,
   resetToCommit,
   resolveBaseRefForLog,
   revertCommit,
@@ -136,6 +137,46 @@ describe('getStatus', () => {
     runGit(repo, ['commit', '-m', 'Initial commit']);
 
     await expect(getStatus(repo)).resolves.toMatchObject({ current: 'main' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// removeWorktree
+// ---------------------------------------------------------------------------
+
+describe('removeWorktree', () => {
+  it('forgets unmanaged orphan worktree entries without deleting files', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+
+    try {
+      const repo = createTempDir();
+      const sentinel = createTempDir();
+      const canary = path.join(sentinel, 'canary.txt');
+
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+      fs.writeFileSync(canary, 'sentinel');
+
+      await expect(removeWorktree(repo, {
+        directory: sentinel,
+        deleteLocalBranch: false,
+      })).resolves.toBe(true);
+      expect(fs.existsSync(canary)).toBe(true);
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
   });
 });
 

@@ -7,6 +7,14 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { Icon } from "@/components/icon/Icon";
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { getDirectoryForFilePath } from '@/lib/path-utils';
+import { useI18n } from '@/lib/i18n';
+import {
+    buildAgentHref,
+    buildAgentMentionUrl,
+    buildSkillHref,
+    parseSkillHref,
+} from '@/lib/messages/inlineMessageLinks';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string };
 
@@ -17,24 +25,7 @@ type UserTextPartProps = {
     agentMention?: AgentMentionInfo;
 };
 
-const buildMentionUrl = (name: string): string => {
-    const encoded = encodeURIComponent(name);
-    return `https://opencode.ai/docs/agents/#${encoded}`;
-};
-
 const SKILL_TOKEN_PATTERN = /(^|\s)\/([a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)/g;
-const SKILL_LINK_PREFIX = '#openchamber-skill:';
-
-const buildSkillHref = (name: string): string => `${SKILL_LINK_PREFIX}${encodeURIComponent(name)}`;
-
-const parseSkillHref = (href: string | null | undefined): string | null => {
-    if (!href?.startsWith(SKILL_LINK_PREFIX)) return null;
-    try {
-        return decodeURIComponent(href.slice(SKILL_LINK_PREFIX.length));
-    } catch {
-        return null;
-    }
-};
 
 const escapeHtml = (text: string): string => {
     return text
@@ -67,9 +58,11 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
     const [isExpanded, setIsExpanded] = React.useState(false);
     const [isTruncated, setIsTruncated] = React.useState(false);
     const userMessageRenderingMode = useUIStore((state) => state.userMessageRenderingMode);
+    const collapsibleUserMessages = useUIStore((state) => state.collapsibleUserMessages);
     const skills = useSkillsStore((state) => state.skills);
     const openContextFile = useUIStore((state) => state.openContextFile);
     const effectiveDirectory = useEffectiveDirectory();
+    const { t } = useI18n();
     const normalizedRenderingMode = normalizeUserMessageRenderingMode(userMessageRenderingMode);
     const textRef = React.useRef<HTMLDivElement>(null);
     const skillByName = React.useMemo(() => new Map(skills.map((skill) => [skill.name, skill])), [skills]);
@@ -77,7 +70,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
     const openSkill = React.useCallback((name: string) => {
         const skill = skillByName.get(name);
         if (!skill?.path) return;
-        openContextFile(effectiveDirectory || skill.path.replace(/\/[^/]*$/, '') || '/', skill.path);
+        openContextFile(effectiveDirectory || getDirectoryForFilePath('', skill.path) || '/', skill.path);
     }, [effectiveDirectory, openContextFile, skillByName]);
 
     const hasActiveSelectionInElement = React.useCallback((element: HTMLElement): boolean => {
@@ -99,7 +92,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
         if (!el) return;
 
         const checkTruncation = () => {
-            if (!isExpanded) {
+            if (collapsibleUserMessages && !isExpanded) {
                 setIsTruncated(el.scrollHeight > el.clientHeight);
             }
         };
@@ -110,7 +103,14 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
         resizeObserver.observe(el);
 
         return () => resizeObserver.disconnect();
-    }, [textContent, isExpanded]);
+    }, [collapsibleUserMessages, textContent, isExpanded]);
+
+    React.useEffect(() => {
+        if (!collapsibleUserMessages) {
+            setIsExpanded(false);
+            setIsTruncated(false);
+        }
+    }, [collapsibleUserMessages]);
 
     const handleClick = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
         const target = event.target as HTMLElement | null;
@@ -133,10 +133,10 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
             return;
         }
 
-        if (!isExpanded && isTruncated) {
+        if (collapsibleUserMessages && !isExpanded && isTruncated) {
             setIsExpanded(true);
         }
-    }, [hasActiveSelectionInElement, isExpanded, isTruncated, openSkill]);
+    }, [collapsibleUserMessages, hasActiveSelectionInElement, isExpanded, isTruncated, openSkill]);
 
     const handleCollapse = React.useCallback((event: React.MouseEvent) => {
         event.stopPropagation();
@@ -149,10 +149,10 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
         // Step 1: First escape HTML to protect against XSS and ensure HTML tags display as text
         content = escapeHtml(content);
 
-        // Step 2: Then insert agent mention links (after escaping, so <a> tags won't be escaped)
+        // Step 2: Insert agent mention links with an internal href so markdown renders them as mentions, not external links.
         if (agentMention?.token && content.includes(agentMention.token)) {
-            const mentionHtml = `<a href="${buildMentionUrl(agentMention.name)}" class="text-primary hover:underline" target="_blank" rel="noopener noreferrer">${agentMention.token}</a>`;
-            content = content.replace(agentMention.token, mentionHtml);
+            const mentionMarkdown = `[${agentMention.token}](${buildAgentHref(agentMention.name)})`;
+            content = content.replace(agentMention.token, mentionMarkdown);
         }
 
         content = content.replace(SKILL_TOKEN_PATTERN, (match, prefix: string, skillName: string) => {
@@ -213,7 +213,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
                 node.slice(0, idx),
                 <a
                     key={`agent-${index}`}
-                    href={buildMentionUrl(agentMention.name)}
+                    href={buildAgentMentionUrl(agentMention.name)}
                     className="text-primary hover:underline"
                     target="_blank"
                     rel="noopener noreferrer"
@@ -232,12 +232,12 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
 
     return (
         <div className="relative" key={part.id || `${messageId}-user-text`}>
-            {isExpanded && (
+            {collapsibleUserMessages && isExpanded && (
                 <button
                     type="button"
                     onClick={handleCollapse}
                     className="absolute top-0 right-0 z-10 flex items-center justify-center rounded-sm bg-[var(--surface-elevated)] p-0.5 text-[var(--surface-mutedForeground)] hover:text-[var(--surface-foreground)] hover:bg-[var(--interactive-hover)] transition-colors"
-                    aria-label="Collapse"
+                    aria-label={t('chat.message.userText.collapseAria')}
                 >
                     <Icon name="arrow-up-s" className="h-3.5 w-3.5" />
                 </button>
@@ -247,8 +247,8 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
                     "break-words font-sans typography-markdown-body",
                     isExpanded && "pb-3",
                     normalizedRenderingMode === 'plain' && 'whitespace-pre-wrap',
-                    !isExpanded && "line-clamp-2",
-                    isTruncated && !isExpanded && "cursor-pointer"
+                    collapsibleUserMessages && !isExpanded && "line-clamp-2",
+                    collapsibleUserMessages && isTruncated && !isExpanded && "cursor-pointer"
                 )}
                 ref={textRef}
                 onClick={handleClick}

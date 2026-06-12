@@ -88,8 +88,8 @@ Only use labels that already exist in this repository. Do not create labels.
 | `priority:low` | Minor UX polish, niche feature request |
 | `data-loss` | Risk of losing user data or overwriting files |
 | `regression` | Bug that worked in a previous release |
-| `has-repro` | Confirmed reproducible with clear steps |
-| `needs-repro` | No clear reproduction steps provided |
+| `reproduction-steps:true` | Clear reproduction steps provided |
+| `reproduction-steps:false` | No clear reproduction steps provided |
 | `needs-info` | Needs more info from reporter to reproduce |
 
 ### General guidelines
@@ -105,3 +105,4 @@ For each issue:
 - Add a small set of accurate existing labels following the steps above.
 - In a single comment summarize the issue and ask the reporter for any additional information needed to complete the request.
 - Keep the comment friendly and concise.
+- Never post test, probe, placeholder, or debugging comments.

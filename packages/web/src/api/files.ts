@@ -125,6 +125,9 @@ export const createWebFilesAPI = ({ urls }: WebFilesAPIOptions): FilesAPI => ({
     if (options?.allowOutsideWorkspace) {
       params.set('allowOutsideWorkspace', 'true');
     }
+    if (options?.outsideFileGrant) {
+      params.set('outsideFileGrant', options.outsideFileGrant);
+    }
     const response = await runtimeFetch(urls.api('/api/fs/stat', params));
 
     if (!response.ok) {
@@ -146,6 +149,9 @@ export const createWebFilesAPI = ({ urls }: WebFilesAPIOptions): FilesAPI => ({
     const params = new URLSearchParams({ path: target });
     if (options?.allowOutsideWorkspace) {
       params.set('allowOutsideWorkspace', 'true');
+    }
+    if (options?.outsideFileGrant) {
+      params.set('outsideFileGrant', options.outsideFileGrant);
     }
     if (options?.optional) {
       params.set('optional', 'true');

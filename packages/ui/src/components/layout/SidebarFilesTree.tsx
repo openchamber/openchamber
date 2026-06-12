@@ -16,6 +16,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -136,6 +143,8 @@ interface FileRowProps {
   downloadFile?: (path: string) => Promise<void>;
   contextMenuPath: string | null;
   setContextMenuPath: (path: string | null) => void;
+  rightClickMenuPath: string | null;
+  setRightClickMenuPath: (path: string | null) => void;
   onSelect: (node: FileNode) => void;
   onToggle: (path: string) => void;
   onRevealPath: (path: string) => void;
@@ -153,6 +162,8 @@ const FileRow: React.FC<FileRowProps> = ({
   downloadFile,
   contextMenuPath,
   setContextMenuPath,
+  rightClickMenuPath,
+  setRightClickMenuPath,
   onSelect,
   onToggle,
   onRevealPath,
@@ -165,8 +176,8 @@ const FileRow: React.FC<FileRowProps> = ({
   const handleContextMenu = React.useCallback((event?: React.MouseEvent) => {
     if (!canRename && !canCreateFile && !canCreateFolder && !canDelete && !canReveal) return;
     event?.preventDefault();
-    setContextMenuPath(node.path);
-  }, [canRename, canCreateFile, canCreateFolder, canDelete, canReveal, node.path, setContextMenuPath]);
+    setRightClickMenuPath(node.path);
+  }, [canRename, canCreateFile, canCreateFolder, canDelete, canReveal, node.path, setRightClickMenuPath]);
 
   const handleInteraction = React.useCallback(() => {
     if (isDir) {
@@ -178,8 +189,76 @@ const FileRow: React.FC<FileRowProps> = ({
 
   const handleMenuButtonClick = React.useCallback((event: React.MouseEvent) => {
     event.stopPropagation();
+    setRightClickMenuPath(null);
     setContextMenuPath(node.path);
-  }, [node.path, setContextMenuPath]);
+  }, [node.path, setContextMenuPath, setRightClickMenuPath]);
+
+  const renderMenuItems = ({
+    Item,
+    Separator,
+  }: {
+    Item: React.ElementType;
+    Separator: React.ElementType;
+  }) => (
+    <>
+      {canRename && (
+        <Item onClick={(e: React.MouseEvent) => { e.stopPropagation(); onOpenDialog('rename', node); }}>
+          <Icon name="edit" className="mr-2 h-4 w-4" /> {t('sidebarFilesTree.menu.rename')}
+        </Item>
+      )}
+      <Item onClick={(e: React.MouseEvent) => {
+        e.stopPropagation();
+        void copyTextToClipboard(node.path).then((result) => {
+          if (result.ok) {
+            toast.success(t('sidebarFilesTree.toast.pathCopied'));
+            return;
+          }
+          toast.error(t('sidebarFilesTree.toast.copyFailed'));
+        });
+      }}>
+        <Icon name="file-copy" className="mr-2 h-4 w-4" /> {t('sidebarFilesTree.menu.copyPath')}
+      </Item>
+      {!isDir && downloadFile && (
+        <Item onClick={(e: React.MouseEvent) => {
+          e.stopPropagation();
+          void downloadFile(node.path);
+        }}>
+          <Icon name="download" className="mr-2 h-4 w-4" /> {t('sidebarFilesTree.menu.save')}
+        </Item>
+      )}
+      {canReveal && (
+        <Item onClick={(e: React.MouseEvent) => { e.stopPropagation(); onRevealPath(node.path); }}>
+          <Icon name="folder-received" className="mr-2 h-4 w-4" /> {t(getRevealLabelKey())}
+        </Item>
+      )}
+      {isDir && (canCreateFile || canCreateFolder) && (
+        <>
+          <Separator />
+          {canCreateFile && (
+            <Item onClick={(e: React.MouseEvent) => { e.stopPropagation(); onOpenDialog('createFile', node); }}>
+              <Icon name="file-add" className="mr-2 h-4 w-4" /> {t('sidebarFilesTree.menu.newFile')}
+            </Item>
+          )}
+          {canCreateFolder && (
+            <Item onClick={(e: React.MouseEvent) => { e.stopPropagation(); onOpenDialog('createFolder', node); }}>
+              <Icon name="folder-add" className="mr-2 h-4 w-4" /> {t('sidebarFilesTree.menu.newFolder')}
+            </Item>
+          )}
+        </>
+      )}
+      {canDelete && (
+        <>
+          <Separator />
+          <Item
+            onClick={(e: React.MouseEvent) => { e.stopPropagation(); onOpenDialog('delete', node); }}
+            className="text-destructive focus:text-destructive"
+          >
+            <Icon name="delete-bin" className="mr-2 h-4 w-4" /> {t('sidebarFilesTree.menu.delete')}
+          </Item>
+        </>
+      )}
+    </>
+  );
 
   const handleDragStart = React.useCallback((e: React.DragEvent) => {
     const path = getRelativePath(root, node.path);
@@ -189,10 +268,8 @@ const FileRow: React.FC<FileRowProps> = ({
   }, [node.path, root]);
 
   return (
-    <div
-      className="group relative flex items-center"
-      onContextMenu={handleContextMenu}
-    >
+    <ContextMenu open={rightClickMenuPath === node.path} onOpenChange={(open) => setRightClickMenuPath(open ? node.path : null)}>
+      <ContextMenuTrigger render={<div className="group relative flex items-center" onContextMenu={handleContextMenu} />}>
       <button
         type="button"
         onClick={handleInteraction}
@@ -251,67 +328,16 @@ const FileRow: React.FC<FileRowProps> = ({
               <TooltipContent side="bottom" sideOffset={6}>{t('sidebarFilesTree.actions.fileMenuTitle')}</TooltipContent>
             </Tooltip>
             <DropdownMenuContent align="end" side="bottom" onCloseAutoFocus={() => setContextMenuPath(null)}>
-              {canRename && (
-                <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onOpenDialog('rename', node); }}>
-                  <Icon name="edit" className="mr-2 h-4 w-4" /> {t('sidebarFilesTree.menu.rename')}
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem onClick={(e) => {
-                e.stopPropagation();
-                void copyTextToClipboard(node.path).then((result) => {
-                  if (result.ok) {
-                    toast.success(t('sidebarFilesTree.toast.pathCopied'));
-                    return;
-                  }
-                  toast.error(t('sidebarFilesTree.toast.copyFailed'));
-                });
-              }}>
-                <Icon name="file-copy" className="mr-2 h-4 w-4" /> {t('sidebarFilesTree.menu.copyPath')}
-              </DropdownMenuItem>
-              {!isDir && downloadFile && (
-                <DropdownMenuItem onClick={(e) => {
-                  e.stopPropagation();
-                  void downloadFile(node.path);
-                }}>
-                  <Icon name="download" className="mr-2 h-4 w-4" /> {t('sidebarFilesTree.menu.save')}
-                </DropdownMenuItem>
-              )}
-              {canReveal && (
-                <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onRevealPath(node.path); }}>
-                  <Icon name="folder-received" className="mr-2 h-4 w-4" /> {t(getRevealLabelKey())}
-                </DropdownMenuItem>
-              )}
-              {isDir && (canCreateFile || canCreateFolder) && (
-                <>
-                  <DropdownMenuSeparator />
-                  {canCreateFile && (
-                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onOpenDialog('createFile', node); }}>
-                      <Icon name="file-add" className="mr-2 h-4 w-4" /> {t('sidebarFilesTree.menu.newFile')}
-                    </DropdownMenuItem>
-                  )}
-                  {canCreateFolder && (
-                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onOpenDialog('createFolder', node); }}>
-                      <Icon name="folder-add" className="mr-2 h-4 w-4" /> {t('sidebarFilesTree.menu.newFolder')}
-                    </DropdownMenuItem>
-                  )}
-                </>
-              )}
-              {canDelete && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    onClick={(e) => { e.stopPropagation(); onOpenDialog('delete', node); }}
-                    className="text-destructive focus:text-destructive"
-                  >
-                    <Icon name="delete-bin" className="mr-2 h-4 w-4" /> {t('sidebarFilesTree.menu.delete')}
-                  </DropdownMenuItem>
-                </>
-              )}
+              {renderMenuItems({ Item: DropdownMenuItem, Separator: DropdownMenuSeparator })}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
       )}
-    </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="min-w-[180px]">
+        {renderMenuItems({ Item: ContextMenuItem, Separator: ContextMenuSeparator })}
+      </ContextMenuContent>
+    </ContextMenu>
   );
 };
 
@@ -357,6 +383,7 @@ export const SidebarFilesTree: React.FC = () => {
 
   // Context menu state
   const [contextMenuPath, setContextMenuPath] = React.useState<string | null>(null);
+  const [rightClickMenuPath, setRightClickMenuPath] = React.useState<string | null>(null);
 
   // Dialog state for CRUD operations
   const [activeDialog, setActiveDialog] = React.useState<'createFile' | 'createFolder' | 'rename' | 'delete' | null>(null);
@@ -419,14 +446,13 @@ export const SidebarFilesTree: React.FC = () => {
     inFlightDirsRef.current = new Set(inFlightDirsRef.current);
     inFlightDirsRef.current.add(normalizedDir);
 
-    const respectGitignore = !showGitignored;
     const listPromise = files.listDirectory
-      ? files.listDirectory(normalizedDir, { respectGitignore }).then((result) => result.entries.map((entry) => ({
+      ? files.listDirectory(normalizedDir).then((result) => result.entries.map((entry) => ({
         name: entry.name,
         path: entry.path,
         isDirectory: entry.isDirectory,
       })))
-      : opencodeClient.listLocalDirectory(normalizedDir, { respectGitignore }).then((result) => result.map((entry) => ({
+      : opencodeClient.listLocalDirectory(normalizedDir).then((result) => result.map((entry) => ({
         name: entry.name,
         path: entry.path,
         isDirectory: entry.isDirectory,
@@ -458,7 +484,7 @@ export const SidebarFilesTree: React.FC = () => {
         inFlightDirsRef.current = new Set(inFlightDirsRef.current);
         inFlightDirsRef.current.delete(normalizedDir);
       });
-  }, [files, mapDirectoryEntries, showGitignored]);
+  }, [files, mapDirectoryEntries]);
 
   const refreshRoot = React.useCallback(async () => {
     if (!root) return;
@@ -802,6 +828,8 @@ export const SidebarFilesTree: React.FC = () => {
             downloadFile={files.downloadFile}
             contextMenuPath={contextMenuPath}
             setContextMenuPath={setContextMenuPath}
+            rightClickMenuPath={rightClickMenuPath}
+            setRightClickMenuPath={setRightClickMenuPath}
             onSelect={handleOpenFile}
             onToggle={toggleDirectory}
             onRevealPath={handleRevealPath}
@@ -809,6 +837,15 @@ export const SidebarFilesTree: React.FC = () => {
           />
           {isDir && isExpanded && (
             <ul className="flex flex-col gap-1 ml-3 pl-3 border-l border-border/40 relative">
+              {loadErrorsByDir[node.path] ? (
+                <li className="flex items-center gap-2 px-2 py-1 typography-meta text-muted-foreground">
+                  <span className="min-w-0 flex-1 truncate text-[var(--status-error)]" title={loadErrorsByDir[node.path]}>{loadErrorsByDir[node.path]}</span>
+                  <Button variant="ghost" size="xs" className="h-6 gap-1" onClick={() => void refreshDirectory(node.path)}>
+                    <Icon name="refresh" className="h-3.5 w-3.5" />
+                    {t('sidebarFilesTree.actions.refreshTitle')}
+                  </Button>
+                </li>
+              ) : null}
               {renderTree(node.path, depth + 1)}
             </ul>
           )}
@@ -821,7 +858,7 @@ export const SidebarFilesTree: React.FC = () => {
   const rootLoadError = root ? loadErrorsByDir[root] : null;
 
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden bg-sidebar">
+    <section className="flex h-full min-h-0 flex-col overflow-hidden">
       <div className="flex items-center gap-2 border-b border-border/40 px-3 py-2">
         <div className="relative min-w-0 flex-1">
           <Icon name="search" className="pointer-events-none absolute left-2 top-2 h-4 w-4 text-muted-foreground" />

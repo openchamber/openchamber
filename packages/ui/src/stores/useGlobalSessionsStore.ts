@@ -122,6 +122,7 @@ const getSessionSignature = (session: Session): string => {
     session.time?.updated ?? 0,
     session.time?.archived ?? 0,
     session.share?.url ?? '',
+    JSON.stringify((session as Session & { metadata?: unknown }).metadata ?? null),
     resolveGlobalSessionDirectory(session) ?? '',
   ].join(':');
 };

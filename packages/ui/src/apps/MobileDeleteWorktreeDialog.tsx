@@ -91,37 +91,69 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
     };
   }, [open, worktree?.path, worktree?.status?.isDirty]);
 
+  const removeWorktreeInBackground = React.useCallback((target: WorktreeMetadata) => {
+    void (async () => {
+      try {
+        await removeProjectWorktree(project, target, {
+          deleteRemoteBranch: hasBranch && deleteRemoteBranch,
+          deleteLocalBranch: hasBranch && deleteLocalBranch,
+        });
+
+        // If the removed worktree was the active directory, fall back to the project root.
+        if (normalizePath(currentDirectory) === worktreePath && normalizePath(project.path)) {
+          useDirectoryStore.getState().setDirectory(normalizePath(project.path), { showOverlay: false });
+        }
+
+        toast.success(t('sessions.sidebar.sessionDialogs.worktree.removedTitle'), {
+          description:
+            hasBranch && deleteRemoteBranch
+              ? t('sessions.sidebar.sessionDialogs.worktree.removedWithRemote')
+              : t('sessions.sidebar.sessionDialogs.worktree.removed'),
+        });
+        onDeleted?.();
+      } catch (error) {
+        toast.error(t('sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle'), {
+          description: error instanceof Error ? error.message : t('sessions.sidebar.dialogs.deleteResult.tryAgain'),
+        });
+      }
+    })();
+  }, [currentDirectory, deleteLocalBranch, deleteRemoteBranch, hasBranch, onDeleted, project, t, worktreePath]);
+
   const handleConfirm = async () => {
     if (!worktree || isProcessing) return;
     setIsProcessing(true);
     try {
       if (linkedSessions.length > 0) {
-        await archiveSessions(linkedSessions.map((session) => session.id));
+        const { archivedIds, failedIds } = await archiveSessions(linkedSessions.map((session) => session.id));
+        if (failedIds.length > 0) {
+          if (archivedIds.length > 0) {
+            toast.success(
+              archivedIds.length === 1
+                ? t('sessions.sidebar.bulkActions.archivedSingle', { count: archivedIds.length })
+                : t('sessions.sidebar.bulkActions.archivedPlural', { count: archivedIds.length }),
+            );
+          }
+          toast.error(
+            failedIds.length === 1
+              ? t('sessions.sidebar.bulkActions.failedArchiveSingle', { count: failedIds.length })
+              : t('sessions.sidebar.bulkActions.failedArchivePlural', { count: failedIds.length }),
+            { description: t('sessions.sidebar.dialogs.deleteResult.tryAgain') },
+          );
+          setIsProcessing(false);
+          return;
+        }
       }
-      await removeProjectWorktree(project, worktree, {
-        deleteRemoteBranch: hasBranch && deleteRemoteBranch,
-        deleteLocalBranch: hasBranch && deleteLocalBranch,
-      });
-
-      // If the removed worktree was the active directory, fall back to the project root.
-      if (normalizePath(currentDirectory) === worktreePath && normalizePath(project.path)) {
-        useDirectoryStore.getState().setDirectory(normalizePath(project.path), { showOverlay: false });
-      }
-
-      toast.success(t('sessions.sidebar.sessionDialogs.worktree.removedTitle'), {
-        description:
-          hasBranch && deleteRemoteBranch
-            ? t('sessions.sidebar.sessionDialogs.worktree.removedWithRemote')
-            : t('sessions.sidebar.sessionDialogs.worktree.removed'),
-      });
-      onDeleted?.();
+      removeWorktreeInBackground(worktree);
       onClose();
     } catch (error) {
       toast.error(t('sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle'), {
         description: error instanceof Error ? error.message : t('sessions.sidebar.dialogs.deleteResult.tryAgain'),
       });
-    } finally {
       setIsProcessing(false);
+    } finally {
+      if (!open) {
+        setIsProcessing(false);
+      }
     }
   };
 

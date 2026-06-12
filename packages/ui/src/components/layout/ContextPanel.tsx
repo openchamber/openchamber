@@ -2170,7 +2170,7 @@ export const ContextPanel: React.FC = () => {
     }
 
     if (activeTab.mode === 'file' && activeTab.targetPath) {
-      setSelectedFilePath(directoryKey, activeTab.targetPath);
+      setSelectedFilePath(directoryKey, activeTab.targetPath, { allowOutsideRoot: true });
       return;
     }
 

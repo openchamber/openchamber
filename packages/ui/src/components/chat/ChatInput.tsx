@@ -15,6 +15,7 @@ import { useInlineCommentDraftStore, type InlineCommentDraft } from '@/stores/us
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
+import { startReviewFlow } from '@/lib/reviewFlow';
 import { AttachedFilesList, AttachedVSCodeFileChips, ActiveEditorFileSuggestion } from './FileAttachment';
 import ToolOutputDialog from './message/ToolOutputDialog';
 import type { ToolPopupContent } from './message/types';
@@ -1084,10 +1085,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         const names = new Set<string>([
             'init', 'review', 'undo', 'redo', 'timeline', 'compact', 'summary', 'workspace-review', 'plan-feature', 'catch-up', 'debug', 'weigh', 'explore',
         ]);
+        if (!isMobile && !isVSCodeRuntime()) names.add('handoff-review');
         for (const command of availableCommands) names.add(command.name.toLowerCase());
         for (const skill of availableSkills) names.add(skill.name.toLowerCase());
         return names;
-    }, [availableCommands, availableSkills]);
+    }, [availableCommands, availableSkills, isMobile]);
 
     // /command and /skill spans (primary color). Only tokens that match a known
     // command/skill name are highlighted — partial/unknown tokens stay plain.
@@ -1912,6 +1914,27 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     scrollToBottom?.();
                 } catch (error) {
                     toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.reviewFailed'));
+                }
+                return;
+            }
+            else if (commandName === 'handoff-review' && currentSessionId && !isMobile && !isVSCodeRuntime()) {
+                try {
+                    const directory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory || '';
+                    if (!directory) {
+                        throw new Error('Session directory is unavailable');
+                    }
+                    await startReviewFlow({
+                        originalSessionID: currentSessionId,
+                        directory,
+                        providerID: providerIdToSend,
+                        modelID: modelIdToSend,
+                        agent: agentNameToSend,
+                        variant: variantToSend,
+                        agentMentionName,
+                    });
+                    scrollToBottom?.();
+                } catch (error) {
+                    console.error('[review-flow] failed to start review flow', error);
                 }
                 return;
             }

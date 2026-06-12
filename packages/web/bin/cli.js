@@ -12,6 +12,11 @@ import { isModuleCliExecution } from './cli-entry.js';
 import { cloudflareTunnelProviderCapabilities } from '../server/lib/tunnels/providers/cloudflare.js';
 import { createRemoteClientAuthRuntime } from '../server/lib/client-auth/remote-clients.js';
 import {
+  getUnauthenticatedLanErrorMessage,
+  isNetworkExposedBindHost,
+  isUnsafeUnauthenticatedLanAllowed,
+} from '../server/lib/security/bind-host.js';
+import {
   intro as clackIntro, outro as clackOutro, log as clackLog,
   box as clackBox, confirm as clackConfirm,
   select as clackSelect, text as clackText, password as clackPassword, cancel as clackCancel,
@@ -145,10 +150,6 @@ function resolveConfiguredBindHost(hostOverride) {
       ? process.env.OPENCHAMBER_HOST.trim()
       : '';
   return configured || '127.0.0.1';
-}
-
-function isWildcardBindHost(host) {
-  return host === '0.0.0.0' || host === '::' || host === '[::]';
 }
 
 function resolveApiHost(hostOverride) {
@@ -635,6 +636,20 @@ function getBunBinary() {
 
 function hasUiPasswordConfigured(password) {
   return typeof password === 'string' && password.trim().length > 0;
+}
+
+function assertAuthenticatedNetworkExposure({ host, uiPassword }) {
+  const bindHost = resolveConfiguredBindHost(host);
+  if (hasUiPasswordConfigured(uiPassword)) {
+    return;
+  }
+  if (!isNetworkExposedBindHost(bindHost)) {
+    return;
+  }
+  if (isUnsafeUnauthenticatedLanAllowed(process.env)) {
+    return;
+  }
+  throw new TunnelCliError(getUnauthenticatedLanErrorMessage(bindHost), EXIT_CODE.AUTH_CONFIG_ERROR);
 }
 
 const BUN_BIN = getBunBinary();
@@ -3445,10 +3460,13 @@ const commands = {
     const logFd = fs.openSync(initialLogPath, 'a');
 
     const effectiveUiPassword = hasUiPasswordConfigured(options.uiPassword) ? options.uiPassword : undefined;
+    assertAuthenticatedNetworkExposure({
+      host: options.host,
+      uiPassword: effectiveUiPassword,
+    });
     if (!effectiveUiPassword && !options.suppressUiPasswordWarning) {
       const bindHost = resolveConfiguredBindHost(options.host);
-      const loopbackHosts = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
-      const networkExposed = isWildcardBindHost(bindHost) || !loopbackHosts.has(bindHost);
+      const networkExposed = isNetworkExposedBindHost(bindHost);
       const warningLine = 'OPENCHAMBER_UI_PASSWORD is not set';
       const warningDetail = networkExposed
         ? `server is bound to ${bindHost} and reachable on your network with no UI auth. `
@@ -5710,6 +5728,7 @@ if (isCliExecution) {
 export {
   commands,
   parseArgs,
+  assertAuthenticatedNetworkExposure,
   hasUiPasswordConfigured,
   shouldDisplayTunnelQr,
   isValidTunnelDoctorResponse,

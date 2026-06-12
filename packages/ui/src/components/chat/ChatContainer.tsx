@@ -336,6 +336,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     const { t } = useI18n();
     // Session UI state
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
+    const currentSessionDirectory = useSessionUIStore((s) => s.currentSessionDirectory);
     const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
     const setCurrentSession = useSessionUIStore((s) => s.setCurrentSession);
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
@@ -345,6 +346,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     // Sync actions
     const sync = useSync();
     const syncDirectory = useSyncDirectory();
+    const effectiveSessionDirectory = currentSessionDirectory ?? syncDirectory;
     const ensureSessionRenderable = React.useCallback(
         (sessionId: string) => sync.ensureSessionRenderable(sessionId),
         [sync],
@@ -377,45 +379,48 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
             [streamingMessageId],
         ),
     );
-    const sessionMessageCount = useSessionMessageCount(currentSessionId ?? '');
+    const sessionMessageCount = useSessionMessageCount(currentSessionId ?? '', effectiveSessionDirectory);
     const hasRenderableSessionSnapshot = useDirectorySync(
         React.useCallback(
             (state) => (currentSessionId ? getSessionMaterializationStatus(state, currentSessionId).renderable : false),
             [currentSessionId],
         ),
+        effectiveSessionDirectory,
     );
     // Messages from sync system
-    const sessionMessageRecords = useSessionMessageRecords(currentSessionId ?? '');
+    const sessionMessageRecords = useSessionMessageRecords(currentSessionId ?? '', effectiveSessionDirectory);
     const sessionMessages = currentSessionId ? sessionMessageRecords : EMPTY_MESSAGES;
     const sessionPrefetchInfo = React.useSyncExternalStore(
         React.useCallback(
             (notify) => currentSessionId
-                ? subscribeSessionPrefetch(syncDirectory, currentSessionId, notify)
+                ? subscribeSessionPrefetch(effectiveSessionDirectory, currentSessionId, notify)
                 : () => undefined,
-            [currentSessionId, syncDirectory],
+            [currentSessionId, effectiveSessionDirectory],
         ),
         React.useCallback(
-            () => currentSessionId ? getSessionPrefetch(syncDirectory, currentSessionId) : undefined,
-            [currentSessionId, syncDirectory],
+            () => currentSessionId ? getSessionPrefetch(effectiveSessionDirectory, currentSessionId) : undefined,
+            [currentSessionId, effectiveSessionDirectory],
         ),
         React.useCallback(() => undefined, []),
     );
 
     // Sessions from sync system
-    const sessions = useSessions();
+    const sessions = useSessions(effectiveSessionDirectory);
 
     // Plan detection - watches messages for plan creation and signals store
     usePlanDetection(currentSessionId ?? '', sessionMessages);
 
     // Session status from sync system
-    const sessionStatusForCurrent = useSessionStatus(currentSessionId ?? '') ?? IDLE_SESSION_STATUS;
+    const sessionStatusForCurrent = useSessionStatus(currentSessionId ?? '', effectiveSessionDirectory) ?? IDLE_SESSION_STATUS;
 
     // Permissions & questions from sync system
     const allPermissions = useDirectorySync(
         React.useCallback((s) => s.permission ?? {}, []),
+        effectiveSessionDirectory,
     );
     const allQuestions = useDirectorySync(
         React.useCallback((s) => s.question ?? {}, []),
+        effectiveSessionDirectory,
     );
 
     // Convert Record → Map for blockingRequests helpers
@@ -763,8 +768,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     React.useEffect(() => {
         if (!currentSessionId) return;
         if (hasRenderableSessionSnapshot) return;
+        if (effectiveSessionDirectory !== syncDirectory) return;
         void ensureSessionRenderable(currentSessionId);
-    }, [currentSessionId, ensureSessionRenderable, hasRenderableSessionSnapshot]);
+    }, [currentSessionId, effectiveSessionDirectory, ensureSessionRenderable, hasRenderableSessionSnapshot, syncDirectory]);
 
 	if (!currentSessionId && !draftOpen) {
 		// With auto-open, the draft welcome opens on the next tick (effect below),

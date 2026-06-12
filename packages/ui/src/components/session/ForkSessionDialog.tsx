@@ -7,6 +7,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { AgentSelector } from '@/components/sections/commands/AgentSelector';
 import { ThinkingPill } from '@/components/session/ThinkingPill';
@@ -15,6 +16,7 @@ import { useAgentsStore } from '@/stores/useAgentsStore';
 import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
 import { EXECUTION_FORK_DEFAULT_INSTRUCTIONS } from '@/lib/messages/executionMeta';
 import { useI18n } from '@/lib/i18n';
+import { isVSCodeRuntime } from '@/lib/desktop';
 
 export type ForkSessionExecution = {
   providerID: string;
@@ -22,6 +24,7 @@ export type ForkSessionExecution = {
   variant: string;
   agent: string;
   instructions: string;
+  createWorktree?: boolean;
 };
 
 type ForkSessionDialogProps = {
@@ -50,10 +53,12 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
   const [variant, setVariant] = React.useState(currentVariant);
   const [agent, setAgent] = React.useState(currentAgentName);
   const [instructions, setInstructions] = React.useState(EXECUTION_FORK_DEFAULT_INSTRUCTIONS);
+  const [createWorktree, setCreateWorktree] = React.useState(false);
+  const showCreateWorktree = React.useMemo(() => !isVSCodeRuntime(), []);
 
   React.useEffect(() => {
     if (!open) return;
-    void loadProviders({ directory: projectDirectory });
+    void loadProviders({ directory: projectDirectory, source: 'forkSessionDialog' });
     void loadConfigAgents({ directory: projectDirectory });
     void loadAgentsStoreAgents();
   }, [open, loadProviders, loadConfigAgents, loadAgentsStoreAgents, projectDirectory]);
@@ -69,6 +74,7 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
     setVariant(config.currentVariant || '');
     setAgent(config.currentAgentName || '');
     setInstructions(EXECUTION_FORK_DEFAULT_INSTRUCTIONS);
+    setCreateWorktree(false);
   }, [open]);
 
   React.useEffect(() => {
@@ -106,8 +112,15 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
 
   const handleSubmit = React.useCallback(() => {
     if (!canConfirm || submitting) return;
-    void onConfirm({ providerID, modelID, variant, agent, instructions });
-  }, [canConfirm, submitting, onConfirm, providerID, modelID, variant, agent, instructions]);
+    void onConfirm({
+      providerID,
+      modelID,
+      variant,
+      agent,
+      instructions,
+      createWorktree: showCreateWorktree && createWorktree,
+    });
+  }, [canConfirm, submitting, onConfirm, providerID, modelID, variant, agent, instructions, showCreateWorktree, createWorktree]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -173,15 +186,35 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
           </div>
         </div>
 
-        <div className="flex items-center justify-end gap-2">
-          <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={submitting}>
-            {t('rightSidebar.contextNotesTodo.sendDialog.actions.cancel')}
-          </Button>
-          <Button size="sm" onClick={handleSubmit} disabled={!canConfirm || submitting}>
-            {submitting
-              ? t('rightSidebar.contextNotesTodo.sendDialog.actions.sending')
-              : t('rightSidebar.contextNotesTodo.sendDialog.actions.send')}
-          </Button>
+        <div className={`flex items-center gap-3 ${showCreateWorktree ? 'justify-between' : 'justify-end'}`}>
+          {showCreateWorktree ? (
+            <div className="flex min-w-0 items-center gap-2">
+              <Checkbox
+                checked={createWorktree}
+                onChange={setCreateWorktree}
+                disabled={submitting}
+                ariaLabel={t('chat.messageBody.forkDialog.createWorktree')}
+              />
+              <button
+                type="button"
+                className="truncate typography-ui-label text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={submitting}
+                onClick={() => setCreateWorktree((value) => !value)}
+              >
+                {t('chat.messageBody.forkDialog.createWorktree')}
+              </button>
+            </div>
+          ) : null}
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={submitting}>
+              {t('rightSidebar.contextNotesTodo.sendDialog.actions.cancel')}
+            </Button>
+            <Button size="sm" onClick={handleSubmit} disabled={!canConfirm || submitting}>
+              {submitting
+                ? t('rightSidebar.contextNotesTodo.sendDialog.actions.sending')
+                : t('rightSidebar.contextNotesTodo.sendDialog.actions.send')}
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

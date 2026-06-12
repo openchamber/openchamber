@@ -250,7 +250,6 @@ jobs:
           retention-days: 1
 
   build-desktop-electron-windows:
-    if: ${{ false }} # Windows artifact is disabled until the build is release-ready.
     needs: create-release
     runs-on: windows-latest
     strategy:
@@ -302,6 +301,7 @@ jobs:
           files: |
             packages/electron/dist/*.exe
             packages/electron/dist/*.blockmap
+            packages/electron/dist/latest.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -346,7 +346,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   finalize-release:
-    needs: [create-release, build-desktop-electron-macos, publish-npm, combine-electron-manifests]
+    needs: [create-release, build-desktop-electron-macos, build-desktop-electron-windows, publish-npm, combine-electron-manifests]
     runs-on: ubuntu-latest
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}

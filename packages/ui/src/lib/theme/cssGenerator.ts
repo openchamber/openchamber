@@ -123,6 +123,9 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
     const isDark = theme.metadata.variant === 'dark';
     const strongAlpha = isDark ? 0.15 : 0.5;
     const softAlpha = isDark ? 0.1 : 0.3;
+    // Translucent fill painted over the native macOS vibrancy layer for the
+    // left sidebar — high enough alpha to stay legible, low enough to frost.
+    const vibrancyAlpha = isDark ? 0.66 : 0.76;
 
     if (sidebarBaseRgb) {
       vars.push(
@@ -131,6 +134,9 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
       vars.push(
         `  --sidebar-overlay-soft: rgb(${sidebarBaseRgb} / ${softAlpha}) !important;`,
       );
+      vars.push(
+        `  --sidebar-vibrancy-overlay: rgb(${sidebarBaseRgb} / ${vibrancyAlpha}) !important;`,
+      );
     } else {
       const base = theme.colors.surface.muted;
       vars.push(
@@ -138,6 +144,9 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
       );
       vars.push(
         `  --sidebar-overlay-soft: ${this.opacity(base, softAlpha)} !important;`,
+      );
+      vars.push(
+        `  --sidebar-vibrancy-overlay: ${this.opacity(base, vibrancyAlpha)} !important;`,
       );
     }
 
@@ -186,6 +195,19 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
     document.head.appendChild(style);
 
     document.documentElement.setAttribute('data-theme', theme.metadata.variant);
+
+    const hasMacVibrancy = typeof window !== 'undefined'
+      && window.__OPENCHAMBER_ELECTRON__?.runtime === 'electron'
+      && window.__OPENCHAMBER_ELECTRON__?.macVibrancy === true;
+    document.documentElement.toggleAttribute('data-oc-vibrancy', hasMacVibrancy);
+    // Default the "ready" flag here (DOM is guaranteed to exist) rather than
+    // relying on the preload, which sets it at document-start when
+    // documentElement may not exist yet — that race left the sidebar stuck
+    // un-frosted on cold launch until a minimize/restore re-sent ready=true.
+    // The minimize/restore IPC continues to toggle this afterwards.
+    if (hasMacVibrancy) {
+      document.documentElement.toggleAttribute('data-oc-vibrancy-ready', true);
+    }
   }
 
   private generatePrimaryColors(primary: Theme['colors']['primary']): string[] {

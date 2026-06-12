@@ -1,0 +1,30 @@
+---
+title: Serveurs MCP
+description: Ajoutez des serveurs MCP pour donner des outils supplémentaires aux agents.
+---
+
+# Serveurs MCP
+
+Un serveur MCP donne des outils supplémentaires à vos agents — par exemple chercher dans une base de données, appeler une API ou lire un service que vous utilisez. Ajoutez-les dans **Paramètres → MCP**.
+
+## Ajouter un serveur
+
+1. Ouvrez **Paramètres → MCP**.
+2. Ajoutez un serveur et choisissez son type :
+   - **local** — OpenChamber lance une commande sur votre machine. Vous fournissez la commande à exécuter et, si nécessaire, des variables d’environnement.
+   - **remote** — OpenChamber se connecte à une URL hébergée par quelqu’un d’autre. Vous fournissez l’URL et les headers nécessaires (par exemple un token d’authentification).
+3. Enregistrez. Le serveur est activé par défaut ; vous pouvez le désactiver sans le supprimer.
+
+## Où il s’applique
+
+Choisissez le scope quand vous ajoutez un serveur :
+
+- **personal** — disponible dans tous les projets
+- **project** — disponible uniquement dans le projet actuel et enregistré avec les autres paramètres du projet
+
+Les noms de serveur utilisent des lettres minuscules, des chiffres, des tirets et des underscores.
+
+## Pages liées
+
+- [Fournisseurs, modèles et agents](/providers/) — connecter d’abord un modèle
+- [Skills](/skills/) — une autre façon d’étendre ce que les agents peuvent faire

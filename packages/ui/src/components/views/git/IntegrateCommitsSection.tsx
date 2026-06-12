@@ -18,7 +18,7 @@ import { Icon } from "@/components/icon/Icon";
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
 import { useUIStore } from '@/stores/useUIStore';
-import { execCommand } from '@/lib/execCommands';
+import { getGitCommitSummaries } from '@/lib/gitApi';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import {
   abortIntegrate,
@@ -143,18 +143,7 @@ export const IntegrateCommitsSection: React.FC<{
           const max = 50;
           // Show newest -> oldest.
           const subset = plan.commits.slice(-max).reverse();
-          const quoted = subset.map((s) => JSON.stringify(s)).join(' ');
-          const result = await execCommand(
-            `git show -s --format=%H%x09%h%x09%s ${quoted}`,
-            repoRoot
-          );
-          const lines = (result.stdout || '').split(/\r?\n/).filter(Boolean);
-          const parsed: Array<{ sha: string; short: string; subject: string }> = [];
-          for (const line of lines) {
-            const [sha, short, subject] = line.split('\t');
-            if (!sha || !short) continue;
-            parsed.push({ sha, short, subject: subject || '' });
-          }
+          const parsed = await getGitCommitSummaries(repoRoot, subset);
           if (!cancelled) {
             setCommitSummaries(parsed);
             setShowAllCommits(false);

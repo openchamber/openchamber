@@ -88,9 +88,7 @@ export const PendingChangesBar: React.FC = React.memo(() => {
         if (!currentDirectory) return;
         if (!isGitFile(file)) return;
 
-        const absolutePath = file.path.startsWith('/')
-            ? file.path
-            : (currentDirectory.endsWith('/') ? currentDirectory : currentDirectory + '/') + file.path;
+        const absolutePath = file.path;
 
         // Dedicated mobile root: open the per-file diff inside the mobile Changes surface.
         if (mobileActions) {

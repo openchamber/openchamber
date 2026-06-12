@@ -1,0 +1,85 @@
+name: bot-help
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  help:
+    if: github.event.comment.user.login != 'openchamber-bot[bot]' && (github.event.comment.body == '@openchamber-bot help' || startsWith(github.event.comment.body, '@openchamber-bot help '))
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Generate bot app token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.OC_REVIEW_APP_ID }}
+          private-key: ${{ secrets.OC_REVIEW_APP_PRIVATE_KEY }}
+
+      - name: Acknowledge help command
+        id: reaction
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+        run: |
+          reaction_id="$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "repos/${GITHUB_REPOSITORY}/issues/comments/${COMMENT_ID}/reactions" \
+            -f content='eyes' \
+            --jq '.id')"
+
+          echo "reaction_id=$reaction_id" >> "$GITHUB_OUTPUT"
+
+      - name: Post help
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          EYES_REACTION_ID: ${{ steps.reaction.outputs.reaction_id }}
+        run: |
+          first_line="${COMMENT_BODY%%$'\n'*}"
+
+          case "$first_line" in
+            "@openchamber-bot help"|"@openchamber-bot help "*)
+              ;;
+            *)
+              echo "Unsupported help command: $first_line" >&2
+              exit 1
+              ;;
+          esac
+
+          gh issue comment "$ISSUE_NUMBER" --body "<h3>OpenChamber Bot Commands</h3>
+
+          Use one command at the start of a comment. Any text after the command is passed as maintainer focus.
+
+          - <code>@openchamber-bot review [focus]</code> — review a pull request.
+          - <code>@openchamber-bot summarize [focus]</code> — summarize an issue or pull request discussion.
+          - <code>@openchamber-bot triage [focus]</code> — triage an issue.
+          - <code>@openchamber-bot reproduce [focus]</code> — attempt to reproduce an issue.
+          - <code>@openchamber-bot help</code> — show this help message.
+
+          <h4>Examples</h4>
+
+          - <code>@openchamber-bot review please check the latest fix</code>
+          - <code>@openchamber-bot summarize focus on unresolved blockers</code>
+          - <code>@openchamber-bot triage this looks like a Windows desktop regression</code>
+          - <code>@openchamber-bot reproduce try the steps from the latest reporter comment</code>"
+
+          if [ -n "$EYES_REACTION_ID" ]; then
+            gh api \
+              --method DELETE \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "repos/${GITHUB_REPOSITORY}/issues/comments/${COMMENT_ID}/reactions/${EYES_REACTION_ID}"
+          fi
+
+          gh api \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "repos/${GITHUB_REPOSITORY}/issues/comments/${COMMENT_ID}/reactions" \
+            -f content='+1' >/dev/null

@@ -1,4 +1,5 @@
 import type { Agent } from '@opencode-ai/sdk/v2';
+import { getProviderModelDisplayName, type DisplayProvider } from '@/lib/modelDisplay';
 
 export type MobileControlsPanel = 'model' | 'agent' | 'variant' | null;
 
@@ -36,24 +37,12 @@ export const getAgentDisplayName = (agents: Agent[], agentName?: string) => {
     return fallbackAgent ? capitalizeLabel(fallbackAgent.name) : 'Select agent';
 };
 
-type ProviderModel = { id?: string; name?: string };
-
 export const getModelDisplayName = (
-    provider: { models?: ProviderModel[] } | undefined,
+    provider: DisplayProvider,
     modelId: string | undefined,
+    fallbackLabel = '',
 ) => {
-    if (!provider || !modelId) {
-        return 'Not selected';
-    }
-    const models = Array.isArray(provider.models) ? provider.models : [];
-    const model = models.find((entry) => entry.id === modelId);
-    if (typeof model?.name === 'string' && model.name.trim().length > 0) {
-        return model.name;
-    }
-    if (typeof model?.id === 'string' && model.id.trim().length > 0) {
-        return model.id;
-    }
-    return modelId;
+    return getProviderModelDisplayName(provider, modelId, { fallbackLabel });
 };
 
 export const formatEffortLabel = (variant?: string) => {

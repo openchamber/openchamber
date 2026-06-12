@@ -8,6 +8,7 @@ import { forceParsing, indentUnit } from '@codemirror/language';
 import { search, searchKeymap, openSearchPanel, closeSearchPanel, searchPanelOpen, getSearchQuery } from '@codemirror/search';
 import { createPortal } from 'react-dom';
 
+import { createVimModeExtensions } from '@/lib/codemirror/vimModeExtension';
 import { cn } from '@/lib/utils';
 
 /** Patches `title` attributes onto CodeMirror search-panel controls for icon-only tooltips. */
@@ -141,6 +142,7 @@ type CodeMirrorEditorProps = {
   enableSearch?: boolean;
   searchOpen?: boolean;
   onSearchOpenChange?: (open: boolean) => void;
+  vimMode?: boolean;
 };
 
 const lineNumbersCompartment = new Compartment();
@@ -149,6 +151,7 @@ const externalExtensionsCompartment = new Compartment();
 const highlightLinesCompartment = new Compartment();
 const blockWidgetsCompartment = new Compartment();
 const searchCompartment = new Compartment();
+const vimCompartment = new Compartment();
 
 const toViewKeyBindings = (bindings: readonly unknown[]): readonly KeyBinding[] => {
   return bindings as readonly KeyBinding[];
@@ -265,6 +268,7 @@ export function CodeMirrorEditor({
   enableSearch,
   searchOpen,
   onSearchOpenChange,
+  vimMode,
 }: CodeMirrorEditorProps) {
   const hostRef = React.useRef<HTMLDivElement | null>(null);
   const viewRef = React.useRef<EditorView | null>(null);
@@ -274,6 +278,7 @@ export function CodeMirrorEditor({
   const onViewDestroyRef = React.useRef(onViewDestroy);
   const onSearchOpenChangeRef = React.useRef(onSearchOpenChange);
   const blockWidgetsRef = React.useRef(blockWidgets);
+  const vimModeRef = React.useRef(vimMode);
   
   // Scoped map for widget containers to avoid global collisions and memory leaks
   const widgetContainersRef = React.useRef(new Map<string, HTMLElement>());
@@ -367,6 +372,7 @@ export function CodeMirrorEditor({
         lineNumbersCompartment.of(lineNumbers(lineNumbersConfig)),
         history(),
         indentUnit.of('  '),
+        vimCompartment.of(createVimModeExtensions(vimMode)),
         keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap]),
         EditorView.updateListener.of((update) => {
           syncEditorCssVars(update.view);
@@ -448,6 +454,23 @@ export function CodeMirrorEditor({
       syncPortalWidgets(blockWidgetsRef.current);
     });
   }, [extensions, highlightLines, lineNumbersConfig, readOnly, blockWidgets, enableSearch, syncEditorCssVars, syncPortalWidgets]);
+
+  React.useEffect(() => {
+    const view = viewRef.current;
+    if (!view) {
+      vimModeRef.current = vimMode;
+      return;
+    }
+
+    if (vimModeRef.current === vimMode) {
+      return;
+    }
+
+    vimModeRef.current = vimMode;
+    view.dispatch({
+      effects: vimCompartment.reconfigure(createVimModeExtensions(vimMode)),
+    });
+  }, [vimMode]);
 
   React.useEffect(() => {
     const view = viewRef.current;

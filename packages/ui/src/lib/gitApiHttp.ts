@@ -133,6 +133,52 @@ export async function getGitStatus(directory: string, options?: { mode?: 'light'
   }
 }
 
+export async function resolveGitPrimaryRoot(directory: string): Promise<{ root: string }> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/primary-root`, directory));
+  if (!response.ok) {
+    throw new Error(`Failed to resolve git primary root: ${response.statusText}`);
+  }
+  const payload = await response.json().catch(() => ({})) as { root?: string };
+  return { root: typeof payload.root === 'string' && payload.root ? payload.root : directory };
+}
+
+export async function resolveGitTopLevel(directory: string): Promise<{ root: string }> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/toplevel`, directory));
+  if (!response.ok) {
+    throw new Error(`Failed to resolve git toplevel: ${response.statusText}`);
+  }
+  const payload = await response.json().catch(() => ({})) as { root?: string };
+  return { root: typeof payload.root === 'string' && payload.root ? payload.root : directory };
+}
+
+export async function getGitCommitSummaries(
+  directory: string,
+  shas: string[]
+): Promise<{ commits: Array<{ sha: string; short: string; subject: string }> }> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/commit-summaries`, directory), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ shas }),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to get git commit summaries: ${response.statusText}`);
+  }
+  const payload = await response.json().catch(() => ({})) as {
+    commits?: Array<{ sha?: string; short?: string; subject?: string }>;
+  };
+  return {
+    commits: Array.isArray(payload.commits)
+      ? payload.commits
+          .map((entry) => ({
+            sha: typeof entry.sha === 'string' ? entry.sha : '',
+            short: typeof entry.short === 'string' ? entry.short : '',
+            subject: typeof entry.subject === 'string' ? entry.subject : '',
+          }))
+          .filter((entry) => entry.sha && entry.short)
+      : [],
+  };
+}
+
 export async function getGitDiff(directory: string, options: GetGitDiffOptions): Promise<GitDiffResponse> {
   const { path, staged, contextLines } = options;
   if (!path) {
@@ -1052,7 +1098,7 @@ export async function canonicalizeWorktreeState(
   cwd: string | null;
   branch: string | null;
   headState: 'branch' | 'detached' | 'unborn';
-  worktreeStatus: 'ready' | 'missing' | 'invalid' | 'not-a-repo';
+  worktreeStatus: 'pending' | 'ready' | 'missing' | 'invalid' | 'not-a-repo';
   legacy: boolean;
   degraded: boolean;
   attentionReason?: 'merge' | 'rebase' | 'cherry-pick' | 'revert' | 'bisect' | null;

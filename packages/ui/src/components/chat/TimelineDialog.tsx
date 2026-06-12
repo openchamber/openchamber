@@ -12,7 +12,7 @@ import { useSessionMessageRecords } from '@/sync/sync-context';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import type { Part } from '@opencode-ai/sdk/v2';
-import { useI18n } from '@/lib/i18n';
+import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
 
@@ -56,7 +56,7 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
         if (diffMins < 60) return t('chat.timeline.relative.minutesAgo', { count: diffMins });
         if (diffHours < 24) return t('chat.timeline.relative.hoursAgo', { count: diffHours });
         if (diffDays < 7) return t('chat.timeline.relative.daysAgo', { count: diffDays });
-        return new Date(timestamp).toLocaleDateString();
+        return new Date(timestamp).toLocaleDateString(getCurrentIntlLocale());
     }, [t]);
 
     // Timeline actions are only valid for user messages.

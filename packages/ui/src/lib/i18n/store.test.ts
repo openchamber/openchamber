@@ -42,4 +42,16 @@ describe('i18n store', () => {
       resetStore();
     }
   });
+
+  test('loads the french dictionary', async () => {
+    try {
+      useI18nStore.getState().setLocale('fr');
+
+      expect(useI18nStore.getState().loadingLocale).toBe('fr');
+      await waitForLocaleLoadToSettle('fr');
+      expect(useI18nStore.getState().dictionary['common.language.french']).toBe('Français');
+    } finally {
+      resetStore();
+    }
+  });
 });

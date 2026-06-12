@@ -15,7 +15,7 @@ export interface RuntimeUrlResolver {
   authenticatedAsset(path: string, query?: RuntimeUrlQuery): string;
   auth(path: string, query?: RuntimeUrlQuery): string;
   health(query?: RuntimeUrlQuery): string;
-  rawFile(path: string, options?: { download?: boolean }): string;
+  rawFile(path: string, options?: { download?: boolean; allowOutsideWorkspace?: boolean; outsideFileGrant?: string }): string;
   sse(path: string, query?: RuntimeUrlQuery): string;
   websocket(path: string, query?: RuntimeUrlQuery): string;
 }
@@ -118,7 +118,12 @@ export const createRuntimeUrlResolver = (config: RuntimeUrlConfig = {}): Runtime
     authenticatedAsset: (path, query) => withUrlAuth(http(path, query)),
     auth: http,
     health: (query) => http('/health', query),
-    rawFile: (path, options) => http('/api/fs/raw', { path, download: options?.download === true ? true : undefined }),
+    rawFile: (path, options) => http('/api/fs/raw', {
+      path,
+      download: options?.download === true ? true : undefined,
+      allowOutsideWorkspace: options?.allowOutsideWorkspace === true ? true : undefined,
+      outsideFileGrant: options?.outsideFileGrant,
+    }),
     sse: (path, query) => withUrlAuth(realtime(path, query)),
     websocket: (path, query) => toWebSocketUrl(withUrlAuth(realtime(path, query)), config),
   };

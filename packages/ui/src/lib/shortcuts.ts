@@ -219,6 +219,7 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     defaultCombo: 'mod+alt+n',
     label: 'New Mini Chat window',
     description: 'Open a new Mini Chat draft window',
+    customizable: true,
   },
   {
     id: 'submit_message',

@@ -4,6 +4,74 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Security: LAN and remote browser access now require a UI password before the server will start.
+- Desktop: if LAN access was enabled without a password, the app now starts locally and asks for a password before turning LAN access back on.
+- Git: worktree status and commit integration now use dedicated Git actions behind the scenes.
+
+## [1.12.4] - 2026-06-11
+
+- Chat: added `/handoff-review` to open a linked review session for the current workspace changes, with actions to send review feedback and implementation replies between the sessions.
+- Chat/UI: added a setting to collapse long user messages.
+- Chat: `@agent` mentions in rendered messages now use the primary accent color.
+- Chat: table copy actions now include a Markdown format option (thanks to @kjhq).
+- Chat: Mermaid diagrams can now be opened in a dedicated diagram editor (thanks to @nerdosaurus).
+- Models: hidden models now stay hidden in multi-model selection controls (thanks to @kjhq).
+- Worktrees: creating a single new worktree session now opens the session immediately while worktree setup continues in the background.
+- Multi-Run: creating isolated runs now opens sessions immediately while worktree setup continues in the background.
+- Sessions: chat folder assignments now stay in place after reloads.
+- Sessions: session, folder, project, and worktree rows now have right-click menus for their available actions.
+- Settings: added search across settings pages.
+- Settings/Agents: agent prompt and permission edits now stay saved after changes.
+- Files: added an editor Vim mode setting (thanks to @Champii).
+- Files: writes are now safer when saving through temporary files (thanks to @nerdosaurus).
+- Git: changed-file folders now have a revert action (thanks to @kostazol).
+- GitHub: issue and pull-request pickers now use server-side search for larger repositories (thanks to @tomzx).
+- Preview: inline module scripts are now rewritten in proxied HTML responses, fixing more Vite preview pages (thanks to @mdbetancourt).
+- Voice: Plan and file preview markdown now include text-to-speech buttons, with a setting for reading selected text or the full document (thanks to @yangyaofei).
+- Desktop/macOS: added a menu bar tray with live session status, Mini Chat access, and a provider usage submenu.
+- Desktop/macOS: added an optional vibrancy effect for the left sidebar.
+- Desktop/macOS: startup no longer opens unnecessary folder prompts.
+- Mobile: refreshed session controls, worktree deletion flow, MCP controls, update flow, and usage tracking for new layout.
+- Terminal/Mobile: touch scrolling in the terminal no longer conflicts with terminal input as often (thanks to @kostazol).
+- Usage: added Cursor quota tracking.
+- UI/Localization: added French interface translations and French documentation (thanks to @pascalandr).
+- VSCode: added an action to archive all sessions from the extension (thanks to @jjdubski).
+- VSCode: added multi-root workspace support, including workspace folder switching in the extension (thanks to @mmospanenko).
+
+## [1.12.3] - 2026-06-05
+
+- Windows/Startup: WSL OpenCode installs are no longer detected or launched; install OpenCode natively on Windows and configure `opencode.cmd` or `opencode.exe` instead.
+- Startup: OpenCode health checks now work with OpenCode 1.15.x.
+- Files: file trees now show directory loading errors with a retry action instead of leaving the folder empty, and slow Git ignore checks no longer block directory listings indefinitely.
+
+## [1.12.2] - 2026-06-05
+
+- **Desktop/Windows: the Windows app is now available publicly, with full functionality parity across the app.**
+- Tunnels: switching between Cloudflare and ngrok quick tunnels now replaces the active quick tunnel instead of reusing the previous provider.
+- Tunnels: ngrok startup failures now show the ngrok or authtoken error returned during startup.
+- Projects: the Add Project directory picker now starts with hidden files off each time it opens.
+- Chat: prompts sent while creating or switching target sessions now stay attached to the intended project directory.
+- VSCode: the extension now detects more Windows OpenCode installs from PATH, npm, Scoop, and Chocolatey.
+
+## [1.12.1] - 2026-06-03
+
+- Chat: completed turns can now show changed-file chips with per-file additions and deletions, controlled by a new Chat setting.
+- Chat: LSP tool calls now show the operation, file, and cursor position more clearly, and JSON tool output can be toggled between formatted and raw views or copied.
+- Chat: streaming messages now appear correctly after startup, and activity/status rows show for the active session.
+- Chat: completed responses no longer lose late-arriving summaries, token counts, errors, structured output, or changed-file details.
+- Chat: question cards now show an error or no-longer-pending message when submit or dismiss fails instead of silently doing nothing.
+- Chat: the first prompt in a new session no longer gets stuck before sending.
+- Chat/UI: sticky user-message headers are now off by default.
+- Sessions: session titles update from live session events, and the app now consistently loads all existing OpenCode sessions.
+- Sessions: recent sessions now stay visible inside project groups, and new or worktree sessions stay in the correct project/worktree group on desktop, mobile, and VS Code.
+- Settings/OpenCode: OpenCode CLI path, update-notification preference, keyboard shortcuts, and protected-session settings now stay saved after changes.
+- UI/Time: the 12-hour/24-hour time preference now applies to chat timestamps, usage reset times, scheduled tasks, tunnels, passkeys, Git history, and pull-request dates.
+- Settings/Files: the default file preview setting now lives with the Chat appearance settings and applies immediately to open file tabs.
+- Preview: embedded previews now rewrite inline module imports, fixing Vite React preview pages that load root-relative modules.
+- Desktop: Desktop tunnels now serve the full app UI instead of the headless page.
+- Desktop: quitting the Desktop app now stops managed OpenCode processes more reliably, reducing leftover OpenCode processes after exit.
+- Desktop: removed the legacy Tauri desktop path; Electron is now the only desktop runtime.
+
 ## [1.12.0] - 2026-06-03
 
 - Mobile: added a new mobile UI as the default, with an option in Settings to switch back to the previous layout; this is the foundation for the upcoming mobile app and is available to try now.

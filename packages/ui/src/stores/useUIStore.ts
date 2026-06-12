@@ -9,7 +9,7 @@ import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOpt
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
-export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context';
+export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
 export type RightSidebarTab = 'git' | 'files' | 'context';
 export type ContextPanelMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'browser';
 export type MermaidRenderingMode = 'svg' | 'ascii';
@@ -19,6 +19,11 @@ export type ActivityRenderMode = 'collapsed' | 'summary';
 export type SessionRetentionAction = 'archive' | 'delete';
 export type TimeFormatPreference = 'auto' | '12h' | '24h';
 export type WeekStartPreference = 'auto' | 'sunday' | 'monday';
+export type FileEditorKeymap = 'default' | 'vim';
+
+function normalizeFileEditorKeymap(value: unknown): FileEditorKeymap {
+  return value === 'vim' ? 'vim' : 'default';
+}
 
 type ContextPanelTab = {
   id: string;
@@ -519,6 +524,7 @@ interface UIStore {
   sidebarOpenBeforeFullscreenTab: boolean | null;
   pendingDiffFile: string | null;
   pendingDiffStaged: boolean;
+  pendingDiagramFile: string | null;
   pendingFileNavigation: PendingFileNavigation | null;
   pendingFileFocusPath: string | null;
   isMobile: boolean;
@@ -606,21 +612,23 @@ interface UIStore {
   inputSpellcheckEnabled: boolean;
   wideChatLayoutEnabled: boolean;
   showToolFileIcons: boolean;
+  showTurnChangedFiles: boolean;
   showExpandedBashTools: boolean;
   showExpandedEditTools: boolean;
   timeFormatPreference: TimeFormatPreference;
   weekStartPreference: WeekStartPreference;
   mermaidRenderingMode: MermaidRenderingMode;
   userMessageRenderingMode: UserMessageRenderingMode;
+  collapsibleUserMessages: boolean;
   stickyUserHeader: boolean;
   showSplitAssistantMessageActions: boolean;
-  showMobileSessionStatusBar: boolean;
   isMobileSessionStatusBarCollapsed: boolean;
   mobileSessionPanelOpen: boolean;
   mobileSessionFilterProjectId: string | null;
   isExpandedInput: boolean;
   reportUsage: boolean;
   shortcutOverrides: Record<string, ShortcutCombo>;
+  fileEditorKeymap: FileEditorKeymap;
 
   setTheme: (theme: 'light' | 'dark' | 'system') => void;
   toggleSidebar: () => void;
@@ -658,10 +666,13 @@ interface UIStore {
   restoreForRuntimeSwitch: (runtimeKey?: string | null) => void;
   setMainTabGuard: (guard: MainTabGuard | null) => void;
   setPendingDiffFile: (filePath: string | null, staged?: boolean) => void;
+  setPendingDiagramFile: (filePath: string | null) => void;
   setPendingFileNavigation: (navigation: PendingFileNavigation | null) => void;
   setPendingFileFocusPath: (path: string | null) => void;
   navigateToDiff: (filePath: string, staged?: boolean) => void;
   consumePendingDiffFile: () => string | null;
+  navigateToDiagram: (filePath: string) => void;
+  consumePendingDiagramFile: () => string | null;
   setIsMobile: (isMobile: boolean) => void;
   toggleCommandPalette: () => void;
   setCommandPaletteOpen: (open: boolean) => void;
@@ -745,15 +756,16 @@ interface UIStore {
   setInputSpellcheckEnabled: (value: boolean) => void;
   setWideChatLayoutEnabled: (value: boolean) => void;
   setShowToolFileIcons: (value: boolean) => void;
+  setShowTurnChangedFiles: (value: boolean) => void;
   setShowExpandedBashTools: (value: boolean) => void;
   setShowExpandedEditTools: (value: boolean) => void;
   setTimeFormatPreference: (value: TimeFormatPreference) => void;
   setWeekStartPreference: (value: WeekStartPreference) => void;
   setMermaidRenderingMode: (value: MermaidRenderingMode) => void;
   setUserMessageRenderingMode: (value: UserMessageRenderingMode) => void;
+  setCollapsibleUserMessages: (value: boolean) => void;
   setStickyUserHeader: (value: boolean) => void;
   setShowSplitAssistantMessageActions: (value: boolean) => void;
-  setShowMobileSessionStatusBar: (value: boolean) => void;
   setIsMobileSessionStatusBarCollapsed: (value: boolean) => void;
   setMobileSessionPanelOpen: (value: boolean) => void;
   setMobileSessionFilterProjectId: (value: string | null) => void;
@@ -767,6 +779,7 @@ interface UIStore {
   setShortcutOverride: (actionId: string, combo: ShortcutCombo) => void;
   clearShortcutOverride: (actionId: string) => void;
   resetAllShortcutOverrides: () => void;
+  setFileEditorKeymap: (value: FileEditorKeymap) => void;
 }
 
 
@@ -799,6 +812,7 @@ export const useUIStore = create<UIStore>()(
         sidebarOpenBeforeFullscreenTab: null,
         pendingDiffFile: null,
         pendingDiffStaged: false,
+        pendingDiagramFile: null,
         pendingFileNavigation: null,
         pendingFileFocusPath: null,
         isMobile: false,
@@ -879,12 +893,14 @@ export const useUIStore = create<UIStore>()(
         inputSpellcheckEnabled: false,
         wideChatLayoutEnabled: false,
         showToolFileIcons: true,
+        showTurnChangedFiles: false,
         showExpandedBashTools: false,
         showExpandedEditTools: false,
         timeFormatPreference: 'auto',
         weekStartPreference: 'auto',
         mermaidRenderingMode: 'svg',
         userMessageRenderingMode: 'markdown',
+        collapsibleUserMessages: true,
         stickyUserHeader: false,
         showSplitAssistantMessageActions: false,
         showMobileSessionStatusBar: true,
@@ -894,6 +910,7 @@ export const useUIStore = create<UIStore>()(
         isExpandedInput: false,
         reportUsage: true,
         shortcutOverrides: {},
+        fileEditorKeymap: 'default',
 
         setTheme: (theme) => {
           set({ theme });
@@ -1383,6 +1400,10 @@ export const useUIStore = create<UIStore>()(
           set({ pendingDiffFile: filePath, pendingDiffStaged: filePath ? staged : false });
         },
 
+        setPendingDiagramFile: (filePath) => {
+          set({ pendingDiagramFile: filePath });
+        },
+
         setPendingFileNavigation: (navigation) => {
           set({ pendingFileNavigation: navigation });
         },
@@ -1405,6 +1426,22 @@ export const useUIStore = create<UIStore>()(
             set({ pendingDiffFile: null, pendingDiffStaged: false });
           }
           return pendingDiffFile;
+        },
+
+        navigateToDiagram: (filePath) => {
+          const guard = get().mainTabGuard;
+          if (guard && !guard('diagram')) {
+            return;
+          }
+          set({ pendingDiagramFile: filePath, activeMainTab: 'diagram' });
+        },
+
+        consumePendingDiagramFile: () => {
+          const { pendingDiagramFile } = get();
+          if (pendingDiagramFile) {
+            set({ pendingDiagramFile: null });
+          }
+          return pendingDiagramFile;
         },
 
         setIsMobile: (isMobile) => {
@@ -1858,10 +1895,13 @@ export const useUIStore = create<UIStore>()(
             const updates: Partial<UIStore> = {};
 
             if (state.isBottomTerminalOpen && !state.hasManuallyResizedBottomTerminal) {
-              updates.bottomTerminalHeight = Math.floor(window.innerHeight * 0.32);
+              const nextHeight = Math.floor(window.innerHeight * 0.32);
+              if (state.bottomTerminalHeight !== nextHeight) {
+                updates.bottomTerminalHeight = nextHeight;
+              }
             }
 
-            return updates;
+            return Object.keys(updates).length > 0 ? updates : state;
           });
         },
 
@@ -1949,6 +1989,9 @@ export const useUIStore = create<UIStore>()(
         setShowToolFileIcons: (value) => {
           set({ showToolFileIcons: value });
         },
+        setShowTurnChangedFiles: (value) => {
+          set({ showTurnChangedFiles: value });
+        },
         setShowExpandedBashTools: (value) => {
           set({ showExpandedBashTools: value });
         },
@@ -1969,14 +2012,14 @@ export const useUIStore = create<UIStore>()(
         setUserMessageRenderingMode: (value) => {
           set({ userMessageRenderingMode: value });
         },
+        setCollapsibleUserMessages: (value) => {
+          set({ collapsibleUserMessages: value });
+        },
         setStickyUserHeader: (value) => {
           set({ stickyUserHeader: value });
         },
         setShowSplitAssistantMessageActions: (value) => {
           set({ showSplitAssistantMessageActions: value });
-        },
-        setShowMobileSessionStatusBar: (value) => {
-          set({ showMobileSessionStatusBar: value });
         },
         setIsMobileSessionStatusBarCollapsed: (value) => {
           set({ isMobileSessionStatusBarCollapsed: value });
@@ -2021,6 +2064,10 @@ export const useUIStore = create<UIStore>()(
 
         resetAllShortcutOverrides: () => {
           set({ shortcutOverrides: {} });
+        },
+
+        setFileEditorKeymap: (value) => {
+          set({ fileEditorKeymap: normalizeFileEditorKeymap(value) });
         },
 
         toggleExpandedInput: () => {
@@ -2122,6 +2169,8 @@ export const useUIStore = create<UIStore>()(
             }
           }
 
+          state.fileEditorKeymap = normalizeFileEditorKeymap(state.fileEditorKeymap);
+
           return state;
         },
         partialize: (state) => ({
@@ -2191,18 +2240,20 @@ export const useUIStore = create<UIStore>()(
           inputSpellcheckEnabled: state.inputSpellcheckEnabled,
           wideChatLayoutEnabled: state.wideChatLayoutEnabled,
           showToolFileIcons: state.showToolFileIcons,
+          showTurnChangedFiles: state.showTurnChangedFiles,
           showExpandedBashTools: state.showExpandedBashTools,
           showExpandedEditTools: state.showExpandedEditTools,
           timeFormatPreference: state.timeFormatPreference,
           weekStartPreference: state.weekStartPreference,
           mermaidRenderingMode: state.mermaidRenderingMode,
           userMessageRenderingMode: state.userMessageRenderingMode,
+          collapsibleUserMessages: state.collapsibleUserMessages,
           stickyUserHeader: state.stickyUserHeader,
           showSplitAssistantMessageActions: state.showSplitAssistantMessageActions,
-          showMobileSessionStatusBar: state.showMobileSessionStatusBar,
           isMobileSessionStatusBarCollapsed: state.isMobileSessionStatusBarCollapsed,
           mobileSessionFilterProjectId: state.mobileSessionFilterProjectId,
           shortcutOverrides: state.shortcutOverrides,
+          fileEditorKeymap: state.fileEditorKeymap,
         })
       }
     ),

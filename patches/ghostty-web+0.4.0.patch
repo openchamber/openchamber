@@ -1,0 +1,30 @@
+diff --git a/node_modules/ghostty-web/dist/ghostty-web.js b/node_modules/ghostty-web/dist/ghostty-web.js
+index 0000000000000000000000000000000000000000..1111111111111111111111111111111111111111 100644
+--- a/node_modules/ghostty-web/dist/ghostty-web.js
++++ b/node_modules/ghostty-web/dist/ghostty-web.js
+@@ -1299,1 +1299,1 @@
+-      C === 0 || C < 32 ? B.push(" ") : B.push(String.fromCodePoint(C));
++      C === 0 || C < 32 || C > 1114111 || C >= 55296 && C <= 57343 ? B.push(" ") : B.push(String.fromCodePoint(C));
+@@ -1341,1 +1341,1 @@
+-    this.ctx = g, this.fontSize = B.fontSize ?? 15, this.fontFamily = B.fontFamily ?? "monospace", this.cursorStyle = B.cursorStyle ?? "block", this.cursorBlink = B.cursorBlink ?? !1, this.theme = { ...f, ...B.theme }, this.devicePixelRatio = B.devicePixelRatio ?? window.devicePixelRatio ?? 1, this.palette = [
++    this.ctx = g, this.fontSize = B.fontSize ?? 15, this.fontFamily = B.fontFamily ?? "monospace", this.lineHeight = B.lineHeight ?? 1, this.cursorStyle = B.cursorStyle ?? "block", this.cursorBlink = B.cursorBlink ?? !1, this.theme = { ...f, ...B.theme }, this.devicePixelRatio = B.devicePixelRatio ?? window.devicePixelRatio ?? 1, this.palette = [
+@@ -1366,1 +1366,1 @@
+-    const g = B.measureText("M"), E = Math.ceil(g.width), C = g.actualBoundingBoxAscent || this.fontSize * 0.8, I = g.actualBoundingBoxDescent || this.fontSize * 0.2, D = Math.ceil(C + I) + 2, i = Math.ceil(C) + 1;
++    const g = B.measureText("M"), E = Math.ceil(g.width), C = g.actualBoundingBoxAscent || this.fontSize * 0.8, I = g.actualBoundingBoxDescent || this.fontSize * 0.2, D0 = Math.ceil(C + I), extra = Math.max(0, Math.round((this.lineHeight - 1) * D0)), D = D0 + 2 + extra, i = Math.ceil(C) + 1;
+@@ -1538,1 +1538,1 @@
+-    if (A.grapheme_len > 0 && ((k = this.currentBuffer) != null && k.getGraphemeString) ? N = this.currentBuffer.getGraphemeString(g, B) : N = String.fromCodePoint(A.codepoint || 32), this.ctx.fillText(N, w, s), A.flags & e.FAINT && (this.ctx.globalAlpha = 1), A.flags & e.UNDERLINE) {
++    if (A.grapheme_len > 0 && ((k = this.currentBuffer) != null && k.getGraphemeString) ? N = this.currentBuffer.getGraphemeString(g, B) : N = A.codepoint == null || A.codepoint <= 0 || A.codepoint > 1114111 || A.codepoint >= 55296 && A.codepoint <= 57343 ? " " : String.fromCodePoint(A.codepoint), this.ctx.fillText(N, w, s), A.flags & e.FAINT && (this.ctx.globalAlpha = 1), A.flags & e.UNDERLINE) {
+@@ -1780,1 +1780,1 @@
+-        if (a && a.codepoint !== 0) {
++        if (a && a.codepoint !== 0 && a.codepoint <= 1114111 && !(a.codepoint >= 55296 && a.codepoint <= 57343)) {
+@@ -2054,1 +2054,1 @@
+-      if (!D || D.codepoint === 0)
++      if (!D || D.codepoint === 0 || D.codepoint > 1114111 || D.codepoint >= 55296 && D.codepoint <= 57343)
+@@ -2205,1 +2205,2 @@
+-      fontFamily: A.fontFamily ?? "monospace",
++      fontFamily: A.fontFamily ?? "monospace",
++      lineHeight: A.lineHeight ?? 1,
+@@ -2340,1 +2341,2 @@
+-        fontFamily: this.options.fontFamily,
++        fontFamily: this.options.fontFamily,
++        lineHeight: this.options.lineHeight,

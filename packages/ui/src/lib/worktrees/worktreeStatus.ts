@@ -1,5 +1,4 @@
-import { getGitStatus } from '@/lib/gitApi';
-import { execCommand } from '@/lib/execCommands';
+import { getGitStatus, resolveGitPrimaryRoot } from '@/lib/gitApi';
 import type { WorktreeMetadata } from '@/types/worktree';
 
 const normalizePath = (value: string): string => {
@@ -11,39 +10,6 @@ const normalizePath = (value: string): string => {
     return '/';
   }
   return replaced.replace(/\/+$/, '');
-};
-
-const toAbsolutePath = (baseDir: string, maybeRelativePath: string): string => {
-  const normalizedBase = normalizePath(baseDir);
-  const normalizedInput = normalizePath(maybeRelativePath);
-  if (!normalizedInput) return normalizedBase;
-  if (normalizedInput.startsWith('/')) return normalizedInput;
-
-  const stack = normalizedBase.split('/').filter(Boolean);
-  const parts = normalizedInput.split('/').filter(Boolean);
-  for (const part of parts) {
-    if (part === '.') continue;
-    if (part === '..') {
-      stack.pop();
-      continue;
-    }
-    stack.push(part);
-  }
-  return `/${stack.join('/')}`;
-};
-
-const derivePrimaryWorktreeRootFromGitDir = (gitDir: string): string | null => {
-  const normalized = normalizePath(gitDir);
-  if (!normalized) return null;
-  if (normalized.endsWith('/.git')) {
-    return normalized.slice(0, -'/.git'.length) || null;
-  }
-  const worktreesMarker = '/.git/worktrees/';
-  const markerIndex = normalized.indexOf(worktreesMarker);
-  if (markerIndex > 0) {
-    return normalized.slice(0, markerIndex) || null;
-  }
-  return null;
 };
 
 export async function getWorktreeStatus(worktreePath: string): Promise<WorktreeMetadata['status']> {
@@ -118,38 +84,7 @@ export function invalidateResolvedProjectRootCache(directory?: string): void {
 }
 
 const computeProjectRoot = async (directory: string): Promise<string> => {
-  // A single `git rev-parse` invocation returns both paths (absolute-git-dir on
-  // the first line, git-common-dir on the second), halving subprocess spawns
-  // versus issuing the two queries separately. In a non-git directory the whole
-  // command fails, mirroring the previous fall-through to `directory`.
-  const result = await execCommand('git rev-parse --absolute-git-dir --git-common-dir', directory);
-  if (!result.success) {
-    return directory;
-  }
-
-  const lines = (result.stdout || '')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  const absoluteGitDir = normalizePath(lines[0] || '');
-  if (absoluteGitDir) {
-    const rootFromAbsoluteGitDir = derivePrimaryWorktreeRootFromGitDir(absoluteGitDir);
-    if (rootFromAbsoluteGitDir) {
-      return rootFromAbsoluteGitDir;
-    }
-  }
-
-  const rawCommonDir = normalizePath(lines[1] || '');
-  if (rawCommonDir) {
-    const commonDir = toAbsolutePath(directory, rawCommonDir);
-    const rootFromCommonDir = derivePrimaryWorktreeRootFromGitDir(commonDir);
-    if (rootFromCommonDir) {
-      return rootFromCommonDir;
-    }
-  }
-
-  return directory;
+  return resolveGitPrimaryRoot(directory).catch(() => directory);
 };
 
 export const resolveProjectRoot = async (directory: string): Promise<string> => {

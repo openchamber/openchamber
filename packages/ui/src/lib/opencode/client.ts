@@ -14,10 +14,11 @@ import type {
 } from "@opencode-ai/sdk/v2";
 import type { PermissionRequest } from "@/types/permission";
 import type { QuestionRequest } from "@/types/question";
-import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap";
 import { getRuntimeUrlResolver } from "@/lib/runtime-url";
 import { runtimeFetch } from "@/lib/runtime-fetch";
+import { getRuntimeKey } from "@/lib/runtime-switch";
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry";
+import { markStartupTrace } from "@/lib/startupTrace";
 import {
   assertProviderCircuitClosed,
   recordProviderSuccess,
@@ -346,7 +347,14 @@ class OpencodeService {
 
   // Set the current working directory for all API calls
   setDirectory(directory: string | undefined) {
-    this.currentDirectory = this.normalizeCandidatePath(directory) ?? directory;
+    const normalized = this.normalizeCandidatePath(directory) ?? directory;
+    if (this.currentDirectory !== normalized) {
+      markStartupTrace('opencodeClient:setDirectory', {
+        previous: this.currentDirectory ?? null,
+        next: normalized ?? null,
+      });
+    }
+    this.currentDirectory = normalized;
   }
 
   getDirectory(): string | undefined {
@@ -479,20 +487,22 @@ class OpencodeService {
     return Array.isArray(response.data) ? response.data : [];
   }
 
-  async createSession(params?: { parentID?: string; title?: string }, directory?: string | null): Promise<Session> {
+  async createSession(params?: { parentID?: string; title?: string; metadata?: Record<string, unknown> }, directory?: string | null): Promise<Session> {
     const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
     const response = await this.client.session.create({
       ...(requestDirectory ? { directory: requestDirectory } : {}),
       parentID: params?.parentID,
       title: params?.title,
+      metadata: params?.metadata,
     });
     return unwrapSdkData(response, 'session.create');
   }
 
-  async getSession(id: string): Promise<Session> {
+  async getSession(id: string, directory?: string | null): Promise<Session> {
+    const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
     const response = await this.client.session.get({
       sessionID: id,
-      ...(this.currentDirectory ? { directory: this.currentDirectory } : {})
+      ...(requestDirectory ? { directory: requestDirectory } : {})
     });
     return unwrapSdkData(response, 'session.get');
   }
@@ -508,12 +518,13 @@ class OpencodeService {
 
   async updateSession(
     id: string,
-    patch: { title?: string; time?: { archived?: number | null } },
+    patch: { title?: string; metadata?: Record<string, unknown>; time?: { archived?: number | null } },
     directory?: string | null,
   ): Promise<Session> {
     const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
     const sdkPatch = {
       ...(patch.title !== undefined ? { title: patch.title } : {}),
+      ...(patch.metadata !== undefined ? { metadata: patch.metadata } : {}),
       ...(patch.time?.archived !== undefined && patch.time.archived !== null ? { time: { archived: patch.time.archived } } : {}),
     };
     const response = await this.client.session.update({
@@ -791,10 +802,6 @@ class OpencodeService {
     }
 
     const requestDirectory = this.normalizeCandidatePath(params.directory ?? null) ?? this.currentDirectory;
-
-    if (requestDirectory) {
-      await waitForWorktreeBootstrap(requestDirectory);
-    }
 
     if (params.format) {
       console.info('[git-generation][browser] send structured message', {
@@ -1414,33 +1421,24 @@ class OpencodeService {
     }
   }
 
-  // Health Check - using /health endpoint for detailed status
+  // Lightweight readiness check. Full diagnostics still live at /health.
   async checkHealth(): Promise<boolean> {
     try {
-      // Health endpoint is at root, not under /api
-      let healthUrl: string;
       const normalizedBase = this.baseUrl.endsWith('/') ? this.baseUrl.replace(/\/+$/, '') : this.baseUrl;
-      if (normalizedBase === '/api') {
-        healthUrl = '/health';
-      } else if (normalizedBase.endsWith('/api')) {
-        // Desktop: http://127.0.0.1:PORT/api -> http://127.0.0.1:PORT/health
-        healthUrl = `${normalizedBase.slice(0, -4)}/health`;
-      } else {
-        healthUrl = `${normalizedBase}/health`;
-      }
+      const healthUrl = normalizedBase === '/api' || normalizedBase.endsWith('/api')
+        ? '/api/opencode/health'
+        : `${normalizedBase}/opencode/health`;
+      markStartupTrace('opencodeClient.checkHealth:url', { baseUrl: this.baseUrl, healthUrl });
       const response = await runtimeFetch(healthUrl);
+      markStartupTrace('opencodeClient.checkHealth:response', { status: response.status });
       if (!response.ok) {
         return false;
       }
 
       const healthData = await response.json();
+      markStartupTrace('opencodeClient.checkHealth:result', { healthy: healthData?.healthy });
 
-      // Check if the upstream API is ready (not just OpenChamber server)
-      if (healthData.isOpenCodeReady === false) {
-        return false;
-      }
-
-      return true;
+      return healthData?.healthy === true;
     } catch {
       return false;
     }
@@ -1630,11 +1628,16 @@ class OpencodeService {
   }
 
   async getFilesystemHome(): Promise<string | null> {
-    // Optimization: Check for desktop runtime first to avoid unnecessary network calls
-    // and fix the "SyntaxError" warning when the endpoint is missing
-    const desktopHome = await getDesktopHomeDirectory();
-    if (desktopHome) {
-      return desktopHome;
+    // The injected desktop home describes the LOCAL machine. It is only a
+    // valid answer while the active runtime is the local one — after an
+    // in-place switch to a remote host the home must come from that host's
+    // /api/fs/home, not from the local Electron global.
+    const runtimeKey = getRuntimeKey();
+    if (!runtimeKey || runtimeKey === 'local') {
+      const desktopHome = await getDesktopHomeDirectory();
+      if (desktopHome) {
+        return desktopHome;
+      }
     }
 
     try {

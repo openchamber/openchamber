@@ -71,6 +71,8 @@ export const createWebGitAPI = (): GitAPI => ({
   worktree: {
     list: gitApiHttp.listGitWorktrees,
     validate: gitApiHttp.validateGitWorktree,
+    bootstrapStatus: gitApiHttp.getGitWorktreeBootstrapStatus,
+    preview: gitApiHttp.previewGitWorktree,
     create: gitApiHttp.createGitWorktree,
     remove: gitApiHttp.deleteGitWorktree,
   },

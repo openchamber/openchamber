@@ -10,6 +10,7 @@ import {
   type VSCodeThemeKind,
   type VSCodeThemePayload,
 } from '@openchamber/ui/lib/theme/vscode/adapter';
+import { getBootstrapMessages, readStoredLocaleForBootstrap } from '@openchamber/ui/lib/i18n';
 import type { VSCodeActiveEditorFile } from '@/sync/input-store';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'error' | 'disconnected';
@@ -23,6 +24,7 @@ declare global {
     __VSCODE_CONFIG__?: {
       apiUrl?: string;
       workspaceFolder: string;
+      workspaceFolders?: Array<{ name: string; path: string }>;
       theme: string;
       connectionStatus: string;
       cliAvailable?: boolean;
@@ -54,6 +56,9 @@ try {
 }
 
 window.__OPENCHAMBER_RUNTIME_APIS__ = createVSCodeAPIs();
+
+const bootstrapLocale = readStoredLocaleForBootstrap();
+const bootstrapMessages = getBootstrapMessages(bootstrapLocale);
 
 const bootstrapConnectionStatus = () => {
   const initialStatus = (window.__VSCODE_CONFIG__?.connectionStatus as ConnectionStatus | undefined) || 'connecting';
@@ -173,7 +178,7 @@ const maybeHideLoadingOverlay = () => {
 
   if (connectionStatus === 'connected') {
     if (bootstrapFailed) {
-      setLoadingStatusText('OpenCode connected, but initial data load failed.', 'error');
+      setLoadingStatusText(bootstrapMessages.initialDataLoadFailed, 'error');
       fadeOutLoadingScreen();
       return;
     }
@@ -190,13 +195,13 @@ const maybeHideLoadingOverlay = () => {
 
   if (connectionStatus === 'error') {
     const error = window.__OPENCHAMBER_CONNECTION__?.error;
-    setLoadingStatusText(error || 'Connection error', 'error');
+    setLoadingStatusText(error || bootstrapMessages.connectionError, 'error');
     fadeOutLoadingScreen();
     return;
   }
 
   if (connectionStatus === 'disconnected') {
-    setLoadingStatusText('Disconnected', 'error');
+    setLoadingStatusText(bootstrapMessages.disconnected, 'error');
     fadeOutLoadingScreen();
     return;
   }
@@ -333,13 +338,14 @@ const getRequestDirectoryHint = (url: URL, input?: RequestInfo | URL, init?: Req
   return undefined;
 };
 
-const decodeBase64 = (value: string): Uint8Array => {
+const decodeBase64 = (value: string): ArrayBuffer => {
   const binary = atob(value);
-  const bytes = new Uint8Array(binary.length);
+  const buffer = new ArrayBuffer(binary.length);
+  const bytes = new Uint8Array(buffer);
   for (let i = 0; i < binary.length; i += 1) {
     bytes[i] = binary.charCodeAt(i);
   }
-  return bytes;
+  return buffer;
 };
 
 const jsonResponse = (body: unknown, status = 200): Response => {
@@ -371,7 +377,7 @@ const buildProxiedResponse = (
     return new Response(proxied.bodyText, { status: proxied.status, headers: proxied.headers });
   }
 
-  const body = proxied.bodyBase64 ? decodeBase64(proxied.bodyBase64) : new Uint8Array();
+  const body = proxied.bodyBase64 ? decodeBase64(proxied.bodyBase64) : new ArrayBuffer(0);
   return new Response(body, { status: proxied.status, headers: proxied.headers });
 };
 
@@ -968,6 +974,24 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     }
   }
 
+  if (pathname === '/api/opencode/version' && method === 'GET') {
+    try {
+      const data = await sendBridgeMessage('api:opencode/version');
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ version: null, error: message }), { status: 502, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname === '/api/opencode/health' && method === 'GET') {
+    const connectionStatus = window.__OPENCHAMBER_CONNECTION__?.status;
+    return new Response(JSON.stringify({ healthy: connectionStatus === 'connected' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
   if (pathname === '/api/zen/models' && method === 'GET') {
     try {
       const data = await sendBridgeMessage('api:zen:models');
@@ -1315,12 +1339,55 @@ onCommand('createSessionWithPrompt', (payload) => {
   });
 });
 
+const normalizeWorkspaceFoldersPayload = (value: unknown): Array<{ name: string; path: string }> => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((entry) => {
+      const candidate = entry as { name?: unknown; path?: unknown };
+      const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
+      const path = typeof candidate.path === 'string' ? candidate.path.trim() : '';
+      return path ? { name, path } : null;
+    })
+    .filter((entry): entry is { name: string; path: string } => entry !== null);
+};
+
+const syncVSCodeWorkspaceProjects = async (
+  workspaceFolders: Array<{ name: string; path: string }>,
+  activePath?: string,
+) => {
+  if (window.__VSCODE_CONFIG__) {
+    window.__VSCODE_CONFIG__.workspaceFolders = workspaceFolders;
+  }
+  const { useProjectsStore } = await import('@/stores/useProjectsStore');
+  return useProjectsStore.getState().syncVSCodeWorkspaceFolders(workspaceFolders, activePath);
+};
+
+onCommand('workspaceFoldersChanged', (payload) => {
+  const record = payload as { workspaceFolders?: unknown } | undefined;
+  const workspaceFolders = normalizeWorkspaceFoldersPayload(record?.workspaceFolders);
+  void syncVSCodeWorkspaceProjects(workspaceFolders);
+});
+
 // Listen for newSession command from extension title bar button
-onCommand('newSession', () => {
-  import('@/sync/session-ui-store').then(({ useSessionUIStore }) => {
-    useSessionUIStore.getState().openNewSessionDraft();
+onCommand('newSession', (payload) => {
+  const record = payload as { directory?: unknown; workspaceFolders?: unknown } | undefined;
+  const directory = record?.directory;
+  const directoryOverride = typeof directory === 'string' && directory.trim().length > 0 ? directory.trim() : undefined;
+  const workspaceFolders = normalizeWorkspaceFoldersPayload(record?.workspaceFolders);
+
+  Promise.all([
+    import('@/sync/session-ui-store'),
+    syncVSCodeWorkspaceProjects(workspaceFolders, directoryOverride),
+  ]).then(([{ useSessionUIStore }, selectedProject]) => {
+    useSessionUIStore.getState().openNewSessionDraft(
+      directoryOverride
+        ? { directoryOverride, selectedProjectId: selectedProject?.id ?? undefined }
+        : undefined
+    );
   });
-  
+
   // Also dispatch event to navigate to chat view in VSCodeLayout
   window.dispatchEvent(new CustomEvent('openchamber:navigate', { detail: { view: 'chat' } }));
 });
@@ -1336,7 +1403,7 @@ onCommand('showSettings', () => {
 // and refreshes config/data. Triggered by the "Restart API Connection" command.
 onCommand('reloadOpenCode', () => {
   void import('@openchamber/ui/stores/useAgentsStore').then(({ reloadOpenCodeConfiguration }) => {
-    void reloadOpenCodeConfiguration();
+    void reloadOpenCodeConfiguration().catch(() => undefined);
   });
 });
 

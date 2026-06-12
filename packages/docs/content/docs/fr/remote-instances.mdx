@@ -1,0 +1,42 @@
+---
+title: Instances distantes
+description: Connectez l’application desktop à OpenChamber sur une autre machine via SSH.
+---
+
+# Instances distantes
+
+L’application desktop peut se connecter à OpenChamber exécuté sur une autre machine via SSH — serveur de travail, machine cloud, homelab — et afficher son UI sur votre écran comme si elle était locale. Configurez cela dans **Paramètres → Instances distantes**.
+
+> Les instances distantes sont une fonctionnalité **desktop uniquement**. Sur le web ou dans VS Code, connectez-vous à un serveur distant avec les variables d’environnement de [Serveur OpenCode](/opencode-server/) à la place.
+
+## Ajouter une instance distante
+
+1. Ouvrez **Paramètres → Instances distantes** et ajoutez-en une.
+2. Donnez la commande SSH que vous utilisez normalement pour joindre la machine, plus un surnom.
+3. Choisissez comment OpenChamber s’y exécute :
+   - **managed** — OpenChamber s’installe et se démarre sur la machine distante
+   - **external** — se connecter à une instance déjà en cours d’exécution
+4. Connectez-vous.
+
+OpenChamber déroule les étapes — vérification de la connexion, configuration du remote, démarrage du serveur et transfert du port — et montre où il en est à chaque étape. Quand il atteint **ready**, l’UI distante se charge localement.
+
+## Identifiants
+
+Vous décidez d’enregistrer les mots de passe SSH et UI ou de les saisir à chaque fois. Si la connexion tombe, OpenChamber indique l’étape qui a échoué pour vous aider à corriger — voir [Accès distant](/troubleshooting/remote-access/).
+
+## Liens de connexion directe
+
+Si une machine distante exécute déjà OpenChamber, créez un lien de connexion là-bas et importez-le dans **Paramètres → Instances distantes → Liens de serveur** :
+
+```bash
+openchamber connect-url --port 3000 --server http://your-host:3000 --qr
+```
+
+`connect-url` démarre d’abord le serveur si rien ne tourne sur ce port. Ajoutez `--api-only` pour un serveur headless, `--lan` pour écouter sur le LAN au démarrage, `--ui-password` pour protéger l’accès navigateur et `--name` pour nommer la connexion enregistrée.
+
+Le lien généré contient un token client pour les applications OpenChamber. Ce token est séparé du mot de passe de l’UI navigateur et survit aux redémarrages du serveur jusqu’à révocation ou suppression.
+
+## Pages liées
+
+- [Serveur OpenCode](/opencode-server/) — se connecter à un serveur distant sur web ou VS Code
+- [Accès distant](/troubleshooting/remote-access/) — quand une connexion ne se termine pas

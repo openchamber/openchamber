@@ -26,6 +26,7 @@ This module provides notification message preparation utilities for the web serv
   - `DELETE /api/push/subscribe`
   - `POST /api/push/visibility`
   - `GET /api/push/visibility`
+  - `GET /api/notifications/stream`
   - `GET /api/session-activity`
   - `GET /api/sessions/snapshot`
   - `GET /api/sessions/status`
@@ -86,6 +87,7 @@ This module provides notification message preparation utilities for the web serv
 
 ### Default values
 - `DEFAULT_NOTIFICATION_MESSAGE_MAX_LENGTH`: 250 (default max length for notification text).
+- `NOTIFICATION_SSE_HEARTBEAT_INTERVAL_MS`: 20000 (notification SSE comment heartbeat interval).
 
 ## Settings object format
 

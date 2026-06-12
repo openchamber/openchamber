@@ -345,7 +345,9 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     if (typeof document === 'undefined') {
       return;
     }
-    const chromeColor = theme.colors.surface.background;
+    const hasMacVibrancy = document.documentElement.hasAttribute('data-oc-vibrancy')
+      || window.__OPENCHAMBER_ELECTRON__?.macVibrancy === true;
+    const chromeColor = hasMacVibrancy ? 'transparent' : theme.colors.surface.background;
 
     document.body.style.backgroundColor = chromeColor;
 

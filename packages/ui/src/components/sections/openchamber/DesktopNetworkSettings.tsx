@@ -22,6 +22,8 @@ export const DesktopNetworkSettings: React.FC = () => {
   const [draftValue, setDraftValue] = React.useState(false);
   const [savedPassword, setSavedPassword] = React.useState('');
   const [draftPassword, setDraftPassword] = React.useState('');
+  const [lanAccessActive, setLanAccessActive] = React.useState(false);
+  const [lanAccessBlockedReason, setLanAccessBlockedReason] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
   const [launchAtLoginSupported, setLaunchAtLoginSupported] = React.useState(false);
@@ -50,6 +52,8 @@ export const DesktopNetworkSettings: React.FC = () => {
         const data = (await response.json().catch(() => null)) as null | {
           desktopLanAccessEnabled?: unknown;
           desktopUiPassword?: unknown;
+          desktopLanAccessActive?: unknown;
+          desktopLanAccessBlockedReason?: unknown;
         };
         if (cancelled) {
           return;
@@ -61,6 +65,10 @@ export const DesktopNetworkSettings: React.FC = () => {
         setDraftValue(enabled);
         setSavedPassword(password);
         setDraftPassword(password);
+        setLanAccessActive(data?.desktopLanAccessActive === true);
+        setLanAccessBlockedReason(
+          typeof data?.desktopLanAccessBlockedReason === 'string' ? data.desktopLanAccessBlockedReason : null
+        );
         setError(null);
       } catch (cause) {
         if (!cancelled) {
@@ -135,10 +143,20 @@ export const DesktopNetworkSettings: React.FC = () => {
     }
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
   }, []);
-  const lanUrl = draftValue && lanAddress && currentPort ? `http://${lanAddress}:${currentPort}` : null;
+  const lanUrl = draftValue && lanAccessActive && lanAddress && currentPort ? `http://${lanAddress}:${currentPort}` : null;
+  const lanRequiresPassword = draftValue && !draftPassword.trim();
+  const lanBlockedByMissingPassword = savedValue && !lanAccessActive && lanAccessBlockedReason === 'missing-password';
+  const saveDisabled = isLoading || isSaving || !isDirty || lanRequiresPassword;
 
   const handleToggle = React.useCallback(() => {
     setDraftValue((current) => !current);
+  }, []);
+
+  const handlePasswordChange = React.useCallback((value: string) => {
+    setDraftPassword(value);
+    if (!value.trim()) {
+      setDraftValue(false);
+    }
   }, []);
 
   const handleLaunchAtLoginToggle = React.useCallback(async () => {
@@ -216,6 +234,7 @@ export const DesktopNetworkSettings: React.FC = () => {
       <section className="space-y-2 px-2 pb-2 pt-0">
         {launchAtLoginSupported ? (
           <div
+            data-settings-item="sessions.desktop-launch-at-login"
             className="group flex cursor-pointer items-start gap-2 py-1.5"
             role="button"
             tabIndex={0}
@@ -242,7 +261,7 @@ export const DesktopNetworkSettings: React.FC = () => {
           </div>
         ) : null}
 
-        <div className="space-y-1 py-1.5">
+        <div data-settings-item="sessions.desktop-ui-password" className="space-y-1 py-1.5">
           <label className="typography-ui-label text-foreground" htmlFor="desktop-ui-password">
             {t('settings.openchamber.desktopPassword.field.password')}
           </label>
@@ -251,9 +270,11 @@ export const DesktopNetworkSettings: React.FC = () => {
             type="password"
             className="h-7 max-w-sm"
             value={draftPassword}
-            onChange={(event) => setDraftPassword(event.target.value)}
+            onChange={(event) => handlePasswordChange(event.target.value)}
             placeholder={t('settings.openchamber.desktopPassword.field.passwordPlaceholder')}
             disabled={isLoading || isSaving}
+            required={draftValue}
+            aria-invalid={lanRequiresPassword}
           />
           <div className="typography-micro text-muted-foreground/70">
             {t('settings.openchamber.desktopPassword.field.passwordDescription')}
@@ -261,6 +282,7 @@ export const DesktopNetworkSettings: React.FC = () => {
         </div>
 
         <div
+          data-settings-item="sessions.desktop-lan-access"
           className="group flex cursor-pointer items-start gap-2 py-1.5"
           role="button"
           tabIndex={0}
@@ -286,6 +308,11 @@ export const DesktopNetworkSettings: React.FC = () => {
             <div className="typography-micro text-[var(--status-warning)]/85">
               {t('settings.openchamber.desktopNetwork.field.warning')}
             </div>
+            {lanRequiresPassword || lanBlockedByMissingPassword ? (
+              <div className="typography-micro text-[var(--status-warning)]/85">
+                {t('settings.openchamber.desktopNetwork.field.passwordRequiredWarning')}
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -307,7 +334,7 @@ export const DesktopNetworkSettings: React.FC = () => {
             type="button"
             size="xs"
             onClick={handleSaveAndRestart}
-            disabled={isLoading || isSaving || !isDirty}
+            disabled={saveDisabled}
             className="shrink-0 !font-normal"
           >
             {isSaving ? t('settings.common.actions.saving') : t('settings.openchamber.desktopNetwork.actions.saveAndRestart')}

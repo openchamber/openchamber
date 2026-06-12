@@ -7,6 +7,9 @@ import { getWebviewHtml } from './webviewHtml';
 import { openSseProxy } from './sseProxy';
 import { resolveWebviewDevServerUrl } from './webviewDevServer';
 import { normalizeWindowsDriveLetter } from './pathUtils';
+import { resolveWorkspaceFolders } from './workspaceResolver';
+
+const t = vscode.l10n.t;
 
 type SessionPanelState = {
   panel: vscode.WebviewPanel;
@@ -62,7 +65,7 @@ export class SessionEditorPanelProvider {
   public createOrShowNewSession(): void {
     // Generate unique panel ID for new session drafts
     const panelId = `new_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    this._createPanel(panelId, 'New Session', null);
+    this._createPanel(panelId, t('New Session'), null);
   }
 
   public createOrShow(sessionId: string, title?: string): void {
@@ -70,7 +73,7 @@ export class SessionEditorPanelProvider {
       return;
     }
 
-    const sessionTitle = title && title.trim().length > 0 ? title.trim() : 'Session';
+    const sessionTitle = title && title.trim().length > 0 ? title.trim() : t('Session');
 
     const existing = this._panels.get(sessionId);
     if (existing) {
@@ -134,7 +137,7 @@ export class SessionEditorPanelProvider {
       if (message.type === 'vscode:command') {
         const { command, args } = (message.payload || {}) as { command?: unknown; args?: unknown[] };
         if (command === 'openchamber.updateSessionEditorTitle') {
-          const title = typeof args?.[1] === 'string' && args[1].trim().length > 0 ? args[1].trim() : 'Session';
+          const title = typeof args?.[1] === 'string' && args[1].trim().length > 0 ? args[1].trim() : t('Session');
           state.panel.title = title;
           state.panel.webview.postMessage({ id: message.id, type: message.type, success: true, data: { result: true } });
           return;
@@ -482,6 +485,7 @@ export class SessionEditorPanelProvider {
     const workspaceFolder = normalizeWindowsDriveLetter(
       vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || ''
     );
+    const workspaceFolders = resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []);
     const initialStatus = this._cachedStatus;
     const cliAvailable = this._openCodeManager?.isCliAvailable() ?? false;
 
@@ -489,6 +493,7 @@ export class SessionEditorPanelProvider {
       webview,
       extensionUri: this._extensionUri,
       workspaceFolder,
+      workspaceFolders,
       initialStatus,
       cliAvailable,
       panelType: 'chat',

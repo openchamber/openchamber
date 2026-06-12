@@ -17,6 +17,11 @@ import { createCloudflareTunnelProvider } from './lib/tunnels/providers/cloudfla
 import { createNgrokTunnelProvider } from './lib/tunnels/providers/ngrok.js';
 import { createRequestSecurityRuntime } from './lib/security/request-security.js';
 import {
+  getUnauthenticatedLanErrorMessage,
+  isNetworkExposedBindHost,
+  isUnsafeUnauthenticatedLanAllowed,
+} from './lib/security/bind-host.js';
+import {
   TUNNEL_MODE_MANAGED_LOCAL,
   TUNNEL_MODE_MANAGED_REMOTE,
   TUNNEL_MODE_QUICK,
@@ -532,16 +537,6 @@ const ENV_DESKTOP_NOTIFY = (() => {
   const argv1 = typeof process.argv?.[1] === 'string' ? process.argv[1] : '';
   return /openchamber-server/i.test(argv0) || /openchamber-server/i.test(argv1);
 })();
-const ENV_CONFIGURED_OPENCODE_WSL_DISTRO =
-  typeof process.env.OPENCODE_WSL_DISTRO === 'string' && process.env.OPENCODE_WSL_DISTRO.trim().length > 0
-    ? process.env.OPENCODE_WSL_DISTRO.trim()
-    : (
-      typeof process.env.OPENCHAMBER_OPENCODE_WSL_DISTRO === 'string' &&
-      process.env.OPENCHAMBER_OPENCODE_WSL_DISTRO.trim().length > 0
-        ? process.env.OPENCHAMBER_OPENCODE_WSL_DISTRO.trim()
-        : null
-    );
-
 const openCodeAuthStateRuntime = createOpenCodeAuthStateRuntime({
   crypto,
   process,
@@ -619,7 +614,6 @@ const openCodeEnvRuntime = createOpenCodeEnvRuntime({
   state: openCodeEnvState,
   normalizeDirectoryPath,
   readSettingsFromDiskMigrated,
-  ENV_CONFIGURED_OPENCODE_WSL_DISTRO,
 });
 
 const applyLoginShellEnvSnapshot = (...args) => openCodeEnvRuntime.applyLoginShellEnvSnapshot(...args);
@@ -630,8 +624,6 @@ const resolveOpencodeCliPath = (...args) => openCodeEnvRuntime.resolveOpencodeCl
 const isExecutable = (...args) => openCodeEnvRuntime.isExecutable(...args);
 const searchPathFor = (...args) => openCodeEnvRuntime.searchPathFor(...args);
 const resolveGitBinaryForSpawn = (...args) => openCodeEnvRuntime.resolveGitBinaryForSpawn(...args);
-const resolveWslExecutablePath = (...args) => openCodeEnvRuntime.resolveWslExecutablePath(...args);
-const buildWslExecArgs = (...args) => openCodeEnvRuntime.buildWslExecArgs(...args);
 const resolveManagedOpenCodeLaunchSpec = (...args) => openCodeEnvRuntime.resolveManagedOpenCodeLaunchSpec(...args);
 const clearResolvedOpenCodeBinary = (...args) => openCodeEnvRuntime.clearResolvedOpenCodeBinary(...args);
 const openCodeResolutionRuntime = createOpenCodeResolutionRuntime({
@@ -919,8 +911,6 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   applyOpencodeBinaryFromSettings,
   ensureOpencodeCliEnv,
   ensureLocalOpenCodeServerPassword,
-  buildWslExecArgs,
-  resolveWslExecutablePath,
   resolveManagedOpenCodeLaunchSpec,
   setOpenCodePort,
   setDetectedOpenCodeApiPrefix,
@@ -1047,6 +1037,20 @@ const gracefulShutdown = (...args) => gracefulShutdownRuntime.gracefulShutdown(.
 async function main(options = {}) {
   const port = Number.isFinite(options.port) && options.port >= 0 ? Math.trunc(options.port) : DEFAULT_PORT;
   const host = typeof options.host === 'string' && options.host.length > 0 ? options.host : undefined;
+  const effectiveBindHost = host
+    || (typeof process.env.OPENCHAMBER_HOST === 'string' && process.env.OPENCHAMBER_HOST.trim().length > 0
+      ? process.env.OPENCHAMBER_HOST.trim()
+      : '127.0.0.1');
+  const uiPassword = typeof options.uiPassword === 'string'
+    ? options.uiPassword
+    : (typeof process.env.OPENCHAMBER_UI_PASSWORD === 'string' ? process.env.OPENCHAMBER_UI_PASSWORD : null);
+  if (
+    isNetworkExposedBindHost(effectiveBindHost)
+    && !(typeof uiPassword === 'string' && uiPassword.trim().length > 0)
+    && !isUnsafeUnauthenticatedLanAllowed(process.env)
+  ) {
+    throw new Error(getUnauthenticatedLanErrorMessage(effectiveBindHost));
+  }
   const tryCfTunnel = options.tryCfTunnel === true;
   const apiOnly = options.apiOnly === true || isEnvFlagEnabled(process.env.OPENCHAMBER_API_ONLY);
   const shouldUseCanonicalTunnelConfig = typeof options.tunnelMode === 'string'
@@ -1118,7 +1122,6 @@ async function main(options = {}) {
   expressApp = app;
   server = http.createServer(app);
 
-  const uiPassword = typeof options.uiPassword === 'string' ? options.uiPassword : null;
   const bootstrapResult = bootstrapRuntime.setupBaseRoutes(app, {
     process,
     openchamberVersion: OPENCHAMBER_VERSION,

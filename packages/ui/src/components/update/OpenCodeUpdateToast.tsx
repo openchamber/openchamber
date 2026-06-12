@@ -38,7 +38,7 @@ export const OpenCodeUpdateToast: React.FC = () => {
       message: t('opencodeUpdate.toast.reload.message'),
       mode: 'projects',
       scopes: ['all'],
-    });
+    }).catch(() => undefined);
   }, [t]);
 
   const runUpgrade = React.useCallback(async () => {

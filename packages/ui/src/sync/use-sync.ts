@@ -10,7 +10,7 @@ import {
 } from "./optimistic"
 import { dropCachedSessionMessageRecordsSnapshots, useDirectoryStore, useSyncSDK, useSyncDirectory, useChildStoreManager } from "./sync-context"
 import { dropSessionCaches, getProtectedSessionCacheIds } from "./session-cache"
-import { stripMessageDiffSnapshots } from "./sanitize"
+import { stripMessageDiffSnapshots, stripSessionDiffSnapshots } from "./sanitize"
 import { isVSCodeRuntime } from "@/lib/desktop"
 import { isMobileSurfaceRuntime } from "@/lib/runtimeSurface"
 import {
@@ -119,6 +119,14 @@ function isUserMessage(message: Message): boolean {
 
 function hasUserMessage(messages: Message[] | undefined): boolean {
   return Boolean(messages?.some(isUserMessage))
+}
+
+export function shouldFetchSessionForRenderableSync(input: {
+  hasSession: boolean
+  shouldLoadMessages: boolean
+  force?: boolean
+}): boolean {
+  return Boolean(input.force) || !input.hasSession || input.shouldLoadMessages
 }
 
 // ---------------------------------------------------------------------------
@@ -257,16 +265,16 @@ export function useSync() {
 
   // Optimistic operations
   const getOptimistic = useCallback(
-    (sessionID: string): OptimisticItem[] => {
-      const key = `${directory}\n${sessionID}`
+    (sessionID: string, directoryOverride?: string | null): OptimisticItem[] => {
+      const key = `${directoryOverride || directory}\n${sessionID}`
       return [...(optimistic.current.get(key)?.values() ?? [])]
     },
     [directory],
   )
 
   const setOptimistic = useCallback(
-    (sessionID: string, item: OptimisticItem) => {
-      const key = `${directory}\n${sessionID}`
+    (sessionID: string, item: OptimisticItem, directoryOverride?: string | null) => {
+      const key = `${directoryOverride || directory}\n${sessionID}`
       const list = optimistic.current.get(key)
       const sorted: OptimisticItem = { message: item.message, parts: sortParts(item.parts) }
       if (list) {
@@ -279,8 +287,8 @@ export function useSync() {
   )
 
   const clearOptimistic = useCallback(
-    (sessionID: string, messageID?: string) => {
-      const key = `${directory}\n${sessionID}`
+    (sessionID: string, messageID?: string, directoryOverride?: string | null) => {
+      const key = `${directoryOverride || directory}\n${sessionID}`
       if (!messageID) {
         optimistic.current.delete(key)
         return
@@ -291,6 +299,14 @@ export function useSync() {
       if (list.size === 0) optimistic.current.delete(key)
     },
     [directory],
+  )
+
+  const getOptimisticStore = useCallback(
+    (directoryOverride?: string | null) => {
+      if (!directoryOverride || directoryOverride === directory) return store
+      return childStores.ensureChild(directoryOverride, { bootstrap: false })
+    },
+    [childStores, directory, store],
   )
 
   // Fetch messages from API
@@ -421,8 +437,8 @@ export function useSync() {
         })) return
       }
 
-      const shouldFetchSession = !hasSession || force
-      const shouldLoadMessages = !cachedReady || force
+      const shouldLoadMessages = Boolean(!cachedReady || force)
+      const shouldFetchSession = shouldFetchSessionForRenderableSync({ hasSession, shouldLoadMessages, force: Boolean(force) })
       const promise = (async () => {
         await Promise.all([
           shouldFetchSession
@@ -434,13 +450,14 @@ export function useSync() {
                     return response
                   })
                   if (result.data) {
+                    const nextSession = stripSessionDiffSnapshots(result.data)
                     const s = store.getState()
                     const sessions = [...s.session]
                     const idx = Binary.search(sessions, sessionID, (s) => s.id)
                     if (idx.found) {
-                      sessions[idx.index] = result.data
+                      sessions[idx.index] = nextSession
                     } else {
-                      sessions.splice(idx.index, 0, result.data)
+                      sessions.splice(idx.index, 0, nextSession)
                     }
                     store.setState({ session: sessions })
                   }
@@ -490,9 +507,10 @@ export function useSync() {
 
   // Optimistic add (for prompt submission)
   const optimisticAdd = useCallback(
-    (input: { sessionID: string; message: Message; parts: Part[] }) => {
-      setOptimistic(input.sessionID, { message: input.message, parts: input.parts })
-      const current = store.getState()
+    (input: { sessionID: string; directory?: string | null; message: Message; parts: Part[] }) => {
+      setOptimistic(input.sessionID, { message: input.message, parts: input.parts }, input.directory)
+      const targetStore = getOptimisticStore(input.directory)
+      const current = targetStore.getState()
       const message = { ...current.message }
       const part = { ...current.part }
 
@@ -505,16 +523,17 @@ export function useSync() {
       // Insert parts
       part[input.message.id] = sortParts(input.parts)
 
-      store.setState({ message, part })
+      targetStore.setState({ message, part })
     },
-    [store, setOptimistic],
+    [getOptimisticStore, setOptimistic],
   )
 
   // Optimistic remove (for rollback on error)
   const optimisticRemove = useCallback(
-    (input: { sessionID: string; messageID: string }) => {
-      clearOptimistic(input.sessionID, input.messageID)
-      const current = store.getState()
+    (input: { sessionID: string; directory?: string | null; messageID: string }) => {
+      clearOptimistic(input.sessionID, input.messageID, input.directory)
+      const targetStore = getOptimisticStore(input.directory)
+      const current = targetStore.getState()
       const message = { ...current.message }
       const part = { ...current.part }
 
@@ -529,9 +548,9 @@ export function useSync() {
       }
       delete part[input.messageID]
 
-      store.setState({ message, part })
+      targetStore.setState({ message, part })
     },
-    [store, clearOptimistic],
+    [clearOptimistic, getOptimisticStore],
   )
 
   return useMemo(
