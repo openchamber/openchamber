@@ -41,7 +41,7 @@
     "@ibm/plex": "^6.4.1",
     "@lezer/highlight": "^1.2.3",
     "@opencode-ai/sdk": "^1.17.0",
-    "@pierre/diffs": "1.1.0-beta.13",
+    "@pierre/diffs": "1.2.10",
     "@replit/codemirror-vim": "^6.3.0",
     "@simplewebauthn/browser": "13.3.0",
     "@tanstack/react-virtual": "^3.13.18",
