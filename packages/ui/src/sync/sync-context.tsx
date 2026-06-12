@@ -1262,7 +1262,58 @@ async function resyncDirectoryAfterReconnect(
     setIndexedSessionMessages(routingIndex, sessionId, directory, nextMessages)
   }))
 
-  await resyncBlockingRequestsForDirectory(directory, store, candidateSessionIds)
+  // Resync parent sessions to update tool parts that reference child sessions
+  // This covers SSE reconnect where child sessions complete during disconnect,
+  // but parent session tool parts don't get the updated tool state/output.
+  // IMPORTANT: Must run BEFORE ingestDirectoryStateIntoRoutingIndex so the
+  // routing index reflects the updated parent session messages/parts.
+  if (resyncedChildSessions.size > 0) {
+    const parentSessionIds = new Set<string>()
+    for (const childSessionId of resyncedChildSessions) {
+      const childSession = store.getState().session.find((s) => s.id === childSessionId)
+      if (childSession?.parentID) {
+        parentSessionIds.add(childSession.parentID)
+      }
+    }
+
+    await Promise.all(Array.from(parentSessionIds).map(async (parentSessionId) => {
+      const messageResponse = await retry(async () => {
+        const response = await scopedClient.session.messages({ sessionID: parentSessionId, limit: RECONNECT_MESSAGE_LIMIT })
+        assertSdkSuccess(response, "session.messages")
+        return response
+      }).catch(() => null)
+      const records = messageResponse?.data
+      if (!records) return
+
+      const nextMessages = records
+        .filter((record) => !!record?.info?.id)
+        .map((record) => stripMessageDiffSnapshots(record.info))
+        .sort((a, b) => cmp(a.id, b.id))
+      const nextMessageIds = new Set(nextMessages.map((message) => message.id))
+
+      store.setState((state: DirectoryStore) => {
+        const nextPartState = { ...state.part }
+        const previousMessages = state.message[parentSessionId] ?? []
+        for (const message of previousMessages) {
+          if (!nextMessageIds.has(message.id)) {
+            delete nextPartState[message.id]
+          }
+        }
+        for (const record of records) {
+          const messageId = record?.info?.id
+          if (!messageId) continue
+          nextPartState[messageId] = (record.parts ?? [])
+            .filter((part) => !!part?.id && !RECONNECT_SKIP_PARTS.has(part.type))
+            .sort((a: { id: string }, b: { id: string }) => cmp(a.id, b.id))
+        }
+
+        return {
+          message: { ...state.message, [parentSessionId]: nextMessages },
+          part: nextPartState,
+        }
+      })
+    }))
+  }
 
   ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
 

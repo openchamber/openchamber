@@ -178,6 +178,7 @@ const VSCODE_TASK_TOOL_IDLE_FETCH_LIMIT = 30;
 const TASK_TOOL_NO_CHANGE_BACKOFF_AFTER_POLLS = 3;
 const TASK_TOOL_SETTLE_GRACE_MS = 2500;
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"]);
+const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 const TASK_TOOL_FALLBACK_RETRY_MS = 3000;
 const GIT_REFRESH_MUTATING_TOOLS = new Set([
     'bash',
@@ -2584,25 +2585,8 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                 if (!targetRecord || !targetRecord.parts) return;
 
                 const fetchedParts = targetRecord.parts
-                    .filter((p) => !!p?.id && typeof p.type === 'string' && !SKIP_PARTS.has(p.type))
-                    .sort((a, b) => {
-                        const aId = String(a.id ?? '');
-                        const bId = String(b.id ?? '');
-                        return aId < bId ? -1 : aId > bId ? 1 : 0;
-                    });
-
-                // Preserve reference identity: only write if parts actually changed
-                const existingParts = childStores.getState(currentDirectory)?.part[targetMessageID];
-                if (existingParts && existingParts.length === fetchedParts.length) {
-                    let identical = true;
-                    for (let i = 0; i < existingParts.length; i++) {
-                        if (existingParts[i] !== fetchedParts[i]) {
-                            identical = false;
-                            break;
-                        }
-                    }
-                    if (identical) return;
-                }
+.filter((p) => !!p?.id && typeof p.type === 'string' && !SKIP_PARTS.has(p.type))
+.sort((a, b) => cmp(a.id, b.id))
 
                 childStores.update(currentDirectory, (prev) => ({
                     ...prev,
