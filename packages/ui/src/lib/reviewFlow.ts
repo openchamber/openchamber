@@ -12,10 +12,11 @@ import {
   withReviewSessionMarker,
 } from '@/lib/sessionReviewMetadata';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useContextStore } from '@/stores/contextStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { optimisticSend, patchSessionMetadata, waitForConnectionOrThrow } from '@/sync/session-actions';
+import { useSelectionStore } from '@/sync/selection-store';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { getSyncMessages, getSyncParts, registerSessionDirectory } from '@/sync/sync-refs';
 import { markPendingUserSendAnimation } from '@/lib/userSendAnimation';
 
@@ -74,23 +75,36 @@ const waitForAssistantText = async (sessionID: string, directory: string, afterC
 };
 
 const resolveModelContext = (sessionID: string): SessionModelContext | null => {
-  const context = useContextStore.getState();
+  const selection = useSelectionStore.getState();
   const config = useConfigStore.getState();
-  const agent = context.getSessionAgentSelection(sessionID) || config.currentAgentName || undefined;
-  const sessionModel = context.getSessionModelSelection(sessionID);
-  const agentModel = agent ? context.getAgentModelForSession(sessionID, agent) : null;
-  const selectedModel = agentModel || sessionModel || (config.currentProviderId && config.currentModelId
+  const lastChoice = useSessionUIStore.getState().getLastUserChoice(sessionID);
+  const agent = selection.getSessionAgentSelection(sessionID) || lastChoice?.agent || config.currentAgentName || undefined;
+  const sessionModel = selection.getSessionModelSelection(sessionID);
+  const agentModel = agent ? selection.getAgentModelForSession(sessionID, agent) : null;
+  const lastChoiceModel = lastChoice?.providerID && lastChoice.modelID
+    ? { providerId: lastChoice.providerID, modelId: lastChoice.modelID }
+    : null;
+  const selectedModel = agentModel || sessionModel || lastChoiceModel || (config.currentProviderId && config.currentModelId
     ? { providerId: config.currentProviderId, modelId: config.currentModelId }
     : null);
   if (!selectedModel?.providerId || !selectedModel?.modelId) return null;
-  const variant = agent
-    ? context.getAgentModelVariantForSession(sessionID, agent, selectedModel.providerId, selectedModel.modelId) || config.currentVariant || undefined
-    : config.currentVariant || undefined;
+  // Variants are model-specific; only reuse one resolved for the same model.
+  const selectionVariant = agent
+    ? selection.getAgentModelVariantForSession(sessionID, agent, selectedModel.providerId, selectedModel.modelId)
+    : undefined;
+  const lastChoiceVariant = lastChoiceModel
+    && lastChoiceModel.providerId === selectedModel.providerId
+    && lastChoiceModel.modelId === selectedModel.modelId
+    ? lastChoice?.variant
+    : undefined;
+  const configVariant = config.currentProviderId === selectedModel.providerId && config.currentModelId === selectedModel.modelId
+    ? config.currentVariant
+    : undefined;
   return {
     providerID: selectedModel.providerId,
     modelID: selectedModel.modelId,
     agent,
-    variant,
+    variant: selectionVariant || lastChoiceVariant || configVariant || undefined,
   };
 };
 
@@ -103,6 +117,13 @@ const sendPlainMessage = async (
 ): Promise<void> => {
   const resolved = modelContext ?? resolveModelContext(sessionID);
   if (!resolved) throw new Error('Select a model before sending review flow messages');
+  const selection = useSelectionStore.getState();
+  selection.saveSessionModelSelection(sessionID, resolved.providerID, resolved.modelID);
+  if (resolved.agent) {
+    selection.saveSessionAgentSelection(sessionID, resolved.agent);
+    selection.saveAgentModelForSession(sessionID, resolved.agent, resolved.providerID, resolved.modelID);
+    selection.saveAgentModelVariantForSession(sessionID, resolved.agent, resolved.providerID, resolved.modelID, resolved.variant);
+  }
   markPendingUserSendAnimation(sessionID);
   await optimisticSend({
     sessionId: sessionID,
@@ -198,6 +219,8 @@ export const startReviewFlow = async (input: StartReviewFlowInput): Promise<void
   await sendPlainMessage(reviewSession.id, input.directory, reviewPrompt, {
     providerID: input.providerID,
     modelID: input.modelID,
+    agent: input.agent,
+    variant: input.variant,
   });
   openReviewSessionPanel(input.directory, reviewSession);
 };

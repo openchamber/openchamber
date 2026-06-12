@@ -1,0 +1,38 @@
+---
+title: Accès distant
+description: Corrigez les tunnels, instances distantes et accès à OpenChamber depuis un autre appareil.
+---
+
+# Accès distant
+
+Quand vous ne pouvez pas joindre OpenChamber depuis votre téléphone ou une autre machine, la correction dépend de votre méthode de connexion.
+
+## Vérifiez d’abord les bases
+
+- ouvrez d’abord `http://localhost:3000` sur le même ordinateur — si cela échoue, ce n’est pas un problème distant ; voir [Connexion à OpenCode](/troubleshooting/opencode-connection/)
+- confirmez que le serveur tourne avec `openchamber status`
+
+## Le lien de tunnel ne fonctionne pas
+
+- lancez `openchamber tunnel status --all`
+- redémarrez le tunnel depuis la même instance et le même port
+- régénérez le lien de connexion si le précédent a déjà été utilisé
+
+Voir [Tunnels](/tunnels/) pour la configuration complète.
+
+## L’instance distante ne se connecte pas (desktop)
+
+Quand une [instance distante](/remote-instances/) bloque, OpenChamber nomme l’étape qui a échoué :
+
+- **auth** — votre mot de passe SSH ou UI a été refusé ; saisissez-le à nouveau
+- **install / start** — OpenChamber n’a pas pu configurer ou démarrer le serveur sur la machine distante ; vérifiez les prérequis de cette machine
+- **forwarding** — la connexion est établie mais le port ne vous rejoint pas ; essayez un autre port local
+
+## Derrière votre propre serveur
+
+Si vous placez OpenChamber derrière un reverse proxy et qu’il se charge bizarrement ou ne se connecte pas, consultez [Reverse proxy](/reverse-proxy/).
+
+## Pages liées
+
+- [Tunnels](/tunnels/) · [Instances distantes](/remote-instances/) · [Reverse proxy](/reverse-proxy/)
+- [Sécurité](/security/) — protéger l’UI avant de l’exposer

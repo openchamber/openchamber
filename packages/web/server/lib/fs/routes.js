@@ -1,6 +1,80 @@
 import { createRealpathCache } from '../path-realpath-cache.js';
+import nodeFsPromises from 'node:fs/promises';
+import nodePath from 'node:path';
 
 const EXEC_JOB_TTL_MS = 30 * 60 * 1000;
+const OUTSIDE_FILE_GRANT_TTL_MS = 10 * 60 * 1000;
+
+const outsideFileGrants = new Map();
+
+const pruneOutsideFileGrants = () => {
+  const now = Date.now();
+  for (const [token, grant] of outsideFileGrants.entries()) {
+    if (!grant || grant.expiresAt <= now) {
+      outsideFileGrants.delete(token);
+    }
+  }
+};
+
+export const mintOutsideFileGrant = async (targetPath, {
+  scopes = ['stat', 'read', 'raw'],
+  fsPromises = nodeFsPromises,
+  path = nodePath,
+  crypto = globalThis.crypto,
+} = {}) => {
+  const raw = typeof targetPath === 'string' ? targetPath.trim() : '';
+  if (!raw) {
+    throw new Error('Path is required');
+  }
+  const canonicalPath = await fsPromises.realpath(raw);
+  const stats = await fsPromises.stat(canonicalPath);
+  if (!stats.isFile()) {
+    throw new Error('Outside file grants require a file path');
+  }
+  pruneOutsideFileGrants();
+  const token = typeof crypto?.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const normalizedScopes = new Set(
+    (Array.isArray(scopes) ? scopes : [])
+      .filter((scope) => typeof scope === 'string' && scope.trim())
+      .map((scope) => scope.trim())
+  );
+  if (normalizedScopes.size === 0) {
+    normalizedScopes.add('read');
+  }
+  const grant = {
+    canonicalPath,
+    base: path.dirname(canonicalPath),
+    scopes: normalizedScopes,
+    expiresAt: Date.now() + OUTSIDE_FILE_GRANT_TTL_MS,
+  };
+  outsideFileGrants.set(token, grant);
+  return {
+    path: canonicalPath,
+    outsideFileGrant: token,
+    expiresAt: grant.expiresAt,
+  };
+};
+
+const resolveOutsideFileGrant = async ({ token, targetPath, scope, fsPromises }) => {
+  pruneOutsideFileGrants();
+  if (typeof token !== 'string' || !token.trim()) {
+    return { ok: false, error: 'Outside workspace file access requires a grant' };
+  }
+  const grant = outsideFileGrants.get(token.trim());
+  if (!grant) {
+    return { ok: false, error: 'Outside workspace file grant is invalid or expired' };
+  }
+  if (!grant.scopes.has(scope)) {
+    return { ok: false, error: 'Outside workspace file grant does not allow this operation' };
+  }
+  const canonicalPath = await fsPromises.realpath(targetPath);
+  if (canonicalPath !== grant.canonicalPath) {
+    return { ok: false, error: 'Outside workspace file grant does not match requested path' };
+  }
+  return { ok: true, base: grant.base, resolved: canonicalPath, granted: true };
+};
 
 const createCommandTimeoutMs = () => {
   const raw = Number(process.env.OPENCHAMBER_FS_EXEC_TIMEOUT_MS);
@@ -175,14 +249,19 @@ const escapeCloneSshKeyPath = (sshKeyPath) => {
   return `'${normalized.replace(/'/g, "'\\''")}'`;
 };
 
-const resolveReadPathFromContext = async ({ req, targetPath, resolveProjectDirectory, path, os, normalizeDirectoryPath, openchamberUserConfigRoot }) => {
+const resolveReadPathFromContext = async ({ req, targetPath, scope, resolveProjectDirectory, path, os, fsPromises, normalizeDirectoryPath, openchamberUserConfigRoot }) => {
   if (req.query?.allowOutsideWorkspace === 'true') {
     const normalized = normalizeDirectoryPath(targetPath);
     if (!normalized || typeof normalized !== 'string') {
       return { ok: false, error: 'Path is required' };
     }
     const resolved = path.resolve(normalized);
-    return { ok: true, base: path.dirname(resolved), resolved };
+    return resolveOutsideFileGrant({
+      token: req.query?.outsideFileGrant,
+      targetPath: resolved,
+      scope,
+      fsPromises,
+    });
   }
 
   return resolveWorkspacePathFromContext({
@@ -451,7 +530,8 @@ export const registerFsRoutes = (app, dependencies) => {
 
       let resolvedPath = '';
       if (allowOutsideWorkspace) {
-        resolvedPath = path.resolve(normalizeDirectoryPath(dirPath));
+        console.warn('Rejected outside-workspace mkdir without trusted directory grant');
+        return res.status(403).json({ error: 'Outside workspace directory creation requires a grant' });
       } else {
         const resolved = await resolveWorkspacePathFromContext({
           req,
@@ -595,13 +675,18 @@ export const registerFsRoutes = (app, dependencies) => {
       const resolved = await resolveReadPathFromContext({
         req,
         targetPath: filePath,
+        scope: 'stat',
         resolveProjectDirectory,
         path,
         os,
+        fsPromises,
         normalizeDirectoryPath,
         openchamberUserConfigRoot,
       });
       if (!resolved.ok) {
+        if (req.query?.allowOutsideWorkspace === 'true') {
+          console.warn(`Rejected outside-workspace stat: ${resolved.error}`);
+        }
         return res.status(400).json({ error: resolved.error });
       }
 
@@ -644,13 +729,18 @@ export const registerFsRoutes = (app, dependencies) => {
       const resolved = await resolveReadPathFromContext({
         req,
         targetPath: filePath,
+        scope: 'read',
         resolveProjectDirectory,
         path,
         os,
+        fsPromises,
         normalizeDirectoryPath,
         openchamberUserConfigRoot,
       });
       if (!resolved.ok) {
+        if (req.query?.allowOutsideWorkspace === 'true') {
+          console.warn(`Rejected outside-workspace read: ${resolved.error}`);
+        }
         return res.status(400).json({ error: resolved.error });
       }
 
@@ -710,13 +800,18 @@ export const registerFsRoutes = (app, dependencies) => {
       const resolved = await resolveReadPathFromContext({
         req,
         targetPath: filePath,
+        scope: 'raw',
         resolveProjectDirectory,
         path,
         os,
+        fsPromises,
         normalizeDirectoryPath,
         openchamberUserConfigRoot,
       });
       if (!resolved.ok) {
+        if (req.query?.allowOutsideWorkspace === 'true') {
+          console.warn(`Rejected outside-workspace raw read: ${resolved.error}`);
+        }
         return res.status(400).json({ error: resolved.error });
       }
 
@@ -745,6 +840,7 @@ export const registerFsRoutes = (app, dependencies) => {
         '.ico': 'image/x-icon',
         '.bmp': 'image/bmp',
         '.avif': 'image/avif',
+        '.pdf': 'application/pdf',
       };
       const mimeType = mimeMap[ext] || 'application/octet-stream';
 
@@ -756,6 +852,9 @@ export const registerFsRoutes = (app, dependencies) => {
 
       const content = await fsPromises.readFile(canonicalPath);
       res.setHeader('Cache-Control', 'no-store');
+      if (resolved.granted) {
+        res.setHeader('Referrer-Policy', 'no-referrer');
+      }
       return res.type(mimeType).send(content);
     } catch (error) {
       const err = error;
@@ -989,7 +1088,25 @@ export const registerFsRoutes = (app, dependencies) => {
     pruneGitReadCache();
 
     try {
-      const resolvedCwd = path.resolve(normalizeDirectoryPath(cwd));
+      if (background === true) {
+        console.warn('Rejected background /api/fs/exec request');
+        return res.status(400).json({ error: 'Background command execution is not allowed' });
+      }
+      const resolvedCwdCandidate = path.resolve(normalizeDirectoryPath(cwd));
+      const resolvedForWorkspace = await resolveWorkspacePathFromContext({
+        req,
+        targetPath: resolvedCwdCandidate,
+        resolveProjectDirectory,
+        path,
+        os,
+        normalizeDirectoryPath,
+        openchamberUserConfigRoot,
+      });
+      if (!resolvedForWorkspace.ok) {
+        console.warn(`Rejected /api/fs/exec outside workspace: ${resolvedForWorkspace.error}`);
+        return res.status(403).json({ error: resolvedForWorkspace.error });
+      }
+      const resolvedCwd = resolvedForWorkspace.resolved;
       const stats = await fsPromises.stat(resolvedCwd);
       if (!stats.isDirectory()) {
         return res.status(400).json({ error: 'Specified cwd is not a directory' });
@@ -1015,7 +1132,7 @@ export const registerFsRoutes = (app, dependencies) => {
 
       execJobs.set(jobId, job);
 
-      const isBackground = background === true;
+      const isBackground = false;
       if (isBackground) {
         void runExecJob(job).catch((error) => {
           job.status = 'done';

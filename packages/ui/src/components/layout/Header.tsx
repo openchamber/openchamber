@@ -37,6 +37,7 @@ import { UpdateDialog } from '@/components/ui/UpdateDialog';
 import { useDeviceInfo, useTabletStandalonePwaRuntime } from '@/lib/device';
 import { cn, hasModifier } from '@/lib/utils';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
+import { McpIcon } from '@/components/icons/McpIcon';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
 import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
@@ -68,7 +69,6 @@ import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
 import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag, type UpdateInfo } from '@/lib/desktop';
 import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
-import { resolveSessionDiffStats } from '@/components/session/sidebar/utils';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -186,11 +186,14 @@ const DesktopGitHubControl = React.memo(function DesktopGitHubControl({
           {githubAccounts.map((account) => {
             const accountUser = account.user;
             const isCurrent = Boolean(account.current);
+            const sourceLabel = account.source === 'gh-cli'
+              ? t('header.github.accountSource.cli')
+              : t('header.github.accountSource.oauth');
             return (
               <DropdownMenuItem
                 key={account.id}
                 className="gap-2"
-                disabled={isCurrent || isSwitchingGitHubAccount}
+                disabled={isSwitchingGitHubAccount}
                 onSelect={() => {
                   if (!isCurrent) {
                     void handleGitHubAccountSwitch(account.id);
@@ -215,8 +218,10 @@ const DesktopGitHubControl = React.memo(function DesktopGitHubControl({
                     {accountUser?.name?.trim() || accountUser?.login || 'GitHub'}
                   </span>
                   {accountUser?.login ? (
-                    <span className="truncate typography-micro font-mono text-muted-foreground">
-                      {accountUser.login}
+                    <span className="truncate typography-micro text-muted-foreground">
+                      <span className="font-mono">{accountUser.login}</span>
+                      <span className="mx-1 opacity-50">·</span>
+                      <span>{sourceLabel}</span>
                     </span>
                   ) : null}
                 </span>
@@ -1283,17 +1288,6 @@ export const Header: React.FC<HeaderProps> = ({
     return trimmedTitle && trimmedTitle.length > 0 ? trimmedTitle : 'Untitled Session';
   }, [activeProjectLabel, currentSession?.title, currentSessionId]);
 
-  const currentSessionDiffStats = React.useMemo(() => {
-    return resolveSessionDiffStats(currentSession?.summary as Parameters<typeof resolveSessionDiffStats>[0]);
-  }, [currentSession?.summary]);
-
-  const currentSessionChanges = React.useMemo(() => {
-    if (currentSessionDiffStats) {
-      return currentSessionDiffStats;
-    }
-    return { additions: 0, deletions: 0 };
-  }, [currentSessionDiffStats]);
-  const hasNonZeroSessionChanges = currentSessionChanges.additions > 0 || currentSessionChanges.deletions > 0;
 
   const actionDirectory = React.useMemo(() => {
     return normalize(openDirectory || activeProject?.path || '');
@@ -1776,13 +1770,13 @@ export const Header: React.FC<HeaderProps> = ({
   }, [activeMainTab, isMobile, setActiveMainTab]);
 
   const servicesTabs = React.useMemo(() => {
-    const base: Array<{ value: 'instance' | 'usage' | 'mcp'; label: string; icon: IconName }> = [];
+    const base: Array<{ value: 'instance' | 'usage' | 'mcp'; label: string; icon: React.ReactNode }> = [];
     if (isDesktopApp) {
-      base.push({ value: 'instance', label: t('layout.services.instance'), icon: "server" });
+      base.push({ value: 'instance', label: t('layout.services.instance'), icon: <Icon name="server" className="h-3.5 w-3.5" /> });
     }
     base.push(
-      { value: 'usage', label: t('layout.services.usage'), icon: "timer" },
-      { value: 'mcp', label: 'MCP', icon: "plug-2" }
+      { value: 'usage', label: t('layout.services.usage'), icon: <Icon name="timer" className="h-3.5 w-3.5" /> },
+      { value: 'mcp', label: 'MCP', icon: <McpIcon className="h-3.5 w-3.5" /> }
     );
     return base;
   }, [isDesktopApp, t]);
@@ -1791,7 +1785,7 @@ export const Header: React.FC<HeaderProps> = ({
     return servicesTabs.map((tab) => ({
       id: tab.value,
       label: tab.label,
-      icon: <Icon name={tab.icon} className="h-3.5 w-3.5" />,
+      icon: tab.icon,
     }));
   }, [servicesTabs]);
 
@@ -1866,7 +1860,7 @@ export const Header: React.FC<HeaderProps> = ({
   const mobileServicesTabItems = React.useMemo<SortableTabsStripItem[]>(() => {
     return [
       { id: 'usage', label: t('layout.services.usage'), icon: <Icon name="timer" className="h-3.5 w-3.5" /> },
-      { id: 'mcp', label: 'MCP', icon: <Icon name="command" className="h-3.5 w-3.5" /> },
+      { id: 'mcp', label: 'MCP', icon: <McpIcon className="h-3.5 w-3.5" /> },
     ];
   }, [t]);
 
@@ -2134,20 +2128,13 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="truncate typography-ui-label text-[14px] font-normal leading-tight text-foreground max-w-full">
               {isNewSessionDraftOpen ? t('sessions.switcher.draftTitle') : currentSessionTitle}
             </span>
-            {(activeProjectLabel || currentBranchLabel || (!isNewSessionDraftOpen && (hasNonZeroSessionChanges || worktreeBadgeKind))) ? (
+            {(activeProjectLabel || currentBranchLabel || (!isNewSessionDraftOpen && worktreeBadgeKind)) ? (
               <span className="flex min-w-0 max-w-full items-center gap-1.5 truncate typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">
                 {activeProjectLabel ? <span className="truncate">{activeProjectLabel}</span> : null}
                 {currentBranchLabel ? (
                   <span className="inline-flex min-w-0 items-center gap-0.5">
                     <Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
                     <span className="truncate">{currentBranchLabel}</span>
-                  </span>
-                ) : null}
-                {!isNewSessionDraftOpen && hasNonZeroSessionChanges ? (
-                  <span className="inline-flex flex-shrink-0 items-center gap-0 text-[0.92em]">
-                    <span className="text-status-success/80">+{currentSessionChanges.additions}</span>
-                    <span className="text-muted-foreground/60">/</span>
-                    <span className="text-status-error/65">-{currentSessionChanges.deletions}</span>
                   </span>
                 ) : null}
                 {!isNewSessionDraftOpen && worktreeBadgeKind ? (

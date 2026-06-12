@@ -1,0 +1,49 @@
+---
+title: Fournisseurs, modèles et agents
+description: Connectez des fournisseurs IA, choisissez des modèles et configurez des agents.
+---
+
+# Fournisseurs, modèles et agents
+
+Avant qu’OpenChamber puisse faire quoi que ce soit, au moins un fournisseur IA doit être connecté. Cette page explique comment connecter un fournisseur, choisir un modèle et adapter les agents.
+
+## Connecter un fournisseur
+
+1. Ouvrez **Paramètres → Fournisseurs**.
+2. Ouvrez le menu **Add provider** et choisissez un fournisseur qui n’est pas encore connecté.
+3. Connectez-vous de l’une des deux façons, selon le fournisseur :
+   - **API key** — collez votre clé et enregistrez.
+   - **Sign-in (device flow)** — OpenChamber affiche un lien et un code court. Ouvrez le lien, saisissez le code et approuvez. OpenChamber termine la connexion tout seul.
+
+Quand un fournisseur apparaît comme connecté, ses modèles deviennent disponibles dans le chat.
+
+Pour vous déconnecter, ouvrez le fournisseur et choisissez de supprimer sa connexion.
+
+## Choisir un modèle
+
+Vous choisissez le modèle là où vous travaillez :
+
+- dans le chat, utilisez le sélecteur de modèle dans la barre de message pour définir le fournisseur et le modèle de cette session
+- par agent, définissez un modèle par défaut (ci-dessous)
+
+## Configurer des agents
+
+Un agent est une configuration nommée — un modèle, une personnalité et ce qu’il est autorisé à faire.
+
+1. Ouvrez **Paramètres → Agents**.
+2. Choisissez un agent ou créez-en un nouveau.
+3. Modifiez au besoin :
+   - **description** — à quoi sert l’agent
+   - **model** — son modèle par défaut
+   - **temperature** — le niveau de créativité de ses réponses
+   - **prompt** — les instructions permanentes qu’il suit toujours
+   - **tool rules** — les outils qu’il peut utiliser
+
+## Où vivent vos connexions
+
+Les connexions aux fournisseurs sont stockées par OpenCode, pas OpenChamber ; elles sont donc partagées avec la CLI OpenCode. Si vous définissez le même fournisseur à plusieurs endroits, le réglage le plus spécifique gagne : un réglage par projet remplace votre réglage personnel.
+
+## Pages liées
+
+- [Serveurs MCP](/mcp/) — ajouter des outils supplémentaires aux agents
+- [Utilisation et quotas](/usage/) — suivre votre consommation

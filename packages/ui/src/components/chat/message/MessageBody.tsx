@@ -969,7 +969,7 @@ const AssistantMessageBody = React.memo(({
     errorVariant = 'error',
     reviewTransferDirection = null,
 }: Omit<MessageBodyProps, 'isUser'>) => {
-    const { t } = useI18n();
+    const { t, locale } = useI18n();
     const chatSurfaceMode = useChatSurfaceMode();
     const streamPhase = _streamPhase;
     void _allowAnimation;
@@ -1879,6 +1879,7 @@ const AssistantMessageBody = React.memo(({
     }, [isLastAssistantInTurn, hasStopFinish, turnGroupingContext?.userMessageCreatedAt, messageCompletedAt]);
 
     const footerTimestamp = React.useMemo(() => {
+        void locale;
         const timestamp = typeof messageCompletedAt === 'number' && messageCompletedAt > 0
             ? messageCompletedAt
             : (typeof messageCreatedAt === 'number' && messageCreatedAt > 0 ? messageCreatedAt : null);
@@ -1886,7 +1887,7 @@ const AssistantMessageBody = React.memo(({
 
         const formatted = formatTimestampForDisplay(timestamp, timeFormatPreference);
         return formatted.length > 0 ? formatted : null;
-    }, [messageCompletedAt, messageCreatedAt, timeFormatPreference]);
+    }, [messageCompletedAt, messageCreatedAt, timeFormatPreference, locale]);
 
     const footerTimestampClassName = 'text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1';
     const canOpenMessagePreview = !isMiniChatSurface && !isMobile && !isVSCode;

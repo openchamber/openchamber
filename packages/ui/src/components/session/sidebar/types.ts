@@ -1,13 +1,6 @@
 import type { Session } from '@opencode-ai/sdk/v2';
 import type { WorktreeMetadata } from '@/types/worktree';
 
-export type SessionSummaryMeta = {
-  additions?: number | string | null;
-  deletions?: number | string | null;
-  files?: number | null;
-  diffs?: Array<{ additions?: number | string | null; deletions?: number | string | null }>;
-};
-
 export type SessionNode = {
   session: Session;
   children: SessionNode[];

@@ -4,6 +4,8 @@ import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive } f
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { getSyncChildStores, getAllSyncSessions } from '@/sync/sync-refs';
+import { opencodeClient } from '@/lib/opencode/client';
+import { useGlobalSessionStatusStore, applyGlobalSessionStatusSnapshot } from '@/sync/global-session-status';
 import { useNotificationStore } from '@/sync/notification-store';
 import { respondToPermission } from '@/sync/session-actions';
 import {
@@ -236,8 +238,18 @@ const collectLiveData = (): LiveData => {
     for (const session of state.session) {
       if (!session?.id) continue;
       titleById.set(session.id, session.title);
-      const type = state.session_status[session.id]?.type;
-      statusById.set(session.id, type === 'busy' ? 'busy' : type === 'retry' ? 'retry' : 'idle');
+    }
+
+    // Status comes from the status map itself, NOT from the session list — a
+    // just-created session can have a live status entry before (or without)
+    // appearing in this store's list, and the same session can be listed by
+    // several stores. Never let one store's missing/idle entry clobber another
+    // store's busy/retry.
+    for (const [sessionId, status] of Object.entries(state.session_status ?? {})) {
+      const type = status?.type;
+      const mapped: TraySessionStatus = type === 'busy' ? 'busy' : type === 'retry' ? 'retry' : 'idle';
+      const existing = statusById.get(sessionId);
+      if (!existing || existing === 'idle') statusById.set(sessionId, mapped);
     }
 
     for (const [sessionId, requests] of Object.entries(state.permission ?? {})) {
@@ -257,6 +269,46 @@ const collectLiveData = (): LiveData => {
   }
 
   return { statusById, branchByDirectory, approvals, titleById };
+};
+
+// Status for sessions outside the synced child stores arrives two ways, both
+// landing in useGlobalSessionStatusStore (the fallback in the rollup below):
+//  - live: the global event stream carries status events for every directory;
+//    the sync dispatcher routes the ones without a child store into the store;
+//  - polled: events only deliver changes, so an initial per-directory snapshot
+//    seeds the state and a slow poll reconciles anything missed. Per directory
+//    because the upstream `/session/status` endpoint is directory-scoped
+//    (querying it without a directory covers only the server's own cwd, NOT
+//    all projects).
+
+// Directories worth polling: everywhere the tray's visible sessions live —
+// including synced ones, so the poll reconciles any status event a child
+// store missed (e.g. a session created from another window mid-race). Returns
+// each directory with the session ids the global list places there, so the
+// snapshot can authoritatively clear stale entries by session id.
+const collectStatusPollDirectories = (): Map<string, string[]> => {
+  const allSessions = useGlobalSessionsStore.getState().activeSessions;
+  const rootDirs = new Set<string>();
+  allSessions
+    .filter((s) => s?.id && !s.parentID)
+    .slice()
+    .sort((a, b) => updatedAt(b) - updatedAt(a))
+    .slice(0, MAX_SESSIONS)
+    .forEach((session) => {
+      const directory = resolveGlobalSessionDirectory(session);
+      if (directory) rootDirs.add(directory);
+    });
+
+  const targets = new Map<string, string[]>();
+  for (const session of allSessions) {
+    if (!session?.id) continue;
+    const directory = resolveGlobalSessionDirectory(session);
+    if (!directory || !rootDirs.has(directory)) continue;
+    const ids = targets.get(directory) ?? [];
+    ids.push(session.id);
+    targets.set(directory, ids);
+  }
+  return targets;
 };
 
 const buildSnapshot = (instanceName: string): TraySnapshot => {
@@ -294,8 +346,19 @@ const buildSnapshot = (instanceName: string): TraySnapshot => {
     return out;
   };
 
+  // A session is active if EITHER source says so: the synced child stores
+  // (instant, but can miss sessions created outside this window) or the
+  // cross-project status map (event-driven for every directory + polled
+  // reconciliation). Requiring agreement would re-introduce the gaps.
+  const globalStatusById = useGlobalSessionStatusStore.getState().statusById;
+  const resolveStatus = (id: string): TraySessionStatus => {
+    const fromStores = live.statusById.get(id);
+    if (fromStores && fromStores !== 'idle') return fromStores;
+    return globalStatusById.get(id)?.status ?? fromStores ?? 'idle';
+  };
+
   const rollupStatus = (family: string[]): TraySessionStatus => {
-    const statuses = family.map((id) => live.statusById.get(id) ?? 'idle');
+    const statuses = family.map((id) => resolveStatus(id));
     if (statuses.includes('busy')) return 'busy';
     if (statuses.includes('retry')) return 'retry';
     return 'idle';
@@ -339,7 +402,6 @@ export const useTraySync = (): void => {
     // The active instance is fixed per window load (switching hosts re-navigates
     // the window, remounting this hook). Resolve it once, then re-push.
     let instanceName = '';
-
     const flushNow = () => {
       if (disposed) return;
       const snapshot = buildSnapshot(instanceName);
@@ -354,6 +416,21 @@ export const useTraySync = (): void => {
       instanceName = name;
       flushNow();
     });
+
+    // Seed + reconcile the cross-project status map. The live path is the
+    // global event stream (captured by the sync dispatcher); this poll covers
+    // sessions already busy before this window opened and any missed events.
+    // Cheap: ~ms per directory, bounded by the tray's visible session count.
+    const refreshGlobalStatus = async () => {
+      const targets = collectStatusPollDirectories();
+      await Promise.all([...targets.entries()].map(async ([directory, sessionIds]) => {
+        // null = fetch failed → keep that directory's current entries;
+        // {} = authoritative "everything here is idle".
+        const raw = await opencodeClient.getSessionStatusForDirectory(directory).catch(() => null);
+        if (disposed || raw === null) return;
+        applyGlobalSessionStatusSnapshot(directory, raw, sessionIds);
+      }));
+    };
 
     // Coalesce bursts (e.g. token-by-token streaming updates a store rapidly)
     // into a single push, while staying near-instant for discrete events like
@@ -414,12 +491,20 @@ export const useTraySync = (): void => {
     const unsubscribeProjects = useProjectsStore.subscribe(() => scheduleFlush());
     const unsubscribeWorktrees = useSessionUIStore.subscribe(() => scheduleFlush());
     const unsubscribeGit = useGitStore.subscribe(() => scheduleFlush());
+    // Cross-project status map: fed live by the sync dispatcher from the global
+    // event stream, and seeded/reconciled by the poll below.
+    const unsubscribeGlobalStatus = useGlobalSessionStatusStore.subscribe(() => scheduleFlush());
 
     // Make the tray self-sufficient: load the full cross-project list now
     // (independent of the sidebar) and refresh it periodically so sessions from
     // directories this client never opened still show up and stay current.
     void ensureGlobalSessionsLoaded(getAllSyncSessions());
     const refreshInterval = window.setInterval(() => { void refreshGlobalSessions(); }, GLOBAL_REFRESH_MS);
+
+    // Global busy/retry status: fetch now and poll, so unsynced sessions don't
+    // sit looking idle. Synced directories stay instant via their SSE stores.
+    void refreshGlobalStatus();
+    const globalStatusInterval = window.setInterval(() => { void refreshGlobalStatus(); }, POLL_INTERVAL_MS);
 
     // Usage: push to the tray whenever the quota store changes, and do one
     // initial fetch for enabled providers so the submenu isn't empty on launch.
@@ -449,12 +534,14 @@ export const useTraySync = (): void => {
       if (flushTimer !== null) window.clearTimeout(flushTimer);
       window.clearInterval(interval);
       window.clearInterval(refreshInterval);
+      window.clearInterval(globalStatusInterval);
       window.clearInterval(usageRefreshTick);
       unsubscribeNotif();
       unsubscribeGlobal();
       unsubscribeProjects();
       unsubscribeWorktrees();
       unsubscribeGit();
+      unsubscribeGlobalStatus();
       unsubscribeQuota();
       unsubscribeRegistry?.();
       for (const unsub of storeUnsubs.values()) unsub();

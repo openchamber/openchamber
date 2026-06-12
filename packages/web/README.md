@@ -16,7 +16,7 @@ curl -fsSL https://raw.githubusercontent.com/btriapitsyn/openchamber/main/script
 
 Or install manually: `bun add -g @openchamber/web` (or npm, pnpm, yarn).
 
-> **Prerequisites:** [OpenCode CLI](https://opencode.ai) installed, Node.js 20+.
+> **Prerequisites:** [OpenCode CLI](https://opencode.ai) installed, Node.js 22+.
 
 ## Usage
 

@@ -31,6 +31,9 @@ export const ProviderLogo: React.FC<ProviderLogoProps> = ({
             src={src}
             alt={alt || `${providerId} logo`}
             className={cn('dark:invert object-contain', className)}
+            loading="eager"
+            decoding="async"
+            fetchPriority="high"
             onError={handleError}
         />
     );

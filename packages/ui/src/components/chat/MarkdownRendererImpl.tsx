@@ -19,6 +19,11 @@ import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
 import { getExternalFaviconUrl, isExternalHttpUrl, isLoopbackHttpUrl, openExternalUrl } from '@/lib/url';
+import {
+  buildAgentMentionUrl,
+  parseAgentHref,
+  parseSkillHref,
+} from '@/lib/messages/inlineMessageLinks';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import { generateSyntaxTheme } from '@/lib/theme/syntaxThemeGenerator';
@@ -28,8 +33,9 @@ import { useDeviceInfo } from '@/lib/device';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { EditorAPI } from '@/lib/api/types';
-import { isVSCodeRuntime } from '@/lib/desktop';
-import { getDirectoryForFilePath, isAbsoluteFilePath, normalizeFilePath, toAbsoluteFilePath } from '@/lib/path-utils';
+import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
+import { ensureOutsideFileGrantForDesktop } from '@/lib/outsideFileGrants';
+import { getDirectoryForFilePath, isAbsoluteFilePath, isFilePathWithinDirectory, normalizeFilePath, toAbsoluteFilePath } from '@/lib/path-utils';
 
 const useCurrentMermaidTheme = () => {
   const themeSystem = useOptionalThemeSystem();
@@ -1000,6 +1006,38 @@ const buildMarkdownComponents = ({
   },
   a({ href, children, ...props }) {
     const targetHref = href ?? '';
+    const agentName = parseAgentHref(targetHref);
+    if (agentName) {
+      return (
+        <a
+          {...props}
+          href={buildAgentMentionUrl(agentName)}
+          data-openchamber-agent-mention="true"
+          className={cn('text-primary hover:underline', props.className)}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(event) => event.stopPropagation()}
+        >
+          {children}
+        </a>
+      );
+    }
+
+    const skillName = parseSkillHref(targetHref);
+    if (skillName) {
+      return (
+        <a
+          {...props}
+          href={targetHref}
+          data-skill-name={skillName}
+          className={cn('text-primary hover:underline', props.className)}
+          onClick={(event) => event.stopPropagation()}
+        >
+          {children}
+        </a>
+      );
+    }
+
     const isExternal = isExternalHttpUrl(targetHref);
     const isLoopback = onPreviewLoopback ? isLoopbackHttpUrl(targetHref) : false;
     return (
@@ -1334,7 +1372,7 @@ const fileReferenceExists = (resolvedPath: string): Promise<boolean> => {
 };
 
 const getContextDirectory = (effectiveDirectory: string, resolvedPath: string): string => {
-  return getDirectoryForFilePath(effectiveDirectory, resolvedPath);
+  return effectiveDirectory || getDirectoryForFilePath(effectiveDirectory, resolvedPath);
 };
 
 const useFileReferenceInteractions = ({
@@ -1404,7 +1442,14 @@ const useFileReferenceInteractions = ({
 
         linkedCount += 1;
 
-        void fileReferenceExists(resolved.resolvedPath).then((exists) => {
+        const canGrantOutsideFile = isDesktopShell()
+          && isDesktopLocalOriginActive()
+          && !isFilePathWithinDirectory(resolved.resolvedPath, effectiveDirectory);
+        const existsPromise = canGrantOutsideFile
+          ? Promise.resolve(true)
+          : fileReferenceExists(resolved.resolvedPath);
+
+        void existsPromise.then((exists) => {
           if (cancelled || !exists || !container.contains(candidate)) {
             return;
           }
@@ -1427,7 +1472,7 @@ const useFileReferenceInteractions = ({
       }
     };
 
-    const openFileReference = (sourceElement: HTMLElement) => {
+    const openFileReference = async (sourceElement: HTMLElement) => {
       const raw = sourceElement.getAttribute('data-openchamber-file-ref') || extractPathCandidateFromElement(sourceElement);
       const resolved = getResolvedReference(raw, effectiveDirectory);
       if (!resolved) {
@@ -1446,6 +1491,10 @@ const useFileReferenceInteractions = ({
             : undefined,
         );
         return;
+      }
+
+      if (!isFilePathWithinDirectory(resolved.resolvedPath, effectiveDirectory)) {
+        await ensureOutsideFileGrantForDesktop(resolved.resolvedPath, effectiveDirectory);
       }
 
       const uiStore = useUIStore.getState();
@@ -1477,7 +1526,7 @@ const useFileReferenceInteractions = ({
       event.preventDefault();
       event.stopPropagation();
 
-      openFileReference(fileRefElement);
+      void openFileReference(fileRefElement);
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1493,7 +1542,7 @@ const useFileReferenceInteractions = ({
       event.preventDefault();
       event.stopPropagation();
 
-      openFileReference(target);
+      void openFileReference(target);
     };
 
     annotateFileLinks();

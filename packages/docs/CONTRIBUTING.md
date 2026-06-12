@@ -202,12 +202,13 @@ other language mirrors the English files under a locale folder.
 | Brazilian Portuguese | `pt-br/` | `pt-BR` |
 | Korean | `ko/` | `ko` |
 | Polish | `pl/` | `pl` |
+| French | `fr/` | `fr` |
 
 > [!IMPORTANT]
 > The **content folder** uses the lowercase locale key (`zh-cn`, `pt-br`); the
 > **sidebar `translations`** key uses the BCP-47 language tag (`zh-CN`, `pt-BR`).
 > They look similar but are not interchangeable — Starlight resolves them with
-> different rules. Everything else (`uk`, `es`, `ko`, `pl`, `en`) is identical
+> different rules. Everything else (`uk`, `es`, `ko`, `pl`, `fr`, `en`) is identical
 > in both columns.
 
 This locale set is mirrored in the website at
@@ -228,6 +229,7 @@ content/docs/
   pt-br/install.mdx        # Brazilian Portuguese
   ko/install.mdx           # Korean
   pl/install.mdx           # Polish
+  fr/install.mdx           # French
 
   guides/tunnels.mdx       # nested English page
   uk/guides/tunnels.mdx    # its Ukrainian translation
@@ -263,7 +265,8 @@ to each section and item in `sidebar.config.json`:
     "es": "Empieza aquí",
     "pt-BR": "Comece aqui",
     "ko": "여기서 시작",
-    "pl": "Zacznij tutaj"
+    "pl": "Zacznij tutaj",
+    "fr": "Commencer ici"
   },
   "items": [
     {
@@ -275,7 +278,8 @@ to each section and item in `sidebar.config.json`:
         "es": "Instalación",
         "pt-BR": "Instalação",
         "ko": "설치",
-        "pl": "Instalacja"
+        "pl": "Instalacja",
+        "fr": "Installation"
       }
     }
   ]

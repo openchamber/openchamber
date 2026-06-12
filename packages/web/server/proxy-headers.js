@@ -1,4 +1,8 @@
 const filteredRequestHeaders = new Set([
+  // Client credentials for the OpenChamber server (UI client tokens) must
+  // never reach the managed OpenCode upstream — it only accepts its own auth,
+  // so a forwarded client bearer turns every upstream response into a 401.
+  'authorization',
   'host',
   'connection',
   'content-length',

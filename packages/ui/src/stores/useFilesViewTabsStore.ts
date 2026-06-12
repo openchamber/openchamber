@@ -15,10 +15,10 @@ type FilesViewTabsState = {
 };
 
 type FilesViewTabsActions = {
-  addOpenPath: (root: string, path: string) => void;
+  addOpenPath: (root: string, path: string, options?: { allowOutsideRoot?: boolean }) => void;
   removeOpenPath: (root: string, path: string) => void;
   removeOpenPathsByPrefix: (root: string, prefixPath: string) => void;
-  setSelectedPath: (root: string, path: string | null) => void;
+  setSelectedPath: (root: string, path: string | null, options?: { allowOutsideRoot?: boolean }) => void;
   ensureSelectedPath: (root: string) => void;
   toggleExpandedPath: (root: string, path: string) => void;
   expandPath: (root: string, path: string) => void;
@@ -163,10 +163,10 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
       (set, get) => ({
         byRoot: {},
 
-        addOpenPath: (root, path) => {
+        addOpenPath: (root, path, options) => {
           const normalizedRoot = normalizePath((root || '').trim());
           const normalizedPath = normalizePath((path || '').trim());
-          if (!normalizedRoot || !normalizedPath || !isPathWithinRoot(normalizedPath, normalizedRoot)) {
+          if (!normalizedRoot || !normalizedPath || (!options?.allowOutsideRoot && !isPathWithinRoot(normalizedPath, normalizedRoot))) {
             return;
           }
 
@@ -270,10 +270,10 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
           });
         },
 
-        setSelectedPath: (root, path) => {
+        setSelectedPath: (root, path, options) => {
           const normalizedRoot = normalizePath((root || '').trim());
           const normalizedPath = path ? normalizePath(path.trim()) : null;
-          if (!normalizedRoot || (normalizedPath && !isPathWithinRoot(normalizedPath, normalizedRoot))) {
+          if (!normalizedRoot || (normalizedPath && !options?.allowOutsideRoot && !isPathWithinRoot(normalizedPath, normalizedRoot))) {
             return;
           }
 
@@ -424,7 +424,7 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
             byRoot: sanitizeByRoot(rawByRoot),
           };
         },
-        partialize: (state) => ({ byRoot: state.byRoot }),
+        partialize: (state) => ({ byRoot: sanitizeByRoot(state.byRoot) }),
       }
     ),
     { name: 'files-view-tabs-store' }

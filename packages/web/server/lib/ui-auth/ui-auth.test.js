@@ -191,14 +191,16 @@ describe('ui auth client credential seam', () => {
     expect(arbitraryGetCalled).toBe(false);
     expect(arbitraryGetRes.statusCode).toBe(401);
 
-    const postReq = { method: 'POST', path: '/api/config/settings', url: `/api/config/settings?oc_url_token=${encodeURIComponent(urlToken)}`, headers: { accept: 'application/json' } };
-    const postRes = createResponse();
-    let postCalled = false;
-    await auth.requireAuth(postReq, postRes, () => {
-      postCalled = true;
-    });
-    expect(postCalled).toBe(false);
-    expect(postRes.statusCode).toBe(401);
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+      const writeReq = { method, path: '/api/fs/raw', url: `/api/fs/raw?path=%2Ftmp%2Fimage.png&oc_url_token=${encodeURIComponent(urlToken)}`, headers: { accept: 'application/json' } };
+      const writeRes = createResponse();
+      let writeCalled = false;
+      await auth.requireAuth(writeReq, writeRes, () => {
+        writeCalled = true;
+      });
+      expect(writeCalled).toBe(false);
+      expect(writeRes.statusCode).toBe(401);
+    }
   });
 
   it('issues desktop client tokens with the UI session expiry', async () => {

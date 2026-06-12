@@ -221,6 +221,7 @@ function isServerConfig(val: Record<string, unknown>): boolean {
  *
  * Supported shapes:
  *   { "mcpServers": { "name": { ... } } }
+ *   { "mcp": { "name": { ... } } }
  *   { "name": { ... } }
  *   { ...serverConfig }
  */
@@ -266,6 +267,29 @@ export function parseImportedMcpSnippet(
     const entry = mcpServers[serverName];
     if (!isObject(entry)) {
       return buildError('Server entry is not a valid object', parsed);
+    }
+    return buildResult(serverName, inferType(entry as Record<string, unknown>), entry as Record<string, unknown>);
+  }
+
+  // Detect OpenCode config shape { "mcp": { "name": { ... } } }
+  const mcp = obj.mcp;
+  if (isObject(mcp)) {
+    const keys = Object.keys(mcp);
+    if (keys.length === 0) {
+      return buildError('mcp object is empty', parsed);
+    }
+    if (keys.length > 1) {
+      return buildError(
+        'Paste one server at a time. Found ' +
+          keys.length +
+          ' servers in mcp',
+        parsed,
+      );
+    }
+    const serverName = keys[0]!;
+    const entry = mcp[serverName];
+    if (!isObject(entry)) {
+      return buildError('Server entry in mcp is not a valid object', parsed);
     }
     return buildResult(serverName, inferType(entry as Record<string, unknown>), entry as Record<string, unknown>);
   }

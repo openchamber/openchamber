@@ -33,6 +33,7 @@ import { useConfigStore } from "@/stores/useConfigStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { toast } from "@/components/ui"
 import { appendNotification } from "./notification-store"
+import { applyGlobalSessionStatusEvent } from "./global-session-status"
 import type { State } from "./types"
 import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type { PermissionRequest } from "@/types/permission"
@@ -1274,6 +1275,11 @@ function handleEvent(
   }
 
   applySessionEventToGlobalSessions(payload)
+  // Keep the cross-project status map current for ALL directories (mirrors the
+  // global-session handling above). Child stores remain the primary source for
+  // synced directories; this map covers sessions a child store doesn't list
+  // (unopened directories, or list/status races for just-created sessions).
+  applyGlobalSessionStatusEvent(directory, payload)
 
   // Global events
   if (directory === "global" || !directory) {

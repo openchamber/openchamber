@@ -43,5 +43,6 @@ Your goal is to create a minimal, working reproduction of the reported bug and l
 
 - Do not fix the bug. Only reproduce it.
 - Keep comments concise and factual.
+- Never post test, probe, placeholder, or debugging comments.
 - If the issue lacks enough detail to even attempt reproduction, say so and ask for the minimum needed.
 - Use the GitHub CLI (`gh`) to inspect the issue, list labels, add labels, and leave comments.

@@ -20,7 +20,7 @@ import { DrawerProvider } from '@/contexts/DrawerContext';
 
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useUpdateStore } from '@/stores/useUpdateStore';
+import { useUpdatePolling } from '@/hooks/useUpdatePolling';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
@@ -219,41 +219,7 @@ export const MainLayout: React.FC = () => {
         }
     }, [isMobile, isSettingsDialogOpen, isRightSidebarOpen, setMobileSessionPanelOpen, setRightSidebarOpen]);
 
-    // Trigger initial update check shortly after mount, then repeat using server-suggested cadence.
-    const checkForUpdates = useUpdateStore((state) => state.checkForUpdates);
-    React.useEffect(() => {
-        const initialDelayMs = 3000;
-        const defaultIntervalMs = 60 * 60 * 1000;
-        const minIntervalMs = 5 * 60 * 1000;
-        const maxIntervalMs = 24 * 60 * 60 * 1000;
-        let disposed = false;
-        let timer: number | null = null;
-
-        const clampIntervalMs = (seconds: number): number => {
-            const ms = Math.round(seconds * 1000);
-            return Math.max(minIntervalMs, Math.min(maxIntervalMs, ms));
-        };
-
-        const scheduleNext = (delayMs: number) => {
-            if (disposed) return;
-            timer = window.setTimeout(async () => {
-                const suggestedSec = await checkForUpdates();
-                const nextDelay = typeof suggestedSec === 'number' && Number.isFinite(suggestedSec)
-                    ? clampIntervalMs(suggestedSec)
-                    : defaultIntervalMs;
-                scheduleNext(nextDelay);
-            }, delayMs);
-        };
-
-        scheduleNext(initialDelayMs);
-
-        return () => {
-            disposed = true;
-            if (timer !== null) {
-                window.clearTimeout(timer);
-            }
-        };
-    }, [checkForUpdates]);
+    useUpdatePolling();
 
     React.useEffect(() => {
         const previous = useUIStore.getState().isMobile;

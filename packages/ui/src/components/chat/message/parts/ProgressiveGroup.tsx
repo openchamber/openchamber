@@ -19,11 +19,12 @@ import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
+import { ensureOutsideFileGrantForDesktop } from '@/lib/outsideFileGrants';
 import ReasoningPart from './ReasoningPart';
 import JustificationBlock from './JustificationBlock';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { getExternalFaviconUrl } from '@/lib/url';
-import { getDirectoryForFilePath, getRelativeFilePath, normalizeFilePath, toAbsoluteFilePath } from '@/lib/path-utils';
+import { getDirectoryForFilePath, getRelativeFilePath, isFilePathWithinDirectory, normalizeFilePath, toAbsoluteFilePath } from '@/lib/path-utils';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-4 sm:!leading-6 tracking-normal';
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
@@ -635,6 +636,19 @@ const StaticToolRowInner: React.FC<{
 
         if (runtime?.editor) {
             void runtime.editor.openFile(absolutePath, offset);
+            return;
+        }
+
+        if (!isFilePathWithinDirectory(absolutePath, currentDirectory)) {
+            void ensureOutsideFileGrantForDesktop(absolutePath, currentDirectory).then(() => {
+                const uiStore = useUIStore.getState();
+                const contextDirectory = currentDirectory || getDirectoryForFilePath(currentDirectory, absolutePath);
+                if (offset && Number.isFinite(offset)) {
+                    uiStore.openContextFileAtLine(contextDirectory, absolutePath, Math.max(1, Math.trunc(offset)), 1);
+                    return;
+                }
+                uiStore.openContextFile(contextDirectory, absolutePath);
+            });
             return;
         }
 
