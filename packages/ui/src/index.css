@@ -360,6 +360,39 @@ textarea[data-chat-input="true"]:focus-visible {
 }
 
 
+@keyframes tooltip-text-fade-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-tooltip-fade-in {
+  animation: tooltip-text-fade-in 150ms ease-out forwards;
+}
+
+
+@keyframes tooltip-button-shake {
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  20% {
+    transform: rotate(-15deg);
+  }
+  60% {
+    transform: rotate(15deg);
+  }
+}
+
+.animate-button-shake {
+  animation: tooltip-button-shake 300ms ease-in-out;
+}
+
+
 @keyframes spin-once {
   from {
     transform: rotate(0deg);
@@ -689,6 +722,16 @@ html:not(.dark) .chat-scroll {
 .overlay-scrollbar__thumb:active {
   background: var(--oc-scrollbar-thumb-hover);
   opacity: 1;
+}
+
+.overlay-scrollbar__track:hover .overlay-scrollbar__thumb {
+  background: var(--oc-scrollbar-thumb-hover) !important;
+  opacity: 1 !important;
+}
+
+.overlay-scrollbar__track:hover .overlay-scrollbar__thumb-visual,
+.overlay-scrollbar__thumb-wrapper:hover .overlay-scrollbar__thumb-visual {
+  background-color: var(--oc-scrollbar-thumb-hover) !important;
 }
 
 .overlay-scrollbar__thumb--horizontal {
@@ -1595,6 +1638,12 @@ html.desktop-runtime
   cursor: default;
 }
 html.desktop-runtime [class*="cursor-pointer"] {
+  cursor: default !important;
+}
+html.desktop-runtime [data-chat-navigation-button="true"][data-interactive="true"] {
+  cursor: pointer !important;
+}
+html.desktop-runtime [data-chat-navigation-button="true"][data-interactive="false"] {
   cursor: default !important;
 }
 html.desktop-runtime .markdown-content [data-openchamber-file-link="true"] {
