@@ -650,9 +650,14 @@ export const SidebarFilesTree: React.FC = () => {
         // Feed autocomplete suggestions from this result set
         setSuggestionExtensions(suggestExtensions(hits, ''));
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         if (!cancelled) {
-          toast.error(t('sidebarFilesTree.toast.searchFailed'));
+          const isTimeout = err instanceof DOMException && err.name === 'TimeoutError';
+          toast.error(
+            isTimeout
+              ? t('sidebarFilesTree.toast.searchTimedOut')
+              : t('sidebarFilesTree.toast.searchFailed')
+          );
         }
       })
       .finally(() => {

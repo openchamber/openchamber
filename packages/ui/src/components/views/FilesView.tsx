@@ -1486,9 +1486,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         // Feed autocomplete suggestions from this result set
         setSuggestionExtensions(suggestExtensions(hits, ''));
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         if (!cancelled) {
-          toast.error(t('filesView.tree.filter.searchFailed'));
+          const isTimeout = err instanceof DOMException && err.name === 'TimeoutError';
+          toast.error(
+            isTimeout
+              ? t('filesView.tree.filter.searchTimedOut')
+              : t('filesView.tree.filter.searchFailed')
+          );
         }
       })
       .finally(() => {
