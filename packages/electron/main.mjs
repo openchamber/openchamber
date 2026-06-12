@@ -3975,6 +3975,14 @@ const isLocalSender = (webContents) => {
     const url = new URL(raw);
     if (url.protocol === `${UI_PROTOCOL}:` && url.hostname === 'app') return true;
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+
+    if (isDev) {
+      const hmrUiPort = process.env.OPENCHAMBER_HMR_UI_PORT || '5173';
+      if (url.origin === `http://127.0.0.1:${hmrUiPort}` || url.origin === `http://localhost:${hmrUiPort}`) {
+        return true;
+      }
+    }
+
     if (state.localOrigin) {
       try {
         const allowed = new URL(state.localOrigin);
