@@ -59,7 +59,13 @@ import { buildCodeMirrorCommentWidgets, normalizeLineRange, useInlineCommentCont
 import { opencodeClient } from '@/lib/opencode/client';
 import { useDirectoryShowHidden, setDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { useFilesViewShowGitignored, setFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
-import { parseExtQualifiers, filterByExtensions, removeExtQualifier } from '@/lib/fileFilterQualifiers';
+import {
+  filterByExtensions,
+  parseFileSearchQualifiers,
+  removeExtQualifier,
+  removePathQualifier,
+  resolvePathScopedDirectory,
+} from '@/lib/fileFilterQualifiers';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
@@ -685,10 +691,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [searchQuery, setSearchQuery] = React.useState('');
   const debouncedSearchQuery = useDebouncedValue(searchQuery, 200);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
-  const activeExtensions = React.useMemo(
-    () => parseExtQualifiers(searchQuery.trim()).extensions,
+  const activeQualifiers = React.useMemo(
+    () => parseFileSearchQualifiers(searchQuery.trim()),
     [searchQuery]
   );
+  const activeExtensions = activeQualifiers.extensions;
+  const activePathScope = activeQualifiers.pathScope;
 
   const [showMobilePageContent, setShowMobilePageContent] = React.useState(false);
   const [wrapLines, setWrapLines] = React.useState(true);
@@ -1409,13 +1417,19 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       return;
     }
 
-    const { cleanQuery, extensions } = parseExtQualifiers(trimmedQuery);
+    const { cleanQuery, extensions, pathScope } = parseFileSearchQualifiers(trimmedQuery);
+    const scopedDirectory = resolvePathScopedDirectory(currentDirectory, pathScope);
+    if (!scopedDirectory) {
+      setSearchResults([]);
+      setSearching(false);
+      return;
+    }
     const serverQuery = cleanQuery.length > 0 ? cleanQuery : '*';
 
     let cancelled = false;
     setSearching(true);
 
-    searchFiles(currentDirectory, serverQuery, 150, {
+    searchFiles(scopedDirectory, serverQuery, 150, {
       includeHidden: showHidden,
       respectGitignore: !showGitignored,
       type: 'file',
@@ -3882,6 +3896,26 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                 {showGitignored ? t('filesView.tree.filter.hideGitignored') : t('filesView.tree.filter.showGitignored')}
               </TooltipContent>
             </Tooltip>
+          {activePathScope && (
+            <>
+              <div className="mx-0.5 h-4 w-px bg-border/60" aria-hidden="true" />
+              <span className="inline-flex items-center gap-0.5 rounded bg-[var(--interactive-selection)] px-1.5 py-0.5 text-[11px] leading-none text-[var(--interactive-selection-foreground)]">
+                <Icon name="folder" className="size-3" />
+                <span className="max-w-32 truncate font-mono" title={activePathScope}>{activePathScope}</span>
+                <button
+                  type="button"
+                  className="ml-0.5 inline-flex size-3 items-center justify-center rounded-sm opacity-70 hover:opacity-100"
+                  onClick={() => {
+                    setSearchQuery(removePathQualifier(searchQuery));
+                    searchInputRef.current?.focus();
+                  }}
+                  aria-label={t('filesView.tree.filter.pathChipRemoveAria', { path: activePathScope })}
+                >
+                  <Icon name="close" className="size-2.5" />
+                </button>
+              </span>
+            </>
+          )}
           {activeExtensions.length > 0 && (
             <>
               <div className="mx-0.5 h-4 w-px bg-border/60" aria-hidden="true" />
