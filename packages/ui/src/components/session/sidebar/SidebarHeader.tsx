@@ -13,6 +13,7 @@ import { Icon } from "@/components/icon/Icon";
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
+import { LabelFilter } from './LabelFilter';
 
 type Props = {
   hideDirectoryControls: boolean;
@@ -285,6 +286,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
           </div>
         ) : null}
       </div>
+      <LabelFilter />
     </div>
   );
 }
