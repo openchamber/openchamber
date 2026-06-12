@@ -98,6 +98,63 @@ describe('session runtime', () => {
     });
   });
 
+  it('recovers from idle within cooldown window when busy arrives (Issue #1630 context)', () => {
+    vi.useFakeTimers();
+    const events = [];
+    const runtime = createSessionRuntime({
+      writeSseEvent() {
+        throw new Error('SSE fallback should not be used when broadcastEvent is provided');
+      },
+      getNotificationClients: () => new Set(),
+      broadcastEvent: (payload) => {
+        events.push(payload);
+      },
+    });
+
+    try {
+      runtime.processOpenCodeSsePayload({
+        type: 'session.status',
+        properties: {
+          sessionID: 'session-activity-1',
+          status: { type: 'busy' },
+        },
+      });
+
+      // SDK emits idle between internal turns
+      runtime.processOpenCodeSsePayload({
+        type: 'session.status',
+        properties: {
+          sessionID: 'session-activity-1',
+          status: { type: 'idle' },
+        },
+      });
+
+      // Model resumes within 2 seconds → busy event comes before cooldown expires
+      vi.advanceTimersByTime(500);
+      runtime.processOpenCodeSsePayload({
+        type: 'session.status',
+        properties: {
+          sessionID: 'session-activity-1',
+          status: { type: 'busy' },
+        },
+      });
+
+      const activityPhases = () => events
+        .filter((event) => event.type === 'openchamber:session-activity')
+        .map((event) => event.properties.phase);
+
+      // The session goes back to busy instead of continuing to idle
+      expect(activityPhases()).toEqual(['busy', 'cooldown', 'busy']);
+
+      // Wait well past the cooldown timer — should NOT transition to idle
+      vi.advanceTimersByTime(5000);
+      expect(activityPhases()).toEqual(['busy', 'cooldown', 'busy']);
+    } finally {
+      runtime.dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it('broadcasts idle activity when cooldown expires', () => {
     vi.useFakeTimers();
     const events = [];
