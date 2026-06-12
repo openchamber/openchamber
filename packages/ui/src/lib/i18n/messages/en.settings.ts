@@ -47,6 +47,7 @@ export const settingsDict = {
   'settings.page.chat.title': 'Chat',
   'settings.page.shortcuts.title': 'Shortcuts',
   'settings.page.sessions.title': 'Sessions',
+  'settings.page.labels.title': 'Labels',
   'settings.page.magicPrompts.title': 'Magic Prompts',
   'settings.page.notifications.title': 'Notifications',
   'settings.page.voice.title': 'Voice',

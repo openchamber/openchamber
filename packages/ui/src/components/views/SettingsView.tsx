@@ -86,6 +86,7 @@ const pageOrder: SettingsPageSlug[] = [
   'chat',
   'notifications',
   'sessions',
+  'labels',
   'shortcuts',
   'git',
   'magic-prompts',
@@ -185,6 +186,8 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
       return 'command';
     case 'sessions':
       return 'chat-history';
+    case 'labels':
+      return 'palette';
 
     case 'providers':
       return 'cloud';
@@ -476,6 +479,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     chat: 'chat',
     shortcuts: 'shortcuts',
     sessions: 'sessions',
+    labels: 'labels',
     notifications: 'notifications',
     voice: 'voice',
     tunnel: 'tunnel',
@@ -515,6 +519,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return t('settings.page.shortcuts.title');
       case 'sessions':
         return t('settings.page.sessions.title');
+      case 'labels':
+        return t('settings.page.labels.title');
       case 'magic-prompts':
         return t('settings.page.magicPrompts.title');
       case 'snippets':
@@ -812,6 +818,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       case 'chat':
       case 'shortcuts':
       case 'sessions':
+      case 'labels':
       case 'notifications':
       case 'voice':
       case 'tunnel': {

@@ -18,6 +18,7 @@ export type SettingsPageSlug =
   | 'chat'
   | 'shortcuts'
   | 'sessions'
+  | 'labels'
   | 'magic-prompts'
   | 'snippets'
   | 'notifications'
@@ -175,6 +176,13 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     group: 'general',
     kind: 'single',
     keywords: ['defaults', 'default agent', 'default model', 'retention', 'memory', 'limits', 'zen'],
+  },
+  {
+    slug: 'labels',
+    title: 'Labels',
+    group: 'general',
+    kind: 'single',
+    keywords: ['label', 'color', 'tag', 'session', 'category'],
   },
   {
     slug: 'magic-prompts',
