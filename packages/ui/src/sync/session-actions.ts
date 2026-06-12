@@ -483,6 +483,12 @@ export async function deleteSession(sessionId: string, _options?: Record<string,
     return true
   } catch (error) {
     console.error("[session-actions] deleteSession failed", error)
+    // The server cascade-deletes child sessions when the parent is removed.
+    // Subsequent delete attempts for those children return 404; treat as
+    // success since the session was already deleted by the cascade.
+    if ((error as { status?: number })?.status === 404) {
+      return true
+    }
     restoreSessionListSnapshots(snapshots)
     restoreGlobalSessionSnapshot(globalSnapshot)
     return false
@@ -507,6 +513,9 @@ export async function deleteSessionInDirectory(sessionId: string, directory: str
     return true
   } catch (error) {
     console.error("[session-actions] deleteSessionInDirectory failed", error)
+    if ((error as { status?: number })?.status === 404) {
+      return true
+    }
     restoreSessionListSnapshots(snapshots)
     restoreGlobalSessionSnapshot(globalSnapshot)
     return false
