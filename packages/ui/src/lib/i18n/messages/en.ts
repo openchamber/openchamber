@@ -1974,6 +1974,8 @@ export const dict = {
   'chat.messageBody.shellCommand.showOutput': 'Show output',
   'chat.messageBody.shellCommand.copied': 'Copied',
   'chat.messageBody.shellCommand.copyOutput': 'Copy output',
+  'chat.userText.previous': 'Previous message',
+  'chat.userText.next': 'Next message',
   'commandPalette.title': 'Command Palette',
   'commandPalette.description': 'Search files, sessions, and commands.',
   'commandPalette.input.placeholder': 'Search files, sessions, commands...',

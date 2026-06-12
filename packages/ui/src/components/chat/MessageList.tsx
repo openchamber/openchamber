@@ -420,6 +420,12 @@ export interface MessageListHandle {
     scrollToBottom: () => void;
 }
 
+export interface UserMessageNavInfo {
+    previousUserMessageId?: string;
+    nextUserMessageId?: string;
+    scrollToUserMessage: (messageId: string) => void;
+}
+
 type RenderEntry =
     | {
         kind: 'ungrouped';
@@ -448,6 +454,8 @@ interface MessageRowProps {
     animationHandlers: AnimationHandlers;
     scrollToBottom?: () => void;
     reviewTransferDirection?: ReviewTransferDirection | null;
+    userNavigationById?: Map<string, { previousUserMessageId?: string; nextUserMessageId?: string }>;
+    scrollToUserMessage?: (messageId: string) => void;
 }
 
 const MessageRow = React.memo<MessageRowProps>(({ 
@@ -464,7 +472,20 @@ const MessageRow = React.memo<MessageRowProps>(({
     animationHandlers,
     scrollToBottom,
     reviewTransferDirection,
+    userNavigationById,
+    scrollToUserMessage,
 }) => {
+    const userMessageNavInfo = React.useMemo(() => {
+        if (resolveMessageRole(message) !== 'user' || !userNavigationById || !scrollToUserMessage) return undefined;
+        const nav = userNavigationById.get(message.info.id);
+        if (!nav) return undefined;
+        return {
+            previousUserMessageId: nav.previousUserMessageId,
+            nextUserMessageId: nav.nextUserMessageId,
+            scrollToUserMessage,
+        };
+    }, [message, userNavigationById, scrollToUserMessage]);
+
     return (
         <ChatMessage
             message={message}
@@ -480,6 +501,7 @@ const MessageRow = React.memo<MessageRowProps>(({
             isInActiveTurn={isInActiveTurn}
             activeStreamingPhase={activeStreamingPhase}
             reviewTransferDirection={reviewTransferDirection}
+            userMessageNavInfo={userMessageNavInfo}
         />
     );
 }, (prev, next) => {
@@ -526,6 +548,8 @@ interface TurnBlockProps {
     activeStreamingMessageId?: string | null;
     activeStreamingPhase?: StreamPhase | null;
     reviewTransferDirection?: ReviewTransferDirection | null;
+    userNavigationById?: Map<string, { previousUserMessageId?: string; nextUserMessageId?: string }>;
+    scrollToUserMessage?: (messageId: string) => void;
 }
 
 const TurnBlock = React.memo(({
@@ -545,6 +569,8 @@ const TurnBlock = React.memo(({
     activeStreamingMessageId,
     activeStreamingPhase,
     reviewTransferDirection,
+    userNavigationById,
+    scrollToUserMessage,
 }: TurnBlockProps) => {
     const turnUiState = turnUiStates.get(turn.turnId) ?? { isExpanded: defaultActivityExpanded };
     const handleToggleTurnGroup = React.useCallback(() => {
@@ -771,6 +797,8 @@ const TurnBlock = React.memo(({
                     onContentChange={onMessageContentChange}
                     animationHandlers={getAnimationHandlers(message.info.id)}
                     scrollToBottom={scrollToBottom}
+                    userNavigationById={userNavigationById}
+                    scrollToUserMessage={scrollToUserMessage}
                 />
             );
         },
@@ -800,6 +828,8 @@ const TurnBlock = React.memo(({
             shouldAnimateUserMessage,
             onUserAnimationConsumed,
             handleToggleTurnGroup,
+            userNavigationById,
+            scrollToUserMessage,
         ]
     );
 
@@ -832,6 +862,8 @@ interface UngroupedMessageRowProps {
     activeStreamingMessageId?: string | null;
     activeStreamingPhase?: StreamPhase | null;
     reviewTransferDirection?: ReviewTransferDirection | null;
+    userNavigationById?: Map<string, { previousUserMessageId?: string; nextUserMessageId?: string }>;
+    scrollToUserMessage?: (messageId: string) => void;
 }
 
 const UngroupedMessageRow = React.memo(({
@@ -846,6 +878,8 @@ const UngroupedMessageRow = React.memo(({
     activeStreamingMessageId,
     activeStreamingPhase,
     reviewTransferDirection,
+    userNavigationById,
+    scrollToUserMessage,
 }: UngroupedMessageRowProps) => {
     return (
         <MessageRow
@@ -860,6 +894,8 @@ const UngroupedMessageRow = React.memo(({
             isInActiveTurn={Boolean(activeStreamingMessageId) && message.info.id === activeStreamingMessageId}
             activeStreamingPhase={message.info.id === activeStreamingMessageId ? activeStreamingPhase : null}
             reviewTransferDirection={reviewTransferDirection}
+            userNavigationById={userNavigationById}
+            scrollToUserMessage={scrollToUserMessage}
         />
     );
 });
@@ -882,6 +918,8 @@ interface MessageListEntryProps {
     activeStreamingMessageId?: string | null;
     activeStreamingPhase?: StreamPhase | null;
     reviewTransferDirection?: ReviewTransferDirection | null;
+    userNavigationById?: Map<string, { previousUserMessageId?: string; nextUserMessageId?: string }>;
+    scrollToUserMessage?: (messageId: string) => void;
 }
 
 const turnContainsMessageId = (turn: TurnRecord, messageId: string | null | undefined): boolean => {
@@ -912,6 +950,8 @@ const MessageListEntry = React.memo(({
     activeStreamingMessageId,
     activeStreamingPhase,
     reviewTransferDirection,
+    userNavigationById,
+    scrollToUserMessage,
 }: MessageListEntryProps) => {
     if (entry.kind === 'ungrouped') {
         return (
@@ -927,6 +967,8 @@ const MessageListEntry = React.memo(({
                 activeStreamingMessageId={activeStreamingMessageId}
                 activeStreamingPhase={activeStreamingPhase}
                 reviewTransferDirection={reviewTransferDirection}
+                userNavigationById={userNavigationById}
+                scrollToUserMessage={scrollToUserMessage}
             />
         );
     }
@@ -949,6 +991,8 @@ const MessageListEntry = React.memo(({
             getAnimationHandlers={getAnimationHandlers}
             scrollToBottom={scrollToBottom}
             stickyUserHeader={stickyUserHeader}
+            userNavigationById={userNavigationById}
+            scrollToUserMessage={scrollToUserMessage}
         />
     );
 });
@@ -975,9 +1019,11 @@ type StaticHistoryListProps = {
     onUserAnimationConsumed: (messageId: string) => void;
     activeStreamingPhase?: StreamPhase | null;
     reviewTransferDirection?: ReviewTransferDirection | null;
+    userNavigationById?: Map<string, { previousUserMessageId?: string; nextUserMessageId?: string }>;
+    scrollToUserMessage?: (messageId: string) => void;
 };
 
-const StaticHistoryList = React.memo(({ entries, shouldVirtualize, virtualRows, totalSize, measureElement, contentRef, onMessageContentChange, getAnimationHandlers, scrollToBottom, stickyUserHeader, defaultActivityExpanded, turnUiStates, onToggleTurnGroup, chatRenderMode, shouldAnimateUserMessage, onUserAnimationConsumed, activeStreamingPhase, reviewTransferDirection }: StaticHistoryListProps) => {
+const StaticHistoryList = React.memo(({ entries, shouldVirtualize, virtualRows, totalSize, measureElement, contentRef, onMessageContentChange, getAnimationHandlers, scrollToBottom, stickyUserHeader, defaultActivityExpanded, turnUiStates, onToggleTurnGroup, chatRenderMode, shouldAnimateUserMessage, onUserAnimationConsumed, activeStreamingPhase, reviewTransferDirection, userNavigationById, scrollToUserMessage }: StaticHistoryListProps) => {
     const renderEntry = React.useCallback((entry: RenderEntry) => {
         return (
             <MessageListEntry
@@ -997,9 +1043,11 @@ const StaticHistoryList = React.memo(({ entries, shouldVirtualize, virtualRows, 
                 activeStreamingMessageId={null}
                 activeStreamingPhase={activeStreamingPhase}
                 reviewTransferDirection={reviewTransferDirection}
+                userNavigationById={userNavigationById}
+                scrollToUserMessage={scrollToUserMessage}
             />
         );
-    }, [activeStreamingPhase, chatRenderMode, defaultActivityExpanded, getAnimationHandlers, onMessageContentChange, onToggleTurnGroup, onUserAnimationConsumed, reviewTransferDirection, scrollToBottom, shouldAnimateUserMessage, stickyUserHeader, turnUiStates]);
+    }, [activeStreamingPhase, chatRenderMode, defaultActivityExpanded, getAnimationHandlers, onMessageContentChange, onToggleTurnGroup, onUserAnimationConsumed, reviewTransferDirection, scrollToBottom, shouldAnimateUserMessage, stickyUserHeader, turnUiStates, userNavigationById, scrollToUserMessage]);
 
     const paddingTop = shouldVirtualize && virtualRows.length > 0
         ? virtualRows[0]?.start ?? 0
@@ -1081,6 +1129,8 @@ const StreamingTailContent: React.FC<{
     activeStreamingMessageId?: string | null;
     activeStreamingPhase?: StreamPhase | null;
     reviewTransferDirection?: ReviewTransferDirection | null;
+    userNavigationById?: Map<string, { previousUserMessageId?: string; nextUserMessageId?: string }>;
+    scrollToUserMessage?: (messageId: string) => void;
 }> = ({
     entry,
     onMessageContentChange,
@@ -1097,6 +1147,8 @@ const StreamingTailContent: React.FC<{
     activeStreamingMessageId,
     activeStreamingPhase,
     reviewTransferDirection,
+    userNavigationById,
+    scrollToUserMessage,
 }) => {
     return (
         <MessageListEntry
@@ -1115,6 +1167,8 @@ const StreamingTailContent: React.FC<{
             activeStreamingMessageId={activeStreamingMessageId}
             activeStreamingPhase={activeStreamingPhase}
             reviewTransferDirection={reviewTransferDirection}
+            userNavigationById={userNavigationById}
+            scrollToUserMessage={scrollToUserMessage}
         />
     );
 };
@@ -1467,6 +1521,20 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             .map((message) => message.info.id);
     }, [messages]);
 
+    const userNavigationById = React.useMemo(() => {
+        const navMap = new Map<string, { previousUserMessageId?: string; nextUserMessageId?: string }>();
+        const userOrder = currentUserOrder;
+        for (let i = 0; i < userOrder.length; i++) {
+            const id = userOrder[i];
+            if (!id) continue;
+            navMap.set(id, {
+                previousUserMessageId: i > 0 ? userOrder[i - 1] : undefined,
+                nextUserMessageId: i < userOrder.length - 1 ? userOrder[i + 1] : undefined,
+            });
+        }
+        return navMap;
+    }, [currentUserOrder]);
+
     // Detect new user messages SYNCHRONOUSLY during render.
     // Must happen during render (not in useEffect) so that ToolRevealOnMount
     // receives animate=true on the FIRST render of the new message,
@@ -1571,7 +1639,14 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return true;
     }, [findMessageElement, resolveScrollContainer]);
 
-    React.useEffect(() => {
+    const scrollToUserMessage = React.useCallback((messageId: string) => {
+        const index = messageIndexMap.get(messageId);
+        if (typeof index === 'number') {
+            scrollHistoryIndexIntoView(index, 'smooth');
+        }
+    }, [messageIndexMap, scrollHistoryIndexIntoView]);
+
+    React.useLayoutEffect(() => {
         if (!ref) {
             return;
         }
@@ -1738,6 +1813,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                             onUserAnimationConsumed={onUserAnimationConsumed}
                             activeStreamingPhase={activeStreamingPhase}
                             reviewTransferDirection={reviewTransferDirection}
+                            userNavigationById={userNavigationById}
+                            scrollToUserMessage={scrollToUserMessage}
                         />
                         {trailingStreamingEntry ? (
                             <StreamingTailContent
@@ -1756,6 +1833,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                                 activeStreamingMessageId={activeStreamingMessageId}
                                 activeStreamingPhase={activeStreamingPhase}
                                 reviewTransferDirection={reviewTransferDirection}
+                                userNavigationById={userNavigationById}
+                                scrollToUserMessage={scrollToUserMessage}
                             />
                         ) : null}
                     </div>

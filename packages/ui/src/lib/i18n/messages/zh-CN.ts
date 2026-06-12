@@ -1940,6 +1940,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.shellCommand.showOutput': '显示输出',
   'chat.messageBody.shellCommand.copied': '已复制',
   'chat.messageBody.shellCommand.copyOutput': '复制输出',
+  'chat.userText.previous': '上一条消息',
+  'chat.userText.next': '下一条消息',
   'commandPalette.title': '命令面板',
   'commandPalette.description': '搜索文件、会话和命令。',
   'commandPalette.input.placeholder': '搜索文件、会话、命令...',
