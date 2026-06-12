@@ -607,7 +607,7 @@ export const SidebarFilesTree: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [currentDirectory, debouncedSearchQuery, searchFiles, showHidden, showGitignored]);
+  }, [currentDirectory, debouncedSearchQuery, searchFiles, showHidden, showGitignored, t]);
 
   // --- Git status helpers (matching FilesView) ---
 

@@ -1443,7 +1443,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     return () => {
       cancelled = true;
     };
-  }, [currentDirectory, debouncedSearchQuery, searchFiles, showHidden, showGitignored]);
+  }, [currentDirectory, debouncedSearchQuery, searchFiles, showHidden, showGitignored, t]);
 
   const readFile = React.useCallback(async (path: string, options?: { allowOutsideWorkspace?: boolean; optional?: boolean }): Promise<string> => {
     if (files.readFile) {
