@@ -14,7 +14,7 @@ import { useSessions } from '@/sync/sync-context';
 import * as sessionActions from '@/sync/session-actions';
 import { useI18n } from '@/lib/i18n';
 import { serializeQuestionAsJson, serializeQuestionAsMarkdown } from './questionSerializers';
-import { getQuestionCustomTextareaHeight } from './questionTextareaSizing';
+import { QUESTION_CUSTOM_TEXTAREA_MIN_HEIGHT, getQuestionCustomTextareaHeight } from './questionTextareaSizing';
 
 interface QuestionCardProps {
   question: QuestionRequest;
@@ -40,7 +40,7 @@ const CustomAnswerTextarea = React.memo(function CustomAnswerTextarea({
 }: CustomAnswerTextareaProps) {
   const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
   const [localValue, setLocalValue] = React.useState(value);
-  const [height, setHeight] = React.useState(40);
+  const [height, setHeight] = React.useState(QUESTION_CUSTOM_TEXTAREA_MIN_HEIGHT);
   const [isScrollable, setIsScrollable] = React.useState(false);
 
   React.useEffect(() => {
@@ -231,6 +231,8 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
   const handleSelectCustom = React.useCallback(() => {
     setCustomMode((prev) => ({ ...prev, [activeIndex]: true }));
     setSelectedOptions((prev) => ({ ...prev, [activeIndex]: [] }));
+    const hasValue = (customTextRef.current[activeIndex] ?? '').trim().length > 0;
+    setCustomTextFilled((prev) => (prev[activeIndex] === hasValue ? prev : { ...prev, [activeIndex]: hasValue }));
   }, [activeIndex]);
 
   const handleCustomValueChange = React.useCallback((value: string) => {
