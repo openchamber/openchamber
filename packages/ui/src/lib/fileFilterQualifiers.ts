@@ -5,6 +5,11 @@ export interface ParsedQualifiers {
   extensions: string[];
 }
 
+function normalizeExtension(ext: string): string | null {
+  const normalized = ext.trim().replace(/^\.+/, '').toLowerCase();
+  return normalized.length > 0 ? normalized : null;
+}
+
 export function parseExtQualifiers(query: string): ParsedQualifiers {
   const extensions: string[] = [];
   let cleanQuery = query;
@@ -13,7 +18,10 @@ export function parseExtQualifiers(query: string): ParsedQualifiers {
   for (const match of matches) {
     const raw = match[1];
     if (raw.length === 0) continue;
-    const exts = raw.split(',').map((e) => e.trim()).filter(Boolean);
+    const exts = raw
+      .split(',')
+      .map(normalizeExtension)
+      .filter((ext): ext is string => Boolean(ext));
     extensions.push(...exts);
     cleanQuery = cleanQuery.replace(match[0], ' ');
   }
@@ -22,6 +30,17 @@ export function parseExtQualifiers(query: string): ParsedQualifiers {
     cleanQuery: cleanQuery.replace(/\s+/g, ' ').trim(),
     extensions: [...new Set(extensions)],
   };
+}
+
+export function removeExtQualifier(query: string, extToRemove: string): string {
+  const removeTarget = normalizeExtension(extToRemove);
+  if (!removeTarget) return query;
+
+  const { cleanQuery, extensions } = parseExtQualifiers(query);
+  const remaining = extensions.filter((ext) => ext !== removeTarget);
+  const qualifier = remaining.length > 0 ? `ext:${remaining.join(',')}` : '';
+
+  return [qualifier, cleanQuery].filter(Boolean).join(' ').trim();
 }
 
 export function filterByExtensions<T extends { extension?: string }>(
