@@ -124,4 +124,94 @@ export function filterByExtensions<T extends { extension?: string }>(
   });
 }
 
+/** True when the user is actively typing inside an `ext:` qualifier. */
+export function isTypingExtQualifier(query: string): boolean {
+  return /\bext:[a-zA-Z0-9.,_-]*$/.test(query);
+}
+
+/**
+ * Appends a selected extension into the query's `ext:` qualifier.
+ * Deduplicates — if the extension is already in the list, the query is unchanged.
+ *
+ * 'ext: auth' + 'ts'   → 'ext:ts auth'
+ * 'ext:t auth' + 'tsx'  → 'ext:tsx auth'
+ * 'ext:ts, auth' + 'tsx' → 'ext:ts,tsx auth'
+ * 'ext:ts auth' + 'ts'   → 'ext:ts auth'
+ */
+export function completeExtQualifier(query: string, extension: string): string {
+  const normalized = normalizeExtension(extension);
+  if (!normalized) return query;
+
+  // Match the last ext: qualifier pattern, allowing empty value (e.g. "ext:")
+  const EXT_WITH_VALUE = /(?:^|\s)(ext:([a-zA-Z0-9*.,_-]*))/g;
+
+  let lastMatch: RegExpExecArray | null = null;
+  let match: RegExpExecArray | null;
+  EXT_WITH_VALUE.lastIndex = 0;
+  while ((match = EXT_WITH_VALUE.exec(query)) !== null) {
+    lastMatch = match;
+  }
+
+  if (!lastMatch) {
+    return `${query} ext:${normalized}`.trim();
+  }
+
+  const raw = lastMatch[1];   // "ext:" or "ext:ts" or "ext:ts,"
+  const qualifierPrefix = lastMatch[0][0]; // ' ' (space before) or '' (start of string)
+  const valStr = lastMatch[2]; // "" or "ts" or "ts,"
+
+  // If value ends with comma, the user is adding another extension.
+  // Otherwise, the last value segment is being typed and should be replaced.
+  const isAdding = valStr.endsWith(',');
+
+  const currentParts = valStr
+    ? valStr.split(',').map((s) => s.trim()).filter(Boolean)
+    : [];
+
+  const normalizedCurrent = currentParts
+    .map((e) => normalizeExtension(e))
+    .filter((e): e is string => Boolean(e));
+
+  if (normalizedCurrent.includes(normalized)) return query;
+
+  let allExts: string[];
+
+  if (isAdding) {
+    allExts = [...normalizedCurrent, normalized];
+  } else if (normalizedCurrent.length > 0) {
+    // Replace the last (partial) value segment being typed
+    allExts = [...normalizedCurrent.slice(0, -1), normalized];
+  } else {
+    allExts = [normalized];
+  }
+
+  const replacement = `ext:${allExts.join(',')}`;
+  const matchIndex = lastMatch.index + (qualifierPrefix === ' ' ? 1 : 0);
+  return query.slice(0, matchIndex) + replacement + query.slice(matchIndex + raw.length);
+}
+
+/**
+ * Returns up to 5 extension suggestions from a list of hits,
+ * sorted by frequency (most common first), optionally filtered by prefix.
+ */
+export function suggestExtensions(
+  hits: Array<{ extension?: string }>,
+  prefix: string
+): string[] {
+  const counts = new Map<string, number>();
+  for (const hit of hits) {
+    if (!hit.extension) continue;
+    counts.set(hit.extension, (counts.get(hit.extension) ?? 0) + 1);
+  }
+
+  const ranked = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([ext]) => ext);
+
+  if (prefix.length === 0) return ranked.slice(0, 5);
+
+  const lower = prefix.toLowerCase();
+  return ranked.filter((ext) => ext.startsWith(lower)).slice(0, 5);
+}
+
 

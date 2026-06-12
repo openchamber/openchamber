@@ -1,12 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  completeExtQualifier,
   filterByExtensions,
+  isTypingExtQualifier,
   parseExtQualifiers,
   parseFileSearchQualifiers,
   removeExtQualifier,
   removePathQualifier,
   resolvePathScopedDirectory,
+  suggestExtensions,
 } from './fileFilterQualifiers';
 
 describe('parseExtQualifiers', () => {
@@ -132,6 +135,88 @@ describe('resolvePathScopedDirectory', () => {
   test('rejects traversal segments', () => {
     expect(resolvePathScopedDirectory('/repo', '../secret')).toBeNull();
     expect(resolvePathScopedDirectory('/repo', 'src/../secret')).toBeNull();
+  });
+});
+
+describe('isTypingExtQualifier', () => {
+  test('true when cursor is directly after ext:', () => {
+    expect(isTypingExtQualifier('ext:')).toBe(true);
+  });
+
+  test('true when mid-typing an extension value', () => {
+    expect(isTypingExtQualifier('ext:ts')).toBe(true);
+  });
+
+  test('true when mid-typing a comma-separated list', () => {
+    expect(isTypingExtQualifier('ext:ts,')).toBe(true);
+  });
+
+  test('false when ext: is followed by a space-terminated value', () => {
+    expect(isTypingExtQualifier('ext:ts auth')).toBe(false);
+  });
+
+  test('false when ext is not a qualifier', () => {
+    expect(isTypingExtQualifier('text:hello')).toBe(false);
+  });
+
+  test('false for a normal query', () => {
+    expect(isTypingExtQualifier('auth')).toBe(false);
+  });
+});
+
+describe('completeExtQualifier', () => {
+  test('inserts extension when ext: has no value yet', () => {
+    expect(completeExtQualifier('ext: auth', 'ts')).toBe('ext:ts auth');
+  });
+
+  test('replaces partial extension text', () => {
+    expect(completeExtQualifier('ext:t auth', 'tsx')).toBe('ext:tsx auth');
+  });
+
+  test('appends to existing comma-separated values', () => {
+    expect(completeExtQualifier('ext:ts, auth', 'tsx')).toBe('ext:ts,tsx auth');
+  });
+
+  test('deduplicates when extension is already in the list', () => {
+    expect(completeExtQualifier('ext:ts,tsx auth', 'ts')).toBe('ext:ts,tsx auth');
+  });
+
+  test('handles ext: at the end of the query', () => {
+    expect(completeExtQualifier('auth ext:', 'md')).toBe('auth ext:md');
+  });
+
+  test('normalizes dotted extension input', () => {
+    expect(completeExtQualifier('ext: auth', '.tsx')).toBe('ext:tsx auth');
+  });
+});
+
+describe('suggestExtensions', () => {
+  test('ranks extensions by frequency', () => {
+    const hits = [
+      { extension: 'ts' }, { extension: 'ts' }, { extension: 'ts' },
+      { extension: 'tsx' }, { extension: 'tsx' },
+      { extension: 'json' },
+    ];
+    expect(suggestExtensions(hits, '')).toEqual(['ts', 'tsx', 'json']);
+  });
+
+  test('filters by prefix', () => {
+    const hits = [
+      { extension: 'ts' }, { extension: 'tsx' }, { extension: 'json' },
+    ];
+    expect(suggestExtensions(hits, 't')).toEqual(['ts', 'tsx']);
+  });
+
+  test('returns empty array for empty hits', () => {
+    expect(suggestExtensions([], 'ts')).toEqual([]);
+  });
+
+  test('returns at most 5 suggestions', () => {
+    const hits = [
+      { extension: 'a' }, { extension: 'b' }, { extension: 'c' },
+      { extension: 'd' }, { extension: 'e' }, { extension: 'f' },
+    ];
+    expect(suggestExtensions(hits, '').length).toBe(5);
   });
 });
 
