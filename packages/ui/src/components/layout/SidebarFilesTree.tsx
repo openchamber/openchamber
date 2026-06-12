@@ -379,7 +379,7 @@ export const SidebarFilesTree: React.FC = () => {
   const activePathScope = activeQualifiers.pathScope;
   const [searchResults, setSearchResults] = React.useState<FileNode[]>([]);
   const [searching, setSearching] = React.useState(false);
-  const suggestionExtensionsRef = React.useRef<string[]>(STATIC_EXTENSION_SUGGESTIONS);
+  const [suggestionExtensions, setSuggestionExtensions] = React.useState<string[]>(STATIC_EXTENSION_SUGGESTIONS);
   const [autocompleteDismissed, setAutocompleteDismissed] = React.useState(false);
   const prevSearchQueryRef = React.useRef(searchQuery);
 
@@ -392,18 +392,19 @@ export const SidebarFilesTree: React.FC = () => {
   }, [searchQuery]);
 
   const autocompleteVisible = React.useMemo(
-    () => isTypingExtQualifier(searchQuery.trim()) && !autocompleteDismissed,
+    () => isTypingExtQualifier(searchQuery) && !autocompleteDismissed,
     [searchQuery, autocompleteDismissed]
   );
   const autocompleteSuggestions = React.useMemo(() => {
     if (!autocompleteVisible) return [];
-    const { extensions: alreadySelected } = parseExtQualifiers(searchQuery.trim());
-    const prefix = searchQuery.match(/\bext:([a-zA-Z0-9.,_-]*)$/)?.[1] ?? '';
+    const { extensions: alreadySelected } = parseExtQualifiers(searchQuery);
+    const rawPrefix = searchQuery.match(/\bext:([a-zA-Z0-9.,_-]*)$/)?.[1] ?? '';
+    const prefix = rawPrefix.split(',').pop() ?? '';
     return suggestExtensions(
-      suggestionExtensionsRef.current.map((ext) => ({ extension: ext })),
+      suggestionExtensions.map((ext) => ({ extension: ext })),
       prefix
     ).filter((ext) => !alreadySelected.includes(ext));
-  }, [autocompleteVisible, searchQuery]);
+  }, [autocompleteVisible, searchQuery, suggestionExtensions]);
 
   const [childrenByDir, setChildrenByDir] = React.useState<Record<string, FileNode[]>>({});
   const [loadErrorsByDir, setLoadErrorsByDir] = React.useState<Record<string, string>>({});
@@ -647,7 +648,7 @@ export const SidebarFilesTree: React.FC = () => {
 
         setSearchResults(mapped);
         // Feed autocomplete suggestions from this result set
-        suggestionExtensionsRef.current = suggestExtensions(hits, '');
+        setSuggestionExtensions(suggestExtensions(hits, ''));
       })
       .catch(() => {
         if (!cancelled) {
