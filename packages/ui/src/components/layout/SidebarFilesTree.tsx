@@ -36,6 +36,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useGitStatus } from '@/stores/useGitStore';
 import { useDirectoryShowHidden, setDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { useFilesViewShowGitignored, setFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
+import { parseExtQualifiers, filterByExtensions } from '@/lib/fileFilterQualifiers';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { cn, getRevealLabelKey } from '@/lib/utils';
 import { opencodeClient } from '@/lib/opencode/client';
@@ -358,6 +359,10 @@ export const SidebarFilesTree: React.FC = () => {
   const [searchQuery, setSearchQuery] = React.useState('');
   const debouncedSearchQuery = useDebouncedValue(searchQuery, 200);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
+  const activeExtensions = React.useMemo(
+    () => parseExtQualifiers(searchQuery.trim()).extensions,
+    [searchQuery]
+  );
   const [searchResults, setSearchResults] = React.useState<FileNode[]>([]);
   const [searching, setSearching] = React.useState(false);
 
@@ -570,10 +575,13 @@ export const SidebarFilesTree: React.FC = () => {
       return;
     }
 
+    const { cleanQuery, extensions } = parseExtQualifiers(trimmedQuery);
+    const serverQuery = cleanQuery.length > 0 ? cleanQuery : '*';
+
     let cancelled = false;
     setSearching(true);
 
-    searchFiles(currentDirectory, trimmedQuery, 150, {
+    searchFiles(currentDirectory, serverQuery, 150, {
       includeHidden: showHidden,
       respectGitignore: !showGitignored,
       type: 'file',
@@ -581,7 +589,8 @@ export const SidebarFilesTree: React.FC = () => {
       .then((hits) => {
         if (cancelled) return;
 
-        const filtered = hits.filter((hit) => showGitignored || !shouldIgnorePath(hit.path));
+        const extFiltered = filterByExtensions(hits, extensions);
+        const filtered = extFiltered.filter((hit) => showGitignored || !shouldIgnorePath(hit.path));
 
         const mapped: FileNode[] = filtered.map((hit) => ({
           name: hit.name,
@@ -1000,6 +1009,35 @@ export const SidebarFilesTree: React.FC = () => {
               {showGitignored ? t('sidebarFilesTree.filter.hideGitignored') : t('sidebarFilesTree.filter.showGitignored')}
             </TooltipContent>
           </Tooltip>
+          {activeExtensions.length > 0 && (
+            <>
+              <div className="mx-0.5 h-4 w-px bg-border/60" aria-hidden="true" />
+              {activeExtensions.map((ext) => (
+                <span
+                  key={ext}
+                  className="inline-flex items-center gap-0.5 rounded bg-[var(--interactive-selection)] px-1.5 py-0.5 text-[11px] leading-none text-[var(--interactive-selection-foreground)]"
+                >
+                  <span className="font-mono">*{ext}</span>
+                  <button
+                    type="button"
+                    className="ml-0.5 inline-flex size-3 items-center justify-center rounded-sm opacity-70 hover:opacity-100"
+                    onClick={() => {
+                      const newQuery = searchQuery
+                        .replace(new RegExp(`\\bext:${ext}(?=[,\\s]|$)`, 'g'), '')
+                        .replace(/,+\s*(?=\s|$)/g, '')
+                        .replace(/\s{2,}/g, ' ')
+                        .trim();
+                      setSearchQuery(newQuery);
+                      searchInputRef.current?.focus();
+                    }}
+                    aria-label={t('sidebarFilesTree.filter.extChipRemoveAria', { ext })}
+                  >
+                    <Icon name="close" className="size-2.5" />
+                  </button>
+                </span>
+              ))}
+            </>
+          )}
         </div>
       )}
 
