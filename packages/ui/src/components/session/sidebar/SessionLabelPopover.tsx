@@ -67,7 +67,7 @@ export const SessionLabelPopover = React.memo(function SessionLabelPopover({
                   />
                   <span className="flex-1 text-left">{label.name}</span>
                   {isActive && (
-                    <Icon name="check-line" className="h-3.5 w-3.5 text-foreground" />
+                    <Icon name="check" className="h-3.5 w-3.5 text-foreground" />
                   )}
                 </button>
               );
@@ -81,7 +81,7 @@ export const SessionLabelPopover = React.memo(function SessionLabelPopover({
                   onClick={handleRemove}
                   className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted"
                 >
-                  <Icon name="close-line" className="h-3.5 w-3.5" />
+                  <Icon name="close" className="h-3.5 w-3.5" />
                   <span>{t('sidebar.labels.remove')}</span>
                 </button>
               </>

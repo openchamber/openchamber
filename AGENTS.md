@@ -460,4 +460,4 @@ A single store with N properties means every subscriber re-evaluates on every st
 ## Recent changes
 
 - Releases + high-level changes: `CHANGELOG.md`
-- Recent commits: `git log --oneline` (latest tags: `v1.11.7`, `v1.11.6`)
+- Recent commits: `git log --oneline` (latest release: `v1.12.4`)
