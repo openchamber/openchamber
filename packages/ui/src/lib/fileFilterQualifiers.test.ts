@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 
-import { filterByExtensions, parseExtQualifiers, removeExtQualifier } from './fileFilterQualifiers';
+import {
+  filterByExtensions,
+  parseExtQualifiers,
+  parseFileSearchQualifiers,
+  removeExtQualifier,
+  removePathQualifier,
+  resolvePathScopedDirectory,
+} from './fileFilterQualifiers';
 
 describe('parseExtQualifiers', () => {
   test('extracts a single extension at the start of the query', () => {
@@ -63,6 +70,68 @@ describe('filterByExtensions', () => {
     expect(filterByExtensions(hits, ['ts'])).toEqual([
       { name: 'a.ts', path: '/repo/a.ts', extension: 'ts' },
     ]);
+  });
+});
+
+describe('parseFileSearchQualifiers', () => {
+  test('extracts path qualifier and strips it from the clean query', () => {
+    expect(parseFileSearchQualifiers('path:src auth')).toEqual({
+      cleanQuery: 'auth',
+      extensions: [],
+      pathScope: 'src',
+    });
+  });
+
+  test('combines path and extension qualifiers', () => {
+    expect(parseFileSearchQualifiers('path:packages/ui ext:ts auth')).toEqual({
+      cleanQuery: 'auth',
+      extensions: ['ts'],
+      pathScope: 'packages/ui',
+    });
+  });
+
+  test('normalizes repeated slashes in path scope', () => {
+    expect(parseFileSearchQualifiers('path:packages//ui auth')).toEqual({
+      cleanQuery: 'auth',
+      extensions: [],
+      pathScope: 'packages/ui',
+    });
+  });
+
+  test('keeps path without value as normal query text', () => {
+    expect(parseFileSearchQualifiers('path:')).toEqual({
+      cleanQuery: 'path:',
+      extensions: [],
+    });
+  });
+});
+
+describe('removePathQualifier', () => {
+  test('removes path qualifier and preserves remaining query', () => {
+    expect(removePathQualifier('path:src auth')).toBe('auth');
+  });
+
+  test('removes path qualifier while preserving ext qualifier', () => {
+    expect(removePathQualifier('path:src ext:ts auth')).toBe('ext:ts auth');
+  });
+});
+
+describe('resolvePathScopedDirectory', () => {
+  test('joins a safe relative scope to the current directory', () => {
+    expect(resolvePathScopedDirectory('/repo', 'src/components')).toBe('/repo/src/components');
+  });
+
+  test('returns current directory when path scope is undefined', () => {
+    expect(resolvePathScopedDirectory('/repo', undefined)).toBe('/repo');
+  });
+
+  test('rejects absolute path scopes', () => {
+    expect(resolvePathScopedDirectory('/repo', '/tmp')).toBeNull();
+  });
+
+  test('rejects traversal segments', () => {
+    expect(resolvePathScopedDirectory('/repo', '../secret')).toBeNull();
+    expect(resolvePathScopedDirectory('/repo', 'src/../secret')).toBeNull();
   });
 });
 
