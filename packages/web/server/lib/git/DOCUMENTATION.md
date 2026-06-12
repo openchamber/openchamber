@@ -31,6 +31,7 @@ The following functions are exported and used by the web server:
 - `getFileDiff(directory, { path, staged })`: Get original and modified file contents for a single file (handles images as data URLs).
 - `collectDiffs(directory, files)`: Collect diff output for multiple files.
 - `revertFile(directory, filePath, options)`: Revert a file. Default scope `all` discards staged and working-tree changes; scope `working` discards only unstaged/working-tree changes.
+- `revertHunk(directory, { path, staged, patch })`: Revert one selected single-file hunk by reverse-applying its unified patch. Uses `git apply --reverse --whitespace=nowarn --unidiff-zero --recount`; staged hunks add `--cached` so only the index is changed.
 - `stageFile(directory, filePath)`: Add one file path to the index.
 - `unstageFile(directory, filePath)`: Remove one file path from the index while preserving working-tree content.
 
@@ -113,6 +114,8 @@ The following functions are internal helpers used by exported functions:
 - A file with both staged and unstaged changes can appear in both UI sections. Staged rows request diffs with `staged: true`; unstaged rows request normal working-tree diffs.
 - The shared Git panel exposes explicit staging actions. Unstaged rows use `stageFile`, staged rows use `unstageFile`, and commits operate on the current staged index.
 - `stageFiles` remains supported for callers that need to stage a selected unstaged subset as part of commit. In that mode the server temporarily unstages unrelated index entries, stages `stageFiles`, commits from the index, then restores temporarily unstaged entries.
+- Hunk revert receives a caller-selected single-file patch from `/api/git/revert-hunk`. The service validates that the patch file headers match the requested repository path before applying it. UI callers should generate these patches from zero-context diffs so the selected hunk can be reverted independently from adjacent hunks.
+
 ### Worktree Create/Remove Response
 - `head`: HEAD commit SHA.
 - `name`: Worktree name.

@@ -208,15 +208,16 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
     }
 
     case 'api:git/file-diff': {
-      const { directory, path: filePath, staged } = (payload || {}) as {
+      const { directory, path: filePath, staged, includeHunkPatch } = (payload || {}) as {
         directory?: string;
         path?: string;
         staged?: boolean;
+        includeHunkPatch?: boolean;
       };
       if (!directory || !filePath) {
         return { id, type, success: false, error: 'Directory and path are required' };
       }
-      const result = await gitService.getGitFileDiff(directory, filePath, staged);
+      const result = await gitService.getGitFileDiff(directory, filePath, staged, includeHunkPatch);
       return { id, type, success: true, data: result };
     }
 
@@ -226,6 +227,20 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
         return { id, type, success: false, error: 'Directory and path are required' };
       }
       await gitService.revertGitFile(directory, filePath, { scope });
+      return { id, type, success: true, data: { success: true } };
+    }
+
+    case 'api:git/revert-hunk': {
+      const { directory, path: filePath, staged, patch } = (payload || {}) as {
+        directory?: string;
+        path?: string;
+        staged?: boolean;
+        patch?: string;
+      };
+      if (!directory || !filePath || !patch) {
+        return { id, type, success: false, error: 'Directory, path, and patch are required' };
+      }
+      await gitService.revertGitHunk(directory, { path: filePath, staged, patch });
       return { id, type, success: true, data: { success: true } };
     }
 

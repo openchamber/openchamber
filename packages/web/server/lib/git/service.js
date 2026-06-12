@@ -2,7 +2,7 @@ import simpleGit from 'simple-git';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import { createRequire } from 'module';
 
@@ -862,6 +862,40 @@ const runGitCommandOrThrow = async (cwd, args, fallbackMessage) => {
     throw new Error(result.message || fallbackMessage || 'Git command failed');
   }
   return result;
+};
+
+const runGitCommandWithInputOrThrow = async (cwd, args, input, fallbackMessage) => {
+  const env = await buildGitEnv();
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(getGitBinary(), args, {
+      cwd,
+      env,
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', chunk => {
+      stdout += chunk;
+    });
+    child.stderr.on('data', chunk => {
+      stderr += chunk;
+    });
+    child.on('error', reject);
+    child.on('close', code => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+        return;
+      }
+      reject(new Error(stderr.trim() || stdout.trim() || fallbackMessage || 'Git command failed'));
+    });
+
+    child.stdin.end(input);
+  });
 };
 
 const ensureOpenCodeProjectId = async (primaryWorktree) => {
@@ -2001,7 +2035,7 @@ const isBinaryDiff = async (directoryPath, filePath, staged) => {
   return false;
 };
 
-export async function getFileDiff(directory, { path: filePath, staged = false } = {}) {
+export async function getFileDiff(directory, { path: filePath, staged = false, includeHunkPatch = false } = {}) {
   if (!directory || !filePath) {
     throw new Error('directory and path are required for getFileDiff');
   }
@@ -2020,6 +2054,7 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
         modified: '',
         path: filePath,
         isBinary: true,
+        hunkPatch: undefined,
       };
     }
   }
@@ -2085,11 +2120,16 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
     }
   }
 
+  const hunkPatch = includeHunkPatch
+    ? await getDiff(directory, { path: filePath, staged, contextLines: 0 })
+    : undefined;
+
   return {
     original: typeof original === 'string' ? original.replace(/\r\n/g, '\n') : original,
     modified: typeof modified === 'string' ? modified.replace(/\r\n/g, '\n') : modified,
     path: filePath,
     isBinary: false,
+    hunkPatch,
   };
 }
 
@@ -2143,6 +2183,62 @@ export async function revertFile(directory, filePath, options = {}) {
         throw fallbackError;
       }
     }
+  });
+}
+
+const normalizePatchFilePath = (value) => {
+  const trimmed = String(value || '').trim();
+  if (!trimmed || trimmed === '/dev/null') return trimmed;
+  if (trimmed.startsWith('a/') || trimmed.startsWith('b/')) return trimmed.slice(2);
+  return trimmed;
+};
+
+const validateSingleFilePatchPath = (patch, repoPath) => {
+  const paths = new Set();
+  for (const line of patch.replace(/\r\n/g, '\n').split('\n')) {
+    if (line.startsWith('--- ') || line.startsWith('+++ ')) {
+      const value = line.slice(4).split('\t')[0];
+      const normalized = normalizePatchFilePath(value);
+      if (normalized && normalized !== '/dev/null') {
+        paths.add(normalized);
+      }
+    }
+  }
+
+  if (paths.size === 0) {
+    throw new Error('Patch must include file headers');
+  }
+  if (paths.size !== 1 || !paths.has(repoPath)) {
+    throw new Error('Patch does not match selected file');
+  }
+};
+
+export async function revertHunk(directory, options = {}) {
+  return withGitIndexMutationQueue(directory, async () => {
+    const filePath = typeof options.path === 'string' ? options.path : '';
+    const patch = typeof options.patch === 'string' ? options.patch : '';
+    if (!filePath.trim()) {
+      throw new Error('path parameter is required');
+    }
+    if (!patch.trim()) {
+      throw new Error('patch parameter is required');
+    }
+
+    const staged = options.staged === true;
+    const directoryPath = normalizeDirectoryPath(directory);
+    const directoryGit = await createGit(directoryPath);
+    const repoRoot = await resolveGitRepositoryRoot(directoryPath, directoryGit);
+    const { repoPath } = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
+
+    validateSingleFilePatchPath(patch, repoPath);
+
+    const args = ['apply'];
+    if (staged) {
+      args.push('--cached');
+    }
+    args.push('--reverse', '--whitespace=nowarn', '--unidiff-zero', '--recount');
+
+    await runGitCommandWithInputOrThrow(repoRoot, args, patch, 'Failed to revert git hunk');
   });
 }
 

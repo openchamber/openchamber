@@ -265,10 +265,12 @@ export function registerGitRoutes(app) {
       }
 
       const staged = req.query.staged === 'true';
+      const includeHunkPatch = req.query.hunkPatch === 'true';
 
       const result = await getFileDiff(directory, {
         path: pathParam,
         staged,
+        includeHunkPatch,
       });
 
       res.json({
@@ -276,6 +278,7 @@ export function registerGitRoutes(app) {
         modified: result.modified,
         path: result.path,
         isBinary: Boolean(result.isBinary),
+        hunkPatch: result.hunkPatch,
       });
     } catch (error) {
       console.error('Failed to get git file diff:', error);
@@ -301,6 +304,30 @@ export function registerGitRoutes(app) {
     } catch (error) {
       console.error('Failed to revert git file:', error);
       res.status(500).json({ error: error.message || 'Failed to revert git file' });
+    }
+  });
+
+  app.post('/api/git/revert-hunk', async (req, res) => {
+    const { revertHunk } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+
+      const { path, staged, patch } = req.body || {};
+      if (!path || typeof path !== 'string') {
+        return res.status(400).json({ error: 'path parameter is required' });
+      }
+      if (!patch || typeof patch !== 'string') {
+        return res.status(400).json({ error: 'patch parameter is required' });
+      }
+
+      await revertHunk(directory, { path, staged: staged === true, patch });
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Failed to revert git hunk:', error);
+      res.status(500).json({ error: error.message || 'Failed to revert git hunk' });
     }
   });
 

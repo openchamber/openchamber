@@ -1230,6 +1230,8 @@ export const dict: Record<I18nKey, string> = {
   "inlineComment.actions.cancel": "Cancelar",
   "inlineComment.actions.save": "Salvar",
   "inlineComment.actions.comment": "Comentar",
+  "inlineComment.actions.revertHunk": "Reverter trecho",
+  "inlineComment.actions.revertingHunk": "Revertendo...",
   "inlineComment.actions.showLess": "Mostrar menos",
   "inlineComment.actions.showMore": "Mostrar mais",
   "inlineComment.actions.editComment": "Editar comentário",

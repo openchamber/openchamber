@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { GitAPI, GitStatus } from "./api/types"
-import { getGitStatus, stageGitFile, stageGitFiles, unstageGitFile, unstageGitFiles } from "./gitApi"
+import { getGitStatus, revertGitHunk, stageGitFile, stageGitFiles, unstageGitFile, unstageGitFiles } from "./gitApi"
 
 const status: GitStatus = {
   current: "main",
@@ -108,5 +108,20 @@ describe("git index mutations", () => {
     })
 
     expect(received).toEqual({ directory: "/repo", path: "a.ts" })
+  })
+
+  test("forwards hunk revert requests to runtime git APIs", async () => {
+    let received: { directory: string; path: string; staged?: boolean; patch: string } | null = null
+    const runtimeGit = {
+      revertGitHunk: async (directory: string, payload: { path: string; staged?: boolean; patch: string }) => {
+        received = { directory, ...payload }
+      },
+    } as Partial<GitAPI> as GitAPI
+
+    await withRuntimeGit(runtimeGit, async () => {
+      await revertGitHunk("/repo", { path: "a.ts", staged: true, patch: "patch" })
+    })
+
+    expect(received).toEqual({ directory: "/repo", path: "a.ts", staged: true, patch: "patch" })
   })
 })
