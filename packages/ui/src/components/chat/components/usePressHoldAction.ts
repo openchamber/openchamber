@@ -1,6 +1,6 @@
 import React from 'react';
 
-const HOLD_ACTION_DELAY_MS = 550;
+const HOLD_ACTION_DELAY_MS = 350;
 
 export const usePressHoldAction = ({
     disabled,
@@ -62,8 +62,13 @@ export const usePressHoldAction = ({
             // Wait 300ms for the shake animation to complete before calling onHold
             shakeTimerRef.current = window.setTimeout(() => {
                 shakeTimerRef.current = null;
-                setIsShaking(false);
                 onHoldRef.current();
+
+                // Keep tooltip visible for 100ms after the shake animation completes
+                shakeTimerRef.current = window.setTimeout(() => {
+                    shakeTimerRef.current = null;
+                    setIsShaking(false);
+                }, 100);
             }, 300);
         }, HOLD_ACTION_DELAY_MS);
     }, [clearPendingHoldTimer, disabled]);
@@ -106,12 +111,17 @@ export const usePressHoldAction = ({
     };
 };
 
-export const useNavigationButtonTooltip = ({ enabled = true }: { enabled?: boolean } = {}) => {
+export const useNavigationButtonTooltip = ({ enabled = true, isShaking = false }: { enabled?: boolean; isShaking?: boolean } = {}) => {
     const [open, setOpen] = React.useState(false);
     const [isHeld, setIsHeld] = React.useState(false);
     const [isLongHover, setIsLongHover] = React.useState(false);
     const hoverTimerRef = React.useRef<number | null>(null);
     const holdHoverTimerRef = React.useRef<number | null>(null);
+    const isShakingRef = React.useRef(isShaking);
+
+    React.useEffect(() => {
+        isShakingRef.current = isShaking;
+    }, [isShaking]);
 
     const clearHoverTimer = React.useCallback(() => {
         if (hoverTimerRef.current !== null) {
@@ -165,8 +175,12 @@ export const useNavigationButtonTooltip = ({ enabled = true }: { enabled?: boole
         setIsHeld(false);
     }, [dismissTooltip]);
 
-    const handleOpenChange = React.useCallback((nextOpen: boolean) => {
+    const handleOpenChange = React.useCallback((nextOpen: boolean, event?: { cancel: () => void }) => {
         if (!nextOpen) {
+            if (isShakingRef.current && event) {
+                event.cancel();
+                return;
+            }
             setOpen(false);
             return;
         }

@@ -56,6 +56,7 @@ const SETTLE_BURST_DURATION_MS = 280;
 const REPIN_GRACE_AFTER_RELEASE_MS = 1200;
 const BOTTOM_SCROLL_FALLBACK_POLL_MS = 120;
 const SMOOTH_HANDOFF_DURATION_MS = 180;
+const EXTERNAL_SCROLL_DELTA_THRESHOLD = 3;
 
 // The bottom of the chat has an empty spacer (10vh on desktop, 40px on mobile)
 // — its height is exactly how far above scrollHeight the user can be while still
@@ -142,10 +143,12 @@ export const useChatAutoFollow = ({
     const smoothHandoffUntilRef = React.useRef(0);
     const settledFramesRef = React.useRef(0);
     const lastScrollTopRef = React.useRef(0);
+    const lastProgrammaticScrollTopRef = React.useRef(0);
     const saveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const pendingSaveRef = React.useRef<{ sessionId: string; anchor: number } | null>(null);
     const settleBurstRafRef = React.useRef<number | null>(null);
     const lastUserReleaseAtRef = React.useRef(0);
+    const releaseFromUserIntentRef = React.useRef<() => void>(() => {});
     // When restoreSnapshot is invoked while ChatViewport is still hydrating
     // (skeleton rendered, no scroll container yet), we record the session here
     // so a follow-up effect can replay the restore once the container mounts.
@@ -217,6 +220,15 @@ export const useChatAutoFollow = ({
             return;
         }
 
+        // Safety net: if scrollTop was changed by another source (e.g. user
+        // dragging the scrollbar thumb or smooth wheel scrolling) between our
+        // frames, stop the loop so we don't fight it.
+        if (Math.abs(container.scrollTop - lastProgrammaticScrollTopRef.current) > EXTERNAL_SCROLL_DELTA_THRESHOLD) {
+            stopFollowLoop();
+            releaseFromUserIntentRef.current();
+            return;
+        }
+
         const target = Math.max(0, container.scrollHeight - container.clientHeight);
         const current = container.scrollTop;
         const delta = target - current;
@@ -226,6 +238,7 @@ export const useChatAutoFollow = ({
                 markProgrammaticWrite();
                 container.scrollTop = target;
                 lastScrollTopRef.current = target;
+                lastProgrammaticScrollTopRef.current = target;
             }
             settledFramesRef.current += 1;
             if (settledFramesRef.current >= SETTLE_FRAMES) {
@@ -243,6 +256,7 @@ export const useChatAutoFollow = ({
         markProgrammaticWrite();
         container.scrollTop = next;
         lastScrollTopRef.current = container.scrollTop;
+        lastProgrammaticScrollTopRef.current = next;
         followRafRef.current = window.requestAnimationFrame(tickFollow);
     }, [markProgrammaticWrite, stopFollowLoop]);
 
@@ -253,6 +267,8 @@ export const useChatAutoFollow = ({
         if (stateRef.current !== 'following') return;
         settledFramesRef.current = 0;
         setIsFollowingProgrammatically(true);
+        // Sync the reference so the first frame doesn't see a stale delta.
+        lastProgrammaticScrollTopRef.current = scrollRef.current?.scrollTop ?? 0;
         followRafRef.current = window.requestAnimationFrame(tickFollow);
     }, [tickFollow]);
 
@@ -266,6 +282,7 @@ export const useChatAutoFollow = ({
         markProgrammaticWrite();
         container.scrollTop = clamped;
         lastScrollTopRef.current = container.scrollTop;
+        lastProgrammaticScrollTopRef.current = clamped;
     }, [markProgrammaticWrite, stopBottomScrollAnimation]);
 
     const stopSettleBurst = React.useCallback(() => {
@@ -279,16 +296,25 @@ export const useChatAutoFollow = ({
         if (typeof window === 'undefined') return;
         stopSettleBurst();
         const until = (typeof performance !== 'undefined' ? performance.now() : Date.now()) + SETTLE_BURST_DURATION_MS;
+        // Sync the reference so the first tick doesn't see a stale delta.
+        lastProgrammaticScrollTopRef.current = scrollRef.current?.scrollTop ?? 0;
         const tick = () => {
             settleBurstRafRef.current = null;
             if (stateRef.current !== 'following') return;
             const c = scrollRef.current;
             if (!c) return;
+            // Safety net: stop the burst if another scroll source is active.
+            if (Math.abs(c.scrollTop - lastProgrammaticScrollTopRef.current) > EXTERNAL_SCROLL_DELTA_THRESHOLD) {
+                stopSettleBurst();
+                releaseFromUserIntentRef.current();
+                return;
+            }
             const target = Math.max(0, c.scrollHeight - c.clientHeight);
             if (Math.abs(c.scrollTop - target) > SETTLE_EPSILON) {
                 markProgrammaticWrite();
                 c.scrollTop = target;
                 lastScrollTopRef.current = target;
+                lastProgrammaticScrollTopRef.current = target;
             }
             const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
             if (now < until) {
@@ -317,6 +343,10 @@ export const useChatAutoFollow = ({
             lastUserReleaseAtRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now();
         }
     }, [setStateValue, stopBottomScrollAnimation, stopFollowLoop, stopSettleBurst]);
+
+    React.useEffect(() => {
+        releaseFromUserIntentRef.current = releaseFromUserIntent;
+    }, [releaseFromUserIntent]);
 
     const goToBottom = React.useCallback((mode: 'instant' | 'smooth' = 'instant') => {
         const container = scrollRef.current;
@@ -565,8 +595,8 @@ export const useChatAutoFollow = ({
         if (!container) return;
 
         const handleWheel = (event: WheelEvent) => {
-            if (event.deltaY >= 0) return;
-            if (nestedScrollableCanConsumeUp(container, event.target)) return;
+            if (event.deltaY === 0) return;
+            if (event.deltaY < 0 && nestedScrollableCanConsumeUp(container, event.target)) return;
             releaseFromUserIntent();
         };
 
@@ -585,8 +615,8 @@ export const useChatAutoFollow = ({
             touchLastY = touch.clientY;
             if (previousY === null) return;
             const fingerDelta = touch.clientY - previousY;
-            if (fingerDelta <= TOUCH_FINGER_DOWN_THRESHOLD) return;
-            if (nestedScrollableCanConsumeUp(container, event.target)) return;
+            if (Math.abs(fingerDelta) <= TOUCH_FINGER_DOWN_THRESHOLD) return;
+            if (fingerDelta > 0 && nestedScrollableCanConsumeUp(container, event.target)) return;
             releaseFromUserIntent();
         };
         const handleTouchEnd = () => {

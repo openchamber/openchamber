@@ -40,7 +40,7 @@ const ScrollToTopButton: React.FC<ScrollToTopButtonProps> = ({ visible, onClick,
         handlePointerDown,
         handlePointerUp,
         handleOpenChange,
-    } = useNavigationButtonTooltip({ enabled: interactionTooltipEnabled });
+    } = useNavigationButtonTooltip({ enabled: interactionTooltipEnabled, isShaking });
 
     const currentLabel = isLoadingHistory
         ? t('chat.loadAllHistory.aria')

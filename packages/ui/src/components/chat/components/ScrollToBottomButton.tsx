@@ -37,7 +37,7 @@ const ScrollToBottomButton: React.FC<ScrollToBottomButtonProps> = ({ visible, on
         handlePointerDown,
         handlePointerUp,
         handleOpenChange,
-    } = useNavigationButtonTooltip({ enabled: interactionTooltipEnabled });
+    } = useNavigationButtonTooltip({ enabled: interactionTooltipEnabled, isShaking });
 
     const currentLabel = (isLongHover || isShaking) ? t('chat.scrollToBottom.hold') : t('chat.scrollToBottom.aria');
     const tooltipOpen = interactionTooltipEnabled && (open || isLongHover || isShaking);
