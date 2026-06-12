@@ -1,4 +1,12 @@
-const EXT_QUALIFIER_RE = /(?:^|\s)ext:([a-zA-Z0-9*.,_-]+)(?:\s|$)/g;
+// When cleanQuery is empty after stripping qualifiers, consumers should fall
+// back to `'*'` so the server returns all files for client-side extension
+// filtering. This assumes `searchFiles('.', '*', …)` returns file results.
+// If that assumption is wrong, change consumers to skip extension-only
+// searches (return empty results) instead of sending `'*'`.
+//
+// Trailing lookahead prevents consuming whitespace so consecutive
+// `ext:` qualifiers (e.g. `ext:ts ext:tsx`) are both parsed.
+const EXT_QUALIFIER_RE = /(?:^|\s)ext:([a-zA-Z0-9*.,_-]+)(?=\s|$)/g;
 
 export interface ParsedQualifiers {
   cleanQuery: string;

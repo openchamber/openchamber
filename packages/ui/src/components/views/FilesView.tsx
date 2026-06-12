@@ -59,7 +59,7 @@ import { buildCodeMirrorCommentWidgets, normalizeLineRange, useInlineCommentCont
 import { opencodeClient } from '@/lib/opencode/client';
 import { useDirectoryShowHidden, setDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { useFilesViewShowGitignored, setFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
-import { parseExtQualifiers, filterByExtensions } from '@/lib/fileFilterQualifiers';
+import { parseExtQualifiers, filterByExtensions, removeExtQualifier } from '@/lib/fileFilterQualifiers';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
@@ -3890,17 +3890,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                   key={ext}
                   className="inline-flex items-center gap-0.5 rounded bg-[var(--interactive-selection)] px-1.5 py-0.5 text-[11px] leading-none text-[var(--interactive-selection-foreground)]"
                 >
-                  <span className="font-mono">*{ext}</span>
+                  <span className="font-mono">*.{ext}</span>
                   <button
                     type="button"
                     className="ml-0.5 inline-flex size-3 items-center justify-center rounded-sm opacity-70 hover:opacity-100"
                     onClick={() => {
-                      const newQuery = searchQuery
-                        .replace(new RegExp(`\\bext:${ext}(?=[,\\s]|$)`, 'g'), '')
-                        .replace(/,+\s*(?=\s|$)/g, '')
-                        .replace(/\s{2,}/g, ' ')
-                        .trim();
-                      setSearchQuery(newQuery);
+                      setSearchQuery(removeExtQualifier(searchQuery, ext));
                       searchInputRef.current?.focus();
                     }}
                     aria-label={t('filesView.tree.filter.extChipRemoveAria', { ext })}

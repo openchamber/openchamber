@@ -36,7 +36,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useGitStatus } from '@/stores/useGitStore';
 import { useDirectoryShowHidden, setDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { useFilesViewShowGitignored, setFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
-import { parseExtQualifiers, filterByExtensions } from '@/lib/fileFilterQualifiers';
+import { parseExtQualifiers, filterByExtensions, removeExtQualifier } from '@/lib/fileFilterQualifiers';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { cn, getRevealLabelKey } from '@/lib/utils';
 import { opencodeClient } from '@/lib/opencode/client';
@@ -1017,17 +1017,12 @@ export const SidebarFilesTree: React.FC = () => {
                   key={ext}
                   className="inline-flex items-center gap-0.5 rounded bg-[var(--interactive-selection)] px-1.5 py-0.5 text-[11px] leading-none text-[var(--interactive-selection-foreground)]"
                 >
-                  <span className="font-mono">*{ext}</span>
+                  <span className="font-mono">*.{ext}</span>
                   <button
                     type="button"
                     className="ml-0.5 inline-flex size-3 items-center justify-center rounded-sm opacity-70 hover:opacity-100"
                     onClick={() => {
-                      const newQuery = searchQuery
-                        .replace(new RegExp(`\\bext:${ext}(?=[,\\s]|$)`, 'g'), '')
-                        .replace(/,+\s*(?=\s|$)/g, '')
-                        .replace(/\s{2,}/g, ' ')
-                        .trim();
-                      setSearchQuery(newQuery);
+                      setSearchQuery(removeExtQualifier(searchQuery, ext));
                       searchInputRef.current?.focus();
                     }}
                     aria-label={t('sidebarFilesTree.filter.extChipRemoveAria', { ext })}
