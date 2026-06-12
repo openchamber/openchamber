@@ -959,6 +959,7 @@ export const dict = {
   'filesView.editor.saveNowManualTitle': 'Enregistrer maintenant ({shortcut})',
   'filesView.editor.saveAria': 'Enregistrer ({shortcut})',
   'filesView.editor.openInDesktopApp': 'Ouvrir dans l\'application de bureau',
+  'filesView.editor.openInBrowser': 'Ouvrir dans le navigateur',
   'filesView.editor.refreshApps': 'Actualiser les applications',
   'filesView.editor.disableLineWrap': 'Désactiver le retour à la ligne',
   'filesView.editor.enableLineWrap': 'Activer le retour à la ligne',

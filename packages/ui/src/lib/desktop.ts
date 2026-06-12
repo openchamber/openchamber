@@ -4,6 +4,7 @@ import type { DraftStarterRef } from '@/lib/draftStarters';
 import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 export type AssistantNotificationPayload = {
   title?: string;
@@ -779,6 +780,61 @@ export const openDesktopFileInApp = async (
     return true;
   } catch (error) {
     console.warn('Failed to open file in app', error);
+    return false;
+  }
+};
+
+export const openRemoteFileInApp = async (
+  filePath: string,
+  appId: string,
+  appName: string,
+): Promise<boolean> => {
+  if (!hasDesktopInvoke()) {
+    return false;
+  }
+
+  const trimmedFilePath = filePath?.trim();
+  const trimmedAppId = appId?.trim();
+  const trimmedAppName = appName?.trim();
+
+  if (!trimmedFilePath || !trimmedAppId || !trimmedAppName) {
+    return false;
+  }
+
+  try {
+    const response = await runtimeFetch('/api/fs/raw', {
+      query: { path: trimmedFilePath, download: true },
+    });
+
+    if (!response.ok) {
+      console.warn('Failed to download file for remote open', response.status);
+      return false;
+    }
+
+    const contentLength = response.headers.get('content-length');
+    if (contentLength && parseInt(contentLength, 10) > 100 * 1024 * 1024) {
+      console.warn('File too large for remote open', contentLength);
+      return false;
+    }
+
+    const fileName = trimmedFilePath.split('/').pop() || 'file';
+    const arrayBuffer = await response.arrayBuffer();
+
+    if (arrayBuffer.byteLength > 100 * 1024 * 1024) {
+      console.warn('File too large for remote open', arrayBuffer.byteLength);
+      return false;
+    }
+
+    await invokeDesktop('desktop_download_and_open', {
+      fileName,
+      fileContent: new Uint8Array(arrayBuffer),
+      appId: trimmedAppId,
+      appName: trimmedAppName,
+    });
+
+    return true;
+  } catch (error) {
+    console.warn('Failed to open remote file in app', error);
     return false;
   }
 };

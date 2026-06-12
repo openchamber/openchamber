@@ -292,6 +292,8 @@ const isUrlAuthReadableHttpPath = (pathname) => {
     || pathname === '/api/openchamber/events'
     || pathname === '/api/notifications/stream'
     || pathname === '/api/fs/raw'
+    || pathname === '/api/fs/serve'
+    || pathname.startsWith('/api/fs/serve/')
     || pathname.startsWith('/api/preview/proxy/')
     || /^\/api\/terminal\/[^/]+\/stream$/.test(pathname)
     || /^\/api\/projects\/[^/]+\/icon$/.test(pathname);

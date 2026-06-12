@@ -98,6 +98,36 @@ const createGitCheckIgnoreTimeoutMs = () => {
   return 2500;
 };
 
+const FILE_MIME_MAP = Object.freeze({
+  '.html': 'text/html',
+  '.htm': 'text/html',
+  '.css': 'text/css',
+  '.js': 'application/javascript',
+  '.mjs': 'application/javascript',
+  '.json': 'application/json',
+  '.wasm': 'application/wasm',
+  '.xml': 'application/xml',
+  '.txt': 'text/plain',
+  '.md': 'text/markdown',
+  '.pdf': 'application/pdf',
+  '.csv': 'text/csv',
+  '.woff2': 'font/woff2',
+  '.woff': 'font/woff',
+  '.ttf': 'font/ttf',
+  '.eot': 'application/vnd.ms-fontobject',
+  '.mp3': 'audio/mpeg',
+  '.mp4': 'video/mp4',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.bmp': 'image/bmp',
+  '.avif': 'image/avif',
+});
+
 // Only deterministic, side-effect-free git plumbing path queries are cacheable.
 // Anything outside this allowlist (including any non-git command) runs normally
 // — we never cache arbitrary exec.
@@ -829,20 +859,15 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: 'Specified path is not a file' });
       }
 
+      const content = await fsPromises.readFile(canonicalPath);
+      const MAX_RAW_BYTES = 100 * 1024 * 1024;
+      if (content.length > MAX_RAW_BYTES) {
+        return res.status(413).json({ error: 'File too large to serve' });
+      }
+
       const ext = path.extname(canonicalPath).toLowerCase();
-      const mimeMap = {
-        '.png': 'image/png',
-        '.jpg': 'image/jpeg',
-        '.jpeg': 'image/jpeg',
-        '.gif': 'image/gif',
-        '.svg': 'image/svg+xml',
-        '.webp': 'image/webp',
-        '.ico': 'image/x-icon',
-        '.bmp': 'image/bmp',
-        '.avif': 'image/avif',
-        '.pdf': 'application/pdf',
-      };
-      const mimeType = mimeMap[ext] || 'application/octet-stream';
+      const mimeType = FILE_MIME_MAP[ext] || 'application/octet-stream';
+>>>>>>> f918e390 (feat: remote Open in Desktop App, HTML preview, image fix, download hardening)
 
       const download = req.query.download === 'true';
       if (download) {
@@ -850,8 +875,8 @@ export const registerFsRoutes = (app, dependencies) => {
         res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
       }
 
-      const content = await fsPromises.readFile(canonicalPath);
       res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
       if (resolved.granted) {
         res.setHeader('Referrer-Policy', 'no-referrer');
       }
@@ -866,6 +891,70 @@ export const registerFsRoutes = (app, dependencies) => {
       }
       console.error('Failed to read raw file:', error);
       return res.status(500).json({ error: (error && error.message) || 'Failed to read file' });
+    }
+  });
+
+  app.get('/api/fs/serve/:path(*)', async (req, res) => {
+    const rawPath = req.params.path || '';
+    if (!rawPath) {
+      return res.status(400).json({ error: 'Path is required' });
+    }
+
+    try {
+      if (req.query?.allowOutsideWorkspace === 'true') {
+        return res.status(403).json({ error: 'allowOutsideWorkspace is not permitted for this endpoint' });
+      }
+
+      const filePath = path.resolve('/', rawPath);
+
+      const resolved = await resolveReadPathFromContext({
+        req,
+        targetPath: filePath,
+        resolveProjectDirectory,
+        path,
+        os,
+        normalizeDirectoryPath,
+        openchamberUserConfigRoot,
+      });
+      if (!resolved.ok) {
+        return res.status(400).json({ error: resolved.error });
+      }
+
+      const [canonicalPath, canonicalBase] = await Promise.all([
+        fsPromises.realpath(resolved.resolved),
+        fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base)),
+      ]);
+
+      if (!isPathWithinRoot(canonicalPath, canonicalBase, path, os)) {
+        return res.status(403).json({ error: 'Access to file denied' });
+      }
+
+      const stats = await fsPromises.stat(canonicalPath);
+      if (!stats.isFile()) {
+        return res.status(400).json({ error: 'Specified path is not a file' });
+      }
+
+      const content = await fsPromises.readFile(canonicalPath);
+      const MAX_SERVE_BYTES = 100 * 1024 * 1024;
+      if (content.length > MAX_SERVE_BYTES) {
+        return res.status(413).json({ error: 'File too large to serve' });
+      }
+
+      const ext = path.extname(canonicalPath).toLowerCase();
+      const mimeType = FILE_MIME_MAP[ext] || 'application/octet-stream';
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      return res.type(mimeType).send(content);
+    } catch (error) {
+      const err = error;
+      if (err && typeof err === 'object' && err.code === 'ENOENT') {
+        return res.status(404).json({ error: 'File not found' });
+      }
+      if (err && typeof err === 'object' && err.code === 'EACCES') {
+        return res.status(403).json({ error: 'Access to file denied' });
+      }
+      console.error('Failed to serve file:', error);
+      return res.status(500).json({ error: (error && error.message) || 'Failed to serve file' });
     }
   });
 

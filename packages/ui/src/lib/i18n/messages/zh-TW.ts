@@ -1061,6 +1061,7 @@ export const dict: Record<I18nKey, string> = {
   'filesView.editor.saveNowManualTitle': '立即儲存（{shortcut}）',
   'filesView.editor.saveAria': '儲存（{shortcut}）',
   'filesView.editor.openInDesktopApp': '在桌面應用程式中開啟',
+  'filesView.editor.openInBrowser': '在瀏覽器中開啟',
   'filesView.editor.refreshApps': '重新整理應用程式',
   'filesView.editor.disableLineWrap': '關閉自動換行',
   'filesView.editor.enableLineWrap': '開啟自動換行',

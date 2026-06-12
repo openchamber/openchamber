@@ -1084,6 +1084,7 @@ export const dict = {
   'filesView.editor.saveNowManualTitle': 'Save now ({shortcut})',
   'filesView.editor.saveAria': 'Save ({shortcut})',
   'filesView.editor.openInDesktopApp': 'Open in desktop app',
+  'filesView.editor.openInBrowser': 'Open in browser',
   'filesView.editor.refreshApps': 'Refresh Apps',
   'filesView.editor.disableLineWrap': 'Disable line wrap',
   'filesView.editor.enableLineWrap': 'Enable line wrap',

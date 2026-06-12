@@ -1518,6 +1518,7 @@ export const dict: Record<I18nKey, string> = {
   'filesView.editor.imageAltFallback': 'Obraz',
   'filesView.editor.openFilesAria': 'Otwarte pliki',
   'filesView.editor.openInDesktopApp': 'Otwórz w aplikacji desktopowej',
+  'filesView.editor.openInBrowser': 'Otwórz w przeglądarce',
   'filesView.editor.pickFileFromTree': 'Wybierz plik z drzewa.',
   'filesView.editor.refreshApps': 'Odśwież aplikacje',
   'filesView.editor.saveAria': 'Zapisz ({shortcut})',

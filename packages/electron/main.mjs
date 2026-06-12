@@ -7,6 +7,7 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile, spawn, spawnSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import updaterPkg from 'electron-updater';
@@ -3202,6 +3203,70 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return null;
     }
 
+    case 'desktop_download_and_open': {
+      const fileName = typeof args.fileName === 'string' ? args.fileName.trim() : '';
+      const fileContent = args.fileContent;
+
+      if (!fileName) throw new Error('File name is required');
+      if (!fileContent || (!(fileContent instanceof Uint8Array) && !Buffer.isBuffer(fileContent))) {
+        throw new Error('File content is required');
+      }
+
+      const safeFileName = path.basename(fileName);
+      if (!safeFileName || safeFileName === '.' || safeFileName === '..') {
+        throw new Error('Invalid file name');
+      }
+
+      const extensions = safeFileName.toLowerCase().split('.').slice(1).map((p) => '.' + p);
+      const blockedExt = extensions.find((e) => BLOCKED_EXTENSIONS.has(e));
+      if (blockedExt) {
+        throw new Error(`Opening files with extension ${blockedExt} is not supported for remote download`);
+      }
+
+      const MAX_DOWNLOAD_SIZE = 100 * 1024 * 1024;
+      const contentSize = Buffer.isBuffer(fileContent) ? fileContent.byteLength : fileContent.byteLength;
+      if (contentSize > MAX_DOWNLOAD_SIZE) {
+        throw new Error('File is too large to download (max 100 MB)');
+      }
+      const buffer = Buffer.isBuffer(fileContent) ? fileContent : Buffer.from(fileContent);
+
+      if (downloadDialogActive) {
+        throw new Error('A download dialog is already open');
+      }
+      downloadDialogActive = true;
+
+      try {
+        const lastExt = safeFileName.includes('.') ? safeFileName.slice(safeFileName.lastIndexOf('.') + 1).toUpperCase() : '';
+        const { response } = await dialog.showMessageBox({
+          type: 'question',
+          buttons: ['Open', 'Cancel'],
+          defaultId: 1,
+          title: 'Open Remote File',
+          message: `Open "${safeFileName}" with default ${lastExt || 'system'} application?`,
+          detail: 'The file will be downloaded from the remote server and opened locally.',
+        });
+        if (response !== 0) {
+          downloadDialogActive = false;
+          return null;
+        }
+
+        const tempDir = path.join(os.tmpdir(), 'openchamber-downloads');
+        await fsp.mkdir(tempDir, { recursive: true });
+        const randomSuffix = crypto.randomBytes(4).toString('hex');
+        const uniqueName = `${Date.now()}-${randomSuffix}-${safeFileName}`;
+        const tempPath = path.join(tempDir, uniqueName);
+
+        await fsp.writeFile(tempPath, buffer);
+
+        const openError = await shell.openPath(tempPath);
+        if (openError) throw new Error(openError);
+
+        return null;
+      } finally {
+        downloadDialogActive = false;
+      }
+    }
+
     case 'desktop_open_external_url': {
       const target = typeof args.url === 'string' ? args.url.trim() : '';
       if (!target) throw new Error('URL is required');
@@ -4007,6 +4072,18 @@ const isLocalSender = (webContents) => {
   }
 };
 
+let downloadDialogActive = false;
+
+const BLOCKED_EXTENSIONS = new Set([
+  '.bat', '.cmd', '.com', '.exe', '.msi', '.scr', '.pif',
+  '.sh', '.bash', '.zsh', '.fish',
+  '.ps1', '.ps2', '.psm1', '.psd1', '.vbs', '.vbe', '.wsf', '.wsh',
+  '.command', '.applescript', '.scpt',
+  '.jar', '.jnlp',
+  '.reg', '.inf',
+  '.pkg', '.dmg', '.deb', '.rpm',
+]);
+
 const COMMANDS_SAFE_FOR_REMOTE = new Set([
   'desktop_hosts_get',
   'desktop_host_probe',
@@ -4024,6 +4101,7 @@ const COMMANDS_SAFE_FOR_REMOTE = new Set([
   'desktop_get_lan_address',
   'desktop_capture_page_rect',
   'desktop_tray_update',
+  'desktop_download_and_open',
 ]);
 
 ipcMain.handle('openchamber:invoke', async (event, command, args) => {
@@ -4338,6 +4416,29 @@ app.on('activate', async () => {
   targetWindow.focus();
 });
 
+const cleanupTempDownloads = async () => {
+  const tempDir = path.join(os.tmpdir(), 'openchamber-downloads');
+  try {
+    const entries = await fsp.readdir(tempDir, { withFileTypes: true });
+    const now = Date.now();
+    const maxAge = 24 * 60 * 60 * 1000;
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      const fullPath = path.join(tempDir, entry.name);
+      try {
+        const stats = await fsp.stat(fullPath);
+        if (now - stats.mtimeMs > maxAge) {
+          await fsp.unlink(fullPath);
+        }
+      } catch {
+        // Ignore per-file errors (file may have been deleted externally)
+      }
+    }
+  } catch {
+    // Ignore errors (directory might not exist)
+  }
+};
+
 app.whenReady().then(async () => {
   const loginItemSettings = readLoginItemSettings();
   const isBackgroundStart = shouldStartInBackground(loginItemSettings);
@@ -4353,6 +4454,8 @@ app.whenReady().then(async () => {
   nativeTheme.themeSource = readThemeSource();
   registerPackagedUiProtocol();
   setupAutoUpdater();
+  await cleanupTempDownloads();
+  setInterval(cleanupTempDownloads, 60 * 60 * 1000).unref();
 
   if (process.platform === 'darwin') {
     Menu.setApplicationMenu(buildMacMenu());

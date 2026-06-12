@@ -67,7 +67,7 @@ import { Icon } from "@/components/icon/Icon";
 import { useMessageTTS } from '@/hooks/useMessageTTS';
 import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
 import { getDefaultTheme } from '@/lib/theme/themes';
-import { openDesktopFileInApp, openDesktopPath } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell, openDesktopFileInApp, openDesktopPath, openRemoteFileInApp } from '@/lib/desktop';
 import { useOpenInAppsStore } from '@/stores/useOpenInAppsStore';
 import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { useI18n } from '@/lib/i18n';
@@ -478,7 +478,10 @@ const FileRow: React.FC<FileRowProps> = ({
       {!isDir && downloadFile && (
         <Item onClick={(e: React.MouseEvent) => {
           e.stopPropagation();
-          void downloadFile(node.path);
+          void downloadFile(node.path).catch((error) => {
+            console.error('Download failed:', error);
+            toast.error(t('sidebarFilesTree.toast.operationFailed'));
+          });
         }}>
           <Icon name="download" className="mr-2 size-4" /> {t('sidebarFilesTree.menu.save')}
         </Item>
@@ -723,7 +726,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [textViewMode, setTextViewMode] = React.useState<TextViewMode>('edit');
   const [mdViewMode, setMdViewMode] = React.useState<PreviewViewMode>('edit');
   const [jsonViewMode, setJsonViewMode] = React.useState<'tree' | 'text'>('tree');
-  const [htmlViewMode, setHtmlViewMode] = React.useState<PreviewViewMode>('edit');
+  const [htmlViewMode, setHtmlViewMode] = React.useState<PreviewViewMode>('preview');
   const [drawioViewMode, setDrawioViewMode] = React.useState<PreviewViewMode>('preview');
   const [drawioRemountNonce, setDrawioRemountNonce] = React.useState(0);
   const textViewModeByPathRef = React.useRef<Record<string, TextViewMode>>({});
@@ -825,6 +828,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [fileLoading, setFileLoading] = React.useState(false);
   const [fileError, setFileError] = React.useState<string | null>(null);
   const [desktopImageSrc, setDesktopImageSrc] = React.useState<string>('');
+  const desktopImageBlobUrlRef = React.useRef<string>('');
   const [imageAssetAuthReadyKey, setImageAssetAuthReadyKey] = React.useState('');
   const [pdfAssetAuthReadyKey, setPdfAssetAuthReadyKey] = React.useState('');
 
@@ -914,6 +918,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       return;
     }
 
+    if (isDesktopShell() && !isDesktopLocalOriginActive()) {
+      const openedRemote = await openRemoteFileInApp(selectedFile.path, app.id, app.appName);
+      if (openedRemote) {
+        return;
+      }
+    }
+
     const fileDirectory = getParentDirectoryPath(selectedFile.path) || root;
     if (fileDirectory) {
       const openedDirectory = await openDesktopPath(fileDirectory, app.appName);
@@ -923,6 +934,16 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     }
     toast.error(t('filesView.toast.openInAppFailed', { app: app.appName }));
   }, [root, selectedFile?.path, t]);
+
+  const handleOpenInBrowser = React.useCallback(() => {
+    if (!selectedFile?.path) return;
+    const rawUrl = getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', { path: selectedFile.path });
+    if (runtime.isDesktop && isDesktopLocalOriginActive()) {
+      void openDesktopPath(selectedFile.path);
+    } else {
+      window.open(rawUrl, '_blank', 'noopener,noreferrer');
+    }
+  }, [selectedFile?.path, runtime.isDesktop]);
 
   const handleOpenDialog = React.useCallback((type: 'createFile' | 'createFolder' | 'rename' | 'delete', data: { path: string; name?: string; type?: 'file' | 'directory' }) => {
     setActiveDialog(type);
@@ -2916,19 +2937,43 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     const resolveDesktopImage = async () => {
       if (!runtime.isDesktop || !selectedFile?.path || !isSelectedImage || isSelectedSvg) {
+        if (desktopImageBlobUrlRef.current) {
+          URL.revokeObjectURL(desktopImageBlobUrlRef.current);
+          desktopImageBlobUrlRef.current = '';
+        }
         setDesktopImageSrc('');
         return;
       }
 
       setFileError(null);
 
+      if (desktopImageBlobUrlRef.current) {
+        URL.revokeObjectURL(desktopImageBlobUrlRef.current);
+        desktopImageBlobUrlRef.current = '';
+      }
+
       const srcPromise = files.readFileBinary
         ? files.readFileBinary(selectedFile.path, selectedFileReadOptions).then((result) => result.dataUrl)
-        : Promise.resolve(getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', {
-          path: selectedFile.path,
-          allowOutsideWorkspace: selectedFileReadOptions.allowOutsideWorkspace ? 'true' : undefined,
-          outsideFileGrant: selectedFileReadOptions.outsideFileGrant,
-        }));
+        : (async () => {
+            const response = await runtimeFetch('/api/fs/raw', {
+              query: {
+                path: selectedFile.path,
+                allowOutsideWorkspace: selectedFileReadOptions.allowOutsideWorkspace ? 'true' : undefined,
+                outsideFileGrant: selectedFileReadOptions.outsideFileGrant,
+              },
+            });
+            if (!response.ok) {
+              throw new Error(t('filesView.error.readFileFailed'));
+            }
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            if (cancelled) {
+              URL.revokeObjectURL(url);
+              return '';
+            }
+            desktopImageBlobUrlRef.current = url;
+            return url;
+          })();
 
       await srcPromise
         .then((src) => {
@@ -2938,6 +2983,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           }
         })
         .catch((error) => {
+          if (desktopImageBlobUrlRef.current) {
+            URL.revokeObjectURL(desktopImageBlobUrlRef.current);
+            desktopImageBlobUrlRef.current = '';
+          }
           if (!cancelled) {
             setDesktopImageSrc('');
             setFileError(error instanceof Error ? error.message : t('filesView.error.readFileFailed'));
@@ -2957,6 +3006,15 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       cancelled = true;
     };
   }, [files, isSelectedImage, isSelectedSvg, runtime.isDesktop, selectedFile?.path, selectedFileReadOptions, t]);
+
+  React.useEffect(() => {
+    return () => {
+      if (desktopImageBlobUrlRef.current) {
+        URL.revokeObjectURL(desktopImageBlobUrlRef.current);
+        desktopImageBlobUrlRef.current = '';
+      }
+    };
+  }, []);
 
   const handleCloseDialog = React.useCallback(() => setActiveDialog(null), []);
 
@@ -3186,6 +3244,23 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           />
         )}
 
+        {isHtmlFile(selectedFile?.path ?? '') && getHtmlViewMode() === 'preview' && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="size-6 p-0 text-muted-foreground opacity-65 hover:bg-transparent hover:opacity-100 focus-visible:bg-transparent active:bg-transparent"
+                aria-label={t('filesView.editor.openInBrowser')}
+                onClick={handleOpenInBrowser}
+              >
+                <Icon name="external-link" className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent sideOffset={6}>{t('filesView.editor.openInBrowser')}</TooltipContent>
+          </Tooltip>
+        )}
+
         {isMarkdown && getMdViewMode() === 'preview' && showMessageTTSButtons && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -3340,7 +3415,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
               size="sm"
               onClick={() => {
                 const fn = files.downloadFile;
-                if (fn) void fn(selectedFile.path);
+                if (fn) void fn(selectedFile.path).catch(() => {
+                  toast.error(t('sidebarFilesTree.toast.operationFailed'));
+                });
               }}
               className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
               title={t('filesView.editor.saveFile')}
@@ -3675,14 +3752,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           ) : selectedFile && isHtml && htmlViewMode === 'preview' ? (
             <div className="h-full overflow-hidden">
               <iframe
-                srcDoc={(() => {
-                  // Inject base tag for relative paths (CSS/JS/images) to work
-                  const basePath = selectedFile.path.substring(0, selectedFile.path.lastIndexOf('/') + 1);
-                  if (!basePath) return fileContent;
-                  const baseTag = `<base href="${runtime.isDesktop ? basePath : basePath}">`;
-                  return fileContent.replace(/<head([^>]*)>/i, `<head$1>${baseTag}`);
+                src={(() => {
+
+                  const encoded = selectedFile.path.split('/').map(s => encodeURIComponent(s)).join('/');
+                  return getRuntimeUrlResolver().authenticatedAsset('/api/fs/serve' + (encoded.startsWith('/') ? encoded : '/' + encoded));
                 })()}
                 className="w-full h-full border-none"
+
                 sandbox="allow-scripts allow-same-origin allow-forms"
                 title={t('filesView.editor.htmlPreviewTitle')}
               />
