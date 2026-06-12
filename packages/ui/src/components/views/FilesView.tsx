@@ -3572,17 +3572,17 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         {/* Row 2: Docked editor toolbar (expanded). Desktop-only opt-in. */}
         {settingsExpandedEditorToolbar && !isMobile && selectedFile ? (
           <div className="flex min-w-0 items-center gap-3 border-t border-border/40 bg-[var(--surface-subtle)] px-3 py-1">
-            <div className="min-w-0 shrink-0 overflow-x-auto">
-              {renderFloatingFileControls({ layout: 'docked' })}
-            </div>
             {displaySelectedPath ? (
               <span
-                className="ml-auto min-w-0 flex-1 truncate text-right typography-meta text-muted-foreground"
+                className="min-w-0 flex-1 truncate typography-meta text-muted-foreground"
                 title={displaySelectedPath}
               >
                 {displaySelectedPath}
               </span>
             ) : null}
+            <div className="ml-auto min-w-0 shrink-0 overflow-x-auto">
+              {renderFloatingFileControls({ layout: 'docked' })}
+            </div>
           </div>
         ) : null}
 
