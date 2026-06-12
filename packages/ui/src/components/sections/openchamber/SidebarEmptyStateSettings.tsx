@@ -25,6 +25,7 @@ export const SidebarEmptyStateSettings: React.FC = () => {
       <section className="px-2 pb-2 pt-0 space-y-0.5">
         <div
           className="group flex cursor-pointer items-center gap-2 py-1.5"
+          data-settings-item="sessions.empty-state"
           role="button"
           tabIndex={0}
           aria-pressed={hide}

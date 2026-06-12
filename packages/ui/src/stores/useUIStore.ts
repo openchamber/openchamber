@@ -903,7 +903,6 @@ export const useUIStore = create<UIStore>()(
         collapsibleUserMessages: true,
         stickyUserHeader: false,
         showSplitAssistantMessageActions: false,
-        showMobileSessionStatusBar: true,
         isMobileSessionStatusBarCollapsed: false,
         mobileSessionPanelOpen: false,
         mobileSessionFilterProjectId: null,
