@@ -60,11 +60,15 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { useDirectoryShowHidden, setDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { useFilesViewShowGitignored, setFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import {
+  completeExtQualifier,
   filterByExtensions,
+  isTypingExtQualifier,
+  parseExtQualifiers,
   parseFileSearchQualifiers,
   removeExtQualifier,
   removePathQualifier,
   resolvePathScopedDirectory,
+  suggestExtensions,
 } from '@/lib/fileFilterQualifiers';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -77,6 +81,8 @@ import { openDesktopFileInApp, openDesktopPath } from '@/lib/desktop';
 import { useOpenInAppsStore } from '@/stores/useOpenInAppsStore';
 import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { useI18n } from '@/lib/i18n';
+
+const STATIC_EXTENSION_SUGGESTIONS = ['ts', 'tsx', 'js', 'jsx', 'json', 'md', 'css', 'html', 'py', 'rs'];
 
 type FileNode = {
   name: string;
@@ -828,6 +834,31 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
   const [searchResults, setSearchResults] = React.useState<FileNode[]>([]);
   const [searching, setSearching] = React.useState(false);
+  const suggestionExtensionsRef = React.useRef<string[]>(STATIC_EXTENSION_SUGGESTIONS);
+  const [autocompleteDismissed, setAutocompleteDismissed] = React.useState(false);
+  const prevSearchQueryRef = React.useRef(searchQuery);
+
+  // Reset dismissal when query content changes
+  React.useEffect(() => {
+    if (prevSearchQueryRef.current !== searchQuery) {
+      setAutocompleteDismissed(false);
+      prevSearchQueryRef.current = searchQuery;
+    }
+  }, [searchQuery]);
+
+  const autocompleteVisible = React.useMemo(
+    () => isTypingExtQualifier(searchQuery.trim()) && !autocompleteDismissed,
+    [searchQuery, autocompleteDismissed]
+  );
+  const autocompleteSuggestions = React.useMemo(() => {
+    if (!autocompleteVisible) return [];
+    const { extensions: alreadySelected } = parseExtQualifiers(searchQuery.trim());
+    const prefix = searchQuery.match(/\bext:([a-zA-Z0-9.,_-]*)$/)?.[1] ?? '';
+    return suggestExtensions(
+      suggestionExtensionsRef.current.map((ext) => ({ extension: ext })),
+      prefix
+    ).filter((ext) => !alreadySelected.includes(ext));
+  }, [autocompleteVisible, searchQuery]);
 
   const [fileContent, setFileContent] = React.useState<string>('');
   const { isPlaying: isTTSPlaying, play: playTTS, stop: stopTTS } = useMessageTTS();
@@ -1451,6 +1482,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         }));
 
         setSearchResults(mapped);
+        // Feed autocomplete suggestions from this result set
+        suggestionExtensionsRef.current = suggestExtensions(hits, '');
       })
       .catch(() => {
         if (!cancelled) {
@@ -1467,6 +1500,27 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       cancelled = true;
     };
   }, [currentDirectory, debouncedSearchQuery, searchFiles, showHidden, showGitignored, t]);
+
+  // Close autocomplete on outside click or Escape
+  React.useEffect(() => {
+    if (!autocompleteVisible) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setAutocompleteDismissed(true);
+    };
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.closest('[data-autocomplete]')) return;
+      setAutocompleteDismissed(true);
+    };
+
+    document.addEventListener('keydown', handleKeyDown, true);
+    document.addEventListener('mousedown', handleClick, true);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown, true);
+      document.removeEventListener('mousedown', handleClick, true);
+    };
+  }, [autocompleteVisible]);
 
   const readFile = React.useCallback(async (path: string, options?: { allowOutsideWorkspace?: boolean; optional?: boolean }): Promise<string> => {
     if (files.readFile) {
@@ -3799,8 +3853,32 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                   searchInputRef.current?.focus();
                 }}
               >
-                <Icon name="close" className="size-4" />
-              </button>
+              <Icon name="close" className="size-4" />
+            </button>
+            )}
+            {autocompleteVisible && autocompleteSuggestions.length > 0 && (
+              <div
+                data-autocomplete
+                className="absolute left-0 top-full z-50 mt-1 w-52 rounded-md border border-border bg-[var(--surface-elevated)] py-1 shadow-lg"
+              >
+                <div className="px-2 py-1 typography-meta text-muted-foreground">
+                  {t('filesView.tree.filter.extAutocompleteLabel')}
+                </div>
+                {autocompleteSuggestions.map((ext) => (
+                  <button
+                    key={ext}
+                    type="button"
+                    className="flex w-full items-center gap-2 px-2 py-1 text-left typography-meta hover:bg-[var(--interactive-hover)]"
+                    onClick={() => {
+                      const completed = completeExtQualifier(searchQuery, ext);
+                      setSearchQuery(completed);
+                      searchInputRef.current?.focus();
+                    }}
+                  >
+                    <span className="font-mono text-[11px]">*.{ext}</span>
+                  </button>
+                ))}
+              </div>
             )}
           </div>
           <Tooltip>
