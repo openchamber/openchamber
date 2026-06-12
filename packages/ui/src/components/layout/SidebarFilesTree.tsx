@@ -34,8 +34,19 @@ import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitStatus } from '@/stores/useGitStore';
-import { useDirectoryShowHidden } from '@/lib/directoryShowHidden';
-import { useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
+import { useDirectoryShowHidden, setDirectoryShowHidden } from '@/lib/directoryShowHidden';
+import { useFilesViewShowGitignored, setFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
+import {
+  completeExtQualifier,
+  filterByExtensions,
+  isTypingExtQualifier,
+  parseExtQualifiers,
+  parseFileSearchQualifiers,
+  removeExtQualifier,
+  removePathQualifier,
+  resolvePathScopedDirectory,
+  suggestExtensions,
+} from '@/lib/fileFilterQualifiers';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { cn, getRevealLabelKey } from '@/lib/utils';
 import { opencodeClient } from '@/lib/opencode/client';
@@ -43,6 +54,8 @@ import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Icon } from "@/components/icon/Icon";
 import { getContextFileOpenFailureMessage, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
 import { useI18n } from '@/lib/i18n';
+
+const STATIC_EXTENSION_SUGGESTIONS = ['ts', 'tsx', 'js', 'jsx', 'json', 'md', 'css', 'html', 'py', 'rs'];
 
 type FileNode = {
   name: string;
@@ -350,6 +363,7 @@ export const SidebarFilesTree: React.FC = () => {
   const root = normalizePath(currentDirectory.trim());
   const showHidden = useDirectoryShowHidden();
   const showGitignored = useFilesViewShowGitignored();
+  const [filtersExpanded, setFiltersExpanded] = React.useState(false);
   const searchFiles = useFileSearchStore((state) => state.searchFiles);
   const openContextFile = useUIStore((state) => state.openContextFile);
   const gitStatus = useGitStatus(currentDirectory);
@@ -357,8 +371,40 @@ export const SidebarFilesTree: React.FC = () => {
   const [searchQuery, setSearchQuery] = React.useState('');
   const debouncedSearchQuery = useDebouncedValue(searchQuery, 200);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
+  const activeQualifiers = React.useMemo(
+    () => parseFileSearchQualifiers(searchQuery.trim()),
+    [searchQuery]
+  );
+  const activeExtensions = activeQualifiers.extensions;
+  const activePathScope = activeQualifiers.pathScope;
   const [searchResults, setSearchResults] = React.useState<FileNode[]>([]);
   const [searching, setSearching] = React.useState(false);
+  const [suggestionExtensions, setSuggestionExtensions] = React.useState<string[]>(STATIC_EXTENSION_SUGGESTIONS);
+  const [autocompleteDismissed, setAutocompleteDismissed] = React.useState(false);
+  const prevSearchQueryRef = React.useRef(searchQuery);
+
+  // Reset dismissal when query content changes
+  React.useEffect(() => {
+    if (prevSearchQueryRef.current !== searchQuery) {
+      setAutocompleteDismissed(false);
+      prevSearchQueryRef.current = searchQuery;
+    }
+  }, [searchQuery]);
+
+  const autocompleteVisible = React.useMemo(
+    () => isTypingExtQualifier(searchQuery) && !autocompleteDismissed,
+    [searchQuery, autocompleteDismissed]
+  );
+  const autocompleteSuggestions = React.useMemo(() => {
+    if (!autocompleteVisible) return [];
+    const { extensions: alreadySelected } = parseExtQualifiers(searchQuery);
+    const rawPrefix = searchQuery.match(/\bext:([a-zA-Z0-9.,_-]*)$/)?.[1] ?? '';
+    const prefix = rawPrefix.split(',').pop() ?? '';
+    return suggestExtensions(
+      suggestionExtensions.map((ext) => ({ extension: ext })),
+      prefix
+    ).filter((ext) => !alreadySelected.includes(ext));
+  }, [autocompleteVisible, searchQuery, suggestionExtensions]);
 
   const [childrenByDir, setChildrenByDir] = React.useState<Record<string, FileNode[]>>({});
   const [loadErrorsByDir, setLoadErrorsByDir] = React.useState<Record<string, string>>({});
@@ -569,10 +615,19 @@ export const SidebarFilesTree: React.FC = () => {
       return;
     }
 
+    const { cleanQuery, extensions, pathScope } = parseFileSearchQualifiers(trimmedQuery);
+    const scopedDirectory = resolvePathScopedDirectory(currentDirectory, pathScope);
+    if (!scopedDirectory) {
+      setSearchResults([]);
+      setSearching(false);
+      return;
+    }
+    const serverQuery = cleanQuery.length > 0 ? cleanQuery : '*';
+
     let cancelled = false;
     setSearching(true);
 
-    searchFiles(currentDirectory, trimmedQuery, 150, {
+    searchFiles(scopedDirectory, serverQuery, 150, {
       includeHidden: showHidden,
       respectGitignore: !showGitignored,
       type: 'file',
@@ -580,7 +635,8 @@ export const SidebarFilesTree: React.FC = () => {
       .then((hits) => {
         if (cancelled) return;
 
-        const filtered = hits.filter((hit) => showGitignored || !shouldIgnorePath(hit.path));
+        const extFiltered = filterByExtensions(hits, extensions);
+        const filtered = extFiltered.filter((hit) => showGitignored || !shouldIgnorePath(hit.path));
 
         const mapped: FileNode[] = filtered.map((hit) => ({
           name: hit.name,
@@ -591,10 +647,17 @@ export const SidebarFilesTree: React.FC = () => {
         }));
 
         setSearchResults(mapped);
+        // Feed autocomplete suggestions from this result set
+        setSuggestionExtensions(suggestExtensions(hits, ''));
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         if (!cancelled) {
-          setSearchResults([]);
+          const isTimeout = err instanceof DOMException && err.name === 'TimeoutError';
+          toast.error(
+            isTimeout
+              ? t('sidebarFilesTree.toast.searchTimedOut')
+              : t('sidebarFilesTree.toast.searchFailed')
+          );
         }
       })
       .finally(() => {
@@ -606,7 +669,28 @@ export const SidebarFilesTree: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [currentDirectory, debouncedSearchQuery, searchFiles, showHidden, showGitignored]);
+  }, [currentDirectory, debouncedSearchQuery, searchFiles, showHidden, showGitignored, t]);
+
+  // Close autocomplete on outside click or Escape
+  React.useEffect(() => {
+    if (!autocompleteVisible) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setAutocompleteDismissed(true);
+    };
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.closest('[data-autocomplete]')) return;
+      setAutocompleteDismissed(true);
+    };
+
+    document.addEventListener('keydown', handleKeyDown, true);
+    document.addEventListener('mousedown', handleClick, true);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown, true);
+      document.removeEventListener('mousedown', handleClick, true);
+    };
+  }, [autocompleteVisible]);
 
   // --- Git status helpers (matching FilesView) ---
 
@@ -860,6 +944,24 @@ export const SidebarFilesTree: React.FC = () => {
   return (
     <section className="flex h-full min-h-0 flex-col overflow-hidden">
       <div className="flex items-center gap-2 border-b border-border/40 px-3 py-2">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setFiltersExpanded(v => !v)}
+                className="size-7 flex-shrink-0"
+                aria-label={t('sidebarFilesTree.filter.expandTooltip')}
+              >
+                <Icon name={filtersExpanded ? 'arrow-up-s' : 'arrow-down-s'} className="size-4" />
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={6}>
+            {t('sidebarFilesTree.filter.expandTooltip')}
+          </TooltipContent>
+        </Tooltip>
         <div className="relative min-w-0 flex-1">
           <Icon name="search" className="pointer-events-none absolute left-2 top-2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -882,6 +984,30 @@ export const SidebarFilesTree: React.FC = () => {
               <Icon name="close" className="h-4 w-4" />
             </button>
           ) : null}
+          {autocompleteVisible && autocompleteSuggestions.length > 0 && (
+            <div
+              data-autocomplete
+              className="absolute left-0 top-full z-50 mt-1 w-52 rounded-md border border-border bg-[var(--surface-elevated)] py-1 shadow-lg"
+            >
+              <div className="px-2 py-1 typography-meta text-muted-foreground">
+                {t('sidebarFilesTree.filter.extAutocompleteLabel')}
+              </div>
+              {autocompleteSuggestions.map((ext) => (
+                <button
+                  key={ext}
+                  type="button"
+                  className="flex w-full items-center gap-2 px-2 py-1 text-left typography-meta hover:bg-[var(--interactive-hover)]"
+                  onClick={() => {
+                    const completed = completeExtQualifier(searchQuery, ext);
+                    setSearchQuery(completed);
+                    searchInputRef.current?.focus();
+                  }}
+                >
+                  <span className="font-mono text-[11px]">*.{ext}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         {canCreateFile && (
           <Tooltip>
@@ -932,6 +1058,101 @@ export const SidebarFilesTree: React.FC = () => {
           <TooltipContent side="bottom" sideOffset={6}>{t('sidebarFilesTree.actions.refreshTitle')}</TooltipContent>
         </Tooltip>
       </div>
+
+      {filtersExpanded && (
+        <div className="flex items-center gap-1 border-b border-border/40 px-3 py-1.5">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setDirectoryShowHidden(!showHidden)}
+                  className={cn(
+                    'size-7',
+                    showHidden
+                      ? 'text-[var(--interactive-selection-foreground)] bg-[var(--interactive-selection)]'
+                      : 'text-muted-foreground'
+                  )}
+                  aria-label={showHidden ? t('sidebarFilesTree.filter.hideHidden') : t('sidebarFilesTree.filter.showHidden')}
+                >
+                  <Icon name={showHidden ? 'eye' : 'eye-off'} className="size-3.5" />
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>
+              {showHidden ? t('sidebarFilesTree.filter.hideHidden') : t('sidebarFilesTree.filter.showHidden')}
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setFilesViewShowGitignored(!showGitignored)}
+                  className={cn(
+                    'size-7',
+                    showGitignored
+                      ? 'text-[var(--interactive-selection-foreground)] bg-[var(--interactive-selection)]'
+                      : 'text-muted-foreground'
+                  )}
+                  aria-label={showGitignored ? t('sidebarFilesTree.filter.hideGitignored') : t('sidebarFilesTree.filter.showGitignored')}
+                >
+                  <Icon name="git-branch" className="size-3.5" />
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>
+              {showGitignored ? t('sidebarFilesTree.filter.hideGitignored') : t('sidebarFilesTree.filter.showGitignored')}
+            </TooltipContent>
+          </Tooltip>
+          {activePathScope && (
+            <>
+              <div className="mx-0.5 h-4 w-px bg-border/60" aria-hidden="true" />
+              <span className="inline-flex items-center gap-0.5 rounded bg-[var(--interactive-selection)] px-1.5 py-0.5 text-[11px] leading-none text-[var(--interactive-selection-foreground)]">
+                <Icon name="folder" className="size-3" />
+                <span className="max-w-32 truncate font-mono" title={activePathScope}>{activePathScope}</span>
+                <button
+                  type="button"
+                  className="ml-0.5 inline-flex size-3 items-center justify-center rounded-sm opacity-70 hover:opacity-100"
+                  onClick={() => {
+                    setSearchQuery(removePathQualifier(searchQuery));
+                    searchInputRef.current?.focus();
+                  }}
+                  aria-label={t('sidebarFilesTree.filter.pathChipRemoveAria', { path: activePathScope })}
+                >
+                  <Icon name="close" className="size-2.5" />
+                </button>
+              </span>
+            </>
+          )}
+          {activeExtensions.length > 0 && (
+            <>
+              <div className="mx-0.5 h-4 w-px bg-border/60" aria-hidden="true" />
+              {activeExtensions.map((ext) => (
+                <span
+                  key={ext}
+                  className="inline-flex items-center gap-0.5 rounded bg-[var(--interactive-selection)] px-1.5 py-0.5 text-[11px] leading-none text-[var(--interactive-selection-foreground)]"
+                >
+                  <span className="font-mono">*.{ext}</span>
+                  <button
+                    type="button"
+                    className="ml-0.5 inline-flex size-3 items-center justify-center rounded-sm opacity-70 hover:opacity-100"
+                    onClick={() => {
+                      setSearchQuery(removeExtQualifier(searchQuery, ext));
+                      searchInputRef.current?.focus();
+                    }}
+                    aria-label={t('sidebarFilesTree.filter.extChipRemoveAria', { ext })}
+                  >
+                    <Icon name="close" className="size-2.5" />
+                  </button>
+                </span>
+              ))}
+            </>
+          )}
+        </div>
+      )}
 
       <ScrollableOverlay outerClassName="flex-1 min-h-0" className="p-2">
         <ul className="flex flex-col">

@@ -5,6 +5,7 @@ import { opencodeClient, type ProjectFileSearchHit } from '@/lib/opencode/client
 const CACHE_TTL_MS = 30_000;
 const MAX_CACHE_ENTRIES = 40;
 const DEFAULT_SEARCH_LIMIT = 60;
+const SEARCH_TIMEOUT_MS = 8_000;
 
 interface FileSearchCacheEntry {
   files: ProjectFileSearchHit[];
@@ -75,15 +76,22 @@ export const useFileSearchStore = create<FileSearchStoreState>()(
           return inflight;
         }
 
-        const searchPromise = opencodeClient
-          .searchFiles(normalizedQuery, {
+        let timeoutId: ReturnType<typeof setTimeout>;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => reject(new DOMException('Search timed out', 'TimeoutError')), SEARCH_TIMEOUT_MS);
+        });
+
+        const searchPromise = Promise.race([
+          opencodeClient.searchFiles(normalizedQuery, {
             directory: normalizedDirectory,
             limit,
             includeHidden,
             respectGitignore,
             dirs: type !== 'file',
             type,
-          })
+          }),
+          timeoutPromise,
+        ])
           .then((files) => {
             set((state) => {
               if (state.inFlight[key] !== searchPromise) {
@@ -109,6 +117,7 @@ export const useFileSearchStore = create<FileSearchStoreState>()(
             return files;
           })
           .finally(() => {
+            clearTimeout(timeoutId);
             set((state) => {
               if (state.inFlight[key] !== searchPromise) {
                 return state;
