@@ -57,8 +57,8 @@ import { useGitStatus } from '@/stores/useGitStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { buildCodeMirrorCommentWidgets, normalizeLineRange, useInlineCommentController } from '@/components/comments';
 import { opencodeClient } from '@/lib/opencode/client';
-import { useDirectoryShowHidden } from '@/lib/directoryShowHidden';
-import { useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
+import { useDirectoryShowHidden, setDirectoryShowHidden } from '@/lib/directoryShowHidden';
+import { useFilesViewShowGitignored, setFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
@@ -672,6 +672,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const alwaysShowActions = isMobile || isTablet;
   const showHidden = useDirectoryShowHidden();
   const showGitignored = useFilesViewShowGitignored();
+  const [filtersExpanded, setFiltersExpanded] = React.useState(false);
 
   const currentDirectory = useEffectiveDirectory() ?? '';
   const root = normalizePath(currentDirectory.trim());
@@ -1430,7 +1431,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       })
       .catch(() => {
         if (!cancelled) {
-          setSearchResults([]);
+          toast.error(t('filesView.tree.filter.searchFailed'));
         }
       })
       .finally(() => {
@@ -3738,6 +3739,24 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     )}>
       <div className={cn("flex flex-col gap-2 py-2", isMobile ? "px-3" : "px-2")}>
         <div className="flex items-center gap-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setFiltersExpanded(v => !v)}
+                  className="size-7 flex-shrink-0"
+                  aria-label={t('filesView.tree.filter.expandTooltip')}
+                >
+                  <Icon name={filtersExpanded ? 'arrow-up-s' : 'arrow-down-s'} className="size-4" />
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>
+              {t('filesView.tree.filter.expandTooltip')}
+            </TooltipContent>
+          </Tooltip>
           <div className="relative flex-1 min-w-0">
             <Icon name="search" className="pointer-events-none absolute left-2 top-2 size-4 text-muted-foreground" />
             <Input
@@ -3806,6 +3825,56 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             <TooltipContent side="bottom" sideOffset={6}>{t('filesView.tree.actions.refreshTitle')}</TooltipContent>
           </Tooltip>
         </div>
+        {filtersExpanded && (
+          <div className={cn("flex items-center gap-1", isMobile ? "px-3" : "px-2")}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setDirectoryShowHidden(!showHidden)}
+                    className={cn(
+                      'size-7',
+                      showHidden
+                        ? 'text-[var(--interactive-selection-foreground)] bg-[var(--interactive-selection)]'
+                        : 'text-muted-foreground'
+                    )}
+                    aria-label={showHidden ? t('filesView.tree.filter.hideHidden') : t('filesView.tree.filter.showHidden')}
+                  >
+                    <Icon name={showHidden ? 'eye' : 'eye-off'} className="size-3.5" />
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={6}>
+                {showHidden ? t('filesView.tree.filter.hideHidden') : t('filesView.tree.filter.showHidden')}
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setFilesViewShowGitignored(!showGitignored)}
+                    className={cn(
+                      'size-7',
+                      showGitignored
+                        ? 'text-[var(--interactive-selection-foreground)] bg-[var(--interactive-selection)]'
+                        : 'text-muted-foreground'
+                    )}
+                    aria-label={showGitignored ? t('filesView.tree.filter.hideGitignored') : t('filesView.tree.filter.showGitignored')}
+                  >
+                    <Icon name="git-branch" className="size-3.5" />
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={6}>
+                {showGitignored ? t('filesView.tree.filter.hideGitignored') : t('filesView.tree.filter.showGitignored')}
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        )}
       </div>
 
       <ScrollableOverlay outerClassName="flex-1 min-h-0" className={cn("py-2", isMobile ? "px-3" : "px-2")}>
