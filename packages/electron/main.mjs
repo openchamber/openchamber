@@ -4081,6 +4081,7 @@ const BLOCKED_EXTENSIONS = new Set([
   '.command', '.applescript', '.scpt',
   '.jar', '.jnlp',
   '.reg', '.inf',
+  '.hta', '.js',
   '.pkg', '.dmg', '.deb', '.rpm',
 ]);
 
