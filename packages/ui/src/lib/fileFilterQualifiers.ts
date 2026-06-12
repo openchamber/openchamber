@@ -62,18 +62,4 @@ export function filterByExtensions<T extends { extension?: string }>(
   });
 }
 
-export function isTypingExtQualifier(query: string): boolean {
-  return /\bext:\s*$/.test(query) || /\bext:[a-zA-Z0-9.,_-]*$/.test(query);
-}
 
-export function suggestExtensions(hits: Array<{ extension?: string }>): string[] {
-  const counts = new Map<string, number>();
-  for (const hit of hits) {
-    if (!hit.extension) continue;
-    counts.set(hit.extension, (counts.get(hit.extension) ?? 0) + 1);
-  }
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-    .map(([ext]) => ext);
-}
