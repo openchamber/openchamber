@@ -24,10 +24,10 @@ export function parseExtQualifiers(query: string): ParsedQualifiers {
   };
 }
 
-export function filterByExtensions(
-  hits: Array<{ extension?: string }>,
+export function filterByExtensions<T extends { extension?: string }>(
+  hits: T[],
   extensions: string[]
-): Array<{ extension?: string }> {
+): T[] {
   if (extensions.length === 0) return hits;
   return hits.filter((hit) => {
     const ext = hit.extension?.toLowerCase();
