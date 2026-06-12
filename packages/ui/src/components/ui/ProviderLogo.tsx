@@ -6,6 +6,7 @@ interface ProviderLogoProps {
     providerId: string;
     alt?: string;
     className?: string;
+    fallback?: React.ReactNode;
     onError?: () => void;
 }
 
@@ -13,9 +14,10 @@ export const ProviderLogo: React.FC<ProviderLogoProps> = ({
     providerId,
     alt,
     className,
+    fallback = null,
     onError: externalOnError
 }) => {
-    const { src, onError: handleInternalError, hasLogo } = useProviderLogo(providerId);
+    const { src, onError: handleInternalError, hasLogo, isCustom } = useProviderLogo(providerId);
 
     const handleError = React.useCallback(() => {
         handleInternalError();
@@ -23,14 +25,14 @@ export const ProviderLogo: React.FC<ProviderLogoProps> = ({
     }, [handleInternalError, externalOnError]);
 
     if (!hasLogo || !src) {
-        return null;
+        return <>{fallback}</>;
     }
 
     return (
         <img
             src={src}
             alt={alt || `${providerId} logo`}
-            className={cn('dark:invert object-contain', className)}
+            className={cn(isCustom ? 'object-contain' : 'dark:invert object-contain', className)}
             loading="eager"
             decoding="async"
             fetchPriority="high"

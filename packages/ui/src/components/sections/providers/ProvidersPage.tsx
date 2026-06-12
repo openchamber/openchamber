@@ -1,7 +1,9 @@
 import React from 'react';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
+import { PROVIDER_LOGO_OPTIONS } from '@/hooks/useProviderLogo';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useProviderIconStore } from '@/stores/useProviderIconStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -152,6 +154,14 @@ export const ProvidersPage: React.FC = () => {
   const toggleHiddenModel = useUIStore((state) => state.toggleHiddenModel);
   const hideAllModels = useUIStore((state) => state.hideAllModels);
   const showAllModels = useUIStore((state) => state.showAllModels);
+  const selectedProviderIconOverride = useProviderIconStore((state) =>
+    selectedProviderId && selectedProviderId !== ADD_PROVIDER_ID
+      ? state.providerIconImages[selectedProviderId]
+      : undefined
+  );
+  const uploadProviderIcon = useProviderIconStore((state) => state.uploadProviderIcon);
+  const selectBuiltInProviderIcon = useProviderIconStore((state) => state.selectBuiltInProviderIcon);
+  const removeProviderIcon = useProviderIconStore((state) => state.removeProviderIcon);
 
   const [authMethodsByProvider, setAuthMethodsByProvider] = React.useState<Record<string, AuthMethod[]>>({});
   const [authLoading, setAuthLoading] = React.useState(false);
@@ -169,6 +179,8 @@ export const ProvidersPage: React.FC = () => {
   const [providerDropdownOpen, setProviderDropdownOpen] = React.useState(false);
   const [providerSources, setProviderSources] = React.useState<Record<string, ProviderSources>>({});
   const [showAuthPanel, setShowAuthPanel] = React.useState(false);
+  const [providerIconBusyKey, setProviderIconBusyKey] = React.useState<string | null>(null);
+  const providerIconInputRef = React.useRef<HTMLInputElement | null>(null);
 
   React.useEffect(() => {
     if (!selectedProviderId && providers.length > 0) {
@@ -482,6 +494,55 @@ export const ProvidersPage: React.FC = () => {
     }
   };
 
+  const handleUploadProviderIcon = async (providerId: string, file: File | null) => {
+    if (!file) {
+      return;
+    }
+
+    const busyKey = `upload:${providerId}`;
+    setProviderIconBusyKey(busyKey);
+    try {
+      const result = await uploadProviderIcon(providerId, file);
+      if (!result.ok) {
+        toast.error(result.error || t('settings.providers.page.toast.iconUploadFailed'));
+        return;
+      }
+      toast.success(t('settings.providers.page.toast.iconUpdated'));
+    } finally {
+      setProviderIconBusyKey(null);
+    }
+  };
+
+  const handleRestoreDefaultProviderIcon = async (providerId: string) => {
+    const busyKey = `restore:${providerId}`;
+    setProviderIconBusyKey(busyKey);
+    try {
+      const result = await removeProviderIcon(providerId);
+      if (!result.ok) {
+        toast.error(result.error || t('settings.providers.page.toast.iconRestoreDefaultFailed'));
+        return;
+      }
+      toast.success(t('settings.providers.page.toast.iconRestoredDefault'));
+    } finally {
+      setProviderIconBusyKey(null);
+    }
+  };
+
+  const handleSelectBuiltInProviderIcon = async (providerId: string, builtInProviderId: string) => {
+    const busyKey = `builtin:${providerId}:${builtInProviderId}`;
+    setProviderIconBusyKey(busyKey);
+    try {
+      const result = await selectBuiltInProviderIcon(providerId, builtInProviderId);
+      if (!result.ok) {
+        toast.error(result.error || t('settings.providers.page.toast.iconSelectFailed'));
+        return;
+      }
+      toast.success(t('settings.providers.page.toast.iconUpdated'));
+    } finally {
+      setProviderIconBusyKey(null);
+    }
+  };
+
   const isAddMode = selectedProviderId === ADD_PROVIDER_ID;
 
   if (!isAddMode && providers.length === 0) {
@@ -784,6 +845,95 @@ export const ProvidersPage: React.FC = () => {
               <span className="font-mono">{selectedProvider.id}</span>
             </p>
           </div>
+        </div>
+
+        {/* Provider Icon */}
+        <div data-settings-item="providers.icon" className="mb-8">
+          <div className="mb-1 px-1">
+            <h3 className="typography-ui-header font-medium text-foreground">{t('settings.providers.page.icon.title')}</h3>
+          </div>
+
+          <section className="px-2 pb-2 pt-0">
+            <input
+              ref={providerIconInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/svg+xml,.png,.jpg,.jpeg,.svg"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0] ?? null;
+                void handleUploadProviderIcon(selectedProvider.id, file);
+                event.currentTarget.value = '';
+              }}
+            />
+            <div className="flex flex-wrap items-center gap-2 py-1.5">
+              <span className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border/60 bg-[var(--surface-elevated)] p-1">
+                <ProviderLogo
+                  providerId={selectedProvider.id}
+                  className="h-full w-full"
+                  fallback={<Icon name="file-image" className="h-4 w-4 text-muted-foreground/60" />}
+                />
+              </span>
+              <Button
+                size="xs"
+                className="!font-normal"
+                onClick={() => providerIconInputRef.current?.click()}
+                disabled={providerIconBusyKey === `upload:${selectedProvider.id}`}
+              >
+                {providerIconBusyKey === `upload:${selectedProvider.id}`
+                  ? t('settings.providers.page.actions.uploadingIcon')
+                  : t('settings.providers.page.actions.uploadIcon')}
+              </Button>
+              {selectedProviderIconOverride ? (
+                <Button
+                  size="xs"
+                  variant="outline"
+                  className="!font-normal"
+                  onClick={() => void handleRestoreDefaultProviderIcon(selectedProvider.id)}
+                  disabled={providerIconBusyKey === `restore:${selectedProvider.id}`}
+                >
+                  {providerIconBusyKey === `restore:${selectedProvider.id}`
+                    ? t('settings.providers.page.actions.restoringDefaultIcon')
+                    : t('settings.providers.page.actions.restoreDefaultIcon')}
+                </Button>
+              ) : null}
+            </div>
+            <div className="mt-2">
+              <div className="mb-1 typography-meta text-muted-foreground">
+                {t('settings.providers.page.icon.builtIn')}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {PROVIDER_LOGO_OPTIONS.map((option) => {
+                  const selected = selectedProviderIconOverride?.source === 'builtin'
+                    && selectedProviderIconOverride.builtinProviderId === option.id;
+                  return (
+                    <Button
+                      key={option.id}
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      aria-pressed={selected}
+                      title={option.label}
+                      className={cn(
+                        'h-8 w-8 rounded-md border p-1',
+                        selected
+                          ? 'border-foreground bg-[var(--primary-base)]/10'
+                          : 'border-border/40 hover:border-border hover:bg-[var(--surface-muted)]'
+                      )}
+                      disabled={providerIconBusyKey?.startsWith(`builtin:${selectedProvider.id}:`) ?? false}
+                      onClick={() => void handleSelectBuiltInProviderIcon(selectedProvider.id, option.id)}
+                    >
+                      <img
+                        src={option.src}
+                        alt=""
+                        className="h-full w-full object-contain dark:invert"
+                        draggable={false}
+                      />
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
+          </section>
         </div>
 
         {/* Authentication */}

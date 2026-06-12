@@ -627,6 +627,13 @@ export interface ProjectEntry {
   sidebarCollapsed?: boolean;
 }
 
+export interface ProviderIconImage {
+  mime?: string;
+  updatedAt: number;
+  source: 'custom' | 'builtin';
+  builtinProviderId?: string;
+}
+
 export interface SettingsPayload {
   themeId?: string;
   useSystemTheme?: boolean;
@@ -681,6 +688,7 @@ export interface SettingsPayload {
   pwaAppName?: string;
   mobileKeyboardMode?: 'native' | 'resize-content';
   draftStarters?: DraftStarterRef[];
+  providerIconImages?: Record<string, ProviderIconImage>;
 
   [key: string]: unknown;
 }

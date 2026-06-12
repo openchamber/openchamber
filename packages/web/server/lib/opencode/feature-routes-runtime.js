@@ -7,6 +7,7 @@ import { registerSessionFoldersRoutes } from '../session-folders/routes.js';
 import { registerConfigEntityRoutes } from './config-entity-routes.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
 import { registerProjectIconRoutes } from './project-icon-routes.js';
+import { registerProviderIconRoutes } from './provider-icon-routes.js';
 import { registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
 import { registerSkillRoutes } from './skill-routes.js';
 import { registerPluginRoutes } from './plugin-routes.js';
@@ -100,6 +101,15 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       createFsSearchRuntime,
       spawn,
       resolveGitBinaryForSpawn,
+    });
+
+    registerProviderIconRoutes(app, {
+      fsPromises,
+      path,
+      crypto,
+      openchamberDataDir,
+      readSettingsFromDiskMigrated,
+      persistSettings,
     });
 
     registerScheduledTaskRoutes(app, {

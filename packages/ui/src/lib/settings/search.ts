@@ -557,6 +557,12 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['api key', 'oauth', 'credentials'],
   },
   {
+    id: 'providers.icon',
+    page: 'providers',
+    titleKey: 'settings.providers.page.icon.title',
+    keywords: ['icon', 'logo', 'upload', 'provider', 'built-in', 'preset'],
+  },
+  {
     id: 'providers.connection-details',
     page: 'providers',
     titleKey: 'settings.providers.page.connectionDetails.title',
