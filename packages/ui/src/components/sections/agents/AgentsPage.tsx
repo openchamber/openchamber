@@ -122,6 +122,10 @@ const filterRulesAgainstGlobal = (ruleset: PermissionRule[], globalAction: Permi
 );
 
 const permissionConfigToRuleset = (value: unknown): PermissionRule[] => {
+  if (Array.isArray(value)) {
+    return normalizeRuleset(value as PermissionRule[]);
+  }
+
   if (isPermissionAction(value)) {
     return [{ permission: '*', pattern: '*', action: value }];
   }
@@ -162,9 +166,7 @@ const buildPermissionConfigWithGlobal = (
     (grouped[rule.permission] ||= {})[rule.pattern] = rule.action;
   }
 
-  const result: Record<string, PermissionConfigValue> = {
-    '*': globalAction,
-  };
+  const result: Record<string, PermissionConfigValue> = {};
 
   for (const [permissionName, patterns] of Object.entries(grouped)) {
     if (permissionName === '*') {
@@ -177,6 +179,14 @@ const buildPermissionConfigWithGlobal = (
     }
 
     result[permissionName] = patterns;
+  }
+
+  if (Object.keys(result).length === 0) {
+    return globalAction;
+  }
+
+  if (globalAction !== 'allow') {
+    result['*'] = globalAction;
   }
 
   return result as AgentConfig['permission'];
@@ -273,7 +283,7 @@ export const AgentsPage: React.FC = () => {
     const names = new Set<string>();
 
     for (const agent of agents) {
-      const rules = normalizeRuleset(Array.isArray(agent.permission) ? agent.permission as PermissionRule[] : []);
+      const rules = normalizeRuleset(permissionConfigToRuleset(agent.permission));
       for (const rule of rules) {
         if (rule.permission && rule.permission !== '*' && rule.permission !== 'invalid') {
           names.add(rule.permission);
@@ -509,7 +519,7 @@ export const AgentsPage: React.FC = () => {
       setPrompt(promptValue);
 
       const permissionState = applyPermissionState(
-        Array.isArray(selectedAgent.permission) ? selectedAgent.permission as PermissionRule[] : [],
+        permissionConfigToRuleset(selectedAgent.permission),
       );
 
       initialStateRef.current = {
@@ -568,6 +578,7 @@ export const AgentsPage: React.FC = () => {
 
     try {
       const trimmedModel = model.trim();
+      const trimmedPrompt = prompt.trim();
       const permissionConfig = buildPermissionConfigWithGlobal(globalPermission, permissionRules);
       const config: AgentConfig = {
         name: agentName,
@@ -576,7 +587,7 @@ export const AgentsPage: React.FC = () => {
         model: trimmedModel === '' ? null : trimmedModel,
         temperature,
         top_p: topP,
-        prompt: prompt.trim() || undefined,
+        prompt: trimmedPrompt || (isNewAgent ? undefined : null),
         permission: permissionConfig,
         scope: isNewAgent ? draftScope : undefined,
       };
@@ -644,7 +655,7 @@ export const AgentsPage: React.FC = () => {
           <section className="px-2 pb-2 pt-0 space-y-0">
 
             {isNewAgent && (
-              <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
+              <div data-settings-item="agents.name" className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
                 <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
                   <span className="typography-ui-label text-foreground">{t('settings.agents.page.field.agentName')}</span>
                 </div>
@@ -694,7 +705,7 @@ export const AgentsPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="pb-1.5 pt-0.5">
+            <div data-settings-item="agents.mode" className="pb-1.5 pt-0.5">
               <div className="flex min-w-0 flex-col gap-1.5">
                 <div className="flex items-center gap-1.5">
                   <span className="typography-ui-label text-foreground">{t('settings.agents.page.field.mode')}</span>
@@ -752,7 +763,7 @@ export const AgentsPage: React.FC = () => {
 
           <section className="px-2 pb-2 pt-0 space-y-0">
 
-            <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
+            <div data-settings-item="agents.model" className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
               <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
                 <span className="typography-ui-label text-foreground">{t('settings.agents.page.field.overrideModel')}</span>
               </div>
@@ -771,7 +782,7 @@ export const AgentsPage: React.FC = () => {
               </div>
             </div>
 
-            <div className={cn("py-1.5", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
+            <div data-settings-item="agents.temperature" className={cn("py-1.5", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
               <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "sm:w-56 shrink-0")}>
                 <div className="flex items-center gap-1.5">
                   <span className="typography-ui-label text-foreground">{t('settings.agents.page.field.temperature')}</span>
@@ -815,7 +826,7 @@ export const AgentsPage: React.FC = () => {
               </div>
             </div>
 
-            <div className={cn("py-1.5", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
+            <div data-settings-item="agents.top-p" className={cn("py-1.5", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
               <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "sm:w-56 shrink-0")}>
                 <div className="flex items-center gap-1.5">
                   <span className="typography-ui-label text-foreground">{t('settings.agents.page.field.topP')}</span>
@@ -863,7 +874,7 @@ export const AgentsPage: React.FC = () => {
         </div>
 
         {/* System Prompt */}
-        <div className="mb-8">
+        <div data-settings-item="agents.system-prompt" className="mb-8">
           <div className="mb-1 px-1">
             <h3 className="typography-ui-header font-medium text-foreground">
               {t('settings.agents.page.section.systemPrompt')}
@@ -882,7 +893,7 @@ export const AgentsPage: React.FC = () => {
         </div>
 
         {/* Tool Permissions */}
-        <div className="mb-2">
+        <div data-settings-item="agents.permissions" className="mb-2">
           <div className="mb-1 px-1 flex items-center justify-between gap-4">
             <h3 className="typography-ui-header font-medium text-foreground">
               {t('settings.agents.page.section.toolPermissions')}

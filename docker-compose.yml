@@ -15,9 +15,12 @@ services:
       - ./data/opencode/config:/home/openchamber/.config/opencode
       - ./data/ssh:/home/openchamber/.ssh
       - ./workspaces:/home/openchamber/workspaces
-    #environment:
-    # OPENCHAMBER_HOST: 0.0.0.0  # Bind address (default in Docker: 0.0.0.0)
-    # UI_PASSWORD: your_secure_password_here  # Uncomment to set UI password
+    environment:
+      # Docker binds OpenChamber to 0.0.0.0 for port mapping, so UI auth is required.
+      # Set this before starting, for example:
+      #   OPENCHAMBER_UI_PASSWORD="$(openssl rand -base64 24)" docker compose up -d
+      OPENCHAMBER_UI_PASSWORD: ${OPENCHAMBER_UI_PASSWORD:?Set OPENCHAMBER_UI_PASSWORD before exposing OpenChamber through Docker}
+    # OPENCHAMBER_HOST: 0.0.0.0  # Bind address (default in Docker entrypoint: 0.0.0.0)
     # OPENCHAMBER_TUNNEL_PROVIDER: cloudflare
     # OPENCHAMBER_TUNNEL_MODE: quick  # quick | managed-remote | managed-local
     # OPENCHAMBER_TUNNEL_HOSTNAME: app.example.com  # required for managed-remote

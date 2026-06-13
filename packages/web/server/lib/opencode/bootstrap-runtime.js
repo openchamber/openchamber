@@ -21,6 +21,7 @@ export const createBootstrapRuntime = (dependencies) => {
       verboseRequestLogs,
       uiPassword,
       tunnelAuthController,
+      remoteClientAuthRuntime,
       readSettingsFromDiskMigrated,
       normalizeTunnelSessionTtlMs,
       sayTTSCapability,
@@ -50,6 +51,15 @@ export const createBootstrapRuntime = (dependencies) => {
       setAutoAcceptSession,
     } = options;
 
+    const uiAuthController = createUiAuth({
+      password: uiPassword,
+      readSettingsFromDiskMigrated,
+      clientAuthController: remoteClientAuthRuntime,
+    });
+    if (uiAuthController.enabled) {
+      console.log('UI password protection enabled for browser sessions');
+    }
+
     registerServerStatusRoutes(app, {
       express,
       process,
@@ -58,22 +68,17 @@ export const createBootstrapRuntime = (dependencies) => {
       serverStartedAt,
       gracefulShutdown,
       getHealthSnapshot,
+      tunnelAuthController,
+      uiAuthController,
     });
 
     registerCommonRequestMiddleware(app, { express, verboseRequestLogs });
-
-    const uiAuthController = createUiAuth({
-      password: uiPassword,
-      readSettingsFromDiskMigrated,
-    });
-    if (uiAuthController.enabled) {
-      console.log('UI password protection enabled for browser sessions');
-    }
 
     registerAuthAndAccessRoutes(app, {
       express,
       tunnelAuthController,
       uiAuthController,
+      remoteClientAuthRuntime,
       readSettingsFromDiskMigrated,
       normalizeTunnelSessionTtlMs,
     });

@@ -20,7 +20,7 @@ export type WorktreeCanonicalizationResult = {
   cwd: string | null;
   branch: string | null;
   headState: 'branch' | 'detached' | 'unborn';
-  worktreeStatus: 'ready' | 'missing' | 'invalid' | 'not-a-repo';
+  worktreeStatus: 'pending' | 'ready' | 'missing' | 'invalid' | 'not-a-repo';
   legacy: boolean;
   degraded: boolean;
   attentionReason?: 'merge' | 'rebase' | 'cherry-pick' | 'revert' | 'bisect' | null;
@@ -143,8 +143,12 @@ export function resolveSessionWorktreeState(
   };
 }
 
-export function formatSessionWorktreeBadge(attachment: SessionWorktreeAttachment): string {
+export function formatSessionWorktreeBadge(
+  attachment: SessionWorktreeAttachment,
+  labels?: { pending?: string }
+): string {
   if (attachment.legacy) return 'Legacy session';
+  if (attachment.worktreeStatus === 'pending') return labels?.pending ?? 'Needs attention';
   if (attachment.worktreeStatus === 'missing') return 'Worktree missing';
   if (attachment.worktreeStatus === 'not-a-repo') return 'Not a repo';
   if (attachment.worktreeStatus === 'invalid') return 'Needs attention';

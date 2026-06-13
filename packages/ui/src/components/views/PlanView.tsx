@@ -1,4 +1,5 @@
 import React from 'react';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import { CodeMirrorEditor } from '@/components/ui/CodeMirrorEditor';
 import { PreviewToggleButton } from './PreviewToggleButton';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
@@ -39,6 +40,7 @@ import { parseProjectPlanMarkdown } from '@/lib/openchamberConfig';
 import { createWorktreeSessionForNewBranch } from '@/lib/worktreeSessionCreator';
 import { TodoSendDialog, type TodoSendExecution } from '@/components/session/TodoSendDialog';
 import { Icon } from "@/components/icon/Icon";
+import { useMessageTTS } from '@/hooks/useMessageTTS';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { useI18n } from '@/lib/i18n';
 
@@ -196,6 +198,8 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
     return toDisplayPath(resolvedPath, { currentDirectory: sessionDirectory, homeDirectory });
   }, [resolvedPath, sessionDirectory, homeDirectory]);
   const [content, setContent] = React.useState<string>('');
+  const { isPlaying: isTTSPlaying, play: playTTS, stop: stopTTS } = useMessageTTS();
+  const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
   const [saveError, setSaveError] = React.useState<string | null>(null);
   const planFileLabel = React.useMemo(() => {
     return displayPath ? displayPath.split('/').pop() || t('planView.file.defaultName') : t('planView.file.defaultName');
@@ -273,6 +277,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
   const {
     drafts: planFileDrafts,
     commentText,
+    setCommentText,
     editingDraftId,
     setSelection: setCommentSelection,
     saveComment,
@@ -324,8 +329,10 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
       if (target.closest('.cm-gutterElement')) return;
       if (target.closest('[data-sonner-toast]') || target.closest('[data-sonner-toaster]')) return;
 
-      setLineSelection(null);
-      cancel();
+      if (!commentText.trim()) {
+        setLineSelection(null);
+        cancel();
+      }
     };
 
     const timeoutId = window.setTimeout(() => {
@@ -336,7 +343,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
       window.clearTimeout(timeoutId);
       document.removeEventListener('click', handleClickOutside);
     };
-  }, [cancel, editingDraftId, isMobile, lineSelection]);
+  }, [cancel, commentText, editingDraftId, isMobile, lineSelection]);
 
   const editorExtensions = React.useMemo(() => {
     const extensions = [createFlexokiCodeMirrorTheme(currentTheme)];
@@ -371,7 +378,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
         return result?.content ?? '';
       }
 
-      const response = await fetch(`/api/fs/read?path=${encodeURIComponent(path)}&optional=true`, {
+      const response = await runtimeFetch(`/api/fs/read?path=${encodeURIComponent(path)}&optional=true`, {
         // Avoid conditional requests (304 + empty body).
         cache: 'no-store',
       });
@@ -475,7 +482,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
             throw new Error(t('planView.error.writeFailed'));
           }
         } else {
-          const response = await fetch('/api/fs/write', {
+          const response = await runtimeFetch('/api/fs/write', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ path: resolvedPath, content }),
@@ -544,7 +551,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
             return;
           }
           sessionId = created.id;
-          directoryHint = null;
+          directoryHint = created.path;
         } else {
           const sessionResult = await createSession(undefined, currentProjectRef.path, null);
           if (!sessionResult?.id) {
@@ -598,6 +605,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
       drafts: planFileDrafts,
       editingDraftId,
       commentText,
+      onTextChange: setCommentText,
       selection: lineSelection,
       isDragging,
       fileLabel: planFileLabel,
@@ -611,7 +619,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
       },
       onDelete: deleteDraft,
     });
-  }, [commentText, deleteDraft, editingDraftId, handleCancelComment, handleSaveComment, isDragging, lineSelection, planFileDrafts, planFileLabel, startEdit]);
+  }, [commentText, deleteDraft, editingDraftId, handleCancelComment, handleSaveComment, isDragging, lineSelection, planFileDrafts, planFileLabel, setCommentText, startEdit]);
 
   return (
     <div className="relative flex h-full min-h-0 min-w-0 w-full flex-col overflow-hidden bg-background">
@@ -688,6 +696,34 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
               currentMode={mdViewMode}
               onToggle={() => saveMdViewMode(mdViewMode === 'preview' ? 'edit' : 'preview')}
             />
+            {mdViewMode === 'preview' && showMessageTTSButtons && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-5 w-5 p-0"
+                    aria-label={isTTSPlaying ? t('planView.tts.stopSpeaking') : t('planView.tts.readAloud')}
+                    onClick={() => {
+                      if (isTTSPlaying) {
+                        stopTTS();
+                      } else if (content.trim()) {
+                        void playTTS(content);
+                      }
+                    }}
+                  >
+                    {isTTSPlaying ? (
+                      <Icon name="stop" className="h-4 w-4 text-[color:var(--status-success)]" />
+                    ) : (
+                      <Icon name="volume-up" className="h-4 w-4" />
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent sideOffset={8}>
+                  {isTTSPlaying ? t('planView.tts.stopSpeaking') : t('planView.tts.readAloud')}
+                </TooltipContent>
+              </Tooltip>
+            )}
             <Button
               variant="ghost"
               size="sm"
@@ -778,6 +814,20 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
                             if (event.button !== 0) return false;
                             event.preventDefault();
                             const lineNumber = view.state.doc.lineAt(line.from).number;
+
+                            if (
+                              lineSelection &&
+                              !event.shiftKey &&
+                              Math.min(lineSelection.start, lineSelection.end) === lineNumber &&
+                              Math.max(lineSelection.start, lineSelection.end) === lineNumber
+                            ) {
+                              setLineSelection(null);
+                              cancel();
+                              isSelectingRef.current = false;
+                              selectionStartRef.current = null;
+                              setIsDragging(false);
+                              return true;
+                            }
 
                             if (isMobile && lineSelection && !event.shiftKey) {
                               const start = Math.min(lineSelection.start, lineSelection.end, lineNumber);

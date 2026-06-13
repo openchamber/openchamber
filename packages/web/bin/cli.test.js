@@ -3,12 +3,105 @@ import path from 'path';
 import { pathToFileURL } from 'url';
 
 import { isModuleCliExecution, normalizeCliEntryPath } from './cli-entry.js';
-import { parseArgs } from './cli.js';
+import { assertAuthenticatedNetworkExposure, parseArgs } from './cli.js';
 
 describe('cli args', () => {
   it('accepts legacy daemon flags as no-ops', () => {
     expect(parseArgs(['serve', '--daemon']).removedFlagErrors).toEqual([]);
     expect(parseArgs(['serve', '-d']).removedFlagErrors).toEqual([]);
+  });
+
+  it('parses explicit connect-url server overrides', () => {
+    const parsed = parseArgs(['connect-url', '--server', 'https://openchamber.example.com', '--port', '3002']);
+
+    expect(parsed.command).toBe('connect-url');
+    expect(parsed.options.server).toBe('https://openchamber.example.com');
+    expect(parsed.options.port).toBe(3002);
+  });
+
+  it('parses connect-url server-url alias', () => {
+    const parsed = parseArgs(['connect-url', '--server-url=http://homebridge:3002']);
+
+    expect(parsed.options.server).toBe('http://homebridge:3002');
+  });
+
+  it('parses connect-url api-only help', () => {
+    const parsed = parseArgs(['connect-url', '--api-only', '--help']);
+
+    expect(parsed.command).toBe('connect-url');
+    expect(parsed.options.apiOnly).toBe(true);
+    expect(parsed.helpRequested).toBe(true);
+  });
+
+  it('parses startup api-only option', () => {
+    const parsed = parseArgs(['startup', 'enable', '--api-only', '--port', '3002']);
+
+    expect(parsed.command).toBe('startup');
+    expect(parsed.startupAction).toBe('enable');
+    expect(parsed.options.apiOnly).toBe(true);
+    expect(parsed.options.port).toBe(3002);
+  });
+
+  it('parses tunnel auto-start server options', () => {
+    const parsed = parseArgs(['tunnel', 'start', '--port', '3002', '--api-only', '--lan', '--ui-password', 'secret']);
+
+    expect(parsed.command).toBe('tunnel');
+    expect(parsed.subcommand).toBe('start');
+    expect(parsed.options.port).toBe(3002);
+    expect(parsed.options.apiOnly).toBe(true);
+    expect(parsed.options.host).toBe('0.0.0.0');
+    expect(parsed.options.uiPassword).toBe('secret');
+  });
+
+  it('maps --lan to wildcard bind host', () => {
+    const parsed = parseArgs(['serve', '--lan', '--port', '3002']);
+
+    expect(parsed.options.host).toBe('0.0.0.0');
+    expect(parsed.options.lan).toBe(true);
+  });
+
+  it('supports --hostname as top-level bind alias', () => {
+    const parsed = parseArgs(['serve', '--hostname', '0.0.0.0']);
+
+    expect(parsed.options.host).toBe('0.0.0.0');
+  });
+
+  it('keeps --hostname for tunnel commands', () => {
+    const parsed = parseArgs(['tunnel', 'start', '--hostname', 'app.example.com']);
+
+    expect(parsed.options.hostname).toBe('app.example.com');
+    expect(parsed.options.host).toBeUndefined();
+  });
+});
+
+describe('network-exposed auth validation', () => {
+  it('allows loopback without a UI password', () => {
+    expect(() => assertAuthenticatedNetworkExposure({ host: '127.0.0.1' })).not.toThrow();
+    expect(() => assertAuthenticatedNetworkExposure({ host: 'localhost' })).not.toThrow();
+    expect(() => assertAuthenticatedNetworkExposure({ host: '::1' })).not.toThrow();
+  });
+
+  it('requires a UI password for LAN and wildcard bind hosts', () => {
+    expect(() => assertAuthenticatedNetworkExposure({ host: '0.0.0.0' })).toThrow(/refuses to bind/);
+    expect(() => assertAuthenticatedNetworkExposure({ host: '192.168.1.10' })).toThrow(/refuses to bind/);
+  });
+
+  it('allows network-exposed bind hosts with a UI password', () => {
+    expect(() => assertAuthenticatedNetworkExposure({ host: '0.0.0.0', uiPassword: 'secret' })).not.toThrow();
+  });
+
+  it('allows explicit unsafe LAN override from process env only', () => {
+    const previous = process.env.OPENCHAMBER_ALLOW_UNAUTHENTICATED_LAN;
+    process.env.OPENCHAMBER_ALLOW_UNAUTHENTICATED_LAN = 'true';
+    try {
+      expect(() => assertAuthenticatedNetworkExposure({ host: '0.0.0.0' })).not.toThrow();
+    } finally {
+      if (typeof previous === 'string') {
+        process.env.OPENCHAMBER_ALLOW_UNAUTHENTICATED_LAN = previous;
+      } else {
+        delete process.env.OPENCHAMBER_ALLOW_UNAUTHENTICATED_LAN;
+      }
+    }
   });
 });
 

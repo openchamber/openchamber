@@ -17,6 +17,7 @@ import { useFileSystemAccess } from '@/hooks/useFileSystemAccess';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 interface DirectoryItem {
   name: string;
@@ -281,7 +282,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
           try {
             let pinned: string[] = [];
 
-        const response = await fetch('/api/config/settings', {
+        const response = await runtimeFetch('/api/config/settings', {
           method: 'GET',
           headers: { Accept: 'application/json' },
         });
@@ -663,7 +664,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
     const fullPath = `${creatingInPath}/${dirName}`;
 
     try {
-      await opencodeClient.createDirectory(fullPath, { allowOutsideWorkspace: true });
+      await opencodeClient.createDirectory(fullPath);
 
       const children = await loadDirectory(creatingInPath);
       const updateItems = (items: DirectoryItem[]): DirectoryItem[] => {

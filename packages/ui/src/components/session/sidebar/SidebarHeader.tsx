@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import { Icon } from "@/components/icon/Icon";
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 
 type Props = {
@@ -63,8 +64,12 @@ export function SidebarHeader(props: Props): React.ReactNode {
 
   const displayMode = useSessionDisplayStore((state) => state.displayMode);
   const showRecentSection = useSessionDisplayStore((state) => state.showRecentSection);
+  const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
   const setDisplayMode = useSessionDisplayStore((state) => state.setDisplayMode);
   const toggleRecentSection = useSessionDisplayStore((state) => state.toggleRecentSection);
+  const toggleArchivedSessions = useSessionDisplayStore((state) => state.toggleArchivedSessions);
+  // VS Code forces the expanded layout, so the mode toggle is meaningless there.
+  const showDisplayModeToggle = !isVSCodeRuntime();
 
   if (hideDirectoryControls) {
     return null;
@@ -186,29 +191,40 @@ export function SidebarHeader(props: Props): React.ReactNode {
                 <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.displayMode.label')}</p></TooltipContent>
               </Tooltip>
               <DropdownMenuContent align="end" className="min-w-[160px]">
-                <DropdownMenuItem
-                  onClick={() => setDisplayMode('default')}
-                  className="flex items-center justify-between"
-                >
-                  <span>{t('sessions.sidebar.header.displayMode.default')}</span>
-                  {displayMode === 'default' ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => setDisplayMode('minimal')}
-                  className="flex items-center justify-between"
-                >
-                  <span>{t('sessions.sidebar.header.displayMode.minimal')}</span>
-                  {displayMode === 'minimal' ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
-                </DropdownMenuItem>
+                {showDisplayModeToggle ? (
+                  <>
+                    <DropdownMenuItem
+                      onClick={() => setDisplayMode('default')}
+                      className="flex items-center justify-between"
+                    >
+                      <span>{t('sessions.sidebar.header.displayMode.default')}</span>
+                      {displayMode === 'default' ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => setDisplayMode('minimal')}
+                      className="flex items-center justify-between"
+                    >
+                      <span>{t('sessions.sidebar.header.displayMode.minimal')}</span>
+                      {displayMode === 'minimal' ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                    </DropdownMenuItem>
+                  </>
+                ) : null}
                 {showRecentControls ? (
                   <>
-                    <DropdownMenuSeparator />
+                    {showDisplayModeToggle ? <DropdownMenuSeparator /> : null}
                     <DropdownMenuItem
                       onClick={toggleRecentSection}
                       className="flex items-center justify-between"
                     >
                       <span>{t('sessions.sidebar.header.displayMode.showRecent')}</span>
                       {showRecentSection ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={toggleArchivedSessions}
+                      className="flex items-center justify-between"
+                    >
+                      <span>{t('sessions.sidebar.header.displayMode.showArchived')}</span>
+                      {showArchivedSessions ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
                     </DropdownMenuItem>
                   </>
                 ) : null}

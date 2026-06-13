@@ -14,6 +14,7 @@ interface CodeMirrorCommentWidgetsOptions {
   drafts: InlineCommentDraft[];
   editingDraftId: string | null;
   commentText: string;
+  onTextChange: (text: string) => void;
   selection: LineRange | null;
   isDragging: boolean;
   fileLabel: string;
@@ -30,6 +31,7 @@ export function buildCodeMirrorCommentWidgets(options: CodeMirrorCommentWidgetsO
     drafts,
     editingDraftId,
     commentText,
+    onTextChange,
     selection,
     isDragging,
     fileLabel,
@@ -53,6 +55,7 @@ export function buildCodeMirrorCommentWidgets(options: CodeMirrorCommentWidgetsO
           <InlineCommentInput
             key={`edit-${draft.id}`}
             initialText={commentText}
+            onTextChange={onTextChange}
             fileLabel={fileLabel}
             lineRange={draftRange}
             isEditing={true}
@@ -92,6 +95,7 @@ export function buildCodeMirrorCommentWidgets(options: CodeMirrorCommentWidgetsO
         <InlineCommentInput
           key={newWidgetId}
           initialText={commentText}
+          onTextChange={onTextChange}
           fileLabel={fileLabel}
           lineRange={normalizedSelection}
           isEditing={false}

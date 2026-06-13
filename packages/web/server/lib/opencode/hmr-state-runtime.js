@@ -6,12 +6,19 @@ export const createHmrStateRuntime = (dependencies) => {
     stateKey,
   } = dependencies;
 
+  const getInitialOpenCodeWorkingDirectory = () => {
+    const configured = typeof processLike.env.OPENCHAMBER_OPENCODE_CWD === 'string'
+      ? processLike.env.OPENCHAMBER_OPENCODE_CWD.trim()
+      : '';
+    return configured || os.homedir();
+  };
+
   const getOrCreateHmrState = () => {
     if (!globalThisLike[stateKey]) {
       globalThisLike[stateKey] = {
         openCodeProcess: null,
         openCodePort: null,
-        openCodeWorkingDirectory: os.homedir(),
+        openCodeWorkingDirectory: getInitialOpenCodeWorkingDirectory(),
         isShuttingDown: false,
         signalsAttached: false,
         userProvidedOpenCodePassword: undefined,

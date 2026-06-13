@@ -94,6 +94,54 @@ describe('settings helpers', () => {
     });
   });
 
+  it('accepts shortcut overrides as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({
+      shortcutOverrides: {
+        open_settings: 'mod+comma',
+        new_chat: '__unassigned__',
+        invalid: 123,
+        empty: '',
+      },
+    })).toEqual({
+      shortcutOverrides: {
+        open_settings: 'mod+comma',
+        new_chat: '__unassigned__',
+      },
+    });
+  });
+
+  it('preserves empty shortcut overrides when resetting all shortcuts', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ shortcutOverrides: {} })).toEqual({
+      shortcutOverrides: {},
+    });
+  });
+
+  it('accepts OpenCode update notification preference as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ showOpenCodeUpdateNotifications: false })).toEqual({
+      showOpenCodeUpdateNotifications: false,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ showOpenCodeUpdateNotifications: true })).toEqual({
+      showOpenCodeUpdateNotifications: true,
+    });
+  });
+
+  it('accepts dismissed OpenCode update toast version as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ openCodeUpdateToastDismissedVersion: ' 1.16.0 ' })).toEqual({
+      openCodeUpdateToastDismissedVersion: '1.16.0',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ openCodeUpdateToastDismissedVersion: '' })).toEqual({
+      openCodeUpdateToastDismissedVersion: '',
+    });
+  });
+
   it('rejects non-boolean collapsibleThinkingBlocks values', () => {
     const helpers = createTestHelpers();
 
@@ -116,5 +164,28 @@ describe('settings helpers', () => {
 
     const response = helpers.formatSettingsResponse({});
     expect(response.collapsibleThinkingBlocks).toBe(true);
+  });
+
+  it('includes transient desktop LAN access runtime status in desktop settings response', () => {
+    const helpers = createTestHelpers();
+    const previousRuntime = process.env.OPENCHAMBER_RUNTIME;
+    const previousActive = process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_ACTIVE;
+    const previousReason = process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_BLOCKED_REASON;
+    try {
+      process.env.OPENCHAMBER_RUNTIME = 'desktop';
+      process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_ACTIVE = 'false';
+      process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_BLOCKED_REASON = 'missing-password';
+
+      const response = helpers.formatSettingsResponse({ desktopLanAccessEnabled: true });
+      expect(response.desktopLanAccessActive).toBe(false);
+      expect(response.desktopLanAccessBlockedReason).toBe('missing-password');
+    } finally {
+      if (typeof previousRuntime === 'string') process.env.OPENCHAMBER_RUNTIME = previousRuntime;
+      else delete process.env.OPENCHAMBER_RUNTIME;
+      if (typeof previousActive === 'string') process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_ACTIVE = previousActive;
+      else delete process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_ACTIVE;
+      if (typeof previousReason === 'string') process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_BLOCKED_REASON = previousReason;
+      else delete process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_BLOCKED_REASON;
+    }
   });
 });

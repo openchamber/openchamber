@@ -24,6 +24,18 @@ OpenChamber가 연결 확인, 원격 설정, 서버 시작, 포트 포워딩 단
 
 SSH 및 UI 비밀번호를 저장할지, 매번 입력할지 결정합니다. 연결이 끊기면 OpenChamber가 어느 단계가 실패했는지 알려주므로 고칠 수 있습니다. [Remote access](/ko/troubleshooting/remote-access/)를 참고하세요.
 
+## 직접 연결 링크
+
+원격 머신에서 OpenChamber가 이미 실행 중이면 그 머신에서 연결 링크를 만들고 **Settings → Remote Instances → Server links**에서 가져오세요:
+
+```bash
+openchamber connect-url --port 3000 --server http://your-host:3000 --qr
+```
+
+해당 포트에 서버가 없으면 `connect-url`이 먼저 서버를 시작합니다. Headless 서버에는 `--api-only`, 시작 시 LAN에 바인딩하려면 `--lan`, 브라우저 접근 보호에는 `--ui-password`, 저장된 연결 이름에는 `--name`을 사용하세요.
+
+생성된 링크에는 OpenChamber 앱용 client token이 들어 있습니다. 이 token은 브라우저 UI 비밀번호와 별개이며, 취소하거나 삭제하기 전까지 서버 재시작 후에도 유지됩니다.
+
 ## 관련 항목
 
 - [OpenCode Server](/ko/opencode-server/) — 웹이나 VS Code에서 원격 서버에 연결하세요

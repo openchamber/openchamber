@@ -4,6 +4,10 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import yaml from 'yaml';
+import {
+  createExecutableSearchEnv,
+  resolveExecutableLaunchTarget,
+} from './tunnels/executable-search.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,52 +21,18 @@ const TUNNEL_MODE_QUICK = 'quick';
 const TUNNEL_MODE_MANAGED_REMOTE = 'managed-remote';
 const TUNNEL_MODE_MANAGED_LOCAL = 'managed-local';
 
-async function searchPathFor(command) {
-  const pathValue = process.env.PATH || '';
-  const segments = pathValue.split(path.delimiter).filter(Boolean);
-  const WINDOWS_EXTENSIONS = process.platform === 'win32'
-    ? (process.env.PATHEXT || '.EXE;.CMD;.BAT;.COM')
-        .split(';')
-        .map((ext) => ext.trim().toLowerCase())
-        .filter(Boolean)
-        .map((ext) => (ext.startsWith('.') ? ext : `.${ext}`))
-    : [''];
-
-  for (const dir of segments) {
-    for (const ext of WINDOWS_EXTENSIONS) {
-      const fileName = process.platform === 'win32' ? `${command}${ext}` : command;
-      const candidate = path.join(dir, fileName);
-      try {
-        const stats = fs.statSync(candidate);
-        if (stats.isFile()) {
-          if (process.platform !== 'win32') {
-            try {
-              fs.accessSync(candidate, fs.constants.X_OK);
-            } catch {
-              continue;
-            }
-          }
-          return candidate;
-        }
-      } catch {
-        continue;
-      }
-    }
-  }
-  return null;
-}
-
 export async function checkCloudflaredAvailable() {
-  const cfPath = await searchPathFor('cloudflared');
-  if (cfPath) {
+  const target = resolveExecutableLaunchTarget('cloudflared');
+  if (target) {
     try {
-      const result = spawnSync(cfPath, ['--version'], {
+      const result = spawnSync(target.command, ['--version'], {
         encoding: 'utf8',
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
+        env: target.env,
       });
       if (result.status === 0) {
-        return { available: true, path: cfPath, version: result.stdout.trim() };
+        return { available: true, path: target.command, version: result.stdout.trim() };
       }
     } catch {
       // Ignore
@@ -102,7 +72,7 @@ const spawnCloudflared = (args, envOverrides = {}, resolvedBinaryPath = 'cloudfl
   stdio: ['ignore', 'pipe', 'pipe'],
   windowsHide: true,
   env: {
-    ...process.env,
+    ...createExecutableSearchEnv(),
     CF_TELEMETRY_DISABLE: '1',
     ...envOverrides,
   },

@@ -8,6 +8,7 @@ import {
 import { refreshAfterOpenCodeRestart } from '@/stores/useAgentsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { opencodeClient } from '@/lib/opencode/client';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 export type PluginScope = 'user' | 'project';
 export type PluginParsedKind = 'npm' | 'path';
@@ -171,7 +172,7 @@ export const usePluginsStore = create<PluginsStore>()(
           const request = (async () => {
             set({ isLoading: true });
             try {
-              const response = await fetch(buildPluginsUrl('/api/config/plugins', configDirectory), {
+              const response = await runtimeFetch(buildPluginsUrl('/api/config/plugins', configDirectory), {
                 headers: buildDirectoryHeaders(configDirectory),
               });
               if (!response.ok) {
@@ -211,7 +212,7 @@ export const usePluginsStore = create<PluginsStore>()(
             const configDirectory = getConfigDirectory();
             const nextRegistryInfo: Record<string, RegistryResult> = { ...get().registryInfo };
             for (const chunk of chunkSpecs(specs)) {
-              const response = await fetch(buildRegistryUrl(chunk, opts?.force === true, configDirectory), {
+              const response = await runtimeFetch(buildRegistryUrl(chunk, opts?.force === true, configDirectory), {
                 headers: buildDirectoryHeaders(configDirectory),
               });
               if (!response.ok) {
@@ -241,7 +242,7 @@ export const usePluginsStore = create<PluginsStore>()(
 
         createEntry: async (input) => {
           const result = await runPluginMutation('Creating plugin entry…', async (configDirectory) => {
-            const response = await fetch(buildPluginsUrl('/api/config/plugins/entry', configDirectory), {
+            const response = await runtimeFetch(buildPluginsUrl('/api/config/plugins/entry', configDirectory), {
               method: 'POST',
               headers: buildJsonHeaders(configDirectory),
               body: JSON.stringify(buildEntryBody(input)),
@@ -258,7 +259,7 @@ export const usePluginsStore = create<PluginsStore>()(
           const existingSpec = get().entries.find((plugin) => plugin.id === id)?.spec;
           const nextSpec = input.spec ?? existingSpec;
           const result = await runPluginMutation('Updating plugin entry…', async (configDirectory) => {
-            const response = await fetch(buildPluginsUrl(`/api/config/plugins/entry/${encodeURIComponent(id)}`, configDirectory), {
+            const response = await runtimeFetch(buildPluginsUrl(`/api/config/plugins/entry/${encodeURIComponent(id)}`, configDirectory), {
               method: 'PATCH',
               headers: buildJsonHeaders(configDirectory),
               body: JSON.stringify(buildEntryBody(input)),
@@ -274,7 +275,7 @@ export const usePluginsStore = create<PluginsStore>()(
         deleteEntry: async (id) => {
           const entryToDelete = get().entries.find((plugin) => plugin.id === id);
           const result = await runPluginMutation('Deleting plugin entry…', async (configDirectory) => {
-            const response = await fetch(buildPluginsUrl(`/api/config/plugins/entry/${encodeURIComponent(id)}`, configDirectory), {
+            const response = await runtimeFetch(buildPluginsUrl(`/api/config/plugins/entry/${encodeURIComponent(id)}`, configDirectory), {
               method: 'DELETE',
               headers: buildDirectoryHeaders(configDirectory),
             });
@@ -295,7 +296,7 @@ export const usePluginsStore = create<PluginsStore>()(
         readFile: async (id) => {
           try {
             const configDirectory = getConfigDirectory();
-            const response = await fetch(buildPluginsUrl(`/api/config/plugins/file/${encodeURIComponent(id)}`, configDirectory), {
+            const response = await runtimeFetch(buildPluginsUrl(`/api/config/plugins/file/${encodeURIComponent(id)}`, configDirectory), {
               headers: buildDirectoryHeaders(configDirectory),
             });
             if (!response.ok) {
@@ -310,7 +311,7 @@ export const usePluginsStore = create<PluginsStore>()(
 
         createFile: async (input) => {
           return runPluginMutation('Creating plugin file…', async (configDirectory) => {
-            const response = await fetch(buildPluginsUrl('/api/config/plugins/file', configDirectory), {
+            const response = await runtimeFetch(buildPluginsUrl('/api/config/plugins/file', configDirectory), {
               method: 'POST',
               headers: buildJsonHeaders(configDirectory),
               body: JSON.stringify(input),
@@ -321,7 +322,7 @@ export const usePluginsStore = create<PluginsStore>()(
 
         updateFile: async (id, input) => {
           return runPluginMutation('Updating plugin file…', async (configDirectory) => {
-            const response = await fetch(buildPluginsUrl(`/api/config/plugins/file/${encodeURIComponent(id)}`, configDirectory), {
+            const response = await runtimeFetch(buildPluginsUrl(`/api/config/plugins/file/${encodeURIComponent(id)}`, configDirectory), {
               method: 'PUT',
               headers: buildJsonHeaders(configDirectory),
               body: JSON.stringify(input),
@@ -332,7 +333,7 @@ export const usePluginsStore = create<PluginsStore>()(
 
         deleteFile: async (id) => {
           const result = await runPluginMutation('Deleting plugin file…', async (configDirectory) => {
-            const response = await fetch(buildPluginsUrl(`/api/config/plugins/file/${encodeURIComponent(id)}`, configDirectory), {
+            const response = await runtimeFetch(buildPluginsUrl(`/api/config/plugins/file/${encodeURIComponent(id)}`, configDirectory), {
               method: 'DELETE',
               headers: buildDirectoryHeaders(configDirectory),
             });

@@ -233,6 +233,7 @@ const createInstantWorktreeDraft = async (options?: {
       branchName: preferredName,
       worktreeName: preferredName,
       setupCommands,
+      returnAfterDirectoryCreated: true,
     });
 
     resolvePendingDraftWorktreeRequest(pendingRequestId, metadata.path);
@@ -325,6 +326,7 @@ export async function createWorktreeOnly(): Promise<string | null> {
       branchName: preferredName,
       worktreeName: preferredName,
       setupCommands,
+      returnAfterDirectoryCreated: true,
     });
 
 
@@ -361,6 +363,7 @@ export async function createWorktreeSessionForBranch(
     ensureRemoteName?: string;
     ensureRemoteUrl?: string;
     createdFromBranch?: string;
+    returnAfterDirectoryCreated?: boolean;
   }
 ): Promise<{ id: string } | null> {
   if (isCreatingWorktreeSession) {
@@ -404,6 +407,7 @@ export async function createWorktreeSessionForBranch(
       ensureRemoteName: options?.ensureRemoteName,
       ensureRemoteUrl: options?.ensureRemoteUrl,
       setupCommands,
+      returnAfterDirectoryCreated: options?.returnAfterDirectoryCreated,
     });
 
     const kind = options?.kind ?? 'standard';
@@ -456,8 +460,9 @@ export async function createWorktreeSessionForNewBranch(
     ensureRemoteName?: string;
     ensureRemoteUrl?: string;
     createdFromBranch?: string;
+    returnAfterDirectoryCreated?: boolean;
   }
-): Promise<{ id: string; branch: string } | null> {
+): Promise<{ id: string; branch: string; path: string } | null> {
   if (isCreatingWorktreeSession) {
     return null;
   }
@@ -507,6 +512,7 @@ export async function createWorktreeSessionForNewBranch(
         ensureRemoteName: options?.ensureRemoteName,
         ensureRemoteUrl: options?.ensureRemoteUrl,
         setupCommands,
+        returnAfterDirectoryCreated: options?.returnAfterDirectoryCreated,
       });
       const createdMetadata = {
         ...metadata,
@@ -523,7 +529,7 @@ export async function createWorktreeSessionForNewBranch(
 
       initializeSessionForWorktree(session.id, createdMetadata);
 
-      return { id: session.id, branch: metadata.branch || base };
+      return { id: session.id, branch: metadata.branch || base, path: metadata.path };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to create worktree session';
       toast.error('Failed to create worktree', { description: message });
@@ -551,8 +557,9 @@ export async function createWorktreeSessionForNewBranchExact(
     ensureRemoteName?: string;
     ensureRemoteUrl?: string;
     createdFromBranch?: string;
+    returnAfterDirectoryCreated?: boolean;
   }
-): Promise<{ id: string; branch: string } | null> {
+): Promise<{ id: string; branch: string; path: string } | null> {
   return createWorktreeSessionForNewBranch(projectDirectory, branchName, startPoint, {
     kind: options?.kind,
     worktreeName: options?.worktreeName,
@@ -562,5 +569,6 @@ export async function createWorktreeSessionForNewBranchExact(
     ensureRemoteName: options?.ensureRemoteName,
     ensureRemoteUrl: options?.ensureRemoteUrl,
     createdFromBranch: options?.createdFromBranch,
+    returnAfterDirectoryCreated: options?.returnAfterDirectoryCreated,
   });
 }

@@ -1,3 +1,5 @@
+import { runtimeFetch } from '@/lib/runtime-fetch';
+
 const ANSI_ESCAPE_PREFIX = String.fromCharCode(27);
 const ANSI_ESCAPE_PATTERN = new RegExp(`${ANSI_ESCAPE_PREFIX}\\[[0-9;?]*[ -/]*[@-~]`, 'g');
 const LOOPBACK_URL_PATTERN = /(https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[(?:::1|::)\])(?::\d{2,5})?(?:\/[^\s<>'"`]*)?)/gi;
@@ -94,7 +96,7 @@ export const isTerminalPreviewUrlAvailable = async (url: string, timeoutMs = 150
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch('/api/system/probe-url', {
+    const response = await runtimeFetch('/api/system/probe-url', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url: parsed.toString() }),

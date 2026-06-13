@@ -93,6 +93,69 @@ export const createSseBoundaryTracker = () => {
   };
 };
 
+const SESSION_LIST_ALLOWED_FIELDS = [
+  'id',
+  'slug',
+  'projectID',
+  'workspaceID',
+  'directory',
+  'path',
+  'parentID',
+  'title',
+  'agent',
+  'model',
+  'version',
+  'time',
+  'cost',
+  'tokens',
+  'share',
+  'metadata',
+  'project',
+];
+
+export const sanitizeSessionListItem = (session) => {
+  if (!session || typeof session !== 'object' || Array.isArray(session)) {
+    return session;
+  }
+
+  const sanitized = {};
+  for (const key of SESSION_LIST_ALLOWED_FIELDS) {
+    if (key in session) {
+      sanitized[key] = session[key];
+    }
+  }
+
+  const summary = session.summary;
+  if (summary && typeof summary === 'object' && !Array.isArray(summary)) {
+    const summaryWithoutDiffs = { ...summary };
+    delete summaryWithoutDiffs.diffs;
+    sanitized.summary = summaryWithoutDiffs;
+  }
+
+  const revert = session.revert;
+  if (revert && typeof revert === 'object' && !Array.isArray(revert)) {
+    const revertMarker = {};
+    if (typeof revert.messageID === 'string') {
+      revertMarker.messageID = revert.messageID;
+    }
+    if (typeof revert.partID === 'string') {
+      revertMarker.partID = revert.partID;
+    }
+    if (Object.keys(revertMarker).length > 0) {
+      sanitized.revert = revertMarker;
+    }
+  }
+
+  return sanitized;
+};
+
+export const sanitizeSessionListPayload = (payload) => {
+  if (!Array.isArray(payload)) {
+    return payload;
+  }
+  return payload.map((session) => sanitizeSessionListItem(session));
+};
+
 export const registerOpenCodeProxy = (app, deps) => {
   const {
     fs,
@@ -122,6 +185,61 @@ export const registerOpenCodeProxy = (app, deps) => {
   const canonicalizeDirectoryQuery = createDirectoryQueryCanonicalizer({
     realpath: fs?.promises?.realpath?.bind(fs.promises),
   });
+
+  const hasParsedBodyValue = (body) => {
+    if (body === undefined || body === null) return false;
+    if (Buffer.isBuffer(body)) return body.length > 0;
+    if (typeof body === 'string') return body.length > 0;
+    if (Array.isArray(body)) return body.length > 0;
+    if (typeof body === 'object') return Object.keys(body).length > 0;
+    return true;
+  };
+
+  const getContentType = (proxyReq, req) => {
+    const value = proxyReq.getHeader?.('content-type') ?? req.headers?.['content-type'] ?? '';
+    if (Array.isArray(value)) return value[0] || '';
+    return String(value || '');
+  };
+
+  const serializeUrlEncodedBody = (body) => {
+    if (!body || typeof body !== 'object' || Buffer.isBuffer(body)) {
+      return String(body ?? '');
+    }
+
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(body)) {
+      if (value === undefined || value === null) continue;
+      if (Array.isArray(value)) {
+        for (const entry of value) {
+          if (entry !== undefined && entry !== null) params.append(key, String(entry));
+        }
+        continue;
+      }
+      params.append(key, String(value));
+    }
+    return params.toString();
+  };
+
+  const serializeParsedBody = (req, proxyReq) => {
+    if (req.method === 'GET' || req.method === 'HEAD') return null;
+    if (req.body === undefined || req.body === null) return null;
+    const originalContentLength = Number.parseInt(req.headers?.['content-length'] || '0', 10) || 0;
+    if (!hasParsedBodyValue(req.body) && originalContentLength <= 0) return null;
+
+    const contentType = getContentType(proxyReq, req).toLowerCase();
+    if (Buffer.isBuffer(req.body)) return req.body;
+    if (contentType.includes('application/json')) return Buffer.from(JSON.stringify(req.body));
+    if (contentType.includes('application/x-www-form-urlencoded')) return Buffer.from(serializeUrlEncodedBody(req.body));
+    if (typeof req.body === 'string') return Buffer.from(req.body);
+    return null;
+  };
+
+  const replayParsedBody = (proxyReq, req) => {
+    const body = serializeParsedBody(req, proxyReq);
+    if (!body) return;
+    proxyReq.setHeader('content-length', String(body.length));
+    proxyReq.write(body);
+  };
 
   const normalizeProxyTarget = (candidate) => {
     if (typeof candidate !== 'string') {
@@ -293,6 +411,57 @@ export const registerOpenCodeProxy = (app, deps) => {
     }
   };
 
+  const forwardSanitizedSessionListRequest = async (req, res, next, logLabel) => {
+    try {
+      const requestUrl = typeof req.originalUrl === 'string' && req.originalUrl.length > 0
+        ? req.originalUrl
+        : (typeof req.url === 'string' ? req.url : '');
+      const upstreamPathRaw = requestUrl.startsWith('/api') ? requestUrl.slice(4) || '/' : requestUrl;
+      const upstreamPath = await canonicalizeDirectoryQuery(upstreamPathRaw);
+      const upstream = await fetch(buildOpenCodeUrl(upstreamPath, ''), {
+        method: 'GET',
+        headers: {
+          ...collectForwardProxyHeaders(req.headers, getOpenCodeAuthHeaders()),
+          accept: 'application/json',
+          'accept-encoding': 'identity',
+        },
+      });
+
+      res.status(upstream.status);
+      applyForwardProxyResponseHeaders(upstream.headers, res);
+
+      const contentType = upstream.headers.get('content-type') || 'application/json; charset=utf-8';
+      const bodyText = await upstream.text();
+      if (!contentType.toLowerCase().includes('application/json')) {
+        res.setHeader('content-type', contentType);
+        res.end(bodyText);
+        return;
+      }
+
+      let payload;
+      try {
+        payload = JSON.parse(bodyText);
+      } catch {
+        res.setHeader('content-type', contentType);
+        res.end(bodyText);
+        return;
+      }
+
+      res.setHeader('content-type', contentType);
+      res.json(sanitizeSessionListPayload(payload));
+    } catch (error) {
+      if (isAbortError(error)) {
+        return;
+      }
+      console.error(`[proxy] OpenCode ${logLabel} proxy error:`, error?.message ?? error);
+      if (!res.headersSent) {
+        res.status(503).json({ error: 'OpenCode service unavailable' });
+        return;
+      }
+      next(error);
+    }
+  };
+
   // Ensure API prefix is detected before proxying
   app.use('/api', (_req, _res, next) => {
     ensureOpenCodeApiPrefix();
@@ -398,7 +567,7 @@ export const registerOpenCodeProxy = (app, deps) => {
           return bTime - aTime;
         });
         console.log(`[SessionMerge] ${globalSessions.length} global + ${extraSessions.length} extra = ${merged.length} total`);
-        return res.json(merged);
+        return res.json(sanitizeSessionListPayload(merged));
       } catch (error) {
         console.log(`[SessionMerge] Error: ${error.message}, falling through`);
         next();
@@ -406,8 +575,16 @@ export const registerOpenCodeProxy = (app, deps) => {
     });
   }
 
+  app.get('/api/session', (req, res, next) => {
+    return forwardSanitizedSessionListRequest(req, res, next, 'session.list');
+  });
+
   app.get('/api/global/event', forwardSseRequest);
   app.get('/api/event', forwardSseRequest);
+
+  app.get('/api/experimental/session', (req, res, next) => {
+    return forwardSanitizedSessionListRequest(req, res, next, 'experimental.session');
+  });
 
   // Generic proxy for non-SSE OpenCode API routes.
   const apiProxy = createProxyMiddleware({
@@ -417,7 +594,7 @@ export const registerOpenCodeProxy = (app, deps) => {
     // Dynamic target — port can change after restart
     router: () => resolveProxyTarget(),
     on: {
-      proxyReq: (proxyReq) => {
+      proxyReq: (proxyReq, req) => {
         // Inject OpenCode auth headers
         const authHeaders = getOpenCodeAuthHeaders();
         if (authHeaders.Authorization) {
@@ -427,6 +604,8 @@ export const registerOpenCodeProxy = (app, deps) => {
         // Defensive: request identity encoding from upstream OpenCode.
         // This avoids compressed-body/header mismatches in multi-proxy setups.
         proxyReq.setHeader('accept-encoding', 'identity');
+
+        replayParsedBody(proxyReq, req);
       },
       proxyRes: (proxyRes) => {
         for (const key of Object.keys(proxyRes.headers || {})) {

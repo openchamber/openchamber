@@ -7,6 +7,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { getDefaultModels } from '@/lib/quota/model-families';
 import { updateDesktopSettings } from '@/lib/persistence';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 const DEFAULT_REFRESH_INTERVAL_MS = 60000;
 
@@ -113,7 +114,7 @@ const loadSettingsFromRuntime = async (): Promise<QuotaSettingsState> => {
   }
 
   if (!isVSCodeRuntime()) {
-    const response = await fetch('/api/config/settings', {
+    const response = await runtimeFetch('/api/config/settings', {
       method: 'GET',
       headers: { Accept: 'application/json' }
     });
@@ -182,7 +183,7 @@ export const useQuotaStore = create<QuotaStore>()(
           isFetchingProvider: { ...state.isFetchingProvider, [providerId]: true }
         }));
         try {
-          const response = await fetch(`/api/quota/${encodeURIComponent(providerId)}`);
+          const response = await runtimeFetch(`/api/quota/${encodeURIComponent(providerId)}`);
           const payload = await response.json().catch(() => null);
           if (!response.ok) {
             throw new Error(payload?.error || 'Failed to fetch quota');

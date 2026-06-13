@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { ChatContainer } from '@/components/chat/ChatContainer';
 import { ChatSurfaceProvider } from '@/components/chat/ChatSurfaceContext';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
+import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
@@ -14,7 +15,6 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useGitBranchLabel, useGitStore } from '@/stores/useGitStore';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { resolveSessionDiffStats } from '@/components/session/sidebar/utils';
 import { Icon } from "@/components/icon/Icon";
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
@@ -69,6 +69,9 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
   const [pinned, setPinned] = React.useState(false);
   const macosMajor = typeof window !== 'undefined' ? window.__OPENCHAMBER_MACOS_MAJOR__ ?? 0 : 0;
   const hasMacTrafficLights = Number.isFinite(macosMajor) && macosMajor > 0;
+  const isWindowsElectronDesktop = typeof window !== 'undefined'
+    && Boolean(window.__OPENCHAMBER_ELECTRON__)
+    && window.__OPENCHAMBER_PLATFORM__ === 'win32';
   const macosHeaderSizeClass = hasMacTrafficLights
     ? macosMajor >= 26
       ? 'h-12'
@@ -132,11 +135,6 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
   const gitBranchForDirectory = useGitBranchLabel(openDirectory || null);
   const rawBranchLabel = gitBranchForDirectory || worktreeMetadataBranch || sessionWorktreeMetadata?.branch?.trim() || worktreeAttachment?.branch?.trim() || catalogWorktreeBranch;
   const branchLabel = rawBranchLabel && rawBranchLabel !== 'HEAD' ? rawBranchLabel : null;
-  const diffStats = React.useMemo(() => {
-    return resolveSessionDiffStats(session?.summary as Parameters<typeof resolveSessionDiffStats>[0]);
-  }, [session?.summary]);
-  const changes = diffStats ?? { additions: 0, deletions: 0 };
-  const hasChanges = changes.additions > 0 || changes.deletions > 0;
   const currentModel = getCurrentModel();
   const latestAssistantModel = React.useMemo(() => {
     for (let i = currentSessionMessages.length - 1; i >= 0; i -= 1) {
@@ -256,9 +254,9 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
   return (
     <header
       className={cn(
-        'flex items-center gap-3 border-b border-[var(--interactive-border)] bg-sidebar pr-3',
+        'flex items-center gap-3 bg-background pr-3',
         hasMacTrafficLights ? 'pl-[5.5rem]' : 'pl-3',
-        macosHeaderSizeClass || 'min-h-14',
+        isWindowsElectronDesktop ? 'h-12' : macosHeaderSizeClass || 'min-h-14',
       )}
       style={dragRegionStyle}
     >
@@ -278,13 +276,6 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
               <span className="inline-flex min-w-0 items-center gap-0.5">
                 <Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
                 <span className="truncate">{branchLabel}</span>
-              </span>
-            ) : null}
-            {hasChanges ? (
-              <span className="inline-flex flex-shrink-0 items-center gap-0 text-[0.92em]">
-                <span className="text-status-success/80">+{changes.additions}</span>
-                <span className="text-muted-foreground/60">/</span>
-                <span className="text-status-error/65">-{changes.deletions}</span>
               </span>
             ) : null}
           </span>
@@ -327,6 +318,7 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
       >
         <Icon name="external-link" className="h-4 w-4" />
       </Button>
+      <WindowsWindowControls visible={isWindowsElectronDesktop} />
     </header>
   );
 };

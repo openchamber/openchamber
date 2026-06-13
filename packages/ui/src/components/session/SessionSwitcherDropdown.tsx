@@ -14,8 +14,8 @@ import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useSwitcherItems, type SwitcherItem } from '@/components/session/sidebar/hooks/useSwitcherItems';
 import { useUIStore } from '@/stores/useUIStore';
 import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
-import { formatSessionCompactDateLabel, resolveSessionDiffStats } from './sidebar/utils';
-import type { SessionNode, SessionSummaryMeta } from './sidebar/types';
+import { formatSessionCompactDateLabel } from './sidebar/utils';
+import type { SessionNode } from './sidebar/types';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
@@ -202,8 +202,6 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
   const isStreaming = statusType === 'busy' || statusType === 'retry';
   const showUnreadDot = !isStreaming && needsAttention && !isActive;
 
-  const summary = session.summary as SessionSummaryMeta | undefined;
-  const diffStats = resolveSessionDiffStats(summary);
   const timestamp = session.time?.updated || session.time?.created || Date.now();
   const timeLabel = formatSessionCompactDateLabel(timestamp);
 
@@ -286,13 +284,6 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
               <span className="inline-flex min-w-0 items-center gap-0.5">
                 <Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
                 <span className="truncate">{branchLabel}</span>
-              </span>
-            ) : null}
-            {diffStats ? (
-              <span className="inline-flex flex-shrink-0 items-center gap-0 text-[0.92em]">
-                <span className="text-status-success/80">+{diffStats.additions}</span>
-                <span className="text-muted-foreground/60">/</span>
-                <span className="text-status-error/65">-{diffStats.deletions}</span>
               </span>
             ) : null}
           </div>

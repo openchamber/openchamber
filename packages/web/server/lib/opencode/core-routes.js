@@ -22,6 +22,42 @@ const parseLoopbackUrl = (rawUrl) => {
   return url;
 };
 
+const getRequestPathname = (req) => {
+  const rawUrl = req?.originalUrl || req?.url || '';
+  if (typeof rawUrl !== 'string' || rawUrl.length === 0) return '';
+  try {
+    return new URL(rawUrl, 'http://localhost').pathname;
+  } catch {
+    return '';
+  }
+};
+
+const getQueryParam = (req, name) => {
+  const rawUrl = req?.originalUrl || req?.url || '';
+  if (typeof rawUrl !== 'string' || rawUrl.length === 0) return '';
+  try {
+    return new URL(rawUrl, 'http://localhost').searchParams.get(name)?.trim() || '';
+  } catch {
+    return '';
+  }
+};
+
+const getCookieValue = (req, name) => {
+  const cookieHeader = req?.headers?.cookie;
+  if (typeof cookieHeader !== 'string' || cookieHeader.length === 0) return '';
+  for (const segment of cookieHeader.split(';')) {
+    const [rawName, ...rawValueParts] = segment.split('=');
+    if (rawName?.trim() !== name) continue;
+    return rawValueParts.join('=').trim();
+  }
+  return '';
+};
+
+const hasPreviewProxyCredential = (req) => {
+  if (!getRequestPathname(req).startsWith('/api/preview/proxy/')) return false;
+  return Boolean(getQueryParam(req, 'oc_preview_token') || getCookieValue(req, 'oc_preview_token'));
+};
+
 export const registerServerStatusRoutes = (app, dependencies) => {
   const {
     express,
@@ -31,6 +67,8 @@ export const registerServerStatusRoutes = (app, dependencies) => {
     serverStartedAt,
     gracefulShutdown,
     getHealthSnapshot,
+    tunnelAuthController = null,
+    uiAuthController = null,
   } = dependencies;
 
   const allocateLoopbackPort = async () => {
@@ -54,6 +92,19 @@ export const registerServerStatusRoutes = (app, dependencies) => {
         }
       });
     });
+  };
+
+  const compatibility = {
+    apiVersion: 1,
+    minClientApiVersion: 1,
+    capabilities: [
+      'api.health.v1',
+      'api.runtime-url.v1',
+      'api.raw-file.v1',
+      'realtime.sse.v1',
+      'realtime.websocket.global-events.v1',
+      'terminal.websocket.v1',
+    ],
   };
 
   const isDevShutdownAllowed = () => {
@@ -166,15 +217,50 @@ export const registerServerStatusRoutes = (app, dependencies) => {
     res.json({
       status: 'ok',
       timestamp: new Date().toISOString(),
+      openchamberVersion,
+      runtime: runtimeName,
+      compatibility,
       ...getHealthSnapshot(),
     });
   });
 
-  app.post('/api/system/shutdown', (_req, res) => {
-    res.json({ ok: true });
-    gracefulShutdown({ exitProcess: true }).catch((error) => {
-      console.error('Shutdown request failed:', error?.message || error);
+  app.get('/api/version', (_req, res) => {
+    res.json({
+      status: 'ok',
+      openchamberVersion,
+      runtime: runtimeName,
+      startedAt: serverStartedAt,
+      compatibility,
     });
+  });
+
+  const requireShutdownAuth = async (req, res, next) => {
+    if (!uiAuthController || typeof uiAuthController.requireAuth !== 'function') {
+      return next();
+    }
+    const requestScope = typeof tunnelAuthController?.classifyRequestScope === 'function'
+      ? tunnelAuthController.classifyRequestScope(req)
+      : 'local';
+    if (
+      (requestScope === 'tunnel' || requestScope === 'unknown-public')
+      && typeof tunnelAuthController?.requireTunnelSession === 'function'
+    ) {
+      return tunnelAuthController.requireTunnelSession(req, res, next);
+    }
+    return uiAuthController.requireAuth(req, res, next);
+  };
+
+  app.post('/api/system/shutdown', async (req, res, next) => {
+    try {
+      await requireShutdownAuth(req, res, () => {
+        res.json({ ok: true });
+        gracefulShutdown({ exitProcess: true }).catch((error) => {
+          console.error('Shutdown request failed:', error?.message || error);
+        });
+      });
+    } catch (error) {
+      next(error);
+    }
   });
 
   app.post('/api/system/dev-shutdown', express.json({ limit: '64kb' }), async (req, res) => {
@@ -271,11 +357,69 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     express,
     tunnelAuthController,
     uiAuthController,
+    remoteClientAuthRuntime,
     readSettingsFromDiskMigrated,
     normalizeTunnelSessionTtlMs,
   } = dependencies;
 
+  const runWithUiAuth = async (req, res, next, handler, options = {}) => {
+    try {
+      const requireAuth = options.sessionOnly === true && typeof uiAuthController.requireSessionAuth === 'function'
+        ? uiAuthController.requireSessionAuth
+        : uiAuthController.requireAuth;
+      await requireAuth(req, res, async () => {
+        await handler();
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  const runWithClientManagementAuth = async (req, res, next, handler) => {
+    try {
+      if (typeof uiAuthController.resolveAuthContext === 'function') {
+        const context = await uiAuthController.resolveAuthContext(req, res, {
+          allowClientAuth: true,
+          allowUrlToken: false,
+        });
+        if (context?.type === 'session' || context?.type === 'client') {
+          await handler(context);
+          return;
+        }
+      }
+
+      await runWithUiAuth(req, res, next, async () => {
+        await handler({ type: 'session' });
+      }, { sessionOnly: true });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  const clientIdFromAuthContext = (context) => {
+    const raw = context?.client?.id || context?.clientId;
+    return typeof raw === 'string' && raw.length > 0 ? raw : null;
+  };
+
+  const clientRecordFromAuthContext = async (context) => {
+    if (context?.client && typeof context.client === 'object') {
+      return context.client;
+    }
+    const clientId = clientIdFromAuthContext(context);
+    if (!clientId) return null;
+    const clients = await remoteClientAuthRuntime.listClients();
+    return clients.find((client) => client.id === clientId) || null;
+  };
+
   const requireApiAuth = async (req, res, next) => {
+    // Preview proxy requests carry a target-scoped capability token that the
+    // preview proxy validates against the registered target id/TTL. Let those
+    // requests reach that stricter check instead of failing the global UI auth
+    // gate when the short-lived browser URL auth token expires.
+    if (hasPreviewProxyCredential(req)) {
+      return next();
+    }
+
     const requestScope = tunnelAuthController.classifyRequestScope(req);
     if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
       return tunnelAuthController.requireTunnelSession(req, res, next);
@@ -309,6 +453,14 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     return uiAuthController.handleSessionCreate(req, res);
   });
 
+  app.post('/auth/url-token', async (req, res, next) => {
+    try {
+      await uiAuthController.handleUrlAuthToken(req, res);
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.get('/auth/passkey/status', (req, res) => {
     const requestScope = tunnelAuthController.classifyRequestScope(req);
     if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
@@ -339,7 +491,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
       return res.status(403).json({ error: 'Passkey setup is disabled for tunnel scope', tunnelLocked: true });
     }
     try {
-      await uiAuthController.requireAuth(req, res, async () => {
+      await uiAuthController.requireSessionAuth(req, res, async () => {
         await uiAuthController.handlePasskeyRegistrationOptions(req, res);
       });
     } catch (error) {
@@ -353,7 +505,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
       return res.status(403).json({ error: 'Passkey setup is disabled for tunnel scope', tunnelLocked: true });
     }
     try {
-      await uiAuthController.requireAuth(req, res, async () => {
+      await uiAuthController.requireSessionAuth(req, res, async () => {
         await uiAuthController.handlePasskeyRegistrationVerify(req, res);
       });
     } catch (error) {
@@ -367,7 +519,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
       return res.status(403).json({ error: 'Passkey management is disabled for tunnel scope', tunnelLocked: true });
     }
     try {
-      await uiAuthController.requireAuth(req, res, async () => {
+      await uiAuthController.requireSessionAuth(req, res, async () => {
         await uiAuthController.handlePasskeyList(req, res);
       });
     } catch (error) {
@@ -381,7 +533,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
       return res.status(403).json({ error: 'Passkey management is disabled for tunnel scope', tunnelLocked: true });
     }
     try {
-      await uiAuthController.requireAuth(req, res, async () => {
+      await uiAuthController.requireSessionAuth(req, res, async () => {
         await uiAuthController.handlePasskeyRevoke(req, res);
       });
     } catch (error) {
@@ -395,12 +547,58 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
       return res.status(403).json({ error: 'Global sign-out is disabled for tunnel scope', tunnelLocked: true });
     }
     try {
-      await uiAuthController.requireAuth(req, res, async () => {
+      await uiAuthController.requireSessionAuth(req, res, async () => {
         await uiAuthController.handleResetAuth(req, res);
       });
     } catch (error) {
       next(error);
     }
+  });
+
+  app.get('/api/client-auth/clients', async (req, res, next) => {
+    await runWithClientManagementAuth(req, res, next, async (authContext) => {
+      if (authContext.type === 'client') {
+        const client = await clientRecordFromAuthContext(authContext);
+        return res.json({ clients: client ? [client] : [] });
+      }
+      const clients = await remoteClientAuthRuntime.listClients();
+      res.json({ clients });
+    });
+  });
+
+  app.post('/api/client-auth/clients', express.json({ limit: '64kb' }), async (req, res, next) => {
+    await runWithUiAuth(req, res, next, async () => {
+      const result = await remoteClientAuthRuntime.createClient({
+        label: req.body?.label,
+        clientKind: req.body?.clientKind,
+        dedupeKey: req.body?.dedupeKey,
+      });
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(201).json(result);
+    }, { sessionOnly: true });
+  });
+
+  app.delete('/api/client-auth/clients/:id', async (req, res, next) => {
+    await runWithClientManagementAuth(req, res, next, async (authContext) => {
+      if (authContext.type === 'client') {
+        const clientId = clientIdFromAuthContext(authContext);
+        if (!clientId || clientId !== req.params?.id) {
+          return res.status(403).json({ revoked: false, error: 'Client tokens can only revoke themselves' });
+        }
+      }
+      const result = await remoteClientAuthRuntime.revokeClient(req.params?.id);
+      if (!result.revoked) {
+        return res.status(404).json({ revoked: false, error: 'Client not found' });
+      }
+      res.json(result);
+    });
+  });
+
+  app.delete('/api/client-auth/clients', async (req, res, next) => {
+    await runWithUiAuth(req, res, next, async () => {
+      const result = await remoteClientAuthRuntime.purgeRevokedClients();
+      res.json(result);
+    }, { sessionOnly: true });
   });
 
   app.get('/connect', async (req, res) => {
@@ -446,7 +644,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
             redirect: 'manual',
             signal: AbortSignal.timeout(1500),
           });
-          return res.json({ ok: response.ok, status: response.status });
+          return res.json({ ok: response.status >= 200 && response.status < 600, status: response.status });
         } catch (error) {
           return res.json({ ok: false, error: error?.message || 'Probe failed' });
         }

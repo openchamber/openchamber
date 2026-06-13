@@ -27,6 +27,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Icon } from "@/components/icon/Icon";
 import { getContextFileOpenFailureMessage, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
+import { toAbsoluteFilePath } from '@/lib/path-utils';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { useI18n } from '@/lib/i18n';
 import type { I18nKey } from '@/lib/i18n/store';
@@ -129,18 +130,8 @@ const isWorkingStatusFile = (file: GitStatus['files'][number]): boolean => {
     return Boolean(workingCode) || file.index === '?';
 };
 
-const isAbsolutePath = (value: string): boolean => {
-    return value.startsWith('/') || value.startsWith('//') || /^[A-Za-z]:\//.test(value);
-};
-
 const toAbsolutePath = (directory: string, filePath: string): string => {
-    const normalizedDirectory = directory.replace(/\\/g, '/').replace(/\/+$/g, '');
-    const normalizedFilePath = filePath.replace(/\\/g, '/');
-    if (isAbsolutePath(normalizedFilePath)) {
-        return normalizedFilePath;
-    }
-    const trimmedFilePath = normalizedFilePath.replace(/^\/+/, '');
-    return normalizedDirectory ? `${normalizedDirectory}/${trimmedFilePath}` : trimmedFilePath;
+    return toAbsoluteFilePath(directory, filePath);
 };
 
 const normalizePath = (value?: string | null): string =>

@@ -31,7 +31,7 @@ jobs:
       release_upload_url: ${{ steps.create_release.outputs.upload_url }}
       version: ${{ steps.get_version.outputs.version }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Get version
         id: get_version
@@ -68,7 +68,7 @@ jobs:
 
       - name: Create GitHub Release
         id: create_release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: v${{ steps.get_version.outputs.version }}
           draft: true
@@ -82,13 +82,13 @@ jobs:
     needs: create-release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Setup bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
@@ -105,7 +105,7 @@ jobs:
 
       - name: Upload npm tarball to release
         if: ${{ github.event.inputs.dry_run != 'true' }}
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: v${{ needs.create-release.outputs.version }}
           files: packages/web/*.tgz
@@ -133,13 +133,13 @@ jobs:
             arch: x64
             platform: darwin-x86_64
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Setup bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: '20'
 
@@ -232,7 +232,7 @@ jobs:
           done
 
       - name: Upload DMG / ZIP / blockmaps to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: v${{ needs.create-release.outputs.version }}
           files: |
@@ -242,41 +242,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Stage signed Electron app for Tauri updater repackage
-        run: |
-          set -euo pipefail
-
-          APP_DIR="packages/electron/dist/mac"
-          [ -d "packages/electron/dist/mac-arm64" ] && APP_DIR="packages/electron/dist/mac-arm64"
-
-          APP_PATH=$(find "$APP_DIR" -maxdepth 2 -name "*.app" -print -quit)
-          if [ -z "$APP_PATH" ]; then
-            echo "Error: .app not found under packages/electron/dist/mac*"
-            ls -la packages/electron/dist/
-            exit 1
-          fi
-
-          rm -rf electron-app-artifact
-          mkdir -p electron-app-artifact
-          cp -R "$APP_PATH" electron-app-artifact/OpenChamber.app
-          tar -C electron-app-artifact -czf electron-app-${{ matrix.arch }}.tar.gz OpenChamber.app
-
-      - name: Upload signed Electron app for Tauri updater repackage
-        uses: actions/upload-artifact@v7
-        with:
-          name: electron-app-${{ matrix.arch }}
-          path: electron-app-${{ matrix.arch }}.tar.gz
-          retention-days: 1
-
       - name: Upload per-arch latest-mac.yml for merge
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: latest-yml-${{ matrix.target }}
           path: packages/electron/dist/latest-mac.yml
           retention-days: 1
 
   build-desktop-electron-windows:
-    if: ${{ false }} # Windows artifact is disabled until the build is release-ready.
     needs: create-release
     runs-on: windows-latest
     strategy:
@@ -287,13 +260,13 @@ jobs:
             target: x86_64-pc-windows-msvc
             platform: win32-x64
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Setup bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: '20'
 
@@ -322,208 +295,36 @@ jobs:
         run: node ./scripts/package.mjs --win --${{ matrix.arch }} --publish=never
 
       - name: Upload installer to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: v${{ needs.create-release.outputs.version }}
           files: |
             packages/electron/dist/*.exe
             packages/electron/dist/*.blockmap
+            packages/electron/dist/latest.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload update manifest as artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: latest-yml-${{ matrix.target }}
           path: packages/electron/dist/latest.yml
           retention-days: 1
 
-  repackage-electron-as-tauri-update:
-    needs: [create-release, build-desktop-electron-macos]
-    runs-on: macos-26
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: arm64
-            platform: darwin-aarch64
-          - arch: x64
-            platform: darwin-x86_64
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Setup bun
-        uses: oven-sh/setup-bun@v2
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Download signed Electron app
-        uses: actions/download-artifact@v4
-        with:
-          name: electron-app-${{ matrix.arch }}
-          path: staged
-
-      - name: Tar and sign Electron app as Tauri update payload
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          VERSION: ${{ needs.create-release.outputs.version }}
-        run: |
-          set -euo pipefail
-
-          if [ -f staged/electron-app-${{ matrix.arch }}.tar.gz ]; then
-            tar -C staged -xzf staged/electron-app-${{ matrix.arch }}.tar.gz
-          elif [ ! -d staged/OpenChamber.app ] && [ -d staged/Contents ]; then
-            mkdir -p staged/OpenChamber.app
-            mv staged/Contents staged/OpenChamber.app/Contents
-          fi
-
-          if [ ! -d staged/OpenChamber.app ]; then
-            echo "Error: staged/OpenChamber.app not found"
-            ls -la staged
-            exit 1
-          fi
-
-          APP_EXECUTABLE=$(find staged/OpenChamber.app/Contents/MacOS -type f -maxdepth 1 -print -quit)
-          if [ -z "$APP_EXECUTABLE" ] || [ ! -x "$APP_EXECUTABLE" ]; then
-            echo "Error: Electron app executable is missing or not executable"
-            ls -la staged/OpenChamber.app/Contents/MacOS
-            exit 1
-          fi
-
-          cd staged
-          TARBALL="OpenChamber.app.tar.gz"
-          tar -czf "$TARBALL" OpenChamber.app
-
-          bun run --cwd ../packages/desktop tauri signer sign "$PWD/$TARBALL"
-
-          mv "$TARBALL" "OpenChamber-${VERSION}-${{ matrix.platform }}.app.tar.gz"
-          mv "${TARBALL}.sig" "OpenChamber-${VERSION}-${{ matrix.platform }}.app.tar.gz.sig"
-
-      - name: Generate Tauri latest platform manifest
-        env:
-          VERSION: ${{ needs.create-release.outputs.version }}
-          REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-
-          SIG=$(cat staged/OpenChamber-${VERSION}-${{ matrix.platform }}.app.tar.gz.sig)
-          TAR="OpenChamber-${VERSION}-${{ matrix.platform }}.app.tar.gz"
-          jq -n \
-            --arg version "$VERSION" \
-            --arg notes "OpenChamber has moved to Electron. This update replaces the Tauri shell with the Electron build. Subsequent updates will be delivered via the Electron auto-updater." \
-            --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --arg platform "${{ matrix.platform }}" \
-            --arg signature "$SIG" \
-            --arg url "https://github.com/${REPO}/releases/download/v${VERSION}/${TAR}" \
-            '{ version: $version, notes: $notes, pub_date: $pub_date, platforms: { ($platform): { signature: $signature, url: $url } } }' \
-            > staged/latest-${{ matrix.platform }}.json
-
-      - name: Upload tarball and signature to release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ needs.create-release.outputs.version }}
-          files: |
-            staged/*.app.tar.gz
-            staged/*.app.tar.gz.sig
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload per-platform Tauri manifest for merge
-        uses: actions/upload-artifact@v7
-        with:
-          name: tauri-manifest-${{ matrix.platform }}
-          path: staged/latest-${{ matrix.platform }}.json
-          retention-days: 1
-
-  combine-manifests:
-    needs: [create-release, repackage-electron-as-tauri-update]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download Tauri updater manifests
-        uses: actions/download-artifact@v4
-        with:
-          pattern: tauri-manifest-*
-          path: artifacts
-          merge-multiple: true
-
-      - name: Combine manifests
-        run: |
-          set -euo pipefail
-
-          VERSION="${{ needs.create-release.outputs.version }}"
-          PUB_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-
-          if [ ! -f artifacts/latest-darwin-aarch64.json ]; then
-            echo "Error: aarch64 manifest not found"
-            exit 1
-          fi
-
-          if [ ! -f artifacts/latest-darwin-x86_64.json ]; then
-            echo "Error: x86_64 manifest not found"
-            exit 1
-          fi
-
-          if ! jq empty artifacts/latest-darwin-aarch64.json 2>/dev/null; then
-            echo "Error: aarch64 manifest is not valid JSON"
-            exit 1
-          fi
-
-          if ! jq empty artifacts/latest-darwin-x86_64.json 2>/dev/null; then
-            echo "Error: x86_64 manifest is not valid JSON"
-            exit 1
-          fi
-
-          if ! jq -e '.platforms["darwin-aarch64"]' artifacts/latest-darwin-aarch64.json > /dev/null; then
-            echo "Error: darwin-aarch64 platform data not found in manifest"
-            exit 1
-          fi
-
-          if ! jq -e '.platforms["darwin-x86_64"]' artifacts/latest-darwin-x86_64.json > /dev/null; then
-            echo "Error: darwin-x86_64 platform data not found in manifest"
-            exit 1
-          fi
-
-          jq -n \
-            --arg version "$VERSION" \
-            --arg notes "OpenChamber has moved to Electron. This update replaces the Tauri shell with the Electron build. Subsequent updates will be delivered via the Electron auto-updater." \
-            --arg pub_date "$PUB_DATE" \
-            --slurpfile aarch64 artifacts/latest-darwin-aarch64.json \
-            --slurpfile x86_64 artifacts/latest-darwin-x86_64.json \
-            '{
-              version: $version,
-              notes: $notes,
-              pub_date: $pub_date,
-              platforms: {
-                "darwin-aarch64": $aarch64[0].platforms["darwin-aarch64"],
-                "darwin-x86_64": $x86_64[0].platforms["darwin-x86_64"]
-              }
-            }' > artifacts/latest.json
-
-          cat artifacts/latest.json
-
-      - name: Upload combined Tauri updater manifest
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ needs.create-release.outputs.version }}
-          files: artifacts/latest.json
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   combine-electron-manifests:
     needs: [create-release, build-desktop-electron-macos]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: '20'
 
       - name: Download per-arch latest-mac.yml
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: latest-yml-*-apple-darwin
           path: artifacts
@@ -536,7 +337,7 @@ jobs:
         run: node packages/electron/scripts/finalize-latest-yml.mjs
 
       - name: Upload combined manifests to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: v${{ needs.create-release.outputs.version }}
           files: |
@@ -545,14 +346,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   finalize-release:
-    needs: [create-release, build-desktop-electron-macos, repackage-electron-as-tauri-update, publish-npm, combine-manifests, combine-electron-manifests]
+    needs: [create-release, build-desktop-electron-macos, build-desktop-electron-windows, publish-npm, combine-electron-manifests]
     runs-on: ubuntu-latest
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
       DISCORD_UPDATE_ROLE_ID: ${{ secrets.DISCORD_UPDATE_ROLE_ID }}
     steps:
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: v${{ needs.create-release.outputs.version }}
           draft: false

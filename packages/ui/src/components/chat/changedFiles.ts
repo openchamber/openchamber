@@ -1,4 +1,5 @@
 import type { ToolPart } from '@opencode-ai/sdk/v2';
+import { getRelativeFilePath, toAbsoluteFilePath } from '@/lib/path-utils';
 
 export interface ChangedFile {
     path: string;
@@ -163,7 +164,7 @@ export const extractGitChangedFiles = (
         if (!code || code === '!') continue;
         const stats = diffStats?.[file.path];
         result.push({
-            path: file.path.startsWith('/') ? file.path : (directory.endsWith('/') ? directory : directory + '/') + file.path,
+            path: toAbsoluteFilePath(directory, file.path),
             relativePath: file.path,
             insertions: stats?.insertions ?? 0,
             deletions: stats?.deletions ?? 0,
@@ -176,16 +177,7 @@ export const extractGitChangedFiles = (
 };
 
 export const toRelativePath = (absolutePath: string, baseDirectory: string): string => {
-    const norm = (p: string) => p.split('\\').join('/').replace(/\/+$/, '');
-    const base = norm(baseDirectory);
-    const absPath = norm(absolutePath);
-    if (absPath.startsWith(base + '/')) {
-        return absPath.slice(base.length + 1);
-    }
-    if (absPath.startsWith(base)) {
-        return absPath.slice(base.length) || absPath;
-    }
-    return absPath;
+    return getRelativeFilePath(absolutePath, baseDirectory);
 };
 
 export const getDisplayPath = (file: ChangedFileEntry, currentDirectory: string): { fileName: string; dirPart: string } => {

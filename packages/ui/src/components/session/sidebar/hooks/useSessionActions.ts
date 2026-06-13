@@ -12,6 +12,11 @@ type DeleteSessionConfirmSetter = React.Dispatch<React.SetStateAction<{
   archivedBucket: boolean;
 } | null>>;
 
+type DeleteSessionSource = {
+  archivedBucket?: boolean;
+  hardDelete?: boolean;
+};
+
 type Args = {
   activeProjectId: string | null;
   currentDirectory: string | null;
@@ -187,10 +192,10 @@ export const useSessionActions = (args: Args) => {
   const executeDeleteSession = React.useCallback(
     async (
       session: Session,
-      source?: { archivedBucket?: boolean },
+      source?: DeleteSessionSource,
       precomputed?: { descendantIds: string[] },
     ) => {
-      const shouldHardDelete = source?.archivedBucket === true;
+      const shouldHardDelete = source?.archivedBucket === true || source?.hardDelete === true;
       // Use the snapshot taken when the dialog opened (if any) so the
       // executed list matches what the user was told. Fall back to a fresh
       // collection for direct-execute (no-dialog) callers.
@@ -214,16 +219,18 @@ export const useSessionActions = (args: Args) => {
 
       const ids = [session.id, ...descendantIds];
       if (shouldHardDelete) {
-        const { deletedIds, failedIds } = await args.deleteSessions(ids);
-        if (deletedIds.length > 0) {
-          toast.success(deletedIds.length === 1
-            ? t('sessions.sidebar.bulkActions.deletedSingle', { count: deletedIds.length })
-            : t('sessions.sidebar.bulkActions.deletedPlural', { count: deletedIds.length }));
-        }
-        if (failedIds.length > 0) {
-          toast.error(failedIds.length === 1
-            ? t('sessions.sidebar.bulkActions.failedDeleteSingle', { count: failedIds.length })
-            : t('sessions.sidebar.bulkActions.failedDeletePlural', { count: failedIds.length }));
+        // The server cascade-deletes all descendant sessions when the parent
+        // is removed. Only send the root session delete request; sending
+        // individual requests for each descendant would hit 404 (already
+        // deleted by cascade) and trigger rollback that restores them.
+        const success = await args.deleteSession(session.id);
+        if (success) {
+          const totalDeleted = descendantIds.length + 1;
+          toast.success(totalDeleted === 1
+            ? t('sessions.sidebar.bulkActions.deletedSingle', { count: totalDeleted })
+            : t('sessions.sidebar.bulkActions.deletedPlural', { count: totalDeleted }));
+        } else {
+          toast.error(t('sessions.sidebar.session.delete.error'));
         }
         return;
       }
@@ -244,8 +251,8 @@ export const useSessionActions = (args: Args) => {
   );
 
   const handleDeleteSession = React.useCallback(
-    (session: Session, source?: { archivedBucket?: boolean }) => {
-      const shouldHardDelete = source?.archivedBucket === true;
+    (session: Session, source?: DeleteSessionSource) => {
+      const shouldHardDelete = source?.archivedBucket === true || source?.hardDelete === true;
       const effectiveDescendantIds = filterDescendantsForAction(
         collectDescendants(session.id),
         shouldHardDelete,

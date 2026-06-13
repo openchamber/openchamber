@@ -11,7 +11,8 @@ import { cn } from '@/lib/utils';
 import type { UpdateInfo, UpdateProgress } from '@/lib/desktop';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/url';
-import { useI18n } from '@/lib/i18n';
+import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 type WebUpdateState = 'idle' | 'updating' | 'restarting' | 'reconnecting' | 'error';
 
@@ -56,7 +57,7 @@ function formatIsoDateForUI(isoDate: string): string {
   if (Number.isNaN(d.getTime())) {
     return isoDate;
   }
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(getCurrentIntlLocale(), {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
@@ -120,7 +121,7 @@ const WEB_UPDATE_MAX_WAIT_MS = 10 * 60 * 1000;
 
 async function installWebUpdate(): Promise<InstallWebUpdateResult> {
   try {
-    const response = await fetch('/api/openchamber/update-install', {
+    const response = await runtimeFetch('/api/openchamber/update-install', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     });
@@ -142,7 +143,7 @@ async function installWebUpdate(): Promise<InstallWebUpdateResult> {
 
 async function isServerReachable(): Promise<boolean> {
   try {
-    const response = await fetch('/health', {
+    const response = await runtimeFetch('/health', {
       method: 'GET',
       headers: { Accept: 'application/json' },
     });
@@ -159,7 +160,7 @@ async function waitForUpdateApplied(
 ): Promise<boolean> {
   for (let i = 0; i < maxAttempts; i++) {
     try {
-      const response = await fetch('/api/openchamber/update-check', {
+      const response = await runtimeFetch('/api/openchamber/update-check', {
         method: 'GET',
         headers: { Accept: 'application/json' },
       });

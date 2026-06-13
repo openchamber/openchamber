@@ -7,7 +7,24 @@ import { setDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { setFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { loadAppearancePreferences, applyAppearancePreferences } from '@/lib/appearancePersistence';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { sanitizeStarterRefs } from '@/lib/draftStarters';
 import { normalizeMobileKeyboardMode, setStoredMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
+import { runtimeFetch } from '@/lib/runtime-fetch';
+
+export const applyPersistedHomeDirectoryToWindow = (homeDirectory: string): void => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  if (typeof window.__OPENCHAMBER_HOME__ === 'string' && window.__OPENCHAMBER_HOME__.length > 0) {
+    return;
+  }
+
+  try {
+    window.__OPENCHAMBER_HOME__ = homeDirectory;
+  } catch {
+    /* read-only contextBridge property — leave preload-seeded value */
+  }
+};
 
 const persistToLocalStorage = (settings: DesktopSettings) => {
   if (typeof window === 'undefined') {
@@ -34,15 +51,7 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   }
   if (settings.homeDirectory) {
     localStorage.setItem('homeDirectory', settings.homeDirectory);
-    // Electron's preload exposes __OPENCHAMBER_HOME__ as a read-only
-    // contextBridge property; assignment throws TypeError there. In VSCode
-    // webview and plain web runtime the property is writable. Swallow the
-    // error in Electron — preload already seeded the value correctly.
-    try {
-      window.__OPENCHAMBER_HOME__ = settings.homeDirectory;
-    } catch {
-      /* read-only contextBridge property — leave preload-seeded value */
-    }
+    applyPersistedHomeDirectoryToWindow(settings.homeDirectory);
   }
   if (Array.isArray(settings.projects) && settings.projects.length > 0) {
     localStorage.setItem('projects', JSON.stringify(settings.projects));
@@ -95,6 +104,14 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   }
   if (typeof settings.mobileKeyboardMode === 'string') {
     setStoredMobileKeyboardMode(settings.mobileKeyboardMode);
+  }
+  if (typeof settings.openCodeUpdateToastDismissedVersion === 'string') {
+    const version = settings.openCodeUpdateToastDismissedVersion.trim();
+    if (version) {
+      localStorage.setItem('opencode-update-toast-dismissed-version', version);
+    } else {
+      localStorage.removeItem('opencode-update-toast-dismissed-version');
+    }
   }
   if (settings.sttProvider === 'browser' || settings.sttProvider === 'server') {
     localStorage.setItem('sttProvider', settings.sttProvider);
@@ -163,6 +180,27 @@ const sanitizeSkillCatalogs = (value: unknown): DesktopSettings['skillCatalogs']
   }
 
   return result;
+};
+
+const sanitizeShortcutOverrides = (value: unknown): Record<string, string> | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const result: Record<string, string> = {};
+  for (const [key, combo] of Object.entries(value)) {
+    const normalizedKey = typeof key === 'string' ? key.trim() : '';
+    const normalizedCombo = typeof combo === 'string' ? combo.trim() : '';
+    if (!normalizedKey || !normalizedCombo) continue;
+    result[normalizedKey] = normalizedCombo;
+  }
+  return result;
+};
+
+const areStringRecordsEqual = (left: Record<string, string>, right: Record<string, string>): boolean => {
+  const leftEntries = Object.entries(left);
+  const rightEntries = Object.entries(right);
+  if (leftEntries.length !== rightEntries.length) return false;
+  return leftEntries.every(([key, value]) => right[key] === value);
 };
 
 const HEX_COLOR_PATTERN = /^#(?:[\da-fA-F]{3}|[\da-fA-F]{6})$/;
@@ -415,8 +453,17 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.inputSpellcheckEnabled === 'boolean' && settings.inputSpellcheckEnabled !== store.inputSpellcheckEnabled) {
     store.setInputSpellcheckEnabled(settings.inputSpellcheckEnabled);
   }
+  if (
+    typeof settings.showOpenCodeUpdateNotifications === 'boolean'
+    && settings.showOpenCodeUpdateNotifications !== store.showOpenCodeUpdateNotifications
+  ) {
+    store.setShowOpenCodeUpdateNotifications(settings.showOpenCodeUpdateNotifications);
+  }
   if (typeof settings.showToolFileIcons === 'boolean' && settings.showToolFileIcons !== store.showToolFileIcons) {
     store.setShowToolFileIcons(settings.showToolFileIcons);
+  }
+  if (typeof settings.showTurnChangedFiles === 'boolean' && settings.showTurnChangedFiles !== store.showTurnChangedFiles) {
+    store.setShowTurnChangedFiles(settings.showTurnChangedFiles);
   }
   if (typeof settings.showExpandedBashTools === 'boolean' && settings.showExpandedBashTools !== store.showExpandedBashTools) {
     store.setShowExpandedBashTools(settings.showExpandedBashTools);
@@ -460,6 +507,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
       store.setUserMessageRenderingMode(settings.userMessageRenderingMode);
     }
   }
+  if (typeof settings.collapsibleUserMessages === 'boolean' && settings.collapsibleUserMessages !== store.collapsibleUserMessages) {
+    store.setCollapsibleUserMessages(settings.collapsibleUserMessages);
+  }
   if (typeof settings.messageStreamTransport === 'string'
     && (settings.messageStreamTransport === 'auto' || settings.messageStreamTransport === 'ws' || settings.messageStreamTransport === 'sse')) {
     if (configStore && settings.messageStreamTransport !== configStore.settingsMessageStreamTransport) {
@@ -468,6 +518,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
   if (typeof settings.stickyUserHeader === 'boolean' && settings.stickyUserHeader !== store.stickyUserHeader) {
     store.setStickyUserHeader(settings.stickyUserHeader);
+  }
+  if (typeof settings.expandedEditorToolbar === 'boolean' && settings.expandedEditorToolbar !== store.expandedEditorToolbar) {
+    store.setExpandedEditorToolbar(settings.expandedEditorToolbar);
   }
   if (typeof settings.wideChatLayoutEnabled === 'boolean' && settings.wideChatLayoutEnabled !== store.wideChatLayoutEnabled) {
     store.setWideChatLayoutEnabled(settings.wideChatLayoutEnabled);
@@ -483,6 +536,12 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
   if (typeof settings.fontSize === 'number' && Number.isFinite(settings.fontSize) && settings.fontSize !== store.fontSize) {
     store.setFontSize(settings.fontSize);
+  }
+  if (Array.isArray(settings.draftStarters)) {
+    const nextStarters = sanitizeStarterRefs(settings.draftStarters);
+    if (JSON.stringify(store.globalDraftStarters) !== JSON.stringify(nextStarters)) {
+      store.setGlobalDraftStarters(nextStarters);
+    }
   }
   if (typeof settings.terminalFontSize === 'number' && Number.isFinite(settings.terminalFontSize) && settings.terminalFontSize !== store.terminalFontSize) {
     store.setTerminalFontSize(settings.terminalFontSize);
@@ -501,6 +560,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
   if (typeof settings.inputBarOffset === 'number' && Number.isFinite(settings.inputBarOffset) && settings.inputBarOffset !== store.inputBarOffset) {
     store.setInputBarOffset(settings.inputBarOffset);
+  }
+  if (settings.shortcutOverrides && !areStringRecordsEqual(settings.shortcutOverrides, store.shortcutOverrides)) {
+    useUIStore.setState({ shortcutOverrides: settings.shortcutOverrides });
   }
   if (typeof settings.mobileKeyboardMode === 'string') {
     const mode = normalizeMobileKeyboardMode(settings.mobileKeyboardMode, store.mobileKeyboardMode);
@@ -629,11 +691,6 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
     result.activeProjectId = candidate.activeProjectId;
   }
 
-  if (Array.isArray(candidate.approvedDirectories)) {
-    result.approvedDirectories = candidate.approvedDirectories.filter(
-      (entry): entry is string => typeof entry === 'string' && entry.length > 0
-    );
-  }
   if (Array.isArray(candidate.securityScopedBookmarks)) {
     result.securityScopedBookmarks = candidate.securityScopedBookmarks.filter(
       (entry): entry is string => typeof entry === 'string' && entry.length > 0
@@ -645,6 +702,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
         candidate.pinnedDirectories.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
       )
     );
+  }
+  if (Array.isArray(candidate.draftStarters)) {
+    result.draftStarters = sanitizeStarterRefs(candidate.draftStarters);
   }
   if (typeof candidate.showReasoningTraces === 'boolean') {
     result.showReasoningTraces = candidate.showReasoningTraces;
@@ -899,8 +959,17 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.inputSpellcheckEnabled === 'boolean') {
     result.inputSpellcheckEnabled = candidate.inputSpellcheckEnabled;
   }
+  if (typeof candidate.showOpenCodeUpdateNotifications === 'boolean') {
+    result.showOpenCodeUpdateNotifications = candidate.showOpenCodeUpdateNotifications;
+  }
+  if (typeof candidate.openCodeUpdateToastDismissedVersion === 'string') {
+    result.openCodeUpdateToastDismissedVersion = candidate.openCodeUpdateToastDismissedVersion.trim().slice(0, 128);
+  }
   if (typeof candidate.showToolFileIcons === 'boolean') {
     result.showToolFileIcons = candidate.showToolFileIcons;
+  }
+  if (typeof candidate.showTurnChangedFiles === 'boolean') {
+    result.showTurnChangedFiles = candidate.showTurnChangedFiles;
   }
   if (typeof candidate.showExpandedBashTools === 'boolean') {
     result.showExpandedBashTools = candidate.showExpandedBashTools;
@@ -936,6 +1005,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
     && (candidate.userMessageRenderingMode === 'markdown' || candidate.userMessageRenderingMode === 'plain')) {
     result.userMessageRenderingMode = candidate.userMessageRenderingMode;
   }
+  if (typeof candidate.collapsibleUserMessages === 'boolean') {
+    result.collapsibleUserMessages = candidate.collapsibleUserMessages;
+  }
   if (typeof candidate.stickyUserHeader === 'boolean') {
     result.stickyUserHeader = candidate.stickyUserHeader;
   }
@@ -966,10 +1038,13 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.inputBarOffset === 'number' && Number.isFinite(candidate.inputBarOffset)) {
     result.inputBarOffset = candidate.inputBarOffset;
   }
+  const shortcutOverrides = sanitizeShortcutOverrides(candidate.shortcutOverrides);
+  if (shortcutOverrides) {
+    result.shortcutOverrides = shortcutOverrides;
+  }
   if (typeof candidate.mobileKeyboardMode === 'string') {
-    const mode = normalizeMobileKeyboardMode(candidate.mobileKeyboardMode, undefined);
-    if (mode) {
-      result.mobileKeyboardMode = mode;
+    if (candidate.mobileKeyboardMode === 'native' || candidate.mobileKeyboardMode === 'resize-content') {
+      result.mobileKeyboardMode = candidate.mobileKeyboardMode;
     }
   }
 
@@ -1100,7 +1175,7 @@ const fetchWebSettings = async (): Promise<DesktopSettings | null> => {
     }
 
     try {
-      const response = await fetch('/api/config/settings', {
+      const response = await runtimeFetch('/api/config/settings', {
         method: 'GET',
         headers: { Accept: 'application/json' },
       });
@@ -1215,7 +1290,7 @@ const _flushSettingsUpdate = async (): Promise<void> => {
   }
 
   try {
-    const response = await fetch('/api/config/settings', {
+    const response = await runtimeFetch('/api/config/settings', {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',

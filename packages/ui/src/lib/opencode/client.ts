@@ -1,5 +1,5 @@
 import { createOpencodeClient, OpencodeClient } from "@opencode-ai/sdk/v2";
-import type { FilesAPI, RuntimeAPIs } from "../api/types";
+import type { FilesAPI } from "../api/types";
 import { getDesktopHomeDirectory } from "../desktop";
 import type {
   Session,
@@ -14,7 +14,11 @@ import type {
 } from "@opencode-ai/sdk/v2";
 import type { PermissionRequest } from "@/types/permission";
 import type { QuestionRequest } from "@/types/question";
-import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap";
+import { getRuntimeUrlResolver } from "@/lib/runtime-url";
+import { runtimeFetch } from "@/lib/runtime-fetch";
+import { getRuntimeKey } from "@/lib/runtime-switch";
+import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry";
+import { markStartupTrace } from "@/lib/startupTrace";
 import {
   assertProviderCircuitClosed,
   recordProviderSuccess,
@@ -45,6 +49,35 @@ function formatSdkError(error: unknown): string {
     return String(error);
   }
 }
+type SdkResult<T> = {
+  data?: T;
+  error?: unknown;
+  response?: { status?: number };
+};
+
+function unwrapSdkData<T>(result: SdkResult<T>, operation: string): T {
+  if (result.error) {
+    const status = result.response?.status;
+    const error = new Error(`${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`) as Error & { status?: number };
+    if (status !== undefined) error.status = status;
+    throw error;
+  }
+  if (result.data === undefined || result.data === null) {
+    throw new Error(`${operation} failed: empty response`);
+  }
+  return result.data;
+}
+
+function unwrapSdkOptional<T>(result: SdkResult<T>, operation: string): T | undefined {
+  if (result.error) {
+    const status = result.response?.status;
+    const error = new Error(`${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`) as Error & { status?: number };
+    if (status !== undefined) error.status = status;
+    throw error;
+  }
+  return result.data;
+}
+
 const ABSOLUTE_URL_PATTERN = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//;
 const ID_RANDOM_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 const ID_RANDOM_LENGTH = 14;
@@ -116,29 +149,19 @@ const ensureAbsoluteBaseUrl = (candidate: string): string => {
   }
 };
 
-const resolveDesktopBaseUrl = (): string | null => {
-  if (typeof window === "undefined") {
+const resolveRuntimeBaseUrl = (): string | null => {
+  try {
+    return getRuntimeUrlResolver().api('/api');
+  } catch {
     return null;
   }
-  const desktopServer = (window as typeof window & {
-    __OPENCHAMBER_DESKTOP_SERVER__?: { origin: string; apiPrefix?: string };
-    __OPENCHAMBER_RUNTIME_APIS__?: RuntimeAPIs;
-  }).__OPENCHAMBER_DESKTOP_SERVER__;
+};
 
-  const isDesktop = Boolean(
-    (window as typeof window & { __OPENCHAMBER_RUNTIME_APIS__?: RuntimeAPIs }).__OPENCHAMBER_RUNTIME_APIS__?.runtime?.isDesktop
-  );
-
-  if (!desktopServer || !isDesktop) {
-    return null;
-  }
-
-  const origin = typeof desktopServer.origin === "string" && desktopServer.origin.length > 0 ? desktopServer.origin : null;
-  if (!origin) {
-    return null;
-  }
-
-  return `${origin}/api`;
+const createRuntimeOpencodeClient = (config: { baseUrl: string; directory?: string }): OpencodeClient => {
+  return createOpencodeClient({
+    ...config,
+    fetch: runtimeFetch,
+  });
 };
 
 interface App {
@@ -192,10 +215,7 @@ const normalizeFsPath = (path: string): string => path.replace(/\\/g, "/");
 const FS_LIST_CACHE_TTL_MS = 400;
 
 const getDesktopFilesApi = (): FilesAPI | null => {
-  if (typeof window === "undefined") {
-    return null;
-  }
-  const apis = (window as typeof window & { __OPENCHAMBER_RUNTIME_APIS__?: RuntimeAPIs }).__OPENCHAMBER_RUNTIME_APIS__;
+  const apis = getRegisteredRuntimeAPIs();
   if (apis && apis.runtime?.isDesktop && apis.files) {
     return apis.files;
   }
@@ -212,14 +232,27 @@ class OpencodeService {
   private listDirectoryCache: Map<string, { entries: FilesystemEntry[]; expiresAt: number }> = new Map();
 
   constructor(baseUrl: string = DEFAULT_BASE_URL) {
-    const desktopBase = resolveDesktopBaseUrl();
-    const requestedBaseUrl = desktopBase || baseUrl;
+    const runtimeBase = resolveRuntimeBaseUrl();
+    const requestedBaseUrl = runtimeBase || baseUrl;
     this.baseUrl = ensureAbsoluteBaseUrl(requestedBaseUrl);
-    this.client = createOpencodeClient({ baseUrl: this.baseUrl });
+    this.client = createRuntimeOpencodeClient({ baseUrl: this.baseUrl });
   }
 
   getBaseUrl(): string {
     return this.baseUrl;
+  }
+
+  reconnectToRuntimeBaseUrl(): void {
+    const runtimeBase = resolveRuntimeBaseUrl();
+    const nextBaseUrl = ensureAbsoluteBaseUrl(runtimeBase || DEFAULT_BASE_URL);
+    if (nextBaseUrl === this.baseUrl) {
+      return;
+    }
+    this.baseUrl = nextBaseUrl;
+    this.client = createRuntimeOpencodeClient({ baseUrl: this.baseUrl });
+    this.scopedClients.clear();
+    this.listDirectoryInFlight.clear();
+    this.listDirectoryCache.clear();
   }
 
   /** Expose the raw SDK client for direct use (e.g., SyncProvider) */
@@ -243,7 +276,7 @@ class OpencodeService {
     if (existing) {
       return existing;
     }
-    const scoped = createOpencodeClient({ baseUrl: this.baseUrl, directory: normalized });
+    const scoped = createRuntimeOpencodeClient({ baseUrl: this.baseUrl, directory: normalized });
     this.scopedClients.set(key, scoped);
     return scoped;
   }
@@ -314,7 +347,14 @@ class OpencodeService {
 
   // Set the current working directory for all API calls
   setDirectory(directory: string | undefined) {
-    this.currentDirectory = this.normalizeCandidatePath(directory) ?? directory;
+    const normalized = this.normalizeCandidatePath(directory) ?? directory;
+    if (this.currentDirectory !== normalized) {
+      markStartupTrace('opencodeClient:setDirectory', {
+        previous: this.currentDirectory ?? null,
+        next: normalized ?? null,
+      });
+    }
+    this.currentDirectory = normalized;
   }
 
   getDirectory(): string | undefined {
@@ -328,11 +368,14 @@ class OpencodeService {
       }
 
       const previousDirectory = this.currentDirectory;
-      this.currentDirectory = this.normalizeCandidatePath(directory) ?? directory;
+      const scopedDirectory = this.normalizeCandidatePath(directory) ?? directory;
+      this.currentDirectory = scopedDirectory;
       try {
         return await fn();
       } finally {
-        this.currentDirectory = previousDirectory;
+        if (this.currentDirectory === scopedDirectory) {
+          this.currentDirectory = previousDirectory;
+        }
       }
     };
 
@@ -444,41 +487,52 @@ class OpencodeService {
     return Array.isArray(response.data) ? response.data : [];
   }
 
-  async createSession(params?: { parentID?: string; title?: string }): Promise<Session> {
+  async createSession(params?: { parentID?: string; title?: string; metadata?: Record<string, unknown> }, directory?: string | null): Promise<Session> {
+    const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
     const response = await this.client.session.create({
-      ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
+      ...(requestDirectory ? { directory: requestDirectory } : {}),
       parentID: params?.parentID,
-      title: params?.title
+      title: params?.title,
+      metadata: params?.metadata,
     });
-    if (!response.data) throw new Error('Failed to create session');
-    return response.data;
+    return unwrapSdkData(response, 'session.create');
   }
 
-  async getSession(id: string): Promise<Session> {
+  async getSession(id: string, directory?: string | null): Promise<Session> {
+    const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
     const response = await this.client.session.get({
       sessionID: id,
-      ...(this.currentDirectory ? { directory: this.currentDirectory } : {})
+      ...(requestDirectory ? { directory: requestDirectory } : {})
     });
-    if (!response.data) throw new Error('Session not found');
-    return response.data;
+    return unwrapSdkData(response, 'session.get');
   }
 
-  async deleteSession(id: string): Promise<boolean> {
+  async deleteSession(id: string, directory?: string | null): Promise<boolean> {
+    const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
     const response = await this.client.session.delete({
       sessionID: id,
-      ...(this.currentDirectory ? { directory: this.currentDirectory } : {})
+      ...(requestDirectory ? { directory: requestDirectory } : {}),
     });
-    return response.data || false;
+    return unwrapSdkOptional(response, 'session.delete') === true;
   }
 
-  async updateSession(id: string, title?: string): Promise<Session> {
+  async updateSession(
+    id: string,
+    patch: { title?: string; metadata?: Record<string, unknown>; time?: { archived?: number | null } },
+    directory?: string | null,
+  ): Promise<Session> {
+    const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
+    const sdkPatch = {
+      ...(patch.title !== undefined ? { title: patch.title } : {}),
+      ...(patch.metadata !== undefined ? { metadata: patch.metadata } : {}),
+      ...(patch.time?.archived !== undefined && patch.time.archived !== null ? { time: { archived: patch.time.archived } } : {}),
+    };
     const response = await this.client.session.update({
       sessionID: id,
-      ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
-      title
+      ...(requestDirectory ? { directory: requestDirectory } : {}),
+      ...sdkPatch,
     });
-    if (!response.data) throw new Error('Failed to update session');
-    return response.data;
+    return unwrapSdkData(response, 'session.update');
   }
 
   async getSessionMessages(id: string, limit?: number): Promise<{ info: Message; parts: Part[] }[]> {
@@ -487,30 +541,20 @@ class OpencodeService {
       ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
       ...(typeof limit === 'number' ? { limit } : {}),
     });
-    return response.data || [];
+    return unwrapSdkData(response, 'session.messages');
   }
 
   async getSessionTodos(sessionId: string): Promise<Array<{ id: string; content: string; status: string; priority: string }>> {
     try {
-      const base = this.baseUrl.replace(/\/$/, "");
-      const url = new URL(`${base}/session/${encodeURIComponent(sessionId)}/todo`);
-
-      if (this.currentDirectory && this.currentDirectory.length > 0) {
-        url.searchParams.set("directory", this.currentDirectory);
-      }
-
-      const response = await fetch(url.toString(), {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-        },
+      const response = await this.client.session.todo({
+        sessionID: sessionId,
+        ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
       });
-
-      if (!response.ok) {
+      if (response.error) {
         return [];
       }
 
-      const data = await response.json().catch(() => null);
+      const data = response.data;
       if (!data || !Array.isArray(data)) {
         return [];
       }
@@ -688,6 +732,7 @@ class OpencodeService {
       schema: Record<string, unknown>;
       retryCount?: number;
     };
+    directory?: string | null;
   }): Promise<string> {
     // Reuse one client-side message ID across retries. The server accepts this
     // as the real user message ID, making ambiguous network retries idempotent.
@@ -756,31 +801,7 @@ class OpencodeService {
       throw new Error('Message must have at least one part (text or file)');
     }
 
-    if (this.currentDirectory) {
-      await waitForWorktreeBootstrap(this.currentDirectory);
-    }
-
-    // Use async prompt endpoint so the client doesn't block waiting
-    // for model work (SSE will deliver output/status).
-    // This avoids 504s from proxy timeouts on long-running turns.
-    const base = this.baseUrl.replace(/\/+$/, '');
-    let url: URL;
-    try {
-      url = new URL(`${base}/session/${encodeURIComponent(params.id)}/prompt_async`);
-      if (this.currentDirectory) {
-        url.searchParams.set('directory', this.currentDirectory);
-      }
-    } catch (error) {
-      console.error('[git-generation][browser] failed to build prompt_async URL', {
-        baseUrl: this.baseUrl,
-        normalizedBase: base,
-        sessionId: params.id,
-        directory: this.currentDirectory,
-        message: error instanceof Error ? error.message : String(error),
-        error,
-      });
-      throw error;
-    }
+    const requestDirectory = this.normalizeCandidatePath(params.directory ?? null) ?? this.currentDirectory;
 
     if (params.format) {
       console.info('[git-generation][browser] send structured message', {
@@ -789,7 +810,7 @@ class OpencodeService {
         modelID: params.modelID,
         agent: params.agent,
         variant: params.variant,
-        directory: this.currentDirectory,
+        directory: requestDirectory,
         baseUrl: this.baseUrl,
         formatType: params.format.type,
       });
@@ -801,24 +822,27 @@ class OpencodeService {
 
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        response = await fetch(url.toString(), {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            accept: 'application/json',
+        const result = await this.client.session.promptAsync({
+          sessionID: params.id,
+          ...(requestDirectory ? { directory: requestDirectory } : {}),
+          model: {
+            providerID: params.providerID,
+            modelID: params.modelID,
           },
-          body: JSON.stringify({
-            model: {
-              providerID: params.providerID,
-              modelID: params.modelID,
-            },
-            agent: params.agent,
-            variant: params.variant,
-            messageID: messageId,
-            ...(params.format ? { format: params.format } : {}),
-            parts,
-          }),
+          agent: params.agent,
+          variant: params.variant,
+          messageID: messageId,
+          ...(params.format ? { format: params.format } : {}),
+          parts,
         });
+        if (result.response instanceof Response) {
+          response = result.response;
+        } else if (result.error) {
+          const status = (result as SdkResult<unknown>).response?.status || 500;
+          response = new Response(JSON.stringify(result.error), { status });
+        } else {
+          response = new Response(JSON.stringify(result.data ?? true), { status: 200 });
+        }
       } catch (error) {
         if (attempt < 2 && isRetryableFetchError(error)) {
           const delay = getRetryDelayMs(attempt);
@@ -873,6 +897,7 @@ class OpencodeService {
     variant?: string;
     files?: Array<FileInputLite>;
     messageId?: string;
+    directory?: string | null;
   }): Promise<string> {
     const tempMessageId = params.messageId ?? ascendingId("msg");
 
@@ -883,42 +908,21 @@ class OpencodeService {
       }
     }
 
-    const base = this.baseUrl.replace(/\/+$/, '');
-    const url = new URL(`${base}/session/${encodeURIComponent(params.id)}/command`);
-    if (this.currentDirectory) {
-      url.searchParams.set('directory', this.currentDirectory);
-    }
+    const requestDirectory = this.normalizeCandidatePath(params.directory ?? null) ?? this.currentDirectory;
 
-    const payload: Record<string, unknown> = {
+    const response = await this.client.session.command({
+      sessionID: params.id,
+      ...(requestDirectory ? { directory: requestDirectory } : {}),
       command: params.command,
       arguments: params.arguments ?? '',
       model: `${params.providerID}/${params.modelID}`,
-      ...(params.agent ? { agent: params.agent } : {}),
-      ...(params.variant ? { variant: params.variant } : {}),
+      agent: params.agent,
+      variant: params.variant,
       ...(parts.length > 0 ? { parts } : {}),
       messageID: tempMessageId,
-    };
-
-    const response = await fetch(url.toString(), {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        accept: 'application/json',
-      },
-      body: JSON.stringify(payload),
     });
 
-    if (!response.ok) {
-      let detail = '';
-      try {
-        detail = await response.text();
-      } catch {
-        // ignore
-      }
-      const suffix = detail && detail.trim().length > 0 ? `: ${detail.trim()}` : '';
-      throw new Error(`Failed to run command (${response.status})${suffix}`);
-    }
-
+    unwrapSdkOptional(response, 'session.command');
     return tempMessageId;
   }
 
@@ -933,15 +937,46 @@ class OpencodeService {
     return Boolean(response.data);
   }
 
-  async revertSession(sessionId: string, messageId: string, partId?: string): Promise<Session> {
+  async shellSession(params: {
+    sessionId: string;
+    command: string;
+    agent: string;
+    model: { providerID: string; modelID: string };
+    messageId?: string;
+    directory?: string | null;
+  }): Promise<{ info: Message; parts: Part[] }> {
+    const requestDirectory = this.normalizeCandidatePath(params.directory ?? null) ?? this.currentDirectory;
+    const response = await this.client.session.shell({
+      sessionID: params.sessionId,
+      ...(requestDirectory ? { directory: requestDirectory } : {}),
+      messageID: params.messageId,
+      agent: params.agent,
+      model: params.model,
+      command: params.command,
+    });
+    return unwrapSdkData(response, 'session.shell') as { info: Message; parts: Part[] };
+  }
+
+  async revertSession(sessionId: string, messageId: string, partId?: string, directory?: string | null): Promise<Session> {
+    const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
     const response = await this.client.session.revert({
       sessionID: sessionId,
-      ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
+      ...(requestDirectory ? { directory: requestDirectory } : {}),
       messageID: messageId,
-      partID: partId
+      partID: partId,
     });
-    if (!response.data) throw new Error('Failed to revert session');
-    return response.data;
+    return unwrapSdkData(response, 'session.revert');
+  }
+
+  async summarizeSession(sessionId: string, providerId: string, modelId: string, directory?: string | null): Promise<boolean> {
+    const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
+    const response = await this.client.session.summarize({
+      sessionID: sessionId,
+      ...(requestDirectory ? { directory: requestDirectory } : {}),
+      providerID: providerId,
+      modelID: modelId,
+    });
+    return unwrapSdkOptional(response, 'session.summarize') === true;
   }
 
   async unrevertSession(sessionId: string): Promise<Session> {
@@ -949,22 +984,17 @@ class OpencodeService {
       sessionID: sessionId,
       ...(this.currentDirectory ? { directory: this.currentDirectory } : {})
     });
-    if (!response.data) throw new Error('Failed to unrevert session');
-    return response.data;
+    return unwrapSdkData(response, 'session.unrevert');
   }
 
-  async forkSession(sessionId: string, messageId?: string): Promise<Session> {
+  async forkSession(sessionId: string, messageId?: string, directory?: string | null): Promise<Session> {
+    const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
     const response = await this.client.session.fork({
       sessionID: sessionId,
-      ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
-      messageID: messageId
+      ...(requestDirectory ? { directory: requestDirectory } : {}),
+      messageID: messageId,
     });
-
-    if (!response.data) {
-      throw new Error('Failed to fork session');
-    }
-
-    return response.data;
+    return unwrapSdkData(response, 'session.fork');
   }
 
   async getSessionStatus(): Promise<
@@ -985,31 +1015,12 @@ class OpencodeService {
     directory: string | null | undefined
   ): Promise<Record<string, { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }> | null> {
     try {
-      const base = this.baseUrl.replace(/\/$/, "");
-      const url = new URL(`${base}/session/status`);
-
       const trimmedDirectory = typeof directory === "string" ? directory.trim() : "";
-      if (trimmedDirectory.length > 0) {
-        url.searchParams.set("directory", trimmedDirectory);
-      }
-
-      const response = await fetch(url.toString(), {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-        },
-      });
-
-      if (!response.ok) {
+      const result = await this.client.session.status(trimmedDirectory ? { directory: trimmedDirectory } : undefined);
+      if (result.error || !result.data || typeof result.data !== "object") {
         return null;
       }
-
-      const data = await response.json().catch(() => null);
-      if (!data || typeof data !== "object") {
-        return null;
-      }
-
-      return data as Record<
+      return result.data as Record<
         string,
         { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }
       >;
@@ -1033,8 +1044,7 @@ class OpencodeService {
     Record<string, { type: string }> | null
   > {
     try {
-      // Web server endpoint - use relative path that works with both dev and prod
-      const response = await fetch('/api/session-activity', {
+      const response = await runtimeFetch('/api/session-activity', {
         method: 'GET',
         headers: {
           Accept: 'application/json',
@@ -1075,15 +1085,16 @@ class OpencodeService {
   async replyToPermission(
     requestId: string,
     reply: 'once' | 'always' | 'reject',
-    options?: { message?: string }
+    options?: { message?: string; directory?: string | null }
   ): Promise<boolean> {
-    const result = await this.client.permission.reply({
+    const requestDirectory = this.normalizeCandidatePath(options?.directory ?? null) ?? this.currentDirectory;
+    const response = await this.client.permission.reply({
       requestID: requestId,
-      ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
+      ...(requestDirectory ? { directory: requestDirectory } : {}),
       reply,
       ...(options?.message ? { message: options.message } : {}),
     });
-    return result.data || false;
+    return unwrapSdkOptional(response, 'permission.reply') === true;
   }
 
   /**
@@ -1138,7 +1149,7 @@ class OpencodeService {
   }
 
   // Questions ("ask" tool)
-  async replyToQuestion(requestId: string, answers: string[] | string[][]): Promise<boolean> {
+  async replyToQuestion(requestId: string, answers: string[] | string[][], directory?: string | null): Promise<boolean> {
     const normalizedAnswers: string[][] = (() => {
       if (!Array.isArray(answers) || answers.length === 0) {
         return [];
@@ -1149,12 +1160,13 @@ class OpencodeService {
       return [answers as string[]];
     })();
 
-    const result = await this.client.question.reply({
+    const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
+    const response = await this.client.question.reply({
       requestID: requestId,
-      ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
+      ...(requestDirectory ? { directory: requestDirectory } : {}),
       answers: normalizedAnswers,
     });
-    return result.data || false;
+    return unwrapSdkOptional(response, 'question.reply') === true;
   }
 
   async rejectQuestion(requestId: string): Promise<boolean> {
@@ -1162,7 +1174,7 @@ class OpencodeService {
       requestID: requestId,
       ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
     });
-    return result.data || false;
+    return unwrapSdkOptional(result, 'question.reject') === true;
   }
 
   /**
@@ -1225,24 +1237,8 @@ class OpencodeService {
   async updateConfig(config: Record<string, unknown>): Promise<Config> {
     // IMPORTANT: Do NOT pass directory parameter for config updates
     // The config should be global, not directory-specific
-    const url = `${this.baseUrl}/config`;
-
-    const response = await fetch(url, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(config)
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[OpencodeClient] Failed to update config:', response.status, errorText);
-      throw new Error(`Failed to update config: ${response.status} ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    return data;
+    const response = await this.client.config.update({ config: config as Config });
+    return unwrapSdkData(response, 'global.config.update');
   }
 
   /**
@@ -1314,25 +1310,11 @@ class OpencodeService {
   // File Operations
   async readFile(path: string): Promise<string> {
     try {
-      // For now, we'll use a placeholder implementation
-      // In a real implementation, this would call an API endpoint to read the file
-      const response = await fetch(`${this.baseUrl}/files/read`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          path,
-          directory: this.currentDirectory
-        })
+      const response = await this.client.file.read({
+        path,
+        ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
       });
-
-      if (!response.ok) {
-        throw new Error(`Failed to read file: ${response.statusText}`);
-      }
-
-      const data = await response.text();
-      return data;
+      return String(unwrapSdkData(response, 'file.read'));
     } catch {
       // Return placeholder for development
       return `// Content of ${path}\n// This would be loaded from the server`;
@@ -1342,20 +1324,12 @@ class OpencodeService {
   async listFiles(directory?: string): Promise<Record<string, unknown>[]> {
     try {
       const targetDir = directory || this.currentDirectory || '/';
-      const response = await fetch(`${this.baseUrl}/files/list`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ directory: targetDir })
+      const response = await this.client.file.list({
+        path: targetDir,
+        ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
       });
-
-      if (!response.ok) {
-        throw new Error(`Failed to list files: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      return data;
+      const data = unwrapSdkData(response, 'file.list');
+      return Array.isArray(data) ? data as Record<string, unknown>[] : [];
     } catch {
       // Return mock data for development
       return [];
@@ -1364,41 +1338,35 @@ class OpencodeService {
 
   // Command Management
   async listCommands(): Promise<Array<{ name: string; description?: string; agent?: string; model?: string; source?: string }>> {
-    try {
-      const response = await this.client.command.list(
-        this.currentDirectory ? { directory: this.currentDirectory } : undefined
-      );
-      // Return only lightweight info for autocomplete
-      return (response.data || []).map((cmd: Record<string, unknown>) => ({
-        name: cmd.name as string,
-        description: cmd.description as string | undefined,
-        agent: cmd.agent as string | undefined,
-        model: cmd.model as string | undefined,
-        source: cmd.source as string | undefined,
-        // Intentionally excluding template to keep memory usage low
-      }));
-    } catch {
-      return [];
-    }
+    const response = await this.client.command.list(
+      this.currentDirectory ? { directory: this.currentDirectory } : undefined
+    );
+    const commands = unwrapSdkData(response, 'command.list');
+    // Return only lightweight info for autocomplete
+    return (commands || []).map((cmd: Record<string, unknown>) => ({
+      name: cmd.name as string,
+      description: cmd.description as string | undefined,
+      agent: cmd.agent as string | undefined,
+      model: cmd.model as string | undefined,
+      source: cmd.source as string | undefined,
+      // Intentionally excluding template to keep memory usage low
+    }));
   }
 
   async listCommandsWithDetails(): Promise<Array<{ name: string; description?: string; agent?: string; model?: string; source?: string; template?: string }>> {
-    try {
-      const response = await this.client.command.list(
-        this.currentDirectory ? { directory: this.currentDirectory } : undefined
-      );
-      // Return full command details including template
-      return (response.data || []).map((cmd: Record<string, unknown>) => ({
-        name: cmd.name as string,
-        description: cmd.description as string | undefined,
-        agent: cmd.agent as string | undefined,
-        model: cmd.model as string | undefined,
-        source: cmd.source as string | undefined,
-        template: cmd.template as string | undefined,
-      }));
-    } catch {
-      return [];
-    }
+    const response = await this.client.command.list(
+      this.currentDirectory ? { directory: this.currentDirectory } : undefined
+    );
+    const commands = unwrapSdkData(response, 'command.list');
+    // Return full command details including template
+    return (commands || []).map((cmd: Record<string, unknown>) => ({
+      name: cmd.name as string,
+      description: cmd.description as string | undefined,
+      agent: cmd.agent as string | undefined,
+      model: cmd.model as string | undefined,
+      source: cmd.source as string | undefined,
+      template: cmd.template as string | undefined,
+    }));
   }
 
   async listSkillsWithDetails(): Promise<Array<{ name: string; description?: string; location: string; content?: string }>> {
@@ -1453,33 +1421,24 @@ class OpencodeService {
     }
   }
 
-  // Health Check - using /health endpoint for detailed status
+  // Lightweight readiness check. Full diagnostics still live at /health.
   async checkHealth(): Promise<boolean> {
     try {
-      // Health endpoint is at root, not under /api
-      let healthUrl: string;
       const normalizedBase = this.baseUrl.endsWith('/') ? this.baseUrl.replace(/\/+$/, '') : this.baseUrl;
-      if (normalizedBase === '/api') {
-        healthUrl = '/health';
-      } else if (normalizedBase.endsWith('/api')) {
-        // Desktop: http://127.0.0.1:PORT/api -> http://127.0.0.1:PORT/health
-        healthUrl = `${normalizedBase.slice(0, -4)}/health`;
-      } else {
-        healthUrl = `${normalizedBase}/health`;
-      }
-      const response = await fetch(healthUrl);
+      const healthUrl = normalizedBase === '/api' || normalizedBase.endsWith('/api')
+        ? '/api/opencode/health'
+        : `${normalizedBase}/opencode/health`;
+      markStartupTrace('opencodeClient.checkHealth:url', { baseUrl: this.baseUrl, healthUrl });
+      const response = await runtimeFetch(healthUrl);
+      markStartupTrace('opencodeClient.checkHealth:response', { status: response.status });
       if (!response.ok) {
         return false;
       }
 
       const healthData = await response.json();
+      markStartupTrace('opencodeClient.checkHealth:result', { healthy: healthData?.healthy });
 
-      // Check if the upstream API is ready (not just OpenChamber server)
-      if (healthData.isOpenCodeReady === false) {
-        return false;
-      }
-
-      return true;
+      return healthData?.healthy === true;
     } catch {
       return false;
     }
@@ -1505,7 +1464,7 @@ class OpencodeService {
       ...(options?.allowOutsideWorkspace ? { allowOutsideWorkspace: true } : {}),
     };
 
-    const response = await fetch(`${this.baseUrl}/fs/mkdir`, {
+    const response = await runtimeFetch(`${this.baseUrl}/fs/mkdir`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1523,7 +1482,7 @@ class OpencodeService {
   }
 
   async cloneRepository(input: { remoteUrl: string; destinationPath: string; gitIdentityId?: string | null }): Promise<{ success: boolean; path: string; output?: string }> {
-    const response = await fetch(`${this.baseUrl}/fs/clone`, {
+    const response = await runtimeFetch(`${this.baseUrl}/fs/clone`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1589,7 +1548,7 @@ class OpencodeService {
         params.set('respectGitignore', 'true');
       }
       const query = params.toString();
-      const response = await fetch(`${this.baseUrl}/fs/list${query ? `?${query}` : ''}`);
+      const response = await runtimeFetch(`${this.baseUrl}/fs/list${query ? `?${query}` : ''}`);
       if (!response.ok) {
         const error = await response.json().catch(() => ({}));
         const message = typeof error.error === 'string' ? error.error : 'Failed to list directory';
@@ -1669,15 +1628,20 @@ class OpencodeService {
   }
 
   async getFilesystemHome(): Promise<string | null> {
-    // Optimization: Check for desktop runtime first to avoid unnecessary network calls
-    // and fix the "SyntaxError" warning when the endpoint is missing
-    const desktopHome = await getDesktopHomeDirectory();
-    if (desktopHome) {
-      return desktopHome;
+    // The injected desktop home describes the LOCAL machine. It is only a
+    // valid answer while the active runtime is the local one — after an
+    // in-place switch to a remote host the home must come from that host's
+    // /api/fs/home, not from the local Electron global.
+    const runtimeKey = getRuntimeKey();
+    if (!runtimeKey || runtimeKey === 'local') {
+      const desktopHome = await getDesktopHomeDirectory();
+      if (desktopHome) {
+        return desktopHome;
+      }
     }
 
     try {
-      const response = await fetch(`${this.baseUrl}/fs/home`, {
+      const response = await runtimeFetch(`${this.baseUrl}/fs/home`, {
         method: 'GET',
         headers: {
           Accept: 'application/json'
@@ -1714,7 +1678,7 @@ class OpencodeService {
     console.log('[OpencodeClient] POST', url, 'with path:', directoryPath);
 
     try {
-      const response = await fetch(url, {
+      const response = await runtimeFetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'

@@ -21,6 +21,7 @@ interface AgentSelectorProps {
     onChange: (agentName: string) => void;
     className?: string;
     filter?: (agent: Agent) => boolean;
+    dropdownPortalToBody?: boolean;
 }
 
 export const AgentSelector: React.FC<AgentSelectorProps> = ({
@@ -28,6 +29,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
     onChange,
     className,
     filter,
+    dropdownPortalToBody = false,
 }) => {
     const { t } = useI18n();
     const { isReady, isUnavailable } = useOpenCodeReadiness();
@@ -176,7 +178,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                             <Icon name="arrow-down-s" className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
                         </div>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent className="max-w-[300px]">
+                    <DropdownMenuContent className="max-w-[300px]" portalToBody={dropdownPortalToBody}>
                         <DropdownMenuItem
                             className="typography-meta"
                             onSelect={() => handleAgentChange('')}

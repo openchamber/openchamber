@@ -493,41 +493,34 @@ export const createSettingsRuntime = (deps) => {
   };
 
   const validateProjectEntries = async (projects) => {
-    console.log(`[validateProjectEntries] Starting validation for ${projects.length} projects`);
-
     if (!Array.isArray(projects)) {
-      console.warn('[validateProjectEntries] Input is not an array, returning empty');
       return [];
     }
 
     const validations = projects.map(async (project) => {
       if (!project || typeof project.path !== 'string' || project.path.length === 0) {
-        console.error('[validateProjectEntries] Invalid project entry: missing or empty path', project);
+        console.warn('[validateProjectEntries] Dropping project entry with missing or empty path');
         return null;
       }
       try {
         const stats = await fsPromises.stat(project.path);
         if (!stats.isDirectory()) {
-          console.error(`[validateProjectEntries] Project path is not a directory: ${project.path}`);
+          console.warn(`[validateProjectEntries] Dropping project — path is not a directory: ${project.path}`);
           return null;
         }
         return project;
       } catch (error) {
-        const err = error;
-        console.error(`[validateProjectEntries] Failed to validate project "${project.path}": ${err.code || err.message || err}`);
-        if (err && typeof err === 'object' && err.code === 'ENOENT') {
-          console.log(`[validateProjectEntries] Removing project with ENOENT: ${project.path}`);
+        if (error && typeof error === 'object' && error.code === 'ENOENT') {
+          console.warn(`[validateProjectEntries] Dropping project — directory no longer exists: ${project.path}`);
           return null;
         }
-        console.log(`[validateProjectEntries] Keeping project despite non-ENOENT error: ${project.path}`);
+        // Permission or transient fs error — keep the project rather than
+        // silently losing it from the user's list.
         return project;
       }
     });
 
-    const results = (await Promise.all(validations)).filter((p) => p !== null);
-
-    console.log(`[validateProjectEntries] Validation complete: ${results.length}/${projects.length} projects valid`);
-    return results;
+    return (await Promise.all(validations)).filter((p) => p !== null);
   };
 
   const migrateSettingsFromLegacyLastDirectory = async (current) => {
@@ -769,6 +762,19 @@ export const createSettingsRuntime = (deps) => {
     return { settings: changed ? next : settings, changed };
   };
 
+  // `approvedDirectories` was a write-only registry: every project path and
+  // visited directory was appended forever, but nothing ever read it. Strip
+  // the stale key from persisted settings on upgrade.
+  const migrateSettingsRemoveApprovedDirectories = (current) => {
+    const settings = current && typeof current === 'object' ? current : {};
+    if (!Object.prototype.hasOwnProperty.call(settings, 'approvedDirectories')) {
+      return { settings, changed: false };
+    }
+    const next = { ...settings };
+    delete next.approvedDirectories;
+    return { settings: next, changed: true };
+  };
+
   const readSettingsFromDiskMigrated = async () => {
     const current = await readSettingsFromDisk();
     const migration1 = await migrateSettingsFromLegacyLastDirectory(current);
@@ -778,17 +784,19 @@ export const createSettingsRuntime = (deps) => {
     const migration5 = await migrateSettingsFromLegacyNamedTunnelKeys(migration4.settings);
     const migration6 = normalizeSettingsPaths(migration5.settings);
     const migration7 = await migrateSettingsToDeterministicProjectIds(migration6.settings);
-    if (migration1.changed || migration2.changed || migration3.changed || migration4.changed || migration5.changed || migration6.changed || migration7.changed) {
-      await writeSettingsToDisk(migration7.settings);
+    const migration8 = migrateSettingsRemoveApprovedDirectories(migration7.settings);
+    if (migration1.changed || migration2.changed || migration3.changed || migration4.changed || migration5.changed || migration6.changed || migration7.changed || migration8.changed) {
+      await writeSettingsToDisk(migration8.settings);
     }
-    return migration7.settings;
+    return migration8.settings;
   };
 
   const persistSettings = async (changes) => {
     persistSettingsLock = persistSettingsLock.then(async () => {
-      console.log('[persistSettings] Called with changes:', JSON.stringify(changes, null, 2));
+      // Log field names only — changes can carry credentials (UI password,
+      // client tokens, tunnel tokens) that must never reach the log file.
+      console.log('[persistSettings] Updating fields:', Object.keys(changes || {}).join(', ') || '(none)');
       const current = await readSettingsFromDisk();
-      console.log('[persistSettings] Current projects count:', Array.isArray(current.projects) ? current.projects.length : 'N/A');
       const sanitized = sanitizeSettingsUpdate(changes);
       let next = mergePersistedSettings(current, sanitized);
 
@@ -802,10 +810,16 @@ export const createSettingsRuntime = (deps) => {
         next = deterministicProjectIdMigration.settings;
       }
 
-      if (Array.isArray(next.projects)) {
-        console.log(`[persistSettings] Validating ${next.projects.length} projects...`);
+      const approvedDirectoriesMigration = migrateSettingsRemoveApprovedDirectories(next);
+      if (approvedDirectoriesMigration.changed) {
+        next = approvedDirectoriesMigration.settings;
+      }
+
+      // Validating project paths hits the filesystem for every entry, so only
+      // do it when the incoming update actually touches the projects list —
+      // not on every theme/window-state/etc. save.
+      if (Object.prototype.hasOwnProperty.call(sanitized, 'projects') && Array.isArray(next.projects)) {
         const validated = await validateProjectEntries(next.projects);
-        console.log(`[persistSettings] After validation: ${validated.length} projects remain`);
         next = { ...next, projects: validated };
       }
 
@@ -848,7 +862,6 @@ export const createSettingsRuntime = (deps) => {
       }
 
       await writeSettingsToDisk(next);
-      console.log(`[persistSettings] Successfully saved ${next.projects?.length || 0} projects to disk`);
       return formatSettingsResponse(next);
     });
 

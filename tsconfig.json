@@ -3,7 +3,7 @@
   "references": [
     { "path": "./packages/ui/tsconfig.json" },
     { "path": "./packages/web/tsconfig.json" },
-    { "path": "./packages/desktop/tsconfig.json" }
+    { "path": "./packages/electron/tsconfig.json" }
   ],
   "compilerOptions": {
     "baseUrl": ".",
@@ -14,8 +14,7 @@
     "resolveJsonModule": true,
     "paths": {
       "@openchamber/ui/*": ["./packages/ui/src/*"],
-      "@openchamber/web/*": ["./packages/web/src/*"],
-      "@openchamber/desktop/*": ["./packages/desktop/src/*"]
+      "@openchamber/web/*": ["./packages/web/src/*"]
     }
   }
 }

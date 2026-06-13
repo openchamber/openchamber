@@ -60,7 +60,23 @@ openchamber startup disable
 OPENCHAMBER_UI_PASSWORD='secret' openchamber startup enable
 ```
 
+如果要在登录时启动一个供桌面或移动应用使用的 headless 服务器，请加上 `--api-only` 和可访问的 host：
+
+```bash
+openchamber startup enable --port 3000 --api-only --host 0.0.0.0 --ui-password secret
+```
+
 `startup enable` 会把当前环境快照保存到服务中，让启动行为更接近你在同一个 shell 中手动运行 `openchamber`。这会保留提供商 token、`PATH`、SSH agent 设置以及其他 CLI auth/config 环境变量。如果你想要最小化的服务环境，请使用 `--no-env-snapshot`。
+
+启动服务会记住 `--port`、`--host`、`--ui-password` 和 `--api-only`。CLI restart 和更新期间的 restart 会复用这些已保存设置。
+
+要为另一个 OpenChamber 应用创建连接链接，请使用：
+
+```bash
+openchamber connect-url --port 3000 --server http://your-host:3000 --qr
+```
+
+运行 `openchamber connect-url --help` 可查看所有链接选项，包括 `--name`、`--lan`、`--server`、`--api-only`、`--ui-password` 和 `--qr`。
 
 你仍然可以独立管理这个运行中服务的隧道：
 

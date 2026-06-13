@@ -51,8 +51,8 @@ const getOpenChamberConfigDir = (): string => {
   return path.join(os.homedir(), '.config', 'openchamber');
 };
 
-const sanitizeInstallScope = (scope: string): 'desktop-tauri' | 'vscode' | 'web' => {
-  if (scope === 'desktop-tauri' || scope === 'vscode' || scope === 'web') return scope;
+const sanitizeInstallScope = (scope: string): 'vscode' | 'web' => {
+  if (scope === 'vscode' || scope === 'web') return scope;
   return 'web';
 };
 
@@ -238,6 +238,32 @@ export async function handleSystemBridgeMessage(
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:opencode/version': {
+      try {
+        const apiUrl = ctx?.manager?.getApiUrl();
+        if (!apiUrl) {
+          return { id, type, success: true, data: { version: null, error: 'OpenCode manager unavailable' } };
+        }
+        const base = `${apiUrl.replace(/\/+$/, '')}/`;
+        const response = await fetch(new URL('global/health', base).toString(), {
+          method: 'GET',
+          headers: { Accept: 'application/json', ...ctx?.manager?.getOpenCodeAuthHeaders() },
+        });
+        const health = await response.json().catch(() => null) as { version?: unknown; error?: unknown } | null;
+        if (!response.ok) {
+          const message = typeof health?.error === 'string' ? health.error : response.statusText || 'Failed to read OpenCode version';
+          return { id, type, success: true, data: { version: null, error: message } };
+        }
+        const version = typeof health?.version === 'string' && health.version.trim().length > 0
+          ? health.version.trim().replace(/^v/, '')
+          : null;
+        return { id, type, success: true, data: { version } };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: true, data: { version: null, error: errorMessage } };
       }
     }
 

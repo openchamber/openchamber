@@ -56,6 +56,9 @@ export const getToolIcon = (toolName: string) => {
     if (tool === 'question') {
         return <Icon name="survey" className={iconClass} />;
     }
+    if (tool === 'lsp') {
+        return <Icon name="scan-2" className={iconClass} />;
+    }
     if (tool === 'plan_enter') {
         return <Icon name="file-list-2" className={iconClass} />;
     }

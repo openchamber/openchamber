@@ -2,7 +2,7 @@ import type { IconName } from "@/components/icon/icons";
 
 export type SidebarSection = 'sessions' | 'agents' | 'commands' | 'skills' | 'mcp' | 'providers' | 'usage' | 'git-identities' | 'settings';
 
-export type IconComponent = IconName;
+export type IconComponent = IconName | 'mcp-custom';
 
 export interface SidebarSectionConfig {
     id: SidebarSection;
@@ -40,7 +40,7 @@ export const SIDEBAR_SECTIONS: SidebarSectionConfig[] = [
         id: 'mcp',
         label: 'MCP',
         description: 'Manage Model Context Protocol servers and their configurations.',
-        icon: "plug-2",
+        icon: "mcp-custom",
     },
     {
         id: 'providers',

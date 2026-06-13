@@ -35,6 +35,7 @@ import { canUseElectronDesktopIPC, invokeDesktop, isDesktopShell, isVSCodeRuntim
 import { SETTINGS_PAGE_METADATA, type SettingsRuntimeContext } from '@/lib/settings/metadata';
 import { getSettingsNavIcon } from '@/components/views/SettingsView';
 import { Icon } from "@/components/icon/Icon";
+import { McpIcon } from '@/components/icons/McpIcon';
 import { scoreByFuzzyQuery } from '@/lib/search/fuzzySearch';
 import { truncatePathMiddle } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
@@ -264,8 +265,8 @@ export const CommandPalette: React.FC = () => {
   // ---------------------------------------------------------------------------
   const settingsRuntimeCtx = React.useMemo<SettingsRuntimeContext>(() => {
     const isDesktop = isDesktopShell();
-    return { isVSCode: isVSCodeRuntime(), isWeb: !isDesktop && isWebRuntime(), isDesktop };
-  }, []);
+    return { isVSCode: isVSCodeRuntime(), isWeb: !isDesktop && isWebRuntime(), isDesktop, isMobile };
+  }, [isMobile]);
 
   const settingsEntries = React.useMemo<CommandEntry[]>(() => {
     return SETTINGS_PAGE_METADATA
@@ -277,7 +278,9 @@ export const CommandPalette: React.FC = () => {
         return {
           id: `settings:${page.slug}`,
           title: page.title,
-          icon: <Icon name={iconName} className="mr-2 h-4 w-4" />,
+          icon: page.slug === 'mcp'
+            ? <McpIcon className="mr-2 h-4 w-4" />
+            : <Icon name={iconName} className="mr-2 h-4 w-4" />,
           searchText: `${page.title} ${page.group} ${keywords}`,
           onSelect: run(() => {
             setSettingsPage(page.slug);

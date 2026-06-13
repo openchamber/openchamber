@@ -4,6 +4,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useContextStore } from '@/stores/contextStore';
 import { formatEffortLabel, getAgentDisplayName, getModelDisplayName } from './mobileControlsUtils';
+import { useI18n } from '@/lib/i18n';
 
 const STATUS_CHIP_STYLE = {
     height: '28px',
@@ -17,6 +18,7 @@ interface StatusChipProps {
 }
 
 export const StatusChip: React.FC<StatusChipProps> = ({ onClick, className }) => {
+    const { t } = useI18n();
     const currentModelId = useConfigStore((state) => state.currentModelId);
     const currentVariant = useConfigStore((state) => state.currentVariant);
     const currentAgentName = useConfigStore((state) => state.currentAgentName);
@@ -32,7 +34,7 @@ export const StatusChip: React.FC<StatusChipProps> = ({ onClick, className }) =>
     const uiAgentName = currentSessionId ? (sessionAgentName || currentAgentName) : currentAgentName;
     const agentLabel = getAgentDisplayName(agents, uiAgentName);
     const currentProvider = getCurrentProvider();
-    const modelLabel = getModelDisplayName(currentProvider, currentModelId);
+    const modelLabel = getModelDisplayName(currentProvider, currentModelId, t('chat.modelControls.selectModel'));
     const hasEffort = getCurrentModelVariants().length > 0;
     const effortLabel = hasEffort ? formatEffortLabel(currentVariant) : null;
     const fullLabel = [agentLabel, modelLabel, effortLabel].filter(Boolean).join(' · ');

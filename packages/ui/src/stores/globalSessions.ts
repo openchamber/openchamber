@@ -1,5 +1,6 @@
 import type { OpencodeClient, Session } from "@opencode-ai/sdk/v2";
 import { retry } from "@/sync/retry";
+import { stripSessionListDetails } from "@/sync/sanitize";
 
 export type GlobalSessionRecord = Session & {
     project?: {
@@ -37,6 +38,41 @@ const readResponseHeader = (response: unknown, header: string): string | null =>
     return typeof direct === "string" ? direct : null;
 };
 
+const formatSdkError = (error: unknown): string => {
+    if (error instanceof Error) return error.message;
+    if (typeof error === "string") return error;
+    if (error && typeof error === "object" && "message" in error && typeof (error as { message?: unknown }).message === "string") {
+        return (error as { message: string }).message;
+    }
+    try {
+        return JSON.stringify(error);
+    } catch {
+        return String(error);
+    }
+};
+
+const unwrapSessionList = (
+    result: { data?: Session[]; error?: unknown; response?: { status?: number } },
+    operation: string,
+): GlobalSessionRecord[] => {
+    if (result.error) {
+        const status = result.response?.status;
+        const error = new Error(`${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`);
+        if (status !== undefined) {
+            (error as Error & { status?: number }).status = status;
+        }
+        throw error;
+    }
+
+    if (!Array.isArray(result.data)) {
+        const error = new Error(`${operation} returned no data`);
+        (error as Error & { status?: number }).status = 503;
+        throw error;
+    }
+
+    return result.data as GlobalSessionRecord[];
+};
+
 export const readNextCursor = (response: unknown): number | null => {
     return toNumber(readResponseHeader(response, "x-next-cursor"));
 };
@@ -63,7 +99,9 @@ export const isMissingGlobalSessionsEndpointError = (error: unknown): boolean =>
 export async function listGlobalSessionPages(
     apiClient: OpencodeClient,
     options: {
+        directory?: string;
         archived: boolean;
+        roots?: boolean;
         pageSize: number;
         onPage?: (sessions: GlobalSessionRecord[]) => void;
     },
@@ -75,14 +113,17 @@ export async function listGlobalSessionPages(
     while (true) {
         const response = await retry(
             () => apiClient.experimental.session.list({
+                ...(options.directory ? { directory: options.directory } : {}),
                 archived: options.archived,
+                ...(options.roots !== undefined ? { roots: options.roots } : {}),
                 limit: options.pageSize,
                 ...(cursor !== undefined ? { cursor } : {}),
             }),
             { attempts: 3, delay: 500, retryIf: () => true },
         );
 
-        const payload = Array.isArray(response.data) ? (response.data as GlobalSessionRecord[]) : [];
+        const payload = unwrapSessionList(response, "experimental.session.list")
+            .map((session) => stripSessionListDetails(session) as GlobalSessionRecord);
         if (payload.length === 0) break;
 
         let appended = 0;

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
+import { opencodeClient } from '@/lib/opencode/client';
 import { useSessionWorktreeStore } from './session-worktree-store';
-import { useSessionUIStore } from './session-ui-store';
+import { routeMessage, useSessionUIStore } from './session-ui-store';
 
 /**
  * Unit tests for session worktree routing through the authoritative store.
@@ -187,5 +188,36 @@ describe('session-worktree-store worktree routing', () => {
     const attachment = store.getAttachment('session-not-repo');
     expect(attachment).toBeDefined();
     expect(attachment.worktreeStatus).toBe('not-a-repo');
+  });
+});
+
+describe('routeMessage directory scoping', () => {
+  test('runs sends in the provided session directory', async () => {
+    // The session directory travels as an explicit request param (not via
+    // client-wide directory scoping), so concurrent sends can't cross-talk.
+    const calls = [];
+    const originalShellSession = opencodeClient.shellSession;
+
+    opencodeClient.shellSession = async (params) => {
+      calls.push(params);
+      return { info: {}, parts: [] };
+    };
+
+    try {
+      await routeMessage({
+        sessionId: 'session-a',
+        directory: '/session/project',
+        content: 'pwd',
+        providerID: 'provider-a',
+        modelID: 'model-a',
+        inputMode: 'shell',
+      });
+    } finally {
+      opencodeClient.shellSession = originalShellSession;
+    }
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].sessionId).toBe('session-a');
+    expect(calls[0].directory).toBe('/session/project');
   });
 });

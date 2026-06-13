@@ -17,6 +17,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import { useAgentGroupsStore, type AgentGroup } from '@/stores/useAgentGroupsStore';
@@ -47,6 +48,7 @@ interface AgentGroupItemProps {
 const AgentGroupItem: React.FC<AgentGroupItemProps> = ({ group, isSelected, isBusy, onSelect }) => {
   const { t } = useI18n();
   const [menuOpen, setMenuOpen] = React.useState(false);
+  const [contextMenuOpen, setContextMenuOpen] = React.useState(false);
   const [confirmOpen, setConfirmOpen] = React.useState(false);
   const [isDeleting, setIsDeleting] = React.useState(false);
   const deleteGroupSessions = useAgentGroupsStore((s) => s.deleteGroupSessions);
@@ -66,16 +68,38 @@ const AgentGroupItem: React.FC<AgentGroupItemProps> = ({ group, isSelected, isBu
   }, [deleteGroupSessions, group.name, group.sessions, isDeleting, t]);
 
   const relativeTime = formatRelativeTime(group.lastActive);
+  const renderGroupMenuItems = (Item: React.ElementType) => (
+    <Item
+      className="text-destructive focus:text-destructive"
+      onSelect={(e: React.MouseEvent) => {
+        e.stopPropagation();
+        setMenuOpen(false);
+        setContextMenuOpen(false);
+        setConfirmOpen(true);
+      }}
+    >
+      {t('agentManager.sidebar.item.delete')}
+    </Item>
+  );
 
   return (
     <>
-      <div
-        className={cn(
-          'group relative flex items-center rounded-md px-1.5 py-1.5 cursor-pointer',
-          isSelected ? 'bg-interactive-selection' : 'hover:bg-interactive-hover',
-        )}
-        onClick={onSelect}
-      >
+      <ContextMenu open={contextMenuOpen} onOpenChange={setContextMenuOpen}>
+        <ContextMenuTrigger
+          render={
+            <div
+              className={cn(
+                'group relative flex items-center rounded-md px-1.5 py-1.5 cursor-pointer',
+                isSelected ? 'bg-interactive-selection' : 'hover:bg-interactive-hover',
+              )}
+              onClick={onSelect}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setContextMenuOpen(true);
+              }}
+            />
+          }
+        >
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <button
             type="button"
@@ -107,7 +131,7 @@ const AgentGroupItem: React.FC<AgentGroupItemProps> = ({ group, isSelected, isBu
           </button>
 
           <div className="flex items-center gap-1.5 self-stretch">
-            <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+            <DropdownMenu open={menuOpen} onOpenChange={(open) => { if (open) setContextMenuOpen(false); setMenuOpen(open); }}>
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
@@ -123,21 +147,16 @@ const AgentGroupItem: React.FC<AgentGroupItemProps> = ({ group, isSelected, isBu
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-[140px]">
-                <DropdownMenuItem
-                  variant="destructive"
-                  onSelect={(e) => {
-                    e.stopPropagation();
-                    setMenuOpen(false);
-                    setConfirmOpen(true);
-                  }}
-                >
-                  {t('agentManager.sidebar.item.delete')}
-                </DropdownMenuItem>
+                {renderGroupMenuItems(DropdownMenuItem)}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
         </div>
-      </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="min-w-[140px]">
+          {renderGroupMenuItems(ContextMenuItem)}
+        </ContextMenuContent>
+      </ContextMenu>
 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent className="max-w-md">

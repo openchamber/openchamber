@@ -1,16 +1,9 @@
 import type { ToolsAPI } from '@openchamber/ui/lib/api/types';
+import { opencodeClient } from '@openchamber/ui/lib/opencode/client';
 
-// Use same endpoint as web - fetch interceptor handles URL rewriting
 export const createVSCodeToolsAPI = (): ToolsAPI => ({
   async getAvailableTools(): Promise<string[]> {
-    const response = await fetch('/api/experimental/tool/ids');
-
-    if (!response.ok) {
-      throw new Error(`Tools API returned ${response.status} ${response.statusText}`);
-    }
-
-    const data = await response.json();
-
+    const data = await opencodeClient.listToolIds();
     if (!Array.isArray(data)) {
       throw new Error('Tools API returned invalid data format');
     }

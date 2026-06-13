@@ -2,6 +2,7 @@
 
 import fs from 'fs';
 import net from 'net';
+import dgram from 'dgram';
 import os from 'os';
 import path from 'path';
 import crypto from 'crypto';
@@ -9,6 +10,12 @@ import { spawn, spawnSync } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { isModuleCliExecution } from './cli-entry.js';
 import { cloudflareTunnelProviderCapabilities } from '../server/lib/tunnels/providers/cloudflare.js';
+import { createRemoteClientAuthRuntime } from '../server/lib/client-auth/remote-clients.js';
+import {
+  getUnauthenticatedLanErrorMessage,
+  isNetworkExposedBindHost,
+  isUnsafeUnauthenticatedLanAllowed,
+} from '../server/lib/security/bind-host.js';
 import {
   intro as clackIntro, outro as clackOutro, log as clackLog,
   box as clackBox, confirm as clackConfirm,
@@ -37,6 +44,7 @@ const TUNNEL_PROFILES_VERSION = 1;
 const TUNNEL_PROFILES_FILE_NAME = 'tunnel-profiles.json';
 const LEGACY_CLOUDFLARE_MANAGED_REMOTE_FILE_NAME = 'cloudflare-managed-remote-tunnels.json';
 const TUNNEL_CLI_STATE_FILE_NAME = 'tunnel-cli-state.json';
+const REMOTE_CLIENTS_FILE_NAME = 'remote-clients.json';
 const TUNNEL_BOOTSTRAP_TTL_DEFAULT_MS = 30 * 60 * 1000;
 const TUNNEL_BOOTSTRAP_TTL_MIN_MS = 60 * 1000;
 const TUNNEL_BOOTSTRAP_TTL_MAX_MS = 24 * 60 * 60 * 1000;
@@ -135,10 +143,17 @@ function isUnsafeBrowserPort(port) {
   return Number.isFinite(port) && UNSAFE_BROWSER_PORTS.has(Math.trunc(port));
 }
 
-function resolveApiHost() {
-  const configured = typeof process.env.OPENCHAMBER_HOST === 'string'
-    ? process.env.OPENCHAMBER_HOST.trim()
-    : '';
+function resolveConfiguredBindHost(hostOverride) {
+  const configured = typeof hostOverride === 'string' && hostOverride.trim()
+    ? hostOverride.trim()
+    : typeof process.env.OPENCHAMBER_HOST === 'string'
+      ? process.env.OPENCHAMBER_HOST.trim()
+      : '';
+  return configured || '127.0.0.1';
+}
+
+function resolveApiHost(hostOverride) {
+  const configured = resolveConfiguredBindHost(hostOverride);
 
   if (!configured) {
     return '127.0.0.1';
@@ -166,10 +181,127 @@ function formatHostForUrl(host) {
   return host.includes(':') ? `[${host}]` : host;
 }
 
-function buildLocalUrl(port, endpoint = '') {
-  const host = formatHostForUrl(resolveApiHost());
+function buildLocalUrl(port, endpoint = '', hostOverride) {
+  const host = formatHostForUrl(resolveApiHost(hostOverride));
   const pathPart = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
   return `http://${host}:${port}${pathPart}`;
+}
+
+async function detectLanIPv4Address() {
+  const ip = await new Promise((resolve) => {
+    const socket = dgram.createSocket('udp4');
+    const finish = (value) => {
+      try { socket.close(); } catch {}
+      resolve(value);
+    };
+    socket.once('error', () => finish(null));
+    try {
+      socket.connect(80, '8.8.8.8', (error) => {
+        if (error) return finish(null);
+        try {
+          const addr = socket.address();
+          finish(addr && typeof addr.address === 'string' ? addr.address : null);
+        } catch {
+          finish(null);
+        }
+      });
+    } catch {
+      finish(null);
+    }
+  });
+
+  if (ip && ip !== '0.0.0.0' && !ip.startsWith('127.')) return ip;
+
+  for (const entries of Object.values(os.networkInterfaces() || {})) {
+    for (const entry of entries || []) {
+      if (entry.family === 'IPv4' && !entry.internal && entry.address) {
+        return entry.address;
+      }
+    }
+  }
+  return null;
+}
+
+async function resolveConnectUrlServerUrl(options) {
+  let hostOverride = options.host;
+  if (typeof hostOverride !== 'string' && !process.env.OPENCHAMBER_HOST) {
+    const storedOptions = readInstanceOptions(await getInstanceFilePath(options.port));
+    if (typeof storedOptions?.host === 'string' && storedOptions.host.trim()) {
+      hostOverride = storedOptions.host.trim();
+    }
+  }
+
+  const bindHost = resolveConfiguredBindHost(hostOverride);
+  if (!isWildcardBindHost(bindHost)) {
+    return {
+      serverUrl: buildLocalUrl(options.port, '/', hostOverride).replace(/\/+$/, ''),
+      source: 'configured-host',
+    };
+  }
+
+  const lanAddress = await detectLanIPv4Address();
+  if (!lanAddress) {
+    return {
+      serverUrl: buildLocalUrl(options.port, '/').replace(/\/+$/, ''),
+      source: 'loopback-fallback',
+    };
+  }
+
+  return {
+    serverUrl: `http://${formatHostForUrl(lanAddress)}:${options.port}`,
+    source: 'lan-detected',
+  };
+}
+
+async function ensureConnectUrlServerRunning(options) {
+  const running = await discoverRunningInstances();
+  if (running.some((entry) => entry.port === options.port)) {
+    return { port: options.port, autoStarted: false };
+  }
+
+  await commands.serve({
+    port: options.port,
+    explicitPort: true,
+    host: options.host,
+    uiPassword: options.uiPassword,
+    apiOnly: options.apiOnly,
+    suppressUnsafePortWarning: true,
+    suppressUiPasswordWarning: true,
+    suppressStartupSummary: true,
+    suppressQuietOutput: true,
+  });
+
+  return { port: options.port, autoStarted: true };
+}
+
+function normalizeServerUrlForConnection(value) {
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return null;
+    }
+    parsed.hash = '';
+    return parsed.toString().replace(/\/+$/, '');
+  } catch {
+    return null;
+  }
+}
+
+function getOpenChamberDataDir() {
+  return process.env.OPENCHAMBER_DATA_DIR
+    ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
+    : path.join(os.homedir(), '.config', 'openchamber');
+}
+
+function buildClientConnectionPayload({ serverUrl, token, label }) {
+  const params = new URLSearchParams();
+  params.set('v', '1');
+  params.set('server', serverUrl.trim().replace(/\/+$/, ''));
+  params.set('token', token.trim());
+  if (label?.trim()) params.set('label', label.trim());
+  return `openchamber://connect?${params.toString()}`;
 }
 
 function formatUnsafePortWarning(port) {
@@ -506,6 +638,20 @@ function hasUiPasswordConfigured(password) {
   return typeof password === 'string' && password.trim().length > 0;
 }
 
+function assertAuthenticatedNetworkExposure({ host, uiPassword }) {
+  const bindHost = resolveConfiguredBindHost(host);
+  if (hasUiPasswordConfigured(uiPassword)) {
+    return;
+  }
+  if (!isNetworkExposedBindHost(bindHost)) {
+    return;
+  }
+  if (isUnsafeUnauthenticatedLanAllowed(process.env)) {
+    return;
+  }
+  throw new TunnelCliError(getUnauthenticatedLanErrorMessage(bindHost), EXIT_CODE.AUTH_CONFIG_ERROR);
+}
+
 const BUN_BIN = getBunBinary();
 
 function isBunRuntime() {
@@ -591,6 +737,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     tokenFile: undefined,
     tokenStdin: false,
     hostname: undefined,
+    server: undefined,
     connectTtl: undefined,
     sessionTtl: undefined,
     qr: false,
@@ -604,6 +751,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     explicitUiPassword: false,
     envSnapshot: true,
     foreground: false,
+    lan: false,
+    apiOnly: false,
   };
 
   const removedFlagErrors = [];
@@ -676,6 +825,9 @@ function parseArgs(argv = process.argv.slice(2)) {
         options.host = value.trim();
         break;
       }
+      case 'lan':
+        options.lan = true;
+        break;
       case 'ui-password': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
@@ -732,6 +884,16 @@ function parseArgs(argv = process.argv.slice(2)) {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
         options.hostname = typeof value === 'string' ? value : options.hostname;
+        break;
+      }
+      case 'server':
+      case 'server-url': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        if (typeof value !== 'string' || value.trim().length === 0) {
+          throw new TunnelCliError('Missing value for --server.', EXIT_CODE.USAGE_ERROR);
+        }
+        options.server = value.trim();
         break;
       }
       case 'connect-ttl': {
@@ -803,6 +965,9 @@ function parseArgs(argv = process.argv.slice(2)) {
       case 'no-daemon':
         options.foreground = true;
         break;
+      case 'api-only':
+        options.apiOnly = true;
+        break;
       case 'daemon':
       case 'd':
         // Legacy no-op: daemon mode is already the default, but older clients
@@ -840,6 +1005,14 @@ function parseArgs(argv = process.argv.slice(2)) {
   const tunnelAction = command === 'tunnel' ? (positional[2] || null) : null;
   const startupAction = command === 'startup' ? (positional[1] || 'status') : null;
 
+  if (options.lan && typeof options.host !== 'string') {
+    options.host = '0.0.0.0';
+  }
+
+  if (command !== 'tunnel' && typeof options.hostname === 'string' && typeof options.host !== 'string') {
+    options.host = options.hostname;
+  }
+
   return {
     command,
     subcommand,
@@ -867,12 +1040,17 @@ COMMANDS:
   tunnel         Tunnel lifecycle commands
   startup        Manage launch at system startup
   logs           Tail OpenChamber logs
+  connect-url    Generate URL/QR for connecting another client
   update         Check for and install updates
 
 OPTIONS:
   -p, --port              Web server port (default: ${DEFAULT_PORT})
   --host                  Bind address (default: 127.0.0.1)
+  --hostname              Alias for --host outside tunnel commands
+  --lan                   Bind to 0.0.0.0 for LAN access
+  --server <url>          Public/server URL for connect-url links
   --ui-password           Protect browser UI with single password
+  --api-only              Start API routes only, without serving browser UI assets
   --foreground            Run server in foreground (use with systemd/process managers)
   --no-daemon             Alias for --foreground
   -h, --help              Show help
@@ -881,6 +1059,7 @@ OPTIONS:
 ENVIRONMENT:
   OPENCHAMBER_HOST             Bind address (e.g. 0.0.0.0 for all interfaces)
   OPENCHAMBER_UI_PASSWORD      Alternative to --ui-password flag
+  OPENCHAMBER_API_ONLY         Set to true/1 to start API routes only
   OPENCHAMBER_DATA_DIR         Override OpenChamber data directory
   OPENCODE_HOST               External OpenCode server base URL, e.g. http://hostname:4096
   OPENCODE_PORT               Port of external OpenCode server to connect to
@@ -890,7 +1069,10 @@ ENVIRONMENT:
 EXAMPLES:
   openchamber                    # Start in daemon mode on default port 3000 (or free port)
   openchamber --port 8080        # Start on port 8080 (daemon)
+  openchamber --lan --port 3002  # Start on LAN at 0.0.0.0:3002
   openchamber serve --foreground # Start in foreground (for systemd Type=simple)
+  openchamber connect-url --port 3000 --qr
+  openchamber connect-url --server https://openchamber.example.com
   openchamber startup enable     # Start OpenChamber at user login
   openchamber tunnel help        # Show tunnel lifecycle help
   openchamber logs               # Follow logs for latest running instance
@@ -913,6 +1095,7 @@ OPTIONS:
   -p, --port              Web server port used by startup service
   --host                  Bind address used by startup service
   --ui-password           Protect browser UI with single password
+  --api-only              Start API routes only, without serving browser UI assets
   --no-env-snapshot       Do not save current environment for startup service
   --json                  Output machine-readable JSON
   -q, --quiet             Suppress non-essential output
@@ -920,7 +1103,41 @@ OPTIONS:
 EXAMPLES:
   openchamber startup enable
   openchamber startup enable --port 3000
+  openchamber startup enable --port 3000 --api-only --host 0.0.0.0
   openchamber startup status --json
+`);
+}
+
+function showConnectUrlHelp() {
+  console.log(`
+ OpenChamber Connect URL
+
+USAGE:
+  openchamber connect-url [OPTIONS]
+
+DESCRIPTION:
+  Generate an openchamber:// connection link for adding this server to another
+  OpenChamber app. If no server is running on the selected port, it starts one.
+
+OPTIONS:
+  -p, --port <port>       Server port to use or start (default: ${DEFAULT_PORT})
+  --host <address>        Bind address when starting the server
+  --hostname <address>    Alias for --host
+  --lan                   Bind to 0.0.0.0 for LAN access when starting
+  --server <url>          Public URL saved into the connection link
+  --server-url <url>      Alias for --server
+  --name <label>          Label saved with the remote client token
+  --ui-password <value>   Protect browser access when UI routes are enabled
+  --api-only              Start in headless/API-only mode when starting
+  --qr                    Print a QR code for the connection link
+  --json                  Output machine-readable JSON
+  -q, --quiet             Print only the connection link
+  -h, --help              Show this help
+
+EXAMPLES:
+  openchamber connect-url --port 3000 --qr
+  openchamber connect-url --port 3000 --api-only --lan --server http://workstation.local:3000 --qr
+  openchamber connect-url --server https://openchamber.example.com --name Workstation
 `);
 }
 
@@ -943,6 +1160,10 @@ SUBCOMMANDS:
 
 COMMON OPTIONS:
   -p, --port              Target OpenChamber instance port
+  --host                  Bind address when auto-starting an instance
+  --lan                   Bind to 0.0.0.0 when auto-starting an instance
+  --ui-password           Protect browser UI when auto-starting an instance
+  --api-only              Start API routes only when auto-starting an instance
   --json                  Output machine-readable JSON
   --all                   Apply to all running instances (doctor default, stop)
 
@@ -1819,6 +2040,9 @@ function collectStartupEnv(options = {}) {
   if (uiPassword) {
     env.OPENCHAMBER_UI_PASSWORD = uiPassword;
   }
+  if (options.apiOnly === true) {
+    env.OPENCHAMBER_API_ONLY = 'true';
+  }
   if (typeof process.env.OPENCHAMBER_DATA_DIR === 'string' && process.env.OPENCHAMBER_DATA_DIR.trim().length > 0) {
     env.OPENCHAMBER_DATA_DIR = path.resolve(process.env.OPENCHAMBER_DATA_DIR.trim());
   }
@@ -1896,6 +2120,9 @@ function buildStartupArgs(options = {}) {
   const args = [resolveCliEntrypoint(), 'serve', '--foreground', '--port', String(options.port || DEFAULT_PORT)];
   if (typeof options.host === 'string' && options.host.length > 0) {
     args.push('--host', options.host);
+  }
+  if (options.apiOnly === true) {
+    args.push('--api-only');
   }
   return args;
 }
@@ -2140,6 +2367,7 @@ function writeInstanceOptions(instanceFilePath, options, onNotice) {
       launchMode: options.launchMode === 'foreground' ? 'foreground' : 'daemon',
       uiPassword: typeof options.uiPassword === 'string' ? options.uiPassword : undefined,
       hasUiPassword: typeof options.uiPassword === 'string',
+      apiOnly: options.apiOnly === true,
       startedAt: Number.isFinite(options.startedAt) ? options.startedAt : Date.now(),
     };
     fs.writeFileSync(instanceFilePath, JSON.stringify(toStore, null, 2), { mode: 0o600 });
@@ -2664,7 +2892,9 @@ async function resolveTargetInstance({
       await commands.serve({
         port: options.port,
         explicitPort: true,
+        host: options.host,
         uiPassword: options.uiPassword,
+        apiOnly: options.apiOnly,
         suppressUnsafePortWarning: true,
         suppressUiPasswordWarning: true,
         suppressStartupSummary: true,
@@ -3230,9 +3460,18 @@ const commands = {
     const logFd = fs.openSync(initialLogPath, 'a');
 
     const effectiveUiPassword = hasUiPasswordConfigured(options.uiPassword) ? options.uiPassword : undefined;
+    assertAuthenticatedNetworkExposure({
+      host: options.host,
+      uiPassword: effectiveUiPassword,
+    });
     if (!effectiveUiPassword && !options.suppressUiPasswordWarning) {
+      const bindHost = resolveConfiguredBindHost(options.host);
+      const networkExposed = isNetworkExposedBindHost(bindHost);
       const warningLine = 'OPENCHAMBER_UI_PASSWORD is not set';
-      const warningDetail = 'browser UI is unsecured. Use --ui-password or OPENCHAMBER_UI_PASSWORD.';
+      const warningDetail = networkExposed
+        ? `server is bound to ${bindHost} and reachable on your network with no UI auth. `
+          + 'Set --ui-password or OPENCHAMBER_UI_PASSWORD before exposing it over LAN.'
+        : 'browser UI is unsecured. Use --ui-password or OPENCHAMBER_UI_PASSWORD.';
       if (showOutput) {
         logStatus('warning', warningLine, warningDetail);
       } else if (isJsonMode(options)) {
@@ -3303,6 +3542,7 @@ const commands = {
         port: targetPort,
         host: effectiveHost,
         uiPassword: effectiveUiPassword,
+        apiOnly: options.apiOnly === true,
         attachSignals: false,
         exitOnShutdown: false,
       });
@@ -3319,6 +3559,7 @@ const commands = {
         host: effectiveHost,
         launchMode: 'foreground',
         uiPassword: effectiveUiPassword,
+        apiOnly: options.apiOnly === true,
       }, emitNotice);
 
       if (isQuietMode(options)) {
@@ -3369,6 +3610,9 @@ const commands = {
     if (effectiveHost) {
       serverArgs.push('--host', effectiveHost);
     }
+    if (options.apiOnly === true) {
+      serverArgs.push('--api-only');
+    }
 
     const serveSpin = showOutput ? createSpinner(options) : null;
 
@@ -3382,6 +3626,7 @@ const commands = {
         OPENCODE_BINARY: opencodeBinary,
         ...(effectiveHost ? { OPENCHAMBER_HOST: effectiveHost } : {}),
         ...(effectiveUiPassword ? { OPENCHAMBER_UI_PASSWORD: effectiveUiPassword } : {}),
+        ...(options.apiOnly === true ? { OPENCHAMBER_API_ONLY: 'true' } : {}),
         ...(process.env.OPENCODE_SKIP_START ? { OPENCHAMBER_SKIP_OPENCODE_START: process.env.OPENCODE_SKIP_START } : {}),
       },
     });
@@ -3460,6 +3705,7 @@ const commands = {
       host: effectiveHost,
       launchMode: 'daemon',
       uiPassword: effectiveUiPassword,
+      apiOnly: options.apiOnly === true,
     }, emitNotice);
 
     const serveResult = {
@@ -3494,6 +3740,55 @@ const commands = {
     }
 
     return resolvedPort;
+  },
+
+  async 'connect-url'(options = {}) {
+    assertSafeBrowserPort(options.port, { context: 'OpenChamber connect-url' });
+    const explicitServerUrl = options.server ? normalizeServerUrlForConnection(options.server) : null;
+    if (options.server && !explicitServerUrl) {
+      throw new TunnelCliError('Invalid --server URL. Use an http:// or https:// URL.', EXIT_CODE.USAGE_ERROR);
+    }
+    const serverState = await ensureConnectUrlServerRunning(options);
+    const resolvedServerUrl = explicitServerUrl
+      ? { serverUrl: explicitServerUrl, source: 'explicit' }
+      : await resolveConnectUrlServerUrl(options);
+    const serverUrl = resolvedServerUrl.serverUrl;
+    const label = options.name || `OpenChamber ${serverUrl}`;
+    const runtime = createRemoteClientAuthRuntime({
+      fsPromises: fs.promises,
+      path,
+      crypto,
+      storePath: path.join(getOpenChamberDataDir(), REMOTE_CLIENTS_FILE_NAME),
+    });
+    const result = await runtime.createClient({ label });
+    const connectUrl = buildClientConnectionPayload({ serverUrl, token: result.token, label });
+
+    if (isJsonMode(options)) {
+      printJson({ serverUrl, connectUrl, token: result.token, client: result.client, autoStarted: serverState.autoStarted });
+      return;
+    }
+
+    if (isQuietMode(options)) {
+      process.stdout.write(`${connectUrl}\n`);
+      return;
+    }
+
+    clackIntro('OpenChamber connect URL');
+    if (serverState.autoStarted) {
+      logStatus('success', `started OpenChamber on port ${options.port}`);
+    }
+    logStatus('success', connectUrl);
+    clackLog.info(`Server URL: ${serverUrl}`);
+    if (resolvedServerUrl.source === 'lan-detected') {
+      clackLog.info('Detected a LAN address because OpenChamber is bound to all interfaces. Use --server to override it.');
+    } else if (resolvedServerUrl.source === 'loopback-fallback') {
+      clackLog.warn('OpenChamber is bound to all interfaces, but no LAN address was detected. Use --server to provide a reachable URL.');
+    }
+    clackLog.info('Copy this connection link into another OpenChamber client. The token is shown only once.');
+    if (options.qr === true) {
+      await displayTunnelQrCode(connectUrl);
+    }
+    clackOutro('connect URL generated');
   },
 
   async stop(options) {
@@ -3759,6 +4054,7 @@ const commands = {
           host: storedOptions.host,
           explicitPort: true,
           uiPassword: options.explicitUiPassword ? options.uiPassword : storedOptions.uiPassword,
+          apiOnly: storedOptions.apiOnly === true,
           suppressStartupSummary: true,
           quiet: true,
           suppressUiPasswordWarning: true,
@@ -5311,6 +5607,8 @@ async function main() {
       showTunnelHelp();
     } else if (command === 'startup') {
       showStartupHelp();
+    } else if (command === 'connect-url') {
+      showConnectUrlHelp();
     } else {
       showHelp();
     }
@@ -5430,6 +5728,7 @@ if (isCliExecution) {
 export {
   commands,
   parseArgs,
+  assertAuthenticatedNetworkExposure,
   hasUiPasswordConfigured,
   shouldDisplayTunnelQr,
   isValidTunnelDoctorResponse,

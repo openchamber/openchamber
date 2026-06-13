@@ -1,0 +1,36 @@
+---
+title: Mode vocal
+description: Parlez à OpenChamber et écoutez les réponses lues à voix haute.
+---
+
+# Mode vocal
+
+Le mode vocal vous permet de dicter des messages et d’entendre les réponses lues à voix haute. Activez-le dans **Paramètres → OpenChamber → Voix**.
+
+## Lecture des réponses à voix haute (text-to-speech)
+
+Choisissez comment les réponses sont lues :
+
+- **browser** — les voix intégrées de votre navigateur, sans configuration
+- **OpenAI** — les voix d’OpenAI ; collez votre clé API et choisissez une voix
+- **OpenAI-compatible** — tout service qui parle le format OpenAI ; saisissez son URL et, s’il en demande une, une clé API
+- **macOS say** — la commande intégrée `say`, sur les Mac qui l’ont
+
+Une fois activé, un bouton de lecture apparaît sur les messages pour les écouter à voix haute.
+
+## Dicter des messages (speech-to-text)
+
+Choisissez comment votre parole est transcrite :
+
+- **browser** — la reconnaissance intégrée de votre navigateur, sans configuration
+- **server** — un service de transcription compatible OpenAI ; saisissez son URL et, si nécessaire, une clé API
+- **on-device** — un modèle vocal qui s’exécute dans votre navigateur et se télécharge à la première utilisation
+
+## Note pour les téléphones
+
+Pour lire les réponses à voix haute sur un téléphone, les options OpenAI ou compatibles OpenAI sont les plus fiables — les navigateurs mobiles limitent les voix intégrées.
+
+## Pages liées
+
+- [Notifications](/notifications/) — recevoir un ping au lieu d’écouter
+- [Fournisseurs, modèles et agents](/providers/) — là où votre clé OpenAI existe peut-être déjà
