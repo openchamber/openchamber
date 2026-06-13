@@ -2040,7 +2040,31 @@ export const useConfigStore = create<ConfigStore>()(
                             const agentModel = agentProvider?.models.find((model) => model.id === modelID);
 
                             if (agentModel) {
-                                applyResolvedModelSelection(providerID, modelID, undefined);
+                                let resolvedVariant: string | undefined;
+
+                                if (currentSessionId) {
+                                    const savedVariant = useSelectionStore.getState().getAgentModelVariantForSession(
+                                        currentSessionId,
+                                        agentName,
+                                        providerID,
+                                        modelID,
+                                    );
+                                    if (savedVariant) {
+                                        const variants = (agentModel as { variants?: Record<string, unknown> })?.variants;
+                                        if (variants && Object.prototype.hasOwnProperty.call(variants, savedVariant)) {
+                                            resolvedVariant = savedVariant;
+                                        }
+                                    }
+                                }
+
+                                if (!resolvedVariant && settingsDefaultVariant) {
+                                    const variants = (agentModel as { variants?: Record<string, unknown> })?.variants;
+                                    if (variants && Object.prototype.hasOwnProperty.call(variants, settingsDefaultVariant)) {
+                                        resolvedVariant = settingsDefaultVariant;
+                                    }
+                                }
+
+                                applyResolvedModelSelection(providerID, modelID, resolvedVariant);
                                 return;
                             }
                         }

@@ -1144,7 +1144,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
         const resolvedSaved = savedVariant && availableVariants.includes(savedVariant)
             ? savedVariant
-            : undefined;
+            : settingsDefaultVariant && availableVariants.includes(settingsDefaultVariant)
+                ? settingsDefaultVariant
+                : undefined;
 
         setCurrentVariant(resolvedSaved);
         manualVariantSelectionRef.current = false;
