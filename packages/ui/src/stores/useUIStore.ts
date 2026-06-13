@@ -10,7 +10,7 @@ import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobi
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
-export type RightSidebarTab = 'git' | 'files' | 'context';
+export type RightSidebarTab = 'git' | 'files' | 'context' | 'subagents';
 export type ContextPanelMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'browser';
 export type MermaidRenderingMode = 'svg' | 'ascii';
 export type UserMessageRenderingMode = 'markdown' | 'plain';
@@ -2132,7 +2132,7 @@ export const useUIStore = create<UIStore>()(
 
           if (
             typeof state.rightSidebarTab !== 'string'
-            || (state.rightSidebarTab !== 'git' && state.rightSidebarTab !== 'files' && state.rightSidebarTab !== 'context')
+            || (state.rightSidebarTab !== 'git' && state.rightSidebarTab !== 'files' && state.rightSidebarTab !== 'context' && state.rightSidebarTab !== 'subagents')
           ) {
             state.rightSidebarTab = 'git';
           }
