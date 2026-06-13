@@ -46,9 +46,10 @@ import { getToolIcon } from './toolPresentation';
 import { useDurationTickerNow } from './useDurationTicker';
 import { resolveFallbackTaskSessionId } from './resolveFallbackTaskSessionId';
 import { readTaskTagSessionIdFromOutput } from './taskSessionIdParser';
-import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { useI18n } from '@/lib/i18n';
 import { getDiffPatchEntries, getPatchText } from './toolDiffUtils';
+import { areRenderRelevantPartsEqual } from '../renderCompare';
+import { SubagentProgressIndicator } from './SubagentProgressIndicator';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-4 sm:!leading-6 tracking-normal';
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
@@ -2202,6 +2203,43 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         return false;
     }, [childSessionMessages, isTaskTool, taskSessionId]);
 
+    const childSessionTokenSummary = React.useMemo(() => {
+        if (!isTaskTool || !taskSessionId || !Array.isArray(childSessionMessages) || childSessionMessages.length === 0) {
+            return null;
+        }
+
+        let totalTokens = 0;
+        let totalCost = 0;
+        let hasData = false;
+
+        for (let i = childSessionMessages.length - 1; i >= 0; i -= 1) {
+            const message = childSessionMessages[i] as { info?: { role?: unknown; tokens?: { input?: number; output?: number; reasoning?: number; cache?: { read?: number; write?: number } }; cost?: { input?: number; output?: number; cache?: { read?: number; write?: number } } } };
+            const messageInfo = message.info;
+            if (messageInfo?.role !== 'assistant') continue;
+
+            if (!hasData && messageInfo.tokens) {
+                const tokens = messageInfo.tokens;
+                totalTokens =
+                    (tokens.input ?? 0) +
+                    (tokens.output ?? 0) +
+                    (tokens.reasoning ?? 0) +
+                    (tokens.cache?.read ?? 0) +
+                    (tokens.cache?.write ?? 0);
+                const cost = messageInfo.cost;
+                if (cost) {
+                    totalCost = (cost.input ?? 0) + (cost.output ?? 0) + (cost.cache?.read ?? 0) + (cost.cache?.write ?? 0);
+                }
+                hasData = true;
+            }
+
+            if (hasData) break;
+        }
+
+        if (!hasData || totalTokens === 0) return null;
+
+        return { tokens: totalTokens, cost: totalCost };
+    }, [childSessionMessages, isTaskTool, taskSessionId]);
+
     const childSessionActivity = useSessionActivity(taskSessionId, currentDirectory);
     const [taskChildSeenActive, setTaskChildSeenActive] = React.useState(false);
     const [taskChildPollingStopped, setTaskChildPollingStopped] = React.useState(false);
@@ -2849,6 +2887,15 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                                     <span style={{ color: 'var(--status-success)' }}>+{writeLineCount}</span>
                                 </span>
                             )}
+                            {isTaskTool && taskSessionId ? (
+                                <SubagentProgressIndicator taskSessionId={taskSessionId} currentDirectory={currentDirectory} />
+                            ) : null}
+                            {isTaskTool && childSessionTokenSummary ? (
+                                <span className="flex-shrink-0 typography-meta text-muted-foreground/70" title={`Subagent tokens: ${childSessionTokenSummary.tokens}`}>
+                                    {childSessionTokenSummary.tokens.toLocaleString()} tks
+                                    {childSessionTokenSummary.cost > 0 ? ` · $${childSessionTokenSummary.cost.toFixed(4)}` : null}
+                                </span>
+                            ) : null}
                         </div>
                     </div>
                 )}
