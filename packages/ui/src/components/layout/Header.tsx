@@ -620,6 +620,7 @@ const isSameContextUsage = (
 
   return a.totalTokens === b.totalTokens
     && a.percentage === b.percentage
+    && (a.cost ?? 0) === (b.cost ?? 0)
     && a.contextLimit === b.contextLimit
     && (a.outputLimit ?? 0) === (b.outputLimit ?? 0)
     && (a.normalizedOutput ?? 0) === (b.normalizedOutput ?? 0)
@@ -2164,6 +2165,7 @@ export const Header: React.FC<HeaderProps> = ({
             <ContextUsageDisplay
               totalTokens={stableDesktopContextUsage.totalTokens}
               percentage={desktopHeaderDisplayPercentage}
+              cost={stableDesktopContextUsage.cost}
               colorPercentage={stableDesktopContextUsage.percentage}
               contextLimit={stableDesktopContextUsage.contextLimit}
               outputLimit={stableDesktopContextUsage.outputLimit ?? 0}

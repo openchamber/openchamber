@@ -65,6 +65,7 @@ export interface SessionHistoryMeta {
 export interface SessionContextUsage {
     totalTokens: number;
     percentage: number;
+    cost?: number;
     contextLimit: number;
     outputLimit?: number;
     normalizedOutput?: number;
