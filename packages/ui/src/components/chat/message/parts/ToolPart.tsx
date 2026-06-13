@@ -14,8 +14,10 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectorySync, useSessionMessageRecords, useEnsureSessionMessages } from '@/sync/sync-context';
 import { getSyncChildStores } from '@/sync/sync-refs';
-import { useUIStore } from '@/stores/useUIStore';
 import { useSessionActivity } from '@/hooks/useSessionActivity';
+import type { SessionActivityResult } from '@/hooks/useSessionActivity';
+import { useUIStore } from '@/stores/useUIStore';
+import { SubagentLiveOutput } from './SubagentLiveOutput';
 import { opencodeClient } from '@/lib/opencode/client';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { sessionEvents } from '@/lib/sessionEvents';
@@ -1205,7 +1207,9 @@ const TaskToolSummary: React.FC<{
     input?: Record<string, unknown>;
     animateTailText?: boolean;
     isActive?: boolean;
-}> = ({ entries, isExpanded, isMobile, output, sessionId, onShowPopup, input, animateTailText = true, isActive = false }) => {
+    messages?: MessageRecord[];
+    activity?: SessionActivityResult;
+}> = ({ entries, isExpanded, isMobile, output, sessionId, onShowPopup, input, animateTailText = true, isActive = false, messages, activity }) => {
     const { t } = useI18n();
     const currentDirectory = useEffectiveDirectory();
     const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
@@ -1311,7 +1315,9 @@ const TaskToolSummary: React.FC<{
                     </div>
                 </ToolScrollableSection>
             ) : null}
-
+            {sessionId && isActive ? (
+                <SubagentLiveOutput messages={messages} activity={activity} sessionId={sessionId} />
+) : null}
             {sessionId && (
                 <button
                     type="button"
@@ -2813,6 +2819,8 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                     input={input}
                     animateTailText={animateTailText}
                     isActive={isActive}
+                    messages={childSessionMessages}
+                    activity={childSessionActivity}
                 />
             ) : null}
 
