@@ -21,6 +21,7 @@ import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDeviceInfo } from '@/lib/device';
 import { Icon } from "@/components/icon/Icon";
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu';
 
 export type SortableTabsStripItem = {
   id: string;
@@ -31,17 +32,12 @@ export type SortableTabsStripItem = {
   closeLabel?: string;
 };
 
-type SortableTabsStripContextPoint = {
-  x: number;
-  y: number;
-};
-
 type SortableTabsStripProps = {
   items: SortableTabsStripItem[];
   activeId: string | null;
   onSelect: (id: string) => void;
   onClose?: (id: string) => void;
-  onContextMenu?: (id: string, point: SortableTabsStripContextPoint, event?: React.SyntheticEvent) => void;
+  renderContextMenu?: (item: SortableTabsStripItem, index: number) => React.ReactNode;
   onReorder?: (activeId: string, overId: string) => void;
   layoutMode?: 'scrollable' | 'fit';
   variant?: 'default' | 'active-pill' | 'animated';
@@ -95,7 +91,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   activeId,
   onSelect,
   onClose,
-  onContextMenu,
+  renderContextMenu,
   onReorder,
   layoutMode = 'scrollable',
   variant = 'default',
@@ -127,11 +123,8 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   const reorderEnabled = typeof onReorder === 'function';
   const Wrapper = reorderEnabled ? SortableTabWrapper : StaticTabWrapper;
   const tabRefs = React.useRef<Map<string, HTMLElement>>(new Map());
-  const tabLongPressTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const tabLongPressSuppressClickTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const tabLongPressStartRef = React.useRef<SortableTabsStripContextPoint | null>(null);
-  const tabLongPressTriggeredRef = React.useRef(false);
   const [pillRect, setPillRect] = React.useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  const [openContextMenuId, setOpenContextMenuId] = React.useState<string | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -307,78 +300,31 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
     onReorder(String(active.id), String(over.id));
   }, [onReorder]);
 
-  const clearTabLongPress = React.useCallback(() => {
-    if (tabLongPressTimerRef.current !== null) {
-      clearTimeout(tabLongPressTimerRef.current);
-      tabLongPressTimerRef.current = null;
-    }
-    tabLongPressStartRef.current = null;
-  }, []);
-
   React.useEffect(() => {
-    return () => {
-      clearTabLongPress();
-      if (tabLongPressSuppressClickTimerRef.current !== null) {
-        clearTimeout(tabLongPressSuppressClickTimerRef.current);
-        tabLongPressSuppressClickTimerRef.current = null;
+    if (!openContextMenuId) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpenContextMenuId(null);
       }
     };
-  }, [clearTabLongPress]);
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest('[data-slot="dropdown-menu-content"]')) {
+        return;
+      }
+      setOpenContextMenuId(null);
+    };
 
-  const startTabLongPress = React.useCallback((id: string, event: React.PointerEvent) => {
-    if (!onContextMenu || event.pointerType === 'mouse') {
-      return;
-    }
+    document.addEventListener('keydown', handleKeyDown, true);
+    document.addEventListener('pointerdown', handlePointerDown, true);
 
-    clearTabLongPress();
-    tabLongPressTriggeredRef.current = false;
-    if (tabLongPressSuppressClickTimerRef.current !== null) {
-      clearTimeout(tabLongPressSuppressClickTimerRef.current);
-      tabLongPressSuppressClickTimerRef.current = null;
-    }
-    const point = { x: event.clientX, y: event.clientY };
-    tabLongPressStartRef.current = point;
-    tabLongPressTimerRef.current = setTimeout(() => {
-      tabLongPressTimerRef.current = null;
-      tabLongPressStartRef.current = null;
-      tabLongPressTriggeredRef.current = true;
-      tabLongPressSuppressClickTimerRef.current = setTimeout(() => {
-        tabLongPressTriggeredRef.current = false;
-        tabLongPressSuppressClickTimerRef.current = null;
-      }, 2000);
-      onContextMenu(id, point);
-    }, 550);
-  }, [clearTabLongPress, onContextMenu]);
-
-  const cancelTabLongPressOnMove = React.useCallback((event: React.PointerEvent) => {
-    if (event.pointerType === 'mouse') {
-      return;
-    }
-
-    const start = tabLongPressStartRef.current;
-    if (!start) {
-      return;
-    }
-
-    if (Math.abs(event.clientX - start.x) > 8 || Math.abs(event.clientY - start.y) > 8) {
-      clearTabLongPress();
-    }
-  }, [clearTabLongPress]);
-
-  const consumeTabLongPressClick = React.useCallback((event: React.MouseEvent) => {
-    if (!tabLongPressTriggeredRef.current) {
-      return false;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-    tabLongPressTriggeredRef.current = false;
-    if (tabLongPressSuppressClickTimerRef.current !== null) {
-      clearTimeout(tabLongPressSuppressClickTimerRef.current);
-      tabLongPressSuppressClickTimerRef.current = null;
-    }
-    return true;
-  }, []);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown, true);
+      document.removeEventListener('pointerdown', handlePointerDown, true);
+    };
+  }, [openContextMenuId]);
 
   const list = (
     <div className={cn('relative flex h-full min-w-0 flex-1', className)}>
@@ -446,7 +392,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
             aria-hidden
           />
         ) : null}
-        {items.map((item) => {
+        {items.map((item, index) => {
           const isActive = item.id === activeId;
           const showInactiveIconOnly = inactiveTabsIconOnly && usesActivePillIndicator && !isActive && Boolean(item.icon);
           const shouldShowLabel = !showInactiveIconOnly;
@@ -480,17 +426,14 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                 }
               }
             : undefined;
-          return (
+          const contextMenu = renderContextMenu?.(item, index);
+          const tab = (
             <Wrapper key={item.id} id={item.id} className={wrapperClassName}>
               <div
                 ref={(element) => setTabRef(item.id, element)}
                 onAuxClick={handleAuxClick}
-                onContextMenu={onContextMenu ? (event) => onContextMenu(item.id, { x: event.clientX, y: event.clientY }, event) : undefined}
+                onContextMenu={contextMenu ? (event) => { event.preventDefault(); setOpenContextMenuId(item.id); } : undefined}
                 onMouseDown={handleMouseDown}
-                onPointerDown={(event) => startTabLongPress(item.id, event)}
-                onPointerMove={cancelTabLongPressOnMove}
-                onPointerUp={clearTabLongPress}
-                onPointerCancel={clearTabLongPress}
                 className={cn(
                   'group flex h-full min-w-0 flex-nowrap items-center',
                   (isScrollable || useIntrinsicPillSizing)
@@ -510,12 +453,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                   role="tab"
                   aria-selected={isActive}
                   aria-label={showInactiveIconOnly ? (item.title ?? item.label) : undefined}
-                  onClick={(event) => {
-                    if (consumeTabLongPressClick(event)) {
-                      return;
-                    }
-                    onSelect(item.id);
-                  }}
+                  onClick={() => onSelect(item.id)}
                   className={cn(
                     usesActivePillIndicator
                       ? 'animated-tabs__button pill-tabs__button relative z-10 flex flex-1 min-w-0 flex-nowrap items-center justify-center rounded-[9px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] text-sm font-medium transition-colors duration-150 !min-h-0'
@@ -641,6 +579,21 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                 ) : null}
               </div>
             </Wrapper>
+          );
+
+          if (!contextMenu) {
+            return tab;
+          }
+
+          return (
+            <ContextMenu key={item.id} open={openContextMenuId === item.id} onOpenChange={(open) => setOpenContextMenuId(open ? item.id : null)}>
+              <ContextMenuTrigger render={<div className={cn('h-full', wrapperClassName)} onContextMenu={(event) => { event.preventDefault(); setOpenContextMenuId(item.id); }} />}>
+                {tab}
+              </ContextMenuTrigger>
+              <ContextMenuContent className="w-56">
+                {contextMenu}
+              </ContextMenuContent>
+            </ContextMenu>
           );
         })}
       </div>

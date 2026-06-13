@@ -3,12 +3,9 @@ import React from 'react';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Button } from '@/components/ui/button';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+  ContextMenuItem,
+  ContextMenuSeparator,
+} from '@/components/ui/context-menu';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { DiffView } from '@/components/views/DiffView';
 import { FilesView } from '@/components/views/FilesView';
@@ -49,12 +46,6 @@ const CONTEXT_PANEL_MAX_WIDTH = 1400;
 const CONTEXT_PANEL_DEFAULT_WIDTH = 600;
 const CONTEXT_TAB_LABEL_MAX_CHARS = 24;
 type TranslateFn = ReturnType<typeof useI18n>['t'];
-
-type ContextPanelTabContextMenuState = {
-  tabID: string;
-  x: number;
-  y: number;
-};
 
 type PreviewConsoleEvent = {
   id: number;
@@ -2035,7 +2026,6 @@ export const ContextPanel: React.FC = () => {
   const wasOpenRef = React.useRef(false);
   const previousIsOpenRef = React.useRef(isOpen);
   const suppressWidthTransitionFrameRef = React.useRef<number | null>(null);
-  const [tabContextMenu, setTabContextMenu] = React.useState<ContextPanelTabContextMenuState | null>(null);
 
   const suppressWidthTransitionForFrame = React.useCallback(() => {
     setSuppressWidthTransition(true);
@@ -2053,32 +2043,6 @@ export const ContextPanel: React.FC = () => {
       window.cancelAnimationFrame(suppressWidthTransitionFrameRef.current);
     }
   }, []);
-
-  React.useEffect(() => {
-    if (!tabContextMenu) {
-      return;
-    }
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setTabContextMenu(null);
-      }
-    };
-    const handlePointerDown = (event: PointerEvent) => {
-      if (event.target instanceof Element && event.target.closest('[data-slot="dropdown-menu-content"]')) {
-        return;
-      }
-      setTabContextMenu(null);
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    document.addEventListener('pointerdown', handlePointerDown);
-
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-      document.removeEventListener('pointerdown', handlePointerDown);
-    };
-  }, [tabContextMenu]);
 
   React.useLayoutEffect(() => {
     const wasOpen = previousIsOpenRef.current;
@@ -2317,11 +2281,6 @@ export const ContextPanel: React.FC = () => {
     };
   }), [effectiveDirectory, t, tabs]);
 
-  const tabContextMenuTab = tabContextMenu ? (tabs.find((tab) => tab.id === tabContextMenu.tabID) ?? null) : null;
-  const tabContextMenuIndex = tabContextMenuTab ? tabs.findIndex((tab) => tab.id === tabContextMenuTab.id) : -1;
-  const tabContextMenuLeftTabIDs = tabContextMenuIndex > 0 ? tabs.slice(0, tabContextMenuIndex).map((tab) => tab.id) : [];
-  const tabContextMenuRightTabIDs = tabContextMenuIndex >= 0 ? tabs.slice(tabContextMenuIndex + 1).map((tab) => tab.id) : [];
-
   const closeContextPanelTabs = React.useCallback((tabIDs: string[]) => {
     if (!directoryKey) {
       return;
@@ -2330,14 +2289,7 @@ export const ContextPanel: React.FC = () => {
     Array.from(new Set(tabIDs)).forEach((tabID) => {
       closeContextPanelTab(directoryKey, tabID);
     });
-    setTabContextMenu(null);
   }, [closeContextPanelTab, directoryKey]);
-
-  const handleTabContextMenu = React.useCallback((tabID: string, point: { x: number; y: number }, event?: React.SyntheticEvent) => {
-    event?.preventDefault();
-    event?.stopPropagation();
-    setTabContextMenu({ tabID, x: point.x, y: point.y });
-  }, []);
 
   const copyTabPath = React.useCallback((path: string, relative: boolean) => {
     const value = relative ? getRelativePathLabel(path, effectiveDirectory) : path;
@@ -2348,7 +2300,6 @@ export const ContextPanel: React.FC = () => {
       }
       toast.error(t('sidebarFilesTree.toast.copyFailed'));
     });
-    setTabContextMenu(null);
   }, [effectiveDirectory, t]);
 
   const activeNonChatContent = activeTab?.mode === 'diff'
@@ -2394,52 +2345,49 @@ export const ContextPanel: React.FC = () => {
 
   const isFileTabActive = activeTab?.mode === 'file';
 
+  const renderTabContextMenu = React.useCallback((item: { id: string }) => {
+    const tab = tabs.find((candidate) => candidate.id === item.id);
+    if (!tab) {
+      return null;
+    }
+
+    const tabIndex = tabs.findIndex((candidate) => candidate.id === tab.id);
+    const leftTabIDs = tabIndex > 0 ? tabs.slice(0, tabIndex).map((candidate) => candidate.id) : [];
+    const rightTabIDs = tabIndex >= 0 ? tabs.slice(tabIndex + 1).map((candidate) => candidate.id) : [];
+
+    return (
+      <>
+        <ContextMenuItem onClick={() => closeContextPanelTabs([tab.id])}>
+          <Icon name="close" className="mr-2 size-4" />
+          {t('contextPanel.tabMenu.close')}
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => closeContextPanelTabs(tabs.map((candidate) => candidate.id))}>
+          <Icon name="close-circle" className="mr-2 size-4" />
+          {t('contextPanel.tabMenu.closeAll')}
+        </ContextMenuItem>
+        <ContextMenuItem disabled={rightTabIDs.length === 0} onClick={() => closeContextPanelTabs(rightTabIDs)}>
+          <Icon name="arrow-right" className="mr-2 size-4" />
+          {t('contextPanel.tabMenu.closeAllRight')}
+        </ContextMenuItem>
+        <ContextMenuItem disabled={leftTabIDs.length === 0} onClick={() => closeContextPanelTabs(leftTabIDs)}>
+          <Icon name="arrow-left" className="mr-2 size-4" />
+          {t('contextPanel.tabMenu.closeAllLeft')}
+        </ContextMenuItem>
+        {tab.targetPath ? (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem onClick={() => copyTabPath(tab.targetPath ?? '', false)}>
+              <Icon name="file-copy" className="mr-2 size-4" />
+              {t('sidebarFilesTree.menu.copyPath')}
+            </ContextMenuItem>
+          </>
+        ) : null}
+      </>
+    );
+  }, [closeContextPanelTabs, copyTabPath, t, tabs]);
+
   const header = (
     <header className="flex h-10 items-stretch border-b border-transparent">
-      <DropdownMenu open={Boolean(tabContextMenuTab)} onOpenChange={(open) => setTabContextMenu(open ? tabContextMenu : null)}>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            tabIndex={-1}
-            aria-hidden="true"
-            className="pointer-events-none fixed opacity-0"
-            style={{ left: tabContextMenu?.x ?? 0, top: tabContextMenu?.y ?? 0, width: 0, height: 0, minWidth: 0, minHeight: 0, padding: 0, border: 0 }}
-          />
-        </DropdownMenuTrigger>
-        {tabContextMenuTab ? (
-          <DropdownMenuContent align="start" className="w-56" portalToBody>
-            <DropdownMenuItem onClick={() => closeContextPanelTabs([tabContextMenuTab.id])}>
-              <Icon name="close" className="mr-2 size-4" />
-              {t('contextPanel.tabMenu.close')}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => closeContextPanelTabs(tabs.map((tab) => tab.id))}>
-              <Icon name="close-circle" className="mr-2 size-4" />
-              {t('contextPanel.tabMenu.closeAll')}
-            </DropdownMenuItem>
-            <DropdownMenuItem disabled={tabContextMenuRightTabIDs.length === 0} onClick={() => closeContextPanelTabs(tabContextMenuRightTabIDs)}>
-              <Icon name="arrow-right" className="mr-2 size-4" />
-              {t('contextPanel.tabMenu.closeAllRight')}
-            </DropdownMenuItem>
-            <DropdownMenuItem disabled={tabContextMenuLeftTabIDs.length === 0} onClick={() => closeContextPanelTabs(tabContextMenuLeftTabIDs)}>
-              <Icon name="arrow-left" className="mr-2 size-4" />
-              {t('contextPanel.tabMenu.closeAllLeft')}
-            </DropdownMenuItem>
-            {tabContextMenuTab.targetPath ? (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => copyTabPath(tabContextMenuTab.targetPath ?? '', false)}>
-                  <Icon name="file-copy" className="mr-2 size-4" />
-                  {t('sidebarFilesTree.menu.copyPath')}
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => copyTabPath(tabContextMenuTab.targetPath ?? '', true)}>
-                  <Icon name="file-copy-2" className="mr-2 size-4" />
-                  {t('filesView.tree.menu.copyRelativePath')}
-                </DropdownMenuItem>
-              </>
-            ) : null}
-          </DropdownMenuContent>
-        ) : null}
-      </DropdownMenu>
       <SortableTabsStrip
         items={tabItems}
         activeId={activeTab?.id ?? null}
@@ -2455,7 +2403,7 @@ export const ContextPanel: React.FC = () => {
           }
           closeContextPanelTab(directoryKey, tabID);
         }}
-        onContextMenu={handleTabContextMenu}
+        renderContextMenu={renderTabContextMenu}
         onReorder={(activeTabID, overTabID) => {
           if (!directoryKey) {
             return;
