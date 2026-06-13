@@ -238,6 +238,10 @@ export type SessionUIState = {
   pendingChangesBarDismissed: Map<string, string>
   dismissPendingChangesBar: (sessionId: string, signature: string | null) => void
 
+  // Subagent error focus target — drives scroll+highlight to the failed task row
+  subagentErrorFocusTarget: { sessionId: string; messageId: string; partId: string } | null
+  setSubagentErrorFocusTarget: (target: { sessionId: string; messageId: string; partId: string } | null) => void
+
   // Actions — UI state management
   setCurrentSession: (id: string | null, directoryHint?: string | null) => void
   prepareForRuntimeSwitch: (apiBaseUrl?: string | null) => void
@@ -428,6 +432,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   lastLoadedDirectory: null,
   sessionPlanAvailable: new Map(),
   pendingChangesBarDismissed: new Map(),
+  subagentErrorFocusTarget: null,
+  setSubagentErrorFocusTarget: (target) => set({ subagentErrorFocusTarget: target }),
 
   // ---------------------------------------------------------------------------
   // setCurrentSession

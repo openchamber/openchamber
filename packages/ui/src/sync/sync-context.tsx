@@ -49,7 +49,7 @@ import { listGlobalSessionPages } from "@/stores/globalSessions"
 import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { assertSdkSuccess } from "./sdk-utils"
 import { isActiveSession, getActiveSession } from "./active-session"
-
+import { useSessionUIStore } from "./session-ui-store"
 // ---------------------------------------------------------------------------
 // Context
 // ---------------------------------------------------------------------------
@@ -374,6 +374,35 @@ function isViewedInCurrentSession(directory: string, sessionId?: string): boolea
 
 function isRecentBoot() {
   return bootingRoot || Date.now() - bootedAt < BOOT_DEBOUNCE_MS
+}
+
+
+function findParentToolPartForSubagent(
+  subagentSessionID: string,
+  state: State,
+): { parentSessionID: string; parentMessageID: string; parentPartID: string } | null {
+  const subagent = state.session.find((s) => s.id === subagentSessionID)
+  const parentID = (subagent as Session & { parentID?: string | null })?.parentID
+  if (!parentID) return null
+
+  const parentMessages = state.message[parentID]
+  if (!Array.isArray(parentMessages)) return null
+
+  for (const message of parentMessages) {
+    const parts = state.part[message.id]
+    if (!Array.isArray(parts)) continue
+    for (const part of parts) {
+      if (part.type !== "tool") continue
+      const toolPart = part as Part & { tool?: string; output?: unknown }
+      if (toolPart.tool !== "task") continue
+      const output = typeof toolPart.output === "string" ? toolPart.output : ""
+      if (output.includes(`<task id="${subagentSessionID}">`) || output.includes(`<task id='${subagentSessionID}'>`)) {
+        return { parentSessionID: parentID, parentMessageID: message.id, parentPartID: part.id }
+      }
+    }
+  }
+
+  return null
 }
 
 function getViewedSessionMaterializationTarget(directory: string) {
@@ -1446,15 +1475,45 @@ function handleEvent(
     // For subtask error: always surface — a subagent failure is critical context
     // the user needs even when the parent is the active session.
     if (sessionID && (!isSubtask || payload.type === "session.error")) {
+      let parentRefs:
+        | { parentSessionID: string; parentMessageID: string; parentPartID: string }
+        | null = null
+
+      // For subagent errors, locate the parent tool row so the toast can navigate
+      // back to the failed task in the parent session.
+      if (isSubtask && payload.type === "session.error") {
+        parentRefs = findParentToolPartForSubagent(sessionID, storeState)
+      }
+
       appendNotification({
         directory: resolvedDirectory,
         session: sessionID,
         time: Date.now(),
         viewed: isViewedInCurrentSession(resolvedDirectory, sessionID),
         ...(payload.type === "session.error"
-          ? { type: "error" as const, error: props.error }
+          ? { type: "error" as const, error: props.error, ...parentRefs }
           : { type: "turn-complete" as const }),
       })
+
+      // Surface subagent failures as a clickable toast that jumps to the parent row.
+      if (isSubtask && payload.type === "session.error" && parentRefs) {
+        const errorMessage = props.error?.message ?? "Subagent failed"
+        toast.error(`Subagent error: ${errorMessage}`, {
+          description: "Click to open the parent session and highlight the failed task.",
+          duration: 10000,
+          action: {
+            label: "Show",
+            onClick: () => {
+              openSessionFromToast(parentRefs.parentSessionID, resolvedDirectory)
+              useSessionUIStore.getState().setSubagentErrorFocusTarget({
+                sessionId: parentRefs.parentSessionID,
+                messageId: parentRefs.parentMessageID,
+                partId: parentRefs.parentPartID,
+              })
+            },
+          },
+        })
+      }
     }
   }
 

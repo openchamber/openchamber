@@ -1211,9 +1211,8 @@ const TaskToolSummary: React.FC<{
     const { t } = useI18n();
     const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
     const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
-    const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
     const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
-    const runtime = React.useContext(RuntimeAPIContext);
+
     const displayEntries = entries;
 
     const trimmedOutput = typeof output === 'string'
@@ -1225,17 +1224,7 @@ const TaskToolSummary: React.FC<{
     const handleOpenSession = (event: React.MouseEvent) => {
         event.stopPropagation();
         if (sessionId && currentDirectory) {
-            if (isMobile || runtime?.runtime.isVSCode) {
-                setCurrentSession(sessionId, currentDirectory);
-                return;
-            }
-
-            openContextPanelTab(currentDirectory, {
-                mode: 'chat',
-                dedupeKey: `session:${sessionId}`,
-                label: agentType.charAt(0).toUpperCase() + agentType.slice(1),
-                readOnly: true,
-            });
+            setCurrentSession(sessionId, currentDirectory);
         }
     };
 
@@ -1932,7 +1921,8 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     const showToolFileIcons = useUIStore((s) => s.showToolFileIcons);
     const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
-
+    const subagentErrorFocusTarget = useSessionUIStore((s) => s.subagentErrorFocusTarget);
+    const setSubagentErrorFocusTarget = useSessionUIStore((s) => s.setSubagentErrorFocusTarget);
     const normalizedPartTool = normalizeToolName(part.tool);
     const isTaskTool = normalizedPartTool === 'task';
 
@@ -1983,7 +1973,24 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     const expandedContentRef = React.useRef<HTMLDivElement>(null);
     const expandedContentAnimationRef = React.useRef<AnimationPlaybackControls | null>(null);
     const expandedContentMountedRef = React.useRef(false);
+    const rootRef = React.useRef<HTMLDivElement>(null);
+    const [isErrorFocused, setIsErrorFocused] = React.useState(false);
 
+    React.useEffect(() => {
+        if (!subagentErrorFocusTarget) return;
+        if (subagentErrorFocusTarget.sessionId !== currentSessionId) return;
+        if (subagentErrorFocusTarget.messageId !== part.messageID) return;
+        if (subagentErrorFocusTarget.partId !== part.id) return;
+
+        rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setIsErrorFocused(true);
+        const timer = setTimeout(() => {
+            setIsErrorFocused(false);
+            setSubagentErrorFocusTarget(null);
+        }, 3000);
+
+        return () => clearTimeout(timer);
+    }, [subagentErrorFocusTarget, currentSessionId, part.messageID, part.id, setSubagentErrorFocusTarget]);
     React.useLayoutEffect(() => {
         if (isTaskTool) {
             return;
@@ -2722,7 +2729,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     }
 
     return (
-        <div>
+        <div ref={rootRef} className={cn(isErrorFocused && 'ring-2 ring-status-error rounded-xl animate-pulse')}>
             {}
             <div
                 className={cn(
