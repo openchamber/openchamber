@@ -69,6 +69,7 @@ export {
 export {
   listPluginEntries,
   getPluginEntry,
+  getPluginStatus,
   createPluginEntry,
   updatePluginEntry,
   deletePluginEntry,

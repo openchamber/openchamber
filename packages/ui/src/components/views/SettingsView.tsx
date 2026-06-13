@@ -19,6 +19,7 @@ import { CommandsPage } from '@/components/sections/commands/CommandsPage';
 import { McpSidebar } from '@/components/sections/mcp/McpSidebar';
 import { McpPage } from '@/components/sections/mcp/McpPage';
 import { PluginsSidebar, PluginsPage } from '@/components/sections/plugins';
+import { PluginStatusPage } from '@/components/sections/plugin-status';
 import { usePluginsStore } from '@/stores/usePluginsStore';
 import { SkillsSidebar } from '@/components/sections/skills/SkillsSidebar';
 import { SkillsPage } from '@/components/sections/skills/SkillsPage';
@@ -97,6 +98,7 @@ const pageOrder: SettingsPageSlug[] = [
   'commands',
   'mcp',
   'plugins',
+  'plugin-status',
   'providers',
   'usage',
   'skills.installed',
@@ -198,6 +200,8 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
       return null;
     case 'plugins':
       return 'code-box';
+    case 'plugin-status':
+      return 'pulse';
 
     case 'skills.installed':
       return 'book-open';
@@ -788,6 +792,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <McpPage />;
       case 'plugins':
         return <PluginsPage />;
+      case 'plugin-status':
+        return <PluginStatusPage />;
       case 'skills.installed':
         return <SkillsPage view="installed" />;
       case 'skills.catalog':

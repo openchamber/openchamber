@@ -11,6 +11,7 @@ export type SettingsPageSlug =
   | 'commands'
   | 'mcp'
   | 'plugins'
+  | 'plugin-status'
   | 'skills.installed'
   | 'skills.catalog'
   | 'git'
@@ -134,6 +135,13 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     group: 'opencode',
     kind: 'split',
     keywords: ['plugin', 'plugins', 'extensions', 'addons', 'npm', 'opencode-wakatime'],
+  },
+  {
+    slug: 'plugin-status',
+    title: 'Plugin Status',
+    group: 'opencode',
+    kind: 'single',
+    keywords: ['plugin', 'status', 'health', 'mcp'],
   },
   {
     slug: 'skills.installed',

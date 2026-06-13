@@ -533,6 +533,12 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['file', 'code'],
   },
   {
+    id: 'plugin-status',
+    page: 'plugin-status',
+    titleKey: 'settings.page.pluginStatus.title',
+    keywords: ['plugin', 'status', 'health', 'mcp'],
+  },
+  {
     id: 'snippets.create',
     page: 'snippets',
     titleKey: 'settings.snippets.sidebar.actions.create',

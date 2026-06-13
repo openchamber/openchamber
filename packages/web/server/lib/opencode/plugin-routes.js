@@ -19,6 +19,7 @@ export const registerPluginRoutes = (app, dependencies) => {
     createPluginEntry,
     updatePluginEntry,
     deletePluginEntry,
+    getPluginStatus,
     listPluginDirFiles,
     readPluginDirFile,
     writePluginDirFile,
@@ -232,6 +233,20 @@ export const registerPluginRoutes = (app, dependencies) => {
     } catch (error) {
       console.error('[API:GET /api/config/plugins/registry]', error);
       return res.status(500).json({ error: 'Failed to query npm registry' });
+    }
+  });
+
+  app.get('/api/config/plugins/status', async (req, res) => {
+    try {
+      const { directory, error: directoryError } = await resolveOptionalProjectDirectory(req);
+      if (directoryError) {
+        return res.status(400).json({ error: directoryError });
+      }
+      const status = await getPluginStatus(directory);
+      return res.json({ status });
+    } catch (error) {
+      console.error('[API:GET /api/config/plugins/status]', error);
+      return res.status(500).json({ error: 'Failed to get plugin status' });
     }
   });
 
