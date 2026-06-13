@@ -5,6 +5,7 @@ import {
   setRuntimeUrlResolver,
   type RuntimeUrlResolver,
 } from '@openchamber/ui/lib/runtime-url';
+import { useDirectoryStore } from '@openchamber/ui/stores/useDirectoryStore';
 import { createWebTerminalAPI } from './terminal';
 import { createWebGitAPI } from './git';
 import { createWebFilesAPI } from './files';
@@ -39,7 +40,7 @@ export const createWebAPIs = (options: WebAPIsOptions = {}): RuntimeAPIs => {
   runtime: { platform: 'web', isDesktop: false, isVSCode: false, label: 'web' },
   terminal: createWebTerminalAPI(),
   git: createWebGitAPI(),
-  files: createWebFilesAPI({ urls: activeUrls }),
+  files: createWebFilesAPI({ urls: activeUrls, getDirectory: () => useDirectoryStore.getState().currentDirectory }),
   settings: createWebSettingsAPI(),
   permissions: createWebPermissionsAPI(),
   notifications: createWebNotificationsAPI(),

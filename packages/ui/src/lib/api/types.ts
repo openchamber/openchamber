@@ -594,6 +594,7 @@ export interface FileReadOptions {
   allowOutsideWorkspace?: boolean;
   outsideFileGrant?: string;
   optional?: boolean;
+  directory?: string;
 }
 
 export interface FilesAPI {

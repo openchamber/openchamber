@@ -800,8 +800,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     () => ({
       allowOutsideWorkspace: mode === 'editor-only' && selectedFileIsOutsideWorkspace,
       outsideFileGrant: selectedOutsideFileGrant,
+      directory: root || undefined,
     }),
-    [mode, selectedFileIsOutsideWorkspace, selectedOutsideFileGrant],
+    [mode, selectedFileIsOutsideWorkspace, selectedOutsideFileGrant, root],
   );
 
   // Editor tabs horizontal scroll fades
@@ -1479,7 +1480,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
   const readFile = React.useCallback(async (path: string, options?: { allowOutsideWorkspace?: boolean; outsideFileGrant?: string; optional?: boolean }): Promise<string> => {
     if (files.readFile) {
-      const result = await files.readFile(path, options);
+      const result = await files.readFile(path, { ...options, directory: root || undefined });
       return result.content ?? '';
     }
 
@@ -1493,8 +1494,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     if (options?.optional) {
       params.set('optional', 'true');
     }
+    if (root) {
+      params.set('directory', root);
+    }
     const response = await runtimeFetch(`/api/fs/read?${params.toString()}`, {
-      // Avoid conditional requests (304 + empty body).
       cache: options?.optional ? 'no-store' : 'default',
     });
     if (!response.ok) {
@@ -1502,11 +1505,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       throw new Error((error as { error?: string }).error || t('filesView.error.readFileFailed'));
     }
     return response.text();
-  }, [files, t]);
+  }, [files, root, t]);
 
   const readFileStat = React.useCallback(async (path: string, options?: { allowOutsideWorkspace?: boolean; outsideFileGrant?: string }): Promise<FileStatSnapshot | null> => {
     if (files.statFile) {
-      const result = await files.statFile(path, options);
+      const result = await files.statFile(path, { ...options, directory: root || undefined });
       return {
         path: result.path,
         size: result.size,
@@ -1514,7 +1517,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       };
     }
     return null;
-  }, [files]);
+  }, [files, root]);
 
   React.useEffect(() => {
     if (!root || !files.statFile || openPaths.length === 0) {
@@ -1526,7 +1529,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     void Promise.all(paths.map(async (path) => {
       try {
-        const stat = await files.statFile?.(path);
+        const stat = await files.statFile?.(path, { directory: root || undefined });
         if (!cancelled && stat && !stat.isFile) {
           removeOpenPathsByPrefix(root, path);
         }
@@ -2948,6 +2951,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           path: selectedFile.path,
           allowOutsideWorkspace: selectedFileReadOptions.allowOutsideWorkspace ? 'true' : undefined,
           outsideFileGrant: selectedFileReadOptions.outsideFileGrant,
+          directory: root || undefined,
         }) : ''))
     : '';
 
@@ -2956,6 +2960,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       path: selectedFile.path,
       allowOutsideWorkspace: selectedFileReadOptions.allowOutsideWorkspace ? 'true' : undefined,
       outsideFileGrant: selectedFileReadOptions.outsideFileGrant,
+      directory: root || undefined,
     })
     : '';
 
@@ -2997,6 +3002,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
               path: selectedFile.path,
               allowOutsideWorkspace: selectedFileReadOptions.allowOutsideWorkspace ? 'true' : undefined,
               outsideFileGrant: selectedFileReadOptions.outsideFileGrant,
+              directory: root || undefined,
             },
           });
           if (!response.ok) {
@@ -3042,7 +3048,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     return () => {
       cancelled = true;
     };
-  }, [files, isSelectedImage, isSelectedSvg, runtime.isDesktop, selectedFile?.path, selectedFileReadOptions, t]);
+  }, [files, isSelectedImage, isSelectedSvg, root, runtime.isDesktop, selectedFile?.path, selectedFileReadOptions, t]);
 
   React.useEffect(() => {
     return () => {
