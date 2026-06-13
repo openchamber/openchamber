@@ -13,9 +13,10 @@ import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectorySync, useSessionMessageRecords, useEnsureSessionMessages } from '@/sync/sync-context';
-import { getSyncChildStores } from '@/sync/sync-refs';
-import { useUIStore } from '@/stores/useUIStore';
 import { useSessionActivity } from '@/hooks/useSessionActivity';
+import type { SessionActivityResult } from '@/hooks/useSessionActivity';
+import { useUIStore } from '@/stores/useUIStore';
+import { getSyncChildStores } from '@/sync/sync-refs';
 import { opencodeClient } from '@/lib/opencode/client';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { sessionEvents } from '@/lib/sessionEvents';
@@ -50,6 +51,7 @@ import { useI18n } from '@/lib/i18n';
 import { getDiffPatchEntries, getPatchText } from './toolDiffUtils';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { SubagentProgressIndicator } from './SubagentProgressIndicator';
+import { SubagentLiveOutput } from './SubagentLiveOutput';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-4 sm:!leading-6 tracking-normal';
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
@@ -1204,13 +1206,15 @@ const TaskToolSummary: React.FC<{
     isMobile: boolean;
     output?: string;
     sessionId?: string;
+    currentDirectory: string;
     onShowPopup?: (content: ToolPopupContent) => void;
     input?: Record<string, unknown>;
     animateTailText?: boolean;
     isActive?: boolean;
-}> = ({ entries, isExpanded, isMobile, output, sessionId, onShowPopup, input, animateTailText = true, isActive = false }) => {
+    messages?: MessageRecord[];
+    activity?: SessionActivityResult;
+}> = ({ entries, isExpanded, isMobile, output, sessionId, currentDirectory, onShowPopup, input, animateTailText = true, isActive = false, messages, activity }) => {
     const { t } = useI18n();
-    const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
     const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
     const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
 
@@ -1314,6 +1318,10 @@ const TaskToolSummary: React.FC<{
                     </div>
                 </ToolScrollableSection>
             ) : null}
+
+            {sessionId && isActive ? (
+                <SubagentLiveOutput messages={messages} activity={activity} sessionId={sessionId} />
+) : null}
 
             {sessionId && (
                 <button
@@ -2909,10 +2917,13 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                     isMobile={isMobile}
                     output={taskOutputString}
                     sessionId={taskSessionId}
+                    currentDirectory={currentDirectory}
                     onShowPopup={onShowPopup}
                     input={input}
                     animateTailText={animateTailText}
                     isActive={isActive}
+                    messages={childSessionMessages}
+                    activity={childSessionActivity}
                 />
             ) : null}
 
