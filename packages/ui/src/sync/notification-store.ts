@@ -25,6 +25,9 @@ type TurnCompleteNotification = NotificationBase & {
 type ErrorNotification = NotificationBase & {
   type: "error"
   error?: { message?: string; code?: string }
+  parentSessionID?: string
+  parentMessageID?: string
+  parentPartID?: string
 }
 
 export type Notification = TurnCompleteNotification | ErrorNotification
