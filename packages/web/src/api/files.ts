@@ -258,6 +258,7 @@ export const createWebFilesAPI = ({ urls, getDirectory }: WebFilesAPIOptions): F
     const target = normalizePath(path);
     const response = await runtimeFetch('/api/fs/raw', {
       query: { path: target, download: true },
+      headers: directoryHeaders(getDirectory),
     });
     if (!response.ok) {
       throw new Error(`Download failed (${response.status})`);

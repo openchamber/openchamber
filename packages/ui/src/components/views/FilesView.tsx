@@ -1480,7 +1480,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
   const readFile = React.useCallback(async (path: string, options?: { allowOutsideWorkspace?: boolean; outsideFileGrant?: string; optional?: boolean }): Promise<string> => {
     if (files.readFile) {
-      const result = await files.readFile(path, { ...options, directory: root || undefined });
+      const result = await files.readFile(path, { ...(options ?? {}), directory: root || undefined });
       return result.content ?? '';
     }
 
@@ -1509,7 +1509,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
   const readFileStat = React.useCallback(async (path: string, options?: { allowOutsideWorkspace?: boolean; outsideFileGrant?: string }): Promise<FileStatSnapshot | null> => {
     if (files.statFile) {
-      const result = await files.statFile(path, { ...options, directory: root || undefined });
+      const result = await files.statFile(path, { ...(options ?? {}), directory: root || undefined });
       return {
         path: result.path,
         size: result.size,
