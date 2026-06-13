@@ -1166,6 +1166,7 @@ export const dict = {
   'contextSidebar.tokens.reasoning': 'Reasoning',
   'contextSidebar.tokens.cacheRead': 'Cache Read',
   'contextSidebar.tokens.cacheWrite': 'Cache Write',
+  'contextSidebar.tokens.cacheHit': 'Cache Hit',
   'contextSidebar.actions.copyJson': 'Copy JSON',
   'contextSidebar.actions.copy': 'Copy',
   'contextSidebar.actions.copied': 'Copied',

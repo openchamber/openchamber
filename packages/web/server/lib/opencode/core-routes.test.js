@@ -25,6 +25,88 @@ describe('core-routes', () => {
     expect(shutdownOpts).toEqual({ exitProcess: true });
   });
 
+  it('should require UI auth before /api/system/shutdown when auth is configured', async () => {
+    const app = express();
+    const dependencies = {
+      gracefulShutdown: vi.fn(async () => {}),
+      getHealthSnapshot: () => ({ status: 'ok' }),
+      openchamberVersion: '1.0.0',
+      runtimeName: 'test',
+      express,
+      tunnelAuthController: {
+        classifyRequestScope: () => 'local',
+        requireTunnelSession: vi.fn(),
+      },
+      uiAuthController: {
+        requireAuth: vi.fn((_req, res) => res.status(401).json({ error: 'Unauthorized' })),
+      },
+    };
+
+    registerServerStatusRoutes(app, dependencies);
+
+    await request(app)
+      .post('/api/system/shutdown')
+      .expect(401, { error: 'Unauthorized' });
+
+    expect(dependencies.uiAuthController.requireAuth).toHaveBeenCalledTimes(1);
+    expect(dependencies.gracefulShutdown).not.toHaveBeenCalled();
+  });
+
+  it('should allow authenticated /api/system/shutdown requests', async () => {
+    const app = express();
+    const dependencies = {
+      gracefulShutdown: vi.fn(async () => {}),
+      getHealthSnapshot: () => ({ status: 'ok' }),
+      openchamberVersion: '1.0.0',
+      runtimeName: 'test',
+      express,
+      tunnelAuthController: {
+        classifyRequestScope: () => 'local',
+        requireTunnelSession: vi.fn(),
+      },
+      uiAuthController: {
+        requireAuth: vi.fn((_req, _res, next) => next()),
+      },
+    };
+
+    registerServerStatusRoutes(app, dependencies);
+
+    await request(app)
+      .post('/api/system/shutdown')
+      .expect(200, { ok: true });
+
+    expect(dependencies.uiAuthController.requireAuth).toHaveBeenCalledTimes(1);
+    expect(dependencies.gracefulShutdown).toHaveBeenCalledWith({ exitProcess: true });
+  });
+
+  it('should require tunnel auth for tunneled /api/system/shutdown requests', async () => {
+    const app = express();
+    const dependencies = {
+      gracefulShutdown: vi.fn(async () => {}),
+      getHealthSnapshot: () => ({ status: 'ok' }),
+      openchamberVersion: '1.0.0',
+      runtimeName: 'test',
+      express,
+      tunnelAuthController: {
+        classifyRequestScope: () => 'tunnel',
+        requireTunnelSession: vi.fn((_req, res) => res.status(401).json({ error: 'Tunnel auth required' })),
+      },
+      uiAuthController: {
+        requireAuth: vi.fn((_req, _res, next) => next()),
+      },
+    };
+
+    registerServerStatusRoutes(app, dependencies);
+
+    await request(app)
+      .post('/api/system/shutdown')
+      .expect(401, { error: 'Tunnel auth required' });
+
+    expect(dependencies.tunnelAuthController.requireTunnelSession).toHaveBeenCalledTimes(1);
+    expect(dependencies.uiAuthController.requireAuth).not.toHaveBeenCalled();
+    expect(dependencies.gracefulShutdown).not.toHaveBeenCalled();
+  });
+
   it('should parse JSON bodies for snippet config routes', async () => {
     const app = express();
     registerCommonRequestMiddleware(app, { express });

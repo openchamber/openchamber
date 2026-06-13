@@ -536,6 +536,7 @@ interface UIStore {
   isSessionCreateDialogOpen: boolean;
   isScheduledTasksDialogOpen: boolean;
   isSettingsDialogOpen: boolean;
+  isNewWorktreeDialogOpen: boolean;
   isModelSelectorOpen: boolean;
   sidebarSection: SidebarSection;
 
@@ -620,6 +621,7 @@ interface UIStore {
   userMessageRenderingMode: UserMessageRenderingMode;
   collapsibleUserMessages: boolean;
   stickyUserHeader: boolean;
+  expandedEditorToolbar: boolean;
   showSplitAssistantMessageActions: boolean;
   isMobileSessionStatusBarCollapsed: boolean;
   mobileSessionPanelOpen: boolean;
@@ -683,6 +685,7 @@ interface UIStore {
   setSessionCreateDialogOpen: (open: boolean) => void;
   setScheduledTasksDialogOpen: (open: boolean) => void;
   setSettingsDialogOpen: (open: boolean) => void;
+  setNewWorktreeDialogOpen: (open: boolean) => void;
   setModelSelectorOpen: (open: boolean) => void;
   applyTheme: () => void;
   setSidebarSection: (section: SidebarSection) => void;
@@ -763,6 +766,7 @@ interface UIStore {
   setUserMessageRenderingMode: (value: UserMessageRenderingMode) => void;
   setCollapsibleUserMessages: (value: boolean) => void;
   setStickyUserHeader: (value: boolean) => void;
+  setExpandedEditorToolbar: (value: boolean) => void;
   setShowSplitAssistantMessageActions: (value: boolean) => void;
   setIsMobileSessionStatusBarCollapsed: (value: boolean) => void;
   setMobileSessionPanelOpen: (value: boolean) => void;
@@ -822,6 +826,7 @@ export const useUIStore = create<UIStore>()(
         isSessionCreateDialogOpen: false,
         isScheduledTasksDialogOpen: false,
         isSettingsDialogOpen: false,
+        isNewWorktreeDialogOpen: false,
         isModelSelectorOpen: false,
         sidebarSection: 'sessions',
         settingsPage: 'home',
@@ -899,6 +904,7 @@ export const useUIStore = create<UIStore>()(
         userMessageRenderingMode: 'markdown',
         collapsibleUserMessages: true,
         stickyUserHeader: false,
+        expandedEditorToolbar: false,
         showSplitAssistantMessageActions: false,
         isMobileSessionStatusBarCollapsed: false,
         mobileSessionPanelOpen: false,
@@ -1492,6 +1498,10 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
+        setNewWorktreeDialogOpen: (open) => {
+          set({ isNewWorktreeDialogOpen: open });
+        },
+
         setModelSelectorOpen: (open) => {
           set({ isModelSelectorOpen: open });
         },
@@ -2010,6 +2020,9 @@ export const useUIStore = create<UIStore>()(
         setStickyUserHeader: (value) => {
           set({ stickyUserHeader: value });
         },
+        setExpandedEditorToolbar: (value: boolean) => {
+          set({ expandedEditorToolbar: value });
+        },
         setShowSplitAssistantMessageActions: (value) => {
           set({ showSplitAssistantMessageActions: value });
         },
@@ -2240,6 +2253,7 @@ export const useUIStore = create<UIStore>()(
           userMessageRenderingMode: state.userMessageRenderingMode,
           collapsibleUserMessages: state.collapsibleUserMessages,
           stickyUserHeader: state.stickyUserHeader,
+          expandedEditorToolbar: state.expandedEditorToolbar,
           showSplitAssistantMessageActions: state.showSplitAssistantMessageActions,
           isMobileSessionStatusBarCollapsed: state.isMobileSessionStatusBarCollapsed,
           mobileSessionFilterProjectId: state.mobileSessionFilterProjectId,

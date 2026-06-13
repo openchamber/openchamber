@@ -116,6 +116,12 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['input', 'home bar', 'offset'],
   },
   {
+    id: 'appearance.expanded-editor-toolbar',
+    page: 'appearance',
+    titleKey: 'settings.openchamber.visual.field.expandedEditorToolbar',
+    keywords: ['editor', 'toolbar', 'tabs', 'docked', 'files'],
+  },
+  {
     id: 'appearance.file-editor-keymap',
     page: 'appearance',
     titleKey: 'settings.openchamber.visual.field.fileEditorKeymap',

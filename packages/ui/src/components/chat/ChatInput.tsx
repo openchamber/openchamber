@@ -2279,6 +2279,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (showCommandAutocomplete && commandRef.current) {
             if (e.key === 'Enter' || e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Escape' || e.key === 'Tab') {
                 e.preventDefault();
+                e.stopPropagation();
                 commandRef.current.handleKeyDown(e.key);
                 return;
             }
@@ -2287,6 +2288,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (showSkillAutocomplete && skillRef.current) {
             if (e.key === 'Enter' || e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Escape' || e.key === 'Tab') {
                 e.preventDefault();
+                e.stopPropagation();
                 skillRef.current.handleKeyDown(e.key);
                 return;
             }
@@ -2295,6 +2297,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (showSnippetAutocomplete && snippetRef.current) {
             if (e.key === 'Enter' || e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Escape' || e.key === 'Tab') {
                 e.preventDefault();
+                e.stopPropagation();
                 snippetRef.current.handleKeyDown(e.key);
                 return;
             }
@@ -2303,6 +2306,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (showFileMention && mentionRef.current) {
             if (e.key === 'Enter' || e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Escape' || e.key === 'Tab') {
                 e.preventDefault();
+                e.stopPropagation();
                 mentionRef.current.handleKeyDown(e.key);
                 return;
             }
@@ -2331,12 +2335,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
 
         // Handle ArrowUp/ArrowDown for message history navigation
-        // ArrowUp: only when cursor at start (position 0) or input is empty
+        // ArrowUp: only when input is empty (so pressing Up at start of text just moves cursor)
         // ArrowDown: also works when cursor at end (to cycle forward through history)
         const isAnyAutocompleteOpen = showCommandAutocomplete || showSkillAutocomplete || showSnippetAutocomplete || showFileMention;
-        const cursorAtStart = textareaRef.current?.selectionStart === 0 && textareaRef.current?.selectionEnd === 0;
         const cursorAtEnd = textareaRef.current?.selectionStart === message.length && textareaRef.current?.selectionEnd === message.length;
-        const canNavigateHistoryUp = !isAnyAutocompleteOpen && (message.length === 0 || cursorAtStart);
+        const canNavigateHistoryUp = !isAnyAutocompleteOpen && message.length === 0;
         const canNavigateHistoryDown = !isAnyAutocompleteOpen && (message.length === 0 || cursorAtEnd);
 
         // Markdown-aware auto-pairing (source mode), normal input only.

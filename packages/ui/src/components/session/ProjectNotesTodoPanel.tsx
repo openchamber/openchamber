@@ -620,6 +620,9 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
           path: result.path,
           allowOutsideWorkspace: 'true',
         });
+        if (result.outsideFileGrant) {
+          params.set('outsideFileGrant', result.outsideFileGrant);
+        }
         const response = await runtimeFetch(`/api/fs/read?${params.toString()}`, { cache: 'no-store' });
         if (!response.ok) {
           toast.error(t('rightSidebar.contextNotesTodo.toast.readPlanFileFailed'));

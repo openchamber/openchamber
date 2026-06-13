@@ -69,7 +69,6 @@ import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
 import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag, type UpdateInfo } from '@/lib/desktop';
 import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
-import { resolveSessionDiffStats } from '@/components/session/sidebar/utils';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -1289,17 +1288,6 @@ export const Header: React.FC<HeaderProps> = ({
     return trimmedTitle && trimmedTitle.length > 0 ? trimmedTitle : 'Untitled Session';
   }, [activeProjectLabel, currentSession?.title, currentSessionId]);
 
-  const currentSessionDiffStats = React.useMemo(() => {
-    return resolveSessionDiffStats(currentSession?.summary as Parameters<typeof resolveSessionDiffStats>[0]);
-  }, [currentSession?.summary]);
-
-  const currentSessionChanges = React.useMemo(() => {
-    if (currentSessionDiffStats) {
-      return currentSessionDiffStats;
-    }
-    return { additions: 0, deletions: 0 };
-  }, [currentSessionDiffStats]);
-  const hasNonZeroSessionChanges = currentSessionChanges.additions > 0 || currentSessionChanges.deletions > 0;
 
   const actionDirectory = React.useMemo(() => {
     return normalize(openDirectory || activeProject?.path || '');
@@ -2140,20 +2128,13 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="truncate typography-ui-label text-[14px] font-normal leading-tight text-foreground max-w-full">
               {isNewSessionDraftOpen ? t('sessions.switcher.draftTitle') : currentSessionTitle}
             </span>
-            {(activeProjectLabel || currentBranchLabel || (!isNewSessionDraftOpen && (hasNonZeroSessionChanges || worktreeBadgeKind))) ? (
+            {(activeProjectLabel || currentBranchLabel || (!isNewSessionDraftOpen && worktreeBadgeKind)) ? (
               <span className="flex min-w-0 max-w-full items-center gap-1.5 truncate typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">
                 {activeProjectLabel ? <span className="truncate">{activeProjectLabel}</span> : null}
                 {currentBranchLabel ? (
                   <span className="inline-flex min-w-0 items-center gap-0.5">
                     <Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
                     <span className="truncate">{currentBranchLabel}</span>
-                  </span>
-                ) : null}
-                {!isNewSessionDraftOpen && hasNonZeroSessionChanges ? (
-                  <span className="inline-flex flex-shrink-0 items-center gap-0 text-[0.92em]">
-                    <span className="text-status-success/80">+{currentSessionChanges.additions}</span>
-                    <span className="text-muted-foreground/60">/</span>
-                    <span className="text-status-error/65">-{currentSessionChanges.deletions}</span>
                   </span>
                 ) : null}
                 {!isNewSessionDraftOpen && worktreeBadgeKind ? (

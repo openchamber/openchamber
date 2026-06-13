@@ -1132,6 +1132,7 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.tokens.reasoning': '推理',
   'contextSidebar.tokens.cacheRead': '缓存读取',
   'contextSidebar.tokens.cacheWrite': '缓存写入',
+  'contextSidebar.tokens.cacheHit': '缓存命中',
   'contextSidebar.actions.copyJson': '复制 JSON',
   'contextSidebar.actions.copy': '复制',
   'contextSidebar.actions.copied': '已复制',

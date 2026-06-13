@@ -165,6 +165,7 @@ ipcRenderer.on('openchamber:emit', (_evt, payload) => {
 contextBridge.exposeInMainWorld('__OPENCHAMBER_DESKTOP__', {
   invoke: (cmd, args) => ipcRenderer.invoke('openchamber:invoke', cmd, args || {}),
   openDialog: (options) => ipcRenderer.invoke('openchamber:dialog:open', options || {}),
+  grantFileAccess: (filePath) => ipcRenderer.invoke('openchamber:file:grant-existing', filePath),
   openExternal: (url) => ipcRenderer.invoke('openchamber:invoke', 'desktop_open_external_url', { url }),
   listen: async (event, handler) => addListener(event, handler),
 });

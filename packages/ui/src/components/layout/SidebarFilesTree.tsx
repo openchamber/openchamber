@@ -221,7 +221,10 @@ const FileRow: React.FC<FileRowProps> = ({
       {!isDir && downloadFile && (
         <Item onClick={(e: React.MouseEvent) => {
           e.stopPropagation();
-          void downloadFile(node.path);
+          void downloadFile(node.path).catch((error) => {
+            console.error('Download failed:', error);
+            toast.error(t('sidebarFilesTree.toast.operationFailed'));
+          });
         }}>
           <Icon name="download" className="mr-2 h-4 w-4" /> {t('sidebarFilesTree.menu.save')}
         </Item>

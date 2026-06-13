@@ -1,3 +1,13 @@
+## [Unreleased]
+
+- Chat: custom-answer question textareas resize more steadily while typing (thanks to @bigcoder84).
+- Chat/Input: tab-completing a mention no longer changes the selected agent (thanks to @Quat3rnion).
+- Chat/Input: Arrow Up moves the cursor inside multi-line drafts again instead of always opening prompt history.
+- Sessions: session menus now include a delete action (thanks to @ShogunPanda).
+- Sessions: deleting a parent session no longer brings deleted child sessions back into the sidebar (thanks to @panzeyu2013).
+- Sessions: switching sessions no longer leaves the chat area blank in some cases (thanks to @panzeyu2013).
+- Settings/MCP: importing MCP snippets from OpenCode config works again (thanks to @youzini).
+
 ## [1.12.4] - 2026-06-11
 
 - Agent Manager: creating isolated runs now opens sessions immediately while worktree setup continues in the background.

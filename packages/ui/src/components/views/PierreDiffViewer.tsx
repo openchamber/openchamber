@@ -253,6 +253,7 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
 
   const selectionRef = useRef<SelectedLineRange | null>(null);
   const editingDraftIdRef = useRef<string | null>(null);
+  const commentTextRef = useRef('');
   // Use a ref to track if we're currently applying a selection programmatically
   // to avoid loop with onLineSelected callback
   const isApplyingSelectionRef = useRef(false);
@@ -266,6 +267,10 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
     editingDraftIdRef.current = editingDraftId;
   }, [editingDraftId]);
 
+  useEffect(() => {
+    commentTextRef.current = commentText;
+  }, [commentText]);
+
   const handleSelectionChange = useCallback((range: SelectedLineRange | null) => {
     // Ignore callbacks while we're programmatically applying selection
     if (isApplyingSelectionRef.current) {
@@ -273,6 +278,10 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
     }
 
     const prevSelection = selectionRef.current;
+
+    if (!range && prevSelection && commentTextRef.current.trim()) {
+      return;
+    }
 
     // Mobile tap-to-extend: if selection exists and new tap is on same side, extend range
     if (isMobile && prevSelection && range && range.side === prevSelection.side) {
@@ -715,6 +724,7 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
       selection={selection}
       editingDraftId={editingDraftId}
       commentText={commentText}
+      onTextChange={setCommentText}
       fileLabel={(fileName?.split('/').pop()) ?? ''}
       onSave={handleSaveComment}
       onCancel={handleCancelComment}

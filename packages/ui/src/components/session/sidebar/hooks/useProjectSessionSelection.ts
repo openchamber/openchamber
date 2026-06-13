@@ -3,6 +3,7 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import type { SessionGroup, SessionNode } from '../types';
 import { normalizePath } from '../utils';
 import type { MainTab } from '@/stores/useUIStore';
+import { useUIStore } from '@/stores/useUIStore';
 
 type ProjectSection = {
   project: { id: string; normalizedPath: string };
@@ -90,6 +91,10 @@ export const useProjectSessionSelection = (args: Args): { currentSessionDirector
     }
 
     if (newSessionDraftOpen) {
+      return;
+    }
+
+    if (useUIStore.getState().isNewWorktreeDialogOpen) {
       return;
     }
 

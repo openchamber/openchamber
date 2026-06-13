@@ -7,7 +7,7 @@ import { isDesktopShell } from '@/lib/desktop';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { formatDirectoryName, cn } from '@/lib/utils';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useAllLiveSessions, useAllSessionStatuses } from '@/sync/sync-context';
+import { useAllLiveSessions } from '@/sync/sync-context';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSync } from '@/sync/use-sync';
 import { useSessionPrefetch } from './sidebar/hooks/useSessionPrefetch';
@@ -59,11 +59,9 @@ import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore'
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { type SessionGroup, type SessionNode } from './sidebar/types';
 import {
-  deriveActiveNowSessions,
-  deriveLiveActiveNowSessions,
+  deriveRecentSessions,
   getSessionUpdatedAtMs,
 } from './sidebar/activitySections';
-import { useActiveNowStore } from '@/stores/useActiveNowStore';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import {
   compareSessionsByPinnedAndTime,
@@ -187,14 +185,12 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     () => new Map(),
   );
   const safeStorage = React.useMemo(() => getSafeStorage(), []);
-  const activeNowEntries = useActiveNowStore((state) => state.entries);
-  const addActiveNowSessionToStore = useActiveNowStore((state) => state.addSession);
-  const pruneActiveNowEntriesInStore = useActiveNowStore((state) => state.prune);
   const [collapsedProjects, setCollapsedProjects] = React.useState<Set<string>>(new Set());
 
   const [projectRepoStatus, setProjectRepoStatus] = React.useState<Map<string, boolean | null>>(new Map());
   const [visibleSessionCountByGroup, setVisibleSessionCountByGroup] = React.useState<Map<string, number>>(new Map());
-  const [newWorktreeDialogOpen, setNewWorktreeDialogOpen] = React.useState(false);
+  const newWorktreeDialogOpen = useUIStore((state) => state.isNewWorktreeDialogOpen);
+  const setNewWorktreeDialogOpen = useUIStore((state) => state.setNewWorktreeDialogOpen);
   const [updateDialogOpen, setUpdateDialogOpen] = React.useState(false);
   const [openSidebarMenuKey, setOpenSidebarMenuKey] = React.useState<string | null>(null);
   const [renamingFolderId, setRenamingFolderId] = React.useState<string | null>(null);
@@ -315,7 +311,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const sync = useSync();
   const liveSessions = useAllLiveSessions();
-  const liveSessionStatuses = useAllSessionStatuses();
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
   const hasLoadedGlobalSessions = useGlobalSessionsStore((state) => state.hasLoaded);
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
@@ -551,7 +546,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const openNewWorktreeDialog = React.useCallback(() => {
     setNewWorktreeDialogOpen(true);
-  }, []);
+  }, [setNewWorktreeDialogOpen]);
 
   const handleOpenUpdateDialog = React.useCallback(() => {
     const current = useUpdateStore.getState();
@@ -1025,9 +1020,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       return [];
     }
 
-    return deriveActiveNowSessions(activeNowEntries, new Map(sessions.map((session) => [session.id, session])))
+    return deriveRecentSessions(sessions)
       .sort((a, b) => compareSessionsByPinnedAndTime(a, b, pinnedSessionIds));
-  }, [activeNowEntries, isVSCode, pinnedSessionIds, sessions, showRecentSection]);
+  }, [isVSCode, pinnedSessionIds, sessions, showRecentSection]);
 
   const vscodeSharedSessions = React.useMemo(() => {
     if (!isVSCode) {
@@ -1043,35 +1038,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         return right.id.localeCompare(left.id);
       });
   }, [isVSCode, sessions]);
-
-  const liveActiveSessions = React.useMemo(() => {
-    if (!showRecentSection) {
-      return [];
-    }
-
-    return deriveLiveActiveNowSessions(sessions, liveSessionStatuses);
-  }, [liveSessionStatuses, sessions, showRecentSection]);
-
-  React.useEffect(() => {
-    if (!showRecentSection || liveActiveSessions.length === 0) {
-      return;
-    }
-
-    liveActiveSessions.forEach((session) => addActiveNowSessionToStore(session.id));
-  }, [addActiveNowSessionToStore, liveActiveSessions, showRecentSection]);
-
-  React.useEffect(() => {
-    if (!showRecentSection) {
-      return;
-    }
-
-    const allKnownSessionsById = new Map<string, Session>();
-    [...sessions, ...archivedSessions].forEach((session) => {
-      allKnownSessionsById.set(session.id, session);
-    });
-
-    pruneActiveNowEntriesInStore(allKnownSessionsById);
-  }, [archivedSessions, pruneActiveNowEntriesInStore, sessions, showRecentSection]);
 
   // Prefetch is wired below, after recentSessionIds is computed.
 

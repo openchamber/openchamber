@@ -664,7 +664,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
     const fullPath = `${creatingInPath}/${dirName}`;
 
     try {
-      await opencodeClient.createDirectory(fullPath, { allowOutsideWorkspace: true });
+      await opencodeClient.createDirectory(fullPath);
 
       const children = await loadDirectory(creatingInPath);
       const updateItems = (items: DirectoryItem[]): DirectoryItem[] => {

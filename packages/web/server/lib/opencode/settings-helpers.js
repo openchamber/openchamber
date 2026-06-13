@@ -145,13 +145,6 @@ export const createSettingsHelpers = (dependencies) => {
       result.activeProjectId = candidate.activeProjectId;
     }
 
-    if (Array.isArray(candidate.approvedDirectories)) {
-      result.approvedDirectories = normalizeStringArray(
-        candidate.approvedDirectories
-          .map((entry) => (typeof entry === 'string' ? normalizePathForPersistence(entry) : entry))
-          .filter((entry) => typeof entry === 'string' && entry.length > 0)
-      );
-    }
     if (Array.isArray(candidate.securityScopedBookmarks)) {
       result.securityScopedBookmarks = normalizeStringArray(candidate.securityScopedBookmarks);
     }
@@ -445,6 +438,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.stickyUserHeader === 'boolean') {
       result.stickyUserHeader = candidate.stickyUserHeader;
     }
+    if (typeof candidate.expandedEditorToolbar === 'boolean') {
+      result.expandedEditorToolbar = candidate.expandedEditorToolbar;
+    }
     if (typeof candidate.showSplitAssistantMessageActions === 'boolean') {
       result.showSplitAssistantMessageActions = candidate.showSplitAssistantMessageActions;
     }
@@ -702,31 +698,6 @@ export const createSettingsHelpers = (dependencies) => {
   };
 
   const mergePersistedSettings = (current, changes) => {
-    const baseApproved = Array.isArray(changes.approvedDirectories)
-      ? changes.approvedDirectories
-      : Array.isArray(current.approvedDirectories)
-        ? current.approvedDirectories
-        : [];
-
-    const additionalApproved = [];
-    if (typeof changes.lastDirectory === 'string' && changes.lastDirectory.length > 0) {
-      additionalApproved.push(changes.lastDirectory);
-    }
-    if (typeof changes.homeDirectory === 'string' && changes.homeDirectory.length > 0) {
-      additionalApproved.push(changes.homeDirectory);
-    }
-    const projectEntries = Array.isArray(changes.projects)
-      ? changes.projects
-      : Array.isArray(current.projects)
-        ? current.projects
-        : [];
-    projectEntries.forEach((project) => {
-      if (project && typeof project.path === 'string' && project.path.length > 0) {
-        additionalApproved.push(project.path);
-      }
-    });
-    const approvedSource = [...baseApproved, ...additionalApproved];
-
     const baseBookmarks = Array.isArray(changes.securityScopedBookmarks)
       ? changes.securityScopedBookmarks
       : Array.isArray(current.securityScopedBookmarks)
@@ -743,11 +714,6 @@ export const createSettingsHelpers = (dependencies) => {
     const next = {
       ...current,
       ...changes,
-      approvedDirectories: Array.from(
-        new Set(
-          approvedSource.filter((entry) => typeof entry === 'string' && entry.length > 0)
-        )
-      ),
       securityScopedBookmarks: Array.from(
         new Set(
           baseBookmarks.filter((entry) => typeof entry === 'string' && entry.length > 0)
@@ -762,7 +728,6 @@ export const createSettingsHelpers = (dependencies) => {
   const formatSettingsResponse = (settings) => {
     const sanitized = sanitizeSettingsUpdate(settings);
     delete sanitized.managedRemoteTunnelToken;
-    const approved = normalizeStringArray(settings.approvedDirectories);
     const bookmarks = normalizeStringArray(settings.securityScopedBookmarks);
     const hasManagedRemoteTunnelToken = typeof settings?.managedRemoteTunnelToken === 'string' && settings.managedRemoteTunnelToken.trim().length > 0;
     const pwaAppName = normalizePwaAppName(settings?.pwaAppName, '');
@@ -775,10 +740,18 @@ export const createSettingsHelpers = (dependencies) => {
       ...(pwaAppName ? { pwaAppName } : {}),
       pwaOrientation,
       mobileKeyboardMode,
-      approvedDirectories: approved,
       securityScopedBookmarks: bookmarks,
       pinnedDirectories: normalizeStringArray(settings.pinnedDirectories),
       typographySizes: sanitizeTypographySizesPartial(settings.typographySizes),
+      ...(process.env.OPENCHAMBER_RUNTIME === 'desktop'
+        ? {
+            desktopLanAccessActive: process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_ACTIVE === 'true',
+            desktopLanAccessBlockedReason:
+              process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_BLOCKED_REASON === 'missing-password'
+                ? 'missing-password'
+                : null,
+          }
+        : {}),
       showReasoningTraces:
         typeof settings.showReasoningTraces === 'boolean'
           ? settings.showReasoningTraces

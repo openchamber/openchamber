@@ -101,6 +101,24 @@ export async function getGitStatus(directory: string, options?: { mode?: 'light'
   return gitHttp.getGitStatus(directory, options);
 }
 
+export async function resolveGitPrimaryRoot(directory: string): Promise<string> {
+  const result = await gitHttp.resolveGitPrimaryRoot(directory);
+  return result.root;
+}
+
+export async function resolveGitTopLevel(directory: string): Promise<string> {
+  const result = await gitHttp.resolveGitTopLevel(directory);
+  return result.root;
+}
+
+export async function getGitCommitSummaries(
+  directory: string,
+  shas: string[]
+): Promise<Array<{ sha: string; short: string; subject: string }>> {
+  const result = await gitHttp.getGitCommitSummaries(directory, shas);
+  return result.commits;
+}
+
 export async function getGitDiff(directory: string, options: import('./api/types').GetGitDiffOptions): Promise<import('./api/types').GitDiffResponse> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.getGitDiff(directory, options);

@@ -10,7 +10,7 @@ import type { ToolPart as ToolPartType, ToolState as ToolStateUnion } from '@ope
 import { toolDisplayStyles } from '@/lib/typography';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
-import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectorySync, useSessionMessageRecords, useEnsureSessionMessages } from '@/sync/sync-context';
 import { getSyncChildStores } from '@/sync/sync-refs';
@@ -1207,7 +1207,7 @@ const TaskToolSummary: React.FC<{
     isActive?: boolean;
 }> = ({ entries, isExpanded, isMobile, output, sessionId, onShowPopup, input, animateTailText = true, isActive = false }) => {
     const { t } = useI18n();
-    const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+    const currentDirectory = useEffectiveDirectory();
     const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
     const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
     const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
@@ -1928,7 +1928,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
 }) => {
     const state = part.state;
     const showToolFileIcons = useUIStore((s) => s.showToolFileIcons);
-    const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
+    const currentDirectory = useEffectiveDirectory() ?? '';
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
 
     const normalizedPartTool = normalizeToolName(part.tool);

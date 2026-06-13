@@ -11,6 +11,21 @@ import { sanitizeStarterRefs } from '@/lib/draftStarters';
 import { normalizeMobileKeyboardMode, setStoredMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
+export const applyPersistedHomeDirectoryToWindow = (homeDirectory: string): void => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  if (typeof window.__OPENCHAMBER_HOME__ === 'string' && window.__OPENCHAMBER_HOME__.length > 0) {
+    return;
+  }
+
+  try {
+    window.__OPENCHAMBER_HOME__ = homeDirectory;
+  } catch {
+    /* read-only contextBridge property — leave preload-seeded value */
+  }
+};
+
 const persistToLocalStorage = (settings: DesktopSettings) => {
   if (typeof window === 'undefined') {
     return;
@@ -36,15 +51,7 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   }
   if (settings.homeDirectory) {
     localStorage.setItem('homeDirectory', settings.homeDirectory);
-    // Electron's preload exposes __OPENCHAMBER_HOME__ as a read-only
-    // contextBridge property; assignment throws TypeError there. In VSCode
-    // webview and plain web runtime the property is writable. Swallow the
-    // error in Electron — preload already seeded the value correctly.
-    try {
-      window.__OPENCHAMBER_HOME__ = settings.homeDirectory;
-    } catch {
-      /* read-only contextBridge property — leave preload-seeded value */
-    }
+    applyPersistedHomeDirectoryToWindow(settings.homeDirectory);
   }
   if (Array.isArray(settings.projects) && settings.projects.length > 0) {
     localStorage.setItem('projects', JSON.stringify(settings.projects));
@@ -512,6 +519,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.stickyUserHeader === 'boolean' && settings.stickyUserHeader !== store.stickyUserHeader) {
     store.setStickyUserHeader(settings.stickyUserHeader);
   }
+  if (typeof settings.expandedEditorToolbar === 'boolean' && settings.expandedEditorToolbar !== store.expandedEditorToolbar) {
+    store.setExpandedEditorToolbar(settings.expandedEditorToolbar);
+  }
   if (typeof settings.wideChatLayoutEnabled === 'boolean' && settings.wideChatLayoutEnabled !== store.wideChatLayoutEnabled) {
     store.setWideChatLayoutEnabled(settings.wideChatLayoutEnabled);
   }
@@ -681,11 +691,6 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
     result.activeProjectId = candidate.activeProjectId;
   }
 
-  if (Array.isArray(candidate.approvedDirectories)) {
-    result.approvedDirectories = candidate.approvedDirectories.filter(
-      (entry): entry is string => typeof entry === 'string' && entry.length > 0
-    );
-  }
   if (Array.isArray(candidate.securityScopedBookmarks)) {
     result.securityScopedBookmarks = candidate.securityScopedBookmarks.filter(
       (entry): entry is string => typeof entry === 'string' && entry.length > 0

@@ -1,5 +1,5 @@
 import React from 'react';
-import { RiArrowLeftLine, RiCloseLine, RiGitBranchLine, RiLoader4Line } from '@remixicon/react';
+import { Icon } from '@/components/icon/Icon';
 
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
@@ -443,16 +443,41 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
     return groups;
   }, [handleRevertFile, handleViewChangeDiff, moveChangePaths, stagedChangeEntries, t, unstagedChangeEntries]);
 
+  const renderListState = (state: React.ReactNode) => (
+    <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
+      <header className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-2 px-3 text-foreground">
+        {onClose ? (
+          <button
+            type="button"
+            className="-ml-1 flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            aria-label={t('mobile.surface.closeAria')}
+            onClick={onClose}
+            style={{ touchAction: 'manipulation' }}
+          >
+            <Icon name="close" className="size-5" />
+          </button>
+        ) : null}
+        <div className="min-w-0 flex-1 px-1">
+          <h2 className="typography-ui-label text-foreground">{t('mobile.nav.changes')}</h2>
+          <p className="truncate typography-micro text-muted-foreground">
+            {status?.current || currentDirectory || ''}
+          </p>
+        </div>
+      </header>
+      <div className="min-h-0 flex-1">{state}</div>
+    </div>
+  );
+
   if (!currentDirectory) {
-    return <MobileChangesState message={t('gitView.empty.selectSessionOrDirectory')} />;
+    return renderListState(<MobileChangesState message={t('gitView.empty.selectSessionOrDirectory')} />);
   }
 
   if (isLoadingStatus && isGitRepo === null) {
-    return <MobileChangesState loading message={t('gitView.loading.checkingRepository')} />;
+    return renderListState(<MobileChangesState loading message={t('gitView.loading.checkingRepository')} />);
   }
 
   if (isGitRepo === false) {
-    return <MobileChangesState icon message={t('gitView.empty.notGitRepository')} description={t('gitView.empty.notGitRepositoryDescription')} />;
+    return renderListState(<MobileChangesState icon message={t('gitView.empty.notGitRepository')} description={t('gitView.empty.notGitRepositoryDescription')} />);
   }
 
   if (route.type === 'diff') {
@@ -479,7 +504,7 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
             onClick={onClose}
             style={{ touchAction: 'manipulation' }}
           >
-            <RiCloseLine className="size-5" />
+            <Icon name="close" className="size-5" />
           </button>
         ) : null}
         <div className="min-w-0 flex-1 px-1">
@@ -548,8 +573,8 @@ const MobileChangesState: React.FC<{
 }> = ({ message, description, loading = false, icon = false }) => (
   <div className="flex h-full items-center justify-center px-6 text-center">
     <div className="flex max-w-sm flex-col items-center gap-2">
-      {loading ? <RiLoader4Line className="size-5 animate-spin text-muted-foreground" /> : null}
-      {icon ? <RiGitBranchLine className="size-6 text-muted-foreground" /> : null}
+      {loading ? <Icon name="loader-4" className="size-5 animate-spin text-muted-foreground" /> : null}
+      {icon ? <Icon name="git-branch" className="size-6 text-muted-foreground" /> : null}
       <p className="typography-ui-label font-semibold text-foreground">{message}</p>
       {description ? <p className="typography-meta text-muted-foreground">{description}</p> : null}
     </div>
@@ -576,7 +601,7 @@ const MobileDiffDetail: React.FC<{
           aria-label={t('header.actions.backAria')}
           onClick={onBack}
         >
-          <RiArrowLeftLine className="size-5" />
+          <Icon name="arrow-left" className="size-5" />
         </button>
         <div className="min-w-0 flex-1 px-2">
           <h2 className="truncate typography-ui-header text-foreground">{path}</h2>

@@ -16,6 +16,7 @@ import type { PermissionRequest } from "@/types/permission";
 import type { QuestionRequest } from "@/types/question";
 import { getRuntimeUrlResolver } from "@/lib/runtime-url";
 import { runtimeFetch } from "@/lib/runtime-fetch";
+import { getRuntimeKey } from "@/lib/runtime-switch";
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry";
 import { markStartupTrace } from "@/lib/startupTrace";
 import {
@@ -1627,11 +1628,16 @@ class OpencodeService {
   }
 
   async getFilesystemHome(): Promise<string | null> {
-    // Optimization: Check for desktop runtime first to avoid unnecessary network calls
-    // and fix the "SyntaxError" warning when the endpoint is missing
-    const desktopHome = await getDesktopHomeDirectory();
-    if (desktopHome) {
-      return desktopHome;
+    // The injected desktop home describes the LOCAL machine. It is only a
+    // valid answer while the active runtime is the local one — after an
+    // in-place switch to a remote host the home must come from that host's
+    // /api/fs/home, not from the local Electron global.
+    const runtimeKey = getRuntimeKey();
+    if (!runtimeKey || runtimeKey === 'local') {
+      const desktopHome = await getDesktopHomeDirectory();
+      if (desktopHome) {
+        return desktopHome;
+      }
     }
 
     try {

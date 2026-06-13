@@ -1,4 +1,6 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test';
+
+const originalFetch = globalThis.fetch;
 
 import type { PluginEntry, PluginFile, RegistryResult } from './usePluginsStore';
 
@@ -29,6 +31,16 @@ mock.module('@/stores/useAgentsStore', () => ({
 mock.module('@/lib/configUpdate', () => ({
   startConfigUpdate: startConfigUpdateMock,
   finishConfigUpdate: finishConfigUpdateMock,
+}));
+
+// mock.module is process-global in bun: another test file (e.g.
+// useCommandsStore.test.ts) may have replaced '@/lib/runtime-fetch' with its
+// own stub before this file runs. Register our own mock so this suite always
+// reaches its fetch double regardless of test file ordering. Delegating to
+// globalThis.fetch (instead of this file's double directly) keeps later test
+// files that stub global fetch working if this registration outlives us.
+mock.module('@/lib/runtime-fetch', () => ({
+  runtimeFetch: (input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init),
 }));
 
 const { usePluginsStore } = await import('./usePluginsStore');
@@ -124,6 +136,10 @@ describe('usePluginsStore', () => {
     fetchCalls.length = 0;
     queuedResponses = [];
     globalThis.fetch = fetchMock as unknown as typeof fetch;
+  });
+
+  afterAll(() => {
+    globalThis.fetch = originalFetch;
   });
 
   test('loadPlugins calls config plugins endpoint once and populates entries/files', async () => {

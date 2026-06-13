@@ -42,29 +42,6 @@ export function SidebarActivitySections({
   const [visibleCountBySection, setVisibleCountBySection] = React.useState<Map<string, number>>(new Map());
   const flatVariant = variant === 'flat';
 
-  const toggleSection = React.useCallback((key: string) => {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
-        next.add(key);
-      }
-      return next;
-    });
-  }, []);
-
-  const showMoreSessions = React.useCallback((key: string, currentVisibleCount: number, totalCount: number) => {
-    setVisibleCountBySection((prev) => {
-      const nextVisibleCount = flatVariant
-        ? Math.min(totalCount, currentVisibleCount + batchSize)
-        : totalCount;
-      const next = new Map(prev);
-      next.set(key, nextVisibleCount);
-      return next;
-    });
-  }, [batchSize, flatVariant]);
-
   const resetSectionLimit = React.useCallback((key: string) => {
     setVisibleCountBySection((prev) => {
       if (!prev.has(key)) {
@@ -75,6 +52,30 @@ export function SidebarActivitySections({
       return next;
     });
   }, []);
+
+  const toggleSection = React.useCallback((key: string) => {
+    // Collapsing/expanding resets any "show more" batches, matching the
+    // worktree/project group behavior.
+    resetSectionLimit(key);
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, [resetSectionLimit]);
+
+  const showMoreSessions = React.useCallback((key: string, currentVisibleCount: number, totalCount: number) => {
+    setVisibleCountBySection((prev) => {
+      const nextVisibleCount = Math.min(totalCount, currentVisibleCount + batchSize);
+      const next = new Map(prev);
+      next.set(key, nextVisibleCount);
+      return next;
+    });
+  }, [batchSize]);
 
   const visibleSections = sections.filter((section) => section.items.length > 0);
   if (visibleSections.length === 0) {
@@ -132,9 +133,7 @@ export function SidebarActivitySections({
                     onClick={() => showMoreSessions(section.key, visibleItems.length, section.items.length)}
                     className="mt-0.5 flex items-center justify-start rounded-md px-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline"
                   >
-                    {remainingCount === 1
-                      ? t('sessions.sidebar.group.showMoreSingle', { count: remainingCount })
-                      : t('sessions.sidebar.group.showMorePlural', { count: remainingCount })}
+                    {t('sessions.sidebar.group.showMore')}
                   </button>
                 ) : null}
                 {canShowFewer ? (

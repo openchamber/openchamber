@@ -32,11 +32,11 @@ const classifyReadError = (error: unknown): ContextFileOpenFailureReason => {
 
 const readFileContent = async (files: FilesAPI, path: string): Promise<string> => {
   if (files.readFile) {
-    const result = await files.readFile(path, { allowOutsideWorkspace: true, optional: true });
+    const result = await files.readFile(path, { optional: true });
     return result.content ?? '';
   }
 
-  const params = new URLSearchParams({ path, allowOutsideWorkspace: 'true', optional: 'true' });
+  const params = new URLSearchParams({ path, optional: 'true' });
   const response = await runtimeFetch(`/api/fs/read?${params.toString()}`, {
     // Avoid conditional requests (304 + empty body).
     cache: 'no-store',

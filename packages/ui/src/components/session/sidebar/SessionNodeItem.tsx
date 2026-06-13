@@ -25,8 +25,8 @@ import { buildSessionMessageRecordsSnapshot, useDirectoryStore, useGlobalSession
 import { useSync } from '@/sync/use-sync';
 import { useViewportStore, viewportSessionKey } from '@/sync/viewport-store';
 import { DraggableSessionRow } from './sessionFolderDnd';
-import type { SessionNode, SessionSummaryMeta } from './types';
-import { formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText, resolveSessionDiffStats } from './utils';
+import type { SessionNode } from './types';
+import { formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from './utils';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
@@ -81,7 +81,7 @@ type Props = {
   addSessionToFolder: (scopeKey: string, folderId: string, sessionId: string) => void;
   createFolderAndStartRename: (scopeKey: string, parentId?: string | null) => { id: string } | null;
   openContextPanelTab: (directory: string, options: { mode: 'chat'; dedupeKey: string; label: string; readOnly?: boolean }) => void;
-  handleDeleteSession: (session: Session, source?: { archivedBucket?: boolean }) => void;
+  handleDeleteSession: (session: Session, source?: { archivedBucket?: boolean; hardDelete?: boolean }) => void;
   mobileVariant: boolean;
   alwaysShowActions: boolean;
   renderSessionNode: (node: SessionNode, depth?: number, groupDirectory?: string | null, projectId?: string | null, archivedBucket?: boolean, secondaryMeta?: SecondaryMeta | null, renderContext?: 'project' | 'recent') => React.ReactNode;
@@ -263,8 +263,11 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const hasSecondaryBranchLabel = Boolean(secondaryMeta?.branchLabel);
 
   const displayMode = useSessionDisplayStore((state) => state.displayMode);
-  const isMinimalMode = displayMode === 'minimal';
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
+  // VS Code keeps the expanded "default" layout regardless of the stored mode:
+  // multi-workspace lists rely on inline project/branch, and hover tooltips
+  // across the whole list would be impractical there.
+  const isMinimalMode = displayMode === 'minimal' && !isVSCode;
   const isElectron = React.useMemo(() => canUseElectronDesktopIPC(), []);
   const runtimeApis = React.useContext(RuntimeAPIContext);
   const revealOnHoverClass = isVSCode
@@ -348,8 +351,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const isSubtaskSession = Boolean((resolvedSession as Session & { parentID?: string | null }).parentID);
   const unseenCount = useSessionUnseenCount(session.id);
   const needsAttention = unseenCount > 0 && (!isSubtaskSession || notifyOnSubtasks);
-  const sessionSummary = resolvedSession.summary as SessionSummaryMeta | undefined;
-  const sessionDiffStats = resolveSessionDiffStats(sessionSummary);
   const sessionTimestamp = resolvedSession.time?.updated || resolvedSession.time?.created || Date.now();
   const sessionUpdatedLabel = formatSessionDateLabel(sessionTimestamp);
   const sessionCompactUpdatedLabel = formatSessionCompactDateLabel(sessionTimestamp);
@@ -529,7 +530,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
               <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
                 {hasChildren ? <span className="inline-flex items-center justify-center flex-shrink-0">{isExpanded ? <Icon name="arrow-down-s" className="h-3 w-3" /> : <Icon name="arrow-right-s" className="h-3 w-3" />}</span> : null}
                 <span className="flex-shrink-0">{sessionUpdatedLabel}</span>
-                {sessionDiffStats ? <span className="flex flex-shrink-0 items-center gap-0 text-[0.92em]"><span className="text-status-success/80">+{sessionDiffStats.additions}</span><span className="text-status-error/65">/-{sessionDiffStats.deletions}</span></span> : null}
                 {hasSecondaryProjectLabel ? <span className="truncate">{secondaryMeta?.projectLabel}</span> : null}
                 {hasSecondaryBranchLabel ? <span className="inline-flex min-w-0 items-center gap-0.5"><Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" /><span className="truncate">{secondaryMeta?.branchLabel}</span></span> : null}
               </div>
@@ -565,7 +565,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       className={cn(
         'pointer-events-none absolute inline-flex h-3.5 items-center justify-center gap-0.5 transition-opacity',
         isMinimalMode ? 'top-1/2 -translate-y-1/2' : 'top-[14.5px] -translate-y-1/2',
-        showStatusMarker && isPinnedSession ? 'left-[-18px] w-6' : 'left-[-10px] w-3.5',
+        showStatusMarker && isPinnedSession ? 'left-[-6px] w-6' : 'left-0.5 w-3.5',
         hasChildren && !alwaysShowActions ? 'opacity-100 group-hover:opacity-0 group-focus-within:opacity-0' : '',
       )}
     >
@@ -594,7 +594,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           ? 'absolute left-1.5 bottom-1'
           : inlineSubsessionChevron
           ? 'relative mr-0.5 shrink-0'
-          : cn('absolute left-[-10px]', isMinimalMode ? 'top-1/2 -translate-y-1/2' : 'top-[14.5px] -translate-y-1/2'),
+          : cn('absolute left-0.5', isMinimalMode ? 'top-1/2 -translate-y-1/2' : 'top-[14.5px] -translate-y-1/2'),
         !metadataSubsessionChevron && !inlineSubsessionChevron && isMinimalMode && showStatusMarker && !alwaysShowActions
           ? 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto'
           : '',
@@ -849,9 +849,15 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       ) : null}
 
       <Separator />
-      <Item className="text-destructive focus:text-destructive [&>svg]:mr-1" onClick={() => handleDeleteSession(session, { archivedBucket })}>
-        <Icon name={archivedBucket ? "delete-bin" : "archive"} className="mr-1 h-4 w-4" />
-        {archivedBucket ? t('sessions.sidebar.bulkActions.delete') : t('sessions.sidebar.bulkActions.archive')}
+      {!archivedBucket ? (
+        <Item className="[&>svg]:mr-1" onClick={() => handleDeleteSession(session, { archivedBucket })}>
+          <Icon name="inbox-archive" className="mr-1 h-4 w-4" />
+          {t('sessions.sidebar.bulkActions.archive')}
+        </Item>
+      ) : null}
+      <Item className="text-destructive focus:text-destructive [&>svg]:mr-1" onClick={() => handleDeleteSession(session, { archivedBucket, hardDelete: true })}>
+        <Icon name="delete-bin" className="mr-1 h-4 w-4" />
+        {t('sessions.sidebar.bulkActions.delete')}
       </Item>
     </>
   );
@@ -928,10 +934,18 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                 data-session-scope={sessionDirectory ?? ''}
                 data-session-archived={archivedBucket ? '1' : '0'}
                 className={cn(
-                  'group relative my-0.5 flex items-center rounded-sm px-1.5 py-1',
+                  'group relative my-0.5 flex items-center rounded-md py-1 pr-1.5',
+                  // Pull the row box left into the container gutter so the
+                  // selection highlight covers the chevron/status markers
+                  // (which sit in that gutter), then re-pad so the title text
+                  // stays put.
+                  '-ml-3',
+                  depth > 0 ? 'pl-[32px]' : 'pl-[18px]',
                   isMissingDirectory ? 'opacity-75' : '',
-                  depth > 0 && 'pl-[20px]',
-                  isRowSelected && 'bg-primary/15',
+                  // Active (currently open) session gets a subtle primary tint;
+                  // multi-select highlight takes precedence when both apply.
+                  isActive && !isRowSelected && 'bg-primary/10',
+                  isRowSelected && 'bg-interactive-selection',
                 )}
               />
             }
@@ -955,7 +969,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                       handleSessionDoubleClick(session.id, sessionTitle);
                     }}
                     className={cn(
-	                      'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed transition-[padding]',
+	                      'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed transition-[padding]',
 	                      isTouchPressed && 'bg-interactive-hover/70',
                       alwaysShowActions
                         ? (isVSCode ? revealPaddingClass : alwaysActionPaddingClass)
@@ -992,14 +1006,11 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                       {secondaryMeta?.projectLabel ? <div className="min-w-0 truncate">{secondaryMeta.projectLabel}</div> : null}
                       <div className="flex-shrink-0">{sessionUpdatedLabel}</div>
                     </div>
-                    {secondaryMeta?.branchLabel || sessionDiffStats ? (
-                      <div className={cn('flex items-center gap-3 text-left text-muted-foreground', secondaryMeta?.branchLabel ? 'justify-between' : 'justify-start')}>
-                        {secondaryMeta?.branchLabel ? (
-                          <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
-                            <span className="inline-flex min-w-0 items-center gap-0.5"><Icon name="git-branch" className="h-3 w-3 flex-shrink-0" /><span className="truncate">{secondaryMeta.branchLabel}</span></span>
-                          </div>
-                        ) : null}
-                        {sessionDiffStats ? <span className="flex flex-shrink-0 items-center gap-0.5"><span className="text-status-success">+{sessionDiffStats.additions}</span><span className="text-status-error">-{sessionDiffStats.deletions}</span></span> : null}
+                    {secondaryMeta?.branchLabel ? (
+                      <div className="flex items-center gap-3 text-left text-muted-foreground justify-start">
+                        <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
+                          <span className="inline-flex min-w-0 items-center gap-0.5"><Icon name="git-branch" className="h-3 w-3 flex-shrink-0" /><span className="truncate">{secondaryMeta.branchLabel}</span></span>
+                        </div>
                       </div>
                     ) : null}
                   </div>
@@ -1019,7 +1030,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                   handleSessionDoubleClick(session.id, sessionTitle);
                 }}
                 className={cn(
-	                  'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed transition-[padding]',
+	                  'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed transition-[padding]',
 	                  isTouchPressed && 'bg-interactive-hover/70',
                   alwaysShowActions
                     ? (isVSCode ? revealPaddingClass : alwaysActionPaddingClass)
@@ -1040,7 +1051,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                   <div className="flex items-center justify-between gap-3 text-muted-foreground/60 min-w-0 overflow-hidden leading-tight" style={{ fontSize: 'calc(var(--text-ui-label) * 0.85)' }}>
                     <div className={cn('flex min-w-0 items-center gap-1.5 overflow-hidden', metadataSubsessionChevron && hasChildren ? 'pl-4' : '')}>
                       <span className="flex-shrink-0">{sessionUpdatedLabel}</span>
-                      {sessionDiffStats ? <span className="flex flex-shrink-0 items-center gap-0 text-[0.92em]"><span className="text-status-success/80">+{sessionDiffStats.additions}</span><span className="text-muted-foreground/60">/</span><span className="text-status-error/65">-{sessionDiffStats.deletions}</span></span> : null}
                       {hasSecondaryProjectLabel ? <span className="truncate">{secondaryMeta?.projectLabel}</span> : null}
                       {hasSecondaryBranchLabel ? <span className="inline-flex min-w-0 items-center gap-0.5"><Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" /><span className="truncate">{secondaryMeta?.branchLabel}</span></span> : null}
                     </div>

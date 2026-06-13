@@ -125,6 +125,9 @@ export const createWebFilesAPI = ({ urls }: WebFilesAPIOptions): FilesAPI => ({
     if (options?.allowOutsideWorkspace) {
       params.set('allowOutsideWorkspace', 'true');
     }
+    if (options?.outsideFileGrant) {
+      params.set('outsideFileGrant', options.outsideFileGrant);
+    }
     const response = await runtimeFetch(urls.api('/api/fs/stat', params));
 
     if (!response.ok) {
@@ -146,6 +149,9 @@ export const createWebFilesAPI = ({ urls }: WebFilesAPIOptions): FilesAPI => ({
     const params = new URLSearchParams({ path: target });
     if (options?.allowOutsideWorkspace) {
       params.set('allowOutsideWorkspace', 'true');
+    }
+    if (options?.outsideFileGrant) {
+      params.set('outsideFileGrant', options.outsideFileGrant);
     }
     if (options?.optional) {
       params.set('optional', 'true');
@@ -237,12 +243,21 @@ export const createWebFilesAPI = ({ urls }: WebFilesAPIOptions): FilesAPI => ({
 
   async downloadFile(path: string): Promise<void> {
     const target = normalizePath(path);
-    const url = urls.rawFile(target, { download: true });
+    const response = await runtimeFetch('/api/fs/raw', {
+      query: { path: target, download: true },
+    });
+    if (!response.ok) {
+      throw new Error(`Download failed (${response.status})`);
+    }
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = target.split('/').pop() || 'file';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 100);
   },
 });

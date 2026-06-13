@@ -1039,6 +1039,7 @@ export const dict = {
   'contextSidebar.tokens.reasoning': 'Raisonnement',
   'contextSidebar.tokens.cacheRead': 'Lecture du cache',
   'contextSidebar.tokens.cacheWrite': 'Écriture du cache',
+  'contextSidebar.tokens.cacheHit': 'Succès du cache',
   'contextSidebar.actions.copyJson': 'Copier JSON',
   'contextSidebar.actions.copy': 'Copie',
   'contextSidebar.actions.copied': 'Copié',

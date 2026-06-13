@@ -277,6 +277,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
   const {
     drafts: planFileDrafts,
     commentText,
+    setCommentText,
     editingDraftId,
     setSelection: setCommentSelection,
     saveComment,
@@ -328,8 +329,10 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
       if (target.closest('.cm-gutterElement')) return;
       if (target.closest('[data-sonner-toast]') || target.closest('[data-sonner-toaster]')) return;
 
-      setLineSelection(null);
-      cancel();
+      if (!commentText.trim()) {
+        setLineSelection(null);
+        cancel();
+      }
     };
 
     const timeoutId = window.setTimeout(() => {
@@ -340,7 +343,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
       window.clearTimeout(timeoutId);
       document.removeEventListener('click', handleClickOutside);
     };
-  }, [cancel, editingDraftId, isMobile, lineSelection]);
+  }, [cancel, commentText, editingDraftId, isMobile, lineSelection]);
 
   const editorExtensions = React.useMemo(() => {
     const extensions = [createFlexokiCodeMirrorTheme(currentTheme)];
@@ -602,6 +605,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
       drafts: planFileDrafts,
       editingDraftId,
       commentText,
+      onTextChange: setCommentText,
       selection: lineSelection,
       isDragging,
       fileLabel: planFileLabel,
@@ -615,7 +619,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
       },
       onDelete: deleteDraft,
     });
-  }, [commentText, deleteDraft, editingDraftId, handleCancelComment, handleSaveComment, isDragging, lineSelection, planFileDrafts, planFileLabel, startEdit]);
+  }, [commentText, deleteDraft, editingDraftId, handleCancelComment, handleSaveComment, isDragging, lineSelection, planFileDrafts, planFileLabel, setCommentText, startEdit]);
 
   return (
     <div className="relative flex h-full min-h-0 min-w-0 w-full flex-col overflow-hidden bg-background">
@@ -810,6 +814,20 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
                             if (event.button !== 0) return false;
                             event.preventDefault();
                             const lineNumber = view.state.doc.lineAt(line.from).number;
+
+                            if (
+                              lineSelection &&
+                              !event.shiftKey &&
+                              Math.min(lineSelection.start, lineSelection.end) === lineNumber &&
+                              Math.max(lineSelection.start, lineSelection.end) === lineNumber
+                            ) {
+                              setLineSelection(null);
+                              cancel();
+                              isSelectingRef.current = false;
+                              selectionStartRef.current = null;
+                              setIsDragging(false);
+                              return true;
+                            }
 
                             if (isMobile && lineSelection && !event.shiftKey) {
                               const start = Math.min(lineSelection.start, lineSelection.end, lineNumber);

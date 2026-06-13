@@ -411,7 +411,9 @@ export const useChatAutoFollow = ({
     }, [sessionIsWorking, startFollowLoop]);
 
     // Replay a deferred restoreSnapshot once ChatViewport mounts.
-    React.useEffect(() => {
+    // useLayoutEffect ensures scroll position is set before the browser paints,
+    // preventing a visible flash of content at the wrong scroll position.
+    React.useLayoutEffect(() => {
         if (!containerEl) return;
         if (pendingInitialRestoreRef.current && pendingInitialRestoreRef.current === currentSessionId) {
             void restoreSnapshot();

@@ -1169,6 +1169,7 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.tokens.reasoning': '추론',
   'contextSidebar.tokens.cacheRead': '캐시 읽기',
   'contextSidebar.tokens.cacheWrite': '캐시 쓰기',
+  'contextSidebar.tokens.cacheHit': '캐시 적중',
   'contextSidebar.actions.copyJson': 'JSON 복사',
   'contextSidebar.actions.copy': '복사',
   'contextSidebar.actions.copied': '복사됨',

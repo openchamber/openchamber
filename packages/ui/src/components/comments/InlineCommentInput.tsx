@@ -8,6 +8,7 @@ import { useI18n } from '@/lib/i18n';
 
 export interface InlineCommentInputProps {
   initialText?: string;
+  onTextChange?: (text: string) => void;
   onSave: (text: string, range?: { start: number; end: number; side?: 'additions' | 'deletions' }) => void;
   onCancel: () => void;
   fileLabel?: string;
@@ -19,6 +20,7 @@ export interface InlineCommentInputProps {
 
 export function InlineCommentInput({
   initialText = '',
+  onTextChange,
   onSave,
   onCancel,
   fileLabel,
@@ -33,6 +35,11 @@ export function InlineCommentInput({
   const { isMobile } = useDeviceInfo();
   const [text, setText] = React.useState(initialText);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const handleTextChange = (value: string) => {
+    setText(value);
+    onTextChange?.(value);
+  };
   
   // Stable range snapshot to prevent race with selection clearing
   const stableRangeRef = useRef(lineRange);
@@ -145,7 +152,7 @@ export function InlineCommentInput({
           simple
           ref={textareaRef}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => handleTextChange(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={isMobile ? t('inlineComment.input.placeholderShort') : t('inlineComment.input.placeholder')}
           outerClassName="rounded-[var(--radius-xl)] bg-[var(--surface-subtle)] ring-1 ring-inset ring-border/60 focus-within:ring-2 focus-within:ring-[var(--interactive-focus-ring)]"
