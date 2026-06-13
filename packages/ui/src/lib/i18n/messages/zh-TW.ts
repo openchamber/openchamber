@@ -384,6 +384,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.project.actions.projectMenu': '專案選單',
   'sessions.sidebar.project.actions.newSession': '新增會話',
   'sessions.sidebar.project.actions.closeProject': '關閉專案',
+  'sessions.sidebar.project.actions.refreshProject': 'Refresh project',
+  'sessions.sidebar.project.actions.refreshProjectTooltip': 'Refresh project sessions and folders',
   'sessions.sidebar.project.actions.newDraftSession': '新增草稿會話',
   'sessions.sidebar.session.menu.rename': '重新命名',
   'sessions.sidebar.session.rename.save': '儲存會話名稱',

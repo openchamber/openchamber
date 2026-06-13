@@ -370,6 +370,8 @@ export const dict = {
   'sessions.sidebar.project.actions.projectMenu': 'Project menu',
   'sessions.sidebar.project.actions.newSession': 'New session',
   'sessions.sidebar.project.actions.closeProject': 'Close project',
+  'sessions.sidebar.project.actions.refreshProject': 'Refresh project',
+  'sessions.sidebar.project.actions.refreshProjectTooltip': 'Refresh project sessions and folders',
   'sessions.sidebar.project.actions.newDraftSession': 'New draft session',
   'sessions.sidebar.session.menu.rename': 'Rename',
   'sessions.sidebar.session.rename.save': 'Save session name',

@@ -135,8 +135,18 @@ export function PluginStatusPage({ onClose, showHeader = true }: PluginStatusPag
   const title = t('settings.pluginStatus.title');
 
   const header = showHeader ? (
-    <header className="border-b border-[var(--border)] px-5 py-4">
+    <header className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
       <h1 className="text-lg font-semibold">{title}</h1>
+      {onClose && (
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-md p-1.5 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+          aria-label={t('settings.view.actions.closeSettings')}
+        >
+          <Icon name="close" className="h-5 w-5" />
+        </button>
+      )}
     </header>
   ) : null;
 
