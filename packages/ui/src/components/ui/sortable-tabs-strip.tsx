@@ -432,7 +432,6 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
               <div
                 ref={(element) => setTabRef(item.id, element)}
                 onAuxClick={handleAuxClick}
-                onContextMenu={contextMenu ? (event) => { event.preventDefault(); setOpenContextMenuId(item.id); } : undefined}
                 onMouseDown={handleMouseDown}
                 className={cn(
                   'group flex h-full min-w-0 flex-nowrap items-center',
