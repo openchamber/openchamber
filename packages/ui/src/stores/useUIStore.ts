@@ -519,6 +519,7 @@ interface UIStore {
   todoPanelHeight: number;
   isSessionSwitcherOpen: boolean;
   isSessionDropdownOpen: boolean;
+  showSubagentSessionsInSidebar: boolean;
   activeMainTab: MainTab;
   mainTabGuard: MainTabGuard | null;
   sidebarOpenBeforeFullscreenTab: boolean | null;
@@ -661,6 +662,7 @@ interface UIStore {
   setTodoPanelHeight: (height: number) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
   setSessionDropdownOpen: (open: boolean) => void;
+  setShowSubagentSessionsInSidebar: (show: boolean) => void;
   setActiveMainTab: (tab: MainTab) => void;
   prepareForRuntimeSwitch: (runtimeKey?: string | null) => void;
   restoreForRuntimeSwitch: (runtimeKey?: string | null) => void;
@@ -807,6 +809,7 @@ export const useUIStore = create<UIStore>()(
         todoPanelHeight: 259,
         isSessionSwitcherOpen: false,
         isSessionDropdownOpen: false,
+        showSubagentSessionsInSidebar: false,
         activeMainTab: 'chat',
         mainTabGuard: null,
         sidebarOpenBeforeFullscreenTab: null,
@@ -1369,6 +1372,14 @@ export const useUIStore = create<UIStore>()(
           }
           set({ isSessionDropdownOpen: open });
         },
+
+        setShowSubagentSessionsInSidebar: (show) => {
+          if (get().showSubagentSessionsInSidebar === show) {
+            return;
+          }
+          set({ showSubagentSessionsInSidebar: show });
+        },
+
 
         setMainTabGuard: (guard) => {
           if (get().mainTabGuard === guard) {
@@ -2252,6 +2263,7 @@ export const useUIStore = create<UIStore>()(
           mobileSessionFilterProjectId: state.mobileSessionFilterProjectId,
           shortcutOverrides: state.shortcutOverrides,
           fileEditorKeymap: state.fileEditorKeymap,
+          showSubagentSessionsInSidebar: state.showSubagentSessionsInSidebar,
         })
       }
     ),
