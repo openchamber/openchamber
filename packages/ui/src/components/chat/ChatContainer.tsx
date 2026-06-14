@@ -137,7 +137,7 @@ type HydratingToolSkeletonRow = {
 
 type ChatViewportProps = {
     currentSessionId: string;
-    isDesktopExpandedInput: boolean;
+    isExpandedInput: boolean;
     isMobile: boolean;
     stickyUserHeader: boolean;
     scrollRef: React.RefObject<HTMLDivElement | null>;
@@ -165,7 +165,7 @@ type ChatViewportProps = {
 
 const ChatViewport = React.memo(({
     currentSessionId,
-    isDesktopExpandedInput,
+    isExpandedInput,
     isMobile,
     stickyUserHeader,
     scrollRef,
@@ -201,11 +201,11 @@ const ChatViewport = React.memo(({
         <div
             className={cn(
                 'relative min-h-0',
-                isDesktopExpandedInput
+                isExpandedInput
                     ? 'absolute inset-0 opacity-0 pointer-events-none'
                     : 'flex-1'
             )}
-            aria-hidden={isDesktopExpandedInput}
+            aria-hidden={isExpandedInput}
         >
             <div className="absolute inset-0">
                 <ScrollShadow
@@ -260,7 +260,7 @@ const ChatViewport = React.memo(({
     );
 }, (prev, next) => {
     return prev.currentSessionId === next.currentSessionId
-        && prev.isDesktopExpandedInput === next.isDesktopExpandedInput
+        && prev.isExpandedInput === next.isExpandedInput
         && prev.isMobile === next.isMobile
         && prev.stickyUserHeader === next.stickyUserHeader
         && prev.scrollRef === next.scrollRef
@@ -547,7 +547,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     const chatSurfaceMode = useChatSurfaceMode();
     const draftOpen = Boolean(newSessionDraft?.open);
     const initError = useGlobalSyncStore((s) => s.error);
-    const isDesktopExpandedInput = isExpandedInput && !isMobile;
     const useCompactDraftLayout = isMobile || isVSCode || chatSurfaceMode === 'mini-chat';
     const messageListRef = React.useRef<MessageListHandle | null>(null);
     const draftProjectLabel = React.useMemo(() => {
@@ -678,7 +677,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     }, [currentSessionId, goToBottom]);
 
     React.useEffect(() => {
-        if (typeof window === 'undefined' || !currentSessionId || isDesktopExpandedInput) {
+        if (typeof window === 'undefined' || !currentSessionId || isExpandedInput) {
             return;
         }
 
@@ -718,7 +717,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         return () => {
             window.removeEventListener('keydown', handleChatTurnKeyDown);
         };
-    }, [currentSessionId, isDesktopExpandedInput, navigation, scrollRef]);
+    }, [currentSessionId, isExpandedInput, navigation, scrollRef]);
 
     React.useLayoutEffect(() => {
         const container = scrollRef.current;
@@ -754,7 +753,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
             if (rafId) cancelAnimationFrame(rafId);
             resizeObserver.disconnect();
         };
-    }, [currentSessionId, isDesktopExpandedInput, scrollRef]);
+    }, [currentSessionId, isExpandedInput, scrollRef]);
 
     const lastScrolledSessionRef = React.useRef<string | null>(null);
 
@@ -809,7 +808,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 	if (!currentSessionId && draftOpen) {
 		return (
 			<div className="relative flex h-full flex-col bg-background transform-gpu">
-				{useCompactDraftLayout && !isDesktopExpandedInput ? (
+				{useCompactDraftLayout && !isExpandedInput ? (
 					<div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
 						<h1 className="text-balance text-3xl font-normal tracking-tight text-foreground">
 							{renderDraftTitle(
@@ -828,7 +827,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 				<div
 					className={cn(
 						'relative z-10 flex min-h-0',
-						isDesktopExpandedInput
+						isExpandedInput
 							? 'flex-1 bg-background'
 							: useCompactDraftLayout
 								? 'bg-background px-0'
@@ -852,11 +851,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 				<div
 					className={cn(
 						'relative min-h-0',
-                        isDesktopExpandedInput
+                        isExpandedInput
                             ? 'absolute inset-0 opacity-0 pointer-events-none'
                             : 'flex-1'
                     )}
-                    aria-hidden={isDesktopExpandedInput}
+                    aria-hidden={isExpandedInput}
                 >
                     <div className="absolute inset-0 overflow-y-auto overflow-x-hidden bg-background pt-6" style={CHAT_SCROLL_STYLE}>
                         <div className="space-y-4">
@@ -890,7 +889,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 <div
                     className={cn(
                         'relative z-10',
-						isDesktopExpandedInput
+						isExpandedInput
 							? 'flex-1 min-h-0 bg-background'
 							: 'bg-background'
 					)}
@@ -908,13 +907,13 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 				<div
 					className={cn(
                         'relative min-h-0',
-                        isDesktopExpandedInput
+                        isExpandedInput
                             ? 'absolute inset-0 opacity-0 pointer-events-none'
                             : 'flex-1'
                     )}
-                    aria-hidden={isDesktopExpandedInput}
+                    aria-hidden={isExpandedInput}
                 >
-                    {!isDesktopExpandedInput ? (
+                    {!isExpandedInput ? (
                         <div className="absolute inset-0 flex items-center justify-center">
                             <ChatEmptyState />
                         </div>
@@ -923,7 +922,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 <div
                     className={cn(
                         'relative z-10',
-						isDesktopExpandedInput
+						isExpandedInput
 							? 'flex-1 min-h-0 bg-background'
 							: 'bg-background'
 					)}
@@ -940,7 +939,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 			<ChatViewport
 				key={currentSessionId}
 				currentSessionId={currentSessionId}
-                isDesktopExpandedInput={isDesktopExpandedInput}
+                isExpandedInput={isExpandedInput}
                 isMobile={isMobile}
                 stickyUserHeader={stickyUserHeader}
                 scrollRef={scrollRef}
@@ -964,12 +963,12 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
             <div
                 className={cn(
                     'relative z-10',
-                    isDesktopExpandedInput
+                    isExpandedInput
                         ? 'flex-1 min-h-0 bg-background'
                         : 'bg-background'
                 )}
             >
-                {!isDesktopExpandedInput && sessionMessages.length > 0 && (
+                {!isExpandedInput && sessionMessages.length > 0 && (
                     <ScrollToBottomButton
                         visible={timelineController.showScrollToBottom}
                         onClick={navigation.resumeToLatest}
