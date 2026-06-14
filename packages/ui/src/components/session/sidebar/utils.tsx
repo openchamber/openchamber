@@ -254,3 +254,18 @@ export const renderHighlightedText = (text: string, query: string): React.ReactN
 
   return parts.length > 0 ? parts : text;
 };
+export const getParentSessionId = (session: Session): string | null => {
+  const raw = (session as Session & { parentID?: string | null }).parentID;
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+export const isSubtaskSession = (session: Session): boolean => {
+  return getParentSessionId(session) !== null;
+};
+
+export const isTopLevelSession = (session: Session): boolean => {
+  return !isSubtaskSession(session);
+};
+
