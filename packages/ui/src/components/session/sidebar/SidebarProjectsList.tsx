@@ -66,6 +66,7 @@ type Props = {
   openSidebarMenuKey: string | null;
   setOpenSidebarMenuKey: (key: string | null) => void;
   isInlineEditing: boolean;
+  onRefreshProject?: (id: string) => void;
 };
 
 export function SidebarProjectsList(props: Props): React.ReactNode {
@@ -200,6 +201,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                     showCreateButtons
                     openSidebarMenuKey={props.openSidebarMenuKey}
                     setOpenSidebarMenuKey={props.setOpenSidebarMenuKey}
+                    onRefreshProject={isActiveProject ? () => props.onRefreshProject?.(projectKey) : undefined}
                   >
                     {!isCollapsed ? (
                       <div className="space-y-0 pt-0 pb-0.5 pl-3">

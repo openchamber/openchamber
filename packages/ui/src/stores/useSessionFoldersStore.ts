@@ -34,6 +34,7 @@ interface SessionFoldersActions {
   toggleFolderCollapse: (folderId: string) => void;
   cleanupSessions: (scopeKey: string, existingSessionIds: Set<string>) => void;
   getSessionFolderId: (scopeKey: string, sessionId: string) => string | null;
+  refreshFolders: () => Promise<void>;
 }
 
 type SessionFoldersStore = SessionFoldersState & SessionFoldersActions;
@@ -485,10 +486,52 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
         }
         return null;
       },
+
+      refreshFolders: async (): Promise<void> => {
+        await refreshSessionFoldersFromDisk();
+      },
     }),
     { name: 'session-folders-store' },
   ),
 );
+
+const fetchSessionFoldersFromDisk = async (): Promise<{ foldersMap: SessionFoldersMap; collapsedFolderIds: Set<string> } | null> => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    const response = await runtimeFetch(SESSION_FOLDERS_API_PATH).catch(() => null);
+    if (!response || !response.ok) {
+      return null;
+    }
+
+    const parsed = await response.json().catch(() => null) as {
+      foldersMap?: SessionFoldersMap;
+      collapsedFolderIds?: string[];
+    } | null;
+
+    if (!parsed) {
+      return null;
+    }
+
+    const diskFolders = parsed.foldersMap && typeof parsed.foldersMap === 'object'
+      ? parsed.foldersMap
+      : {};
+    const diskCollapsed = Array.isArray(parsed.collapsedFolderIds)
+      ? new Set(parsed.collapsedFolderIds.filter((value): value is string => typeof value === 'string'))
+      : new Set<string>();
+
+    const hasDiskData = Object.keys(diskFolders).length > 0 || diskCollapsed.size > 0;
+    if (!hasDiskData) {
+      return null;
+    }
+
+    return { foldersMap: diskFolders, collapsedFolderIds: diskCollapsed };
+  } catch {
+    return null;
+  }
+};
 
 const hydrateSessionFoldersFromDisk = async (): Promise<void> => {
   if (diskHydrated || diskHydrationInFlight || typeof window === 'undefined') {
@@ -538,6 +581,36 @@ const hydrateSessionFoldersFromDisk = async (): Promise<void> => {
     persistCollapsed(diskCollapsed);
   } catch {
     // ignored
+  } finally {
+    diskHydrationInFlight = false;
+    diskHydrated = true;
+  }
+};
+
+const refreshSessionFoldersFromDisk = async (): Promise<void> => {
+  if (diskHydrationInFlight || typeof window === 'undefined') {
+    return;
+  }
+
+  if (isVSCodeWebview()) {
+    return;
+  }
+
+  diskHydrationInFlight = true;
+
+  try {
+    const data = await fetchSessionFoldersFromDisk();
+    if (!data) {
+      return;
+    }
+
+    useSessionFoldersStore.setState({
+      foldersMap: data.foldersMap,
+      collapsedFolderIds: data.collapsedFolderIds,
+    });
+
+    persistFolders(data.foldersMap);
+    persistCollapsed(data.collapsedFolderIds);
   } finally {
     diskHydrationInFlight = false;
     diskHydrated = true;

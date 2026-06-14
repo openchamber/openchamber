@@ -24,6 +24,7 @@ type Args = {
   setSessionSwitcherOpen: (open: boolean) => void;
   sessions: Session[];
   worktreeMetadata: Map<string, { path?: string | null }>;
+  hasLoadedGlobalSessions: boolean;
 };
 
 export const useProjectSessionSelection = (args: Args): { currentSessionDirectory: string | null } => {
@@ -41,6 +42,7 @@ export const useProjectSessionSelection = (args: Args): { currentSessionDirector
     setSessionSwitcherOpen,
     sessions,
     worktreeMetadata,
+    hasLoadedGlobalSessions,
   } = args;
 
   const projectSessionMeta = React.useMemo(() => {
@@ -120,6 +122,10 @@ export const useProjectSessionSelection = (args: Args): { currentSessionDirector
       return;
     }
 
+    if (!hasLoadedGlobalSessions) {
+      return;
+    }
+
     if (!projectMap || projectMap.size === 0) {
       setActiveMainTab('chat');
       if (mobileVariant) {
@@ -153,6 +159,7 @@ export const useProjectSessionSelection = (args: Args): { currentSessionDirector
     setActiveMainTab,
     setSessionSwitcherOpen,
     setActiveSessionByProject,
+    hasLoadedGlobalSessions,
   ]);
 
   React.useEffect(() => {

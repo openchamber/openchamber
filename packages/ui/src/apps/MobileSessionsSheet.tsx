@@ -3,6 +3,7 @@ import {
   RiAddLine,
   RiArchiveLine,
   RiArrowDownSLine,
+  RiRefreshLine,
   RiArrowUpSLine,
   RiCheckLine,
   RiCloseLine,
@@ -45,7 +46,8 @@ import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/pro
 import { cn } from '@/lib/utils';
 import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { mergeSessionDirectoryMetadata, refreshGlobalSessions, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { mergeSessionDirectoryMetadata, refreshGlobalSessions, refreshGlobalSessionsForDirectories, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useMobileSessionExpansionStore } from '@/stores/useMobileSessionExpansionStore';
 import { useMobileSessionTreeStore } from '@/stores/useMobileSessionTreeStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -843,6 +845,15 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     onOpenChange(false);
   };
 
+  const handleRefreshProject = React.useCallback((project: ProjectMeta) => {
+    const directories = [project.path];
+    for (const wt of project.worktrees) {
+      directories.push(wt.path);
+    }
+    void refreshGlobalSessionsForDirectories(directories);
+    void useSessionFoldersStore.getState().refreshFolders();
+  }, []);
+
   const handleNewWorktree = (projectId: string) => {
     setWorktreeDialogProjectId(projectId);
     setActiveProjectIdOnly(projectId);
@@ -1184,6 +1195,21 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                         <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">
                           {node.totalSessions}
                         </span>
+                      </button>
+                      <button
+                        type="button"
+                        className={cn(
+                          'flex size-9 shrink-0 items-center justify-center rounded-full text-[var(--surface-mutedForeground)] transition-colors hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]',
+                        )}
+                        aria-label={t('sessions.sidebar.project.actions.refreshProjectTooltip')}
+                        title={t('sessions.sidebar.project.actions.refreshProjectTooltip')}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRefreshProject(node.project);
+                        }}
+                        style={{ touchAction: 'manipulation' }}
+                      >
+                        <RiRefreshLine className="size-4" />
                       </button>
                       {node.project.isGitRepo ? (
                         <NewWorktreeIconButton
