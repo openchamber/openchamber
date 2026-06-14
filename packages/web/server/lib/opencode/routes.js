@@ -17,14 +17,22 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     resolveProjectDirectory,
     getProviderSources,
     removeProviderConfig,
+    getUserProviderModelContextLimits,
+    updateUserProviderModelContextLimit,
     refreshOpenCodeAfterConfigChange,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
+    fetchProvidersSnapshot,
+    modelsDevApiUrl,
+    modelsMetadataCacheTtl,
   } = dependencies;
 
   let authLibrary = null;
+  let cachedModelsMetadata = null;
+  let cachedModelsMetadataTimestamp = 0;
   const pendingMcpAuthContextByState = new Map();
   const PENDING_MCP_AUTH_TTL_MS = 30 * 60 * 1000;
+  const DEFAULT_MODELS_METADATA_CACHE_TTL_MS = 5 * 60 * 1000;
   const getAuthLibrary = async () => {
     if (!authLibrary) {
       authLibrary = await import('./auth.js');
@@ -39,6 +47,122 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
 
     const trimmed = value.trim();
     return trimmed || null;
+  };
+
+  const isPlainObject = (value) => value && typeof value === 'object' && !Array.isArray(value);
+
+  const getNumericContextLimit = (modelEntry) => {
+    if (!isPlainObject(modelEntry) || !isPlainObject(modelEntry.limit)) {
+      return null;
+    }
+    const context = modelEntry.limit.context;
+    return typeof context === 'number' && Number.isFinite(context) && context > 0
+      ? context
+      : null;
+  };
+
+  const getCachedModelsMetadata = async () => {
+    if (!modelsDevApiUrl) {
+      return null;
+    }
+
+    const now = Date.now();
+    const cacheTtl = Number.isFinite(modelsMetadataCacheTtl)
+      ? modelsMetadataCacheTtl
+      : DEFAULT_MODELS_METADATA_CACHE_TTL_MS;
+    if (cachedModelsMetadata && now - cachedModelsMetadataTimestamp < cacheTtl) {
+      return cachedModelsMetadata;
+    }
+
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeout = controller ? setTimeout(() => controller.abort(), 8000) : null;
+    try {
+      const response = await fetch(modelsDevApiUrl, {
+        signal: controller?.signal,
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) {
+        throw new Error(`models.dev responded with status ${response.status}`);
+      }
+      cachedModelsMetadata = await response.json();
+      cachedModelsMetadataTimestamp = Date.now();
+      return cachedModelsMetadata;
+    } catch (error) {
+      console.warn('Failed to fetch models.dev metadata for context cap validation:', error);
+      return cachedModelsMetadata;
+    } finally {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+    }
+  };
+
+  const getAdvertisedModelContextLimit = async (providerId, modelId) => {
+    const metadata = await getCachedModelsMetadata();
+    if (!isPlainObject(metadata)) {
+      return null;
+    }
+
+    const normalizedProviderId = providerId.toLowerCase();
+    for (const [providerKey, providerValue] of Object.entries(metadata)) {
+      if (!isPlainObject(providerValue)) {
+        continue;
+      }
+
+      const resolvedProviderId = typeof providerValue.id === 'string' && providerValue.id.length > 0
+        ? providerValue.id
+        : providerKey;
+      if (resolvedProviderId.toLowerCase() !== normalizedProviderId || !isPlainObject(providerValue.models)) {
+        continue;
+      }
+
+      const directModel = providerValue.models[modelId];
+      const directLimit = getNumericContextLimit(directModel);
+      if (directLimit !== null) {
+        return directLimit;
+      }
+
+      for (const [modelKey, modelValue] of Object.entries(providerValue.models)) {
+        if (modelKey !== modelId && (!isPlainObject(modelValue) || modelValue.id !== modelId)) {
+          continue;
+        }
+        const contextLimit = getNumericContextLimit(modelValue);
+        if (contextLimit !== null) {
+          return contextLimit;
+        }
+      }
+    }
+
+    return null;
+  };
+
+  const getLiveModelContextLimit = async (providerId, modelId, currentContextCap) => {
+    if (typeof fetchProvidersSnapshot !== 'function') {
+      return null;
+    }
+
+    try {
+      const providers = await fetchProvidersSnapshot();
+      const provider = providers.find((entry) => isPlainObject(entry) && entry.id === providerId);
+      const models = isPlainObject(provider?.models) ? provider.models : null;
+      const modelEntry = models ? models[modelId] : null;
+      const contextLimit = getNumericContextLimit(modelEntry);
+      if (contextLimit === null || contextLimit === currentContextCap) {
+        return null;
+      }
+      return contextLimit;
+    } catch (error) {
+      console.warn('Failed to fetch OpenCode provider metadata for context cap validation:', error);
+      return null;
+    }
+  };
+
+  const resolveMaxModelContextLimit = async (providerId, modelId, currentContextCap) => {
+    const advertisedLimit = await getAdvertisedModelContextLimit(providerId, modelId);
+    if (advertisedLimit !== null) {
+      return advertisedLimit;
+    }
+    return getLiveModelContextLimit(providerId, modelId, currentContextCap);
   };
 
   const parseVersionForComparison = (value) => {
@@ -371,6 +495,61 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     } catch (error) {
       console.error('Failed to get provider sources:', error);
       return res.status(500).json({ error: error.message || 'Failed to get provider sources' });
+    }
+  });
+
+  app.get('/api/provider/:providerId/model-context-limits', async (req, res) => {
+    try {
+      const { providerId } = req.params;
+      if (!providerId) {
+        return res.status(400).json({ error: 'Provider ID is required' });
+      }
+
+      const result = getUserProviderModelContextLimits(providerId);
+      return res.json(result);
+    } catch (error) {
+      console.error('Failed to get provider model context limits:', error);
+      return res.status(500).json({ error: error.message || 'Failed to get provider model context limits' });
+    }
+  });
+
+  app.patch('/api/provider/:providerId/model-context-limit', async (req, res) => {
+    try {
+      const { providerId } = req.params;
+      const modelId = typeof req.body?.modelId === 'string' ? req.body.modelId.trim() : '';
+      if (!providerId) {
+        return res.status(400).json({ error: 'Provider ID is required' });
+      }
+      if (!modelId) {
+        return res.status(400).json({ error: 'Model ID is required' });
+      }
+
+      const currentLimits = getUserProviderModelContextLimits(providerId);
+      const currentContextCap = currentLimits.models?.[modelId]?.context ?? null;
+      const maxContextLimit = await resolveMaxModelContextLimit(providerId, modelId, currentContextCap);
+      const result = updateUserProviderModelContextLimit(
+        providerId,
+        modelId,
+        req.body?.contextLimit ?? null,
+        req.body?.outputLimit ?? null,
+        maxContextLimit,
+      );
+
+      return res.json({
+        success: true,
+        ...result,
+        maxContextLimit,
+        requiresReload: true,
+        message: result.context === null
+          ? 'Model context cap cleared. Reloading interface…'
+          : 'Model context cap saved. Reloading interface…',
+        reloadDelayMs: clientReloadDelayMs,
+      });
+    } catch (error) {
+      console.error('Failed to update provider model context limit:', error);
+      const message = error.message || 'Failed to update provider model context limit';
+      const status = message.includes('required') || message.includes('positive integer') || message.includes('cannot exceed') ? 400 : 500;
+      return res.status(status).json({ error: message });
     }
   });
 

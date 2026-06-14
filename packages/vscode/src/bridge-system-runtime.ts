@@ -3,11 +3,17 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { randomUUID } from 'crypto';
-import { removeProviderConfig, getProviderSources } from './opencodeConfig';
+import {
+  removeProviderConfig,
+  getProviderSources,
+  getUserProviderModelContextLimits,
+  updateUserProviderModelContextLimit,
+} from './opencodeConfig';
 import { getProviderAuth, removeProviderAuth } from './opencodeAuth';
 import { fetchQuotaForProvider, listConfiguredQuotaProviders } from './quotaProviders';
 import { getSessionActivitySnapshot } from './sessionActivityWatcher';
 import type { BridgeContext, BridgeResponse } from './bridge';
+import { waitForApiUrl } from './opencode-ready';
 
 type BridgeMessageInput = {
   id: string;
@@ -207,6 +213,137 @@ const reconstructOriginalContentFromPatch = (modifiedContent: string, patch: str
 };
 
 const fetchFreeZenModels = async (): Promise<Array<{ id: string; owned_by?: string }>> => [];
+const MODELS_DEV_API_URL = 'https://models.dev/api.json';
+const MODELS_METADATA_CACHE_TTL_MS = 5 * 60 * 1000;
+
+let cachedModelsMetadata: unknown = null;
+let cachedModelsMetadataTimestamp = 0;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const getNumericContextLimit = (modelEntry: unknown): number | null => {
+  if (!isRecord(modelEntry) || !isRecord(modelEntry.limit)) {
+    return null;
+  }
+  const context = modelEntry.limit.context;
+  return typeof context === 'number' && Number.isFinite(context) && context > 0 ? context : null;
+};
+
+const getCachedModelsMetadata = async (): Promise<unknown> => {
+  const now = Date.now();
+  if (cachedModelsMetadata && now - cachedModelsMetadataTimestamp < MODELS_METADATA_CACHE_TTL_MS) {
+    return cachedModelsMetadata;
+  }
+
+  try {
+    const response = await fetch(MODELS_DEV_API_URL, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!response.ok) {
+      throw new Error(`models.dev responded with status ${response.status}`);
+    }
+    cachedModelsMetadata = await response.json();
+    cachedModelsMetadataTimestamp = Date.now();
+  } catch (error) {
+    console.warn('[OpenChamber][VSCode] Failed to fetch models.dev metadata for context cap validation:', error);
+  }
+
+  return cachedModelsMetadata;
+};
+
+const getAdvertisedModelContextLimit = async (providerId: string, modelId: string): Promise<number | null> => {
+  const metadata = await getCachedModelsMetadata();
+  if (!isRecord(metadata)) {
+    return null;
+  }
+
+  const normalizedProviderId = providerId.toLowerCase();
+  for (const [providerKey, providerValue] of Object.entries(metadata)) {
+    if (!isRecord(providerValue)) {
+      continue;
+    }
+
+    const resolvedProviderId = typeof providerValue.id === 'string' && providerValue.id.length > 0
+      ? providerValue.id
+      : providerKey;
+    if (resolvedProviderId.toLowerCase() !== normalizedProviderId || !isRecord(providerValue.models)) {
+      continue;
+    }
+
+    const directLimit = getNumericContextLimit(providerValue.models[modelId]);
+    if (directLimit !== null) {
+      return directLimit;
+    }
+
+    for (const [modelKey, modelValue] of Object.entries(providerValue.models)) {
+      if (modelKey !== modelId && (!isRecord(modelValue) || modelValue.id !== modelId)) {
+        continue;
+      }
+      const contextLimit = getNumericContextLimit(modelValue);
+      if (contextLimit !== null) {
+        return contextLimit;
+      }
+    }
+  }
+
+  return null;
+};
+
+const getLiveModelContextLimit = async (
+  ctx: BridgeContext | undefined,
+  providerId: string,
+  modelId: string,
+  currentContextCap: number | null,
+): Promise<number | null> => {
+  try {
+    const apiUrl = await waitForApiUrl(ctx?.manager);
+    if (!apiUrl) {
+      return null;
+    }
+
+    const base = `${apiUrl.replace(/\/+$/, '')}/`;
+    const response = await fetch(new URL('provider', base).toString(), {
+      method: 'GET',
+      headers: { Accept: 'application/json', ...ctx?.manager?.getOpenCodeAuthHeaders() },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!response.ok) {
+      throw new Error(`OpenCode provider endpoint responded with status ${response.status}`);
+    }
+
+    const providers = await response.json().catch(() => null) as unknown;
+    if (!Array.isArray(providers)) {
+      return null;
+    }
+
+    const provider = providers.find((entry) => isRecord(entry) && entry.id === providerId);
+    const models = isRecord(provider?.models) ? provider.models : null;
+    const contextLimit = getNumericContextLimit(models?.[modelId]);
+    if (contextLimit === null || contextLimit === currentContextCap) {
+      return null;
+    }
+    return contextLimit;
+  } catch (error) {
+    console.warn('[OpenChamber][VSCode] Failed to fetch OpenCode provider metadata for context cap validation:', error);
+    return null;
+  }
+};
+
+const resolveMaxModelContextLimit = async (
+  ctx: BridgeContext | undefined,
+  providerId: string,
+  modelId: string,
+  currentContextCap: number | null,
+): Promise<number | null> => {
+  const advertisedLimit = await getAdvertisedModelContextLimit(providerId, modelId);
+  if (advertisedLimit !== null) {
+    return advertisedLimit;
+  }
+  return getLiveModelContextLimit(ctx, providerId, modelId, currentContextCap);
+};
 
 export async function handleSystemBridgeMessage(
   message: BridgeMessageInput,
@@ -465,6 +602,58 @@ export async function handleSystemBridgeMessage(
         const auth = getProviderAuth(providerId);
         sources.auth.exists = Boolean(auth);
         return { id, type, success: true, data: { providerId, sources } };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:provider/model-context-limits:get': {
+      const { providerId } = (payload || {}) as { providerId?: string };
+      if (!providerId) {
+        return { id, type, success: false, error: 'Provider ID is required' };
+      }
+      try {
+        return { id, type, success: true, data: getUserProviderModelContextLimits(providerId) };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:provider/model-context-limit:patch': {
+      const { providerId, modelId, contextLimit, outputLimit } = (payload || {}) as {
+        providerId?: string;
+        modelId?: string;
+        contextLimit?: unknown;
+        outputLimit?: unknown;
+      };
+      if (!providerId) {
+        return { id, type, success: false, error: 'Provider ID is required' };
+      }
+      if (!modelId) {
+        return { id, type, success: false, error: 'Model ID is required' };
+      }
+      try {
+        const currentLimits = getUserProviderModelContextLimits(providerId);
+        const currentContextCap = currentLimits.models[modelId]?.context ?? null;
+        const maxContextLimit = await resolveMaxModelContextLimit(ctx, providerId, modelId, currentContextCap);
+        const result = updateUserProviderModelContextLimit(providerId, modelId, contextLimit ?? null, outputLimit ?? null, maxContextLimit);
+        return {
+          id,
+          type,
+          success: true,
+          data: {
+            success: true,
+            ...result,
+            maxContextLimit,
+            requiresReload: true,
+            message: result.context === null
+              ? 'Model context cap cleared. Reloading interface…'
+              : 'Model context cap saved. Reloading interface…',
+            reloadDelayMs: deps.clientReloadDelayMs,
+          },
+        };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         return { id, type, success: false, error: errorMessage };

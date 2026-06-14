@@ -1093,6 +1093,37 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     }
   }
 
+  const providerModelContextLimitsMatch = pathname.match(/^\/api\/provider\/([^/]+)\/model-context-limits$/);
+  if (providerModelContextLimitsMatch && method === 'GET') {
+    const providerId = decodeURIComponent(providerModelContextLimitsMatch[1]);
+    try {
+      const data = await sendBridgeMessage('api:provider/model-context-limits:get', { providerId });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  const providerModelContextLimitMatch = pathname.match(/^\/api\/provider\/([^/]+)\/model-context-limit$/);
+  if (providerModelContextLimitMatch && method === 'PATCH') {
+    const providerId = decodeURIComponent(providerModelContextLimitMatch[1]);
+    const body = await extractJsonBody(input, init, method);
+    try {
+      const data = await sendBridgeMessage('api:provider/model-context-limit:patch', {
+        providerId,
+        modelId: body?.modelId,
+        contextLimit: body?.contextLimit,
+        outputLimit: body?.outputLimit,
+      });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const status = message.includes('required') || message.includes('positive integer') ? 400 : 500;
+      return new Response(JSON.stringify({ error: message }), { status, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
   return null;
 };
 

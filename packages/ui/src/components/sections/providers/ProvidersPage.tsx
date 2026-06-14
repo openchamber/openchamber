@@ -23,6 +23,7 @@ import type { ModelMetadata } from '@/types';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { opencodeClient } from '@/lib/opencode/client';
+import { mergeModelMetadataWithLiveModel } from '@/lib/modelMetadata';
 
 const formatCompactNumber = (value: number) => new Intl.NumberFormat(getCurrentIntlLocale(), {
   notation: 'compact',
@@ -41,6 +42,29 @@ const formatTokens = (value?: number | null) => {
   const formatted = formatCompactNumber(value);
   return formatted.endsWith('.0') ? formatted.slice(0, -2) : formatted;
 };
+
+const MODEL_CONTEXT_CAP_INPUT_SEPARATOR = '\u0000';
+
+const buildModelContextCapInputKey = (providerId: string, modelId: string) =>
+  `${providerId}${MODEL_CONTEXT_CAP_INPUT_SEPARATOR}${modelId}`;
+
+const parseContextCapInput = (value: string): number | null | undefined => {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const match = trimmed.match(/^(\d+(?:\.\d+)?)\s*([kKmM])?$/);
+  if (!match) return undefined;
+
+  const amount = Number.parseFloat(match[1]);
+  const suffix = match[2]?.toLowerCase();
+  const multiplier = suffix === 'm' ? 1_000_000 : suffix === 'k' ? 1_000 : 1;
+  const result = Math.round(amount * multiplier);
+
+  return Number.isSafeInteger(result) && result > 0 ? result : undefined;
+};
+
+const formatContextCapInputValue = (value: number | null | undefined) =>
+  typeof value === 'number' && Number.isFinite(value) ? String(value) : '';
 
 const ADD_PROVIDER_ID = '__add_provider__';
 
@@ -69,6 +93,11 @@ interface ProviderSources {
   user: ProviderSourceInfo;
   project: ProviderSourceInfo;
   custom?: ProviderSourceInfo;
+}
+
+interface ModelContextCap {
+  context: number;
+  output?: number;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -169,6 +198,10 @@ export const ProvidersPage: React.FC = () => {
   const [providerDropdownOpen, setProviderDropdownOpen] = React.useState(false);
   const [providerSources, setProviderSources] = React.useState<Record<string, ProviderSources>>({});
   const [showAuthPanel, setShowAuthPanel] = React.useState(false);
+  const [modelContextCapsByProvider, setModelContextCapsByProvider] = React.useState<Record<string, Record<string, ModelContextCap>>>({});
+  const [modelContextCapInputs, setModelContextCapInputs] = React.useState<Record<string, string>>({});
+  const [modelContextCapEditingKey, setModelContextCapEditingKey] = React.useState<string | null>(null);
+  const [modelContextCapBusyKey, setModelContextCapBusyKey] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!selectedProviderId && providers.length > 0) {
@@ -309,6 +342,70 @@ export const ProvidersPage: React.FC = () => {
     };
 
     loadSources();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedProviderId, t]);
+
+  React.useEffect(() => {
+    if (!selectedProviderId || selectedProviderId === ADD_PROVIDER_ID) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadModelContextCaps = async () => {
+      try {
+        const response = await runtimeFetch(`/api/provider/${encodeURIComponent(selectedProviderId)}/model-context-limits`, {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+        });
+
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) {
+          throw new Error(payload?.error || t('settings.providers.page.toast.contextCapLoadFailed'));
+        }
+
+        const rawModels = (payload?.models ?? payload?.data?.models) as unknown;
+        const nextCaps: Record<string, ModelContextCap> = {};
+        if (isRecord(rawModels)) {
+          for (const [modelId, value] of Object.entries(rawModels)) {
+            if (!isRecord(value) || typeof value.context !== 'number' || !Number.isFinite(value.context)) {
+              continue;
+            }
+            nextCaps[modelId] = {
+              context: value.context,
+              ...(typeof value.output === 'number' && Number.isFinite(value.output) ? { output: value.output } : {}),
+            };
+          }
+        }
+
+        if (cancelled) return;
+
+        setModelContextCapsByProvider((prev) => ({
+          ...prev,
+          [selectedProviderId]: nextCaps,
+        }));
+        setModelContextCapInputs((prev) => {
+          const providerPrefix = `${selectedProviderId}${MODEL_CONTEXT_CAP_INPUT_SEPARATOR}`;
+          const next = Object.fromEntries(
+            Object.entries(prev).filter(([key]) => !key.startsWith(providerPrefix))
+          );
+          for (const [modelId, cap] of Object.entries(nextCaps)) {
+            next[buildModelContextCapInputKey(selectedProviderId, modelId)] = formatContextCapInputValue(cap.context);
+          }
+          return next;
+        });
+      } catch (error) {
+        if (!cancelled) {
+          console.error('Failed to load provider model context caps:', error);
+          toast.error(t('settings.providers.page.toast.contextCapLoadFailed'));
+        }
+      }
+    };
+
+    loadModelContextCaps();
 
     return () => {
       cancelled = true;
@@ -480,6 +577,110 @@ export const ProvidersPage: React.FC = () => {
     } finally {
       setAuthBusyKey(null);
     }
+  };
+
+  const handleModelContextCapInputChange = (providerId: string, modelId: string, value: string) => {
+    const inputKey = buildModelContextCapInputKey(providerId, modelId);
+    setModelContextCapInputs((prev) => ({ ...prev, [inputKey]: value }));
+  };
+
+  const startEditingModelContextCap = (providerId: string, modelId: string, currentCap?: ModelContextCap) => {
+    const inputKey = buildModelContextCapInputKey(providerId, modelId);
+    setModelContextCapInputs((prev) => ({
+      ...prev,
+      [inputKey]: formatContextCapInputValue(currentCap?.context),
+    }));
+    setModelContextCapEditingKey(inputKey);
+  };
+
+  const cancelEditingModelContextCap = (providerId: string, modelId: string, currentCap?: ModelContextCap) => {
+    const inputKey = buildModelContextCapInputKey(providerId, modelId);
+    setModelContextCapInputs((prev) => ({
+      ...prev,
+      [inputKey]: formatContextCapInputValue(currentCap?.context),
+    }));
+    setModelContextCapEditingKey(null);
+  };
+
+  const saveModelContextCap = async (
+    providerId: string,
+    modelId: string,
+    outputLimit?: number | null,
+    maxContextLimit?: number | null,
+    inputOverride?: string,
+  ) => {
+    const inputKey = buildModelContextCapInputKey(providerId, modelId);
+    const input = inputOverride ?? modelContextCapInputs[inputKey] ?? '';
+    const parsed = parseContextCapInput(input);
+
+    if (parsed === undefined) {
+      toast.error(t('settings.providers.page.toast.contextCapInvalid'));
+      return;
+    }
+
+    if (parsed !== null && typeof maxContextLimit === 'number' && Number.isFinite(maxContextLimit) && parsed > maxContextLimit) {
+      toast.error(t('settings.providers.page.toast.contextCapTooHigh', {
+        tokens: formatTokens(maxContextLimit) ?? String(maxContextLimit),
+      }));
+      return;
+    }
+
+    const busyKey = `context-cap:${providerId}:${modelId}`;
+    setModelContextCapBusyKey(busyKey);
+
+    try {
+      const body: { modelId: string; contextLimit: number | null; outputLimit?: number } = {
+        modelId,
+        contextLimit: parsed,
+      };
+      if (parsed !== null && typeof outputLimit === 'number' && Number.isFinite(outputLimit)) {
+        body.outputLimit = outputLimit;
+      }
+
+      const response = await runtimeFetch(`/api/provider/${encodeURIComponent(providerId)}/model-context-limit`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.error || t('settings.providers.page.toast.contextCapSaveFailed'));
+      }
+
+      setModelContextCapsByProvider((prev) => {
+        const providerCaps = { ...(prev[providerId] ?? {}) };
+        if (parsed === null) {
+          delete providerCaps[modelId];
+        } else {
+          providerCaps[modelId] = {
+            context: parsed,
+            ...(typeof body.outputLimit === 'number' ? { output: body.outputLimit } : {}),
+          };
+        }
+        return { ...prev, [providerId]: providerCaps };
+      });
+      setModelContextCapInputs((prev) => ({
+        ...prev,
+        [inputKey]: formatContextCapInputValue(parsed),
+      }));
+      setModelContextCapEditingKey((current) => current === inputKey ? null : current);
+
+      toast.success(parsed === null
+        ? t('settings.providers.page.toast.contextCapCleared')
+        : t('settings.providers.page.toast.contextCapSaved'));
+      await reloadOpenCodeConfiguration({ scopes: ['providers'], mode: 'active' });
+      setSelectedProvider(providerId);
+    } catch (error) {
+      console.error('Failed to save model context cap:', error);
+      toast.error(error instanceof Error ? error.message : t('settings.providers.page.toast.contextCapSaveFailed'));
+    } finally {
+      setModelContextCapBusyKey(null);
+    }
+  };
+
+  const clearModelContextCap = (providerId: string, modelId: string, outputLimit?: number | null, maxContextLimit?: number | null) => {
+    void saveModelContextCap(providerId, modelId, outputLimit, maxContextLimit, '');
   };
 
   const isAddMode = selectedProviderId === ADD_PROVIDER_ID;
@@ -1016,6 +1217,9 @@ export const ProvidersPage: React.FC = () => {
                 className="h-7 pl-8 w-full"
               />
             </div>
+            <p data-settings-item="providers.model-context-caps" className="mb-2 px-1 typography-meta text-muted-foreground">
+              {t('settings.providers.page.models.contextCap.description')}
+            </p>
 
             {filteredModels.length === 0 ? (
               <p className="typography-meta text-muted-foreground py-4 text-center">{t('settings.providers.page.models.noModelsMatchFilter')}</p>
@@ -1024,13 +1228,72 @@ export const ProvidersPage: React.FC = () => {
                 {filteredModels.map((model) => {
                   const modelId = typeof model?.id === 'string' ? model.id : '';
                   const modelName = typeof model?.name === 'string' ? model.name : modelId;
-                  const metadata = modelId ? getModelMetadata(selectedProvider.id, modelId) as ModelMetadata | undefined : undefined;
+                  const advertisedMetadata = modelId ? getModelMetadata(selectedProvider.id, modelId) as ModelMetadata | undefined : undefined;
+                  const metadata = modelId
+                    ? mergeModelMetadataWithLiveModel(selectedProvider.id, model, advertisedMetadata)
+                    : advertisedMetadata;
                   const isHidden = hiddenModels.some(
                     (item) => item.providerID === selectedProvider.id && item.modelID === modelId
                   );
 
+                  const modelContextCap = modelContextCapsByProvider[selectedProvider.id]?.[modelId];
+                  const hasUserContextCap = typeof modelContextCap?.context === 'number';
+                  const advertisedContextLimit = advertisedMetadata?.limit?.context;
+                  const fallbackLiveContextLimit = hasUserContextCap ? undefined : metadata?.limit?.context;
+                  const maxContextLimit = typeof advertisedContextLimit === 'number' && Number.isFinite(advertisedContextLimit)
+                    ? advertisedContextLimit
+                    : fallbackLiveContextLimit;
                   const contextTokens = formatTokens(metadata?.limit?.context);
                   const outputTokens = formatTokens(metadata?.limit?.output);
+                  const advertisedContextTokens = formatTokens(advertisedContextLimit);
+                  const maxContextTokens = formatTokens(maxContextLimit);
+                  const inputKey = buildModelContextCapInputKey(selectedProvider.id, modelId);
+                  const capInputValue = modelContextCapInputs[inputKey] ?? '';
+                  const capBusyKey = `context-cap:${selectedProvider.id}:${modelId}`;
+                  const isContextCapBusy = modelContextCapBusyKey === capBusyKey;
+                  const isContextCapEditing = modelContextCapEditingKey === inputKey;
+                  const outputLimit = metadata?.limit?.output ?? advertisedMetadata?.limit?.output ?? modelContextCap?.output;
+                  const canCustomizeContextCap = typeof maxContextLimit === 'number' && Number.isFinite(maxContextLimit);
+                  const customContextTokens = formatTokens(modelContextCap?.context);
+                  const parsedCapInput = parseContextCapInput(capInputValue);
+                  const isCapInputTooHigh = typeof parsedCapInput === 'number'
+                    && canCustomizeContextCap
+                    && parsedCapInput > maxContextLimit;
+                  const isCapInputInvalid = capInputValue.trim().length > 0
+                    && (parsedCapInput === undefined || isCapInputTooHigh);
+                  const canSaveContextCap = !isContextCapBusy
+                    && Boolean(modelId)
+                    && parsedCapInput !== undefined
+                    && parsedCapInput !== null
+                    && !isCapInputTooHigh;
+
+                  let contextLimitValue = t('settings.providers.page.models.contextCap.unknown');
+                  if (hasUserContextCap && customContextTokens) {
+                    contextLimitValue = t('settings.providers.page.models.contextCap.valueCustom', { tokens: customContextTokens });
+                  } else if (advertisedContextTokens) {
+                    contextLimitValue = t('settings.providers.page.models.contextCap.valueAdvertised', { tokens: advertisedContextTokens });
+                  } else if (maxContextTokens) {
+                    contextLimitValue = t('settings.providers.page.models.contextCap.valueModelMax', { tokens: maxContextTokens });
+                  }
+
+                  let contextLimitSubtext = t('settings.providers.page.models.contextCap.maxUnavailable');
+                  if (hasUserContextCap && advertisedContextTokens) {
+                    contextLimitSubtext = t('settings.providers.page.models.contextCap.advertisedMax', { tokens: advertisedContextTokens });
+                  } else if (hasUserContextCap && maxContextTokens) {
+                    contextLimitSubtext = t('settings.providers.page.models.contextCap.modelMax', { tokens: maxContextTokens });
+                  } else if (maxContextTokens) {
+                    contextLimitSubtext = t('settings.providers.page.models.contextCap.usingModelMax');
+                  }
+
+                  const formattedMaxContextLimit = maxContextTokens ?? String(maxContextLimit ?? '');
+                  let contextCapHelpText = t('settings.providers.page.models.contextCap.helperWithMax', {
+                    tokens: formattedMaxContextLimit,
+                  });
+                  if (isCapInputInvalid) {
+                    contextCapHelpText = isCapInputTooHigh
+                      ? t('settings.providers.page.toast.contextCapTooHigh', { tokens: formattedMaxContextLimit })
+                      : t('settings.providers.page.toast.contextCapInvalid');
+                  }
 
                   const capabilityIcons: Array<{ key: string; icon: IconName; label: string }> = [];
                   if (metadata?.tool_call) capabilityIcons.push({ key: 'tools', icon: "tools", label: t('settings.providers.page.models.capability.toolCalling') });
@@ -1051,7 +1314,7 @@ export const ProvidersPage: React.FC = () => {
                       <div className="flex items-center gap-2 flex-shrink-0">
                         {(contextTokens || outputTokens) && (
                           <span className="typography-micro text-muted-foreground flex-shrink-0 bg-[var(--surface-muted)] px-1.5 py-0.5 rounded">
-                            {contextTokens ? `${contextTokens} ${t('settings.providers.page.models.tokenBadge.context')}` : ''}
+                            {contextTokens ? `${contextTokens} ${hasUserContextCap ? t('settings.providers.page.models.tokenBadge.effectiveContext') : t('settings.providers.page.models.tokenBadge.context')}` : ''}
                             {contextTokens && outputTokens ? ' · ' : ''}
                             {outputTokens ? `${outputTokens} ${t('settings.providers.page.models.tokenBadge.output')}` : ''}
                           </span>
@@ -1080,6 +1343,113 @@ export const ProvidersPage: React.FC = () => {
                           {isHidden ? <Icon name="eye-off" className="h-3.5 w-3.5" /> : <Icon name="eye" className="h-3.5 w-3.5" />}
                         </button>
                       </div>
+                      </div>
+                      <div className="mt-1 space-y-1.5">
+                        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+                              <span className="typography-micro text-muted-foreground">
+                                {t('settings.providers.page.models.contextCap.label')}
+                              </span>
+                              <span className="typography-micro font-medium tabular-nums text-foreground">
+                                {contextLimitValue}
+                              </span>
+                            </div>
+                            <div className="typography-micro text-muted-foreground/80">
+                              {contextLimitSubtext}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5 sm:shrink-0">
+                            {hasUserContextCap ? (
+                              <>
+                                <Button
+                                  variant="outline"
+                                  size="xs"
+                                  className="!font-normal"
+                                  onClick={() => startEditingModelContextCap(selectedProvider.id, modelId, modelContextCap)}
+                                  disabled={isContextCapBusy || !modelId || !canCustomizeContextCap}
+                                >
+                                  {t('settings.providers.page.models.contextCap.edit')}
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="xs"
+                                  className="!font-normal"
+                                  onClick={() => clearModelContextCap(selectedProvider.id, modelId, outputLimit, maxContextLimit)}
+                                  disabled={isContextCapBusy || !modelId}
+                                >
+                                  {t('settings.providers.page.models.contextCap.useModelMax')}
+                                </Button>
+                              </>
+                            ) : (
+                              <Button
+                                variant="outline"
+                                size="xs"
+                                className="!font-normal"
+                                onClick={() => startEditingModelContextCap(selectedProvider.id, modelId, modelContextCap)}
+                                disabled={isContextCapBusy || !modelId || !canCustomizeContextCap}
+                              >
+                                {t('settings.providers.page.models.contextCap.setCustom')}
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+
+                        {isContextCapEditing && (
+                          <div className="rounded-md border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-2">
+                            <label className="typography-micro font-medium text-foreground">
+                              {t('settings.providers.page.models.contextCap.customLimitLabel')}
+                            </label>
+                            <div className="mt-1.5 flex flex-col gap-2 sm:flex-row sm:items-center">
+                              <Input
+                                value={capInputValue}
+                                onChange={(event) => handleModelContextCapInputChange(selectedProvider.id, modelId, event.target.value)}
+                                placeholder={t('settings.providers.page.models.contextCap.placeholder')}
+                                inputMode="numeric"
+                                className="h-7 w-full font-mono text-xs sm:w-32"
+                                aria-label={t('settings.providers.page.models.contextCap.aria', { model: modelName })}
+                                disabled={isContextCapBusy}
+                              />
+                              <div className="flex items-center gap-1.5 sm:shrink-0">
+                                <Button
+                                  variant="outline"
+                                  size="xs"
+                                  className="!font-normal"
+                                  onClick={() => saveModelContextCap(selectedProvider.id, modelId, outputLimit, maxContextLimit)}
+                                  disabled={!canSaveContextCap}
+                                >
+                                  {isContextCapBusy ? t('settings.common.actions.saving') : t('settings.providers.page.models.contextCap.save')}
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="xs"
+                                  className="!font-normal"
+                                  onClick={() => cancelEditingModelContextCap(selectedProvider.id, modelId, modelContextCap)}
+                                  disabled={isContextCapBusy}
+                                >
+                                  {t('settings.common.actions.cancel')}
+                                </Button>
+                                {hasUserContextCap ? (
+                                  <Button
+                                    variant="ghost"
+                                    size="xs"
+                                    className="!font-normal"
+                                    onClick={() => clearModelContextCap(selectedProvider.id, modelId, outputLimit, maxContextLimit)}
+                                    disabled={isContextCapBusy || !modelId}
+                                  >
+                                    {t('settings.providers.page.models.contextCap.remove')}
+                                  </Button>
+                                ) : null}
+                              </div>
+                            </div>
+                            <p className={cn(
+                              "mt-1 typography-micro",
+                              isCapInputInvalid ? "text-[var(--status-error)]" : "text-muted-foreground",
+                            )}>
+                              {contextCapHelpText}
+                            </p>
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
