@@ -702,27 +702,67 @@ const resolveInitialDirectoryKey = (): string => {
     return toConfigDirectoryKey(directory);
 };
 
+// Persisted worktree→project mapping. The runtime worktree map
+// (availableWorktreesByProject) is populated by async git discovery and isn't
+// ready when initializeApp runs on startup — so without this, a worktree's first
+// config load can't resolve to its project and duplicates the project's load.
+// We cache resolved mappings to localStorage so subsequent launches resolve the
+// project synchronously at init time. worktree→project is effectively immutable,
+// so a cached entry is safe to trust.
+const WORKTREE_PROJECT_MAP_KEY = 'oc.worktreeProjectMap';
+let _worktreeProjectMap: Record<string, string> | null = null;
+const getWorktreeProjectMap = (): Record<string, string> => {
+    if (_worktreeProjectMap === null) {
+        try {
+            const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(WORKTREE_PROJECT_MAP_KEY) : null;
+            _worktreeProjectMap = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+        } catch {
+            _worktreeProjectMap = {};
+        }
+    }
+    return _worktreeProjectMap;
+};
+const rememberWorktreeProject = (worktree: string, project: string): void => {
+    if (!worktree || !project || worktree === project) return;
+    const map = getWorktreeProjectMap();
+    if (map[worktree] === project) return;
+    map[worktree] = project;
+    try {
+        localStorage.setItem(WORKTREE_PROJECT_MAP_KEY, JSON.stringify(map));
+    } catch {
+        // localStorage quota exceeded — ignore; live resolution still works.
+    }
+};
+
 /**
  * Map a directory to its CONFIG scope. Providers/agents/defaults are defined at
  * the PROJECT level (opencode.json), so a worktree must inherit its parent
  * project's config instead of maintaining — and re-fetching — its own
  * per-worktree snapshot. Returns the owning project's path when the directory is
- * a known worktree, else the directory unchanged. Degrades gracefully (returns
- * the directory) when the worktree→project mapping isn't available yet.
+ * a known worktree, else the directory unchanged.
  */
 const resolveConfigDirectory = (directory: string | null | undefined): string | null => {
     const dir = typeof directory === 'string' && directory.trim().length > 0 ? directory : null;
     if (!dir) return dir;
+    // 1. Persisted mapping — resolves synchronously at startup, before the async
+    //    git worktree discovery has populated the runtime map.
+    const cached = getWorktreeProjectMap()[dir];
+    if (cached) return cached;
+    // 2. Live resolution via projects + discovered worktree map; cache the hit.
     try {
         const project = resolveProjectForSessionDirectory(
             useProjectsStore.getState().projects,
             useSessionUIStore.getState().availableWorktreesByProject,
             dir,
         );
-        return project?.path ?? dir;
+        if (project?.path && project.path !== dir) {
+            rememberWorktreeProject(dir, project.path);
+            return project.path;
+        }
     } catch {
         return dir;
     }
+    return dir;
 };
 
 const toConfigDirectoryKey = (directory: string | null | undefined): string =>
