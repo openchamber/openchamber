@@ -86,6 +86,10 @@ import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.
 import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
 import { createProxyMiddleware, responseInterceptor } from 'http-proxy-middleware';
 import webPush from 'web-push';
+import { isPiHarnessRuntimeEnabled, resolvePiHarnessConfig } from './lib/pi-harness/config.js';
+import { createPiHarnessClient } from './lib/pi-harness/client.js';
+import { createPiHarnessState } from './lib/pi-harness/state.js';
+import { registerPiHarnessRoutes } from './lib/pi-harness/routes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -522,8 +526,12 @@ const {
   logger: console,
 });
 
+const PI_HARNESS_CONFIG = resolvePiHarnessConfig(process.env);
+const IS_PI_HARNESS_RUNTIME = isPiHarnessRuntimeEnabled(process.env);
+
 const ENV_SKIP_OPENCODE_START = process.env.OPENCODE_SKIP_START === 'true' ||
-                                    process.env.OPENCHAMBER_SKIP_OPENCODE_START === 'true';
+                                    process.env.OPENCHAMBER_SKIP_OPENCODE_START === 'true' ||
+                                    IS_PI_HARNESS_RUNTIME;
 const ENV_DESKTOP_NOTIFY = (() => {
   if (process.env.OPENCHAMBER_DESKTOP_NOTIFY === 'true') {
     return true;
@@ -1156,6 +1164,9 @@ async function main(options = {}) {
         desktopNotifyEnabled: ENV_DESKTOP_NOTIFY,
         planModeExperimentalEnabled: PLAN_MODE_EXPERIMENT_ENABLED,
         apiOnly,
+        backendRuntime: IS_PI_HARNESS_RUNTIME ? 'pi-harness' : 'opencode',
+        piHarnessEnabled: IS_PI_HARNESS_RUNTIME,
+        piHarnessUrl: IS_PI_HARNESS_RUNTIME ? PI_HARNESS_CONFIG.baseUrl : null,
       };
     },
     verboseRequestLogs: OPENCHAMBER_VERBOSE_REQUEST_LOGS,
@@ -1230,6 +1241,24 @@ async function main(options = {}) {
     writeSseEvent,
   });
 
+  // Pi-Harness route registration before proxy
+  if (IS_PI_HARNESS_RUNTIME) {
+    const piHarnessState = createPiHarnessState({
+      providerID: PI_HARNESS_CONFIG.providerID,
+      modelID: PI_HARNESS_CONFIG.modelID,
+    });
+    const piHarnessClient = createPiHarnessClient({
+      baseUrl: PI_HARNESS_CONFIG.baseUrl,
+      apiKey: PI_HARNESS_CONFIG.apiKey,
+    });
+    registerPiHarnessRoutes(app, {
+      client: piHarnessClient,
+      state: piHarnessState,
+      config: PI_HARNESS_CONFIG,
+      readSettings: readSettingsFromDiskMigrated,
+    });
+  }
+
   const previewProxyRuntime = createPreviewProxyRuntime({
     crypto,
     URL,
@@ -1265,9 +1294,16 @@ async function main(options = {}) {
     terminalHeartbeatIntervalMs: TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS,
     terminalRebindWindowMs: TERMINAL_INPUT_WS_REBIND_WINDOW_MS,
     terminalMaxRebindsPerWindow: TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW,
-    setupProxy,
+    setupProxy: IS_PI_HARNESS_RUNTIME ? () => {} : setupProxy,
     scheduleOpenCodeApiDetection,
-    bootstrapOpenCodeAtStartup,
+    bootstrapOpenCodeAtStartup: IS_PI_HARNESS_RUNTIME
+      ? async () => {
+          openCodePort = null;
+          openCodeBaseUrl = PI_HARNESS_CONFIG.baseUrl;
+          isOpenCodeReady = true;
+          lastOpenCodeError = null;
+        }
+      : bootstrapOpenCodeAtStartup,
     triggerHealthCheck,
     staticRoutesRuntime,
     process,
