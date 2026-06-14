@@ -87,6 +87,7 @@ import {
     buildAttachmentCitationText,
     findAttachmentCitationRanges,
 } from './attachmentCitations';
+import { getFileMentionAutocompleteQuery, type FileMentionAutocompleteInputSource } from './fileMentionAutocompleteState';
 import type { Message, Part } from '@opencode-ai/sdk/v2/client';
 
 const MAX_VISIBLE_TEXTAREA_LINES = 8;
@@ -967,6 +968,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const dragEnterCountRef = React.useRef(0);
     const suppressNextFileDropTextInsertRef = React.useRef(false);
     const suppressNextFileDropTextInsertTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    const suppressNextFileMentionPasteRef = React.useRef(false);
+    const suppressNextFileMentionPasteTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const pendingDroppedAbsolutePathsRef = React.useRef<string[]>([]);
     const canAcceptDropRef = React.useRef(false);
     const mentionRef = React.useRef<FileMentionHandle>(null);
@@ -2688,7 +2691,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         adjustTextareaHeight({ allowShrink });
     }, [adjustTextareaHeight, message, isMobile]);
 
-    const updateAutocompleteState = React.useCallback((value: string, cursorPosition: number) => {
+    const updateAutocompleteState = React.useCallback((
+        value: string,
+        cursorPosition: number,
+        inputSource: FileMentionAutocompleteInputSource = 'manual',
+    ) => {
         if (inputMode === 'shell') {
             setShowCommandAutocomplete(false);
             setShowFileMention(false);
@@ -2753,19 +2760,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         setShowSnippetAutocomplete(false);
 
-        const lastAtSymbol = textBeforeCursor.lastIndexOf('@');
-        if (lastAtSymbol !== -1) {
-            const charBefore = lastAtSymbol > 0 ? textBeforeCursor[lastAtSymbol - 1] : null;
-            const textAfterAt = textBeforeCursor.substring(lastAtSymbol + 1);
-            const isWordBoundary = !charBefore || /\s/.test(charBefore);
-            if (isWordBoundary && !textAfterAt.includes(' ') && !textAfterAt.includes('\n')) {
-                setMentionQuery(textAfterAt);
-                setShowFileMention(true);
-            } else {
-                setShowFileMention(false);
-            }
-        } else {
+        const nextMentionQuery = getFileMentionAutocompleteQuery({ value, cursorPosition, inputSource });
+        if (nextMentionQuery === null) {
             setShowFileMention(false);
+        } else {
+            setMentionQuery(nextMentionQuery);
+            setShowFileMention(true);
         }
     }, [
         inputMode,
@@ -2779,7 +2779,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         setSnippetQuery,
     ]);
 
-    const insertTextAtSelection = React.useCallback((text: string) => {
+    const insertTextAtSelection = React.useCallback((
+        text: string,
+        inputSource: FileMentionAutocompleteInputSource = 'manual',
+    ) => {
         if (!text) {
             return;
         }
@@ -2788,7 +2791,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!textarea) {
             const nextValue = message + text;
             setMessage(nextValue);
-            updateAutocompleteState(nextValue, nextValue.length);
+            updateAutocompleteState(nextValue, nextValue.length, inputSource);
             requestAnimationFrame(() => adjustTextareaHeight());
             return;
         }
@@ -2808,7 +2811,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             adjustTextareaHeight();
         });
 
-        updateAutocompleteState(nextValue, cursorPosition);
+        updateAutocompleteState(nextValue, cursorPosition, inputSource);
     }, [adjustTextareaHeight, message, updateAutocompleteState]);
 
     const clearDropTextSuppression = React.useCallback(() => {
@@ -2828,6 +2831,25 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             clearDropTextSuppression();
         }, 700);
     }, [clearDropTextSuppression]);
+
+    const clearFileMentionPasteSuppression = React.useCallback(() => {
+        suppressNextFileMentionPasteRef.current = false;
+        if (suppressNextFileMentionPasteTimeoutRef.current) {
+            clearTimeout(suppressNextFileMentionPasteTimeoutRef.current);
+            suppressNextFileMentionPasteTimeoutRef.current = null;
+        }
+    }, []);
+
+    const markFileMentionPasteSuppression = React.useCallback(() => {
+        suppressNextFileMentionPasteRef.current = true;
+        if (suppressNextFileMentionPasteTimeoutRef.current) {
+            clearTimeout(suppressNextFileMentionPasteTimeoutRef.current);
+        }
+        suppressNextFileMentionPasteTimeoutRef.current = setTimeout(() => {
+            suppressNextFileMentionPasteRef.current = false;
+            suppressNextFileMentionPasteTimeoutRef.current = null;
+        }, 700);
+    }, []);
 
     const handleBeforeInput = React.useCallback((e: React.FormEvent<HTMLTextAreaElement>) => {
         if (!isVSCodeRuntime() || !suppressNextFileDropTextInsertRef.current) {
@@ -2856,6 +2878,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         const value = e.target.value;
         const cursorPosition = e.target.selectionStart ?? value.length;
+        const isPasteInput = nativeInputEvent?.inputType?.startsWith('insertFromPaste')
+            || suppressNextFileMentionPasteRef.current;
+        if (suppressNextFileMentionPasteRef.current) {
+            clearFileMentionPasteSuppression();
+        }
+        const inputSource: FileMentionAutocompleteInputSource = isPasteInput
+            ? 'paste'
+            : 'manual';
 
         if (inputMode === 'normal' && value.startsWith('!')) {
             const shellCommand = value.slice(1);
@@ -2877,14 +2907,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         setMessage(value);
         adjustTextareaHeight();
-        updateAutocompleteState(value, cursorPosition);
+        updateAutocompleteState(value, cursorPosition, inputSource);
     };
 
     React.useEffect(() => {
         return () => {
             clearDropTextSuppression();
+            clearFileMentionPasteSuppression();
         };
-    }, [clearDropTextSuppression]);
+    }, [clearDropTextSuppression, clearFileMentionPasteSuppression]);
 
     const handlePaste = React.useCallback(async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
         // Pasting a URL over a selection wraps it as a markdown link:
@@ -2915,7 +2946,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         }
                         adjustTextareaHeight();
                     });
-                    updateAutocompleteState(next, caret);
+                    updateAutocompleteState(next, caret, 'paste');
                     return;
                 }
             }
@@ -2939,17 +2970,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         });
 
         const imageFiles = Array.from(fileMap.values());
+        const pastedText = e.clipboardData.getData('text');
         if (imageFiles.length === 0) {
+            if (pastedText) {
+                markFileMentionPasteSuppression();
+            }
             return;
         }
 
         if (!currentSessionId && !newSessionDraftOpen) {
+            if (pastedText) {
+                markFileMentionPasteSuppression();
+            }
             return;
         }
 
         e.preventDefault();
 
-        const pastedText = e.clipboardData.getData('text');
         const assignedFilenames = assignImageAttachmentFilenames(
             imageFiles,
             [
@@ -2967,7 +3004,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             message.slice(selectionEnd),
         );
 
-        insertTextAtSelection(insertionText);
+        insertTextAtSelection(insertionText, 'paste');
 
         for (let index = 0; index < imageFiles.length; index += 1) {
             const filename = assignedFilenames[index];
@@ -2982,7 +3019,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 pendingPastedAttachmentFilenamesRef.current.delete(filename);
             }
         }
-    }, [addAttachedFile, attachedFiles, adjustTextareaHeight, currentSessionId, inputMode, message, newSessionDraftOpen, insertTextAtSelection, setMessage, t, updateAutocompleteState]);
+    }, [addAttachedFile, attachedFiles, adjustTextareaHeight, currentSessionId, inputMode, markFileMentionPasteSuppression, message, newSessionDraftOpen, insertTextAtSelection, setMessage, t, updateAutocompleteState]);
 
     const handleFileSelect = (file: { name: string; path: string; relativePath?: string }) => {
 
