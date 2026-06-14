@@ -2,6 +2,10 @@ import React from 'react';
 
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Button } from '@/components/ui/button';
+import {
+  ContextMenuItem,
+  ContextMenuSeparator,
+} from '@/components/ui/context-menu';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { DiffView } from '@/components/views/DiffView';
 import { FilesView } from '@/components/views/FilesView';
@@ -2290,6 +2294,27 @@ export const ContextPanel: React.FC = () => {
     };
   }), [effectiveDirectory, t, tabs]);
 
+  const closeContextPanelTabs = React.useCallback((tabIDs: string[]) => {
+    if (!directoryKey) {
+      return;
+    }
+
+    Array.from(new Set(tabIDs)).forEach((tabID) => {
+      closeContextPanelTab(directoryKey, tabID);
+    });
+  }, [closeContextPanelTab, directoryKey]);
+
+  const copyTabPath = React.useCallback((path: string, relative: boolean) => {
+    const value = relative ? getRelativePathLabel(path, effectiveDirectory) : path;
+    void copyTextToClipboard(value).then((result) => {
+      if (result.ok) {
+        toast.success(t(relative ? 'filesView.toast.relativePathCopied' : 'sidebarFilesTree.toast.pathCopied'));
+        return;
+      }
+      toast.error(t('sidebarFilesTree.toast.copyFailed'));
+    });
+  }, [effectiveDirectory, t]);
+
   const activeNonChatContent = activeTab?.mode === 'diff'
     ? (
       <DiffView
@@ -2334,6 +2359,47 @@ export const ContextPanel: React.FC = () => {
 
   const isFileTabActive = activeTab?.mode === 'file';
 
+  const renderTabContextMenu = React.useCallback((item: { id: string }) => {
+    const tab = tabs.find((candidate) => candidate.id === item.id);
+    if (!tab) {
+      return null;
+    }
+
+    const tabIndex = tabs.findIndex((candidate) => candidate.id === tab.id);
+    const leftTabIDs = tabIndex > 0 ? tabs.slice(0, tabIndex).map((candidate) => candidate.id) : [];
+    const rightTabIDs = tabIndex >= 0 ? tabs.slice(tabIndex + 1).map((candidate) => candidate.id) : [];
+
+    return (
+      <>
+        <ContextMenuItem onClick={() => closeContextPanelTabs([tab.id])}>
+          <Icon name="close" className="mr-2 size-4" />
+          {t('contextPanel.tabMenu.close')}
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => closeContextPanelTabs(tabs.map((candidate) => candidate.id))}>
+          <Icon name="close-circle" className="mr-2 size-4" />
+          {t('contextPanel.tabMenu.closeAll')}
+        </ContextMenuItem>
+        <ContextMenuItem disabled={rightTabIDs.length === 0} onClick={() => closeContextPanelTabs(rightTabIDs)}>
+          <Icon name="arrow-right" className="mr-2 size-4" />
+          {t('contextPanel.tabMenu.closeAllRight')}
+        </ContextMenuItem>
+        <ContextMenuItem disabled={leftTabIDs.length === 0} onClick={() => closeContextPanelTabs(leftTabIDs)}>
+          <Icon name="arrow-left" className="mr-2 size-4" />
+          {t('contextPanel.tabMenu.closeAllLeft')}
+        </ContextMenuItem>
+        {tab.targetPath ? (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem onClick={() => copyTabPath(tab.targetPath ?? '', false)}>
+              <Icon name="file-copy" className="mr-2 size-4" />
+              {t('sidebarFilesTree.menu.copyPath')}
+            </ContextMenuItem>
+          </>
+        ) : null}
+      </>
+    );
+  }, [closeContextPanelTabs, copyTabPath, t, tabs]);
+
   const header = (
     <header className="flex h-10 items-stretch border-b border-transparent">
       <SortableTabsStrip
@@ -2351,6 +2417,7 @@ export const ContextPanel: React.FC = () => {
           }
           closeContextPanelTab(directoryKey, tabID);
         }}
+        renderContextMenu={renderTabContextMenu}
         onReorder={(activeTabID, overTabID) => {
           if (!directoryKey) {
             return;

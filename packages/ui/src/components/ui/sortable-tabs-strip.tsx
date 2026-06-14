@@ -21,6 +21,7 @@ import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDeviceInfo } from '@/lib/device';
 import { Icon } from "@/components/icon/Icon";
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu';
 
 export type SortableTabsStripItem = {
   id: string;
@@ -36,6 +37,7 @@ type SortableTabsStripProps = {
   activeId: string | null;
   onSelect: (id: string) => void;
   onClose?: (id: string) => void;
+  renderContextMenu?: (item: SortableTabsStripItem, index: number) => React.ReactNode;
   onReorder?: (activeId: string, overId: string) => void;
   layoutMode?: 'scrollable' | 'fit';
   variant?: 'default' | 'active-pill' | 'animated';
@@ -89,6 +91,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   activeId,
   onSelect,
   onClose,
+  renderContextMenu,
   onReorder,
   layoutMode = 'scrollable',
   variant = 'default',
@@ -121,6 +124,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   const Wrapper = reorderEnabled ? SortableTabWrapper : StaticTabWrapper;
   const tabRefs = React.useRef<Map<string, HTMLElement>>(new Map());
   const [pillRect, setPillRect] = React.useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  const [openContextMenuId, setOpenContextMenuId] = React.useState<string | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -296,6 +300,32 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
     onReorder(String(active.id), String(over.id));
   }, [onReorder]);
 
+  React.useEffect(() => {
+    if (!openContextMenuId) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpenContextMenuId(null);
+      }
+    };
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest('[data-slot="dropdown-menu-content"]')) {
+        return;
+      }
+      setOpenContextMenuId(null);
+    };
+
+    document.addEventListener('keydown', handleKeyDown, true);
+    document.addEventListener('pointerdown', handlePointerDown, true);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown, true);
+      document.removeEventListener('pointerdown', handlePointerDown, true);
+    };
+  }, [openContextMenuId]);
+
   const list = (
     <div className={cn('relative flex h-full min-w-0 flex-1', className)}>
       {isScrollable && overflow.left ? (
@@ -362,7 +392,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
             aria-hidden
           />
         ) : null}
-        {items.map((item) => {
+        {items.map((item, index) => {
           const isActive = item.id === activeId;
           const showInactiveIconOnly = inactiveTabsIconOnly && usesActivePillIndicator && !isActive && Boolean(item.icon);
           const shouldShowLabel = !showInactiveIconOnly;
@@ -396,7 +426,8 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                 }
               }
             : undefined;
-          return (
+          const contextMenu = renderContextMenu?.(item, index);
+          const tab = (
             <Wrapper key={item.id} id={item.id} className={wrapperClassName}>
               <div
                 ref={(element) => setTabRef(item.id, element)}
@@ -547,6 +578,21 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                 ) : null}
               </div>
             </Wrapper>
+          );
+
+          if (!contextMenu) {
+            return tab;
+          }
+
+          return (
+            <ContextMenu key={item.id} open={openContextMenuId === item.id} onOpenChange={(open) => setOpenContextMenuId(open ? item.id : null)}>
+              <ContextMenuTrigger render={<div className={cn('h-full', wrapperClassName)} onContextMenu={(event) => { event.preventDefault(); setOpenContextMenuId(item.id); }} />}>
+                {tab}
+              </ContextMenuTrigger>
+              <ContextMenuContent className="w-56">
+                {contextMenu}
+              </ContextMenuContent>
+            </ContextMenu>
           );
         })}
       </div>
