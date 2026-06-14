@@ -19,7 +19,6 @@ export const createWebGitAPI = (): GitAPI => ({
   getGitBranches: gitApiHttp.getGitBranches,
   deleteGitBranch: gitApiHttp.deleteGitBranch as GitAPI['deleteGitBranch'],
   deleteRemoteBranch: gitApiHttp.deleteRemoteBranch as GitAPI['deleteRemoteBranch'],
-  setBranchUpstream: gitApiHttp.setBranchUpstream,
   removeRemote: gitApiHttp.removeRemote as GitAPI['removeRemote'],
   generateCommitMessage: gitApiHttp.generateCommitMessage,
   generatePullRequestDescription: gitApiHttp.generatePullRequestDescription,

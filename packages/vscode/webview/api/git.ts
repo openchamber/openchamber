@@ -14,7 +14,6 @@ import type {
   GitBranch,
   GitDeleteBranchPayload,
   GitDeleteRemoteBranchPayload,
-  GitSetBranchUpstreamPayload,
   GitRemoveRemotePayload,
   GeneratedCommitMessage,
   GeneratedPullRequestDescription,
@@ -110,15 +109,6 @@ export const createVSCodeGitAPI = (): GitAPI => ({
       directory,
       branch: payload.branch,
       remote: payload.remote,
-    });
-  },
-
-  setBranchUpstream: async (directory: string, payload: GitSetBranchUpstreamPayload): Promise<{ success: boolean; branch: string; upstream: string }> => {
-    return sendBridgeMessage<{ success: boolean; branch: string; upstream: string }>('api:git/branches/upstream', {
-      directory,
-      branch: payload.branch,
-      remote: payload.remote,
-      upstreamBranch: payload.upstreamBranch,
     });
   },
 

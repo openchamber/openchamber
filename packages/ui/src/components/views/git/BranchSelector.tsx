@@ -1,11 +1,17 @@
 import React from 'react';
-import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import {
   Dialog,
   DialogContent,
@@ -14,6 +20,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import {
   Command,
   CommandEmpty,
@@ -29,7 +36,6 @@ import type { GitRemote } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 
 interface BranchInfo {
-  tracking?: string;
   ahead?: number;
   behind?: number;
 }
@@ -43,7 +49,6 @@ interface BranchSelectorProps {
   onCreate: (name: string, remote?: GitRemote) => Promise<void>;
   onRename?: (oldName: string, newName: string) => Promise<void>;
   onDelete?: (branch: string) => Promise<void>;
-  onSetUpstream?: (branch: string, remote: string, upstreamBranch: string) => Promise<void>;
   remotes?: GitRemote[];
   disabled?: boolean;
 }
@@ -93,16 +98,17 @@ const sanitizeBranchNameInput = (value: string): string => {
 };
 
 const getRemoteBranchDisplayName = (branch: string, remoteNames?: string[]): string => {
+  const normalized = branch.replace(/^remotes\//, '');
   if (remoteNames) {
     for (const name of remoteNames) {
-      if (branch.startsWith(`${name}/`)) {
-        return branch.slice(name.length + 1);
+      if (normalized.startsWith(`${name}/`)) {
+        return normalized.slice(name.length + 1);
       }
     }
-    return branch;
+    return normalized;
   }
-  const slashIndex = branch.indexOf('/');
-  return slashIndex > 0 ? branch.slice(slashIndex + 1) : branch;
+  const slashIndex = normalized.indexOf('/');
+  return slashIndex > 0 ? normalized.slice(slashIndex + 1) : normalized;
 };
 
 export const BranchSelector: React.FC<BranchSelectorProps> = ({
@@ -114,7 +120,6 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
   onCreate,
   onRename,
   onDelete,
-  onSetUpstream,
   remotes = [],
   disabled = false,
 }) => {
@@ -125,32 +130,22 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
   const [showRemoteSelect, setShowRemoteSelect] = React.useState(false);
   const [newBranchName, setNewBranchName] = React.useState('');
   const [isCreating, setIsCreating] = React.useState(false);
-  const [menuBranch, setMenuBranch] = React.useState<string | null>(null);
-  const [menuPosition, setMenuPosition] = React.useState<{ x: number; y: number } | null>(null);
+  const [contextMenuBranch, setContextMenuBranch] = React.useState<string | null>(null);
+  const [actionMenuBranch, setActionMenuBranch] = React.useState<string | null>(null);
   const [renameBranch, setRenameBranch] = React.useState<string | null>(null);
   const [renameValue, setRenameValue] = React.useState('');
   const [isRenaming, setIsRenaming] = React.useState(false);
   const [deleteBranch, setDeleteBranch] = React.useState<string | null>(null);
   const [isDeleting, setIsDeleting] = React.useState(false);
-  const [upstreamBranch, setUpstreamBranch] = React.useState<string | null>(null);
-  const [upstreamValue, setUpstreamValue] = React.useState('');
-  const [upstreamSearch, setUpstreamSearch] = React.useState('');
-  const [upstreamDropdownOpen, setUpstreamDropdownOpen] = React.useState(false);
-  const [isSettingUpstream, setIsSettingUpstream] = React.useState(false);
   const createInputRef = React.useRef<HTMLInputElement>(null);
   const renameInputRef = React.useRef<HTMLInputElement>(null);
-  const upstreamSearchInputRef = React.useRef<HTMLInputElement>(null);
-  const upstreamDropdownRef = React.useRef<HTMLDivElement>(null);
-  const contextMenuRef = React.useRef<HTMLDivElement>(null);
-  const longPressTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const longPressTriggeredRef = React.useRef(false);
 
   const stopDropdownTypeahead = React.useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
     event.stopPropagation();
   }, []);
 
   const hasMultipleRemotes = remotes.length > 1;
-  const canManageBranches = Boolean(onRename || onDelete || onSetUpstream);
+  const canManageBranches = Boolean(onRename || onDelete);
   const remoteNames = React.useMemo(() => remotes.map((remote) => remote.name), [remotes]);
 
   const sanitizedNewBranch = React.useMemo(
@@ -175,23 +170,6 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
     return remoteBranches.filter((b) => b.toLowerCase().includes(term));
   }, [search, remoteBranches]);
 
-  const upstreamOptions = React.useMemo(() => {
-    const values = new Set(remoteBranches);
-    if (upstreamBranch) {
-      const tracking = branchInfo?.[upstreamBranch]?.tracking;
-      if (tracking) {
-        values.add(tracking);
-      }
-    }
-    return Array.from(values);
-  }, [branchInfo, remoteBranches, upstreamBranch]);
-
-  const filteredUpstreamOptions = React.useMemo(() => {
-    const term = upstreamSearch.trim().toLowerCase();
-    if (!term) return upstreamOptions;
-    return upstreamOptions.filter((branch) => branch.toLowerCase().includes(term));
-  }, [upstreamOptions, upstreamSearch]);
-
   const handleCheckout = (branch: string) => {
     if (branch === currentBranch) {
       setIsOpen(false);
@@ -209,13 +187,13 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
 
   const handleCreate = async () => {
     if (!sanitizedNewBranch || isCreating) return;
-    
+
     // If multiple remotes, show remote selection first
     if (hasMultipleRemotes) {
       setShowRemoteSelect(true);
       return;
     }
-    
+
     // Single or no remote - proceed directly
     setIsCreating(true);
     try {
@@ -252,47 +230,15 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
     setShowRemoteSelect(false);
   };
 
-  const clearLongPressTimer = React.useCallback(() => {
-    if (longPressTimerRef.current) {
-      clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
-    }
-  }, []);
-
-  const openBranchMenu = React.useCallback((branch: string, position: { x: number; y: number }) => {
-    if (!canManageBranches) return;
-    setMenuBranch(branch);
-    setMenuPosition(position);
-  }, [canManageBranches]);
-
-  const startLongPress = React.useCallback((event: React.PointerEvent, branch: string) => {
-    if (event.pointerType !== 'touch' || !canManageBranches) return;
-    const target = event.currentTarget;
-    clearLongPressTimer();
-    longPressTriggeredRef.current = false;
-    longPressTimerRef.current = setTimeout(() => {
-      const rect = target.getBoundingClientRect();
-      longPressTriggeredRef.current = true;
-      openBranchMenu(branch, { x: rect.left, y: rect.bottom + 4 });
-    }, 550);
-  }, [canManageBranches, clearLongPressTimer, openBranchMenu]);
-
-  const handleBranchClickCapture = React.useCallback((event: React.MouseEvent) => {
-    if (!longPressTriggeredRef.current) return;
-    event.preventDefault();
-    event.stopPropagation();
-    longPressTriggeredRef.current = false;
-  }, []);
-
-  const closeBranchMenu = React.useCallback(() => {
-    setMenuBranch(null);
-    setMenuPosition(null);
+  const closeBranchMenus = React.useCallback(() => {
+    setContextMenuBranch(null);
+    setActionMenuBranch(null);
   }, []);
 
   const handleOpenRename = (branch: string) => {
     setRenameBranch(branch);
     setRenameValue(branch);
-    closeBranchMenu();
+    closeBranchMenus();
     setIsOpen(false);
     setTimeout(() => renameInputRef.current?.focus(), 0);
   };
@@ -315,7 +261,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
 
   const handleOpenDelete = (branch: string) => {
     setDeleteBranch(branch);
-    closeBranchMenu();
+    closeBranchMenus();
     setIsOpen(false);
   };
 
@@ -330,113 +276,46 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
     }
   };
 
-  const handleOpenUpstream = (branch: string) => {
-    setUpstreamBranch(branch);
-    setUpstreamValue(branchInfo?.[branch]?.tracking || remoteBranches[0] || '');
-    setUpstreamSearch('');
-    closeBranchMenu();
-    setIsOpen(false);
-  };
-
-  const handleConfirmUpstream = async () => {
-    if (!upstreamBranch || !onSetUpstream || !upstreamValue.trim() || isSettingUpstream) return;
-    const normalized = upstreamValue.trim().replace(/^remotes\//, '');
-    const slashIndex = normalized.indexOf('/');
-    if (slashIndex <= 0) return;
-    const remote = normalized.slice(0, slashIndex);
-    const targetBranch = normalized.slice(slashIndex + 1);
-    if (!remote || !targetBranch) return;
-    setIsSettingUpstream(true);
-    try {
-      await onSetUpstream(upstreamBranch, remote, targetBranch);
-      setUpstreamBranch(null);
-      setUpstreamValue('');
-      setUpstreamSearch('');
-      setUpstreamDropdownOpen(false);
-    } finally {
-      setIsSettingUpstream(false);
-    }
-  };
-
-  const handleToggleUpstreamDropdown = () => {
-    if (upstreamOptions.length === 0 || isSettingUpstream) return;
-    setUpstreamDropdownOpen((open) => {
-      const nextOpen = !open;
-      if (nextOpen) {
-        setTimeout(() => upstreamSearchInputRef.current?.focus(), 0);
-      }
-      return nextOpen;
-    });
-  };
-
-  const handleSelectUpstream = (branch: string) => {
-    setUpstreamValue(branch);
-    setUpstreamSearch('');
-    setUpstreamDropdownOpen(false);
-  };
-
   React.useEffect(() => {
     if (!isOpen) {
       setSearch('');
       setShowCreate(false);
       setShowRemoteSelect(false);
       setNewBranchName('');
-      closeBranchMenu();
+      closeBranchMenus();
     }
-  }, [closeBranchMenu, isOpen]);
+  }, [closeBranchMenus, isOpen]);
 
-  React.useEffect(() => {
-    if (!menuBranch) return;
-    const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target instanceof Node ? event.target : null;
-      if (target && contextMenuRef.current?.contains(target)) return;
-      if (target instanceof Element && target.closest('[data-branch-menu-trigger]')) return;
-      closeBranchMenu();
-    };
-    document.addEventListener('pointerdown', handlePointerDown, true);
-    return () => document.removeEventListener('pointerdown', handlePointerDown, true);
-  }, [closeBranchMenu, menuBranch]);
+  const renderBranchActions = (branch: string, Item: React.ElementType) => {
+    const ActionItem = Item;
 
-  React.useEffect(() => {
-    if (!upstreamDropdownOpen) return;
-    const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target instanceof Node ? event.target : null;
-      if (target && upstreamDropdownRef.current?.contains(target)) return;
-      setUpstreamDropdownOpen(false);
-    };
-    document.addEventListener('pointerdown', handlePointerDown, true);
-    return () => document.removeEventListener('pointerdown', handlePointerDown, true);
-  }, [upstreamDropdownOpen]);
-
-  React.useEffect(() => {
-    if (!upstreamBranch) {
-      setUpstreamSearch('');
-      setUpstreamDropdownOpen(false);
-    }
-  }, [upstreamBranch]);
-
-  React.useEffect(() => {
-    if (!menuBranch) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        closeBranchMenu();
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [closeBranchMenu, menuBranch]);
-
-  React.useEffect(() => {
-    return () => clearLongPressTimer();
-  }, [clearLongPressTimer]);
-
-  const branchMenuStyle = React.useMemo<React.CSSProperties | undefined>(() => {
-    if (!menuPosition) return undefined;
-    return {
-      left: Math.min(Math.max(8, menuPosition.x), Math.max(8, window.innerWidth - 264)),
-      top: Math.min(Math.max(8, menuPosition.y), Math.max(8, window.innerHeight - 152)),
-    };
-  }, [menuPosition]);
+    return (
+      <>
+        {onRename ? (
+          <ActionItem onClick={(event: React.MouseEvent) => {
+            event.stopPropagation();
+            handleOpenRename(branch);
+          }}>
+            <Icon name="edit" className="size-4 shrink-0" />
+            <span className="min-w-0 truncate">{t('gitView.branch.actions.rename')}</span>
+          </ActionItem>
+        ) : null}
+        {onDelete ? (
+          <ActionItem
+            className="text-destructive focus:text-destructive"
+            disabled={currentBranch === branch}
+            onClick={(event: React.MouseEvent) => {
+              event.stopPropagation();
+              handleOpenDelete(branch);
+            }}
+          >
+            <Icon name="delete-bin" className="size-4 shrink-0" />
+            <span className="min-w-0 truncate">{t('gitView.branch.actions.delete')}</span>
+          </ActionItem>
+        ) : null}
+      </>
+    );
+  };
 
   return (
     <>
@@ -569,75 +448,56 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
 
             <CommandGroup heading={t('gitView.branch.localBranches')}>
               {filteredLocal.map((branch) => (
-                <CommandItem
-                  key={`local-${branch}`}
-                  className="group"
-                  onSelect={() => handleCheckout(branch)}
-                  onMouseDown={(event) => {
-                    if (event.button !== 2) return;
-                    event.preventDefault();
-                    event.stopPropagation();
-                  }}
-                  onContextMenu={(event) => {
-                    if (!canManageBranches) return;
-                    event.preventDefault();
-                    event.stopPropagation();
-                    longPressTriggeredRef.current = true;
-                    openBranchMenu(branch, { x: event.clientX, y: event.clientY });
-                  }}
-                  onPointerDown={(event) => startLongPress(event, branch)}
-                  onPointerMove={clearLongPressTimer}
-                  onPointerUp={(event) => {
-                    clearLongPressTimer();
-                    if (event.button !== 2) return;
-                    event.preventDefault();
-                    event.stopPropagation();
-                  }}
-                  onPointerCancel={clearLongPressTimer}
-                  onClickCapture={handleBranchClickCapture}
-                >
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="flex min-w-0 items-center gap-2 typography-ui-label text-foreground">
-                      {currentBranch === branch && (
-                        <span className="typography-micro shrink-0 text-primary">{t('gitView.branch.currentBadge')}</span>
-                      )}
-                      <BranchNameMarquee name={branch} />
-                    </span>
-                    {(branchInfo?.[branch]?.ahead || branchInfo?.[branch]?.behind) && (
-                      <span className="typography-micro text-muted-foreground">
-                        {branchInfo[branch].ahead || 0} ahead ·{' '}
-                        {branchInfo[branch].behind || 0} behind
+                <ContextMenu key={`local-${branch}`} open={contextMenuBranch === branch} onOpenChange={(open) => setContextMenuBranch(open ? branch : null)}>
+                  <ContextMenuTrigger render={<div className="contents" />}>
+                    <CommandItem className="group" onSelect={() => handleCheckout(branch)}>
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="flex min-w-0 items-center gap-2 typography-ui-label text-foreground">
+                          {currentBranch === branch && (
+                            <span className="typography-micro shrink-0 text-primary">{t('gitView.branch.currentBadge')}</span>
+                          )}
+                          <BranchNameMarquee name={branch} />
+                        </span>
+                        {(branchInfo?.[branch]?.ahead || branchInfo?.[branch]?.behind) && (
+                          <span className="typography-micro text-muted-foreground">
+                            {branchInfo[branch].ahead || 0} ahead ·{' '}
+                            {branchInfo[branch].behind || 0} behind
+                          </span>
+                        )}
                       </span>
-                    )}
-                  </span>
+                      {canManageBranches ? (
+                        <DropdownMenu open={actionMenuBranch === branch} onOpenChange={(open) => setActionMenuBranch(open ? branch : null)}>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="ml-1 size-6 shrink-0 opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+                              onMouseDown={(event) => {
+                                event.stopPropagation();
+                              }}
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                              }}
+                              aria-label={t('gitView.branch.actionsAria', { branch })}
+                            >
+                              <Icon name="more-2" className="size-3.5" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-56">
+                            {renderBranchActions(branch, DropdownMenuItem)}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      ) : null}
+                    </CommandItem>
+                  </ContextMenuTrigger>
                   {canManageBranches ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="ml-1 size-6 shrink-0 opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
-                      onMouseDown={(event) => {
-                        event.stopPropagation();
-                      }}
-                      onClick={(event) => {
-                        const rect = event.currentTarget.getBoundingClientRect();
-                        event.preventDefault();
-                        event.stopPropagation();
-                        if (menuBranch === branch) {
-                          closeBranchMenu();
-                          return;
-                        }
-                        openBranchMenu(branch, { x: rect.right - 208, y: rect.bottom + 4 });
-                      }}
-                      aria-label={t('gitView.branch.actionsAria', { branch })}
-                      aria-haspopup="menu"
-                      aria-expanded={menuBranch === branch}
-                      data-branch-menu-trigger={branch}
-                    >
-                      <Icon name="more-2" className="size-3.5" />
-                    </Button>
+                    <ContextMenuContent className="w-56">
+                      {renderBranchActions(branch, ContextMenuItem)}
+                    </ContextMenuContent>
                   ) : null}
-                </CommandItem>
+                </ContextMenu>
               ))}
               {filteredLocal.length === 0 && (
                 <CommandItem disabled className="justify-center">
@@ -675,48 +535,6 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
         </Command>
       </DropdownMenuContent>
     </DropdownMenu>
-    {menuBranch && menuPosition ? createPortal(
-      <div
-        ref={contextMenuRef}
-        role="menu"
-        className="fixed z-[60] w-64 max-w-[calc(100vw-1rem)] rounded-xl border border-border bg-[var(--surface-elevated)] p-1 text-[var(--surface-elevated-foreground)] shadow-lg"
-        style={branchMenuStyle}
-        onMouseDown={(event) => event.stopPropagation()}
-        onClick={(event) => event.stopPropagation()}
-      >
-        {onRename ? (
-          <Button variant="ghost" size="sm" className="w-full min-w-0 justify-start normal-case" role="menuitem" onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            handleOpenRename(menuBranch);
-          }}>
-            <Icon name="edit" className="size-4 shrink-0" />
-            <span className="min-w-0 truncate">{t('gitView.branch.actions.rename')}</span>
-          </Button>
-        ) : null}
-        {onSetUpstream ? (
-          <Button variant="ghost" size="sm" className="w-full min-w-0 justify-start normal-case" role="menuitem" onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            handleOpenUpstream(menuBranch);
-          }}>
-            <Icon name="git-branch" className="size-4 shrink-0" />
-            <span className="min-w-0 truncate">{t('gitView.branch.actions.changeUpstream')}</span>
-          </Button>
-        ) : null}
-        {onDelete ? (
-          <Button variant="ghost" size="sm" className="w-full min-w-0 justify-start normal-case text-destructive hover:bg-destructive/10 hover:text-destructive dark:hover:bg-destructive/20" role="menuitem" onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            handleOpenDelete(menuBranch);
-          }} disabled={currentBranch === menuBranch}>
-            <Icon name="delete-bin" className="size-4 shrink-0" />
-            <span className="min-w-0 truncate">{t('gitView.branch.actions.delete')}</span>
-          </Button>
-        ) : null}
-      </div>,
-      document.body
-    ) : null}
     <Dialog open={renameBranch !== null} onOpenChange={(open) => !isRenaming && !open && setRenameBranch(null)}>
       <DialogContent className="max-w-md">
         <DialogHeader>
@@ -730,11 +548,11 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
             void handleConfirmRename();
           }}
         >
-          <input
+          <Input
             ref={renameInputRef}
             value={renameValue}
             onChange={(event) => setRenameValue(event.target.value)}
-            className="h-9 w-full rounded-lg border border-border bg-transparent px-3 typography-ui-label outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+            className="typography-ui-label"
             placeholder={t('gitView.branch.namePlaceholder')}
           />
           <DialogFooter>
@@ -762,84 +580,6 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
             {isDeleting ? t('gitView.branch.deleting') : t('gitView.branch.deleteConfirm')}
           </Button>
         </DialogFooter>
-      </DialogContent>
-    </Dialog>
-    <Dialog open={upstreamBranch !== null} onOpenChange={(open) => !isSettingUpstream && !open && setUpstreamBranch(null)}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>{t('gitView.branch.upstreamDialogTitle')}</DialogTitle>
-          <DialogDescription>{t('gitView.branch.upstreamDialogDescription', { branch: upstreamBranch || '' })}</DialogDescription>
-        </DialogHeader>
-        <form
-          className="space-y-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void handleConfirmUpstream();
-          }}
-        >
-          <div ref={upstreamDropdownRef} className="relative">
-            {upstreamDropdownOpen ? (
-              <div className="flex h-9 w-full min-w-0 items-center gap-2 rounded-lg border border-border px-2 text-left">
-                <Icon name="search" className="size-4 shrink-0 text-muted-foreground" />
-                <input
-                  ref={upstreamSearchInputRef}
-                  value={upstreamSearch}
-                  onChange={(event) => setUpstreamSearch(event.target.value)}
-                  onKeyDown={(event) => {
-                    event.stopPropagation();
-                    if (event.key === 'Escape') {
-                      event.preventDefault();
-                      setUpstreamDropdownOpen(false);
-                    } else if (event.key === 'Enter') {
-                      event.preventDefault();
-                      if (filteredUpstreamOptions[0]) {
-                        handleSelectUpstream(filteredUpstreamOptions[0]);
-                      }
-                    }
-                  }}
-                  className="min-w-0 flex-1 bg-transparent typography-ui-label outline-none placeholder:text-muted-foreground"
-                  placeholder={upstreamValue ? getRemoteBranchDisplayName(upstreamValue, remoteNames) : t('gitView.branch.upstreamSearchPlaceholder')}
-                  role="combobox"
-                  aria-expanded="true"
-                />
-              </div>
-            ) : (
-              <Button type="button" variant="outline" size="sm" className="h-9 w-full min-w-0 justify-start text-left normal-case" onClick={handleToggleUpstreamDropdown} disabled={upstreamOptions.length === 0 || isSettingUpstream} aria-expanded={upstreamDropdownOpen}>
-                {upstreamValue ? (
-                  <BranchNameMarquee name={getRemoteBranchDisplayName(upstreamValue, remoteNames)} />
-                ) : (
-                  <span className="min-w-0 truncate text-muted-foreground">{t('gitView.branch.upstreamPlaceholder')}</span>
-                )}
-                <Icon name="arrow-down-s" className="ml-auto size-4 shrink-0 opacity-50" />
-              </Button>
-            )}
-            {upstreamDropdownOpen ? (
-              <div className="mt-1 max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-[var(--surface-elevated)] p-1 text-[var(--surface-elevated-foreground)] shadow-lg">
-                <div className="max-h-32 overflow-y-auto">
-                  {filteredUpstreamOptions.map((branch) => (
-                    <Button key={branch} type="button" variant="ghost" size="sm" className="w-full min-w-0 justify-start text-left normal-case" title={branch} onClick={() => handleSelectUpstream(branch)}>
-                      <BranchNameMarquee name={getRemoteBranchDisplayName(branch, remoteNames)} />
-                      {branch === upstreamValue ? <Icon name="check" className="size-4 shrink-0" /> : null}
-                    </Button>
-                  ))}
-                  {filteredUpstreamOptions.length === 0 ? (
-                    <div className="px-2 py-3 text-center typography-meta text-muted-foreground">
-                      {t('gitView.branch.noUpstreamBranches')}
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" size="sm" type="button" onClick={() => setUpstreamBranch(null)} disabled={isSettingUpstream}>
-              {t('gitView.common.cancel')}
-            </Button>
-            <Button size="sm" type="submit" disabled={!upstreamValue.trim() || isSettingUpstream}>
-              {isSettingUpstream ? t('gitView.branch.upstreamSaving') : t('gitView.branch.upstreamConfirm')}
-            </Button>
-          </DialogFooter>
-        </form>
       </DialogContent>
     </Dialog>
     </>
