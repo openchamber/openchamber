@@ -192,6 +192,13 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['changed files', 'turns'],
   },
   {
+    id: 'sidebar.subagent-sessions',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.showSubagentSessionsInSidebar',
+    descriptionKey: 'settings.openchamber.visual.field.showSubagentSessionsInSidebarDescription',
+    keywords: ['subagent', 'sidebar', 'sessions'],
+  },
+  {
     id: 'chat.dotfiles',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.showDotfiles',
