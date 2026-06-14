@@ -70,6 +70,7 @@ export {
   listPluginEntries,
   getPluginEntry,
   getPluginStatus,
+  autoUpdatePlugins,
   createPluginEntry,
   updatePluginEntry,
   deletePluginEntry,

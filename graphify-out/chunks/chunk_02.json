@@ -1,0 +1,22 @@
+[
+  "/home/herjarsa/GITHUB/openchamber/.claude/skills/theme-system/SKILL.md",
+  "/home/herjarsa/GITHUB/openchamber/.claude/skills/theme-system/references/adding-themes.md",
+  "/home/herjarsa/GITHUB/openchamber/.claude/skills/ui-api-decoupling/SKILL.md",
+  "/home/herjarsa/GITHUB/openchamber/.github/ISSUE_TEMPLATE/bug_report.yml",
+  "/home/herjarsa/GITHUB/openchamber/.github/ISSUE_TEMPLATE/config.yml",
+  "/home/herjarsa/GITHUB/openchamber/.github/ISSUE_TEMPLATE/feature_request.yml",
+  "/home/herjarsa/GITHUB/openchamber/.github/workflows/bot-help.yml",
+  "/home/herjarsa/GITHUB/openchamber/.github/workflows/bot-summarize.yml",
+  "/home/herjarsa/GITHUB/openchamber/.github/workflows/build-macos-arm64-dmg.yml",
+  "/home/herjarsa/GITHUB/openchamber/.github/workflows/docs-source.yml",
+  "/home/herjarsa/GITHUB/openchamber/.github/workflows/oc-integration.yml",
+  "/home/herjarsa/GITHUB/openchamber/.github/workflows/oc-review.yml",
+  "/home/herjarsa/GITHUB/openchamber/.github/workflows/opencode.yml",
+  "/home/herjarsa/GITHUB/openchamber/.github/workflows/pr-review.yml",
+  "/home/herjarsa/GITHUB/openchamber/.github/workflows/release-desktop-smoke.yml",
+  "/home/herjarsa/GITHUB/openchamber/.github/workflows/release.yml",
+  "/home/herjarsa/GITHUB/openchamber/.github/workflows/reproduce-issue.yml",
+  "/home/herjarsa/GITHUB/openchamber/.github/workflows/stale.yml",
+  "/home/herjarsa/GITHUB/openchamber/.github/workflows/triage.yml",
+  "/home/herjarsa/GITHUB/openchamber/.github/workflows/vscode-extension.yml"
+]

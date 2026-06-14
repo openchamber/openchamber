@@ -1,0 +1,43 @@
+<output>
+<compartments>
+<compartment start="1" end="93" title="Resolved issue #1630 and improved PR #1616, started community PR integration" episode_type="investigation,bug,feature" importance="55">
+<p1>
+U: "REVISA EN EL REPO EN GITHUB NUESTROS PRs e ISUUE REPORTADOS, RESOLVER LOS ISUEE REPORTADOS POR MI, LUEGO VER LO QUE HA REPORTADO LA COMUNIDAD Y PRs RELEVANTES, ESTE ES EL REPO CLONADO LA IDEA ES RESOLVER LOS PRINCIPALES BLOQUEANTES E INSTALAR EL FORK CORREGIDO EN LOCAL PARA NO ESPERAR QUE MERGEN SE TARDAN MUCHO EN CORREGIR LOS ERRORES RELEVANTES."
+
+Investigated the GitHub repo for open issues and PRs. Found:
+- **Issue #1630** (our report, priority:high) — session bar deactivating prematurely during internal turns (reasoning→content, parent→subagent). Root cause in `packages/ui/src/hooks/useSessionActivity.ts` line 54: `session.status = idle` between internal turns was incorrectly deactivating the bar.
+- **PR #1616** (`fix/parent-session-resync-fresh`, OPEN) — non-blocking bot review findings.
+- **Community PRs** — several bug-fix PRs identified as relevant to our fork.
+
+Fixed issue #1630 with a one-line change: added `&& !hasPendingAssistant` to the status check so idle status between internal turns doesn't deactivate the bar prematurely.
+
+Improved PR #1616 based on bot review findings:
+- **Finding 1**: Moved parent resync to run BEFORE `ingestDirectoryStateIntoRoutingIndex` in `packages/ui/src/sync/sync-context.tsx` — critical ordering fix.
+- **Finding 2**: Removed dead identity check in `packages/ui/src/components/chat/message/parts/ToolPart.tsx`.
+
+Type-check passed (pre-existing errors in terminalApi.ts unrelated). Committed and pushed to fork.
+
+Started merging community bug-fix PRs onto local fork:
+- PR #1627 (merged via squash)
+- PR #1607, #1614, #1544, #1585 (fetched, in progress)
+Reset bun.lock and package.json during integration.
+</p1>
+<p2>
+Fixed issue #1630 (session bar deactivation) by adding `!hasPendingAssistant` check in `useSessionActivity.ts`. Improved PR #1616: fixed routing index ordering (parent resync before `ingestDirectoryStateIntoRoutingIndex`) and removed dead identity check in ToolPart.tsx. Started integrating community bug-fix PRs (#1627, #1607, #1614, #1544, #1585) onto local fork.
+</p2>
+<p3>
+Resolved session bar deactivation bug and PR review findings. Began integrating community bug-fix PRs into local fork.
+</p3>
+<p4>issue #1630; PR #1616; parent resync ordering; community PRs #1627 #1607 #1614 #1544 #1585</p4>
+</compartment>
+</compartments>
+<facts>
+<PROJECT_RULES>
+* Parent resync must run before `ingestDirectoryStateIntoRoutingIndex` in sync pipeline to ensure correct routing state.
+</PROJECT_RULES>
+</facts>
+<meta>
+<messages_processed>1-93</messages_processed>
+<unprocessed_from>94</unprocessed_from>
+</meta>
+</output>

@@ -1,0 +1,316 @@
+- generic [ref=e44]:
+  - generic [ref=e45]:
+    - generic [ref=e46]:
+      - heading "Command Palette" [level=2] [ref=e47]
+      - paragraph [ref=e48]: Search files, sessions, and commands.
+    - generic [ref=e50]:
+      - button "Open sessions" [ref=e51] [cursor=pointer]:
+        - img [ref=e52]
+      - generic [ref=e54]:
+        - button "Run Auto-discover" [ref=e55] [cursor=pointer]:
+          - img [ref=e57]
+        - button "Choose project action" [ref=e59] [cursor=pointer]:
+          - img [ref=e60]
+    - generic [ref=e62]:
+      - complementary [ref=e63]:
+        - separator "Resize left panel" [ref=e64]
+        - generic [ref=e71]:
+          - generic [ref=e74]:
+            - generic [ref=e75]:
+              - button "Add project" [ref=e76] [cursor=pointer]:
+                - img [ref=e77]
+              - button "New session" [ref=e79] [cursor=pointer]:
+                - img [ref=e80]
+              - button "New multi-run" [ref=e82] [cursor=pointer]:
+                - img [ref=e83]
+              - button "Scheduled tasks" [ref=e85] [cursor=pointer]:
+                - img [ref=e86]
+            - generic [ref=e88]:
+              - button "Search sessions" [ref=e89] [cursor=pointer]:
+                - img [ref=e90]
+              - button "Select sessions" [ref=e92] [cursor=pointer]:
+                - img [ref=e93]
+              - button "Session display mode" [ref=e95] [cursor=pointer]:
+                - img [ref=e96]
+          - generic [ref=e99]:
+            - generic [ref=e101]:
+              - button "recent" [expanded] [ref=e102] [cursor=pointer]:
+                - img [ref=e104]
+                - generic [ref=e106]: recent
+              - generic [ref=e107]:
+                - button "Session active Expand subsessions Estado de plugins con iconos y popup de diagnóstico 1m Archive Session menu" [ref=e108] [cursor=pointer]:
+                  - generic [ref=e109]:
+                    - generic:
+                      - generic "Session active"
+                    - button "Expand subsessions":
+                      - img
+                    - button "Estado de plugins con iconos y popup de diagnóstico 1m" [ref=e111]:
+                      - generic [ref=e112]:
+                        - generic [ref=e113]: Estado de plugins con iconos y popup de diagnóstico
+                        - generic [ref=e115]: 1m
+                    - generic [ref=e116]:
+                      - button "Archive" [ref=e117]:
+                        - img [ref=e118]
+                      - button "Session menu" [ref=e120]:
+                        - img [ref=e121]
+                - button "Expand subsessions Resolver issues y PRs del repo clonado 4h Archive Session menu" [ref=e354] [cursor=pointer]:
+                  - generic [ref=e355]:
+                    - button "Expand subsessions" [ref=e356]:
+                      - img [ref=e357]
+                    - button "Resolver issues y PRs del repo clonado 4h" [ref=e360]:
+                      - generic [ref=e361]:
+                        - generic [ref=e362]: Resolver issues y PRs del repo clonado
+                        - generic [ref=e364]: 4h
+                    - generic [ref=e365]:
+                      - button "Archive" [ref=e366]:
+                        - img [ref=e367]
+                      - button "Session menu" [ref=e369]:
+                        - img [ref=e370]
+            - generic [ref=e159]:
+              - button "Openchamber New worktree Project menu New draft session" [ref=e161] [cursor=pointer]:
+                - button "Openchamber" [ref=e162]:
+                  - img [ref=e164]
+                  - generic [ref=e166]: Openchamber
+                - generic [ref=e167]:
+                  - button "New worktree":
+                    - img
+                  - button "Project menu":
+                    - img
+                - generic [ref=e168]:
+                  - button "New draft session":
+                    - img
+              - generic [ref=e169]:
+                - generic [ref=e171]:
+                  - button "Session active Expand subsessions Estado de plugins con iconos y popup de diagnóstico 1m Archive Session menu" [ref=e172] [cursor=pointer]:
+                    - generic [ref=e173]:
+                      - generic:
+                        - generic "Session active"
+                      - button "Expand subsessions":
+                        - img
+                      - button "Estado de plugins con iconos y popup de diagnóstico 1m" [ref=e175]:
+                        - generic [ref=e176]:
+                          - generic [ref=e177]: Estado de plugins con iconos y popup de diagnóstico
+                          - generic [ref=e179]: 1m
+                      - generic [ref=e180]:
+                        - button "Archive" [ref=e181]:
+                          - img [ref=e182]
+                        - button "Session menu" [ref=e184]:
+                          - img [ref=e185]
+                  - button "Verify the fix applied (@oracle subagent) 1h Archive Session menu" [ref=e372] [cursor=pointer]:
+                    - generic [ref=e373]:
+                      - button "Verify the fix applied (@oracle subagent) 1h" [ref=e375]:
+                        - generic [ref=e376]:
+                          - generic [ref=e377]: Verify the fix applied (@oracle subagent)
+                          - generic [ref=e379]: 1h
+                      - generic [ref=e380]:
+                        - button "Archive" [ref=e381]:
+                          - img [ref=e382]
+                        - button "Session menu" [ref=e384]:
+                          - img [ref=e385]
+                  - button "Verify the following change (@oracle subagent) 1h Archive Session menu" [ref=e387] [cursor=pointer]:
+                    - generic [ref=e388]:
+                      - button "Verify the following change (@oracle subagent) 1h" [ref=e390]:
+                        - generic [ref=e391]:
+                          - generic [ref=e392]: Verify the following change (@oracle subagent)
+                          - generic [ref=e394]: 1h
+                      - generic [ref=e395]:
+                        - button "Archive" [ref=e396]:
+                          - img [ref=e397]
+                        - button "Session menu" [ref=e399]:
+                          - img [ref=e400]
+                  - 'button "Verify: Fix mobile load (@oracle subagent) 2h Archive Session menu" [ref=e402] [cursor=pointer]':
+                    - generic [ref=e403]:
+                      - 'button "Verify: Fix mobile load (@oracle subagent) 2h" [ref=e405]':
+                        - generic [ref=e406]:
+                          - generic [ref=e407]: "Verify: Fix mobile load (@oracle subagent)"
+                          - generic [ref=e409]: 2h
+                      - generic [ref=e410]:
+                        - button "Archive" [ref=e411]:
+                          - img [ref=e412]
+                        - button "Session menu" [ref=e414]:
+                          - img [ref=e415]
+                  - button "Explore mobile bundle and code splitting (@Sisyphus-Junior subagent) 4h Archive Session menu" [ref=e417] [cursor=pointer]:
+                    - generic [ref=e418]:
+                      - button "Explore mobile bundle and code splitting (@Sisyphus-Junior subagent) 4h" [ref=e420]:
+                        - generic [ref=e421]:
+                          - generic [ref=e422]: Explore mobile bundle and code splitting (@Sisyphus-Junior subagent)
+                          - generic [ref=e424]: 4h
+                      - generic [ref=e425]:
+                        - button "Archive" [ref=e426]:
+                          - img [ref=e427]
+                        - button "Session menu" [ref=e429]:
+                          - img [ref=e430]
+                  - button "Show more sessions" [ref=e432] [cursor=pointer]
+                  - status [ref=e223]
+                - status [ref=e224]
+            - generic [ref=e225]:
+              - button "Opencode New worktree Project menu New draft session" [ref=e227] [cursor=pointer]:
+                - button "Opencode" [ref=e228]:
+                  - img [ref=e230]
+                  - generic [ref=e232]: Opencode
+                - generic [ref=e233]:
+                  - button "New worktree":
+                    - img
+                  - button "Project menu":
+                    - img
+                - generic [ref=e234]:
+                  - button "New draft session":
+                    - img
+              - generic [ref=e235]:
+                - generic [ref=e237]:
+                  - generic [ref=e238]: No sessions in this workspace yet.
+                  - status [ref=e239]
+                - status [ref=e240]
+            - status [ref=e241]
+          - generic [ref=e242]:
+            - button "Settings" [ref=e243] [cursor=pointer]:
+              - img [ref=e244]
+            - button "Shortcuts" [ref=e246] [cursor=pointer]:
+              - img [ref=e247]
+            - button "About OpenChamber" [ref=e249] [cursor=pointer]:
+              - img [ref=e250]
+      - generic [ref=e252]:
+        - banner [ref=e253]:
+          - tablist "Main navigation" [ref=e254]:
+            - generic [ref=e256]:
+              - button "Open session switcher" [ref=e257] [cursor=pointer]:
+                - generic: New session
+                - generic:
+                  - generic: Openchamber
+                  - generic:
+                    - img [ref=e258]
+                    - generic: fix/integration-openchamber-fixes
+              - generic [ref=e260]:
+                - button "Open services, usage and MCP" [expanded] [ref=e261] [cursor=pointer]:
+                  - img [ref=e262]
+                - menu "Open services, usage and MCP" [ref=e438]:
+                  - tablist "Tabs" [ref=e442]:
+                    - tab "Usage" [active] [selected] [ref=e445] [cursor=pointer]:
+                      - img [ref=e448]
+                      - generic [ref=e450]: Usage
+                    - tab "MCP" [ref=e453] [cursor=pointer]:
+                      - img [ref=e456]
+                      - generic [ref=e459]: MCP
+                    - tab "Plugin Status" [ref=e462] [cursor=pointer]:
+                      - img [ref=e465]
+                      - generic [ref=e467]: Plugin Status
+                  - generic [ref=e468]:
+                    - generic [ref=e469]:
+                      - generic [ref=e470]:
+                        - generic [ref=e471]: Rate limits
+                        - generic [ref=e472]: 9:06 PM
+                      - generic [ref=e473]:
+                        - tablist "Tabs" [ref=e476]:
+                          - tab "Used" [ref=e479] [cursor=pointer]:
+                            - generic [ref=e480]: Used
+                          - tab "Remaining" [selected] [ref=e483] [cursor=pointer]:
+                            - generic [ref=e484]: Remaining
+                        - button "Refresh rate limits" [ref=e485] [cursor=pointer]:
+                          - img [ref=e486]
+                    - generic [ref=e488]:
+                      - generic [ref=e489]:
+                        - img "kimi-for-coding logo" [ref=e490]
+                        - generic [ref=e491]: Kimi for Coding
+                      - generic [ref=e492]:
+                        - generic [ref=e493]:
+                          - generic [ref=e494]:
+                            - generic [ref=e495]:
+                              - generic [ref=e496]: Weekly Limit
+                              - generic [ref=e497]: Thu, Jun 18, 7:32 PM
+                            - generic [ref=e498]: 37%
+                          - progressbar [ref=e500]
+                        - generic [ref=e502]:
+                          - generic [ref=e503]:
+                            - generic [ref=e504]:
+                              - generic [ref=e505]: Rate Limit (300m)
+                              - generic [ref=e506]: Sun, Jun 14, 12:32 AM
+                            - generic [ref=e507]: 89%
+                          - progressbar [ref=e509]
+                      - generic [ref=e511]:
+                        - img "openrouter logo" [ref=e512]
+                        - generic [ref=e513]: OpenRouter
+                      - generic [ref=e514]: "API error: 401"
+                      - generic [ref=e516]:
+                        - img "minimax-coding-plan logo" [ref=e517]
+                        - generic [ref=e518]: MiniMax Coding Plan (minimax.io)
+                      - generic [ref=e519]:
+                        - generic [ref=e520]:
+                          - generic [ref=e522]:
+                            - generic [ref=e523]: 5-Hour
+                            - generic [ref=e524]: 10:00 PM
+                          - generic [ref=e525]:
+                            - progressbar
+                        - generic [ref=e526]:
+                          - generic [ref=e528]:
+                            - generic [ref=e529]: Weekly Limit
+                            - generic [ref=e530]: Mon, Jun 15, 2:00 AM
+                          - generic [ref=e531]:
+                            - progressbar
+                  - menuitem "Stop OpenChamber" [ref=e534] [cursor=pointer]
+                - button "Toggle terminal panel" [ref=e264] [cursor=pointer]:
+                  - img [ref=e265]
+                - button "Open browser panel" [ref=e267] [cursor=pointer]:
+                  - img [ref=e268]
+                - button "Toggle right sidebar" [ref=e270] [cursor=pointer]:
+                  - img [ref=e271]
+                - button "herjarsa avatar" [ref=e273] [cursor=pointer]:
+                  - img "herjarsa avatar" [ref=e274]
+        - main [ref=e279]:
+          - generic [ref=e283]:
+            - heading "What are we working on in Openchamber?" [level=1] [ref=e285]
+            - generic [ref=e286]:
+              - generic [ref=e287]:
+                - combobox [ref=e288] [cursor=pointer]:
+                  - generic:
+                    - generic:
+                      - img
+                      - generic: Openchamber
+                  - generic [ref=e289]:
+                    - img
+                - textbox [ref=e290]: path_L2hvbWUvaGVyamFyc2EvR0lUSFVCL29wZW5jaGFtYmVy
+                - combobox [ref=e291] [cursor=pointer]:
+                  - generic: fix/integration-openchamber-fixes
+                  - generic [ref=e292]:
+                    - img
+                - textbox [ref=e293]: /home/herjarsa/GITHUB/openchamber
+              - generic [ref=e294]:
+                - 'textbox "Use @ / ! # for helpers" [ref=e299]'
+                - generic [ref=e300]:
+                  - generic [ref=e301]:
+                    - button "Add attachment" [ref=e304] [cursor=pointer]:
+                      - img [ref=e305]
+                    - button "Toggle focus mode" [ref=e307] [cursor=pointer]:
+                      - img [ref=e308]
+                    - button "Enable permission auto-accept" [ref=e310] [cursor=pointer]:
+                      - img [ref=e311]
+                  - generic [ref=e313]:
+                    - generic:
+                      - generic:
+                        - generic:
+                          - img "kimi-for-coding logo"
+                        - img [ref=e314] [cursor=pointer]
+                    - button "Send message" [disabled] [ref=e316]:
+                      - img [ref=e317]
+            - generic [ref=e319]:
+              - button "Explore the codebase" [ref=e321] [cursor=pointer]:
+                - img [ref=e322]
+                - generic [ref=e324]: Explore the codebase
+              - button "Catch me up" [ref=e326] [cursor=pointer]:
+                - img [ref=e327]
+                - generic [ref=e329]: Catch me up
+              - button "Weigh my options" [ref=e331] [cursor=pointer]:
+                - img [ref=e332]
+                - generic [ref=e334]: Weigh my options
+              - button "Start feature planning" [ref=e336] [cursor=pointer]:
+                - img [ref=e337]
+                - generic [ref=e339]: Start feature planning
+              - button "Debug an issue" [ref=e341] [cursor=pointer]:
+                - img [ref=e342]
+                - generic [ref=e344]: Debug an issue
+              - button "Review my changes" [ref=e346] [cursor=pointer]:
+                - img [ref=e347]
+                - generic [ref=e349]: Review my changes
+              - button "Add a starter" [ref=e350] [cursor=pointer]:
+                - img [ref=e351]
+            - status [ref=e353]
+  - region "Notifications alt+T"

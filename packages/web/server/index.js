@@ -70,6 +70,7 @@ import { createServerStartupRuntime } from './lib/opencode/server-startup-runtim
 import { createTunnelWiringRuntime } from './lib/opencode/tunnel-wiring-runtime.js';
 import { createStartupPipelineRuntime } from './lib/opencode/startup-pipeline-runtime.js';
 import { runCliEntryIfMain } from './lib/opencode/cli-entry-runtime.js';
+import { autoUpdatePlugins } from './lib/opencode/plugins.js';
 import { registerNotificationRoutes } from './lib/notifications/routes.js';
 import { createNotificationEmitterRuntime } from './lib/notifications/emitter-runtime.js';
 import { createNotificationTriggerRuntime } from './lib/notifications/runtime.js';
@@ -1250,6 +1251,7 @@ async function main(options = {}) {
     setupProxy,
     scheduleOpenCodeApiDetection,
     bootstrapOpenCodeAtStartup,
+    autoUpdatePlugins,
     triggerHealthCheck,
     staticRoutesRuntime,
     process,

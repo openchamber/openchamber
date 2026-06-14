@@ -1,0 +1,22 @@
+[
+  "/home/herjarsa/GITHUB/openchamber/packages/vscode/CHANGELOG.md",
+  "/home/herjarsa/GITHUB/openchamber/packages/vscode/README.md",
+  "/home/herjarsa/GITHUB/openchamber/packages/vscode/src/DOCUMENTATION.md",
+  "/home/herjarsa/GITHUB/openchamber/packages/vscode/webview/index.html",
+  "/home/herjarsa/GITHUB/openchamber/packages/web/README.md",
+  "/home/herjarsa/GITHUB/openchamber/packages/web/index.html",
+  "/home/herjarsa/GITHUB/openchamber/packages/web/mini-chat.html",
+  "/home/herjarsa/GITHUB/openchamber/packages/web/mobile.html",
+  "/home/herjarsa/GITHUB/openchamber/packages/web/server/TERMINAL_WS_PROTOCOL.md",
+  "/home/herjarsa/GITHUB/openchamber/packages/web/server/lib/event-stream/DOCUMENTATION.md",
+  "/home/herjarsa/GITHUB/openchamber/packages/web/server/lib/fs/DOCUMENTATION.md",
+  "/home/herjarsa/GITHUB/openchamber/packages/web/server/lib/git/DOCUMENTATION.md",
+  "/home/herjarsa/GITHUB/openchamber/packages/web/server/lib/github/DOCUMENTATION.md",
+  "/home/herjarsa/GITHUB/openchamber/packages/web/server/lib/notifications/DOCUMENTATION.md",
+  "/home/herjarsa/GITHUB/openchamber/packages/web/server/lib/opencode/DOCUMENTATION.md",
+  "/home/herjarsa/GITHUB/openchamber/packages/web/server/lib/quota/DOCUMENTATION.md",
+  "/home/herjarsa/GITHUB/openchamber/packages/web/server/lib/scheduled-tasks/DOCUMENTATION.md",
+  "/home/herjarsa/GITHUB/openchamber/packages/web/server/lib/skills-catalog/DOCUMENTATION.md",
+  "/home/herjarsa/GITHUB/openchamber/packages/web/server/lib/terminal/DOCUMENTATION.md",
+  "/home/herjarsa/GITHUB/openchamber/packages/web/server/lib/text/DOCUMENTATION.md"
+]

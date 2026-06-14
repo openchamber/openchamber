@@ -385,6 +385,7 @@ function deletePluginDirFile(id, workingDirectory) {
  * @property {'ok'|'warning'|'error'} status
  * @property {string} [error]
  * @property {string} command
+ * @property {string} [version]
  */
 
 /**
@@ -418,7 +419,7 @@ function buildInvestigateCommand(name, id, status, error) {
  * @param {string|undefined} error
  * @returns {PluginStatusItem}
  */
-function buildPluginStatusResult(id, name, status, error) {
+function buildPluginStatusResult(id, name, status, error, version) {
   return {
     id,
     name,
@@ -426,6 +427,7 @@ function buildPluginStatusResult(id, name, status, error) {
     status,
     ...(error !== undefined ? { error } : {}),
     command: buildInvestigateCommand(name, id, status, error),
+    ...(version ? { version } : {}),
   };
 }
 
@@ -440,6 +442,7 @@ async function getStatusForEntry(entry, directory) {
   let name = spec;
   let status = 'ok';
   let error = undefined;
+  let version = undefined;
 
   if (parsedKind === 'npm') {
     try {
@@ -454,18 +457,26 @@ async function getStatusForEntry(entry, directory) {
         if (!info.ok) {
           status = 'error';
           error = info.error || `Registry lookup failed (status ${info.status})`;
-        } else if (parsed.version !== null && !isExactSemver(parsed.version)) {
-          status = 'ok';
-        } else if (parsed.version !== null && isExactSemver(parsed.version) && !info.versions.includes(parsed.version)) {
-          status = 'error';
-          error = `Version ${parsed.version} not found in registry`;
+        } else {
+          // Report the resolved version: exact pin from spec, or latest from registry
+          if (parsed.version && isExactSemver(parsed.version)) {
+            version = parsed.version;
+          } else if (info.latest) {
+            version = info.latest;
+          }
+          if (parsed.version !== null && !isExactSemver(parsed.version)) {
+            status = 'ok';
+          } else if (parsed.version !== null && isExactSemver(parsed.version) && !info.versions.includes(parsed.version)) {
+            status = 'error';
+            error = `Version ${parsed.version} not found in registry`;
+          }
         }
       }
     } catch (e) {
       status = 'error';
       error = String(e?.message ?? e);
     }
-    return buildPluginStatusResult(id, name, status, error);
+    return buildPluginStatusResult(id, name, status, error, version);
   }
 
   if (parsedKind === 'path') {
@@ -545,6 +556,85 @@ export async function getPluginStatus(directory) {
   const results = await Promise.all(
     entries.map((entry) => getStatusForEntry(entry, directory)),
   );
+  return results;
+}
+
+/**
+ * @typedef {Object} AutoUpdateResult
+ * @property {string} spec
+ * @property {boolean} success
+ * @property {string} [toVersion]
+ * @property {string} [error]
+ */
+
+/**
+ * Auto-update all npm plugins to their latest version.
+ * Skips path-based plugins and exact-version pins.
+ * Skips entirely if OPENCHAMBER_SKIP_PLUGIN_AUTO_UPDATE env is set.
+ *
+ * @param {string|null} directory working directory
+ * @returns {Promise<Array<AutoUpdateResult>>}
+ */
+export async function autoUpdatePlugins(directory) {
+  if (process.env.OPENCHAMBER_SKIP_PLUGIN_AUTO_UPDATE) {
+    return [];
+  }
+
+  const entries = listPluginEntries(directory);
+  const npmEntries = entries.filter((e) => e.parsedKind === 'npm');
+
+  if (npmEntries.length === 0) return [];
+
+  const results = [];
+
+  for (const entry of npmEntries) {
+    const { spec } = entry;
+    try {
+      const parsed = parseNpmSpec(spec);
+      if (parsed.malformed) {
+        results.push({ spec, success: false, error: 'Malformed spec' });
+        continue;
+      }
+
+      const info = await getNpmInfo(parsed.name);
+      if (!info.ok) {
+        results.push({ spec, success: false, error: info.error || 'Registry lookup failed' });
+        continue;
+      }
+
+      const latestVersion = info.latest;
+      if (!latestVersion) {
+        results.push({ spec, success: false, error: 'No latest version found' });
+        continue;
+      }
+
+      // Skip unpinned specs (user intends "always latest")
+      if (parsed.version === null) {
+        results.push({ spec, success: true, toVersion: info.latest || 'latest' });
+        continue;
+      }
+
+      // Skip range specs (^ ~ etc.) — the range governs resolution
+      if (!isExactSemver(parsed.version)) {
+        results.push({ spec, success: true, toVersion: info.latest || 'latest' });
+        continue;
+      }
+
+      // Skip if already at latest version
+      if (parsed.version === latestVersion) {
+        results.push({ spec, success: true, toVersion: latestVersion });
+        continue;
+      }
+
+      // Build new spec with latest version
+      const newSpec = `${parsed.name}@${latestVersion}`;
+      updatePluginEntry(entry.id, { spec: newSpec }, directory);
+      results.push({ spec, success: true, toVersion: latestVersion });
+    } catch (e) {
+      results.push({ spec, success: false, error: String(e?.message ?? e) });
+    }
+  }
+
   return results;
 }
 

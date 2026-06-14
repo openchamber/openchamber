@@ -31,6 +31,7 @@ interface PluginStatusItem {
   status: PluginStatus;
   error?: string;
   command: string;
+  version?: string;
 }
 
 interface PluginStatusPageProps {
@@ -216,7 +217,14 @@ export function PluginStatusPage({ onClose, showHeader = true }: PluginStatusPag
                     className="flex w-full items-center gap-3 px-5 py-3 text-left transition-colors hover:bg-[var(--accent)]"
                   >
                     <StatusIcon status={item.status} />
-                    <span className="flex-1 truncate">{item.shortName}</span>
+                    <span className="flex-1 truncate">
+                      {item.shortName}
+                      {item.version && (
+                        <span className="ml-2 text-xs text-[var(--muted-foreground)]">
+                          v{item.version}
+                        </span>
+                      )}
+                    </span>
                     <span
                       className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${STATUS_BG_CLASS[item.status]} text-[var(--foreground)]`}
                     >
@@ -244,6 +252,11 @@ export function PluginStatusPage({ onClose, showHeader = true }: PluginStatusPag
               <div className="flex items-center gap-3">
                 <StatusIcon status={selected.status} />
                 <span className="font-medium">{selected.name}</span>
+                {selected.version && (
+                  <span className="text-sm text-[var(--muted-foreground)]">
+                    v{selected.version}
+                  </span>
+                )}
                 <span
                   className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${STATUS_BG_CLASS[selected.status]}`}
                 >
