@@ -18,8 +18,6 @@ import { CommandsSidebar } from '@/components/sections/commands/CommandsSidebar'
 import { CommandsPage } from '@/components/sections/commands/CommandsPage';
 import { McpSidebar } from '@/components/sections/mcp/McpSidebar';
 import { McpPage } from '@/components/sections/mcp/McpPage';
-import { PluginsSidebar, PluginsPage } from '@/components/sections/plugins';
-import { usePluginsStore } from '@/stores/usePluginsStore';
 import { SkillsSidebar } from '@/components/sections/skills/SkillsSidebar';
 import { SkillsPage } from '@/components/sections/skills/SkillsPage';
 import { ProjectsSidebar } from '@/components/sections/projects/ProjectsSidebar';
@@ -96,7 +94,6 @@ const pageOrder: SettingsPageSlug[] = [
   'behavior',
   'commands',
   'mcp',
-  'plugins',
   'providers',
   'usage',
   'skills.installed',
@@ -196,8 +193,6 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
       return 'slash-commands-2';
     case 'mcp':
       return null;
-    case 'plugins':
-      return 'code-box';
 
     case 'skills.installed':
       return 'book-open';
@@ -216,6 +211,9 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
     case 'about':
       return 'information';
     case 'home':
+      return null;
+    case 'plugin-status':
+    case 'plugins':
       return null;
     default:
       return 'robot-2';
@@ -434,10 +432,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       void useMcpConfigStore.getState().loadMcpConfigs();
       return;
     }
-    if (settingsSlug === 'plugins') {
-      void usePluginsStore.getState().loadPlugins();
-      return;
-    }
     if (settingsSlug === 'skills.installed' || settingsSlug === 'skills.catalog') {
       void useSkillsStore.getState().loadSkills();
       void useSkillsCatalogStore.getState().loadCatalog();
@@ -495,8 +489,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return t('settings.page.commands.title');
       case 'mcp':
         return t('settings.page.mcp.title');
-      case 'plugins':
-        return t('settings.page.plugins.title');
       case 'skills.installed':
         return t('settings.page.skills.title');
       case 'skills.catalog':
@@ -599,9 +591,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       useConfigStore.getState().setSelectedProvider(ADD_PROVIDER_SETTINGS_ID);
     }
 
-    if (result.id === 'plugins.create') {
-      return 'plugins.spec';
-    }
 
     return result.id;
   }, []);
@@ -648,11 +637,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     openPage(result.page);
     if (isMobile) {
       setMobileStage('page-content');
-    }
-    if (result.id === 'plugins.create' && typeof window !== 'undefined') {
-      window.setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('openchamber:settings-open-plugin-add'));
-      }, 50);
     }
   }, [isMobile, openPage, prepareSettingsSearchTarget]);
 
@@ -748,8 +732,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <CommandsSidebar onItemSelect={opts.onItemSelect} />;
       case 'mcp':
         return <McpSidebar onItemSelect={opts.onItemSelect} />;
-      case 'plugins':
-        return <PluginsSidebar onItemSelect={opts.onItemSelect} />;
       case 'skills.installed':
         return <SkillsSidebar onItemSelect={opts.onItemSelect} />;
       case 'providers':
@@ -786,8 +768,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <CommandsPage />;
       case 'mcp':
         return <McpPage />;
-      case 'plugins':
-        return <PluginsPage />;
       case 'skills.installed':
         return <SkillsPage view="installed" />;
       case 'skills.catalog':
@@ -817,7 +797,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       default:
         return <SettingsHome onOpen={openPage} />;
     }
-  }, [openChamberSectionBySlug, openPage, renderUnavailable, runtimeCtx]);
+  }, [openChamberSectionBySlug, openPage, renderUnavailable, runtimeCtx, onClose]);
 
   // Mobile: if opened via deep-link / palette to a non-home page, jump into it once.
   React.useEffect(() => {
