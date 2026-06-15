@@ -2,14 +2,9 @@ import { marked, type Tokens } from 'marked';
 import remend from 'remend';
 import katex from 'katex';
 import DOMPurify from 'dompurify';
-import {
-  getSharedHighlighter,
-  type DiffsThemeNames,
-  type SupportedLanguages,
-} from '@pierre/diffs';
 import { buildAgentMentionUrl, parseAgentHref, parseSkillHref } from '@/lib/messages/inlineMessageLinks';
 import { isVSCodeRuntime } from '@/lib/desktop';
-import { ensureMarkdownShikiTheme, MARKDOWN_SHIKI_THEME } from './markdownTheme';
+import { highlightCodeInWorker } from './markdown-worker';
 
 const escapeAttr = (value: string): string =>
   value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -195,13 +190,6 @@ const highlightCodeBlocks = async (html: string): Promise<string> => {
   const matches = [...html.matchAll(CODE_BLOCK_RE)];
   if (matches.length === 0) return html;
 
-  ensureMarkdownShikiTheme();
-  const highlighter = await getSharedHighlighter({
-    themes: [MARKDOWN_SHIKI_THEME as DiffsThemeNames],
-    langs: [],
-    preferredHighlighter: 'shiki-wasm',
-  });
-
   const lineLimit = isVSCodeRuntime() ? VSCODE_CODE_HIGHLIGHT_LINE_LIMIT : CODE_HIGHLIGHT_LINE_LIMIT;
 
   let result = html;
@@ -220,28 +208,13 @@ const highlightCodeBlocks = async (html: string): Promise<string> => {
       continue;
     }
 
-    let lang = requested;
-
-    if (lang !== 'text' && !highlighter.getLoadedLanguages().includes(lang)) {
-      try {
-        await highlighter.loadLanguage(lang as SupportedLanguages);
-      } catch {
-        lang = 'text';
-      }
-    }
-
-    try {
-      const highlighted = highlighter
-        .codeToHtml(code, {
-          lang: lang as SupportedLanguages,
-          theme: MARKDOWN_SHIKI_THEME as DiffsThemeNames,
-          tabindex: false,
-        })
-        // Stamp the language so the decorate pass can show a header label.
-        .replace(/^<pre/, `<pre data-md-lang="${requested}"`);
-      result = result.replace(full, () => highlighted);
-    } catch {
-      // Leave the original (escaped, sanitized) <pre><code> in place.
+    // Tokenize off the main thread. On failure the worker resolves to null and
+    // we keep the original escaped <pre><code> (no main-thread highlight).
+    const highlighted = await highlightCodeInWorker(code, requested);
+    if (highlighted) {
+      // Stamp the language so the decorate pass can show a header label.
+      const stamped = highlighted.replace(/^<pre/, `<pre data-md-lang="${requested}"`);
+      result = result.replace(full, () => stamped);
     }
   }
 

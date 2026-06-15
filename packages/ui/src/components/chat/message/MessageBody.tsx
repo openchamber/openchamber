@@ -337,7 +337,6 @@ interface MessageBodyProps {
     messageCompletedAt?: number;
     messageCreatedAt?: number;
 
-    syntaxTheme: { [key: string]: React.CSSProperties };
 
     isMobile: boolean;
     alwaysShowActions?: boolean;
@@ -950,7 +949,6 @@ const AssistantMessageBody = React.memo(({
     messageCompletedAt,
     messageCreatedAt,
 
-    syntaxTheme,
     isMobile,
     alwaysShowActions,
     hasTouchInput,
@@ -1642,7 +1640,6 @@ const AssistantMessageBody = React.memo(({
                             isExpanded={turnGroupingContext.isGroupExpanded === true}
                             collapsedPreviewCount={collapsedPreviewCount}
                             onToggle={toggleActivityGroup}
-                            syntaxTheme={syntaxTheme}
                             isMobile={isMobile}
                             expandedTools={expandedTools}
                             onToggleTool={onToggleTool}
@@ -1794,7 +1791,6 @@ const AssistantMessageBody = React.memo(({
                                     part={toolPart}
                                     isExpanded={expandedTools.has(toolPart.id)}
                                     onToggle={onToggleTool}
-                                    syntaxTheme={syntaxTheme}
                                     isMobile={isMobile}
                                     alwaysShowActions={alwaysShowMessageActions}
                                     onContentChange={onContentChange}
@@ -1866,7 +1862,6 @@ const AssistantMessageBody = React.memo(({
         effectiveStreamPhase,
         showReasoningTraces,
         shouldDeferSortedInlineText,
-        syntaxTheme,
         toggleActivityGroup,
         turnGroupingContext,
         visibleParts,

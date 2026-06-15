@@ -1,11 +1,9 @@
 import React from 'react';
 import type { Message, Part } from '@opencode-ai/sdk/v2';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
 
 import { deriveMessageRole } from '@/components/chat/message/messageRole';
 import { Icon } from "@/components/icon/Icon";
-import { useThemeSystem } from '@/contexts/useThemeSystem';
-import { generateSyntaxTheme } from '@/lib/theme/syntaxThemeGenerator';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -272,9 +270,7 @@ const resolveProviderAndModel = (
 
 export const ContextPanelContent: React.FC = () => {
   const { t } = useI18n();
-  const { currentTheme } = useThemeSystem();
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
-  const syntaxTheme = React.useMemo(() => generateSyntaxTheme(currentTheme), [currentTheme]);
   const [expandedRawMessages, setExpandedRawMessages] = React.useState<Record<string, boolean>>({});
   const [copiedRawMessageId, setCopiedRawMessageId] = React.useState<string | null>(null);
   const copyResetTimeoutRef = React.useRef<number | null>(null);
@@ -649,28 +645,18 @@ export const ContextPanelContent: React.FC = () => {
                             {isCopied ? <Icon name="check" className="size-3.5" /> : <Icon name="file-copy" className="size-3.5" />}
                           </button>
                         </div>
-                        <SyntaxHighlighter
+                        <WorkerHighlightedCode
                           language="json"
-                          style={syntaxTheme}
-                          PreTag="div"
-                          customStyle={{
+                          code={jsonValue}
+                          style={{
                             margin: 0,
                             padding: '0.75rem',
                             background: 'transparent',
                             fontSize: 'var(--text-micro)',
                             lineHeight: '1.35',
                           }}
-                          codeTagProps={{
-                            style: {
-                              whiteSpace: 'pre-wrap',
-                              wordBreak: 'break-word',
-                              overflowWrap: 'break-word',
-                            },
-                          }}
-                          wrapLongLines
-                        >
-                          {jsonValue}
-                        </SyntaxHighlighter>
+                          wrap
+                        />
                       </div>
                     </div>
                   )}

@@ -4557,7 +4557,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         <ToolOutputDialog
             popup={attachmentPreview}
             onOpenChange={handleAttachmentPreviewOpenChange}
-            syntaxTheme={{}}
             isMobile={isMobile}
         />
         </>
