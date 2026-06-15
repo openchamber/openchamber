@@ -510,7 +510,7 @@ export const renderTodoOutput = (
     }
 };
 
-export const renderWebSearchOutput = (output: string, _syntaxTheme: { [key: string]: React.CSSProperties }, options?: { unstyled?: boolean }) => {
+export const renderWebSearchOutput = (output: string, options?: { unstyled?: boolean }) => {
     try {
         return (
             <div

@@ -18,8 +18,9 @@ import { buildCodeMirrorCommentWidgets, normalizeLineRange, useInlineCommentCont
 import { getLanguageFromExtension } from '@/lib/toolHelpers';
 import { useDeviceInfo } from '@/lib/device';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
-import { generateSyntaxTheme } from '@/lib/theme/syntaxThemeGenerator';
 import { createFlexokiCodeMirrorTheme } from '@/lib/codemirror/flexokiTheme';
+import { shikiHighlightExtension } from '@/lib/codemirror/shikiHighlight';
+import { getResolvedShikiTheme } from '@/lib/shiki/appThemeRegistry';
 import { languageByExtension } from '@/lib/codemirror/languageByExtension';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessions } from '@/sync/sync-context';
@@ -164,7 +165,6 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
   const runtimeApis = useRuntimeAPIs();
   const { isMobile } = useDeviceInfo();
   const { currentTheme } = useThemeSystem();
-  React.useMemo(() => generateSyntaxTheme(currentTheme), [currentTheme]);
 
   const session = React.useMemo(() => {
     if (!currentSessionId) return null;
@@ -346,10 +346,21 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
   }, [cancel, commentText, editingDraftId, isMobile, lineSelection]);
 
   const editorExtensions = React.useMemo(() => {
-    const extensions = [createFlexokiCodeMirrorTheme(currentTheme)];
+    // Shiki token colors only for code files; markdown keeps the lezer
+    // highlighter (markdown-aware bold headings etc., and no Shiki view to match).
+    const shikiLanguage = resolvedPath ? getLanguageFromExtension(resolvedPath) : null;
+    const useShiki = Boolean(shikiLanguage) && shikiLanguage !== 'markdown';
+    const extensions = [createFlexokiCodeMirrorTheme(currentTheme, useShiki ? { syntaxColors: false } : undefined)];
     const language = languageByExtension(resolvedPath || 'plan.md');
     if (language) {
       extensions.push(language);
+    }
+    if (useShiki && shikiLanguage) {
+      extensions.push(shikiHighlightExtension({
+        language: shikiLanguage,
+        themeName: currentTheme.metadata.id,
+        theme: getResolvedShikiTheme(currentTheme),
+      }));
     }
     extensions.push(EditorView.lineWrapping);
     return extensions;
