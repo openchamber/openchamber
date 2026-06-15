@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -71,6 +71,8 @@ type Props = {
 
 export function SidebarProjectsList(props: Props): React.ReactNode {
   const { t } = useI18n();
+  const onRefreshProjectRef = useRef(props.onRefreshProject);
+  onRefreshProjectRef.current = props.onRefreshProject;
   const projectSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -159,8 +161,13 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                 const isCollapsed = props.collapsedProjects.has(projectKey);
                 const isActiveProject = projectKey === props.activeProjectId;
                 const isRepo = props.projectRepoStatus.get(projectKey);
+                const onRefreshProjectProp = isActiveProject
+                  ? () => onRefreshProjectRef.current?.(projectKey)
+                  : undefined;
+
                 const orderedGroups = props.getOrderedGroups(projectKey, section.groups);
                 const rootGroup = orderedGroups.find((group) => group.isMain) ?? null;
+
                 const nestedGroups = rootGroup
                   ? orderedGroups.filter((group) => group.id !== rootGroup.id)
                   : orderedGroups;
@@ -201,7 +208,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                     showCreateButtons
                     openSidebarMenuKey={props.openSidebarMenuKey}
                     setOpenSidebarMenuKey={props.setOpenSidebarMenuKey}
-                    onRefreshProject={isActiveProject ? () => props.onRefreshProject?.(projectKey) : undefined}
+                    onRefreshProject={onRefreshProjectProp}
                   >
                     {!isCollapsed ? (
                       <div className="space-y-0 pt-0 pb-0.5 pl-3">
