@@ -60,6 +60,7 @@ import { getAttachedSessionDirectory } from "./session-worktree-contract"
 import { setSessionOpener } from "./session-navigation"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { rememberRuntimeLiveStatus } from "./runtime-live-memory"
+import { sumAssistantMessageCosts } from "@/stores/utils/costUtils"
 
 export type { AttachedFile }
 
@@ -778,6 +779,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     if (!lastTokens) return null
 
     const totalTokens = lastTokens.input + lastTokens.output + lastTokens.reasoning + (lastTokens.cache?.read ?? 0) + (lastTokens.cache?.write ?? 0)
+    const cost = sumAssistantMessageCosts(messages)
     const thresholdLimit = contextLimit > 0 ? contextLimit : 200000
     const percentage = contextLimit > 0 ? Math.round((totalTokens / contextLimit) * 100) : 0
     const normalizedOutput = outputLimit > 0 ? Math.round((lastTokens.output / outputLimit) * 100) : undefined
@@ -785,6 +787,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     return {
       totalTokens,
       percentage,
+      ...(cost > 0 ? { cost } : {}),
       contextLimit: contextLimit || 0,
       outputLimit: outputLimit || undefined,
       normalizedOutput,
