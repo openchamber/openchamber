@@ -100,7 +100,7 @@
     },
     "packages/electron": {
       "name": "@openchamber/electron",
-      "version": "1.12.4",
+      "version": "1.13.0",
       "dependencies": {
         "@openchamber/web": "workspace:*",
         "electron-context-menu": "^4.1.2",
@@ -115,7 +115,7 @@
     },
     "packages/ui": {
       "name": "@openchamber/ui",
-      "version": "1.12.4",
+      "version": "1.13.0",
       "dependencies": {
         "@base-ui/react": "^1.4.0",
         "@codemirror/autocomplete": "^6.20.0",
@@ -150,7 +150,6 @@
         "@pierre/diffs": "1.3.0-beta.4",
         "@replit/codemirror-vim": "^6.3.0",
         "@simplewebauthn/browser": "13.3.0",
-        "@types/react-syntax-highlighter": "^15.5.13",
         "@xenova/transformers": "^2.17.2",
         "@zumer/snapdom": "^2.12.0",
         "beautiful-mermaid": "^1.1.3",
@@ -170,15 +169,14 @@
         "morphdom": "^2.7.7",
         "motion": "^12.23.24",
         "next-themes": "^0.4.6",
-        "prismjs": "^1.30.0",
         "qrcode": "^1.5.4",
         "react": "^19.1.1",
         "react-dom": "^19.1.1",
         "react-drawio": "1.0.7",
-        "react-syntax-highlighter": "^15.6.6",
         "rehype-katex": "^7.0.1",
         "remark-math": "^6.0.0",
         "remend": "^1.2.1",
+        "shiki": "^3.23.0",
         "simple-git": "^3.28.0",
         "sonner": "^2.0.7",
         "strip-json-comments": "^5.0.3",
@@ -193,7 +191,6 @@
         "@remixicon/react": "^4.7.0",
         "@tailwindcss/postcss": "^4.0.0",
         "@types/node": "^24.3.1",
-        "@types/prismjs": "^1.26.6",
         "@types/qrcode": "^1.5.5",
         "@types/react": "^19.1.10",
         "@types/react-dom": "^19.1.7",
@@ -217,7 +214,7 @@
     },
     "packages/vscode": {
       "name": "openchamber",
-      "version": "1.12.4",
+      "version": "1.13.0",
       "dependencies": {
         "@openchamber/ui": "workspace:*",
         "@opencode-ai/sdk": "^1.17.7",
@@ -240,7 +237,7 @@
     },
     "packages/web": {
       "name": "@openchamber/web",
-      "version": "1.12.4",
+      "version": "1.13.0",
       "bin": {
         "openchamber": "./bin/cli.js",
       },
@@ -292,7 +289,6 @@
         "@types/node": "^24.3.1",
         "@types/react": "^19.1.10",
         "@types/react-dom": "^19.1.7",
-        "@types/react-syntax-highlighter": "^15.5.13",
         "@types/supertest": "^7.2.0",
         "@vitejs/plugin-react": "^5.0.0",
         "autoprefixer": "^10.4.21",
@@ -312,7 +308,6 @@
         "react": "^19.1.1",
         "react-dom": "^19.1.1",
         "react-markdown": "^10.1.0",
-        "react-syntax-highlighter": "^15.6.6",
         "remark-gfm": "^4.0.1",
         "sonner": "^2.0.7",
         "strip-json-comments": "^5.0.3",
@@ -1329,8 +1324,6 @@
     "@types/normalize-package-data": ["@types/normalize-package-data@2.4.4", "", {}, "sha512-37i+OaWTh9qeK4LSHPsyRC7NahnGotNuZvjLSgcPzblpHB3rrCJxAOgI5gCdKm7coonsaX1Of0ILiTcnZjbfxA=="],
 
     "@types/plist": ["@types/plist@3.0.5", "", { "dependencies": { "@types/node": "*", "xmlbuilder": ">=11.0.1" } }, "sha512-E6OCaRmAe4WDmWNsL/9RMqdkkzDCY1etutkflWk4c+AcjDU07Pcz1fQwTX0TQz+Pxqn9i4L1TU3UFpjnrcDgxA=="],
-
-    "@types/prismjs": ["@types/prismjs@1.26.6", "", {}, "sha512-vqlvI7qlMvcCBbVe0AKAb4f97//Hy0EBTaiW8AalRnG/xAN5zOiWWyrNqNXeq8+KAuvRewjCVY1+IPxk4RdNYw=="],
 
     "@types/qrcode": ["@types/qrcode@1.5.6", "", { "dependencies": { "@types/node": "*" } }, "sha512-te7NQcV2BOvdj2b1hCAHzAoMNuj65kNBMz0KBaxM6c3VGBOhU0dURQKOtH8CFNI/dsKkwlv32p26qYQTWoB5bw=="],
 

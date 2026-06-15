@@ -29,6 +29,8 @@ import { JsonTreeView } from '@/components/ui/JsonTreeView';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { languageByExtension, loadLanguageByExtension } from '@/lib/codemirror/languageByExtension';
 import { createFlexokiCodeMirrorTheme } from '@/lib/codemirror/flexokiTheme';
+import { shikiHighlightExtension } from '@/lib/codemirror/shikiHighlight';
+import { getResolvedShikiTheme } from '@/lib/shiki/appThemeRegistry';
 import { File as PierreFile } from '@pierre/diffs/react';
 import {
   Dialog,
@@ -2824,10 +2826,22 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       return [createFlexokiCodeMirrorTheme(currentTheme)];
     }
 
-    const extensions = [createFlexokiCodeMirrorTheme(currentTheme)];
+    // Shiki token colors (worker-backed) match the Shiki file view exactly.
+    // Same language resolver as the view, so both agree on the language. When
+    // Shiki is the color source, drop the lezer token colors to avoid a
+    // competing highlighter (keep the lezer language for indentation/folding).
+    const shikiLanguage = getLanguageFromExtension(selectedFile.path);
+    const extensions = [createFlexokiCodeMirrorTheme(currentTheme, shikiLanguage ? { syntaxColors: false } : undefined)];
     const language = staticLanguageExtension ?? dynamicLanguageExtension;
     if (language) {
       extensions.push(language);
+    }
+    if (shikiLanguage) {
+      extensions.push(shikiHighlightExtension({
+        language: shikiLanguage,
+        themeName: currentTheme.metadata.id,
+        theme: getResolvedShikiTheme(currentTheme),
+      }));
     }
     if (wrapLines) {
       extensions.push(EditorView.lineWrapping);
