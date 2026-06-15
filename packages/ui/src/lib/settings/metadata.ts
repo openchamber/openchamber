@@ -135,6 +135,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     group: 'opencode',
     kind: 'split',
     keywords: ['plugin', 'plugins', 'extensions', 'addons', 'npm', 'opencode-wakatime'],
+    isAvailable: () => false,
   },
   {
     slug: 'plugin-status',
@@ -142,6 +143,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     group: 'opencode',
     kind: 'single',
     keywords: ['plugin', 'status', 'health', 'mcp'],
+    isAvailable: () => false,
   },
   {
     slug: 'skills.installed',
