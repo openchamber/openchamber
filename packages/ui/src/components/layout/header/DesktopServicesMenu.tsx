@@ -17,7 +17,6 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
-import { PluginStatusPage } from '@/components/sections/plugin-status/PluginStatusPage';
 import {
   formatQuotaValueLabel,
   formatQuotaResetLabel,
@@ -48,8 +47,8 @@ type DesktopServicesMenuProps = {
   isDesktopServicesOpen: boolean;
   setIsDesktopServicesOpen: React.Dispatch<React.SetStateAction<boolean>>;
   refreshCurrentInstanceLabel: () => Promise<void>;
-  desktopServicesTab: 'instance' | 'usage' | 'mcp' | 'plugin-status' | null;
-  setDesktopServicesTab: React.Dispatch<React.SetStateAction<'instance' | 'usage' | 'mcp' | 'plugin-status' | null>>;
+  desktopServicesTab: 'instance' | 'usage' | 'mcp';
+  setDesktopServicesTab: React.Dispatch<React.SetStateAction<'instance' | 'usage' | 'mcp'>>;
   quotaResultsLength: number;
   fetchAllQuotas: () => Promise<unknown>;
   servicesTabItems: SortableTabsStripItem[];
@@ -170,7 +169,7 @@ export const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
               items={servicesTabItems}
               activeId={desktopServicesTab}
               onSelect={(tabID) => {
-                const value = tabID as 'instance' | 'usage' | 'mcp' | 'plugin-status';
+                const value = tabID as 'instance' | 'usage' | 'mcp';
                 setDesktopServicesTab(value);
                 if (value === 'usage' && quotaResultsLength === 0) {
                   void fetchAllQuotas();
@@ -225,11 +224,6 @@ export const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
           <McpDropdownContent active={isDesktopServicesOpen && desktopServicesTab === 'mcp'} />
         ) : null}
 
-        {desktopServicesTab === 'plugin-status' ? (
-	  			<div className="max-h-[60vh] overflow-y-auto px-2 py-2">
-            <PluginStatusPage onClose={() => setDesktopServicesTab(null)} showHeader={false} />
-					</div>
-        ) : null}
         {desktopServicesTab === 'usage' ? (
           <div className="overflow-x-hidden">
             <div className="flex items-center justify-between gap-3 border-b border-[var(--interactive-border)] px-4 py-2.5">

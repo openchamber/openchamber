@@ -2046,16 +2046,17 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
 };
 
 export const MarkdownRenderer = React.memo(MarkdownRendererImpl, (prev, next) => {
-  return prev.content === next.content
-    && prev.isStreaming === next.isStreaming
-    && prev.disableStreamAnimation === next.disableStreamAnimation
-    && prev.variant === next.variant
-    && prev.isAnimated === next.isAnimated
-    && prev.skipFadeIn === next.skipFadeIn
-    && prev.className === next.className
-    && prev.messageId === next.messageId
+return prev.content === next.content
+&& prev.isStreaming === next.isStreaming
+&& prev.disableStreamAnimation === next.disableStreamAnimation
+&& prev.variant === next.variant
+&& prev.isAnimated === next.isAnimated
+&& prev.skipFadeIn === next.skipFadeIn
+&& prev.className === next.className
+&& prev.messageId === next.messageId
     && prev.onShowPopup === next.onShowPopup
-    && prev.part?.id === next.part?.id;
+    && prev.enableFileReferences === next.enableFileReferences
+&& prev.part?.id === next.part?.id;
 });
 
 const SimpleMarkdownRendererImpl: React.FC<{

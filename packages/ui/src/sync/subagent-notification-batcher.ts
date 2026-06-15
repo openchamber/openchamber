@@ -7,6 +7,7 @@
 // ---------------------------------------------------------------------------
 
 import { appendNotification } from './notification-store'
+import { findParentToolPartForSubagent } from './sync-context'
 import type { State } from './types'
 
 export type SubagentEvent = {
@@ -88,28 +89,11 @@ class SubagentNotificationBatcher {
     let parentPartID: string | undefined
 
     if (hasError) {
-      const subagent = state.session.find((s) => s.id === representative.sessionID)
-      const parentID = (subagent as { parentID?: string | null } | undefined)?.parentID
-      if (parentID) {
-        const parentMessages = state.message[parentID]
-        if (Array.isArray(parentMessages)) {
-          outer: for (const message of parentMessages) {
-            const parts = state.part[message.id]
-            if (!Array.isArray(parts)) continue
-            for (const part of parts) {
-              if (part.type !== 'tool') continue
-              const toolPart = part as { tool?: string; output?: unknown }
-              if (toolPart.tool !== 'task') continue
-              const output = typeof toolPart.output === 'string' ? toolPart.output : ''
-              if (output.includes(`<task id="${representative.sessionID}">`) || output.includes(`<task id='${representative.sessionID}'>`)) {
-                parentSessionID = parentID
-                parentMessageID = message.id
-                parentPartID = part.id
-                break outer
-              }
-            }
-          }
-        }
+      const match = findParentToolPartForSubagent(representative.sessionID, state)
+      if (match) {
+        parentSessionID = match.parentSessionID
+        parentMessageID = match.parentMessageID
+        parentPartID = match.parentPartID
       }
     }
 
