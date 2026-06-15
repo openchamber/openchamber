@@ -371,7 +371,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.project.actions.projectMenu': '프로젝트 메뉴',
   'sessions.sidebar.project.actions.newSession': '새 세션',
   'sessions.sidebar.project.actions.closeProject': '프로젝트 닫기',
-  'sessions.sidebar.project.actions.refreshProject': 'Refresh project',  'sessions.sidebar.project.actions.refreshProjectTooltip': 'Refresh project sessions and folders',  'sessions.sidebar.project.actions.newDraftSession': '새 드래프트 세션',
+  'sessions.sidebar.project.actions.newDraftSession': '새 드래프트 세션',
   'sessions.sidebar.session.menu.rename': '이름 변경',
   'sessions.sidebar.session.rename.save': '세션 이름 저장',
   'sessions.sidebar.session.rename.cancel': '세션 이름 변경 취소',

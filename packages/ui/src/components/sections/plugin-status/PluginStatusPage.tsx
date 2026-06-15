@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useInputStore } from '@/sync/input-store';
@@ -123,17 +123,9 @@ export function PluginStatusPage({ onClose, showHeader = true }: PluginStatusPag
     onClose?.();
   };
 
-  const statusCounts = useMemo(() => {
-    return items.reduce(
-      (acc, item) => {
-        acc[item.status] = (acc[item.status] || 0) + 1;
-        return acc;
-      },
-      { ok: 0, warning: 0, error: 0 } as Record<PluginStatus, number>,
-    );
-  }, [items]);
 
   const title = t('settings.pluginStatus.title');
+
 
   const header = showHeader ? (
     <header className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
@@ -178,27 +170,21 @@ export function PluginStatusPage({ onClose, showHeader = true }: PluginStatusPag
 
   return (
     <div className="flex h-full flex-col">
-      {header}
-      <header className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
-        <h1 className="text-lg font-semibold">{title}</h1>
-        {items.length > 0 && (
-          <div className="flex items-center gap-3 text-sm">
-            <span className="flex items-center gap-1">
-              <span className="inline-block h-2 w-2 rounded-full bg-[var(--status-success)]" />
-              {statusCounts.ok}
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="inline-block h-2 w-2 rounded-full bg-[var(--status-warning)]" />
-              {statusCounts.warning}
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="inline-block h-2 w-2 rounded-full bg-[var(--status-error)]" />
-              {statusCounts.error}
-            </span>
-          </div>
-        )}
-      </header>
-
+      {showHeader && (
+        <header className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
+          <h1 className="text-lg font-semibold">{title}</h1>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md p-1.5 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+              aria-label={t('settings.view.actions.closeSettings')}
+            >
+              <Icon name="close" className="h-5 w-5" />
+            </button>
+          )}
+        </header>
+      )}
       {items.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center px-5 text-center">
           <Icon name="plug" className="h-10 w-10 text-[var(--muted-foreground)]" />

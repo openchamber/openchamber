@@ -33,7 +33,6 @@ export const createStartupPipelineRuntime = (dependencies) => {
       bootstrapOpenCodeAtStartup,
       autoUpdatePlugins,
       refreshOpenCodeAfterConfigChange,
-      autoUpdatePlugins,
       staticRoutesRuntime,
       process,
       crypto,
@@ -99,7 +98,10 @@ export const createStartupPipelineRuntime = (dependencies) => {
           const results = await autoUpdatePlugins(null);
           if (results.length > 0) {
             const updated = results.filter((r) => r.success).length;
-            const actuallyChanged = results.filter((r) => r.success && r.toVersion).length;
+            // Reload only when at least one plugin reported a successful check
+            // (autoUpdatePlugins always sets toVersion on success, even for
+            // no-op entries; the reload is a no-op config re-read when nothing
+            // was written, so this is safe).
             console.log(`[Plugin Auto-Update] Updated ${updated}/${results.length} plugins`);
             for (const result of results) {
               if (result.success) {
@@ -108,8 +110,8 @@ export const createStartupPipelineRuntime = (dependencies) => {
                 console.log(`  ✗ ${result.spec}: ${result.error}`);
               }
             }
-            // Reload OpenCode to pick up updated plugin specs
-            if (actuallyChanged > 0 && typeof refreshOpenCodeAfterConfigChange === 'function') {
+            // Reload OpenCode so any updated specs take effect immediately
+            if (updated > 0 && typeof refreshOpenCodeAfterConfigChange === 'function') {
               try {
                 await refreshOpenCodeAfterConfigChange('plugin auto-update');
                 console.log('[Plugin Auto-Update] OpenCode reloaded');

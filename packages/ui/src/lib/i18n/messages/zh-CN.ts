@@ -371,7 +371,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.project.actions.projectMenu': '项目菜单',
   'sessions.sidebar.project.actions.newSession': '新建会话',
   'sessions.sidebar.project.actions.closeProject': '关闭项目',
-  'sessions.sidebar.project.actions.refreshProject': 'Refresh project',  'sessions.sidebar.project.actions.refreshProjectTooltip': 'Refresh project sessions and folders',  'sessions.sidebar.project.actions.newDraftSession': '新建草稿会话',
+  'sessions.sidebar.project.actions.newDraftSession': '新建草稿会话',
   'sessions.sidebar.session.menu.rename': '重命名',
   'sessions.sidebar.session.rename.save': '保存会话名称',
   'sessions.sidebar.session.rename.cancel': '取消重命名会话',
