@@ -37,6 +37,7 @@ import { UpdateDialog } from '@/components/ui/UpdateDialog';
 import { useDeviceInfo, useTabletStandalonePwaRuntime } from '@/lib/device';
 import { cn, hasModifier } from '@/lib/utils';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
+import { PluginStatusPage } from '@/components/sections/plugin-status/PluginStatusPage';
 import { McpIcon } from '@/components/icons/McpIcon';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
@@ -262,8 +263,8 @@ type DesktopServicesMenuProps = {
   isDesktopServicesOpen: boolean;
   setIsDesktopServicesOpen: React.Dispatch<React.SetStateAction<boolean>>;
   refreshCurrentInstanceLabel: () => Promise<void>;
-  desktopServicesTab: 'instance' | 'usage' | 'mcp';
-  setDesktopServicesTab: React.Dispatch<React.SetStateAction<'instance' | 'usage' | 'mcp'>>;
+  desktopServicesTab: 'instance' | 'usage' | 'mcp' | 'plugin-status';
+  setDesktopServicesTab: React.Dispatch<React.SetStateAction<'instance' | 'usage' | 'mcp' | 'plugin-status'>>;
   quotaResultsLength: number;
   fetchAllQuotas: () => Promise<unknown>;
   servicesTabItems: SortableTabsStripItem[];
@@ -435,8 +436,14 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
           </div>
         ) : null}
 
-        {desktopServicesTab === 'mcp' ? (
-          <McpDropdownContent active={isDesktopServicesOpen && desktopServicesTab === 'mcp'} />
+{desktopServicesTab === 'mcp' ? (
+<McpDropdownContent active={isDesktopServicesOpen && desktopServicesTab === 'mcp'} />
+        ) : null}
+
+        {desktopServicesTab === 'plugin-status' ? (
+          <div className="overflow-x-hidden">
+            <PluginStatusPage onClose={() => setDesktopServicesTab('usage')} showHeader={false} />
+          </div>
         ) : null}
 
         {desktopServicesTab === 'usage' ? (
@@ -869,7 +876,7 @@ export const Header: React.FC<HeaderProps> = ({
   const [remoteUpdateChecking, setRemoteUpdateChecking] = React.useState(false);
   const [remoteUpdateError, setRemoteUpdateError] = React.useState<string | null>(null);
   const compactCurrentInstanceLabel = React.useMemo(() => formatCompactHeaderLabel(currentInstanceLabel), [currentInstanceLabel]);
-  const [desktopServicesTab, setDesktopServicesTab] = React.useState<'instance' | 'usage' | 'mcp'>(
+  const [desktopServicesTab, setDesktopServicesTab] = React.useState<'instance' | 'usage' | 'mcp' | 'plugin-status'>(
     isDesktopApp ? 'instance' : 'usage'
   );
   const [mobileServicesTab, setMobileServicesTab] = React.useState<'usage' | 'mcp'>('usage');
@@ -1785,13 +1792,14 @@ export const Header: React.FC<HeaderProps> = ({
   }, [activeMainTab, isMobile, setActiveMainTab]);
 
   const servicesTabs = React.useMemo(() => {
-    const base: Array<{ value: 'instance' | 'usage' | 'mcp'; label: string; icon: React.ReactNode }> = [];
+    const base: Array<{ value: 'instance' | 'usage' | 'mcp' | 'plugin-status'; label: string; icon: React.ReactNode }> = [];
     if (isDesktopApp) {
       base.push({ value: 'instance', label: t('layout.services.instance'), icon: <Icon name="server" className="h-3.5 w-3.5" /> });
     }
     base.push(
       { value: 'usage', label: t('layout.services.usage'), icon: <Icon name="timer" className="h-3.5 w-3.5" /> },
-      { value: 'mcp', label: 'MCP', icon: <McpIcon className="h-3.5 w-3.5" /> }
+      { value: 'mcp', label: 'MCP', icon: <McpIcon className="h-3.5 w-3.5" /> },
+      { value: 'plugin-status', label: t('layout.services.pluginStatus'), icon: <Icon name="plug" className="h-3.5 w-3.5" /> }
     );
     return base;
   }, [isDesktopApp, t]);
@@ -1919,7 +1927,7 @@ export const Header: React.FC<HeaderProps> = ({
       if (eventMatchesShortcut(e, cycleServicesCombo)) {
         e.preventDefault();
 
-        const tabValues = servicesTabs.map((tab) => tab.value) as Array<'instance' | 'usage' | 'mcp'>;
+        const tabValues = servicesTabs.map((tab) => tab.value) as Array<'instance' | 'usage' | 'mcp' | 'plugin-status'>;
         if (tabValues.length === 0) {
           return;
         }

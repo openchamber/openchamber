@@ -144,6 +144,7 @@ export const dict: Record<I18nKey, string> = {
   'layout.rightSidebar.context': '컨텍스트',
   'layout.services.instance': '인스턴스',
   'layout.services.usage': '사용량',
+  'layout.services.pluginStatus': 'Plugin Status',
   'sessions.sidebar.header.actions.closeSessions': '세션 닫기',
   'sessions.sidebar.header.actions.addProject': '프로젝트 추가',
   'sessions.sidebar.header.actions.newSession': '새 세션',

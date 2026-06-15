@@ -234,7 +234,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-export type VisibleSetting = 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'sidebar' | 'expandedEditorToolbar';
+export type VisibleSetting = 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -251,9 +251,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setShowReasoningTraces = useUIStore(state => state.setShowReasoningTraces);
     const collapsibleThinkingBlocks = useUIStore(state => state.collapsibleThinkingBlocks);
     const setCollapsibleThinkingBlocks = useUIStore(state => state.setCollapsibleThinkingBlocks);
-    const showSubagentSessionsInSidebar = useUIStore(state => state.showSubagentSessionsInSidebar);
-    const setShowSubagentSessionsInSidebar = useUIStore(state => state.setShowSubagentSessionsInSidebar);
-
 
     const mermaidRenderingMode = useUIStore(state => state.mermaidRenderingMode);
     const setMermaidRenderingMode = useUIStore(state => state.setMermaidRenderingMode);
@@ -545,7 +542,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('queueMode')
         || shouldShow('persistDraft')
         || shouldShow('showToolFileIcons')
-        || shouldShow('sidebar')
         || shouldShow('expandedTools')
         || (!isMobile && shouldShow('inputSpellcheck'));
 
@@ -1888,30 +1884,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 ariaLabel={t('settings.openchamber.visual.field.showTurnChangedFilesAria')}
                                             />
                                             <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.showTurnChangedFiles')}</span>
-                                        </div>
-                                    )}
-
-                                    {shouldShow('sidebar') && (
-                                        <div
-                                            data-settings-item="sidebar.subagent-sessions"
-                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={showSubagentSessionsInSidebar}
-                                            onClick={() => setShowSubagentSessionsInSidebar(!showSubagentSessionsInSidebar)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    setShowSubagentSessionsInSidebar(!showSubagentSessionsInSidebar);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
-                                                checked={showSubagentSessionsInSidebar}
-                                                onChange={setShowSubagentSessionsInSidebar}
-                                                ariaLabel={t('settings.openchamber.visual.field.showSubagentSessionsInSidebarAria')}
-                                            />
-                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.showSubagentSessionsInSidebar')}</span>
                                         </div>
                                     )}
 

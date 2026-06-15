@@ -144,6 +144,7 @@ export const dict: Record<I18nKey, string> = {
   "layout.rightSidebar.context": "Контекст",
   "layout.services.instance": "Інстанс",
   "layout.services.usage": "Використання",
+  "layout.services.pluginStatus": "Plugin Status",
   "sessions.sidebar.header.actions.closeSessions": "Закрити сесії",
   "sessions.sidebar.header.actions.addProject": "Додати проєкт",
   "sessions.sidebar.header.actions.newSession": "Нова сесія",
