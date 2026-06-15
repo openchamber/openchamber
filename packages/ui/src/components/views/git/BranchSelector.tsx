@@ -53,29 +53,31 @@ interface BranchSelectorProps {
   disabled?: boolean;
 }
 
-const BranchNameMarquee = ({ name }: { name: string }) => {
+const BranchNameMarquee = ({ name, className = '' }: { name: string; className?: string }) => {
   const containerRef = React.useRef<HTMLSpanElement>(null);
   const textRef = React.useRef<HTMLSpanElement>(null);
+  const measureRef = React.useRef<HTMLSpanElement>(null);
   const [isOverflowing, setIsOverflowing] = React.useState(false);
 
   React.useLayoutEffect(() => {
     const container = containerRef.current;
-    const text = textRef.current;
-    if (!container || !text) return;
-    const updateOverflow = () => setIsOverflowing(text.scrollWidth > container.clientWidth + 1);
+    const measure = measureRef.current;
+    if (!container || !measure) return;
+    const updateOverflow = () => setIsOverflowing(measure.scrollWidth > container.clientWidth + 1);
     updateOverflow();
     const observer = new ResizeObserver(updateOverflow);
     observer.observe(container);
-    observer.observe(text);
+    observer.observe(measure);
     return () => observer.disconnect();
   }, [name]);
 
   return (
-    <span ref={containerRef} className="min-w-0 flex-1 overflow-hidden text-left">
+    <span ref={containerRef} className={`relative min-w-0 flex-1 overflow-hidden text-left ${className}`}>
+      <span ref={measureRef} className="invisible pointer-events-none absolute left-0 top-0 max-w-none whitespace-nowrap" aria-hidden="true">{name}</span>
       {isOverflowing ? (
-        <span className="open-file-name-marquee-track">
-          <span ref={textRef} className="open-file-name-marquee-item">{name}</span>
-          <span className="open-file-name-marquee-item" aria-hidden="true">{name}</span>
+        <span className="git-branch-name-marquee-track">
+          <span ref={textRef} className="git-branch-name-marquee-item">{name}</span>
+          <span className="git-branch-name-marquee-item" aria-hidden="true">{name}</span>
         </span>
       ) : (
         <span ref={textRef} className="block truncate">{name}</span>
@@ -330,9 +332,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
               disabled={disabled}
             >
               <Icon name="git-branch" className="size-4 text-primary" />
-              <span className="min-w-0 truncate font-medium text-left">
-                {currentBranch || t('gitView.branch.detachedHead')}
-              </span>
+              <BranchNameMarquee name={currentBranch || t('gitView.branch.detachedHead')} className="font-medium" />
               <Icon name="arrow-down-s" className="size-4 opacity-60" />
             </Button>
           </DropdownMenuTrigger>
@@ -472,7 +472,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
                               type="button"
                               variant="ghost"
                               size="icon"
-                              className="ml-1 size-6 shrink-0 opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+                              className="ml-1 size-6 shrink-0 opacity-100"
                               onMouseDown={(event) => {
                                 event.stopPropagation();
                               }}
