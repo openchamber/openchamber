@@ -161,9 +161,9 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                 const isCollapsed = props.collapsedProjects.has(projectKey);
                 const isActiveProject = projectKey === props.activeProjectId;
                 const isRepo = props.projectRepoStatus.get(projectKey);
-                const onRefreshProjectProp = isActiveProject
-                  ? () => onRefreshProjectRef.current?.(projectKey)
-                  : undefined;
+const onRefreshProjectProp = isActiveProject
+? () => onRefreshProjectRef.current?.(projectKey)
+: undefined;
 
                 const orderedGroups = props.getOrderedGroups(projectKey, section.groups);
                 const rootGroup = orderedGroups.find((group) => group.isMain) ?? null;

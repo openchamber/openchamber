@@ -2440,7 +2440,6 @@ export const dict = {
   'mobile.menu.files': 'Fichiers',
   'mobile.menu.changes': 'Modifications',
   'mobile.menu.mcp': 'MCP',
-  'mobile.menu.pluginStatus': 'État des plugins',
   'mobile.menu.update': 'Mettre à jour',
   'mobile.menu.settings': 'Paramètres',
   'mobile.sessions.newChatCta': 'Nouveau chat dans {project}',

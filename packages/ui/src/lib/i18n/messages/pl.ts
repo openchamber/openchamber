@@ -43,7 +43,6 @@ export const dict: Record<I18nKey, string> = {
   'mobile.menu.files': 'Pliki',
   'mobile.menu.changes': 'Zmiany',
   'mobile.menu.mcp': 'MCP',
-  'mobile.menu.pluginStatus': 'Status wtyczek',
   'mobile.menu.update': 'Aktualizuj',
   'mobile.menu.settings': 'Ustawienia',
   'mobile.sessions.newChatCta': 'Nowy czat w {project}',

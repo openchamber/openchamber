@@ -42,7 +42,6 @@ export const dict: Record<I18nKey, string> = {
   "mobile.menu.files": "Файли",
   "mobile.menu.changes": "Зміни",
   "mobile.menu.mcp": "MCP",
-  "mobile.menu.pluginStatus": "Статус плагінів",
   "mobile.menu.update": "Оновити",
   "mobile.menu.settings": "Налаштування",
   "mobile.sessions.newChatCta": "Новий чат у {project}",

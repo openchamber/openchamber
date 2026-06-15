@@ -42,7 +42,6 @@ export const dict: Record<I18nKey, string> = {
   'mobile.menu.files': '檔案',
   'mobile.menu.changes': '變更',
   'mobile.menu.mcp': 'MCP',
-  'mobile.menu.pluginStatus': '外掛狀態',
   'mobile.menu.update': '更新',
   'mobile.menu.settings': '設定',
   'mobile.sessions.newChatCta': '在 {project} 中新增聊天',
