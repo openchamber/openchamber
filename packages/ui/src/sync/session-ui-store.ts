@@ -618,6 +618,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     }
 
     void activateConfigForDirectory(directory)
+
+    if (directory && directory !== useDirectoryStore.getState().currentDirectory) {
+      useDirectoryStore.getState().setDirectory(directory)
+    }
   },
 
   // ---------------------------------------------------------------------------
@@ -656,6 +660,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       }
     })
     void activateConfigForDirectory(nextDirectory)
+
+    if (nextDirectory && nextDirectory !== useDirectoryStore.getState().currentDirectory) {
+      useDirectoryStore.getState().setDirectory(nextDirectory)
+    }
   },
 
   setDraftPreserveDirectoryOverride: (value) =>
@@ -774,6 +782,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       return { newSessionDraft: nextDraft }
     })
     void activateConfigForDirectory(nextDirectory)
+
+    if (nextDirectory && nextDirectory !== useDirectoryStore.getState().currentDirectory) {
+      useDirectoryStore.getState().setDirectory(nextDirectory)
+    }
   },
 
   resolvePendingDraftWorktreeTarget: (requestId, directory, options) =>
