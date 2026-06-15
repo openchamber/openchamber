@@ -60,7 +60,6 @@ import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { type SessionGroup, type SessionNode } from './sidebar/types';
 import {
   deriveRecentSessions,
-  getSessionUpdatedAtMs,
 } from './sidebar/activitySections';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import {
@@ -83,8 +82,6 @@ const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
 const GROUP_COLLAPSE_STORAGE_KEY = 'oc.sessions.groupCollapse';
 const PROJECT_ACTIVE_SESSION_STORAGE_KEY = 'oc.sessions.activeSessionByProject';
-const VSCODE_RECENT_INITIAL_SESSION_COUNT = 20;
-const VSCODE_RECENT_SESSION_BATCH_SIZE = 20;
 // v2 key holds composite "${renderContext}:${active|archived}:${sessionId}"
 // entries so the same session in different render contexts (e.g. "Recent"
 // and a project's root) has independent expand state. v1 held bare session
@@ -325,6 +322,16 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const worktreeMetadata = useSessionUIStore((state) => state.worktreeMetadata);
   const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
+  // The sidebar tree's +-buttons (project / group / folder) open a draft but,
+  // unlike selecting an existing session, don't navigate. VS Code's compact view
+  // is driven by the openchamber:navigate event, so switch to chat explicitly
+  // (a no-op in the expanded side-by-side layout, which is always showing chat).
+  const openNewSessionDraftFromTree = React.useCallback<typeof openNewSessionDraft>((options) => {
+    openNewSessionDraft(options);
+    if (isVSCode) {
+      window.dispatchEvent(new CustomEvent('openchamber:navigate', { detail: { view: 'chat' } }));
+    }
+  }, [isVSCode, openNewSessionDraft]);
   const updateStore = useUpdateStore(useShallow((s) => ({
     checkForUpdates: s.checkForUpdates,
     available: s.available,
@@ -1024,29 +1031,17 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       .sort((a, b) => compareSessionsByPinnedAndTime(a, b, pinnedSessionIds));
   }, [isVSCode, pinnedSessionIds, sessions, showRecentSection]);
 
-  const vscodeSharedSessions = React.useMemo(() => {
-    if (!isVSCode) {
-      return [];
-    }
-
-    return sessions
-      .filter((session) => !session.time?.archived)
-      .filter((session) => !(session as Session & { parentID?: string | null }).parentID)
-      .sort((left, right) => {
-        const timeDelta = getSessionUpdatedAtMs(right) - getSessionUpdatedAtMs(left);
-        if (timeDelta !== 0) return timeDelta;
-        return right.id.localeCompare(left.id);
-      });
-  }, [isVSCode, sessions]);
-
   // Prefetch is wired below, after recentSessionIds is computed.
 
   const activitySections = React.useMemo(() => {
-    if (!isVSCode && !showRecentSection) {
+    // VS Code renders the full grouped project view (one group per open
+    // workspace, folders + pinned native); the flat "recent" activity list is
+    // web/desktop-only.
+    if (isVSCode || !showRecentSection) {
       return [];
     }
 
-    const recentSessions = isVSCode ? vscodeSharedSessions : activeNowSessions;
+    const recentSessions = activeNowSessions;
 
     const toItem = (session: Session) => {
       const existing = sessionSidebarMetaById.get(session.id);
@@ -1080,7 +1075,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     return [
       { key: 'active-now' as const, title: t('sessions.sidebar.activity.recentTitle'), items },
     ];
-  }, [activeNowSessions, filterSessionNodesForSearch, hasSessionSearchQuery, isVSCode, normalizedSessionSearchQuery, sessionSidebarMetaById, showRecentSection, t, vscodeSharedSessions]);
+  }, [activeNowSessions, filterSessionNodesForSearch, hasSessionSearchQuery, isVSCode, normalizedSessionSearchQuery, sessionSidebarMetaById, showRecentSection, t]);
 
   const hasActivitySectionItems = React.useMemo(
     () => activitySections.some((section) => section.items.length > 0),
@@ -1376,7 +1371,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         setActiveProjectIdOnly={setActiveProjectIdOnly}
         setActiveMainTab={setActiveMainTab}
         setSessionSwitcherOpen={setSessionSwitcherOpen}
-        openNewSessionDraft={openNewSessionDraft}
+        openNewSessionDraft={openNewSessionDraftFromTree}
         addSessionToFolder={addSessionToFolder}
         createFolderAndStartRename={createFolderAndStartRename}
         renamingFolderId={renamingFolderId}
@@ -1413,7 +1408,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       setActiveProjectIdOnly,
       setActiveMainTab,
       setSessionSwitcherOpen,
-      openNewSessionDraft,
+      openNewSessionDraftFromTree,
       addSessionToFolder,
       createFolderAndStartRename,
       renamingFolderId,
@@ -1425,13 +1420,11 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     ],
   );
 
-  const topContent = (isVSCode || (showRecentSection && !hasSessionSearchQuery)) ? (
+  const topContent = (!isVSCode && showRecentSection && !hasSessionSearchQuery) ? (
     <SidebarActivitySections
       sections={activitySections}
       renderSessionNode={renderSessionNode}
-      variant={isVSCode ? 'flat' : 'section'}
-      initialVisibleCount={isVSCode ? VSCODE_RECENT_INITIAL_SESSION_COUNT : undefined}
-      batchSize={isVSCode ? VSCODE_RECENT_SESSION_BATCH_SIZE : undefined}
+      variant="section"
     />
   ) : null;
   const isInlineEditing = Boolean(renamingFolderId || editingId || editingProjectDialogId);
@@ -1648,7 +1641,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
       <SidebarProjectsList
         topContent={topContent}
-        sharedSessionsOnly={isVSCode}
         hasSharedSessions={hasActivitySectionItems}
         sectionsForRender={sectionsForSidebarRender}
         projectSections={projectSections}
@@ -1670,7 +1662,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         setActiveProjectIdOnly={setActiveProjectIdOnly}
         setActiveMainTab={setActiveMainTab}
         setSessionSwitcherOpen={setSessionSwitcherOpen}
-        openNewSessionDraft={openNewSessionDraft}
+        openNewSessionDraft={openNewSessionDraftFromTree}
         openNewWorktreeDialog={openNewWorktreeDialog}
         openProjectEditDialog={setEditingProjectDialogId}
         removeProject={removeProject}

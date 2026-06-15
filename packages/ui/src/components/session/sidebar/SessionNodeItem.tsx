@@ -264,10 +264,10 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
 
   const displayMode = useSessionDisplayStore((state) => state.displayMode);
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
-  // VS Code keeps the expanded "default" layout regardless of the stored mode:
-  // multi-workspace lists rely on inline project/branch, and hover tooltips
-  // across the whole list would be impractical there.
-  const isMinimalMode = displayMode === 'minimal' && !isVSCode;
+  // VS Code always uses the minimal (single-line) layout: sessions are grouped
+  // under workspace project headers, so the second metadata row (project/branch)
+  // is redundant. The display-mode toggle is hidden there, so force it on.
+  const isMinimalMode = displayMode === 'minimal' || isVSCode;
   const isElectron = React.useMemo(() => canUseElectronDesktopIPC(), []);
   const runtimeApis = React.useContext(RuntimeAPIContext);
   const revealOnHoverClass = isVSCode
@@ -280,7 +280,15 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const showQuickArchiveAction = !archivedBucket && !mobileVariant;
   const revealPaddingClass = isMinimalMode
     ? (isVSCode
-        ? 'group-hover:pr-2'
+        // VS Code minimal rows reveal up to three actions on hover
+        // (open-in-editor + quick-archive + menu, each h-4). The date sits in the
+        // row flow, so the title must shrink enough to clear the actions or they
+        // overlap the timestamp. Open-in-editor is always present in VS Code.
+        ? (showQuickArchiveAction && showOpenInEditorAction
+            ? 'group-hover:pr-18'
+            : showQuickArchiveAction || showOpenInEditorAction
+              ? 'group-hover:pr-14'
+              : 'group-hover:pr-8')
         : 'group-hover:pr-2 group-focus-within:pr-2')
     : (isVSCode
         ? (showQuickArchiveAction && showOpenInEditorAction
@@ -1006,6 +1014,9 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                     </div>
                   </button>
                 </TooltipTrigger>
+                {/* VS Code already shows project context via workspace headers, so
+                    the per-row metadata tooltip is redundant noise there. */}
+                {!isVSCode ? (
                 <TooltipContent side="right" sideOffset={8} className="max-w-xs text-left">
                   <div className="flex flex-col gap-1 text-left text-xs">
                     <div className={cn('flex items-center gap-3 text-left text-muted-foreground', secondaryMeta?.projectLabel ? 'justify-between' : 'justify-start')}>
@@ -1021,6 +1032,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                     ) : null}
                   </div>
                 </TooltipContent>
+                ) : null}
               </Tooltip>
             ) : (
               <button
