@@ -5,7 +5,6 @@ import type { IconName } from '@/components/icon/icons';
 import { McpIcon } from '@/components/icons/McpIcon';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
 import { AboutSettings } from '@/components/sections/openchamber/AboutSettings';
-import { PluginStatusPage } from '@/components/sections/plugin-status/PluginStatusPage';
 import { OpenCodeUpdateToast } from '@/components/update/OpenCodeUpdateToast';
 import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
@@ -104,7 +103,7 @@ const getProjectLabel = (path: string): string => {
 };
 
 type OverflowItem = {
-  key: 'files' | 'changes' | 'mcp' | 'plugin-status' | 'update' | 'settings';
+  key: 'files' | 'changes' | 'mcp' | 'update' | 'settings';
   icon?: IconName;
   iconNode?: React.ReactNode;
   label: string;
@@ -744,7 +743,6 @@ const MobileShell: React.FC = () => {
   const [filesOpen, setFilesOpen] = React.useState(false);
   const [changesOpen, setChangesOpen] = React.useState(false);
   const [mcpOpen, setMcpOpen] = React.useState(false);
-  const [pluginStatusOpen, setPluginStatusOpen] = React.useState(false);
   const [isMcpRefreshing, setIsMcpRefreshing] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [updateOpen, setUpdateOpen] = React.useState(false);
@@ -852,12 +850,6 @@ const MobileShell: React.FC = () => {
         iconNode: <McpIcon className="size-5 shrink-0 text-muted-foreground" />,
         label: t('mobile.menu.mcp'),
         onSelect: () => setMcpOpen(true),
-      },
-      {
-        key: 'plugin-status',
-        icon: 'pulse',
-        label: t('mobile.menu.pluginStatus'),
-        onSelect: () => setPluginStatusOpen(true),
       },
       ...(showUpdateItem ? [{
         key: 'update' as const,
@@ -981,7 +973,7 @@ const MobileShell: React.FC = () => {
                 </div>
               </div>
             )}
->
+          >
             <ErrorBoundary>
               <McpDropdownContent
                 active
@@ -993,20 +985,6 @@ const MobileShell: React.FC = () => {
             </ErrorBoundary>
           </MobileOverlayPanel>
         ) : null}
-
-        {pluginStatusOpen ? (
-          <MobileSurfaceShell
-            open
-            onClose={() => setPluginStatusOpen(false)}
-            ariaLabel={t('mobile.menu.pluginStatus')}
-            headerless
->
-            <ErrorBoundary>
-	            <PluginStatusPage onClose={() => setPluginStatusOpen(false)} />
-            </ErrorBoundary>
-          </MobileSurfaceShell>
-        ) : null}
-
 
         {settingsOpen ? (
           <MobileSurfaceShell

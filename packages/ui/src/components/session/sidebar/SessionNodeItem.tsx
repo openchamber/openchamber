@@ -1158,9 +1158,9 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           {contextMenuContent}
         </ContextMenu.Root>
       </DraggableSessionRow>
-{hasChildren && isExpanded
-? node.children.map((child) => renderSessionNode(child, depth + 1, sessionDirectory ?? groupDirectory, projectId, archivedBucket, undefined, renderContext))
-: null}
+        {hasChildren && isExpanded
+          ? node.children.map((child) => renderSessionNode(child, depth + 1, sessionDirectory ?? groupDirectory, projectId, archivedBucket, undefined, renderContext))
+          : null}
       <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
         <DialogContent showCloseButton={false} className="max-w-sm gap-5">
           <DialogHeader>

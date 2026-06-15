@@ -70,7 +70,7 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
     const childrenByParent = new Map<string, Session[]>();
     for (const session of activeSessions) {
       const parentId = getParentSessionId(session);
-if (!parentId) continue;
+      if (!parentId) continue;
       if (session.time?.archived) continue;
       const bucket = childrenByParent.get(parentId);
       if (bucket) {

@@ -2,7 +2,7 @@ import React from 'react';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
-import { useUIStore } from '@/stores/useUIStore';
+import { useUIStore, type RightSidebarTab } from '@/stores/useUIStore';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useAssistantStatus } from '@/hooks/useAssistantStatus';
 import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
@@ -313,7 +313,7 @@ export const useKeyboardShortcuts = () => {
           return;
         }
 
-        const tabs = ['git', 'files', 'context'] as const;
+        const tabs: RightSidebarTab[] = ['git', 'files', 'context', 'subagents'];
         const currentIndex = tabs.indexOf(rightSidebarTab);
         const nextTab = tabs[(currentIndex + 1) % tabs.length];
 

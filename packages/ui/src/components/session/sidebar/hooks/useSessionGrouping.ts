@@ -101,15 +101,16 @@ export const buildGroupedSessions = (
   const groupedNodes = new Map<string, SessionNode[]>();
   const archivedKey = '__archived__';
 
-  const getGroupKey = (session: Session) => {
+const getGroupKey = (session: Session) => {
     if (session.time?.archived) return archivedKey;
-    const metadataPath = normalizePath(args.worktreeMetadata.get(session.id)?.path ?? null);
-    const normalizedDir = metadataPath ?? resolveGlobalSessionDirectory(session);
-    if (!normalizedDir) return archivedKey;
-    if (normalizedDir !== normalizedProjectRoot && worktreeByPath.has(normalizedDir)) return normalizedDir;
-    if (normalizedDir === normalizedProjectRoot) return normalizedProjectRoot ?? '__project_root__';
-    return archivedKey;
-  };
+    if (args.isVSCode) return normalizedProjectRoot ?? '__project_root__';
+const metadataPath = normalizePath(args.worktreeMetadata.get(session.id)?.path ?? null);
+const normalizedDir = metadataPath ?? resolveGlobalSessionDirectory(session);
+if (!normalizedDir) return archivedKey;
+if (normalizedDir !== normalizedProjectRoot && worktreeByPath.has(normalizedDir)) return normalizedDir;
+if (normalizedDir === normalizedProjectRoot) return normalizedProjectRoot ?? '__project_root__';
+return archivedKey;
+};
 
   roots.forEach((session) => {
     const node = buildProjectNode(session);
@@ -175,7 +176,7 @@ export const buildGroupedSessions = (
     return aLabel.localeCompare(bLabel);
   });
 
-  sortedWorktrees.forEach((meta) => {
+  (args.isVSCode ? [] : sortedWorktrees).forEach((meta) => {
     const directory = normalizePath(meta.path) ?? meta.path;
     const currentBranch = args.gitBranches.get(directory)?.trim() || null;
     const metadataBranch = meta.branch?.trim() || null;
