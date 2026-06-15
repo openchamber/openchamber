@@ -32,6 +32,8 @@ export const createStartupPipelineRuntime = (dependencies) => {
       scheduleOpenCodeApiDetection,
       bootstrapOpenCodeAtStartup,
       autoUpdatePlugins,
+      refreshOpenCodeAfterConfigChange,
+      autoUpdatePlugins,
       staticRoutesRuntime,
       process,
       crypto,
@@ -97,12 +99,22 @@ export const createStartupPipelineRuntime = (dependencies) => {
           const results = await autoUpdatePlugins(null);
           if (results.length > 0) {
             const updated = results.filter((r) => r.success).length;
+            const actuallyChanged = results.filter((r) => r.success && r.toVersion).length;
             console.log(`[Plugin Auto-Update] Updated ${updated}/${results.length} plugins`);
             for (const result of results) {
               if (result.success) {
-                console.log(`  \u2713 ${result.spec} \u2192 ${result.toVersion}`);
+                console.log(`  ✓ ${result.spec} → ${result.toVersion}`);
               } else {
-                console.log(`  \u2717 ${result.spec}: ${result.error}`);
+                console.log(`  ✗ ${result.spec}: ${result.error}`);
+              }
+            }
+            // Reload OpenCode to pick up updated plugin specs
+            if (actuallyChanged > 0 && typeof refreshOpenCodeAfterConfigChange === 'function') {
+              try {
+                await refreshOpenCodeAfterConfigChange('plugin auto-update');
+                console.log('[Plugin Auto-Update] OpenCode reloaded');
+              } catch (reloadError) {
+                console.error('[Plugin Auto-Update] Failed to reload OpenCode:', reloadError);
               }
             }
           }

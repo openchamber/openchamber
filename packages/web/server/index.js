@@ -1270,6 +1270,7 @@ async function main(options = {}) {
     scheduleOpenCodeApiDetection,
     bootstrapOpenCodeAtStartup,
     autoUpdatePlugins,
+    refreshOpenCodeAfterConfigChange,
     triggerHealthCheck,
     staticRoutesRuntime,
     process,
