@@ -64,11 +64,7 @@ export const useSessionActions = (args: Args) => {
   }, []);
 
   const handleSessionSelect = React.useCallback(
-    (sessionId: string, sessionDirectory?: string | null, disabled?: boolean, projectId?: string | null) => {
-      if (disabled) {
-        return;
-      }
-
+    (sessionId: string, sessionDirectory?: string | null, projectId?: string | null) => {
       const resetSessionSearch = () => {
         if (!args.isSessionSearchOpen && args.sessionSearchQuery.length === 0) {
           return;

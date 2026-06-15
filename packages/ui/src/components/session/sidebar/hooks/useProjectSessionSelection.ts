@@ -16,7 +16,7 @@ type Args = {
   activeSessionByProject: Map<string, string>;
   setActiveSessionByProject: React.Dispatch<React.SetStateAction<Map<string, string>>>;
   currentSessionId: string | null;
-  handleSessionSelect: (sessionId: string, sessionDirectory: string | null, isMissingDirectory: boolean, projectId?: string | null) => void;
+  handleSessionSelect: (sessionId: string, sessionDirectory: string | null, projectId?: string | null) => void;
   newSessionDraftOpen: boolean;
   mobileVariant: boolean;
   openNewSessionDraft: (options?: { directoryOverride?: string | null }) => void;
@@ -139,7 +139,7 @@ export const useProjectSessionSelection = (args: Args): { currentSessionDirector
       return;
     }
     const targetDirectory = projectMap.get(targetSessionId)?.directory ?? null;
-    handleSessionSelect(targetSessionId, targetDirectory, false, activeProjectId);
+    handleSessionSelect(targetSessionId, targetDirectory, activeProjectId);
   }, [
     activeProjectId,
     activeSessionByProject,

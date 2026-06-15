@@ -178,9 +178,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const [editTitle, setEditTitle] = React.useState('');
   const [editingProjectDialogId, setEditingProjectDialogId] = React.useState<string | null>(null);
   const [expandedParents, setExpandedParents] = React.useState<Set<string>>(new Set());
-  const [directoryStatus] = React.useState<Map<string, 'unknown' | 'exists' | 'missing'>>(
-    () => new Map(),
-  );
   const safeStorage = React.useMemo(() => getSafeStorage(), []);
   const [collapsedProjects, setCollapsedProjects] = React.useState<Set<string>>(new Set());
 
@@ -1233,7 +1230,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         groupDirectory={groupDirectory}
         projectId={projectId}
         archivedBucket={archivedBucket}
-        directoryStatus={directoryStatus}
         currentSessionId={currentSessionId}
         pinnedSessionIds={pinnedSessionIds}
         expandedParents={expandedParents}
@@ -1272,7 +1268,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       />
     ),
     [
-      directoryStatus,
       currentSessionId,
       pinnedSessionIds,
       expandedParents,

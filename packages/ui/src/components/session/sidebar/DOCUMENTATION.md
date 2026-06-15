@@ -39,7 +39,6 @@
 - `hooks/useSessionActions.ts`: Centralizes session row actions (select/open, rename, share/unshare, archive/delete, confirmations).
 - `hooks/useSessionSearchEffects.ts`: Handles search open/close UX and input focus behavior.
 - `hooks/useSessionPrefetch.ts`: Prefetches messages for nearby/active sessions to improve perceived load speed.
-- `hooks/useDirectoryStatusProbe.ts`: Probes and caches directory existence status for session/path indicators.
 - `hooks/useSessionGrouping.ts`: Builds grouped session structures and search text/filter helpers.
 - `hooks/useSessionSidebarSections.ts`: Composes final per-project sections and group search metadata for rendering.
 - `hooks/useProjectSessionSelection.ts`: Resolves active/current project-session selection logic and session-directory context.
