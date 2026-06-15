@@ -436,6 +436,33 @@ export function registerGitRoutes(app) {
     }
   });
 
+  app.post('/api/git/apply-hunk', async (req, res) => {
+    const { applyHunk } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+
+      const { path: filePath, patch, action } = req.body || {};
+      if (!filePath || typeof filePath !== 'string') {
+        return res.status(400).json({ error: 'path parameter is required' });
+      }
+      if (typeof patch !== 'string' || !patch.trim()) {
+        return res.status(400).json({ error: 'patch is required' });
+      }
+      if (action !== 'stage' && action !== 'unstage' && action !== 'discard') {
+        return res.status(400).json({ error: 'action must be stage, unstage, or discard' });
+      }
+
+      await applyHunk(directory, filePath, { patch, action });
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Failed to apply git hunk:', error);
+      res.status(500).json({ error: error.message || 'Failed to apply git hunk' });
+    }
+  });
+
   app.post('/api/git/pull', async (req, res) => {
     const { pull } = await getGitLibraries();
     try {

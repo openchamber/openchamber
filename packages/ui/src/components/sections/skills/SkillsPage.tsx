@@ -608,6 +608,7 @@ const SkillsInstalledPage: React.FC = () => {
                       content={skillMarkdown}
                       className="typography-markdown-body"
                       stripFrontmatter
+                      enableFileReferences={false}
                     />
                   </div>
                 </ScrollableOverlay>

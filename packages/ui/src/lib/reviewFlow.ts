@@ -35,6 +35,8 @@ type StartReviewFlowInput = SessionModelContext & {
   originalSessionID: string;
   directory: string;
   agentMentionName?: string;
+  generateHandoff?: boolean;
+  returnAfterHandoffRequest?: boolean;
 };
 
 const isMessageCompleted = (message: Message): boolean => {
@@ -207,15 +209,43 @@ const createOrReuseReviewSession = async (originalSessionID: string, directory: 
 
 export const startReviewFlow = async (input: StartReviewFlowInput): Promise<void> => {
   await waitForConnectionOrThrow();
-  const visibleText = await renderMagicPrompt('session.reviewHandoff.visible');
-  const instructionsText = await renderMagicPrompt('session.reviewHandoff.instructions');
-  const startedAt = Date.now();
-  await sendPlainMessage(input.originalSessionID, input.directory, visibleText, input, [
-    { text: instructionsText, synthetic: true },
-  ]);
-  const handoff = await waitForAssistantText(input.originalSessionID, input.directory, startedAt);
+  let reviewPrompt: string;
+
+  if (input.generateHandoff ?? true) {
+    const visibleText = await renderMagicPrompt('session.reviewHandoff.visible');
+    const instructionsText = await renderMagicPrompt('session.reviewHandoff.instructions');
+    const startedAt = Date.now();
+    await sendPlainMessage(input.originalSessionID, input.directory, visibleText, null, [
+      { text: instructionsText, synthetic: true },
+    ]);
+
+    const continueFromHandoff = async (): Promise<void> => {
+      const handoff = await waitForAssistantText(input.originalSessionID, input.directory, startedAt);
+      const handoffReviewPrompt = await renderMagicPrompt('session.reviewSession.visible', { handoff });
+      const reviewSession = await createOrReuseReviewSession(input.originalSessionID, input.directory);
+      await sendPlainMessage(reviewSession.id, input.directory, handoffReviewPrompt, {
+        providerID: input.providerID,
+        modelID: input.modelID,
+        agent: input.agent,
+        variant: input.variant,
+      });
+      openReviewSessionPanel(input.directory, reviewSession);
+    };
+
+    if (input.returnAfterHandoffRequest) {
+      void continueFromHandoff().catch((error) => {
+        console.error('[review-flow] failed to finish background review flow', error);
+      });
+      return;
+    }
+
+    await continueFromHandoff();
+    return;
+  } else {
+    reviewPrompt = await renderMagicPrompt('session.reviewSessionWithoutHandoff.visible');
+  }
+
   const reviewSession = await createOrReuseReviewSession(input.originalSessionID, input.directory);
-  const reviewPrompt = await renderMagicPrompt('session.reviewSession.visible', { handoff });
   await sendPlainMessage(reviewSession.id, input.directory, reviewPrompt, {
     providerID: input.providerID,
     modelID: input.modelID,

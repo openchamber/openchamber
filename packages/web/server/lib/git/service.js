@@ -348,6 +348,14 @@ const normalizeDirectoryPath = (value) => {
   return trimmed;
 };
 
+const normalizePath = (value) => {
+  const normalized = normalizeDirectoryPath(value);
+  if (typeof normalized !== 'string') {
+    return normalized;
+  }
+  return normalized.replace(/\\/g, '/');
+};
+
 const getGitIndexMutationQueueKey = (directory) => {
   const normalized = normalizeDirectoryPath(directory);
   if (!normalized) {
@@ -2542,6 +2550,113 @@ export async function revertFile(directory, filePath, options = {}) {
       } catch (fallbackError) {
         console.error('Failed to revert git file:', fallbackError);
         throw fallbackError;
+      }
+    }
+  });
+}
+
+const HUNK_ACTION_FLAGS = {
+  stage: ['--cached'],
+  unstage: ['--cached', '--reverse'],
+  discard: ['--reverse'],
+};
+
+const parsePatchPathToken = (line) => {
+  const value = String(line || '').replace(/^(?:-{3}|\+{3})\s+/, '');
+  if (!value || value === '/dev/null') {
+    return null;
+  }
+
+  if (value.startsWith('"')) {
+    let token = '"';
+    let escaped = false;
+    for (let index = 1; index < value.length; index += 1) {
+      const char = value[index];
+      token += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === '"') {
+        break;
+      }
+    }
+
+    try {
+      return JSON.parse(token);
+    } catch {
+      return token.slice(1, token.endsWith('"') ? -1 : undefined);
+    }
+  }
+
+  return value.split('\t', 1)[0] || null;
+};
+
+const normalizePatchTargetPath = (value) => {
+  if (!value || value === '/dev/null') {
+    return null;
+  }
+  return value.replace(/^[ab]\//, '');
+};
+
+const extractPatchTargetPath = (patch) => {
+  const matches = [...patch.matchAll(/^(?:-{3}|\+{3})\s+.+$/gm)];
+  const realTargets = matches
+    .map((match) => normalizePatchTargetPath(parsePatchPathToken(match[0])))
+    .filter(Boolean);
+  return realTargets[0] || null;
+};
+
+const writeTempPatchFile = async (patch) => {
+  const tmpDir = os.tmpdir();
+  const tmpPath = path.join(tmpDir, `openchamber-hunk-${Date.now()}-${Math.random().toString(36).slice(2)}.patch`);
+  await fsp.writeFile(tmpPath, patch, 'utf8');
+  return tmpPath;
+};
+
+export async function applyHunk(directory, filePath, options = {}) {
+  const action = options?.action;
+  if (!action || !HUNK_ACTION_FLAGS[action]) {
+    throw new Error('Invalid hunk action');
+  }
+  const patch = typeof options?.patch === 'string' ? options.patch : '';
+  if (!patch.trim()) {
+    throw new Error('patch is required to apply a hunk');
+  }
+  if (!/^@@\s/m.test(patch)) {
+    throw new Error('patch does not contain a hunk header');
+  }
+
+  return withGitIndexMutationQueue(directory, async () => {
+    const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
+    const fileContext = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
+    validateRepositoryFilePaths(repoRoot, [fileContext.repoPath]);
+
+    const targetPath = extractPatchTargetPath(patch);
+    if (targetPath && targetPath !== fileContext.repoPath && targetPath !== filePath) {
+      throw new Error('patch target path does not match the requested file');
+    }
+
+    const flags = HUNK_ACTION_FLAGS[action];
+    let tmpPath = null;
+    try {
+      tmpPath = await writeTempPatchFile(patch);
+
+      try {
+        await git.raw(['apply', ...flags, '--check', tmpPath]);
+      } catch (checkError) {
+        const text = parseGitErrorText(checkError);
+        throw new Error(
+          text
+            ? `Hunk no longer applies — refresh and try again.\n${text}`
+            : 'Hunk no longer applies — refresh and try again.'
+        );
+      }
+
+      await git.raw(['apply', ...flags, tmpPath]);
+    } finally {
+      if (tmpPath) {
+        await fsp.rm(tmpPath, { force: true }).catch(() => {});
       }
     }
   });

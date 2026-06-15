@@ -787,7 +787,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
                         </div>
                       }
                     >
-                      <SimpleMarkdownRenderer content={content} className="typography-markdown-body" />
+                      <SimpleMarkdownRenderer content={content} className="typography-markdown-body" enableFileReferences={false} />
                     </ErrorBoundary>
                   </div>
                 ) : (

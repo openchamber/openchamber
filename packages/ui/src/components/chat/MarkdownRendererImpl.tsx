@@ -2,7 +2,7 @@ import React from 'react';
 import 'katex/dist/katex.min.css';
 import { renderMermaidASCII, renderMermaidSVG } from 'beautiful-mermaid';
 import ReactMarkdown from 'react-markdown';
-import type { Components } from 'react-markdown';
+import type { Components, Options as ReactMarkdownOptions } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
@@ -216,6 +216,10 @@ const TableCopyButton: React.FC<{ tableRef: React.RefObject<HTMLDivElement | nul
   const menuRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
+    if (!showMenu) {
+      return;
+    }
+
     const handleClickOutside = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setShowMenu(false);
@@ -223,7 +227,7 @@ const TableCopyButton: React.FC<{ tableRef: React.RefObject<HTMLDivElement | nul
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  }, [showMenu]);
 
   const handleCopy = async (format: 'csv' | 'tsv' | 'markdown') => {
     const tableEl = tableRef.current?.querySelector('table');
@@ -308,6 +312,10 @@ const TableDownloadButton: React.FC<{ tableRef: React.RefObject<HTMLDivElement |
   const menuRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
+    if (!showMenu) {
+      return;
+    }
+
     const handleClickOutside = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setShowMenu(false);
@@ -315,7 +323,7 @@ const TableDownloadButton: React.FC<{ tableRef: React.RefObject<HTMLDivElement |
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  }, [showMenu]);
 
    const handleDownload = (format: 'csv' | 'markdown') => {
       const tableEl = tableRef.current?.querySelector('table');
@@ -364,16 +372,35 @@ const TableWrapper: React.FC<{ children?: React.ReactNode; className?: string }>
   const tableRef = React.useRef<HTMLDivElement>(null);
   const { isMobile, isTablet } = useDeviceInfo();
   const alwaysShowActions = isMobile || isTablet;
+  const [showActions, setShowActions] = React.useState(alwaysShowActions);
+
+  React.useEffect(() => {
+    if (alwaysShowActions) {
+      setShowActions(true);
+    }
+  }, [alwaysShowActions]);
 
   return (
-    <div className="group my-4 flex flex-col space-y-2" data-markdown="table-wrapper" ref={tableRef}>
-      <div className={cn(
-        "flex items-center justify-end gap-1 transition-opacity",
-        alwaysShowActions ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-      )}>
-        <TableCopyButton tableRef={tableRef} />
-        <TableDownloadButton tableRef={tableRef} />
-      </div>
+    <div
+      className="group my-4 flex flex-col space-y-2"
+      data-markdown="table-wrapper"
+      ref={tableRef}
+      onMouseEnter={() => setShowActions(true)}
+      onMouseLeave={() => {
+        if (!alwaysShowActions) {
+          setShowActions(false);
+        }
+      }}
+      onFocusCapture={() => setShowActions(true)}
+    >
+      {showActions ? (
+        <div className="flex items-center justify-end gap-1 transition-opacity">
+          <TableCopyButton tableRef={tableRef} />
+          <TableDownloadButton tableRef={tableRef} />
+        </div>
+      ) : (
+        <div className="h-6" aria-hidden="true" />
+      )}
       <div className="overflow-x-auto rounded-lg border border-border/80 bg-[var(--surface-elevated)]">
         <table className={cn('w-full border-collapse text-sm', className)} data-markdown="table">
           {children}
@@ -383,40 +410,83 @@ const TableWrapper: React.FC<{ children?: React.ReactNode; className?: string }>
   );
 };
 
+const MERMAID_RENDER_DELAY_MS = 80;
+
 const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii' }> = ({ source, mode }) => {
   const { t } = useI18n();
   const currentTheme = useCurrentMermaidTheme();
   const { isMobile, isTablet } = useDeviceInfo();
   const [copied, setCopied] = React.useState(false);
   const [downloaded, setDownloaded] = React.useState(false);
+  const [svg, setSvg] = React.useState('');
+  const [ascii, setAscii] = React.useState('');
 
-  const svg = React.useMemo(() => {
-    if (mode !== 'svg') return '';
-    try {
-      return renderMermaidSVG(source, {
-        bg: currentTheme.colors.surface.elevated,
-        fg: currentTheme.colors.surface.foreground,
-        line: currentTheme.colors.interactive.border,
-        accent: currentTheme.colors.primary.base,
-        muted: currentTheme.colors.surface.mutedForeground,
-        surface: currentTheme.colors.surface.muted,
-        border: currentTheme.colors.interactive.border,
-        transparent: true,
-        font: 'IBM Plex Sans, sans-serif',
+  React.useEffect(() => {
+    if (typeof window === 'undefined') {
+      try {
+        setSvg(mode === 'svg' ? renderMermaidSVG(source, {
+          bg: currentTheme.colors.surface.elevated,
+          fg: currentTheme.colors.surface.foreground,
+          line: currentTheme.colors.interactive.border,
+          accent: currentTheme.colors.primary.base,
+          muted: currentTheme.colors.surface.mutedForeground,
+          surface: currentTheme.colors.surface.muted,
+          border: currentTheme.colors.interactive.border,
+          transparent: true,
+          font: 'IBM Plex Sans, sans-serif',
+        }) : '');
+        setAscii(mode === 'ascii' ? renderMermaidASCII(source) : '');
+      } catch {
+        setSvg('');
+        setAscii('');
+      }
+      return;
+    }
+
+    let cancelled = false;
+    let frame: number | null = null;
+    setSvg('');
+    setAscii('');
+
+    const timer = window.setTimeout(() => {
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        if (cancelled) {
+          return;
+        }
+
+        try {
+          if (mode === 'svg') {
+            setSvg(renderMermaidSVG(source, {
+              bg: currentTheme.colors.surface.elevated,
+              fg: currentTheme.colors.surface.foreground,
+              line: currentTheme.colors.interactive.border,
+              accent: currentTheme.colors.primary.base,
+              muted: currentTheme.colors.surface.mutedForeground,
+              surface: currentTheme.colors.surface.muted,
+              border: currentTheme.colors.interactive.border,
+              transparent: true,
+              font: 'IBM Plex Sans, sans-serif',
+            }));
+            return;
+          }
+
+          setAscii(renderMermaidASCII(source));
+        } catch {
+          setSvg('');
+          setAscii('');
+        }
       });
-    } catch {
-      return '';
-    }
-  }, [currentTheme, mode, source]);
+    }, MERMAID_RENDER_DELAY_MS);
 
-  const ascii = React.useMemo(() => {
-    if (mode !== 'ascii') return '';
-    try {
-      return renderMermaidASCII(source);
-    } catch {
-      return '';
-    }
-  }, [mode, source]);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+      }
+    };
+  }, [currentTheme, mode, source]);
 
   const copyVisibilityClass = isMobile || isTablet ? 'opacity-100' : 'opacity-0 group-hover:opacity-100';
 
@@ -573,6 +643,10 @@ const stripLeadingFrontmatter = (markdown: string): string => {
 
 export type MarkdownVariant = 'assistant' | 'tool' | 'reasoning';
 
+const MARKDOWN_REMARK_PLUGINS: ReactMarkdownOptions['remarkPlugins'] = [remarkGfm, remarkMath];
+const MARKDOWN_REHYPE_PLUGINS: ReactMarkdownOptions['rehypePlugins'] = [[rehypeKatex, { throwOnError: false, errorColor: 'var(--destructive)' }]];
+const MARKDOWN_BLOCK_CACHE_MAX_ENTRIES = 240;
+
 type MarkdownStreamBlock = {
   key: string;
   raw: string;
@@ -613,14 +687,45 @@ const buildMarkdownCacheKey = (baseKey: string, raw: string, index: number, mode
   return `${baseKey}:${index}:${mode}:${raw.length}:${fnv1a32(sample)}`;
 };
 
+const MARKDOWN_BLOCK_CACHE = new Map<string, MarkdownStreamBlock[]>();
+
+const getMarkdownBlockCacheEntry = (key: string): MarkdownStreamBlock[] | undefined => {
+  const cached = MARKDOWN_BLOCK_CACHE.get(key);
+  if (!cached) {
+    return undefined;
+  }
+  MARKDOWN_BLOCK_CACHE.delete(key);
+  MARKDOWN_BLOCK_CACHE.set(key, cached);
+  return cached;
+};
+
+const setMarkdownBlockCacheEntry = (key: string, blocks: MarkdownStreamBlock[]): void => {
+  while (MARKDOWN_BLOCK_CACHE.size >= MARKDOWN_BLOCK_CACHE_MAX_ENTRIES) {
+    const oldest = MARKDOWN_BLOCK_CACHE.keys().next().value;
+    if (typeof oldest !== 'string') {
+      break;
+    }
+    MARKDOWN_BLOCK_CACHE.delete(oldest);
+  }
+  MARKDOWN_BLOCK_CACHE.set(key, blocks);
+};
+
 const streamMarkdownBlocks = (text: string, live: boolean, baseKey: string): MarkdownStreamBlock[] => {
   if (!live) {
-    return [{
+    const cacheKey = `${baseKey}:final:${text.length}:${fnv1a32(text.length > 800 ? `${text.slice(0, 400)}${text.slice(-400)}` : text)}`;
+    const cached = getMarkdownBlockCacheEntry(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const blocks: MarkdownStreamBlock[] = [{
       key: buildMarkdownCacheKey(baseKey, text, 0, 'full'),
       raw: text,
       src: text,
       mode: 'full',
     }];
+    setMarkdownBlockCacheEntry(cacheKey, blocks);
+    return blocks;
   }
 
   const healed = healMarkdown(text);
@@ -742,6 +847,7 @@ const normalizeCodeBlockText = (code: string, language: string): string => {
 };
 
 const CODE_HIGHLIGHT_SETTLE_MS = 300;
+const CODE_HIGHLIGHT_INITIAL_DELAY_MS = 80;
 const CODE_HIGHLIGHT_LINE_LIMIT = 1200;
 const VSCODE_CODE_HIGHLIGHT_LINE_LIMIT = 200;
 const CODE_SHARED_STYLE: React.CSSProperties = {
@@ -795,14 +901,22 @@ const MarkdownCodeBlock: React.FC<{
   syntaxTheme: { [key: string]: React.CSSProperties };
 }> = ({ code, language, syntaxTheme }) => {
   const [copied, setCopied] = React.useState(false);
-  const [highlight, setHighlight] = React.useState(true);
+  const [highlight, setHighlight] = React.useState(false);
   const [viewMode, setViewMode] = React.useState<'code' | 'preview'>('code');
   const prevCodeRef = React.useRef<string>(code);
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const { isMobile, isTablet } = useDeviceInfo();
+  const alwaysShowControls = isMobile || isTablet;
+  const [showControls, setShowControls] = React.useState(alwaysShowControls);
   const skipHighlight = exceedsLineLimit(code, getCodeHighlightLineLimit());
 
   const canPreview = language === 'html' || language === 'htm';
+
+  React.useEffect(() => {
+    if (alwaysShowControls) {
+      setShowControls(true);
+    }
+  }, [alwaysShowControls]);
 
   React.useEffect(() => {
     if (!canPreview && viewMode !== 'code') {
@@ -810,8 +924,34 @@ const MarkdownCodeBlock: React.FC<{
     }
   }, [canPreview, viewMode]);
 
+  React.useEffect(() => {
+    if (skipHighlight) {
+      setHighlight(false);
+      return;
+    }
+
+    if (typeof window === 'undefined') {
+      setHighlight(true);
+      return;
+    }
+
+    let frame: number | null = null;
+    const timer = window.setTimeout(() => {
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        setHighlight(true);
+      });
+    }, CODE_HIGHLIGHT_INITIAL_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(timer);
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+      }
+    };
+  }, [skipHighlight]);
+
   // Defer Prism highlighting while code is actively streaming.
-  // Initial mount renders highlighted immediately (plays nice with finalized blocks).
   React.useEffect(() => {
     if (prevCodeRef.current === code) return;
     prevCodeRef.current = code;
@@ -848,46 +988,57 @@ const MarkdownCodeBlock: React.FC<{
   }, [canPreview, code]);
 
   return (
-    <div data-component="markdown-code" className="my-4 group overflow-hidden rounded-2xl border border-border/80 bg-[var(--surface-elevated)]">
+    <div
+      data-component="markdown-code"
+      className="my-4 group overflow-hidden rounded-2xl border border-border/80 bg-[var(--surface-elevated)]"
+      onMouseEnter={() => setShowControls(true)}
+      onMouseLeave={() => {
+        if (!alwaysShowControls) {
+          setShowControls(false);
+        }
+      }}
+      onFocusCapture={() => setShowControls(true)}
+    >
       <div className="flex items-center justify-between border-b border-border/70 px-3 py-1.5">
         <span className="font-mono text-[13px] text-muted-foreground">{language}</span>
-        <div className={cn(
-          "flex items-center gap-1 transition-opacity",
-          isMobile || isTablet ? "opacity-100" : "opacity-100 md:opacity-0 md:group-hover:opacity-100"
-        )}>
-          {canPreview ? (
+        {showControls ? (
+          <div className="flex min-h-6 items-center gap-1 transition-opacity">
+            {canPreview ? (
+              <button
+                type="button"
+                onClick={() => setViewMode((mode) => (mode === 'preview' ? 'code' : 'preview'))}
+                className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
+                title={viewMode === 'preview' ? 'Show code' : 'Preview'}
+                aria-pressed={viewMode === 'preview'}
+                aria-label={viewMode === 'preview' ? 'Show code' : 'Preview HTML'}
+              >
+                {viewMode === 'preview' ? <Icon name="code" className="size-3.5" /> : <Icon name="eye" className="size-3.5" />}
+              </button>
+            ) : null}
+            {canPreview ? (
+              <button
+                type="button"
+                onClick={handleDownload}
+                className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
+                title="Download HTML"
+                aria-label="Download HTML"
+              >
+                <Icon name="download" className="size-3.5" />
+              </button>
+            ) : null}
             <button
               type="button"
-              onClick={() => setViewMode((mode) => (mode === 'preview' ? 'code' : 'preview'))}
+              onClick={() => { void handleCopy(); }}
               className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-              title={viewMode === 'preview' ? 'Show code' : 'Preview'}
-              aria-pressed={viewMode === 'preview'}
-              aria-label={viewMode === 'preview' ? 'Show code' : 'Preview HTML'}
+              title={copied ? 'Copied' : 'Copy code'}
+              aria-label={copied ? 'Copied' : 'Copy code'}
             >
-              {viewMode === 'preview' ? <Icon name="code" className="size-3.5" /> : <Icon name="eye" className="size-3.5" />}
+              {copied ? <Icon name="check" className="size-3.5" /> : <Icon name="file-copy" className="size-3.5" />}
             </button>
-          ) : null}
-          {canPreview ? (
-            <button
-              type="button"
-              onClick={handleDownload}
-              className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-              title="Download HTML"
-              aria-label="Download HTML"
-            >
-              <Icon name="download" className="size-3.5" />
-            </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={() => { void handleCopy(); }}
-            className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-            title={copied ? 'Copied' : 'Copy code'}
-            aria-label={copied ? 'Copied' : 'Copy code'}
-          >
-            {copied ? <Icon name="check" className="size-3.5" /> : <Icon name="file-copy" className="size-3.5" />}
-          </button>
-        </div>
+          </div>
+        ) : (
+          <div className="min-h-6 min-w-6" aria-hidden="true" />
+        )}
       </div>
       {canPreview && viewMode === 'preview' ? (
         <div className="h-[320px] md:h-[420px] bg-background">
@@ -1078,7 +1229,7 @@ const MarkdownBlockView: React.FC<{
   components: Components;
 }> = React.memo(({ block, components }) => {
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[[rehypeKatex, { throwOnError: false, errorColor: 'var(--destructive)' }]]} components={components}>
+    <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS} rehypePlugins={MARKDOWN_REHYPE_PLUGINS} components={components}>
       {block.src}
     </ReactMarkdown>
   );
@@ -1119,8 +1270,9 @@ const MAX_BLOCK_CODE_SCAN_LENGTH = 200_000;
 const FILE_REFERENCE_STAT_CONCURRENCY = 4;
 const FILE_REFERENCE_STAT_CACHE_MAX = 1000;
 const VSCODE_FILE_REFERENCE_STAT_CACHE_MAX = 200;
-const FILE_REFERENCE_LINK_LIMIT = 200;
+const FILE_REFERENCE_LINK_LIMIT = 80;
 const VSCODE_FILE_REFERENCE_LINK_LIMIT = 40;
+const FILE_REFERENCE_ANNOTATION_DELAY_MS = 160;
 const FILE_REFERENCE_STAT_CACHE = new Map<string, Promise<boolean>>();
 let activeFileReferenceStatCount = 0;
 const pendingFileReferenceStats: Array<() => void> = [];
@@ -1462,11 +1614,18 @@ const fileReferenceExists = (resolvedPath: string): Promise<boolean> => {
   const request = new Promise<boolean>((resolve) => {
     const run = () => {
       activeFileReferenceStatCount += 1;
-      void runtimeFetch(`/api/fs/stat?path=${encodeURIComponent(normalizedPath)}`, {
+      void runtimeFetch(`/api/fs/stat?path=${encodeURIComponent(normalizedPath)}&optional=true`, {
         method: 'GET',
         cache: 'no-store',
       })
-        .then((response) => resolve(response.ok))
+        .then(async (response) => {
+          if (!response.ok) {
+            resolve(false);
+            return;
+          }
+          const payload = await response.json().catch(() => null) as { exists?: unknown } | null;
+          resolve(payload?.exists !== false);
+        })
         .catch(() => resolve(false))
         .finally(() => {
           activeFileReferenceStatCount = Math.max(0, activeFileReferenceStatCount - 1);
@@ -1546,6 +1705,24 @@ const useFileReferenceInteractions = ({
       clearAnnotatedFileLinks();
       return;
     }
+
+    const scheduleAnnotation = (delayMs = 0) => {
+      if (annotationDebounceRef.current !== null && typeof window !== 'undefined') {
+        window.clearTimeout(annotationDebounceRef.current);
+      }
+      if (typeof window === 'undefined') {
+        annotateFileLinks();
+        return;
+      }
+      annotationDebounceRef.current = window.setTimeout(() => {
+        annotationDebounceRef.current = null;
+        window.requestAnimationFrame(() => {
+          if (!cancelled) {
+            annotateFileLinks();
+          }
+        });
+      }, delayMs);
+    };
 
     const annotateFileLinks = () => {
       if (enabled) {
@@ -1674,20 +1851,10 @@ const useFileReferenceInteractions = ({
       void openFileReference(target);
     };
 
-    annotateFileLinks();
+    scheduleAnnotation(FILE_REFERENCE_ANNOTATION_DELAY_MS);
 
     const observer = new MutationObserver(() => {
-      if (annotationDebounceRef.current !== null && typeof window !== 'undefined') {
-        window.clearTimeout(annotationDebounceRef.current);
-      }
-      if (typeof window === 'undefined') {
-        annotateFileLinks();
-        return;
-      }
-      annotationDebounceRef.current = window.setTimeout(() => {
-        annotationDebounceRef.current = null;
-        annotateFileLinks();
-      }, 120);
+      scheduleAnnotation(FILE_REFERENCE_ANNOTATION_DELAY_MS);
     });
     observer.observe(container, {
       childList: true,

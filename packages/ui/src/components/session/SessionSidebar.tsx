@@ -189,7 +189,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const [projectRepoStatus, setProjectRepoStatus] = React.useState<Map<string, boolean | null>>(new Map());
   const [visibleSessionCountByGroup, setVisibleSessionCountByGroup] = React.useState<Map<string, number>>(new Map());
-  const [newWorktreeDialogOpen, setNewWorktreeDialogOpen] = React.useState(false);
+  const newWorktreeDialogOpen = useUIStore((state) => state.isNewWorktreeDialogOpen);
+  const setNewWorktreeDialogOpen = useUIStore((state) => state.setNewWorktreeDialogOpen);
   const [updateDialogOpen, setUpdateDialogOpen] = React.useState(false);
   const [openSidebarMenuKey, setOpenSidebarMenuKey] = React.useState<string | null>(null);
   const [renamingFolderId, setRenamingFolderId] = React.useState<string | null>(null);
@@ -545,7 +546,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const openNewWorktreeDialog = React.useCallback(() => {
     setNewWorktreeDialogOpen(true);
-  }, []);
+  }, [setNewWorktreeDialogOpen]);
 
   const handleOpenUpdateDialog = React.useCallback(() => {
     const current = useUpdateStore.getState();

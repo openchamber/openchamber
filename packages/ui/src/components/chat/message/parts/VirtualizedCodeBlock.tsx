@@ -3,14 +3,14 @@
  *
  * Replaces per-line <SyntaxHighlighter> with:
  *   1. ONE Prism.highlight() call to tokenize all code at once
- *   2. @tanstack/react-virtual to only render visible rows
+ *   2. virtua to only render visible rows
  *
  * This drops mount cost from O(N * Prism) to O(1 * Prism) + O(visible_rows).
  * For a 2000-line file, ~2000 SyntaxHighlighter instances → ~30 plain <div>s.
  */
 
 import React from 'react';
-import { useVirtualizer } from '@tanstack/react-virtual';
+import { Virtualizer } from 'virtua';
 import Prism from 'prismjs';
 
 // Ensure common languages are loaded (react-syntax-highlighter lazy-loads them,
@@ -244,52 +244,31 @@ const VirtualizedRows: React.FC<VirtualizedRowsProps> = React.memo(({
   lineStyles,
 }) => {
   const parentRef = React.useRef<HTMLDivElement>(null);
-
-  const virtualizer = useVirtualizer({
-    count: lines.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => ROW_HEIGHT,
-    overscan: 20, // render 20 extra rows above/below viewport
-  });
+  const viewportHeight = `min(${lines.length * ROW_HEIGHT}px, ${maxHeight})`;
 
   return (
     <div
       ref={parentRef}
       className="typography-code font-mono w-full min-w-0 oc-virtualized-prism"
-      style={{ maxHeight, overflow: 'auto' }}
+      style={{ height: viewportHeight, maxHeight, overflow: 'auto' }}
     >
       {prismThemeCss ? <style>{prismThemeCss}</style> : null}
-      <div
-        style={{
-          height: `${virtualizer.getTotalSize()}px`,
-          width: '100%',
-          position: 'relative',
-        }}
+      <Virtualizer
+        data={lines}
+        itemSize={ROW_HEIGHT}
+        bufferSize={ROW_HEIGHT * 20}
+        scrollRef={parentRef}
       >
-        {virtualizer.getVirtualItems().map((vItem) => {
-          const line = lines[vItem.index];
-          return (
-            <div
-              key={vItem.index}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                height: `${vItem.size}px`,
-                transform: `translateY(${vItem.start}px)`,
-              }}
-            >
-              <Row
-                line={line}
-                language={language}
-                showLineNumbers={showLineNumbers}
-                style={lineStyles?.(line)}
-              />
-            </div>
-          );
-        })}
-      </div>
+        {(line, index) => (
+          <Row
+            key={index}
+            line={line}
+            language={language}
+            showLineNumbers={showLineNumbers}
+            style={lineStyles?.(line)}
+          />
+        )}
+      </Virtualizer>
     </div>
   );
 });

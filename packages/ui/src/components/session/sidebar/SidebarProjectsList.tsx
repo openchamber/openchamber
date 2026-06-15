@@ -192,7 +192,6 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                     onNewWorktreeSession={() => {
                       if (projectKey !== props.activeProjectId) props.setActiveProjectIdOnly(projectKey);
                       props.setActiveMainTab('chat');
-                      if (props.mobileVariant) props.setSessionSwitcherOpen(false);
                       props.openNewWorktreeDialog();
                     }}
                     onRenameStart={() => props.openProjectEditDialog(projectKey)}

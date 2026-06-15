@@ -468,8 +468,26 @@ export const registerOpenCodeProxy = (app, deps) => {
     next();
   });
 
-  // Readiness gate — return 503 while OpenCode is starting/restarting
-  app.use('/api', (req, res, next) => {
+  // Readiness gate — while OpenCode is starting/restarting, HOLD the request and
+  // poll readiness instead of returning 503 immediately. A bare 503 pushes the
+  // client into an exponential-backoff retry loop (500ms → 1s → …) that wastes
+  // seconds of cold-start time and can fail bootstrap outright. Holding the
+  // request until OpenCode is ready (typically well under a second) lets the
+  // first call simply succeed. We still 503 if readiness doesn't arrive within a
+  // bounded window so genuinely-down servers fail fast.
+  const READINESS_HOLD_POLL_MS = 75;
+  const READINESS_HOLD_MAX_MS = 6000;
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const isStillWaiting = (runtimeState) => {
+    const waitElapsed = runtimeState.openCodeNotReadySince === 0 ? 0 : Date.now() - runtimeState.openCodeNotReadySince;
+    return (
+      (!runtimeState.isOpenCodeReady && (runtimeState.openCodeNotReadySince === 0 || waitElapsed < OPEN_CODE_READY_GRACE_MS)) ||
+      runtimeState.isRestartingOpenCode ||
+      !runtimeState.openCodePort
+    );
+  };
+
+  app.use('/api', async (req, res, next) => {
     if (
       req.path.startsWith('/themes/custom') ||
       req.path.startsWith('/push') ||
@@ -483,21 +501,26 @@ export const registerOpenCodeProxy = (app, deps) => {
       return next();
     }
 
-    const runtimeState = getRuntime();
-    const waitElapsed = runtimeState.openCodeNotReadySince === 0 ? 0 : Date.now() - runtimeState.openCodeNotReadySince;
-    const stillWaiting =
-      (!runtimeState.isOpenCodeReady && (runtimeState.openCodeNotReadySince === 0 || waitElapsed < OPEN_CODE_READY_GRACE_MS)) ||
-      runtimeState.isRestartingOpenCode ||
-      !runtimeState.openCodePort;
+    if (!isStillWaiting(getRuntime())) {
+      return next();
+    }
 
-    if (stillWaiting) {
-      return res.status(503).json({
+    const deadline = Date.now() + Math.min(OPEN_CODE_READY_GRACE_MS, READINESS_HOLD_MAX_MS);
+    while (Date.now() < deadline) {
+      // Client gave up (closed/aborted) — stop holding.
+      if (res.writableEnded || req.aborted) return;
+      await sleep(READINESS_HOLD_POLL_MS);
+      if (!isStillWaiting(getRuntime())) {
+        return next();
+      }
+    }
+
+    if (!res.headersSent) {
+      res.status(503).json({
         error: 'OpenCode is restarting',
         restarting: true,
       });
     }
-
-    next();
   });
 
   // Windows: session merge for cross-directory session listing

@@ -1,6 +1,7 @@
 ## [Unreleased]
 
 - Chat: custom-answer question textareas resize more steadily while typing (thanks to @bigcoder84).
+- Chat/Performance: long conversations now use virtualized rendering to keep large histories responsive.
 - Chat/Input: tab-completing a mention no longer changes the selected agent (thanks to @Quat3rnion).
 - Chat/Input: Arrow Up moves the cursor inside multi-line drafts again instead of always opening prompt history.
 - Sessions: session menus now include a delete action (thanks to @ShogunPanda).

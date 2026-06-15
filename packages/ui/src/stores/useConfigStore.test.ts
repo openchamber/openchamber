@@ -187,7 +187,7 @@ describe('useConfigStore provider persistence', () => {
     });
   });
 
-  test('strips persisted provider snapshots while preserving other directory state', async () => {
+  test('hydrates persisted provider snapshots for instant paint, then refreshes to live data', async () => {
     storage.set(STORAGE_KEY, JSON.stringify({
       state: {
         activeDirectoryKey: DIRECTORY,
@@ -223,14 +223,16 @@ describe('useConfigStore provider persistence', () => {
 
     await useConfigStore.persist.rehydrate();
 
+    // Stale-while-revalidate: the persisted snapshot is hydrated as-is so the
+    // pickers can paint instantly on cold start, instead of being stripped to empty.
     const hydrated = useConfigStore.getState();
-    expect(hydrated.providers).toEqual([]);
-    expect(hydrated.defaultProviders).toEqual({});
-    expect(hydrated.directoryScoped[DIRECTORY]?.providers).toEqual([]);
-    expect(hydrated.directoryScoped[DIRECTORY]?.defaultProviders).toEqual({});
+    expect(hydrated.providers.map((entry) => entry.id)).toEqual(['stale']);
+    expect(hydrated.defaultProviders).toEqual({ default: 'stale' });
+    expect(hydrated.directoryScoped[DIRECTORY]?.providers.map((entry) => entry.id)).toEqual(['stale']);
+    expect(hydrated.directoryScoped[DIRECTORY]?.defaultProviders).toEqual({ default: 'stale' });
     expect(hydrated.directoryScoped[DIRECTORY]?.agents).toEqual([{ name: 'build', mode: 'primary' }]);
     expect(hydrated.directoryScoped[DIRECTORY]?.currentAgentName).toBe('build');
-    expect(hydrated.directoryScoped[OTHER_DIRECTORY]?.providers).toEqual([]);
+    expect(hydrated.directoryScoped[OTHER_DIRECTORY]?.providers.map((entry) => entry.id)).toEqual(['other-stale']);
 
     liveProviderId = 'fresh';
     await hydrated.initializeApp();

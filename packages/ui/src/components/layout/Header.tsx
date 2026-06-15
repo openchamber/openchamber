@@ -717,6 +717,7 @@ export const Header: React.FC<HeaderProps> = ({
   const openContextOverview = useUIStore((state) => state.openContextOverview);
   const openContextPlan = useUIStore((state) => state.openContextPlan);
   const openContextBrowser = useUIStore((state) => state.openContextBrowser);
+  const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
   const contextPanelByDirectory = useUIStore((state) => state.contextPanelByDirectory);
   const activeMainTab = useUIStore((state) => state.activeMainTab);
@@ -1495,6 +1496,21 @@ export const Header: React.FC<HeaderProps> = ({
     openContextPlan(directory);
   }, [closeContextPanel, contextPanelByDirectory, openContextPlan, openDirectory]);
 
+  const handleOpenContextChanges = React.useCallback(() => {
+    const directory = normalize(openDirectory || '');
+    if (!directory) {
+      return;
+    }
+
+    const panelState = contextPanelByDirectory[directory];
+    if (getActiveContextMode(panelState) === 'diff') {
+      closeContextPanel(directory);
+      return;
+    }
+
+    openContextPanelTab(directory, { mode: 'diff', stagedDiff: false });
+  }, [closeContextPanel, contextPanelByDirectory, openContextPanelTab, openDirectory]);
+
   const handleOpenContextBrowser = React.useCallback(() => {
     const directory = normalize(openDirectory || '');
     if (!directory) {
@@ -1517,6 +1533,15 @@ export const Header: React.FC<HeaderProps> = ({
     }
     const panelState = contextPanelByDirectory[directory];
     return getActiveContextMode(panelState) === 'plan';
+  }, [contextPanelByDirectory, openDirectory]);
+
+  const isContextChangesActive = React.useMemo(() => {
+    const directory = normalize(openDirectory || '');
+    if (!directory) {
+      return false;
+    }
+    const panelState = contextPanelByDirectory[directory];
+    return getActiveContextMode(panelState) === 'diff';
   }, [contextPanelByDirectory, openDirectory]);
 
   const isContextBrowserActive = React.useMemo(() => {
@@ -1990,6 +2015,29 @@ export const Header: React.FC<HeaderProps> = ({
     return <React.Fragment key={tab.id}>{tabButton}</React.Fragment>;
   };
 
+  const desktopChangesPanelAction = !isVSCode ? (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={t('header.actions.toggleChangesPanelAria')}
+          aria-pressed={isContextChangesActive}
+          onClick={handleOpenContextChanges}
+          className={desktopHeaderIconButtonClass}
+        >
+          <span className="relative h-5 w-5 overflow-hidden rounded-[2px]">
+            <span className="absolute left-[4px] top-[4px] h-3 w-[5px] bg-[var(--status-error)]/25" />
+            <span className="absolute right-[4px] top-[4px] h-3 w-[5px] bg-[var(--status-success)]/25" />
+            <Icon name="layout-column" className="absolute inset-0 h-5 w-5" />
+          </span>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>
+        <p>{t('header.actions.toggleChangesPanel')}</p>
+      </TooltipContent>
+    </Tooltip>
+  ) : null;
+
   const desktopSidebarActions = (
     <>
       {showPlanTab && (
@@ -2177,12 +2225,13 @@ export const Header: React.FC<HeaderProps> = ({
               percentIconClassName="h-5 w-5"
             />
           ) : null}
+          {desktopChangesPanelAction}
           <HeaderIconActionButton
             visible={showMiniChatHeaderAction}
             title={isNewSessionDraftOpen ? t('header.actions.newMiniChat') : t('header.actions.openSessionMiniChat')}
             ariaLabel={isNewSessionDraftOpen ? t('header.actions.newMiniChatAria') : t('header.actions.openSessionMiniChatAria')}
             onClick={handleOpenCurrentMiniChat}
-            className={cn(desktopHeaderIconButtonClass, showDesktopHeaderContextUsage ? 'mr-3.5' : 'mr-1')}
+            className={cn(desktopHeaderIconButtonClass, 'mr-1')}
             Icon={'picture-in-picture-2'}
           />
           {desktopSidebarActions}

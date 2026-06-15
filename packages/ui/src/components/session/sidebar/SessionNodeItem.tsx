@@ -306,7 +306,13 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const sessionDirectory =
     normalizePath((session as Session & { directory?: string | null }).directory ?? null)
     ?? normalizePath(groupDirectory ?? null);
-  const directoryStore = useDirectoryStore(sessionDirectory ?? undefined);
+  // Archived rows are historical and never need live state, yet they point at
+  // dozens of (often deleted) worktrees — bootstrapping each from the sidebar
+  // triggers a pointless session-list fetch + 6×2s empty-retry storm on startup.
+  // Skip bootstrap for archived rows; the store ref is only read on-demand via
+  // getState() in the export handlers (never subscribed). Active rows keep
+  // bootstrapping so live cross-directory session/status still aggregates.
+  const directoryStore = useDirectoryStore(sessionDirectory ?? undefined, { bootstrap: !archivedBucket });
   const sync = useSync();
 
   const selectionModeEnabled = useSessionMultiSelectStore((state) => state.enabled);

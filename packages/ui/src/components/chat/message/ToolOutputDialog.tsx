@@ -119,7 +119,7 @@ const TOOL_DIFF_METRICS = {
     lineHeight: 24,
     diffHeaderHeight: 44,
     hunkSeparatorHeight: 24,
-    fileGap: 0,
+    spacing: 0,
 };
 
 const usePierreThemeConfig = (): PierreThemeConfig => {
@@ -972,6 +972,7 @@ const MermaidPreviewDialog: React.FC<{
                                         allowMermaidWheelZoom
                                         className="markdown-mermaid-fullscreen h-full [&_[data-markdown='mermaid-block']_button]:hidden"
                                         mermaidControls={MERMAID_CONTROLS}
+                                        enableFileReferences={false}
                                     />
                                 </div>
                             )}

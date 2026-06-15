@@ -168,6 +168,24 @@ export async function unstageGitFiles(directory: string, filePaths: string[]): P
   return gitHttp.unstageGitFiles(directory, filePaths);
 }
 
+export async function stageGitHunk(directory: string, filePath: string, patch: string): Promise<void> {
+  const runtime = getRuntimeGit();
+  if (runtime?.stageGitHunk) return runtime.stageGitHunk(directory, filePath, patch);
+  return gitHttp.stageGitHunk(directory, filePath, patch);
+}
+
+export async function unstageGitHunk(directory: string, filePath: string, patch: string): Promise<void> {
+  const runtime = getRuntimeGit();
+  if (runtime?.unstageGitHunk) return runtime.unstageGitHunk(directory, filePath, patch);
+  return gitHttp.unstageGitHunk(directory, filePath, patch);
+}
+
+export async function revertGitHunk(directory: string, filePath: string, patch: string): Promise<void> {
+  const runtime = getRuntimeGit();
+  if (runtime?.revertGitHunk) return runtime.revertGitHunk(directory, filePath, patch);
+  return gitHttp.revertGitHunk(directory, filePath, patch);
+}
+
 export async function isLinkedWorktree(directory: string): Promise<boolean> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.isLinkedWorktree(directory);

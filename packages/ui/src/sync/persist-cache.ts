@@ -7,8 +7,11 @@
  * from the server via SSE bootstrap.
  */
 
-import type { VcsInfo } from "@opencode-ai/sdk/v2/client"
+import type { Session, VcsInfo } from "@opencode-ai/sdk/v2/client"
 import type { ProjectMeta } from "./types"
+
+/** Cap persisted session lists so localStorage stays bounded per directory. */
+const PERSISTED_SESSION_LIMIT = 50
 
 // ---------------------------------------------------------------------------
 // Storage key generation
@@ -33,7 +36,7 @@ function storagePrefix(directory: string): string {
 // Typed cache helpers
 // ---------------------------------------------------------------------------
 
-type CacheKey = "vcs" | "projectMeta" | "icon"
+type CacheKey = "vcs" | "projectMeta" | "icon" | "sessions"
 
 function cacheKey(directory: string, key: CacheKey): string {
   return `${storagePrefix(directory)}.${key}`
@@ -84,6 +87,7 @@ export type PersistedDirCache = {
   vcs: VcsInfo | undefined
   projectMeta: ProjectMeta | undefined
   icon: string | undefined
+  sessions: Session[] | undefined
 }
 
 /** Read all cached metadata for a directory */
@@ -92,7 +96,24 @@ export function readDirCache(directory: string): PersistedDirCache {
     vcs: readCache<VcsInfo>(directory, "vcs"),
     projectMeta: readCache<ProjectMeta>(directory, "projectMeta"),
     icon: readCache<string>(directory, "icon"),
+    sessions: readCache<Session[]>(directory, "sessions"),
   }
+}
+
+/**
+ * Write a capped slice of the directory session list to cache so the sidebar
+ * can paint chats instantly on cold start. Refreshed by bootstrap loadSessions.
+ */
+export function persistSessions(directory: string, sessions: Session[] | undefined): void {
+  if (!sessions || sessions.length === 0) {
+    writeCache(directory, "sessions", undefined)
+    return
+  }
+  // Keep the most recent N by id (ids are time-ordered hex) to bound storage.
+  const capped = sessions.length > PERSISTED_SESSION_LIMIT
+    ? [...sessions].sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0)).slice(0, PERSISTED_SESSION_LIMIT)
+    : sessions
+  writeCache(directory, "sessions", capped)
 }
 
 /** Write vcs info to cache */

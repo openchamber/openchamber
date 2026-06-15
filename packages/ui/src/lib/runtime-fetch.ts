@@ -120,18 +120,68 @@ const resolveRuntimeFetchInput = (input: string | URL | Request, query?: Runtime
   return target === input.url ? input : new Request(target, input);
 };
 
+// ---------------------------------------------------------------------------
+// In-flight read coalescing
+//
+// On cold start two independent data layers (the sync bootstrap and the config
+// store) fire the SAME idempotent reads — providers, config, path, agents,
+// project — concurrently, with no shared dedup. That saturates the single
+// OpenCode process and delays everything queued behind it (e.g. createSession).
+// Coalesce genuinely-concurrent identical GETs to those read endpoints so
+// OpenCode does the work once; every caller gets an independent `clone()`.
+//
+// Scope is deliberately tight: GET only, an allowlist of read paths, never an
+// event stream, and never a request carrying an AbortSignal (so one caller
+// aborting can't cancel the shared fetch for the others). The entry is removed
+// as soon as the request settles, so this only ever shares overlapping in-flight
+// requests — it never serves a stale/cached response.
+// ---------------------------------------------------------------------------
+const COALESCE_READ_PATH = /\/api\/(config|path|app\/agents|agent|project|command)(\b|\/|\?|$)/;
+const READ_COALESCE = new Map<string, Promise<Response>>();
+
+const coalesceReadKey = (method: string, url: string, hasSignal: boolean): string | null => {
+  if (hasSignal) return null;
+  if (method !== 'GET') return null;
+  if (url.includes('/event')) return null;
+  if (!COALESCE_READ_PATH.test(url)) return null;
+  return `GET ${url}`;
+};
+
 export const runtimeFetch = async (input: string | URL | Request, init: RuntimeFetchOptions = {}): Promise<Response> => {
   const { query, ...requestInit } = init;
   const resolvedInput = resolveRuntimeFetchInput(input, query);
   const inputHeaders = resolvedInput instanceof Request ? resolvedInput.headers : undefined;
   const headers = await mergeHeaders(inputHeaders, requestInit.headers, shouldAttachRuntimeAuth(resolvedInput));
 
-  return resolvedInput instanceof Request
-    ? fetch(new Request(resolvedInput, { ...requestInit, headers }))
-    : fetch(resolvedInput, {
-      ...requestInit,
-      headers,
-    });
+  const doFetch = (): Promise<Response> =>
+    resolvedInput instanceof Request
+      ? fetch(new Request(resolvedInput, { ...requestInit, headers }))
+      : fetch(resolvedInput, { ...requestInit, headers });
+
+  const url =
+    resolvedInput instanceof Request ? resolvedInput.url
+    : resolvedInput instanceof URL ? resolvedInput.toString()
+    : String(resolvedInput);
+  const method = String(
+    requestInit.method ?? (resolvedInput instanceof Request ? resolvedInput.method : 'GET'),
+  ).toUpperCase();
+  // A Request always carries a (possibly default) signal; treat any Request, or
+  // an explicit init.signal, as "has signal" and skip coalescing for safety.
+  const hasSignal = requestInit.signal != null || resolvedInput instanceof Request;
+
+  const key = coalesceReadKey(method, url, hasSignal);
+  if (!key) return doFetch();
+
+  const existing = READ_COALESCE.get(key);
+  if (existing) return existing.then((res) => res.clone());
+
+  const pending = doFetch();
+  READ_COALESCE.set(key, pending);
+  pending.then(
+    () => READ_COALESCE.delete(key),
+    () => READ_COALESCE.delete(key),
+  );
+  return pending.then((res) => res.clone());
 };
 
 let runtimeFetchBridgeInstalled = false;

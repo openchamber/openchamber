@@ -1789,6 +1789,12 @@ const reloadMenuTargetWindow = () => {
   target.webContents.reload();
 };
 
+const openDevToolsForMenuTarget = () => {
+  const target = getMenuTargetWindow();
+  if (!target || target.isDestroyed()) return;
+  target.webContents.toggleDevTools();
+};
+
 const relaunchFromMenu = () => {
   prepareForQuit();
   app.relaunch();
@@ -3813,6 +3819,7 @@ const buildMacMenu = () => {
       submenu: [
         { label: 'Keyboard Shortcuts', accelerator: 'Cmd+.', click: () => dispatchAction('help-dialog') },
         { label: 'Show Diagnostics', accelerator: 'Cmd+Shift+L', click: () => dispatchAction('download-logs') },
+        { label: 'Toggle Developer Tools', accelerator: 'Cmd+Alt+I', click: () => openDevToolsForMenuTarget() },
         { type: 'separator' },
         { label: 'Clear Cache', click: () => void handleInvoke(null, 'desktop_clear_cache') },
         { type: 'separator' },
@@ -3880,7 +3887,7 @@ const buildAutoHiddenMenu = () => {
       submenu: [
         { role: 'reload' },
         { role: 'forceReload' },
-        ...(isDev ? [{ role: 'toggleDevTools' }] : []),
+        { label: 'Toggle Developer Tools', accelerator: 'Ctrl+Alt+I', click: () => openDevToolsForMenuTarget() },
         { type: 'separator' },
         { label: 'Toggle Right Sidebar', accelerator: 'Ctrl+B', click: () => dispatchAction('toggle-right-sidebar') },
         { label: 'Open Git Sidebar', accelerator: 'Ctrl+Shift+G', click: () => dispatchAction('open-right-sidebar-git') },

@@ -16,6 +16,7 @@ import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { startReviewFlow } from '@/lib/reviewFlow';
+import { ReviewFlowDialog, type ReviewFlowExecution } from '@/components/session/ReviewFlowDialog';
 import { AttachedFilesList, AttachedVSCodeFileChips, ActiveEditorFileSuggestion } from './FileAttachment';
 import ToolOutputDialog from './message/ToolOutputDialog';
 import type { ToolPopupContent } from './message/types';
@@ -1014,6 +1015,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const projects = useProjectsStore((state) => state.projects);
     const activeProjectId = useProjectsStore((state) => state.activeProjectId);
     const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
+    const [reviewDialogOpen, setReviewDialogOpen] = React.useState(false);
+    const [reviewFlowSubmitting, setReviewFlowSubmitting] = React.useState(false);
 
     const currentProviderId = useConfigStore((state) => state.currentProviderId);
     const currentModelId = useConfigStore((state) => state.currentModelId);
@@ -1061,6 +1064,35 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         setAttachmentPreview((prev) => ({ ...prev, open }));
         setImagePreviewOpen(open);
     }, [setImagePreviewOpen]);
+
+    const handleStartReviewFlow = React.useCallback(async (execution: ReviewFlowExecution) => {
+        if (!currentSessionId) return;
+        const directory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory || '';
+        if (!directory) {
+            toast.error(t('diffView.reviewDialog.toast.noSessionDirectory'));
+            return;
+        }
+
+        setReviewFlowSubmitting(true);
+        try {
+            await startReviewFlow({
+                originalSessionID: currentSessionId,
+                directory,
+                providerID: execution.providerID,
+                modelID: execution.modelID,
+                agent: execution.agent || undefined,
+                variant: execution.variant || undefined,
+                generateHandoff: execution.generateHandoff,
+                returnAfterHandoffRequest: execution.generateHandoff,
+            });
+            setReviewDialogOpen(false);
+        } catch (error) {
+            console.error('[review-flow] failed to start review flow', error);
+            toast.error(error instanceof Error ? error.message : t('diffView.reviewDialog.toast.startFailed'));
+        } finally {
+            setReviewFlowSubmitting(false);
+        }
+    }, [currentSessionId, currentDirectory, t]);
 
     const isDesktopExpanded = isExpandedInput && !isMobile;
     const chatInputRadius = 'var(--radius-xl)';
@@ -1940,24 +1972,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 return;
             }
             else if (commandName === 'handoff-review' && currentSessionId && !isMobile && !isVSCodeRuntime()) {
-                try {
-                    const directory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory || '';
-                    if (!directory) {
-                        throw new Error('Session directory is unavailable');
-                    }
-                    await startReviewFlow({
-                        originalSessionID: currentSessionId,
-                        directory,
-                        providerID: providerIdToSend,
-                        modelID: modelIdToSend,
-                        agent: agentNameToSend,
-                        variant: variantToSend,
-                        agentMentionName,
-                    });
-                    scrollToBottom?.();
-                } catch (error) {
-                    console.error('[review-flow] failed to start review flow', error);
-                }
+                setReviewDialogOpen(true);
                 return;
             }
             else if (commandName === 'plan-feature' && (currentSessionId || newSessionDraftOpen)) {
@@ -3536,7 +3551,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const draftProjectLabel = selectedDraftProject ? getProjectDisplayLabel(selectedDraftProject) : null;
 
     const selectedDraftProjectBranches = useGitBranches(selectedDraftProjectPath);
+    const selectedDraftProjectBranchesFetchedAt = useGitStore(
+        (s) => (selectedDraftProjectPath ? s.directories.get(selectedDraftProjectPath)?.lastBranchesFetch ?? 0 : 0),
+    );
     const selectedDraftProjectIsGitRepo = useIsGitRepo(selectedDraftProjectPath);
+    const hasDraftBranchList = Boolean(selectedDraftProjectBranches?.all);
     const fetchGitStatus = useGitStore((state) => state.fetchStatus);
     const fetchBranches = useGitStore((state) => state.fetchBranches);
     const [isDiscoveringDraftBranches, setIsDiscoveringDraftBranches] = React.useState(false);
@@ -3555,13 +3574,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             return;
         }
 
-        if (selectedDraftProjectBranches?.all) {
+        // Stale-while-revalidate: branches seeded from the persisted cache show
+        // instantly. Refresh based on staleness (not mere presence) so a cached
+        // list can't go stale, while only showing the discovering spinner when
+        // there is nothing to display yet.
+        const DRAFT_BRANCHES_SWR_TTL_MS = 30_000;
+        const isStale =
+            !selectedDraftProjectBranchesFetchedAt ||
+            Date.now() - selectedDraftProjectBranchesFetchedAt > DRAFT_BRANCHES_SWR_TTL_MS;
+
+        if (hasDraftBranchList && !isStale) {
             setIsDiscoveringDraftBranches(false);
             return;
         }
 
         let cancelled = false;
-        setIsDiscoveringDraftBranches(true);
+        setIsDiscoveringDraftBranches(!hasDraftBranchList);
 
         void fetchBranches(selectedDraftProjectPath, runtimeGit)
             .finally(() => {
@@ -3573,7 +3601,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         return () => {
             cancelled = true;
         };
-    }, [fetchBranches, runtimeGit, selectedDraftProject, selectedDraftProjectBranches?.all, selectedDraftProjectIsGitRepo, selectedDraftProjectPath, showDraftTargetSelectors]);
+    }, [fetchBranches, runtimeGit, selectedDraftProject, selectedDraftProjectBranchesFetchedAt, hasDraftBranchList, selectedDraftProjectIsGitRepo, selectedDraftProjectPath, showDraftTargetSelectors]);
 
     const selectedDraftProjectCurrentBranch = selectedDraftProjectBranches?.current?.trim() ?? '';
 
@@ -4501,6 +4529,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 setLinkedPr(pr);
                 setLinkedIssue(null);
             }}
+        />
+        <ReviewFlowDialog
+            open={reviewDialogOpen}
+            onOpenChange={setReviewDialogOpen}
+            projectDirectory={currentSessionDirectoryForSync ?? currentDirectory ?? null}
+            submitting={reviewFlowSubmitting}
+            onConfirm={handleStartReviewFlow}
         />
         <ToolOutputDialog
             popup={attachmentPreview}

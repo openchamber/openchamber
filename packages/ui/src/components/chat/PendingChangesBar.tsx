@@ -88,6 +88,8 @@ export const PendingChangesBar: React.FC = React.memo(() => {
         if (!currentDirectory) return;
         if (!isGitFile(file)) return;
 
+        setIsExpanded(false);
+
         const absolutePath = file.path;
 
         // Dedicated mobile root: open the per-file diff inside the mobile Changes surface.
@@ -96,7 +98,6 @@ export const PendingChangesBar: React.FC = React.memo(() => {
                 diffPath: file.relativePath,
                 staged: file.hasStagedChanges && !file.hasWorkingChanges,
             });
-            setIsExpanded(false);
             return;
         }
 

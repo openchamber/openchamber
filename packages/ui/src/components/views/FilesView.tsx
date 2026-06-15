@@ -3799,6 +3799,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                   content={fileContent}
                   className="typography-markdown-body"
                   stripFrontmatter
+                  enableFileReferences={false}
                 />
               </ErrorBoundary>
             </div>
@@ -4139,6 +4140,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                   content={fileContent}
                   className="typography-markdown-body"
                   stripFrontmatter
+                  enableFileReferences={false}
                 />
               </ErrorBoundary>
             </div>

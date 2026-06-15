@@ -191,6 +191,10 @@ const normalizeContextPanelTabDedupeKey = (
   targetPath: string | null,
   dedupeKey: string | null | undefined,
 ): string => {
+  if (mode === 'diff') {
+    return mode;
+  }
+
   if (typeof dedupeKey === 'string') {
     const trimmed = dedupeKey.trim();
     if (trimmed) {
@@ -536,6 +540,7 @@ interface UIStore {
   isSessionCreateDialogOpen: boolean;
   isScheduledTasksDialogOpen: boolean;
   isSettingsDialogOpen: boolean;
+  isNewWorktreeDialogOpen: boolean;
   isModelSelectorOpen: boolean;
   sidebarSection: SidebarSection;
 
@@ -578,7 +583,6 @@ interface UIStore {
   diffLayoutPreference: 'dynamic' | 'inline' | 'side-by-side';
   diffFileLayout: Record<string, 'inline' | 'side-by-side'>;
   diffWrapLines: boolean;
-  diffViewMode: 'single' | 'stacked';
   gitChangesViewMode: 'flat' | 'tree';
   isTimelineDialogOpen: boolean;
   isImagePreviewOpen: boolean;
@@ -684,6 +688,7 @@ interface UIStore {
   setSessionCreateDialogOpen: (open: boolean) => void;
   setScheduledTasksDialogOpen: (open: boolean) => void;
   setSettingsDialogOpen: (open: boolean) => void;
+  setNewWorktreeDialogOpen: (open: boolean) => void;
   setModelSelectorOpen: (open: boolean) => void;
   applyTheme: () => void;
   setSidebarSection: (section: SidebarSection) => void;
@@ -733,7 +738,6 @@ interface UIStore {
   setDiffLayoutPreference: (mode: 'dynamic' | 'inline' | 'side-by-side') => void;
   setDiffFileLayout: (filePath: string, mode: 'inline' | 'side-by-side') => void;
   setDiffWrapLines: (wrap: boolean) => void;
-  setDiffViewMode: (mode: 'single' | 'stacked') => void;
   setGitChangesViewMode: (mode: 'flat' | 'tree') => void;
   setMultiRunLauncherOpen: (open: boolean) => void;
   setTimelineDialogOpen: (open: boolean) => void;
@@ -824,6 +828,7 @@ export const useUIStore = create<UIStore>()(
         isSessionCreateDialogOpen: false,
         isScheduledTasksDialogOpen: false,
         isSettingsDialogOpen: false,
+        isNewWorktreeDialogOpen: false,
         isModelSelectorOpen: false,
         sidebarSection: 'sessions',
         settingsPage: 'home',
@@ -861,7 +866,6 @@ export const useUIStore = create<UIStore>()(
         diffLayoutPreference: 'inline',
         diffFileLayout: {},
         diffWrapLines: false,
-        diffViewMode: 'stacked',
         gitChangesViewMode: 'flat',
         isTimelineDialogOpen: false,
         isImagePreviewOpen: false,
@@ -1032,7 +1036,6 @@ export const useUIStore = create<UIStore>()(
           get().openContextPanelTab(normalizedDirectory, {
             mode: 'diff',
             targetPath: normalizedFilePath,
-            dedupeKey: staged ? 'staged' : null,
             stagedDiff: staged,
           });
         },
@@ -1495,6 +1498,10 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
+        setNewWorktreeDialogOpen: (open) => {
+          set({ isNewWorktreeDialogOpen: open });
+        },
+
         setModelSelectorOpen: (open) => {
           set({ isModelSelectorOpen: open });
         },
@@ -1672,10 +1679,6 @@ export const useUIStore = create<UIStore>()(
 
         setDiffWrapLines: (wrap) => {
           set({ diffWrapLines: wrap });
-        },
-
-        setDiffViewMode: (mode) => {
-          set({ diffViewMode: mode });
         },
 
         setGitChangesViewMode: (mode) => {
@@ -2079,12 +2082,17 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createJSONStorage(() => getSafeStorage()),
-        version: 9,
+        version: 10,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
           }
           const state = persistedState as Record<string, unknown>;
+
+          // v9 -> v10: remove obsolete single-file diff view mode setting
+          if (version < 10) {
+            delete state.diffViewMode;
+          }
 
           // v8 -> v9: initialize notes/todo panel height fields
           if (version < 9) {
@@ -2218,7 +2226,6 @@ export const useUIStore = create<UIStore>()(
           recentEfforts: state.recentEfforts,
           diffLayoutPreference: state.diffLayoutPreference,
           diffWrapLines: state.diffWrapLines,
-          diffViewMode: state.diffViewMode,
           gitChangesViewMode: state.gitChangesViewMode,
           nativeNotificationsEnabled: state.nativeNotificationsEnabled,
           notificationMode: state.notificationMode,
