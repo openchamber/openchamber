@@ -610,12 +610,11 @@ const refreshSessionFoldersFromDisk = async (): Promise<void> => {
     });
 
     persistFolders(data.foldersMap);
-    persistFolders(data.foldersMap);
-  persistCollapsed(data.collapsedFolderIds);
+    persistCollapsed(data.collapsedFolderIds);
     diskHydrated = true;
-    } finally {
+  } finally {
     diskHydrationInFlight = false;
-}
+  }
 };
 
 const bootstrapSessionFoldersDiskHydration = (): void => {
