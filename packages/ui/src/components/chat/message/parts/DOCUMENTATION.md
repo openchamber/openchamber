@@ -30,12 +30,12 @@ Use this doc when you ask an agent to change tool/header/description behavior.
   - Used by both `ProgressiveGroup.tsx` and `ToolPart.tsx`.
 
 - `toolRenderUtils.ts`
-  - Core classification helpers:
-    - `isExpandableTool`
-    - `isStaticTool`
-    - `isStandaloneTool`
-    - `getStaticGroupToolName`
-  - If a tool should switch between static vs expandable, change it here.
+   - Thin wrappers around tool rendering policy from `packages/ui/src/lib/toolHelpers.ts`:
+     - `isExpandableTool`
+     - `isStaticTool`
+     - `isStandaloneTool`
+     - `getStaticGroupToolName`
+   - Built-in rendering capabilities are declared in `toolHelpers.ts` metadata. Unknown MCP/plugin tools are expandable by default so their inputs and outputs remain inspectable without adding tool-specific IDs.
 
 - `ReasoningPart.tsx`
   - Thinking block UI (`ReasoningTimelineBlock`), summary + optional duration.
@@ -63,10 +63,10 @@ Why: in current pipeline Perplexity is static/grouped, so `StaticToolRow` is the
 
 ## "I want tool to become expandable" (example)
 
-1. Update `toolRenderUtils.ts`:
-   - add/remove tool name in `EXPANDABLE_TOOL_NAMES`
-2. Ensure `ToolPart.tsx` supports desired header + expanded output format for that tool.
-3. Validate both modes (`sorted` and `live`).
+1. Unknown MCP/plugin tools are expandable by default; no allowlist entry is needed.
+2. For built-in tools, update `toolHelpers.ts` metadata only when switching a known static tool into or out of expandable rendering.
+3. Ensure `ToolPart.tsx` supports desired header + expanded output format for that tool.
+4. Validate both modes (`sorted` and `live`).
 
 ## Safe editing checklist
 
