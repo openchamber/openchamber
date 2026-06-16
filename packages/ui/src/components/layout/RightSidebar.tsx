@@ -96,13 +96,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ isOpen, children, cl
     setRightSidebarWidth(finalWidth);
   };
 
-  React.useEffect(() => {
-    if (!isResizing) {
-      resizingWidthRef.current = null;
-      activeResizePointerIDRef.current = null;
-    }
-  }, [isResizing]);
-
   const currentWidth = isResizing ? (resizingWidthRef.current ?? appliedWidth) : appliedWidth;
 
   return (
@@ -116,11 +109,9 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ isOpen, children, cl
       )}
       style={{
         width: `${currentWidth}px`,
-        minWidth: `${currentWidth}px`,
-        maxWidth: `${currentWidth}px`,
         ['--oc-right-sidebar-width' as string]: `${isResizing ? currentWidth : openWidth}px`,
         overflowX: 'clip',
-        transitionProperty: isResizing ? 'none' : 'width, min-width, max-width',
+        transitionProperty: isResizing ? 'none' : 'width',
         transitionDuration: '200ms',
         transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
       }}

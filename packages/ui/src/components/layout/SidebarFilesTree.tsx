@@ -104,6 +104,61 @@ const shouldIgnorePath = (path: string): boolean => {
   return normalized === 'node_modules' || normalized.endsWith('/node_modules') || normalized.includes('/node_modules/');
 };
 
+// Module-level per-root cache for the file tree. After P1.1 the component
+// stays mounted across right-sidebar tab switches, so the cache also stays
+// warm during that flow. The cache also survives the close-and-reopen flow
+// (the component remounts but the Map is module-scoped) — without this, every
+// sidebar reopen would re-list every expanded directory.
+//
+// LRU by touchedAt; cap is generous because large repos can have hundreds
+// of expanded directories and each FileNode is small (~80 bytes). Stale
+// roots are evicted on the next touch.
+type FileTreeCache = {
+  childrenByDir: Record<string, FileNode[]>;
+  loadErrorsByDir: Record<string, string>;
+  loadedDirs: Set<string>;
+  touchedAt: number;
+};
+const FILE_TREE_CACHE_MAX_ROOTS = 8;
+const fileTreeCacheByRoot = new Map<string, FileTreeCache>();
+
+const touchCache = (root: string): FileTreeCache | null => {
+  const entry = fileTreeCacheByRoot.get(root);
+  if (!entry) return null;
+  entry.touchedAt = Date.now();
+  // Touch on read promotes the key to the end of the Map's iteration order,
+  // so the oldest (front) entry is the next eviction candidate.
+  fileTreeCacheByRoot.delete(root);
+  fileTreeCacheByRoot.set(root, entry);
+  return entry;
+};
+
+const getOrCreateCache = (root: string): FileTreeCache => {
+  const existing = fileTreeCacheByRoot.get(root);
+  if (existing) {
+    existing.touchedAt = Date.now();
+    return existing;
+  }
+  if (fileTreeCacheByRoot.size >= FILE_TREE_CACHE_MAX_ROOTS) {
+    const oldest = fileTreeCacheByRoot.keys().next().value;
+    if (oldest !== undefined) {
+      fileTreeCacheByRoot.delete(oldest);
+    }
+  }
+  const created: FileTreeCache = {
+    childrenByDir: {},
+    loadErrorsByDir: {},
+    loadedDirs: new Set(),
+    touchedAt: Date.now(),
+  };
+  fileTreeCacheByRoot.set(root, created);
+  return created;
+};
+
+const dropCacheForRoot = (root: string): void => {
+  fileTreeCacheByRoot.delete(root);
+};
+
 const getFileIcon = (filePath: string, extension?: string): React.ReactNode => {
   return <FileTypeIcon filePath={filePath} extension={extension} />;
 };
@@ -141,10 +196,6 @@ interface FileRowProps {
     canReveal: boolean;
   };
   downloadFile?: (path: string) => Promise<void>;
-  contextMenuPath: string | null;
-  setContextMenuPath: (path: string | null) => void;
-  rightClickMenuPath: string | null;
-  setRightClickMenuPath: (path: string | null) => void;
   onSelect: (node: FileNode) => void;
   onToggle: (path: string) => void;
   onRevealPath: (path: string) => void;
@@ -160,10 +211,6 @@ const FileRow: React.FC<FileRowProps> = ({
   badge,
   permissions,
   downloadFile,
-  contextMenuPath,
-  setContextMenuPath,
-  rightClickMenuPath,
-  setRightClickMenuPath,
   onSelect,
   onToggle,
   onRevealPath,
@@ -173,11 +220,17 @@ const FileRow: React.FC<FileRowProps> = ({
   const isDir = node.type === 'directory';
   const { canRename, canCreateFile, canCreateFolder, canDelete, canReveal } = permissions;
 
+  // Menu open state is local to each row so opening a menu in one row
+  // never re-renders its siblings. Previously this state lived on the
+  // parent, which made every FileRow re-render whenever any menu toggled.
+  const [contextMenuOpen, setContextMenuOpen] = React.useState(false);
+  const [rightClickOpen, setRightClickOpen] = React.useState(false);
+
   const handleContextMenu = React.useCallback((event?: React.MouseEvent) => {
     if (!canRename && !canCreateFile && !canCreateFolder && !canDelete && !canReveal) return;
     event?.preventDefault();
-    setRightClickMenuPath(node.path);
-  }, [canRename, canCreateFile, canCreateFolder, canDelete, canReveal, node.path, setRightClickMenuPath]);
+    setRightClickOpen(true);
+  }, [canRename, canCreateFile, canCreateFolder, canDelete, canReveal]);
 
   const handleInteraction = React.useCallback(() => {
     if (isDir) {
@@ -189,9 +242,9 @@ const FileRow: React.FC<FileRowProps> = ({
 
   const handleMenuButtonClick = React.useCallback((event: React.MouseEvent) => {
     event.stopPropagation();
-    setRightClickMenuPath(null);
-    setContextMenuPath(node.path);
-  }, [node.path, setContextMenuPath, setRightClickMenuPath]);
+    setRightClickOpen(false);
+    setContextMenuOpen(true);
+  }, []);
 
   const renderMenuItems = ({
     Item,
@@ -271,7 +324,7 @@ const FileRow: React.FC<FileRowProps> = ({
   }, [node.path, root]);
 
   return (
-    <ContextMenu open={rightClickMenuPath === node.path} onOpenChange={(open) => setRightClickMenuPath(open ? node.path : null)}>
+    <ContextMenu open={rightClickOpen} onOpenChange={setRightClickOpen}>
       <ContextMenuTrigger render={<div className="group relative flex items-center" onContextMenu={handleContextMenu} />}>
       <button
         type="button"
@@ -308,8 +361,8 @@ const FileRow: React.FC<FileRowProps> = ({
       {(canRename || canCreateFile || canCreateFolder || canDelete || canReveal) && (
         <div className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 focus-within:opacity-100 group-hover:opacity-100">
           <DropdownMenu
-            open={contextMenuPath === node.path}
-            onOpenChange={(open) => setContextMenuPath(open ? node.path : null)}
+            open={contextMenuOpen}
+            onOpenChange={setContextMenuOpen}
           >
             <Tooltip>
               <TooltipTrigger asChild>
@@ -330,7 +383,7 @@ const FileRow: React.FC<FileRowProps> = ({
               </TooltipTrigger>
               <TooltipContent side="bottom" sideOffset={6}>{t('sidebarFilesTree.actions.fileMenuTitle')}</TooltipContent>
             </Tooltip>
-            <DropdownMenuContent align="end" side="bottom" onCloseAutoFocus={() => setContextMenuPath(null)}>
+            <DropdownMenuContent align="end" side="bottom" onCloseAutoFocus={() => setContextMenuOpen(false)}>
               {renderMenuItems({ Item: DropdownMenuItem, Separator: DropdownMenuSeparator })}
             </DropdownMenuContent>
           </DropdownMenu>
@@ -343,6 +396,23 @@ const FileRow: React.FC<FileRowProps> = ({
     </ContextMenu>
   );
 };
+
+const areFileRowPropsEqual = (prev: FileRowProps, next: FileRowProps): boolean => (
+  prev.node === next.node
+  && prev.root === next.root
+  && prev.isExpanded === next.isExpanded
+  && prev.isActive === next.isActive
+  && prev.status === next.status
+  && prev.badge === next.badge
+  && prev.permissions === next.permissions
+  && prev.downloadFile === next.downloadFile
+  && prev.onSelect === next.onSelect
+  && prev.onToggle === next.onToggle
+  && prev.onRevealPath === next.onRevealPath
+  && prev.onOpenDialog === next.onOpenDialog
+);
+
+const MemoizedFileRow = React.memo(FileRow, areFileRowPropsEqual);
 
 // --- Main component ---
 
@@ -368,6 +438,71 @@ export const SidebarFilesTree: React.FC = () => {
   const loadedDirsRef = React.useRef<Set<string>>(new Set());
   const inFlightDirsRef = React.useRef<Set<string>>(new Set());
 
+  // Hydrate the per-root cache on mount or root change. The cache is
+  // module-scoped so it survives close-and-reopen of the right sidebar;
+  // expanded paths are already persisted via useFilesViewTabsStore, so
+  // combining the two means the tree re-paints with cached data instead
+  // of blanking out and re-listing every directory.
+  React.useEffect(() => {
+    if (!root) {
+      setChildrenByDir({});
+      setLoadErrorsByDir({});
+      loadedDirsRef.current = new Set();
+      return;
+    }
+    const cached = touchCache(root);
+    if (cached) {
+      // Shallow-clone so the state and cache hold independent references.
+      // This protects the cache from accidental in-place mutation of state
+      // (a future contributor could otherwise break the contract silently).
+      setChildrenByDir({ ...cached.childrenByDir });
+      setLoadErrorsByDir({ ...cached.loadErrorsByDir });
+      loadedDirsRef.current = new Set(cached.loadedDirs);
+    } else {
+      setChildrenByDir({});
+      setLoadErrorsByDir({});
+      loadedDirsRef.current = new Set();
+    }
+  }, [root]);
+
+  // Mirror local state into the per-root cache. Don't bump touchedAt here:
+  // writes are frequent and the LRU should reflect user attention, not
+  // background re-renders.
+  React.useEffect(() => {
+    if (!root) return;
+    const cache = getOrCreateCache(root);
+    cache.childrenByDir = childrenByDir;
+  }, [root, childrenByDir]);
+
+  React.useEffect(() => {
+    if (!root) return;
+    const cache = getOrCreateCache(root);
+    cache.loadErrorsByDir = loadErrorsByDir;
+  }, [root, loadErrorsByDir]);
+
+  // The ref's contents must be persisted to the cache so a remount (e.g.
+  // close-and-reopen of the right sidebar) skips re-listing already-known
+  // directories. Mirror on every change of `root` so the ref → cache sync
+  // happens once per directory; the ref itself updates synchronously inside
+  // `loadDirectory` and isn't tracked by React otherwise.
+  React.useEffect(() => {
+    if (!root) return;
+    const cache = getOrCreateCache(root);
+    cache.loadedDirs = new Set(loadedDirsRef.current);
+  }, [root, childrenByDir, loadErrorsByDir]);
+
+  // Drop the cache entry for this root on unmount when no data was loaded
+  // (e.g. user opened the tab and immediately switched projects before any
+  // listDirectory round-trip). A populated entry stays so the next mount
+  // rehydrates instantly.
+  React.useEffect(() => () => {
+    if (!root) return;
+    const cache = fileTreeCacheByRoot.get(root);
+    if (cache && cache.loadedDirs.size === 0 && Object.keys(cache.childrenByDir).length === 0) {
+      dropCacheForRoot(root);
+    }
+  }, [root]);
+
   const EMPTY_PATHS: string[] = React.useMemo(() => [], []);
   const EMPTY_CONTEXT_TABS: Array<{ mode: string; targetPath: string | null }> = React.useMemo(() => [], []);
   const expandedPaths = useFilesViewTabsStore((state) => (root ? (state.byRoot[root]?.expandedPaths ?? EMPTY_PATHS) : EMPTY_PATHS));
@@ -383,10 +518,6 @@ export const SidebarFilesTree: React.FC = () => {
       .filter((targetPath): targetPath is string => typeof targetPath === 'string' && targetPath.length > 0)
       .map((targetPath) => normalizePath(targetPath))
   ), [contextTabs]);
-
-  // Context menu state
-  const [contextMenuPath, setContextMenuPath] = React.useState<string | null>(null);
-  const [rightClickMenuPath, setRightClickMenuPath] = React.useState<string | null>(null);
 
   // Dialog state for CRUD operations
   const [activeDialog, setActiveDialog] = React.useState<'createFile' | 'createFolder' | 'rename' | 'delete' | null>(null);
@@ -440,7 +571,7 @@ export const SidebarFilesTree: React.FC = () => {
     return sortNodes(nodes);
   }, [showGitignored, showHidden]);
 
-  const loadDirectory = React.useCallback(async (dirPath: string) => {
+  const loadDirectory = React.useCallback(async (dirPath: string, isCancelled?: () => boolean) => {
     const normalizedDir = normalizePath(dirPath.trim());
     if (!normalizedDir) return;
 
@@ -461,32 +592,34 @@ export const SidebarFilesTree: React.FC = () => {
         isDirectory: entry.isDirectory,
       })));
 
-    await listPromise
-      .then((entries) => {
-        const mapped = mapDirectoryEntries(normalizedDir, entries);
+    try {
+      const entries = await listPromise;
+      if (isCancelled?.()) return;
+      const mapped = mapDirectoryEntries(normalizedDir, entries);
 
-        loadedDirsRef.current = new Set(loadedDirsRef.current);
-        loadedDirsRef.current.add(normalizedDir);
-        setLoadErrorsByDir((prev) => {
-          if (!prev[normalizedDir]) return prev;
-          const next = { ...prev };
-          delete next[normalizedDir];
-          return next;
-        });
-        setChildrenByDir((prev) => ({ ...prev, [normalizedDir]: mapped }));
-      })
-      .catch((error) => {
-        const message = error instanceof Error ? error.message : String(error ?? '');
-        console.error('Failed to load sidebar directory:', error);
-        setLoadErrorsByDir((prev) => ({
-          ...prev,
-          [normalizedDir]: message,
-        }));
-      })
-      .finally(() => {
+      loadedDirsRef.current = new Set(loadedDirsRef.current);
+      loadedDirsRef.current.add(normalizedDir);
+      setLoadErrorsByDir((prev) => {
+        if (!prev[normalizedDir]) return prev;
+        const next = { ...prev };
+        delete next[normalizedDir];
+        return next;
+      });
+      setChildrenByDir((prev) => ({ ...prev, [normalizedDir]: mapped }));
+    } catch (error) {
+      if (isCancelled?.()) return;
+      const message = error instanceof Error ? error.message : String(error ?? '');
+      console.error('Failed to load sidebar directory:', error);
+      setLoadErrorsByDir((prev) => ({
+        ...prev,
+        [normalizedDir]: message,
+      }));
+    } finally {
+      if (!isCancelled?.()) {
         inFlightDirsRef.current = new Set(inFlightDirsRef.current);
         inFlightDirsRef.current.delete(normalizedDir);
-      });
+      }
+    }
   }, [files, mapDirectoryEntries]);
 
   const refreshRoot = React.useCallback(async () => {
@@ -545,12 +678,16 @@ export const SidebarFilesTree: React.FC = () => {
 
     if (toLoad.length === 0) return;
 
-    // Load with concurrency limit to avoid API stampede on startup
+    // Load with concurrency limit to avoid API stampede on startup.
+    // Each per-dir fetch gets a cancellation predicate so the load stops
+    // touching state once the effect tears down (e.g. user collapses the
+    // directory or the directory list changes mid-flight).
     let cancelled = false;
+    const isCancelled = () => cancelled;
     void (async () => {
       for (let i = 0; i < toLoad.length && !cancelled; i += 3) {
         const batch = toLoad.slice(i, i + 3);
-        await Promise.all(batch.map((dir) => loadDirectory(dir)));
+        await Promise.all(batch.map((dir) => loadDirectory(dir, isCancelled)));
       }
     })();
     return () => { cancelled = true; };
@@ -612,36 +749,64 @@ export const SidebarFilesTree: React.FC = () => {
   }, [currentDirectory, debouncedSearchQuery, searchFiles, showHidden, showGitignored]);
 
   // --- Git status helpers (matching FilesView) ---
+  //
+  // statusByPath / badgeByDir are precomputed once per gitStatus change so the
+  // tree render is O(1) per node instead of O(N) per node. Without these
+  // maps, a deep tree with 200 files and 40 directories would do ~8000
+  // string comparisons on every render.
+
+  const statusByPath = React.useMemo(() => {
+    const map = new Map<string, FileStatus>();
+    if (!gitStatus?.files) return map;
+    for (const file of gitStatus.files) {
+      if (file.index === 'A' || file.working_dir === '?') {
+        map.set(file.path, 'git-added');
+      } else if (file.index === 'D') {
+        map.set(file.path, 'git-deleted');
+      } else if (file.index === 'M' || file.working_dir === 'M') {
+        map.set(file.path, 'git-modified');
+      }
+    }
+    return map;
+  }, [gitStatus]);
+
+  const badgeByDir = React.useMemo(() => {
+    const map = new Map<string, { modified: number; added: number }>();
+    if (!gitStatus?.files || !root) return map;
+    for (const file of gitStatus.files) {
+      const isModified = file.index === 'M' || file.working_dir === 'M';
+      const isAdded = file.index === 'A' || file.working_dir === '?';
+      if (!isModified && !isAdded) continue;
+      const segments = file.path.split('/');
+      if (segments.length <= 1) continue;
+      let currentDir = root;
+      for (let i = 0; i < segments.length - 1; i++) {
+        currentDir = `${currentDir}/${segments[i]}`;
+        let entry = map.get(currentDir);
+        if (!entry) {
+          entry = { modified: 0, added: 0 };
+          map.set(currentDir, entry);
+        }
+        if (isModified) entry.modified++;
+        if (isAdded) entry.added++;
+      }
+    }
+    return map;
+  }, [gitStatus, root]);
 
   const getFileStatus = React.useCallback((path: string): FileStatus | null => {
     if (openContextFilePaths.has(path)) return 'open';
-
-    if (gitStatus?.files) {
-      const relative = path.startsWith(root + '/') ? path.slice(root.length + 1) : path;
-      const file = gitStatus.files.find((f) => f.path === relative);
-      if (file) {
-        if (file.index === 'A' || file.working_dir === '?') return 'git-added';
-        if (file.index === 'D') return 'git-deleted';
-        if (file.index === 'M' || file.working_dir === 'M') return 'git-modified';
-      }
-    }
-    return null;
-  }, [openContextFilePaths, gitStatus, root]);
+    if (statusByPath.size === 0) return null;
+    const relative = path.startsWith(root + '/') ? path.slice(root.length + 1) : path;
+    return statusByPath.get(relative) ?? null;
+  }, [openContextFilePaths, statusByPath, root]);
 
   const getFolderBadge = React.useCallback((dirPath: string): { modified: number; added: number } | null => {
-    if (!gitStatus?.files) return null;
-    const relativeDir = dirPath.startsWith(root + '/') ? dirPath.slice(root.length + 1) : dirPath;
-    const prefix = relativeDir ? `${relativeDir}/` : '';
-
-    let modified = 0, added = 0;
-    for (const f of gitStatus.files) {
-      if (f.path.startsWith(prefix)) {
-        if (f.index === 'M' || f.working_dir === 'M') modified++;
-        if (f.index === 'A' || f.working_dir === '?') added++;
-      }
-    }
-    return modified + added > 0 ? { modified, added } : null;
-  }, [gitStatus, root]);
+    if (badgeByDir.size === 0) return null;
+    const entry = badgeByDir.get(dirPath);
+    if (!entry) return null;
+    return entry.modified + entry.added > 0 ? entry : null;
+  }, [badgeByDir]);
 
   // --- File operations ---
 
@@ -820,7 +985,7 @@ export const SidebarFilesTree: React.FC = () => {
               )}
             </>
           )}
-          <FileRow
+          <MemoizedFileRow
             node={node}
             root={root}
             isExpanded={isExpanded}
@@ -829,10 +994,6 @@ export const SidebarFilesTree: React.FC = () => {
             badge={isDir ? getFolderBadge(node.path) : undefined}
             permissions={fileRowPermissions}
             downloadFile={files.downloadFile}
-            contextMenuPath={contextMenuPath}
-            setContextMenuPath={setContextMenuPath}
-            rightClickMenuPath={rightClickMenuPath}
-            setRightClickMenuPath={setRightClickMenuPath}
             onSelect={handleOpenFile}
             onToggle={toggleDirectory}
             onRevealPath={handleRevealPath}
