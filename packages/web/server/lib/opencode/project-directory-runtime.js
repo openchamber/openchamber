@@ -1,5 +1,11 @@
 import { createRealpathCache } from '../path-realpath-cache.js';
 
+// The browser's Headers API only accepts ISO-8859-1 characters, so the client
+// encodes non-ASCII header values with encodeURIComponent. Decode them here.
+const safeDecodeURIComponent = (value) => {
+  try { return decodeURIComponent(value); } catch { return value; }
+};
+
 export const createProjectDirectoryRuntime = (dependencies) => {
   const {
     fsPromises,
@@ -50,7 +56,8 @@ export const createProjectDirectoryRuntime = (dependencies) => {
   };
 
   const resolveProjectDirectory = async (req) => {
-    const headerDirectory = typeof req.get === 'function' ? req.get('x-opencode-directory') : null;
+    const rawHeaderDirectory = typeof req.get === 'function' ? req.get('x-opencode-directory') : null;
+    const headerDirectory = rawHeaderDirectory ? safeDecodeURIComponent(rawHeaderDirectory) : null;
     const queryDirectory = Array.isArray(req.query?.directory)
       ? req.query.directory[0]
       : req.query?.directory;
@@ -103,7 +110,8 @@ export const createProjectDirectoryRuntime = (dependencies) => {
   };
 
   const resolveOptionalProjectDirectory = async (req) => {
-    const headerDirectory = typeof req.get === 'function' ? req.get('x-opencode-directory') : null;
+    const rawHeaderDirectory = typeof req.get === 'function' ? req.get('x-opencode-directory') : null;
+    const headerDirectory = rawHeaderDirectory ? safeDecodeURIComponent(rawHeaderDirectory) : null;
     const queryDirectory = Array.isArray(req.query?.directory)
       ? req.query.directory[0]
       : req.query?.directory;

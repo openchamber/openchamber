@@ -279,7 +279,25 @@ const normalizeUrl = (input: string | URL) => {
 
 const headersToRecord = (headers: HeadersInit | undefined): Record<string, string> => {
   if (!headers) return {};
-  const normalized = headers instanceof Headers ? headers : new Headers(headers);
+  const isLatin1Safe = (v: string): boolean => {
+    for (let i = 0; i < v.length; i += 1) {
+      if (v.charCodeAt(i) > 0xFF) return false;
+    }
+    return true;
+  };
+  const sanitize = (init: HeadersInit): HeadersInit => {
+    const sourceEntries: [string, string][] = init instanceof Headers
+      ? Array.from(init.entries())
+      : Array.isArray(init)
+        ? init
+        : Object.entries(init);
+    const entries: [string, string][] = [];
+    for (const [key, value] of sourceEntries) {
+      entries.push([key, isLatin1Safe(value) ? value : encodeURIComponent(value)]);
+    }
+    return entries;
+  };
+  const normalized = headers instanceof Headers ? headers : new Headers(sanitize(headers));
   const result: Record<string, string> = {};
   normalized.forEach((value, key) => {
     result[key] = value;
@@ -298,7 +316,11 @@ const getRequestDirectoryHint = (url: URL, input?: RequestInfo | URL, init?: Req
   if (queryDirectory) return queryDirectory;
   const headers = getRequestHeaders(input, init);
   for (const [key, value] of Object.entries(headers)) {
-    if (key.toLowerCase() === 'x-opencode-directory') return value;
+    if (key.toLowerCase() === 'x-opencode-directory') {
+      // headersToRecord encodes non-ASCII values via encodeURIComponent
+      // so the browser's Headers API doesn't reject them. Decode here.
+      try { return decodeURIComponent(value); } catch { return value; }
+    }
   }
   return undefined;
 };
