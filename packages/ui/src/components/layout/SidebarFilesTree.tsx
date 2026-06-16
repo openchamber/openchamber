@@ -615,10 +615,8 @@ export const SidebarFilesTree: React.FC = () => {
         [normalizedDir]: message,
       }));
     } finally {
-      if (!isCancelled?.()) {
-        inFlightDirsRef.current = new Set(inFlightDirsRef.current);
-        inFlightDirsRef.current.delete(normalizedDir);
-      }
+      inFlightDirsRef.current = new Set(inFlightDirsRef.current);
+      inFlightDirsRef.current.delete(normalizedDir);
     }
   }, [files, mapDirectoryEntries]);
 
