@@ -256,6 +256,7 @@ export const useSessionGrouping = (args: Args) => {
     [buildSessionSearchText],
   );
 
+  const { homeDirectory, worktreeMetadata, pinnedSessionIds, gitBranches, isVSCode } = args;
   const buildGroupedSessionsHook = React.useCallback(
     (
       projectSessions: Session[],
@@ -265,13 +266,13 @@ export const useSessionGrouping = (args: Args) => {
       projectIsRepo: boolean,
     ) => {
       return buildGroupedSessions(projectSessions, projectRoot, availableWorktrees, projectRootBranch, projectIsRepo, {
-        ...args,
+        homeDirectory, worktreeMetadata, pinnedSessionIds, gitBranches, isVSCode,
         showSubagentSessionsInSidebar,
         t: ((key: string, params?: Record<string, unknown>) =>
           t(key as Parameters<typeof t>[0], params as Parameters<typeof t>[1])) as BuildGroupedSessionsArgs['t'],
       });
     },
-    [args, showSubagentSessionsInSidebar, t],
+    [homeDirectory, worktreeMetadata, pinnedSessionIds, gitBranches, isVSCode, showSubagentSessionsInSidebar, t],
   );
 
   return {

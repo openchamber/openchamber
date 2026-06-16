@@ -170,9 +170,13 @@ export const computeProjectSessionLists = (args: ProjectSessionListsArgs): Proje
 export const useProjectSessionLists = (
   args: Omit<ProjectSessionListsArgs, 'showSubagentSessionsInSidebar'>,
 ): ProjectSessionLists => {
+  const { isVSCode, sessions, archivedSessions, availableWorktreesByProject } = args;
   const showSubagentSessionsInSidebar = useUIStore((state) => state.showSubagentSessionsInSidebar);
   return React.useMemo(
-    () => computeProjectSessionLists({ ...args, showSubagentSessionsInSidebar }),
-    [args, showSubagentSessionsInSidebar],
+    () => computeProjectSessionLists({
+      isVSCode, sessions, archivedSessions, availableWorktreesByProject,
+      showSubagentSessionsInSidebar,
+    }),
+    [isVSCode, sessions, archivedSessions, availableWorktreesByProject, showSubagentSessionsInSidebar],
   );
 };
