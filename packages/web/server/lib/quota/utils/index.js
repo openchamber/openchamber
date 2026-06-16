@@ -6,5 +6,7 @@
  */
 
 export * from './auth.js';
+export * from './browser.js';
+export * from './login.js';
 export * from './transformers.js';
 export * from './formatters.js';

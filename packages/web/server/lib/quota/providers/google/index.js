@@ -26,6 +26,7 @@ export {
 } from './api.js';
 
 import { buildResult } from '../../utils/index.js';
+import { isJsonMode, isQuietMode, printJson, log } from '../../../../../bin/cli-output.js';
 import {
   resolveGoogleAuthSources,
   resolveGoogleOAuthClient,
@@ -37,6 +38,12 @@ import {
   fetchGoogleQuotaBuckets,
   fetchGoogleModels
 } from './api.js';
+
+export const login = async (options = {}) => {
+  if (isJsonMode(options)) printJson({ provider: 'google', command: 'opencode auth login' });
+  else if (isQuietMode(options)) process.stdout.write('Run: opencode auth login\n');
+  else log.info("Run 'opencode auth login' to add auth for Google.");
+};
 
 export const fetchGoogleQuota = async () => {
   const authSources = resolveGoogleAuthSources();

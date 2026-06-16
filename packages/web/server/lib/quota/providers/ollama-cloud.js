@@ -1,9 +1,12 @@
 import { homedir } from 'os';
-import { readFileSync, existsSync } from 'fs';
-import { join } from 'path';
-import { buildResult, toUsageWindow, toNumber } from '../utils/index.js';
+import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
+import { join, dirname } from 'path';
+import { readAuthFile } from '../../opencode/auth.js';
+import { buildResult, toUsageWindow, toNumber, discoverBrowserCookie } from '../utils/index.js';
+import { isJsonMode, isQuietMode, canPrompt, printJson, log, text, isCancel } from '../../../../bin/cli-output.js';
 
 const COOKIE_PATH = join(homedir(), '.config', 'ollama-quota', 'cookie');
+const hostPattern = /\.ollama\.com$/;
 
 export const providerId = 'ollama-cloud';
 export const providerName = 'Ollama Cloud';
@@ -17,6 +20,14 @@ const readCookieFile = () => {
     return trimmed || null;
   } catch {
     return null;
+  }
+};
+
+const saveCookieFile = (cookie) => {
+  try {
+    mkdirSync(dirname(COOKIE_PATH), { recursive: true });
+    writeFileSync(COOKIE_PATH, cookie, 'utf8');
+  } catch {
   }
 };
 
@@ -53,15 +64,54 @@ const parseOllamaSettingsHtml = (html) => {
   return windows;
 };
 
+const readCookie = () => {
+  const envCookie = process.env.OLLAMA_CLOUD_COOKIE || null;
+  if (envCookie) return envCookie;
+  return readCookieFile();
+};
+
 export const isConfigured = () => {
-  const cookie = readCookieFile();
+  const cookie = readCookie();
   return Boolean(cookie);
 };
 
-export const fetchQuota = async () => {
-  const cookie = readCookieFile();
+export const login = async (options = {}) => {
+  const auth = readAuthFile();
+  if (Object.keys(auth).length === 0) {
+    if (isJsonMode(options)) printJson({ provider: providerId, command: 'opencode auth login' });
+    else if (isQuietMode(options)) process.stdout.write('Run: opencode auth login\n');
+    else log.info(`Run 'opencode auth login' to add auth for ${providerName}.`);
+    return;
+  }
 
-  if (!cookie) {
+  if (isJsonMode(options)) {
+    printJson({ provider: providerId, type: 'browser-login', loginUrl: 'https://ollama.com/settings' });
+    return;
+  }
+  if (isQuietMode(options)) {
+    process.stdout.write('Login at https://ollama.com/settings\n');
+    return;
+  }
+
+  log.step('Open https://ollama.com/settings in your browser and log in.');
+  if (canPrompt(options)) {
+    const result = await text({ message: 'Press Enter after logging in', placeholder: 'Enter to continue' });
+    if (isCancel(result)) process.exit(0);
+  }
+
+  const cookie = await discoverBrowserCookie(hostPattern, 'ollama_session');
+  if (cookie) {
+    saveCookieFile(cookie);
+    log.success('Cookie found and saved.');
+  } else {
+    log.error('No cookie found. Run `openchamber quota login` again after logging in.');
+  }
+};
+
+export const fetchQuota = async () => {
+  const authCookie = readCookie();
+
+  if (!authCookie) {
     return buildResult({
       providerId,
       providerName,
@@ -75,7 +125,7 @@ export const fetchQuota = async () => {
     const response = await fetch('https://ollama.com/settings', {
       method: 'GET',
       headers: {
-        Cookie: cookie,
+        Cookie: authCookie,
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
       }
     });

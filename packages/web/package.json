@@ -27,6 +27,7 @@
     "@octokit/rest": "^22.0.1",
     "@opencode-ai/sdk": "^1.17.7",
     "@simplewebauthn/server": "13.3.0",
+    "@steipete/sweet-cookie": "^0.4.0",
     "adm-zip": "^0.5.16",
     "better-sqlite3": "^12.10.0",
     "bun-pty": "^0.4.5",

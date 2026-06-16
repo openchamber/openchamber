@@ -33,8 +33,11 @@ import {
   buildResult,
   toUsageWindow,
   resolveWindowSeconds,
-  normalizeTimestamp
+  normalizeTimestamp,
+  loginWithAuthCheck,
 } from '../utils/index.js';
+
+import { isJsonMode, isQuietMode, printJson, log } from '../../../../bin/cli-output.js';
 
 export const providerId = 'zhipuai-coding-plan';
 export const providerName = 'Zhipu AI Coding Plan';
@@ -68,6 +71,9 @@ function getApiKey() {
 export const isConfigured = () => {
   return Boolean(getApiKey());
 };
+
+export const login = async (options = {}) =>
+  loginWithAuthCheck({ options, id: providerId, name: providerName, aliases });
 
 export const fetchQuota = async () => {
   const apiKey = getApiKey();

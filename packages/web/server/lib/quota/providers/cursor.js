@@ -9,6 +9,7 @@ import {
   toTimestamp,
   toUsageWindow
 } from '../utils/index.js';
+import { isJsonMode, isQuietMode, printJson, log } from '../../../../bin/cli-output.js';
 
 const BASE_URL = 'https://api2.cursor.sh';
 const USAGE_URL = `${BASE_URL}/aiserver.v1.DashboardService/GetCurrentPeriodUsage`;
@@ -270,6 +271,12 @@ const appendCreditsWindow = (windows, credits) => {
 export const isConfigured = () => {
   const auth = loadAuthState();
   return Boolean(auth.accessToken || auth.refreshToken);
+};
+
+export const login = async (options = {}) => {
+  if (isJsonMode(options)) printJson({ provider: providerId, type: 'unsupported' });
+  else if (isQuietMode(options)) process.stdout.write('Login not supported\n');
+  else log.info(`Login not available for ${providerName}.`);
 };
 
 export const fetchQuota = async () => {

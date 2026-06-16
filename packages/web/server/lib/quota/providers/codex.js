@@ -6,8 +6,11 @@ import {
   toUsageWindow,
   toNumber,
   toTimestamp,
-  formatMoney
+  formatMoney,
+  loginWithAuthCheck,
 } from '../utils/index.js';
+
+import { isJsonMode, isQuietMode, printJson, log } from '../../../../bin/cli-output.js';
 
 export const providerId = 'codex';
 export const providerName = 'Codex';
@@ -18,6 +21,9 @@ export const isConfigured = () => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
   return Boolean(entry?.access || entry?.token);
 };
+
+export const login = async (options = {}) =>
+  loginWithAuthCheck({ options, id: providerId, name: providerName, aliases });
 
 export const fetchQuota = async () => {
   const auth = readAuthFile();
