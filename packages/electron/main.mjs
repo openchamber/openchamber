@@ -48,7 +48,9 @@ const shouldStartInBackground = (loginItemSettings = readLoginItemSettings()) =>
 // ~/Library/Logs/OpenChamber/ (not ~/Library/Logs/@openchamber/electron/).
 app.setName('OpenChamber');
 if (isDev) {
-  app.setPath('userData', path.join(app.getPath('appData'), 'OpenChamber Dev'));
+  const suffix = process.env.OPENCHAMBER_USER_DATA_SUFFIX;
+  const folderName = suffix ? `OpenChamber Dev - ${suffix}` : 'OpenChamber Dev';
+  app.setPath('userData', path.join(app.getPath('appData'), folderName));
 }
 app.setAppUserModelId(APP_USER_MODEL_ID);
 app.commandLine.appendSwitch('proxy-bypass-list', '<-loopback>');
@@ -1985,6 +1987,18 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
       const url = new URL(raw);
       if (url.protocol === 'devtools:') return true;
       if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+
+      if (isDev) {
+        const hmrUiPort = process.env.OPENCHAMBER_HMR_UI_PORT || '5173';
+        if (url.origin === `http://127.0.0.1:${hmrUiPort}` || url.origin === `http://localhost:${hmrUiPort}`) {
+          return true;
+        }
+        const hmrApiPort = process.env.OPENCHAMBER_HMR_API_PORT || '3901';
+        if (url.origin === `http://127.0.0.1:${hmrApiPort}` || url.origin === `http://localhost:${hmrApiPort}`) {
+          return true;
+        }
+      }
+
       if (state.localOrigin) {
         try {
           if (new URL(state.localOrigin).origin === url.origin) return true;
@@ -3976,6 +3990,7 @@ const isLocalSender = (webContents) => {
     if (url.protocol === `${UI_PROTOCOL}:` && url.hostname === 'app') return true;
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
 
+    // Allow HMR UI origin in development mode
     if (isDev) {
       const hmrUiPort = process.env.OPENCHAMBER_HMR_UI_PORT || '5173';
       if (url.origin === `http://127.0.0.1:${hmrUiPort}` || url.origin === `http://localhost:${hmrUiPort}`) {

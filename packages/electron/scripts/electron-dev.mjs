@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -10,6 +11,29 @@ const repoRoot = path.resolve(__dirname, '../../..');
 const electronDir = path.join(repoRoot, 'packages/electron');
 const preferredHmrUiPort = Number(process.env.OPENCHAMBER_HMR_UI_PORT || '5173');
 const preferredHmrApiPort = Number(process.env.OPENCHAMBER_HMR_API_PORT || '3901');
+
+function waitForPortToBeBusy(port, timeoutMs = 15000) {
+  return new Promise((resolve) => {
+    const startTime = Date.now();
+    const check = () => {
+      const socket = net.createConnection({ port, host: '127.0.0.1' });
+      socket.once('connect', () => {
+        socket.destroy();
+        resolve(true);
+      });
+      socket.once('error', () => {
+        if (Date.now() - startTime > timeoutMs) {
+          console.warn(`[electron:dev] Timed out waiting for API port ${port} to start.`);
+          resolve(false);
+        } else {
+          setTimeout(check, 100);
+        }
+      });
+    };
+    check();
+  });
+}
+
 
 const quoteWindowsCommandArg = (value) => `"${String(value).replace(/"/g, '""')}"`;
 
@@ -178,6 +202,19 @@ async function stopChildTree(child) {
 }
 
 async function main() {
+  const repoFolderName = path.basename(repoRoot);
+  const isDefaultRepoName = repoFolderName === 'openchamber';
+  
+  const suffix = process.env.OPENCHAMBER_USER_DATA_SUFFIX || (!isDefaultRepoName ? repoFolderName : '');
+  const dataDir = process.env.OPENCHAMBER_DATA_DIR || (!isDefaultRepoName ? path.join(os.homedir(), '.config', `openchamber-${repoFolderName}`) : '');
+
+  if (suffix) {
+    process.env.OPENCHAMBER_USER_DATA_SUFFIX = suffix;
+  }
+  if (dataDir) {
+    process.env.OPENCHAMBER_DATA_DIR = dataDir;
+  }
+
   const useBundledUi = process.env.OPENCHAMBER_ELECTRON_USE_BUNDLED_UI === '1';
   let devServer = null;
   let hmrApiPort = '';
@@ -197,6 +234,8 @@ async function main() {
         OPENCHAMBER_DISABLE_PWA_DEV: '1',
       },
     });
+    // Wait for the backend API port to become busy/listening to avoid ECONNREFUSED in Electron console
+    await waitForPortToBeBusy(Number(hmrApiPort));
   }
 
   const electron = spawnProcess('npx', ['electron', './main.mjs'], {
@@ -210,6 +249,7 @@ async function main() {
       OPENCHAMBER_DISABLE_PWA_DEV: '1',
     },
   });
+
 
   let cleaning = false;
   const teardown = async (code) => {

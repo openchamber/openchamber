@@ -1770,6 +1770,14 @@ export function SyncProvider(props: {
           hasEverConnected: true,
           connectionPhase: "connected",
         })
+
+        const pendingReload = localStorage.getItem('oc_pending_checkout_reload');
+        if (pendingReload === 'true') {
+          localStorage.removeItem('oc_pending_checkout_reload');
+          window.location.reload();
+          return;
+        }
+
         if (isRecentBoot()) {
           return
         }

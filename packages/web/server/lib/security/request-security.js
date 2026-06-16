@@ -57,6 +57,14 @@ export const createRequestSecurityRuntime = (deps) => {
 
   const getRequestOriginCandidates = async (req) => {
     const origins = new Set();
+
+    // Allow connections originating from the HMR UI server in development mode
+    if (process.env.OPENCHAMBER_ELECTRON_DEV === '1') {
+      const hmrUiPort = process.env.OPENCHAMBER_HMR_UI_PORT || '5173';
+      origins.add(`http://127.0.0.1:${hmrUiPort}`);
+      origins.add(`http://localhost:${hmrUiPort}`);
+    }
+
     const forwardedProto = typeof req.headers['x-forwarded-proto'] === 'string'
       ? req.headers['x-forwarded-proto'].split(',')[0].trim().toLowerCase()
       : '';

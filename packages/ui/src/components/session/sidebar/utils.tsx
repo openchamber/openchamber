@@ -2,7 +2,6 @@ import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { getCurrentIntlLocale } from '@/lib/i18n';
 import { formatMessage, useI18nStore } from '@/lib/i18n/store';
-import type { SessionSummaryMeta } from './types';
 
 const t = (key: Parameters<typeof formatMessage>[1], params?: Parameters<typeof formatMessage>[2]) =>
   formatMessage(useI18nStore.getState().dictionary, key, params);
@@ -209,47 +208,6 @@ export const isSessionRelatedToProject = (
   return sessionDirectory === projectRoot || sessionDirectory.startsWith(`${projectRoot}/`);
 };
 
-const parseSummaryCount = (value: number | string | null | undefined): number | null => {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value;
-  }
-  if (typeof value === 'string') {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-  return null;
-};
-
-export const resolveSessionDiffStats = (summary?: SessionSummaryMeta): { additions: number; deletions: number } | null => {
-  if (!summary) {
-    return null;
-  }
-
-  const directAdditions = parseSummaryCount(summary.additions);
-  const directDeletions = parseSummaryCount(summary.deletions);
-  if (directAdditions !== null || directDeletions !== null) {
-    const stats = {
-      additions: Math.max(0, directAdditions ?? 0),
-      deletions: Math.max(0, directDeletions ?? 0),
-    };
-    return stats.additions === 0 && stats.deletions === 0 ? null : stats;
-  }
-
-  const diffs = Array.isArray(summary.diffs) ? summary.diffs : [];
-  if (diffs.length === 0) {
-    return null;
-  }
-
-  let additions = 0;
-  let deletions = 0;
-  diffs.forEach((diff) => {
-    additions += Math.max(0, parseSummaryCount(diff.additions) ?? 0);
-    deletions += Math.max(0, parseSummaryCount(diff.deletions) ?? 0);
-  });
-  return additions === 0 && deletions === 0 ? null : { additions, deletions };
-};
 
 export const formatProjectLabel = (label: string): string => {
   return label

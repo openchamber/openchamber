@@ -17,7 +17,7 @@ type SessionDisplayStore = {
 export const useSessionDisplayStore = create<SessionDisplayStore>()(
   persist(
     (set) => ({
-      displayMode: 'default',
+      displayMode: 'minimal',
       showRecentSection: true,
       showArchivedSessions: true,
       setDisplayMode: (mode) => set({ displayMode: mode }),
@@ -28,6 +28,17 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
     }),
     {
       name: 'session-display-mode',
+      version: 1,
+      // v0 shipped 'default' as the only/initial mode, so most existing users
+      // have it persisted by accident rather than choice. Nudge everyone onto
+      // minimal once so the mode can be evaluated before removing it entirely.
+      migrate: (persisted, version) => {
+        const state = (persisted ?? {}) as Partial<SessionDisplayStore>;
+        if (version < 1) {
+          return { ...state, displayMode: 'minimal' };
+        }
+        return state;
+      },
     },
   ),
 );

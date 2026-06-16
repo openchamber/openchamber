@@ -25,8 +25,8 @@ import { buildSessionMessageRecordsSnapshot, useDirectoryStore, useGlobalSession
 import { useSync } from '@/sync/use-sync';
 import { useViewportStore, viewportSessionKey } from '@/sync/viewport-store';
 import { DraggableSessionRow } from './sessionFolderDnd';
-import type { SessionNode, SessionSummaryMeta } from './types';
-import { formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText, resolveSessionDiffStats } from './utils';
+import type { SessionNode } from './types';
+import { formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from './utils';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
@@ -263,8 +263,11 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const hasSecondaryBranchLabel = Boolean(secondaryMeta?.branchLabel);
 
   const displayMode = useSessionDisplayStore((state) => state.displayMode);
-  const isMinimalMode = displayMode === 'minimal';
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
+  // VS Code keeps the expanded "default" layout regardless of the stored mode:
+  // multi-workspace lists rely on inline project/branch, and hover tooltips
+  // across the whole list would be impractical there.
+  const isMinimalMode = displayMode === 'minimal' && !isVSCode;
   const isElectron = React.useMemo(() => canUseElectronDesktopIPC(), []);
   const runtimeApis = React.useContext(RuntimeAPIContext);
   const revealOnHoverClass = isVSCode
@@ -348,8 +351,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const isSubtaskSession = Boolean((resolvedSession as Session & { parentID?: string | null }).parentID);
   const unseenCount = useSessionUnseenCount(session.id);
   const needsAttention = unseenCount > 0 && (!isSubtaskSession || notifyOnSubtasks);
-  const sessionSummary = resolvedSession.summary as SessionSummaryMeta | undefined;
-  const sessionDiffStats = resolveSessionDiffStats(sessionSummary);
   const sessionTimestamp = resolvedSession.time?.updated || resolvedSession.time?.created || Date.now();
   const sessionUpdatedLabel = formatSessionDateLabel(sessionTimestamp);
   const sessionCompactUpdatedLabel = formatSessionCompactDateLabel(sessionTimestamp);
@@ -529,7 +530,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
               <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
                 {hasChildren ? <span className="inline-flex items-center justify-center flex-shrink-0">{isExpanded ? <Icon name="arrow-down-s" className="h-3 w-3" /> : <Icon name="arrow-right-s" className="h-3 w-3" />}</span> : null}
                 <span className="flex-shrink-0">{sessionUpdatedLabel}</span>
-                {sessionDiffStats ? <span className="flex flex-shrink-0 items-center gap-0 text-[0.92em]"><span className="text-status-success/80">+{sessionDiffStats.additions}</span><span className="text-status-error/65">/-{sessionDiffStats.deletions}</span></span> : null}
                 {hasSecondaryProjectLabel ? <span className="truncate">{secondaryMeta?.projectLabel}</span> : null}
                 {hasSecondaryBranchLabel ? <span className="inline-flex min-w-0 items-center gap-0.5"><Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" /><span className="truncate">{secondaryMeta?.branchLabel}</span></span> : null}
               </div>
@@ -992,14 +992,11 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                       {secondaryMeta?.projectLabel ? <div className="min-w-0 truncate">{secondaryMeta.projectLabel}</div> : null}
                       <div className="flex-shrink-0">{sessionUpdatedLabel}</div>
                     </div>
-                    {secondaryMeta?.branchLabel || sessionDiffStats ? (
-                      <div className={cn('flex items-center gap-3 text-left text-muted-foreground', secondaryMeta?.branchLabel ? 'justify-between' : 'justify-start')}>
-                        {secondaryMeta?.branchLabel ? (
-                          <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
-                            <span className="inline-flex min-w-0 items-center gap-0.5"><Icon name="git-branch" className="h-3 w-3 flex-shrink-0" /><span className="truncate">{secondaryMeta.branchLabel}</span></span>
-                          </div>
-                        ) : null}
-                        {sessionDiffStats ? <span className="flex flex-shrink-0 items-center gap-0.5"><span className="text-status-success">+{sessionDiffStats.additions}</span><span className="text-status-error">-{sessionDiffStats.deletions}</span></span> : null}
+                    {secondaryMeta?.branchLabel ? (
+                      <div className="flex items-center gap-3 text-left text-muted-foreground justify-start">
+                        <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
+                          <span className="inline-flex min-w-0 items-center gap-0.5"><Icon name="git-branch" className="h-3 w-3 flex-shrink-0" /><span className="truncate">{secondaryMeta.branchLabel}</span></span>
+                        </div>
                       </div>
                     ) : null}
                   </div>
@@ -1040,7 +1037,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                   <div className="flex items-center justify-between gap-3 text-muted-foreground/60 min-w-0 overflow-hidden leading-tight" style={{ fontSize: 'calc(var(--text-ui-label) * 0.85)' }}>
                     <div className={cn('flex min-w-0 items-center gap-1.5 overflow-hidden', metadataSubsessionChevron && hasChildren ? 'pl-4' : '')}>
                       <span className="flex-shrink-0">{sessionUpdatedLabel}</span>
-                      {sessionDiffStats ? <span className="flex flex-shrink-0 items-center gap-0 text-[0.92em]"><span className="text-status-success/80">+{sessionDiffStats.additions}</span><span className="text-muted-foreground/60">/</span><span className="text-status-error/65">-{sessionDiffStats.deletions}</span></span> : null}
                       {hasSecondaryProjectLabel ? <span className="truncate">{secondaryMeta?.projectLabel}</span> : null}
                       {hasSecondaryBranchLabel ? <span className="inline-flex min-w-0 items-center gap-0.5"><Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" /><span className="truncate">{secondaryMeta?.branchLabel}</span></span> : null}
                     </div>

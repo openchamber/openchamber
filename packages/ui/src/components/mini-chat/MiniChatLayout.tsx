@@ -15,7 +15,6 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useGitBranchLabel, useGitStore } from '@/stores/useGitStore';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { resolveSessionDiffStats } from '@/components/session/sidebar/utils';
 import { Icon } from "@/components/icon/Icon";
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
@@ -136,11 +135,6 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
   const gitBranchForDirectory = useGitBranchLabel(openDirectory || null);
   const rawBranchLabel = gitBranchForDirectory || worktreeMetadataBranch || sessionWorktreeMetadata?.branch?.trim() || worktreeAttachment?.branch?.trim() || catalogWorktreeBranch;
   const branchLabel = rawBranchLabel && rawBranchLabel !== 'HEAD' ? rawBranchLabel : null;
-  const diffStats = React.useMemo(() => {
-    return resolveSessionDiffStats(session?.summary as Parameters<typeof resolveSessionDiffStats>[0]);
-  }, [session?.summary]);
-  const changes = diffStats ?? { additions: 0, deletions: 0 };
-  const hasChanges = changes.additions > 0 || changes.deletions > 0;
   const currentModel = getCurrentModel();
   const latestAssistantModel = React.useMemo(() => {
     for (let i = currentSessionMessages.length - 1; i >= 0; i -= 1) {
@@ -282,13 +276,6 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
               <span className="inline-flex min-w-0 items-center gap-0.5">
                 <Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
                 <span className="truncate">{branchLabel}</span>
-              </span>
-            ) : null}
-            {hasChanges ? (
-              <span className="inline-flex flex-shrink-0 items-center gap-0 text-[0.92em]">
-                <span className="text-status-success/80">+{changes.additions}</span>
-                <span className="text-muted-foreground/60">/</span>
-                <span className="text-status-error/65">-{changes.deletions}</span>
               </span>
             ) : null}
           </span>

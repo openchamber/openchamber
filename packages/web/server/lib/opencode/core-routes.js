@@ -1,3 +1,10 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const repoRoot = path.resolve(__dirname, '../../../..');
+
 const parseLoopbackUrl = (rawUrl) => {
   if (typeof rawUrl !== 'string') {
     return null;
@@ -309,6 +316,7 @@ export const registerServerStatusRoutes = (app, dependencies) => {
       runtime: runtimeName,
       pid: process.pid,
       startedAt: serverStartedAt,
+      appDirectory: repoRoot,
     });
   });
 

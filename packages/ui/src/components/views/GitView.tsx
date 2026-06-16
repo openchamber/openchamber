@@ -37,6 +37,7 @@ import {
   CommandList,
 } from '@/components/ui/command';
 import { Icon } from "@/components/icon/Icon";
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useUIStore } from '@/stores/useUIStore';
@@ -237,6 +238,29 @@ export const GitView: React.FC = () => {
   const { t } = useI18n();
   const { git } = useRuntimeAPIs();
   const currentDirectory = useEffectiveDirectory();
+
+  const checkAndSetReloadFlag = async (dir: string) => {
+    try {
+      const sysInfoRes = await runtimeFetch('/api/system/info');
+      if (sysInfoRes.ok) {
+        const sysInfo = await sysInfoRes.json();
+        if (sysInfo.appDirectory) {
+          const normalize = (p: string) => p.replace(/\\/g, '/').toLowerCase().replace(/\/+$/, '');
+          if (normalize(sysInfo.appDirectory) === normalize(dir)) {
+            localStorage.setItem('oc_pending_checkout_reload', 'true');
+            setTimeout(() => {
+              if (localStorage.getItem('oc_pending_checkout_reload') === 'true') {
+                localStorage.removeItem('oc_pending_checkout_reload');
+                window.location.reload();
+              }
+            }, 4000);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to check app directory for checkout reload:', e);
+    }
+  };
   const [worktreeBootstrapStatus, setWorktreeBootstrapStatus] = React.useState<'pending' | 'ready' | 'failed' | null>(null);
   const [isWaitingForGitRefreshAfterBootstrap, setIsWaitingForGitRefreshAfterBootstrap] = React.useState(false);
   const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
@@ -1259,6 +1283,7 @@ export const GitView: React.FC = () => {
 
       // Checkout the new branch and stay on it
       await git.checkoutBranch(currentDirectory, branchName);
+      await checkAndSetReloadFlag(currentDirectory);
 
       let pushSucceeded = false;
       try {
@@ -1334,6 +1359,7 @@ export const GitView: React.FC = () => {
 
     try {
       await git.checkoutBranch(currentDirectory, normalized);
+      await checkAndSetReloadFlag(currentDirectory);
       toast.success(t('gitView.toast.checkedOut', { name: normalized }));
       await refreshStatusAndBranches();
       await refreshLog();

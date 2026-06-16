@@ -12,6 +12,51 @@ const pwaDevEnabled = process.env.OPENCHAMBER_DISABLE_PWA_DEV !== '1';
 const reactScanToggle = (process.env.VITE_ENABLE_REACT_SCAN ?? '').toLowerCase();
 const enableReactScan = reactScanToggle === '1' || reactScanToggle === 'true' || reactScanToggle === 'on' || reactScanToggle === 'yes';
 
+const wrapSocketError = (socket: any) => {
+  for (const methodName of ['on', 'addListener'] as const) {
+    const originalMethod = socket[methodName];
+    if (typeof originalMethod === 'function') {
+      socket[methodName] = function (socketEvent: string, listener: (...args: any[]) => void) {
+        if (socketEvent === 'error') {
+          const originalListener = listener;
+          listener = function (err: any, ...listenerArgs: any[]) {
+            if (err && (err.code === 'ECONNRESET' || err.code === 'ECONNABORTED')) {
+              return;
+            }
+            return originalListener.apply(this, [err, ...listenerArgs]);
+          };
+        }
+        return originalMethod.apply(this, [socketEvent, listener]);
+      };
+    }
+  }
+};
+
+const configureProxy = (proxy: any) => {
+  const originalEmit = proxy.emit;
+  proxy.emit = function (event: string, ...args: any[]) {
+    if (event === 'error') {
+      const err = args[0];
+      if (err && (err.code === 'ECONNRESET' || err.code === 'ECONNABORTED')) {
+        return false;
+      }
+    }
+    if (event === 'open') {
+      const proxySocket = args[0];
+      if (proxySocket) {
+        wrapSocketError(proxySocket);
+      }
+    }
+    if (event === 'proxyReqWs') {
+      const clientSocket = args[2];
+      if (clientSocket) {
+        wrapSocketError(clientSocket);
+      }
+    }
+    return originalEmit.apply(this, [event, ...args]);
+  };
+};
+
 export default defineConfig({
   root: path.resolve(__dirname, '.'),
   plugins: [
@@ -84,75 +129,18 @@ export default defineConfig({
       '/auth': {
         target: `http://127.0.0.1:${process.env.OPENCHAMBER_PORT || 3001}`,
         changeOrigin: true,
-        configure: (proxy) => {
-          const originalEmit = proxy.emit;
-          proxy.emit = function (event, ...args) {
-            if (event === 'error') {
-              const err = args[0];
-              if (err && (err.code === 'ECONNREFUSED' || err.code === 'ECONNRESET' || err.code === 'ECONNABORTED')) {
-                return false;
-              }
-            }
-            return originalEmit.apply(this, [event, ...args]);
-          };
-        },
+        configure: configureProxy,
       },
       '/health': {
         target: `http://127.0.0.1:${process.env.OPENCHAMBER_PORT || 3001}`,
         changeOrigin: true,
-        configure: (proxy) => {
-          const originalEmit = proxy.emit;
-          proxy.emit = function (event, ...args) {
-            if (event === 'error') {
-              const err = args[0];
-              if (err && (err.code === 'ECONNREFUSED' || err.code === 'ECONNRESET' || err.code === 'ECONNABORTED')) {
-                return false;
-              }
-            }
-            return originalEmit.apply(this, [event, ...args]);
-          };
-        },
+        configure: configureProxy,
       },
       '/api': {
         target: `http://127.0.0.1:${process.env.OPENCHAMBER_PORT || 3001}`,
         changeOrigin: true,
         ws: true,
-        configure: (proxy) => {
-          const originalEmit = proxy.emit;
-          proxy.emit = function (event, ...args) {
-            if (event === 'error') {
-              const err = args[0];
-              if (err && (err.code === 'ECONNREFUSED' || err.code === 'ECONNRESET' || err.code === 'ECONNABORTED')) {
-                return false;
-              }
-            }
-            return originalEmit.apply(this, [event, ...args]);
-          };
-          proxy.on('proxyReqWs', (proxyReq, req, socket) => {
-            const originalSocketEmit = socket.emit;
-            socket.emit = function (event, ...args) {
-              if (event === 'error') {
-                const err = args[0];
-                if (err && (err.code === 'ECONNREFUSED' || err.code === 'ECONNRESET' || err.code === 'ECONNABORTED')) {
-                  return false;
-                }
-              }
-              return originalSocketEmit.apply(this, [event, ...args]);
-            };
-          });
-          proxy.on('open', (proxySocket) => {
-            const originalSocketEmit = proxySocket.emit;
-            proxySocket.emit = function (event, ...args) {
-              if (event === 'error') {
-                const err = args[0];
-                if (err && (err.code === 'ECONNREFUSED' || err.code === 'ECONNRESET' || err.code === 'ECONNABORTED')) {
-                  return false;
-                }
-              }
-              return originalSocketEmit.apply(this, [event, ...args]);
-            };
-          });
-        },
+        configure: configureProxy,
       },
     },
   },
