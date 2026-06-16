@@ -106,7 +106,7 @@ const prepareCookieEnv = () => {
   }
 };
 
-export const discoverBrowserCookie = async (hostPattern, cookieName = 'auth') => {
+export const discoverBrowserCookie = async (hostPattern, cookieName) => {
   const url = hostToUrl(hostPattern);
   if (!url) return null;
   return discoverCookie(url, cookieName);
