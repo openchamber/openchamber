@@ -1,11 +1,9 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
-import { useUIStore } from '@/stores/useUIStore';
+import { useUIStore, RIGHT_SIDEBAR_MIN_WIDTH, RIGHT_SIDEBAR_MAX_WIDTH } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 
 export const RIGHT_SIDEBAR_CONTENT_WIDTH = 420;
-const RIGHT_SIDEBAR_MIN_WIDTH = 360;
-const RIGHT_SIDEBAR_MAX_WIDTH = 860;
 
 interface RightSidebarProps {
   isOpen: boolean;
