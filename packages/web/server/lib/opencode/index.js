@@ -44,6 +44,8 @@ export {
 export {
   getProviderSources,
   removeProviderConfig,
+  getUserProviderModelContextLimits,
+  updateUserProviderModelContextLimit,
 } from './providers.js';
 
 export {

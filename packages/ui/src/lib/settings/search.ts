@@ -575,6 +575,13 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['models', 'hide', 'show'],
   },
   {
+    id: 'providers.model-context-caps',
+    page: 'providers',
+    titleKey: 'settings.providers.page.models.contextCap.searchTitle',
+    descriptionKey: 'settings.providers.page.models.contextCap.description',
+    keywords: ['context', 'cap', 'limit', 'tokens', 'model limits', 'advertised max'],
+  },
+  {
     id: 'skills.create',
     page: 'skills.installed',
     titleKey: 'settings.skills.page.title.newSkill',

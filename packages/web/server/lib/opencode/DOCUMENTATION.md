@@ -78,6 +78,8 @@ This module provides OpenCode server integration utilities for the web server ru
   - `GET /api/opencode/upgrade-status`
   - `POST /api/opencode/directory`
   - `GET /api/provider/:providerId/source`
+  - `GET /api/provider/:providerId/model-context-limits`
+  - `PATCH /api/provider/:providerId/model-context-limit`
   - `DELETE /api/provider/:providerId/auth`
 - Owns lazy auth library loading for provider auth checks/removal.
 - Keeps route behavior independent from composition root; `index.js` now supplies dependencies only.

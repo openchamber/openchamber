@@ -55,6 +55,9 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       isUnsafeSkillRelativePath,
       buildOpenCodeUrl,
       getOpenCodeAuthHeaders,
+      fetchProvidersSnapshot,
+      modelsDevApiUrl,
+      modelsMetadataCacheTtl,
       getOpenCodePort,
       buildAugmentedPath,
       projectConfigRuntime,
@@ -63,7 +66,12 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       writeSseEvent,
     } = routeDependencies;
 
-    const { getProviderSources, removeProviderConfig } = await import('./index.js');
+    const {
+      getProviderSources,
+      removeProviderConfig,
+      getUserProviderModelContextLimits,
+      updateUserProviderModelContextLimit,
+    } = await import('./index.js');
 
     registerSettingsUtilityRoutes(app, {
       readCustomThemesFromDisk,
@@ -84,9 +92,14 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       resolveProjectDirectory,
       getProviderSources,
       removeProviderConfig,
+      getUserProviderModelContextLimits,
+      updateUserProviderModelContextLimit,
       refreshOpenCodeAfterConfigChange,
       buildOpenCodeUrl,
       getOpenCodeAuthHeaders,
+      fetchProvidersSnapshot,
+      modelsDevApiUrl,
+      modelsMetadataCacheTtl,
     });
 
     registerProjectIconRoutes(app, {
