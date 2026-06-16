@@ -516,6 +516,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       case 'plugin-status':
         return t('settings.page.pluginStatus.title');
       case 'about':
+        return t('settings.page.about.title');
       default:
         return t('settings.view.home.title');
     }
