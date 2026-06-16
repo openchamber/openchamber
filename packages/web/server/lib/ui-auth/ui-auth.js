@@ -301,7 +301,8 @@ const isUrlAuthReadableHttpPath = (pathname) => {
     || pathname.startsWith('/api/fs/serve/')
     || pathname.startsWith('/api/preview/proxy/')
     || /^\/api\/terminal\/[^/]+\/stream$/.test(pathname)
-    || /^\/api\/projects\/[^/]+\/icon$/.test(pathname);
+    || /^\/api\/projects\/[^/]+\/icon$/.test(pathname)
+    || /^\/api\/provider\/[^/]+\/icon$/.test(pathname);
 };
 
 const isUrlAuthWebSocketPath = (pathname) => {

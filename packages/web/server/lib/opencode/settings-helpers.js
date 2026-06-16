@@ -24,8 +24,10 @@ export const createSettingsHelpers = (dependencies) => {
   const VERSION_STRING_MAX_LENGTH = 128;
   const SHORTCUT_OVERRIDE_KEY_MAX_LENGTH = 128;
   const SHORTCUT_OVERRIDE_VALUE_MAX_LENGTH = 128;
+  const PROVIDER_ICON_PROVIDER_ID_MAX_LENGTH = 256;
   const PWA_ORIENTATION_VALUES = new Set(['system', 'portrait', 'landscape']);
   const MOBILE_KEYBOARD_MODE_VALUES = new Set(['native', 'resize-content']);
+  const PROVIDER_ICON_MIME_VALUES = new Set(['image/png', 'image/jpeg', 'image/svg+xml']);
 
   const sanitizeShortcutOverrides = (value) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -38,6 +40,53 @@ export const createSettingsHelpers = (dependencies) => {
       if (!key || !combo) continue;
       result[key.slice(0, SHORTCUT_OVERRIDE_KEY_MAX_LENGTH)] = combo.slice(0, SHORTCUT_OVERRIDE_VALUE_MAX_LENGTH);
     }
+    return result;
+  };
+
+  const sanitizeProviderIconImages = (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null;
+    }
+
+    const result = {};
+    for (const [rawProviderId, rawIconImage] of Object.entries(value)) {
+      const providerId = typeof rawProviderId === 'string' ? rawProviderId.trim() : '';
+      if (!providerId || providerId.length > PROVIDER_ICON_PROVIDER_ID_MAX_LENGTH) {
+        continue;
+      }
+      if (!rawIconImage || typeof rawIconImage !== 'object' || Array.isArray(rawIconImage)) {
+        continue;
+      }
+
+      const candidate = rawIconImage;
+      const mime = typeof candidate.mime === 'string' ? candidate.mime.trim().toLowerCase() : '';
+      const updatedAt = typeof candidate.updatedAt === 'number' && Number.isFinite(candidate.updatedAt)
+        ? Math.max(0, Math.round(candidate.updatedAt))
+        : 0;
+      if (candidate.source === 'custom') {
+        if (!PROVIDER_ICON_MIME_VALUES.has(mime) || updatedAt <= 0) {
+          continue;
+        }
+        result[providerId] = { mime, updatedAt, source: 'custom' };
+        continue;
+      }
+
+      if (candidate.source !== 'builtin') {
+        continue;
+      }
+
+      const builtinProviderId = typeof candidate.builtinProviderId === 'string' ? candidate.builtinProviderId.trim() : '';
+      if (
+        !builtinProviderId ||
+        builtinProviderId.length > PROVIDER_ICON_PROVIDER_ID_MAX_LENGTH ||
+        !/^[a-z0-9][a-z0-9_.-]*$/i.test(builtinProviderId) ||
+        updatedAt <= 0
+      ) {
+        continue;
+      }
+      result[providerId] = { builtinProviderId, updatedAt, source: 'builtin' };
+    }
+
     return result;
   };
 
@@ -120,6 +169,10 @@ export const createSettingsHelpers = (dependencies) => {
       if (typeof normalized === 'string' && normalized.length > 0) {
         result.homeDirectory = normalized;
       }
+    }
+    const providerIconImages = sanitizeProviderIconImages(candidate.providerIconImages);
+    if (providerIconImages) {
+      result.providerIconImages = providerIconImages;
     }
 
     // Absolute path to the opencode CLI binary (optional override).

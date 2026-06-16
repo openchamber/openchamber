@@ -324,6 +324,12 @@ This module provides OpenCode server integration utilities for the web server ru
   - `DELETE /api/projects/:projectId/icon`
   - `POST /api/projects/:projectId/icon/discover`
 
+## Public exports (provider-icon-routes.js)
+- `registerProviderIconRoutes(app, dependencies)`: registers provider icon routes and owns custom provider icon storage plus built-in provider logo selection metadata:
+  - `GET /api/provider/:providerId/icon`
+  - `PUT /api/provider/:providerId/icon`
+  - `DELETE /api/provider/:providerId/icon`
+
 ## Public exports (skill-routes.js)
 - `registerSkillRoutes(app, dependencies)`: registers skills-related routes:
   - Skills config CRUD and metadata under `/api/config/skills*`
