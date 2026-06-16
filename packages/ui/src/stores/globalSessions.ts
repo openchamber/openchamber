@@ -1,5 +1,6 @@
 import type { OpencodeClient, Session } from "@opencode-ai/sdk/v2";
 import { retry } from "@/sync/retry";
+import { stripSessionListDetails } from "@/sync/sanitize";
 
 export type GlobalSessionRecord = Session & {
     project?: {
@@ -121,7 +122,8 @@ export async function listGlobalSessionPages(
             { attempts: 3, delay: 500, retryIf: () => true },
         );
 
-        const payload = unwrapSessionList(response, "experimental.session.list");
+        const payload = unwrapSessionList(response, "experimental.session.list")
+            .map((session) => stripSessionListDetails(session) as GlobalSessionRecord);
         if (payload.length === 0) break;
 
         let appended = 0;

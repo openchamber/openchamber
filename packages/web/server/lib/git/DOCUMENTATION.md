@@ -33,6 +33,7 @@ The following functions are exported and used by the web server:
 - `revertFile(directory, filePath, options)`: Revert a file. Default scope `all` discards staged and working-tree changes; scope `working` discards only unstaged/working-tree changes.
 - `stageFile(directory, filePath)`: Add one file path to the index.
 - `unstageFile(directory, filePath)`: Remove one file path from the index while preserving working-tree content.
+- `applyHunk(directory, filePath, options)`: Apply a single-hunk patch via `git apply`. `options.action` is `stage` (`git apply --cached`), `unstage` (`git apply --cached --reverse`), or `discard` (`git apply --reverse` in the working tree). The patch is written to a temp file; a `--check` runs first so a stale hunk fails with a clear "refresh and try again" error instead of a partial mutation. The patch target path must match the requested file.
 
 ### Branch Operations
 - `getBranches(directory)`: Get list of local and remote branches (filtered to active remote branches).

@@ -22,6 +22,8 @@ const parsePushUnsubscribeBody = (body) => {
   return { endpoint: endpoint.trim() };
 };
 
+export const NOTIFICATION_SSE_HEARTBEAT_INTERVAL_MS = 20_000;
+
 export const registerNotificationRoutes = (app, dependencies) => {
   const {
     uiAuthController,
@@ -180,17 +182,50 @@ export const registerNotificationRoutes = (app, dependencies) => {
     const clients = getUiNotificationClients();
     clients.add(res);
 
+    let closed = false;
+    let heartbeatTimer = null;
+
+    const cleanup = () => {
+      if (closed) {
+        return;
+      }
+      closed = true;
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
+      clients.delete(res);
+    };
+
+    req.on('close', cleanup);
+    res.on('error', cleanup);
+
+    const flushSse = () => {
+      res.flush?.();
+    };
+
+    heartbeatTimer = setInterval(() => {
+      if (closed || res.writableEnded || res.destroyed) {
+        cleanup();
+        return;
+      }
+      try {
+        res.write(':heartbeat\n\n');
+        flushSse();
+      } catch {
+        cleanup();
+      }
+    }, NOTIFICATION_SSE_HEARTBEAT_INTERVAL_MS);
+
     try {
       writeSseEvent(res, {
         type: 'openchamber:notification-stream-ready',
         properties: { uiToken },
       });
+      flushSse();
     } catch {
+      cleanup();
     }
-
-    req.on('close', () => {
-      clients.delete(res);
-    });
   });
 
   app.get('/api/session-activity', (_req, res) => {

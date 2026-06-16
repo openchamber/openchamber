@@ -4,10 +4,70 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-06-15
+
+- Security: LAN and remote browser access now require a UI password before the server will start.
+- Desktop: if LAN access was enabled without a password, the app now starts locally and asks for a password before turning LAN access back on.
+- Chat: file paths inside fenced code blocks are now clickable, including line and column targets (thanks to @robertoberto).
+- Chat: context breakdowns now show message previews and cache hit rates (thanks to @robertoberto, @raz123).
+- Chat/Performance: long conversations now use virtualized rendering to keep large histories responsive.
+- Chat: custom-answer question textareas resize more steadily while typing (thanks to @bigcoder84).
+- Chat/Input: tab-completing a mention no longer changes the selected agent (thanks to @Quat3rnion).
+- Chat/Input: Arrow Up moves the cursor inside multi-line drafts again instead of always opening prompt history.
+- Chat/Mobile: collapsed tool cards now keep their tool icon visible, and reasoning/tool text no longer clips descenders.
+- Files: added dedicated PDF files previews mode.
+- Files: added an optional docked files editor toolbar (thanks to @robertoberto).
+- Files: file operations now use the active workspace directory more consistently (thanks to @tomzx).
+- Sessions: session menus now include a delete action (thanks to @ShogunPanda).
+- Sessions: deleting a parent session no longer brings deleted child sessions back into the sidebar (thanks to @panzeyu2013).
+- Sessions: switching sessions no longer leaves the chat area blank in some cases (thanks to @panzeyu2013).
+- Sessions: selected rows now highlight across the full sidebar gutter.
+- Comments: inline file/diff comment drafts now stay in place when focus changes.
+- Git/Diff: redesigned the Changes diff view with faster multi-file rendering, expandable hunk separators, a full-file loading toggle, compact responsive controls, and a unified changed/staged context panel workflow.
+- Git/Diff: individual diff hunks can now be staged, unstaged, or discarded directly from the Changes view via `git apply`.
+- Git/Diff: added a review flow for starting a review from current changes.
+- GitHub: GitHub settings can now use credentials from the `gh` CLI when available (thanks to @tomzx).
+- Settings/MCP: importing MCP snippets from OpenCode config works again (thanks to @youzini).
+- Notifications: notification streams now stay connected more reliably behind proxies (thanks to @kostazol).
+- Mobile: the empty Changes view keeps a close control visible (thanks to @lilyzhaun).
+- Security: file previews and downloads now reject paths outside the allowed workspace unless access has been granted.
+- Sessions: fixed a bug where a running session would briefly flicker as idle (in the sidebar, the send/stop button, and the status row) when the app is protected by a password.
+- Desktop: you can now open developer tools from the Help menu.
+- Sessions: new draft sessions now start from the default model and agent instead of inheriting the previous session's selection, and fall back to OpenCode's own `default_agent` (and its model) when no OpenChamber default is set.
+- Startup: cached settings and session state now appear earlier while the live API finishes connecting.
+- Startup: the model and agent now appear faster on the initial draft — config loads under the project key up front (no reload when the draft opens) and the agent list is fetched once instead of per consumer.
+- VSCode: the extension opens faster with cached sessions, models, providers, and projects, then refreshes in the background.
+- VSCode: sessions are now grouped under their workspace, with cleaner session rows and an archived-sessions toggle.
+
+## [1.12.4] - 2026-06-11
+
 - Chat: added `/handoff-review` to open a linked review session for the current workspace changes, with actions to send review feedback and implementation replies between the sessions.
+- Chat/UI: added a setting to collapse long user messages.
+- Chat: `@agent` mentions in rendered messages now use the primary accent color.
+- Chat: table copy actions now include a Markdown format option (thanks to @kjhq).
+- Chat: Mermaid diagrams can now be opened in a dedicated diagram editor (thanks to @nerdosaurus).
+- Models: hidden models now stay hidden in multi-model selection controls (thanks to @kjhq).
 - Worktrees: creating a single new worktree session now opens the session immediately while worktree setup continues in the background.
 - Multi-Run: creating isolated runs now opens sessions immediately while worktree setup continues in the background.
 - Sessions: chat folder assignments now stay in place after reloads.
+- Sessions: session, folder, project, and worktree rows now have right-click menus for their available actions.
+- Settings: added search across settings pages.
+- Settings/Agents: agent prompt and permission edits now stay saved after changes.
+- Files: added an editor Vim mode setting (thanks to @Champii).
+- Files: writes are now safer when saving through temporary files (thanks to @nerdosaurus).
+- Git: changed-file folders now have a revert action (thanks to @kostazol).
+- GitHub: issue and pull-request pickers now use server-side search for larger repositories (thanks to @tomzx).
+- Preview: inline module scripts are now rewritten in proxied HTML responses, fixing more Vite preview pages (thanks to @mdbetancourt).
+- Voice: Plan and file preview markdown now include text-to-speech buttons, with a setting for reading selected text or the full document (thanks to @yangyaofei).
+- Desktop/macOS: added a menu bar tray with live session status, Mini Chat access, and a provider usage submenu.
+- Desktop/macOS: added an optional vibrancy effect for the left sidebar.
+- Desktop/macOS: startup no longer opens unnecessary folder prompts.
+- Mobile: refreshed session controls, worktree deletion flow, MCP controls, update flow, and usage tracking for new layout.
+- Terminal/Mobile: touch scrolling in the terminal no longer conflicts with terminal input as often (thanks to @kostazol).
+- Usage: added Cursor quota tracking.
+- UI/Localization: added French interface translations and French documentation (thanks to @pascalandr).
+- VSCode: added an action to archive all sessions from the extension (thanks to @jjdubski).
+- VSCode: added multi-root workspace support, including workspace folder switching in the extension (thanks to @mmospanenko).
 
 ## [1.12.3] - 2026-06-05
 

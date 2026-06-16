@@ -1,12 +1,12 @@
 import React from 'react';
-import { useVirtualizer } from '@tanstack/react-virtual';
+import { Virtualizer } from 'virtua';
 import type { Session } from '@opencode-ai/sdk/v2';
 
 // Archived buckets routinely grow into the hundreds/thousands; virtualize
 // when we cross this row count so the DOM stays bounded.
 const ARCHIVED_VIRTUALIZE_THRESHOLD = 50;
 // Compact rows in the archived bucket without nested subagents render
-// around 24-32px; tanstack-virtual will measure precisely via the row ref.
+// around 24-32px; virtua measures mounted rows and uses this as the initial hint.
 const ARCHIVED_ROW_ESTIMATE_PX = 28;
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
@@ -22,6 +22,7 @@ import type { SessionFolder } from '@/stores/useSessionFoldersStore';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { openExternalUrl } from '@/lib/url';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 
 type DeleteFolderConfirm = {
@@ -157,7 +158,8 @@ export function SessionGroupSection(props: Props): React.ReactNode {
   const searchData = hasSessionSearchQuery ? groupSearchDataByGroup.get(group) : null;
   const displayMode = useSessionDisplayStore((state) => state.displayMode);
   const foldersMap = useSessionFoldersStore((state) => state.foldersMap);
-  const isMinimalMode = displayMode === 'minimal';
+  // VS Code always uses the expanded layout (see SessionNodeItem).
+  const isMinimalMode = displayMode === 'minimal' && !isVSCodeRuntime();
   const isCollapsed = hasSessionSearchQuery ? false : collapsedGroups.has(groupKey);
   const maxVisible = hideDirectoryControls ? 10 : 5;
   const nonArchivedVisibleCount = Math.max(maxVisible, visibleSessionCount ?? maxVisible);
@@ -272,9 +274,10 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     && visibleSessions.length >= ARCHIVED_VIRTUALIZE_THRESHOLD;
 
   const archivedVirtualContainerRef = React.useRef<HTMLDivElement | null>(null);
+  const archivedScrollRef = React.useRef<HTMLElement | null>(null);
   const [archivedScrollEl, setArchivedScrollEl] = React.useState<HTMLElement | null>(null);
   // Offset of the virtual container from the scroll element's content origin.
-  // tanstack-virtual reads scrollMargin from useVirtualizer options and uses it
+  // virtua reads startMargin from Virtualizer options and uses it
   // to translate scrollTop into container-relative coordinates. Without this,
   // when the scroll element is an ancestor (the sidebar's ScrollableOverlay),
   // the virtualizer assumes the container starts at the top of the scroll
@@ -285,15 +288,6 @@ export function SessionGroupSection(props: Props): React.ReactNode {
   // routes its scroll through `ScrollableOverlay` higher up the tree;
   // threading a ref through every intermediate component would be invasive
   // for this single use case.
-  const archivedVirtualizer = useVirtualizer({
-    count: visibleSessions.length,
-    getScrollElement: () => archivedScrollEl,
-    estimateSize: () => ARCHIVED_ROW_ESTIMATE_PX,
-    overscan: 8,
-    enabled: shouldVirtualizeArchived && archivedScrollEl !== null,
-    scrollMargin: archivedScrollMargin,
-  });
-
   // Resolve the scrolling ancestor and measure the virtual container's offset
   // from its content origin, both on every render. The container ref is null
   // while the archived bucket is collapsed (the body isn't mounted), so a
@@ -307,6 +301,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
   React.useLayoutEffect(() => {
     if (!shouldVirtualizeArchived) {
       if (archivedScrollEl !== null) setArchivedScrollEl(null);
+      archivedScrollRef.current = null;
       if (archivedScrollMargin !== 0) setArchivedScrollMargin(0);
       return;
     }
@@ -330,6 +325,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
         el = el.parentElement;
       }
       if (scrollEl !== archivedScrollEl) {
+        archivedScrollRef.current = scrollEl;
         setArchivedScrollEl(scrollEl);
         // setState triggers a re-render; bail out and let the next pass
         // measure the margin against the fresh element.
@@ -342,29 +338,6 @@ export function SessionGroupSection(props: Props): React.ReactNode {
       + scrollEl.scrollTop;
     setArchivedScrollMargin((prev) => (Math.abs(prev - offset) < 1 ? prev : offset));
   });
-
-  // Re-measure when the sidebar's scroll container resizes (e.g. window
-  // resize, sidebar width change). Mirrors the pattern in ChangesSection.
-  React.useEffect(() => {
-    if (!shouldVirtualizeArchived || !archivedScrollEl) return;
-    const observer = new ResizeObserver(() => {
-      archivedVirtualizer.measure();
-    });
-    observer.observe(archivedScrollEl);
-    return () => observer.disconnect();
-  }, [shouldVirtualizeArchived, archivedScrollEl, archivedVirtualizer]);
-
-  const archivedTotalSize = archivedVirtualizer.getTotalSize();
-  // Read virtual rows directly in render rather than via useMemo. The
-  // virtualizer instance is a stable reference across renders, and on a
-  // pure scroll event neither it nor `archivedTotalSize` change — only the
-  // virtualizer's internal scroll offset does. Memoizing here would return
-  // stale rows after every scroll. tanstack-virtual v3 expects callers to
-  // read getVirtualItems() inline; it's cheap and returns [] when the
-  // virtualizer is disabled.
-  const archivedVirtualRows = shouldVirtualizeArchived && archivedScrollEl !== null
-    ? archivedVirtualizer.getVirtualItems()
-    : [];
 
   if (hasSessionSearchQuery && !groupMatchesSearch && rootFolders.length === 0 && ungroupedSessions.length === 0) {
     return null;
@@ -574,41 +547,16 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     >
       {renderFolderItems()}
       {shouldVirtualizeArchived ? (
-        <div
-          ref={archivedVirtualContainerRef}
-          style={{
-            position: 'relative',
-            // Reserve scroll height for all archived rows so the parent
-            // scroll thumb reflects the full list. Individual rows are
-            // absolutely positioned by translateY.
-            height: archivedTotalSize > 0 ? archivedTotalSize : undefined,
-            width: '100%',
-          }}
-        >
-          {archivedVirtualRows.map((virtualRow) => {
-            const node = visibleSessions[virtualRow.index];
-            if (!node) return null;
-            return (
-              <div
-                key={virtualRow.key}
-                data-index={virtualRow.index}
-                ref={archivedVirtualizer.measureElement}
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  width: '100%',
-                  // virtualRow.start is in scroll-element coordinates (offset by
-                  // scrollMargin). Subtract scrollMargin to position within the
-                  // container, which itself starts at scrollMargin in the scroll
-                  // element.
-                  transform: `translateY(${virtualRow.start - archivedScrollMargin}px)`,
-                }}
-              >
-                {renderSessionNode(node, 0, group.directory, projectId, true)}
-              </div>
-            );
-          })}
+        <div ref={archivedVirtualContainerRef}>
+          <Virtualizer
+            data={visibleSessions}
+            itemSize={ARCHIVED_ROW_ESTIMATE_PX}
+            bufferSize={ARCHIVED_ROW_ESTIMATE_PX * 8}
+            scrollRef={archivedScrollRef}
+            startMargin={archivedScrollMargin}
+          >
+            {(node) => renderSessionNode(node, 0, group.directory, projectId, true) as React.ReactElement}
+          </Virtualizer>
         </div>
       ) : (
         visibleSessions.map((node) => renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true))

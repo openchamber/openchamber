@@ -42,7 +42,7 @@ const buildAuthUrl = (apiBaseUrl: string | null | undefined, path: string): stri
   }
 };
 
-const clearRuntimeUrlAuthToken = (): void => {
+export const clearRuntimeUrlAuthToken = (): void => {
   runtimeUrlAuthToken = '';
   runtimeUrlAuthTokenExpiresAt = 0;
 };

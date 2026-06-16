@@ -96,7 +96,7 @@ Download from [Releases](https://github.com/btriapitsyn/openchamber/releases).
 Install from [Marketplace](https://marketplace.visualstudio.com/items?itemName=fedaykindev.openchamber) or search "OpenChamber" in Extensions.
 
 ### **CLI (Web + PWA)**
-_requires Node.js 20+_
+_requires Node.js 22+_
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/btriapitsyn/openchamber/main/scripts/install.sh | bash

@@ -15,6 +15,7 @@
 import type { Event, OpencodeClient, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import { opencodeClient } from "@/lib/opencode/client"
 import { getRuntimeUrlResolver } from "@/lib/runtime-url"
+import { clearRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from "@/lib/runtime-auth"
 import { syncDebug } from "./debug"
 
 export type QueuedEvent = {
@@ -529,6 +530,28 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
   }
 
   const runWsAttempt = async (signal: AbortSignal) => {
+    // A WebSocket upgrade can't carry an Authorization header, so it
+    // authenticates purely via the oc_url_token query param. The sync token
+    // getter returns "" while the token is unminted or inside its expiry skew
+    // window, which would open the socket WITHOUT credentials — the server then
+    // rejects it ("HTTP Authentication failed; no valid credentials available")
+    // and the resulting reconnect storm churns the sync store (transient
+    // status-missing → idle flicker). Mint/await a valid token BEFORE
+    // connecting. (SSE avoids this: the SDK fetch sends the bearer header.)
+    try {
+      await refreshRuntimeUrlAuthToken()
+    } catch (error) {
+      const wrapped = error instanceof Error ? error : new Error("Message stream WebSocket auth token unavailable")
+      if (transport === "auto") {
+        wsFallbackUntil = Date.now() + WS_FALLBACK_WINDOW_MS
+        ;(wrapped as Error & { code?: string }).code = "WS_FALLBACK"
+      }
+      ;(wrapped as Error & { reason?: string }).reason = "ws_auth_token_unavailable"
+      throw wrapped
+    }
+    if (signal.aborted) {
+      throw new DOMException("Aborted", "AbortError")
+    }
     await new Promise<void>((resolve, reject) => {
       let settled = false
       let opened = false
@@ -676,6 +699,14 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
         ;(error as Error & { reason?: string }).reason = opened
           ? `ws_closed:code=${event?.code ?? "?"}`
           : "ws_closed_before_ready"
+
+        // Closed before the socket ever opened → the server rejected the
+        // upgrade, typically an auth failure on the oc_url_token. Drop the
+        // cached token so the next attempt mints a fresh one instead of
+        // replaying a token the server won't accept (which would loop).
+        if (!opened) {
+          clearRuntimeUrlAuthToken()
+        }
 
         // If the WS stream connects (ready) but then drops quickly, prefer SSE for a while.
         // This avoids tight reconnect loops with repeated console spam.

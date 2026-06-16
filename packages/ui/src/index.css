@@ -40,6 +40,12 @@ button,
   animation: none !important;
 }
 
+[data-settings-search-highlight="true"] {
+  border-radius: 0.25rem;
+  background: color-mix(in srgb, var(--primary-base) 7%, transparent);
+  transition: background-color 180ms ease;
+}
+
 /* ── macOS vibrancy ───────────────────────────────────────────────────────
    The window is created transparent with a native 'sidebar' NSVisualEffectView
    behind it. We keep the whole app opaque (bg-background covers the window)
@@ -851,6 +857,20 @@ html:not(.dark) .chat-scroll {
   }
 }
 
+/* Diff toolbar: drop low-priority labels only when the context panel is genuinely tight. */
+@container diff-toolbar (max-width: 28rem) {
+  .diff-toolbar__scope-count,
+  .diff-toolbar__review-label,
+  .diff-toolbar__expand-label {
+    display: none;
+  }
+
+  .diff-toolbar__review-button,
+  .diff-toolbar__expand-button {
+    padding-inline: 0.5rem;
+  }
+}
+
 /* Status row: collapse optional text when narrow to keep both sides in one line. */
 @container status-row (max-width: 30rem) {
   .status-row__active-todo {
@@ -1061,6 +1081,17 @@ html:not(.dark) .chat-scroll {
 
 .markdown-content [data-openchamber-file-link="true"]:hover {
   color: var(--markdown-link-hover, var(--primary));
+}
+
+/* Agent/skill mentions use the primary accent, not the markdown link color */
+.markdown-content a[data-openchamber-agent-mention="true"],
+.markdown-content a[data-skill-name] {
+  color: var(--primary);
+}
+
+.markdown-content a[data-openchamber-agent-mention="true"]:hover,
+.markdown-content a[data-skill-name]:hover {
+  color: var(--primary);
 }
 
 /* Markdown blockquote - use theme colors */

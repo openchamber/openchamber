@@ -59,7 +59,6 @@ export type DesktopSettings = {
   desktopUiPassword?: string;
   projects?: ProjectEntry[];
   activeProjectId?: string;
-  approvedDirectories?: string[];
   securityScopedBookmarks?: string[];
   pinnedDirectories?: string[];
   showReasoningTraces?: boolean;
@@ -144,7 +143,9 @@ export type DesktopSettings = {
   activityRenderMode?: 'collapsed' | 'summary';
   mermaidRenderingMode?: 'svg' | 'ascii';
   userMessageRenderingMode?: 'markdown' | 'plain';
+  collapsibleUserMessages?: boolean;
   stickyUserHeader?: boolean;
+  expandedEditorToolbar?: boolean;
   wideChatLayoutEnabled?: boolean;
   showSplitAssistantMessageActions?: boolean;
   fontSize?: number;
@@ -159,7 +160,6 @@ export type DesktopSettings = {
   favoriteModels?: Array<{ providerID: string; modelID: string }>;
   recentModels?: Array<{ providerID: string; modelID: string }>;
   diffLayoutPreference?: 'dynamic' | 'inline' | 'side-by-side';
-  diffViewMode?: 'single' | 'stacked';
   gitChangesViewMode?: 'flat' | 'tree';
   directoryShowHidden?: boolean;
   filesViewShowGitignored?: boolean;
@@ -192,6 +192,7 @@ export type DesktopSettings = {
 type DesktopBridgeGlobal = {
   invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
   openDialog?: (options: Record<string, unknown>) => Promise<unknown>;
+  grantFileAccess?: (path: string) => Promise<unknown>;
   openExternal?: (url: string) => Promise<unknown>;
   listen?: (
     event: string,
@@ -433,22 +434,43 @@ export const requestDirectoryAccess = async (
   return { success: true, path: directoryPath };
 };
 
+const isDesktopFileGrantResult = (
+  value: unknown
+): value is { path?: unknown; outsideFileGrant?: unknown } => (
+  value !== null && typeof value === 'object' && !Array.isArray(value)
+);
+
 export const requestFileAccess = async (
   options?: { filters?: Array<{ name: string; extensions: string[] }>; defaultPath?: string }
-): Promise<{ success: boolean; path?: string; error?: string }> => {
+): Promise<{ success: boolean; path?: string; outsideFileGrant?: string; error?: string }> => {
   if (hasDesktopInvoke() && isDesktopLocalOriginActive()) {
     try {
       const selected = await getDesktopBridge()?.openDialog?.({
         directory: false,
         multiple: false,
         title: 'Select File',
+        returnGrant: true,
         ...(options?.filters ? { filters: options.filters } : {}),
         ...(options?.defaultPath ? { defaultPath: options.defaultPath } : {}),
       });
-      if (!selected || typeof selected !== 'string') {
+      if (!selected) {
         return { success: false, error: 'File selection cancelled' };
       }
-      return { success: true, path: selected };
+      if (typeof selected === 'string') {
+        return { success: true, path: selected };
+      }
+      if (!isDesktopFileGrantResult(selected)) {
+        return { success: false, error: 'File selection cancelled' };
+      }
+      const path = typeof selected.path === 'string' ? selected.path : '';
+      if (!path) {
+        return { success: false, error: 'File selection cancelled' };
+      }
+      return {
+        success: true,
+        path,
+        outsideFileGrant: typeof selected.outsideFileGrant === 'string' ? selected.outsideFileGrant : undefined,
+      };
     } catch (error) {
       console.warn('Failed to request file access', error);
       return { success: false, error: error instanceof Error ? error.message : String(error) };
@@ -456,6 +478,34 @@ export const requestFileAccess = async (
   }
 
   return { success: false, error: 'Native file picker not available' };
+};
+
+export const requestExistingFileAccess = async (
+  path: string
+): Promise<{ success: boolean; path?: string; outsideFileGrant?: string; error?: string }> => {
+  const targetPath = typeof path === 'string' ? path.trim() : '';
+  if (!targetPath) {
+    return { success: false, error: 'Path is required' };
+  }
+  if (!hasDesktopInvoke() || !isDesktopLocalOriginActive()) {
+    return { success: false, error: 'Native file access not available' };
+  }
+
+  try {
+    const selected = await getDesktopBridge()?.grantFileAccess?.(targetPath);
+    if (!isDesktopFileGrantResult(selected)) {
+      return { success: false, error: 'File access was not granted' };
+    }
+    const grantedPath = typeof selected.path === 'string' ? selected.path : '';
+    const outsideFileGrant = typeof selected.outsideFileGrant === 'string' ? selected.outsideFileGrant : '';
+    if (!grantedPath || !outsideFileGrant) {
+      return { success: false, error: 'File access was not granted' };
+    }
+    return { success: true, path: grantedPath, outsideFileGrant };
+  } catch (error) {
+    console.warn('Failed to request existing file access', error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
 };
 
 export const startAccessingDirectory = async (

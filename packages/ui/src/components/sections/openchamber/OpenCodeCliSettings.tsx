@@ -109,7 +109,7 @@ export const OpenCodeCliSettings: React.FC = () => {
       </div>
 
       <section className="px-2 pb-2 pt-0 space-y-0.5">
-        <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-3">
+        <div data-settings-item="sessions.opencode-binary" className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-3">
           <div className="flex min-w-0 flex-col shrink-0">
             <span className="typography-ui-label text-foreground">{t('settings.openchamber.opencodeCli.field.binaryPath')}</span>
           </div>
@@ -149,7 +149,7 @@ export const OpenCodeCliSettings: React.FC = () => {
           </div>
         </div>
 
-        <label className="flex cursor-pointer items-center gap-2 py-1.5">
+        <label data-settings-item="sessions.opencode-update-notifications" className="flex cursor-pointer items-center gap-2 py-1.5">
           <Checkbox
             checked={showOpenCodeUpdateNotifications}
             onChange={handleShowUpdateNotificationsChange}

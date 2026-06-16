@@ -622,12 +622,13 @@ const CronScheduleSection: React.FC<{
 
   const formatNextRun = React.useCallback(
     (date: Date) => new Intl.DateTimeFormat(locale, {
+      timeZone: draft.schedule.timezone,
       month: 'short',
       day: 'numeric',
       hour: 'numeric',
       minute: '2-digit',
     }).format(date),
-    [locale],
+    [locale, draft.schedule.timezone],
   );
 
   return (
@@ -1127,7 +1128,6 @@ export function ScheduledTaskEditorDialog(props: {
       return;
     }
 
-    const normalizedTimes = dedupeSortTimes(draft.schedule.times);
     const payload: Partial<ScheduledTask> = {
       ...(draft.id ? { id: draft.id } : {}),
       name: draft.name.trim(),
@@ -1141,9 +1141,9 @@ export function ScheduledTaskEditorDialog(props: {
             ? {
                 date: draft.schedule.onceDate,
                 time: draft.schedule.onceTime,
-              }
+            }
             : {
-                times: normalizedTimes,
+                times: dedupeSortTimes(draft.schedule.times),
                 ...(draft.schedule.kind === 'weekly' ? { weekdays: draft.schedule.weekdays } : {}),
               }),
       },

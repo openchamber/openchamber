@@ -693,6 +693,11 @@ export function isImageFile(filePath: string): boolean {
   return IMAGE_EXTENSIONS.includes(ext || '');
 }
 
+export function isPdfFile(filePath: string): boolean {
+  const ext = filePath.split('.').pop()?.toLowerCase();
+  return ext === 'pdf';
+}
+
 export function getImageMimeType(filePath: string): string {
   const ext = filePath.split('.').pop()?.toLowerCase();
   const mimeMap: Record<string, string> = {

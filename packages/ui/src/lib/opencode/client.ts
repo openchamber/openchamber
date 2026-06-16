@@ -16,6 +16,7 @@ import type { PermissionRequest } from "@/types/permission";
 import type { QuestionRequest } from "@/types/question";
 import { getRuntimeUrlResolver } from "@/lib/runtime-url";
 import { runtimeFetch } from "@/lib/runtime-fetch";
+import { getRuntimeKey } from "@/lib/runtime-switch";
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry";
 import { markStartupTrace } from "@/lib/startupTrace";
 import {
@@ -228,6 +229,7 @@ class OpencodeService {
   private currentDirectory: string | undefined = undefined;
   private directoryContextQueue: Promise<void> = Promise.resolve();
   private listDirectoryInFlight: Map<string, Promise<FilesystemEntry[]>> = new Map();
+  private listAgentsInFlight: Map<string, Promise<Agent[]>> = new Map();
   private listDirectoryCache: Map<string, { entries: FilesystemEntry[]; expiresAt: number }> = new Map();
 
   constructor(baseUrl: string = DEFAULT_BASE_URL) {
@@ -1293,14 +1295,34 @@ class OpencodeService {
    * useAgentsStore) can observe failure and retry; silently returning an
    * empty list would defeat retries and clear the cached agent list.
    */
-  async listAgents(): Promise<Agent[]> {
-    const response = await this.client.app.agents(
-      this.currentDirectory ? { directory: this.currentDirectory } : undefined
-    );
-    if (response.error) {
-      throw new Error(`app.agents failed: ${formatSdkError(response.error)}`);
+  async listAgents(directory?: string | null): Promise<Agent[]> {
+    // Pass the directory explicitly so we don't depend on (and serialize behind)
+    // withDirectory's shared context queue. Concurrent callers for the same
+    // directory (e.g. config store + agents store at startup) share one request.
+    const effectiveDirectory = this.normalizeCandidatePath(directory) ?? directory ?? this.currentDirectory ?? undefined;
+    const key = effectiveDirectory ?? '';
+
+    const existing = this.listAgentsInFlight.get(key);
+    if (existing) {
+      return existing;
     }
-    return response.data || [];
+
+    const request = (async () => {
+      const response = await this.client.app.agents(
+        effectiveDirectory ? { directory: effectiveDirectory } : undefined
+      );
+      if (response.error) {
+        throw new Error(`app.agents failed: ${formatSdkError(response.error)}`);
+      }
+      return response.data || [];
+    })();
+
+    this.listAgentsInFlight.set(key, request);
+    try {
+      return await request;
+    } finally {
+      this.listAgentsInFlight.delete(key);
+    }
   }
 
   // SSE infrastructure removed — EventPipeline in sync/event-pipeline.ts handles
@@ -1627,11 +1649,16 @@ class OpencodeService {
   }
 
   async getFilesystemHome(): Promise<string | null> {
-    // Optimization: Check for desktop runtime first to avoid unnecessary network calls
-    // and fix the "SyntaxError" warning when the endpoint is missing
-    const desktopHome = await getDesktopHomeDirectory();
-    if (desktopHome) {
-      return desktopHome;
+    // The injected desktop home describes the LOCAL machine. It is only a
+    // valid answer while the active runtime is the local one — after an
+    // in-place switch to a remote host the home must come from that host's
+    // /api/fs/home, not from the local Electron global.
+    const runtimeKey = getRuntimeKey();
+    if (!runtimeKey || runtimeKey === 'local') {
+      const desktopHome = await getDesktopHomeDirectory();
+      if (desktopHome) {
+        return desktopHome;
+      }
     }
 
     try {

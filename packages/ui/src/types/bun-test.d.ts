@@ -24,6 +24,7 @@ declare module "bun:test" {
     };
   };
   export function beforeEach(fn: () => void | Promise<void>): void;
+  export function afterAll(fn: () => void | Promise<void>): void;
   export function mock<T extends (...args: never[]) => unknown>(fn?: T): T;
   export namespace mock {
     function module(moduleName: string, factory: () => Record<string, unknown>): void;

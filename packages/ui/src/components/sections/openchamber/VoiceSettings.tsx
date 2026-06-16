@@ -499,7 +499,7 @@ export const VoiceSettings: React.FC = () => {
         <div className="space-y-8">
 
             {/* Voice Setup */}
-            <div className="mb-8">
+            <div data-settings-item="voice.voice-setup" className="mb-8">
                 <div className="mb-1 px-1">
                     <h3 className="typography-ui-header font-medium text-foreground">
                         {t('settings.voice.page.section.voiceSetup')}
@@ -827,7 +827,7 @@ export const VoiceSettings: React.FC = () => {
 
             {/* Speech Recognition */}
             {voiceModeEnabled && (
-                <div className="mb-8">
+                <div data-settings-item="voice.speech-recognition" className="mb-8">
                     <div className="mb-1 px-1">
                         <h3 className="typography-ui-header font-medium text-foreground">
                             {t('settings.voice.page.section.speechRecognition')}
@@ -1035,7 +1035,7 @@ export const VoiceSettings: React.FC = () => {
             )}
 
             {/* Playback & Summarization */}
-            <div className="mb-8">
+            <div data-settings-item="voice.playback" className="mb-8">
                 <div className="mb-1 px-1">
                     <h3 className="typography-ui-header font-medium text-foreground">
                         {t('settings.voice.page.section.playbackAndSummary')}

@@ -150,7 +150,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
   }, [clearShortcutOverride, persistShortcutOverrides, shortcutOverrides]);
 
   return (
-    <div className="mb-8">
+    <div data-settings-item="shortcuts.keyboard-shortcuts" className="mb-8">
       <div className="mb-1 px-1">
         <div className="flex items-center gap-2">
           <h3 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.keyboardShortcuts.title')}</h3>

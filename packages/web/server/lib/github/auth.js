@@ -12,6 +12,7 @@ const SETTINGS_FILE = path.join(OPENCHAMBER_DATA_DIR, 'settings.json');
 
 const DEFAULT_GITHUB_CLIENT_ID = 'Ov23lizomPOC3eFYo56r';
 const DEFAULT_GITHUB_SCOPES = 'repo read:org workflow read:user user:email';
+export const GH_CLI_ACCOUNT_ID = 'gh-cli';
 
 function ensureStorageDir() {
   if (!fs.existsSync(STORAGE_DIR)) {
@@ -159,6 +160,34 @@ function writeAuthList(list) {
   writeJsonFile(list);
 }
 
+function readSettingsFile() {
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) {
+      return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) || {};
+    }
+  } catch {
+    // ignore
+  }
+  return {};
+}
+
+function writeSettingsFile(settings) {
+  ensureStorageDir();
+  const tmpFile = `${SETTINGS_FILE}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(tmpFile, JSON.stringify(settings, null, 2), 'utf8');
+  try {
+    fs.chmodSync(tmpFile, 0o600);
+  } catch {
+    // best-effort
+  }
+  fs.renameSync(tmpFile, SETTINGS_FILE);
+  try {
+    fs.chmodSync(SETTINGS_FILE, 0o600);
+  } catch {
+    // best-effort
+  }
+}
+
 export function getGitHubAuth() {
   const list = readAuthList();
   if (!list.length) {
@@ -237,6 +266,7 @@ export function activateGitHubAuth(accountId) {
   if (index === -1) {
     return false;
   }
+  setGhCliActive(false);
   list.forEach((entry, idx) => {
     entry.current = idx === index;
   });
@@ -305,3 +335,27 @@ export function getGitHubScopes() {
 }
 
 export const GITHUB_AUTH_FILE = STORAGE_FILE;
+
+export function isGhCliDisabled() {
+  return Boolean(readSettingsFile()?.ghCliDisabled);
+}
+
+export function setGhCliDisabled(disabled) {
+  const settings = readSettingsFile();
+  settings.ghCliDisabled = Boolean(disabled);
+  if (settings.ghCliDisabled) {
+    settings.ghCliActive = false;
+  }
+  writeSettingsFile(settings);
+}
+
+export function isGhCliActive() {
+  const settings = readSettingsFile();
+  return !settings?.ghCliDisabled && Boolean(settings?.ghCliActive);
+}
+
+export function setGhCliActive(active) {
+  const settings = readSettingsFile();
+  settings.ghCliActive = Boolean(active) && !settings.ghCliDisabled;
+  writeSettingsFile(settings);
+}

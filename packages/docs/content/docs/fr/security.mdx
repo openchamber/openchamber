@@ -1,0 +1,37 @@
+---
+title: Sécurité
+description: Protégez l’UI avec un mot de passe et des passkeys avant de l’exposer.
+---
+
+# Sécurité
+
+OpenChamber donne accès à votre machine et à votre code ; verrouillez-le donc avant que quelqu’un d’autre que vous puisse l’atteindre. Cette page couvre le mot de passe UI, les passkeys et ce qu’il faut savoir avant d’exposer OpenChamber sur un réseau.
+
+## Définir un mot de passe UI
+
+Démarrez OpenChamber avec un mot de passe et l’UI navigateur le demandera :
+
+```bash
+openchamber --ui-password be-creative-here
+```
+
+Vous pouvez aussi le définir avec la variable d’environnement `OPENCHAMBER_UI_PASSWORD` au lieu de le mettre en ligne de commande. Après connexion, OpenChamber mémorise l’appareil pendant un moment pour ne pas vous le redemander à chaque fois.
+
+Définissez toujours un mot de passe si l’instance est joignable par quelqu’un d’autre — surtout via un [tunnel](/tunnels/) ou internet public.
+
+## Passkeys
+
+Une fois un mot de passe défini, vous pouvez ajouter des passkeys (Face ID, Touch ID, clé de sécurité) pour vous connecter plus vite. Ajoutez-les dans **Paramètres → OpenChamber → Passkeys**.
+
+Les passkeys sont liées au mot de passe actuel. Si vous changez ou supprimez le mot de passe, les passkeys enregistrées sont effacées et vous devrez les ajouter à nouveau.
+
+## Avant de l’exposer
+
+- Par défaut, OpenChamber n’écoute que sur votre propre machine (`127.0.0.1`). Écouter plus largement demande un changement volontaire, et vous devriez définir un mot de passe d’abord.
+- Préférez un [tunnel](/tunnels/) ou un réseau privé (comme un VPN) plutôt que d’ouvrir un port sur internet.
+- Si vous placez OpenChamber derrière votre propre serveur HTTPS, consultez [Reverse proxy](/reverse-proxy/).
+
+## Pages liées
+
+- [Tunnels](/tunnels/) — la façon recommandée de joindre une instance à distance
+- [Reverse proxy](/reverse-proxy/) — exécuter OpenChamber derrière votre propre serveur

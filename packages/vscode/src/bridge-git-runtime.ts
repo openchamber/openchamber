@@ -251,6 +251,23 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       return { id, type, success: true, data: { success: true } };
     }
 
+    case 'api:git/apply-hunk': {
+      const { directory, path: filePath, patch, action } = (payload || {}) as {
+        directory?: string;
+        path?: string;
+        patch?: string;
+        action?: 'stage' | 'unstage' | 'discard';
+      };
+      if (!directory || !filePath || typeof patch !== 'string' || !patch.trim()) {
+        return { id, type, success: false, error: 'Directory, path, and patch are required' };
+      }
+      if (action !== 'stage' && action !== 'unstage' && action !== 'discard') {
+        return { id, type, success: false, error: 'action must be stage, unstage, or discard' };
+      }
+      await gitService.applyGitHunk(directory, filePath, patch, action);
+      return { id, type, success: true, data: { success: true } };
+    }
+
     case 'api:git/commit': {
       const { directory, message, addAll, files, stageFiles } = (payload || {}) as {
         directory?: string;

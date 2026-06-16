@@ -37,6 +37,7 @@ import { UpdateDialog } from '@/components/ui/UpdateDialog';
 import { useDeviceInfo, useTabletStandalonePwaRuntime } from '@/lib/device';
 import { cn, hasModifier } from '@/lib/utils';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
+import { McpIcon } from '@/components/icons/McpIcon';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
 import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
@@ -68,7 +69,6 @@ import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
 import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag, type UpdateInfo } from '@/lib/desktop';
 import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
-import { resolveSessionDiffStats } from '@/components/session/sidebar/utils';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -186,11 +186,14 @@ const DesktopGitHubControl = React.memo(function DesktopGitHubControl({
           {githubAccounts.map((account) => {
             const accountUser = account.user;
             const isCurrent = Boolean(account.current);
+            const sourceLabel = account.source === 'gh-cli'
+              ? t('header.github.accountSource.cli')
+              : t('header.github.accountSource.oauth');
             return (
               <DropdownMenuItem
                 key={account.id}
                 className="gap-2"
-                disabled={isCurrent || isSwitchingGitHubAccount}
+                disabled={isSwitchingGitHubAccount}
                 onSelect={() => {
                   if (!isCurrent) {
                     void handleGitHubAccountSwitch(account.id);
@@ -215,8 +218,10 @@ const DesktopGitHubControl = React.memo(function DesktopGitHubControl({
                     {accountUser?.name?.trim() || accountUser?.login || 'GitHub'}
                   </span>
                   {accountUser?.login ? (
-                    <span className="truncate typography-micro font-mono text-muted-foreground">
-                      {accountUser.login}
+                    <span className="truncate typography-micro text-muted-foreground">
+                      <span className="font-mono">{accountUser.login}</span>
+                      <span className="mx-1 opacity-50">·</span>
+                      <span>{sourceLabel}</span>
                     </span>
                   ) : null}
                 </span>
@@ -712,6 +717,7 @@ export const Header: React.FC<HeaderProps> = ({
   const openContextOverview = useUIStore((state) => state.openContextOverview);
   const openContextPlan = useUIStore((state) => state.openContextPlan);
   const openContextBrowser = useUIStore((state) => state.openContextBrowser);
+  const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
   const contextPanelByDirectory = useUIStore((state) => state.contextPanelByDirectory);
   const activeMainTab = useUIStore((state) => state.activeMainTab);
@@ -1283,17 +1289,6 @@ export const Header: React.FC<HeaderProps> = ({
     return trimmedTitle && trimmedTitle.length > 0 ? trimmedTitle : 'Untitled Session';
   }, [activeProjectLabel, currentSession?.title, currentSessionId]);
 
-  const currentSessionDiffStats = React.useMemo(() => {
-    return resolveSessionDiffStats(currentSession?.summary as Parameters<typeof resolveSessionDiffStats>[0]);
-  }, [currentSession?.summary]);
-
-  const currentSessionChanges = React.useMemo(() => {
-    if (currentSessionDiffStats) {
-      return currentSessionDiffStats;
-    }
-    return { additions: 0, deletions: 0 };
-  }, [currentSessionDiffStats]);
-  const hasNonZeroSessionChanges = currentSessionChanges.additions > 0 || currentSessionChanges.deletions > 0;
 
   const actionDirectory = React.useMemo(() => {
     return normalize(openDirectory || activeProject?.path || '');
@@ -1422,16 +1417,6 @@ export const Header: React.FC<HeaderProps> = ({
     toggleSidebar();
   }, [blurActiveElement, isMobile, isSessionSwitcherOpen, setSessionSwitcherOpen, toggleSidebar]);
 
-  const handleOpenWindowsAppMenu = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    void invokeDesktop('desktop_show_app_menu', {
-      x: rect.left,
-      y: rect.bottom,
-    }).catch((error) => {
-      console.warn('[header] failed to open app menu', error);
-    });
-  }, []);
-
   const handleOpenDraftMiniChat = React.useCallback(() => {
     void invokeDesktop('desktop_open_draft_mini_chat_window', {
       directory: normalize(openDirectory || activeProject?.path || ''),
@@ -1501,6 +1486,21 @@ export const Header: React.FC<HeaderProps> = ({
     openContextPlan(directory);
   }, [closeContextPanel, contextPanelByDirectory, openContextPlan, openDirectory]);
 
+  const handleOpenContextChanges = React.useCallback(() => {
+    const directory = normalize(openDirectory || '');
+    if (!directory) {
+      return;
+    }
+
+    const panelState = contextPanelByDirectory[directory];
+    if (getActiveContextMode(panelState) === 'diff') {
+      closeContextPanel(directory);
+      return;
+    }
+
+    openContextPanelTab(directory, { mode: 'diff', stagedDiff: false });
+  }, [closeContextPanel, contextPanelByDirectory, openContextPanelTab, openDirectory]);
+
   const handleOpenContextBrowser = React.useCallback(() => {
     const directory = normalize(openDirectory || '');
     if (!directory) {
@@ -1523,6 +1523,15 @@ export const Header: React.FC<HeaderProps> = ({
     }
     const panelState = contextPanelByDirectory[directory];
     return getActiveContextMode(panelState) === 'plan';
+  }, [contextPanelByDirectory, openDirectory]);
+
+  const isContextChangesActive = React.useMemo(() => {
+    const directory = normalize(openDirectory || '');
+    if (!directory) {
+      return false;
+    }
+    const panelState = contextPanelByDirectory[directory];
+    return getActiveContextMode(panelState) === 'diff';
   }, [contextPanelByDirectory, openDirectory]);
 
   const isContextBrowserActive = React.useMemo(() => {
@@ -1776,13 +1785,13 @@ export const Header: React.FC<HeaderProps> = ({
   }, [activeMainTab, isMobile, setActiveMainTab]);
 
   const servicesTabs = React.useMemo(() => {
-    const base: Array<{ value: 'instance' | 'usage' | 'mcp'; label: string; icon: IconName }> = [];
+    const base: Array<{ value: 'instance' | 'usage' | 'mcp'; label: string; icon: React.ReactNode }> = [];
     if (isDesktopApp) {
-      base.push({ value: 'instance', label: t('layout.services.instance'), icon: "server" });
+      base.push({ value: 'instance', label: t('layout.services.instance'), icon: <Icon name="server" className="h-3.5 w-3.5" /> });
     }
     base.push(
-      { value: 'usage', label: t('layout.services.usage'), icon: "timer" },
-      { value: 'mcp', label: 'MCP', icon: "plug-2" }
+      { value: 'usage', label: t('layout.services.usage'), icon: <Icon name="timer" className="h-3.5 w-3.5" /> },
+      { value: 'mcp', label: 'MCP', icon: <McpIcon className="h-3.5 w-3.5" /> }
     );
     return base;
   }, [isDesktopApp, t]);
@@ -1791,7 +1800,7 @@ export const Header: React.FC<HeaderProps> = ({
     return servicesTabs.map((tab) => ({
       id: tab.value,
       label: tab.label,
-      icon: <Icon name={tab.icon} className="h-3.5 w-3.5" />,
+      icon: tab.icon,
     }));
   }, [servicesTabs]);
 
@@ -1866,7 +1875,7 @@ export const Header: React.FC<HeaderProps> = ({
   const mobileServicesTabItems = React.useMemo<SortableTabsStripItem[]>(() => {
     return [
       { id: 'usage', label: t('layout.services.usage'), icon: <Icon name="timer" className="h-3.5 w-3.5" /> },
-      { id: 'mcp', label: 'MCP', icon: <Icon name="command" className="h-3.5 w-3.5" /> },
+      { id: 'mcp', label: 'MCP', icon: <McpIcon className="h-3.5 w-3.5" /> },
     ];
   }, [t]);
 
@@ -1996,6 +2005,29 @@ export const Header: React.FC<HeaderProps> = ({
     return <React.Fragment key={tab.id}>{tabButton}</React.Fragment>;
   };
 
+  const desktopChangesPanelAction = !isVSCode ? (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={t('header.actions.toggleChangesPanelAria')}
+          aria-pressed={isContextChangesActive}
+          onClick={handleOpenContextChanges}
+          className={desktopHeaderIconButtonClass}
+        >
+          <span className="relative h-5 w-5 overflow-hidden rounded-[2px]">
+            <span className="absolute left-[4px] top-[4px] h-3 w-[5px] bg-[var(--status-error)]/25" />
+            <span className="absolute right-[4px] top-[4px] h-3 w-[5px] bg-[var(--status-success)]/25" />
+            <Icon name="layout-column" className="absolute inset-0 h-5 w-5" />
+          </span>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>
+        <p>{t('header.actions.toggleChangesPanel')}</p>
+      </TooltipContent>
+    </Tooltip>
+  ) : null;
+
   const desktopSidebarActions = (
     <>
       {showPlanTab && (
@@ -2112,15 +2144,6 @@ export const Header: React.FC<HeaderProps> = ({
         className="app-region-no-drag shrink-0 self-stretch transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
         style={{ width: headerControlsSpacerWidth }}
       />
-      {isWindowsElectronDesktop ? (
-        <HeaderIconActionButton
-          title={t('header.actions.openAppMenu')}
-          ariaLabel={t('header.actions.openAppMenuAria')}
-          onClick={handleOpenWindowsAppMenu}
-          className={`${desktopHeaderIconButtonClass} shrink-0`}
-          Icon={'menu-2'}
-        />
-      ) : null}
       {/* Sidebar toggle + project actions live in the persistent
           TitlebarLeftControls overlay; the header reserves matching left space
           via padding (see headerStyle) when the sidebar is collapsed. */}
@@ -2134,20 +2157,13 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="truncate typography-ui-label text-[14px] font-normal leading-tight text-foreground max-w-full">
               {isNewSessionDraftOpen ? t('sessions.switcher.draftTitle') : currentSessionTitle}
             </span>
-            {(activeProjectLabel || currentBranchLabel || (!isNewSessionDraftOpen && (hasNonZeroSessionChanges || worktreeBadgeKind))) ? (
+            {(activeProjectLabel || currentBranchLabel || (!isNewSessionDraftOpen && worktreeBadgeKind)) ? (
               <span className="flex min-w-0 max-w-full items-center gap-1.5 truncate typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">
                 {activeProjectLabel ? <span className="truncate">{activeProjectLabel}</span> : null}
                 {currentBranchLabel ? (
                   <span className="inline-flex min-w-0 items-center gap-0.5">
                     <Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
                     <span className="truncate">{currentBranchLabel}</span>
-                  </span>
-                ) : null}
-                {!isNewSessionDraftOpen && hasNonZeroSessionChanges ? (
-                  <span className="inline-flex flex-shrink-0 items-center gap-0 text-[0.92em]">
-                    <span className="text-status-success/80">+{currentSessionChanges.additions}</span>
-                    <span className="text-muted-foreground/60">/</span>
-                    <span className="text-status-error/65">-{currentSessionChanges.deletions}</span>
                   </span>
                 ) : null}
                 {!isNewSessionDraftOpen && worktreeBadgeKind ? (
@@ -2190,12 +2206,13 @@ export const Header: React.FC<HeaderProps> = ({
               percentIconClassName="h-5 w-5"
             />
           ) : null}
+          {desktopChangesPanelAction}
           <HeaderIconActionButton
             visible={showMiniChatHeaderAction}
             title={isNewSessionDraftOpen ? t('header.actions.newMiniChat') : t('header.actions.openSessionMiniChat')}
             ariaLabel={isNewSessionDraftOpen ? t('header.actions.newMiniChatAria') : t('header.actions.openSessionMiniChatAria')}
             onClick={handleOpenCurrentMiniChat}
-            className={cn(desktopHeaderIconButtonClass, showDesktopHeaderContextUsage ? 'mr-3.5' : 'mr-1')}
+            className={cn(desktopHeaderIconButtonClass, 'mr-1')}
             Icon={'picture-in-picture-2'}
           />
           {desktopSidebarActions}

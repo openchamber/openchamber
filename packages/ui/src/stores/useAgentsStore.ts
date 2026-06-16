@@ -245,8 +245,10 @@ export const useAgentsStore = create<AgentsStore>()(
               try {
                 const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
 
-                // Ensure we list agents using the correct project context
-                const agents = await opencodeClient.withDirectory(configDirectory, () => opencodeClient.listAgents());
+                // Ensure we list agents using the correct project context. Pass the
+                // directory directly so this shares the in-flight request with the config
+                // store instead of issuing a duplicate agents fetch at startup.
+                const agents = await opencodeClient.listAgents(configDirectory);
 
                 const agentsWithScope = await Promise.all(
                   agents.map(async (agent) => {

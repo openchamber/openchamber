@@ -169,13 +169,19 @@ export async function bootstrapDirectory(input: {
     .filter((r): r is PromiseRejectedResult => r.status === "rejected")
     .map((r) => r.reason)
 
-  // path.get and session.status have no global-state fallback.
-  // If either fails, the UI cannot safely advance to "complete".
-  const [, , , pathResult, sessionStatusResult] = phase1Results
-  const criticalPhase1Failed =
-    pathResult.status === "rejected" || sessionStatusResult.status === "rejected"
+  // De-block the UI: only a total failure (OpenCode genuinely unreachable)
+  // should abort the directory. Don't let one transient initial fetch strand
+  // the directory in "loading" forever and skip phase 2/3 (sessions).
+  //   - session.status is LIVE data the event pipeline keeps current — a failed
+  //     initial snapshot is harmless; SSE will deliver the real status.
+  //   - path.get feeds project resolution, but if we already resolved a project
+  //     (from global projects) its failure is tolerable; the worktree path is
+  //     refreshed by later events.
+  const [, , , pathResult] = phase1Results
+  const pathFailedWithoutProject =
+    pathResult.status === "rejected" && !getState().project
 
-  if (phase1Errors.length === phase1Results.length || criticalPhase1Failed) {
+  if (phase1Errors.length === phase1Results.length || pathFailedWithoutProject) {
     console.error(`[bootstrap] directory bootstrap failed for ${directory}`, phase1Errors[0])
     return
   }

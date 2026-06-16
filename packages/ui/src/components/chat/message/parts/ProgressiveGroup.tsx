@@ -19,13 +19,14 @@ import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
+import { ensureOutsideFileGrantForDesktop } from '@/lib/outsideFileGrants';
 import ReasoningPart from './ReasoningPart';
 import JustificationBlock from './JustificationBlock';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { getExternalFaviconUrl } from '@/lib/url';
-import { getDirectoryForFilePath, getRelativeFilePath, normalizeFilePath, toAbsoluteFilePath } from '@/lib/path-utils';
+import { getDirectoryForFilePath, getRelativeFilePath, isFilePathWithinDirectory, normalizeFilePath, toAbsoluteFilePath } from '@/lib/path-utils';
 
-const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-4 sm:!leading-6 tracking-normal';
+const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
 const TOOL_ROW_DESCRIPTION_CLASS = cn('typography-meta', TOOL_ROW_TEXT_CLASS);
 
@@ -34,7 +35,6 @@ interface ProgressiveGroupProps {
     isExpanded: boolean;
     collapsedPreviewCount?: number;
     onToggle: () => void;
-    syntaxTheme: Record<string, React.CSSProperties>;
     isMobile: boolean;
     expandedTools: Set<string>;
     onToggleTool: (toolId: string) => void;
@@ -372,7 +372,6 @@ type AggregatedRow =
 interface ExpandableToolRowProps {
     activity: TurnActivityPart;
     isExpanded: boolean;
-    syntaxTheme: Record<string, React.CSSProperties>;
     isMobile: boolean;
     onToggleTool: (toolId: string) => void;
     onShowPopup: (content: ToolPopupContent) => void;
@@ -384,7 +383,6 @@ interface ExpandableToolRowProps {
 const ExpandableToolRow: React.FC<ExpandableToolRowProps> = ({
     activity,
     isExpanded,
-    syntaxTheme,
     isMobile,
     onToggleTool,
     onShowPopup,
@@ -401,7 +399,6 @@ const ExpandableToolRow: React.FC<ExpandableToolRowProps> = ({
             part={activity.part as ToolPartType}
             isExpanded={isExpanded}
             onToggle={handleToggle}
-            syntaxTheme={syntaxTheme}
             isMobile={isMobile}
             onContentChange={onContentChange}
             onShowPopup={onShowPopup}
@@ -424,7 +421,6 @@ const ExpandableToolRow: React.FC<ExpandableToolRowProps> = ({
 
 const MemoExpandableToolRow = React.memo(ExpandableToolRow, (prev, next) => {
     return prev.isExpanded === next.isExpanded
-        && prev.syntaxTheme === next.syntaxTheme
         && prev.isMobile === next.isMobile
         && prev.onToggleTool === next.onToggleTool
         && prev.onShowPopup === next.onShowPopup
@@ -638,6 +634,19 @@ const StaticToolRowInner: React.FC<{
             return;
         }
 
+        if (!isFilePathWithinDirectory(absolutePath, currentDirectory)) {
+            void ensureOutsideFileGrantForDesktop(absolutePath, currentDirectory).then(() => {
+                const uiStore = useUIStore.getState();
+                const contextDirectory = currentDirectory || getDirectoryForFilePath(currentDirectory, absolutePath);
+                if (offset && Number.isFinite(offset)) {
+                    uiStore.openContextFileAtLine(contextDirectory, absolutePath, Math.max(1, Math.trunc(offset)), 1);
+                    return;
+                }
+                uiStore.openContextFile(contextDirectory, absolutePath);
+            });
+            return;
+        }
+
         const uiStore = useUIStore.getState();
         const contextDirectory = getDirectoryForFilePath(currentDirectory, absolutePath);
         if (offset && Number.isFinite(offset)) {
@@ -812,7 +821,6 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
     isExpanded,
     collapsedPreviewCount = 0,
     onToggle,
-    syntaxTheme,
     isMobile,
     expandedTools,
     onToggleTool,
@@ -901,7 +909,6 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                         key={row.activity.id}
                         activity={row.activity}
                         isExpanded={expandedTools.has(row.activity.id)}
-                        syntaxTheme={syntaxTheme}
                         isMobile={isMobile}
                         onToggleTool={onToggleTool}
                         onShowPopup={onShowPopup}
@@ -928,7 +935,6 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                         key={row.activity.id}
                         activity={row.activity}
                         isExpanded={expandedTools.has(row.activity.id)}
-                        syntaxTheme={syntaxTheme}
                         isMobile={isMobile}
                         onToggleTool={onToggleTool}
                         onShowPopup={onShowPopup}

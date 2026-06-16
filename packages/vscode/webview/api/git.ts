@@ -87,6 +87,18 @@ export const createVSCodeGitAPI = (): GitAPI => ({
     await sendBridgeMessage('api:git/unstage', { directory, paths: filePaths });
   },
 
+  stageGitHunk: async (directory: string, filePath: string, patch: string): Promise<void> => {
+    await sendBridgeMessage('api:git/apply-hunk', { directory, path: filePath, patch, action: 'stage' });
+  },
+
+  unstageGitHunk: async (directory: string, filePath: string, patch: string): Promise<void> => {
+    await sendBridgeMessage('api:git/apply-hunk', { directory, path: filePath, patch, action: 'unstage' });
+  },
+
+  revertGitHunk: async (directory: string, filePath: string, patch: string): Promise<void> => {
+    await sendBridgeMessage('api:git/apply-hunk', { directory, path: filePath, patch, action: 'discard' });
+  },
+
   isLinkedWorktree: async (directory: string): Promise<boolean> => {
     return sendBridgeMessage<boolean>('api:git/worktree-type', { directory });
   },

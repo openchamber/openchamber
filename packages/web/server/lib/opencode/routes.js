@@ -258,10 +258,8 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
   });
 
   app.put('/api/config/settings', async (req, res) => {
-    console.log('[API:PUT /api/config/settings] Received request');
     try {
       const updated = await persistSettings(req.body ?? {});
-      console.log(`[API:PUT /api/config/settings] Success, returning ${updated.projects?.length || 0} projects`);
       res.json(updated);
     } catch (error) {
       console.error('[API:PUT /api/config/settings] Failed to save settings:', error);

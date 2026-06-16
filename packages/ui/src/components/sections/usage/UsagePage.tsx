@@ -170,7 +170,7 @@ export const UsagePage: React.FC = () => {
         </div>
 
         {/* Options */}
-        <div className="mb-8 px-2">
+        <div data-settings-item="usage.header-menu" className="mb-8 px-2">
           <div
             className="group flex cursor-pointer items-center gap-2 py-1.5"
             role="button"
@@ -228,7 +228,7 @@ export const UsagePage: React.FC = () => {
 
         {/* Overall Usage Windows */}
         {usage?.windows && Object.keys(usage.windows).length > 0 && (
-          <div className="mb-8">
+          <div data-settings-item="usage.model-quotas" className="mb-8">
             <section className="px-2 pb-2 pt-0">
               <div className="divide-y divide-[var(--surface-subtle)]">
                 {Object.entries(usage.windows).map(([label, window]) => (

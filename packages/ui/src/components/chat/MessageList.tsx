@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Part } from '@opencode-ai/sdk/v2';
-import { measureElement as measureVirtualElement, type VirtualItem, useVirtualizer } from '@tanstack/react-virtual';
+import { Virtualizer, type CacheSnapshot, type VirtualizerHandle } from 'virtua';
 
 import ChatMessage from './ChatMessage';
 import { areOptionalRenderRelevantMessagesEqual, areRelevantTurnGroupingContextsEqual, areRenderRelevantMessagesEqual } from './message/renderCompare';
@@ -21,10 +21,10 @@ import { getReviewTransferDirection, type ReviewTransferDirection } from '@/lib/
 import { getOriginalSessionID, getReviewSessionID } from '@/lib/sessionReviewMetadata';
 
 const MESSAGE_LIST_VIRTUALIZE_THRESHOLD = 5;
-const MESSAGE_LIST_OVERSCAN = 6;
 const EMPTY_STATIC_ENTRY_MESSAGES: ChatMessageEntry[] = [];
 const EMPTY_UNGROUPED_MESSAGE_IDS = new Set<string>();
-const EMPTY_VIRTUAL_ROWS: VirtualItem[] = [];
+const MESSAGE_LIST_BUFFER_SIZE = 900;
+const TIMELINE_CACHE_LIMIT = 16;
 
 const estimateHistoryEntryHeight = (entry: RenderEntry | undefined): number => {
     if (!entry) {
@@ -36,6 +36,38 @@ const estimateHistoryEntryHeight = (entry: RenderEntry | undefined): number => {
     }
 
     return 140;
+};
+
+const sameKeys = (a: readonly string[] | undefined, b: readonly string[] | undefined): boolean => {
+    if (a === b) return true;
+    if (!a || !b) return false;
+    if (a.length !== b.length) return false;
+    return a.every((key, index) => key === b[index]);
+};
+
+const timelineCache = new Map<string, { keys: readonly string[]; cache: CacheSnapshot }>();
+
+const readTimelineCache = (sessionKey: string, keys: readonly string[]): CacheSnapshot | undefined => {
+    const entry = timelineCache.get(sessionKey);
+    if (!entry) return undefined;
+    if (sameKeys(entry.keys, keys)) return entry.cache;
+    timelineCache.delete(sessionKey);
+    return undefined;
+};
+
+const writeTimelineCache = (
+    sessionKey: string,
+    keys: readonly string[],
+    handle: VirtualizerHandle | null | undefined,
+): void => {
+    if (!handle || keys.length === 0) return;
+    timelineCache.delete(sessionKey);
+    timelineCache.set(sessionKey, { keys: keys.slice(), cache: handle.cache });
+    while (timelineCache.size > TIMELINE_CACHE_LIMIT) {
+        const oldest = timelineCache.keys().next().value;
+        if (typeof oldest !== 'string') break;
+        timelineCache.delete(oldest);
+    }
 };
 
 const useStableEvent = <TArgs extends unknown[], TResult>(handler: (...args: TArgs) => TResult) => {
@@ -959,10 +991,12 @@ MessageListEntry.displayName = 'MessageListEntry';
 type StaticHistoryListProps = {
     entries: RenderEntry[];
     shouldVirtualize: boolean;
-    virtualRows: VirtualItem[];
-    totalSize: number;
-    measureElement: (element: HTMLDivElement | null) => void;
     contentRef: React.RefObject<HTMLDivElement | null>;
+    scrollRef?: React.RefObject<HTMLDivElement | null>;
+    virtualizerRef: React.Ref<VirtualizerHandle>;
+    virtualizerKey: string;
+    virtualCache?: CacheSnapshot;
+    shift: boolean;
     onMessageContentChange: (reason?: ContentChangeReason) => void;
     getAnimationHandlers: (messageId: string) => AnimationHandlers;
     scrollToBottom?: () => void;
@@ -977,7 +1011,7 @@ type StaticHistoryListProps = {
     reviewTransferDirection?: ReviewTransferDirection | null;
 };
 
-const StaticHistoryList = React.memo(({ entries, shouldVirtualize, virtualRows, totalSize, measureElement, contentRef, onMessageContentChange, getAnimationHandlers, scrollToBottom, stickyUserHeader, defaultActivityExpanded, turnUiStates, onToggleTurnGroup, chatRenderMode, shouldAnimateUserMessage, onUserAnimationConsumed, activeStreamingPhase, reviewTransferDirection }: StaticHistoryListProps) => {
+const StaticHistoryList = React.memo(({ entries, shouldVirtualize, contentRef, scrollRef, virtualizerRef, virtualizerKey, virtualCache, shift, onMessageContentChange, getAnimationHandlers, scrollToBottom, stickyUserHeader, defaultActivityExpanded, turnUiStates, onToggleTurnGroup, chatRenderMode, shouldAnimateUserMessage, onUserAnimationConsumed, activeStreamingPhase, reviewTransferDirection }: StaticHistoryListProps) => {
     const renderEntry = React.useCallback((entry: RenderEntry) => {
         return (
             <MessageListEntry
@@ -1001,13 +1035,6 @@ const StaticHistoryList = React.memo(({ entries, shouldVirtualize, virtualRows, 
         );
     }, [activeStreamingPhase, chatRenderMode, defaultActivityExpanded, getAnimationHandlers, onMessageContentChange, onToggleTurnGroup, onUserAnimationConsumed, reviewTransferDirection, scrollToBottom, shouldAnimateUserMessage, stickyUserHeader, turnUiStates]);
 
-    const paddingTop = shouldVirtualize && virtualRows.length > 0
-        ? virtualRows[0]?.start ?? 0
-        : 0;
-    const paddingBottom = shouldVirtualize && virtualRows.length > 0
-        ? Math.max(0, totalSize - (virtualRows[virtualRows.length - 1]?.end ?? 0))
-        : 0;
-
     if (!shouldVirtualize) {
         return (
             <div ref={contentRef} className="relative w-full">
@@ -1023,43 +1050,23 @@ const StaticHistoryList = React.memo(({ entries, shouldVirtualize, virtualRows, 
         );
     }
 
-    if (virtualRows.length === 0 && entries.length > 0) {
-        return (
-            <div ref={contentRef} className="relative w-full">
-                {entries.map((entry) => (
-                    <div
-                        key={entry.key}
-                        data-turn-entry={entry.key}
-                    >
-                        {renderEntry(entry)}
-                    </div>
-                ))}
-            </div>
-        );
-    }
-
     return (
-        <div ref={contentRef} className="relative w-full">
-            {paddingTop > 0 ? <div aria-hidden="true" style={{ height: `${paddingTop}px` }} /> : null}
-            {virtualRows.map((virtualRow) => {
-                const entry = entries[virtualRow.index];
-                if (!entry) {
-                    return null;
-                }
-
-                return (
-                    <div
-                        key={virtualRow.key}
-                        ref={measureElement}
-                        data-index={virtualRow.index}
-                        data-turn-entry={entry.key}
-                    >
-                        {renderEntry(entry)}
-                    </div>
-                );
-            })}
-            {paddingBottom > 0 ? <div aria-hidden="true" style={{ height: `${paddingBottom}px` }} /> : null}
-        </div>
+        <Virtualizer
+            key={virtualizerKey}
+            ref={virtualizerRef}
+            data={entries}
+            cache={virtualCache}
+            itemSize={virtualCache ? undefined : estimateHistoryEntryHeight(undefined)}
+            bufferSize={MESSAGE_LIST_BUFFER_SIZE}
+            shift={shift}
+            scrollRef={scrollRef}
+        >
+            {(entry) => (
+                <div key={entry.key} data-turn-entry={entry.key}>
+                    {renderEntry(entry)}
+                </div>
+            )}
+        </Virtualizer>
     );
 });
 
@@ -1229,7 +1236,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     }), [messages]);
 
     const historyContentRef = React.useRef<HTMLDivElement | null>(null);
-    const pendingVirtualMeasureFrameRef = React.useRef<number | null>(null);
+    const historyVirtualizerRef = React.useRef<VirtualizerHandle | null>(null);
     const resolveScrollContainer = React.useCallback((): HTMLDivElement | null => {
         if (scrollRef?.current) {
             return scrollRef.current;
@@ -1332,120 +1339,44 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 
     const historyEntries = staticRenderEntries;
     const shouldVirtualizeHistory = historyEntries.length >= MESSAGE_LIST_VIRTUALIZE_THRESHOLD;
-
-    const previousHistoryLenRef = React.useRef(historyEntries.length);
-    const previousFirstEntryKeyRef = React.useRef(historyEntries[0]?.key);
-
-    React.useLayoutEffect(() => {
-        const previousLen = previousHistoryLenRef.current;
-        const currentLen = historyEntries.length;
-        const previousFirstKey = previousFirstEntryKeyRef.current;
-        const currentFirstKey = historyEntries[0]?.key;
-
-        previousHistoryLenRef.current = currentLen;
-        previousFirstEntryKeyRef.current = currentFirstKey;
-
-        const grew = currentLen > previousLen;
-        const firstChanged = previousFirstKey !== currentFirstKey;
-        if (!shouldVirtualizeHistory || isLoadingOlder || disableStaging || !grew || !firstChanged || previousLen === 0) {
+    const historyEntryKeys = React.useMemo(() => historyEntries.map((entry) => entry.key), [historyEntries]);
+    const virtualCache = React.useMemo(
+        () => (shouldVirtualizeHistory ? readTimelineCache(sessionKey, historyEntryKeys) : undefined),
+        [historyEntryKeys, sessionKey, shouldVirtualizeHistory],
+    );
+    const virtualCacheSessionRef = React.useRef(sessionKey);
+    const virtualCacheKeysRef = React.useRef(historyEntryKeys);
+    const setHistoryVirtualizer = React.useCallback((handle: VirtualizerHandle | null) => {
+        if (!handle) {
+            writeTimelineCache(
+                virtualCacheSessionRef.current,
+                virtualCacheKeysRef.current,
+                historyVirtualizerRef.current,
+            );
+            historyVirtualizerRef.current = null;
             return;
         }
 
-        const prependedCount = currentLen - previousLen;
-        const shiftedOldFirst = historyEntries[prependedCount]?.key;
-        if (shiftedOldFirst !== previousFirstKey) {
-            return;
-        }
-
-        // Prepend detected: new entries added at the beginning of the list.
-        // The virtualizer renders based on the current scroll offset which
-        // now maps to different items. Compensate so the user sees the
-        // prepended content (scroll to top) or stays on the same content.
-        let prependedHeight = 0;
-        for (let i = 0; i < prependedCount; i++) {
-            prependedHeight += estimateHistoryEntryHeight(historyEntries[i]);
-        }
-
-        const scrollEl = resolveScrollContainer();
-        if (!scrollEl || prependedHeight <= 0) return;
-
-        scrollEl.scrollTop += prependedHeight;
-    });
-
-    const historyVirtualizer = useVirtualizer({
-        count: historyEntries.length,
-        getScrollElement: resolveScrollContainer,
-        estimateSize: (index) => estimateHistoryEntryHeight(historyEntries[index]),
-        getItemKey: (index) => historyEntries[index]?.key ?? String(index),
-        measureElement: measureVirtualElement,
-        useAnimationFrameWithResizeObserver: true,
-        overscan: MESSAGE_LIST_OVERSCAN,
-        enabled: shouldVirtualizeHistory,
-    });
-
-    React.useLayoutEffect(() => {
-        const historyContent = historyContentRef.current;
-        if (!historyContent || !shouldVirtualizeHistory) {
-            return;
-        }
-
-        if (typeof ResizeObserver === 'undefined') {
-            return;
-        }
-
-        const observer = new ResizeObserver(() => {
-            historyVirtualizer.measure();
-        });
-        observer.observe(historyContent);
-        return () => {
-            observer.disconnect();
-        };
-    }, [historyEntries.length, shouldVirtualizeHistory, historyVirtualizer]);
-
-    React.useEffect(() => {
-        if (!shouldVirtualizeHistory) {
-            return;
-        }
-
-        historyVirtualizer.measure();
-    }, [historyEntries.length, historyVirtualizer, shouldVirtualizeHistory]);
-
-    const scheduleVirtualMeasure = React.useCallback(() => {
-        if (!shouldVirtualizeHistory) {
-            return;
-        }
-        if (typeof window === 'undefined') {
-            historyVirtualizer.measure();
-            return;
-        }
-        if (pendingVirtualMeasureFrameRef.current !== null) {
-            return;
-        }
-        pendingVirtualMeasureFrameRef.current = window.requestAnimationFrame(() => {
-            pendingVirtualMeasureFrameRef.current = null;
-            historyVirtualizer.measure();
-        });
-    }, [historyVirtualizer, shouldVirtualizeHistory]);
-
-    React.useEffect(() => {
-        return () => {
-            if (pendingVirtualMeasureFrameRef.current !== null && typeof window !== 'undefined') {
-                window.cancelAnimationFrame(pendingVirtualMeasureFrameRef.current);
-            }
-        };
+        historyVirtualizerRef.current = handle;
     }, []);
 
-    const historyVirtualRows = React.useMemo(
-        () => (shouldVirtualizeHistory ? historyVirtualizer.getVirtualItems() : EMPTY_VIRTUAL_ROWS),
-        [historyVirtualizer, shouldVirtualizeHistory],
-    );
+    React.useEffect(() => {
+        virtualCacheSessionRef.current = sessionKey;
+        virtualCacheKeysRef.current = historyEntryKeys;
+    }, [historyEntryKeys, sessionKey]);
+
+    React.useEffect(() => {
+        const virtualizerForCleanup = historyVirtualizerRef.current;
+        return () => {
+            writeTimelineCache(virtualCacheSessionRef.current, virtualCacheKeysRef.current, virtualizerForCleanup);
+        };
+    }, []);
 
     const allEntries = React.useMemo(() => {
         return trailingStreamingEntry ? [...historyEntries, trailingStreamingEntry] : historyEntries;
     }, [historyEntries, trailingStreamingEntry]);
 
     const stableHistoryContentChange = useStableEvent((reason?: ContentChangeReason) => {
-        scheduleVirtualMeasure();
         onMessageContentChange(reason);
     });
 
@@ -1540,10 +1471,14 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             return false;
         }
 
-        const virtualizerBehavior = behavior === 'smooth' ? 'smooth' : 'auto';
-        historyVirtualizer.scrollToIndex(index, { align: 'start', behavior: virtualizerBehavior });
+        const virtualizer = historyVirtualizerRef.current;
+        if (!virtualizer) {
+            return false;
+        }
+
+        virtualizer.scrollToIndex(index, { align: 'start', smooth: behavior === 'smooth' });
         return true;
-    }, [historyEntries.length, historyVirtualizer, shouldVirtualizeHistory]);
+    }, [historyEntries.length, shouldVirtualizeHistory]);
 
     const scrollMessageElementIntoView = React.useCallback((messageId: string, behavior: ScrollBehavior = 'auto') => {
         const container = resolveScrollContainer();
@@ -1682,7 +1617,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 
             scrollToBottom: () => {
                 if (shouldVirtualizeHistory && historyEntries.length > 0) {
-                    historyVirtualizer.scrollToIndex(historyEntries.length - 1, { align: 'end' });
+                    historyVirtualizerRef.current?.scrollToIndex(historyEntries.length - 1, { align: 'end' });
                     return;
                 }
                 const container = resolveScrollContainer();
@@ -1703,7 +1638,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return () => {
             objectRef.current = null;
         };
-    }, [findMessageElement, historyEntries.length, historyVirtualizer, messageIndexMap, resolveScrollContainer, scrollHistoryIndexIntoView, scrollMessageElementIntoView, shouldVirtualizeHistory, trailingStreamingEntry, turnIndexMap, ref]);
+    }, [findMessageElement, historyEntries.length, messageIndexMap, resolveScrollContainer, scrollHistoryIndexIntoView, scrollMessageElementIntoView, shouldVirtualizeHistory, trailingStreamingEntry, turnIndexMap, ref]);
 
     const disableFadeIn = false;
 
@@ -1714,10 +1649,12 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                         <StaticHistoryList
                             entries={historyEntries}
                             shouldVirtualize={shouldVirtualizeHistory}
-                            virtualRows={historyVirtualRows}
-                            totalSize={historyVirtualizer.getTotalSize()}
-                            measureElement={historyVirtualizer.measureElement}
                             contentRef={historyContentRef}
+                            scrollRef={scrollRef}
+                            virtualizerRef={setHistoryVirtualizer}
+                            virtualizerKey={sessionKey}
+                            virtualCache={virtualCache}
+                            shift={isLoadingOlder || disableStaging}
                             onMessageContentChange={stableHistoryContentChange}
                             getAnimationHandlers={stableGetAnimationHandlers}
                             scrollToBottom={stableScrollToBottom}

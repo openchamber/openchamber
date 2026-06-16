@@ -93,6 +93,69 @@ export const createSseBoundaryTracker = () => {
   };
 };
 
+const SESSION_LIST_ALLOWED_FIELDS = [
+  'id',
+  'slug',
+  'projectID',
+  'workspaceID',
+  'directory',
+  'path',
+  'parentID',
+  'title',
+  'agent',
+  'model',
+  'version',
+  'time',
+  'cost',
+  'tokens',
+  'share',
+  'metadata',
+  'project',
+];
+
+export const sanitizeSessionListItem = (session) => {
+  if (!session || typeof session !== 'object' || Array.isArray(session)) {
+    return session;
+  }
+
+  const sanitized = {};
+  for (const key of SESSION_LIST_ALLOWED_FIELDS) {
+    if (key in session) {
+      sanitized[key] = session[key];
+    }
+  }
+
+  const summary = session.summary;
+  if (summary && typeof summary === 'object' && !Array.isArray(summary)) {
+    const summaryWithoutDiffs = { ...summary };
+    delete summaryWithoutDiffs.diffs;
+    sanitized.summary = summaryWithoutDiffs;
+  }
+
+  const revert = session.revert;
+  if (revert && typeof revert === 'object' && !Array.isArray(revert)) {
+    const revertMarker = {};
+    if (typeof revert.messageID === 'string') {
+      revertMarker.messageID = revert.messageID;
+    }
+    if (typeof revert.partID === 'string') {
+      revertMarker.partID = revert.partID;
+    }
+    if (Object.keys(revertMarker).length > 0) {
+      sanitized.revert = revertMarker;
+    }
+  }
+
+  return sanitized;
+};
+
+export const sanitizeSessionListPayload = (payload) => {
+  if (!Array.isArray(payload)) {
+    return payload;
+  }
+  return payload.map((session) => sanitizeSessionListItem(session));
+};
+
 export const registerOpenCodeProxy = (app, deps) => {
   const {
     fs,
@@ -348,14 +411,83 @@ export const registerOpenCodeProxy = (app, deps) => {
     }
   };
 
+  const forwardSanitizedSessionListRequest = async (req, res, next, logLabel) => {
+    try {
+      const requestUrl = typeof req.originalUrl === 'string' && req.originalUrl.length > 0
+        ? req.originalUrl
+        : (typeof req.url === 'string' ? req.url : '');
+      const upstreamPathRaw = requestUrl.startsWith('/api') ? requestUrl.slice(4) || '/' : requestUrl;
+      const upstreamPath = await canonicalizeDirectoryQuery(upstreamPathRaw);
+      const upstream = await fetch(buildOpenCodeUrl(upstreamPath, ''), {
+        method: 'GET',
+        headers: {
+          ...collectForwardProxyHeaders(req.headers, getOpenCodeAuthHeaders()),
+          accept: 'application/json',
+          'accept-encoding': 'identity',
+        },
+      });
+
+      res.status(upstream.status);
+      applyForwardProxyResponseHeaders(upstream.headers, res);
+
+      const contentType = upstream.headers.get('content-type') || 'application/json; charset=utf-8';
+      const bodyText = await upstream.text();
+      if (!contentType.toLowerCase().includes('application/json')) {
+        res.setHeader('content-type', contentType);
+        res.end(bodyText);
+        return;
+      }
+
+      let payload;
+      try {
+        payload = JSON.parse(bodyText);
+      } catch {
+        res.setHeader('content-type', contentType);
+        res.end(bodyText);
+        return;
+      }
+
+      res.setHeader('content-type', contentType);
+      res.json(sanitizeSessionListPayload(payload));
+    } catch (error) {
+      if (isAbortError(error)) {
+        return;
+      }
+      console.error(`[proxy] OpenCode ${logLabel} proxy error:`, error?.message ?? error);
+      if (!res.headersSent) {
+        res.status(503).json({ error: 'OpenCode service unavailable' });
+        return;
+      }
+      next(error);
+    }
+  };
+
   // Ensure API prefix is detected before proxying
   app.use('/api', (_req, _res, next) => {
     ensureOpenCodeApiPrefix();
     next();
   });
 
-  // Readiness gate — return 503 while OpenCode is starting/restarting
-  app.use('/api', (req, res, next) => {
+  // Readiness gate — while OpenCode is starting/restarting, HOLD the request and
+  // poll readiness instead of returning 503 immediately. A bare 503 pushes the
+  // client into an exponential-backoff retry loop (500ms → 1s → …) that wastes
+  // seconds of cold-start time and can fail bootstrap outright. Holding the
+  // request until OpenCode is ready (typically well under a second) lets the
+  // first call simply succeed. We still 503 if readiness doesn't arrive within a
+  // bounded window so genuinely-down servers fail fast.
+  const READINESS_HOLD_POLL_MS = 75;
+  const READINESS_HOLD_MAX_MS = 6000;
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const isStillWaiting = (runtimeState) => {
+    const waitElapsed = runtimeState.openCodeNotReadySince === 0 ? 0 : Date.now() - runtimeState.openCodeNotReadySince;
+    return (
+      (!runtimeState.isOpenCodeReady && (runtimeState.openCodeNotReadySince === 0 || waitElapsed < OPEN_CODE_READY_GRACE_MS)) ||
+      runtimeState.isRestartingOpenCode ||
+      !runtimeState.openCodePort
+    );
+  };
+
+  app.use('/api', async (req, res, next) => {
     if (
       req.path.startsWith('/themes/custom') ||
       req.path.startsWith('/push') ||
@@ -369,21 +501,26 @@ export const registerOpenCodeProxy = (app, deps) => {
       return next();
     }
 
-    const runtimeState = getRuntime();
-    const waitElapsed = runtimeState.openCodeNotReadySince === 0 ? 0 : Date.now() - runtimeState.openCodeNotReadySince;
-    const stillWaiting =
-      (!runtimeState.isOpenCodeReady && (runtimeState.openCodeNotReadySince === 0 || waitElapsed < OPEN_CODE_READY_GRACE_MS)) ||
-      runtimeState.isRestartingOpenCode ||
-      !runtimeState.openCodePort;
+    if (!isStillWaiting(getRuntime())) {
+      return next();
+    }
 
-    if (stillWaiting) {
-      return res.status(503).json({
+    const deadline = Date.now() + Math.min(OPEN_CODE_READY_GRACE_MS, READINESS_HOLD_MAX_MS);
+    while (Date.now() < deadline) {
+      // Client gave up (closed/aborted) — stop holding.
+      if (res.writableEnded || req.aborted) return;
+      await sleep(READINESS_HOLD_POLL_MS);
+      if (!isStillWaiting(getRuntime())) {
+        return next();
+      }
+    }
+
+    if (!res.headersSent) {
+      res.status(503).json({
         error: 'OpenCode is restarting',
         restarting: true,
       });
     }
-
-    next();
   });
 
   // Windows: session merge for cross-directory session listing
@@ -453,7 +590,7 @@ export const registerOpenCodeProxy = (app, deps) => {
           return bTime - aTime;
         });
         console.log(`[SessionMerge] ${globalSessions.length} global + ${extraSessions.length} extra = ${merged.length} total`);
-        return res.json(merged);
+        return res.json(sanitizeSessionListPayload(merged));
       } catch (error) {
         console.log(`[SessionMerge] Error: ${error.message}, falling through`);
         next();
@@ -461,8 +598,16 @@ export const registerOpenCodeProxy = (app, deps) => {
     });
   }
 
+  app.get('/api/session', (req, res, next) => {
+    return forwardSanitizedSessionListRequest(req, res, next, 'session.list');
+  });
+
   app.get('/api/global/event', forwardSseRequest);
   app.get('/api/event', forwardSseRequest);
+
+  app.get('/api/experimental/session', (req, res, next) => {
+    return forwardSanitizedSessionListRequest(req, res, next, 'experimental.session');
+  });
 
   // Generic proxy for non-SSE OpenCode API routes.
   const apiProxy = createProxyMiddleware({

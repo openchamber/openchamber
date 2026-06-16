@@ -473,6 +473,9 @@ export interface GitAPI {
   stageGitFiles?(directory: string, filePaths: string[]): Promise<void>;
   unstageGitFile(directory: string, filePath: string): Promise<void>;
   unstageGitFiles?(directory: string, filePaths: string[]): Promise<void>;
+  stageGitHunk?(directory: string, filePath: string, patch: string): Promise<void>;
+  unstageGitHunk?(directory: string, filePath: string, patch: string): Promise<void>;
+  revertGitHunk?(directory: string, filePath: string, patch: string): Promise<void>;
   isLinkedWorktree(directory: string): Promise<boolean>;
   getGitBranches(directory: string): Promise<GitBranch>;
   deleteGitBranch(directory: string, payload: GitDeleteBranchPayload): Promise<{ success: boolean }>;
@@ -592,7 +595,9 @@ export interface ListDirectoryOptions {
 
 export interface FileReadOptions {
   allowOutsideWorkspace?: boolean;
+  outsideFileGrant?: string;
   optional?: boolean;
+  directory?: string;
 }
 
 export interface FilesAPI {
@@ -638,7 +643,6 @@ export interface SettingsPayload {
   opencodeBinary?: string;
   projects?: ProjectEntry[];
   activeProjectId?: string;
-  approvedDirectories?: string[];
   securityScopedBookmarks?: string[];
   pinnedDirectories?: string[];
   showReasoningTraces?: boolean;
@@ -672,7 +676,6 @@ export interface SettingsPayload {
   inputBarOffset?: number;
   shortcutOverrides?: Record<string, string>;
   diffLayoutPreference?: 'dynamic' | 'inline' | 'side-by-side';
-  diffViewMode?: 'single' | 'stacked';
   gitChangesViewMode?: 'flat' | 'tree';
   directoryShowHidden?: boolean;
   filesViewShowGitignored?: boolean;
@@ -1039,6 +1042,12 @@ export type GitHubAuthStatus = {
   user?: GitHubUserSummary | null;
   scope?: string;
   accounts?: GitHubAuthAccount[];
+  ghCli?: {
+    available: boolean;
+    disabled: boolean;
+    active: boolean;
+    user?: GitHubUserSummary | null;
+  } | null;
 };
 
 export type GitHubAuthAccount = {
@@ -1046,6 +1055,7 @@ export type GitHubAuthAccount = {
   user: GitHubUserSummary;
   scope?: string;
   current?: boolean;
+  source?: 'oauth' | 'gh-cli';
 };
 
 export type GitHubDeviceFlowStart = {
@@ -1068,6 +1078,7 @@ export interface GitHubAPI {
   authComplete(deviceCode: string): Promise<GitHubDeviceFlowComplete>;
   authDisconnect(): Promise<{ removed: boolean }>;
   authActivate(accountId: string): Promise<GitHubAuthStatus>;
+  authSetGhCliDisabled(disabled: boolean): Promise<{ disabled: boolean }>;
   me?(): Promise<GitHubUserSummary>;
 
   prStatus(directory: string, branch: string, remote?: string, options?: { force?: boolean }): Promise<GitHubPullRequestStatus>;

@@ -1322,7 +1322,7 @@ export const TunnelSettings: React.FC = () => {
       {(
         <section className="space-y-4 px-2 pb-2 pt-0">
           <div className="space-y-3">
-            <div className="space-y-1.5">
+            <div data-settings-item="tunnel.provider" className="space-y-1.5">
               <p className="typography-ui-label text-foreground">{t('settings.openchamber.tunnel.field.provider')}</p>
               <Select
                 value={tunnelProvider}
@@ -1353,7 +1353,7 @@ export const TunnelSettings: React.FC = () => {
               </Select>
             </div>
 
-            <div className="space-y-1.5">
+            <div data-settings-item="tunnel.type" className="space-y-1.5">
               <p className="typography-ui-label text-foreground">{t('settings.openchamber.tunnel.field.tunnelType')}</p>
               <div className="flex flex-wrap items-center gap-1">
                 {tunnelModeOptions.map((option) => (
@@ -1381,7 +1381,7 @@ export const TunnelSettings: React.FC = () => {
             </div>
           </div>
 
-          <div className="mt-2 grid grid-cols-1 gap-2 py-1.5 md:grid-cols-[14rem_auto] md:gap-x-8 md:gap-y-2">
+          <div data-settings-item="tunnel.ttl" className="mt-2 grid grid-cols-1 gap-2 py-1.5 md:grid-cols-[14rem_auto] md:gap-x-8 md:gap-y-2">
             <div className="flex min-w-0 items-center gap-2">
               <span className="typography-ui-label shrink-0 text-foreground">{t('settings.openchamber.tunnel.field.connectLinkTtl')}</span>
               <Select
@@ -1446,7 +1446,7 @@ export const TunnelSettings: React.FC = () => {
           )}
 
           {tunnelMode === 'managed-remote' && (
-            <div className="space-y-2 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-3">
+            <div data-settings-item="tunnel.managed-remote" className="space-y-2 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-3">
               {typeof suggestedConnectorPort === 'number' && (
                 <div className="rounded-md border border-[var(--status-info-border)] bg-[var(--status-info-background)]/35 px-2 py-1.5">
                   <p className="typography-meta text-[var(--status-info)]">
@@ -1657,7 +1657,7 @@ export const TunnelSettings: React.FC = () => {
           )}
 
           {tunnelMode === 'managed-local' && (
-            <div className="space-y-2 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-3">
+            <div data-settings-item="tunnel.managed-local-config" className="space-y-2 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-3">
               <div className="space-y-1.5">
                 <p className="typography-ui-label text-foreground">{t('settings.openchamber.tunnel.field.configurationFile')}</p>
                 <input
@@ -1722,7 +1722,7 @@ export const TunnelSettings: React.FC = () => {
           )}
 
           {!isSelectedModeTunnelReady && (
-            <div className="space-y-6">
+            <div data-settings-item="tunnel.start" className="space-y-6">
               <div className="rounded-lg border border-[var(--status-info-border)] bg-[var(--status-info-background)] p-3">
                 <div className="flex items-start gap-2">
                   <Icon name="information" className="mt-0.5 size-4 shrink-0 text-[var(--status-info)]" />
@@ -1832,7 +1832,7 @@ export const TunnelSettings: React.FC = () => {
       )}
 
       {isSelectedModeTunnelReady && tunnelInfo && (
-        <section className="space-y-4 px-2 pb-2 pt-0">
+        <section data-settings-item="tunnel.start" className="space-y-4 px-2 pb-2 pt-0">
           <div className="space-y-3">
             <div className="flex items-center gap-2">
               <div className="size-2 shrink-0 rounded-full bg-[var(--status-success)]" />

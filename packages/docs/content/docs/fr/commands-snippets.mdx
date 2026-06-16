@@ -1,0 +1,39 @@
+---
+title: Commandes et snippets
+description: Créez des commandes slash et snippets de texte réutilisables pour le chat.
+---
+
+# Commandes et snippets
+
+Les commandes et les snippets vous évitent de retaper la même chose. Les commandes sont des prompts complets que vous déclenchez avec `/` ; les snippets sont des morceaux de texte que vous insérez dans un message avec `#`.
+
+## Commandes
+
+Une commande est un prompt enregistré que vous lancez avec un slash, comme `/review`. Gérez-les dans **Paramètres → Commandes**.
+
+1. Ouvrez **Paramètres → Commandes** et créez une commande.
+2. Donnez-lui un nom, une description et le texte de prompt qu’elle doit envoyer.
+3. Épinglez-la éventuellement à un agent ou modèle précis.
+4. Choisissez un scope personnel ou projet.
+
+Dans le chat, tapez `/` comme **premier** caractère du message pour afficher les commandes, puis choisissez-en une. Votre texte peut utiliser des placeholders :
+
+- `$ARGUMENTS` — tout ce que vous tapez après la commande
+- `@filename` — insère le contenu d’un fichier
+- `` !`command` `` — insère la sortie d’une commande shell
+
+Les commandes intégrées `init` et `review` peuvent être réinitialisées mais pas supprimées.
+
+## Snippets
+
+Un snippet est un texte réutilisable que vous référencez inline avec un hashtag, comme `#signoff`. Gérez-les dans **Paramètres → Snippets**.
+
+1. Ouvrez **Paramètres → Snippets** et créez un snippet.
+2. Donnez-lui un nom et le texte qu’il représente. Ajoutez des alias si vous voulez plusieurs déclencheurs.
+3. Choisissez un scope personnel ou projet.
+
+Dans le chat, tapez `#` et choisissez un snippet. OpenChamber remplace ce raccourci par le texte complet avant l’envoi.
+
+## Pages liées
+
+- [Skills](/skills/) — charger de plus grands ensembles d’instructions à la demande

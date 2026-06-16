@@ -1,5 +1,4 @@
 import type { ChatMessageEntry } from './types';
-import { TURN_WINDOW_DEFAULTS } from './constants';
 
 const resolveMessageRole = (message: ChatMessageEntry): string => {
     const role = (message.info as { clientRole?: string | null; role?: string | null }).clientRole ?? message.info.role;
@@ -202,47 +201,4 @@ export const buildTurnWindowModel = (messages: ChatMessageEntry[]): TurnWindowMo
         messageToTurnIndex,
         turnCount: turnIds.length,
     };
-};
-
-export const getInitialTurnStart = (
-    turnCount: number,
-    initialTurns = TURN_WINDOW_DEFAULTS.initialTurns,
-): number => {
-    if (turnCount <= 0) {
-        return 0;
-    }
-    return turnCount > initialTurns ? turnCount - initialTurns : 0;
-};
-
-export const clampTurnStart = (turnStart: number, turnCount: number): number => {
-    if (turnCount <= 0) {
-        return 0;
-    }
-    if (turnStart <= 0) {
-        return 0;
-    }
-    return Math.min(turnStart, turnCount - 1);
-};
-
-export const getTurnWindowSliceStart = (
-    model: Pick<TurnWindowModel, 'turnMessageStartIndexes'>,
-    turnStart: number,
-): number => {
-    if (turnStart <= 0) {
-        return 0;
-    }
-    const from = model.turnMessageStartIndexes[turnStart];
-    return typeof from === 'number' ? from : 0;
-};
-
-export const windowMessagesByTurn = (
-    messages: ChatMessageEntry[],
-    model: Pick<TurnWindowModel, 'turnMessageStartIndexes'>,
-    turnStart: number,
-): ChatMessageEntry[] => {
-    const sliceStart = getTurnWindowSliceStart(model, turnStart);
-    if (sliceStart <= 0) {
-        return messages;
-    }
-    return messages.slice(sliceStart);
 };
