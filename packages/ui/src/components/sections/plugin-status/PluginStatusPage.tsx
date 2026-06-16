@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useInputStore } from '@/sync/input-store';
@@ -126,22 +126,49 @@ export function PluginStatusPage({ onClose, showHeader = true }: PluginStatusPag
 
   const title = t('settings.pluginStatus.title');
 
+  const statusCounts = useMemo(() => {
+    return items.reduce(
+      (acc, item) => {
+        acc[item.status] = (acc[item.status] || 0) + 1;
+        return acc;
+      },
+      { ok: 0, warning: 0, error: 0 } as Record<PluginStatus, number>,
+    );
+  }, [items]);
 
-  const header = showHeader ? (
+const header = showHeader ? (
     <header className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
+      <div className="flex items-baseline gap-3">
       <h1 className="text-lg font-semibold">{title}</h1>
-      {onClose && (
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-md p-1.5 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
-          aria-label={t('settings.view.actions.closeSettings')}
-        >
-          <Icon name="close" className="h-5 w-5" />
-        </button>
-      )}
-    </header>
-  ) : null;
+        {items.length > 0 && (
+          <div className="flex items-center gap-3 text-sm text-[var(--muted-foreground)]">
+            <span className="flex items-center gap-1">
+              <span className="inline-block h-2 w-2 rounded-full bg-[var(--status-success)]" />
+              {statusCounts.ok}
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="inline-block h-2 w-2 rounded-full bg-[var(--status-warning)]" />
+              {statusCounts.warning}
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="inline-block h-2 w-2 rounded-full bg-[var(--status-error)]" />
+              {statusCounts.error}
+            </span>
+          </div>
+        )}
+      </div>
+{onClose && (
+<button
+type="button"
+onClick={onClose}
+className="rounded-md p-1.5 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+aria-label={t('settings.view.actions.closeSettings')}
+>
+<Icon name="close" className="h-5 w-5" />
+</button>
+)}
+</header>
+) : null;
 
   if (loading) {
     return (
