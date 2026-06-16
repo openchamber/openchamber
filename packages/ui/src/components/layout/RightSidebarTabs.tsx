@@ -171,6 +171,7 @@ export const RightSidebarTabs: React.FC = () => {
     () => (hiddenRightTab ? tabItems.filter((item) => item.id !== hiddenRightTab) : tabItems),
     [tabItems, hiddenRightTab]
   );
+  const isRightGitTabActive = isRightSidebarOpen && rightSidebarTab === 'git' && hiddenRightTab !== 'git';
 
   const handleTabSelect = React.useCallback(
     (tabID: string) => {
@@ -196,7 +197,7 @@ export const RightSidebarTabs: React.FC = () => {
 
       <div className="min-h-0 flex-1 overflow-hidden">
         <div className={cn('h-full', rightSidebarTab !== 'git' && 'hidden')}>
-          <GitView />
+          <GitView isActive={isRightGitTabActive} />
         </div>
         <div className={cn('h-full', rightSidebarTab !== 'files' && 'hidden')}>
           <SidebarFilesTree />

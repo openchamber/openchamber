@@ -194,7 +194,11 @@ const isUnstagedStatusFile = (file: GitStatus['files'][number]): boolean => {
   return Boolean(workingStatus || indexStatus === '?');
 };
 
-export const GitView: React.FC = () => {
+type GitViewProps = {
+  isActive: boolean;
+};
+
+export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   const { t } = useI18n();
   const { git } = useRuntimeAPIs();
   const currentDirectory = useEffectiveDirectory();
@@ -300,17 +304,6 @@ export const GitView: React.FC = () => {
   const openContextDiff = useUIStore((state) => state.openContextDiff);
   const navigateToDiff = useUIStore((state) => state.navigateToDiff);
   const setRightSidebarOpen = useUIStore((state) => state.setRightSidebarOpen);
-  const isRightSidebarOpen = useUIStore((state) => state.isRightSidebarOpen);
-  const rightSidebarTab = useUIStore((state) => state.rightSidebarTab);
-  const activeMainTab = useUIStore((state) => state.activeMainTab);
-
-  // This instance is the visible consumer when it sits in the secondaryView
-  // for main tab 'git', or in the right sidebar with right tab 'git'. The
-  // right-sidebar tab 'git' is hidden (and snapped to 'files') whenever the
-  // main tab is 'git' (see RightSidebarTabs), so these two cases are
-  // mutually exclusive after P1.1.
-  const isGitViewActive = activeMainTab === 'git'
-    || (isRightSidebarOpen && rightSidebarTab === 'git');
 
   const previousBootstrapStatusRef = React.useRef<'pending' | 'ready' | 'failed' | null>(null);
   const gitReconcileTimeoutRef = React.useRef<number | null>(null);
@@ -419,7 +412,7 @@ export const GitView: React.FC = () => {
   React.useEffect(() => clearScheduledGitMutationFlush, [clearScheduledGitMutationFlush]);
 
   React.useEffect(() => {
-    if (!isGitViewActive) return;
+    if (!isActive) return;
     if (!currentDirectory) {
       setWorktreeBootstrapStatus(null);
       setIsWaitingForGitRefreshAfterBootstrap(false);
@@ -456,7 +449,7 @@ export const GitView: React.FC = () => {
         window.clearTimeout(timeoutId);
       }
     };
-  }, [isGitViewActive, currentDirectory]);
+  }, [isActive, currentDirectory]);
 
   React.useEffect(() => {
     const previous = previousBootstrapStatusRef.current;
@@ -795,14 +788,14 @@ export const GitView: React.FC = () => {
   }, [commitMessage, currentDirectory, generatedHighlights]);
 
   React.useEffect(() => {
-    if (!isGitViewActive) return;
+    if (!isActive) return;
     loadProfiles();
     loadGlobalIdentity();
     loadDefaultGitIdentityId();
-  }, [isGitViewActive, loadProfiles, loadGlobalIdentity, loadDefaultGitIdentityId]);
+  }, [isActive, loadProfiles, loadGlobalIdentity, loadDefaultGitIdentityId]);
 
   React.useEffect(() => {
-    if (!isGitViewActive) return;
+    if (!isActive) return;
     if (!currentDirectory || !git?.getRemoteUrl) {
       setRemoteUrl(null);
       return;
@@ -813,7 +806,7 @@ export const GitView: React.FC = () => {
       .then((url) => { if (!cancelled) setRemoteUrl(url); })
       .catch(() => { if (!cancelled) setRemoteUrl(null); });
     return () => { cancelled = true; };
-  }, [isGitViewActive, currentDirectory, git]);
+  }, [isActive, currentDirectory, git]);
 
   const refreshRemotes = React.useCallback(async () => {
     if (!currentDirectory || !git?.getRemotes) {
@@ -833,20 +826,20 @@ export const GitView: React.FC = () => {
   }, [currentDirectory, git]);
 
   React.useEffect(() => {
-    if (!isGitViewActive) return;
+    if (!isActive) return;
     void refreshRemotes();
-  }, [isGitViewActive, refreshRemotes]);
+  }, [isActive, refreshRemotes]);
 
   React.useEffect(() => {
-    if (!isGitViewActive) return;
+    if (!isActive) return;
     if (currentDirectory) {
       setActiveDirectory(currentDirectory);
       void ensureAll(currentDirectory, git);
     }
-  }, [isGitViewActive, currentDirectory, setActiveDirectory, ensureAll, git]);
+  }, [isActive, currentDirectory, setActiveDirectory, ensureAll, git]);
 
   React.useEffect(() => {
-    if (!isGitViewActive) return;
+    if (!isActive) return;
     if (!currentDirectory) {
       return;
     }
@@ -857,7 +850,7 @@ export const GitView: React.FC = () => {
       }
       void fetchStatus(currentDirectory, git);
     });
-  }, [isGitViewActive, currentDirectory, fetchStatus, git]);
+  }, [isActive, currentDirectory, fetchStatus, git]);
 
   const refreshStatusAndBranches = React.useCallback(
     async (showErrors = true) => {
@@ -890,7 +883,7 @@ export const GitView: React.FC = () => {
   }, [currentDirectory, git, fetchIdentity]);
 
   React.useEffect(() => {
-    if (!isGitViewActive) return;
+    if (!isActive) return;
     if (!currentDirectory) return;
     if (!git?.hasLocalIdentity) return;
     if (isGitRepo !== true) return;
@@ -927,7 +920,7 @@ export const GitView: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [isGitViewActive, beginIdentityApply, currentDirectory, defaultGitIdentityId, endIdentityApply, git, isGitRepo, refreshIdentity]);
+  }, [isActive, beginIdentityApply, currentDirectory, defaultGitIdentityId, endIdentityApply, git, isGitRepo, refreshIdentity]);
 
   const changeEntries = React.useMemo(() => {
     if (!status) return [];
