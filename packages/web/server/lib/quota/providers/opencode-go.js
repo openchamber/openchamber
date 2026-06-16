@@ -150,6 +150,16 @@ export const fetchQuota = async () => {
     const parsed = parseUsageHtml(html);
     const windows = {};
 
+    if (!parsed.rolling && !parsed.weekly && !parsed.monthly) {
+      return buildResult({
+        providerId,
+        providerName,
+        ok: false,
+        configured: true,
+        error: 'Failed to parse usage data'
+      });
+    }
+
     if (parsed.rolling) {
       windows.rolling = toUsageWindow({
         usedPercent: toNumber(parsed.rolling.usagePercent),

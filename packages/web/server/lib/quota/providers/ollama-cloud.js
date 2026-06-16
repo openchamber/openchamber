@@ -106,6 +106,16 @@ export const fetchQuota = async () => {
     const html = await response.text();
     const windows = parseOllamaSettingsHtml(html);
 
+    if (Object.keys(windows).length === 0) {
+      return buildResult({
+        providerId,
+        providerName,
+        ok: false,
+        configured: true,
+        error: 'Failed to parse usage data'
+      });
+    }
+
     return buildResult({
       providerId,
       providerName,
