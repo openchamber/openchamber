@@ -188,6 +188,54 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  publish-docker-manifest:
+    needs:
+      - create-release
+      - publish-docker
+    if: ${{ github.event.inputs.dry_run != 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      REGISTRY: ghcr.io
+    steps:
+      - name: Derive image name
+        id: image
+        shell: bash
+        run: echo "name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6.1.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}
+          tags: |
+            type=semver,pattern={{version}},value=v${{ needs.create-release.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=v${{ needs.create-release.outputs.version }}
+            type=raw,value=latest
+            type=sha,prefix=sha-
+
+      - name: Create multi-arch manifest
+        working-directory: /tmp/digests
+        shell: bash
+        run: |
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") $(printf '${{ env.REGISTRY }}/${{ steps.image.outputs.name }}@sha256:%s ' *)
+
   build-desktop-electron-macos:
     needs: create-release
     runs-on: macos-26
@@ -417,7 +465,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   finalize-release:
-    needs: [create-release, build-desktop-electron-macos, build-desktop-electron-windows, publish-npm, combine-electron-manifests, publish-docker]
+    needs: [create-release, build-desktop-electron-macos, build-desktop-electron-windows, publish-npm, combine-electron-manifests, publish-docker-manifest]
     runs-on: ubuntu-latest
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
