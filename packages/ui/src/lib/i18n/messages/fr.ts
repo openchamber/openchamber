@@ -2030,6 +2030,7 @@ export const dict = {
   'openInApp.actions.copyPath': 'Copier le chemin',
   'openInApp.actions.refreshApps': 'Actualiser les applications',
   'openInApp.toast.pathCopied': 'Chemin copié dans le presse-papiers',
+  'openInApp.toast.remoteOpenFailed': "Impossible d'ouvrir le chemin distant dans l'application",
   'projectActions.actions.addActionAria': 'Ajouter une action',
   'projectActions.actions.addAction': 'Ajouter une action',
   'projectActions.actions.addNewAction': 'Ajouter une nouvelle action',

@@ -2207,6 +2207,7 @@ export const dict: Record<I18nKey, string> = {
   'openInApp.actions.copyPath': 'パスをコピー',
   'openInApp.actions.refreshApps': 'アプリを更新',
   'openInApp.toast.pathCopied': 'パスをクリップボードにコピーしました',
+  'openInApp.toast.remoteOpenFailed': 'リモートパスをアプリで開けませんでした',
   'projectActions.actions.addActionAria': 'アクションを追加',
   'projectActions.actions.addAction': 'アクションを追加',
   'projectActions.actions.addNewAction': '新しいアクションを追加',
