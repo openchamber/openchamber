@@ -124,6 +124,7 @@ export interface TurnGroupingContext {
     diffStats?: TurnDiffStats;
     changedFiles?: TurnChangedFile[];
     userMessageCreatedAt?: number;
+    earliestPartStart?: number;
     userMessageVariant?: string;
     isWorking: boolean;
     isGroupExpanded?: boolean;

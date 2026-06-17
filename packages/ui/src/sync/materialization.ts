@@ -54,6 +54,16 @@ function haveEquivalentPartSnapshots(left: Part[] | undefined, right: Part[]): b
   return true
 }
 
+function getPartTimeStart(part: Part): number | undefined {
+  const stateStart = (part as { state?: { time?: { start?: unknown } } }).state?.time?.start
+  if (typeof stateStart === "number" && Number.isFinite(stateStart)) {
+    return stateStart
+  }
+
+  const timeStart = (part as { time?: { start?: unknown } }).time?.start
+  return typeof timeStart === "number" && Number.isFinite(timeStart) ? timeStart : undefined
+}
+
 function getPartEndTime(part: Part): number | undefined {
   const stateEnd = (part as { state?: { time?: { end?: unknown } } }).state?.time?.end
   if (typeof stateEnd === "number") {
@@ -77,10 +87,26 @@ function hasLiveStreamingField(part: Part): boolean {
   })
 }
 
-function mergeMaterializedPart(existing: Part | undefined, next: Part): Part {
-  if (!existing || getPartEndTime(next) !== undefined) return next
+function maybePreserveToolStart(existing: Part | undefined, next: Part): Part | undefined {
+  if (!existing || next.type !== "tool" || existing.type !== "tool") return undefined
+  const existingStart = getPartTimeStart(existing)
+  const nextStart = getPartTimeStart(next)
+  if (existingStart === undefined || nextStart !== undefined) return undefined
+  const nextState = ((next as Record<string, unknown>).state ?? {}) as Record<string, unknown>
+  const nextTime = (nextState.time ?? {}) as Record<string, unknown>
+  return {
+    ...next,
+    state: { ...nextState, time: { ...nextTime, start: existingStart } },
+  } as unknown as Part
+}
 
-  let merged: Part = next
+function mergeMaterializedPart(existing: Part | undefined, next: Part): Part {
+  const withPreservedStart = maybePreserveToolStart(existing, next)
+  if (!existing || getPartEndTime(next) !== undefined) {
+    return withPreservedStart ?? next
+  }
+
+  let merged: Part = withPreservedStart ?? next
   for (const field of STREAMING_PART_FIELDS) {
     const existingValue = getStringField(existing, field)
     if (!existingValue) continue
