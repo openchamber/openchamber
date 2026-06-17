@@ -45,8 +45,8 @@ export interface ResolveFallbackParams {
  *
  * Returns `undefined` when:
  * - Not a task tool
- * - Task is finalized
  * - Parent session is unknown
+ * - Task start time is unknown
  * - No unambiguous match found
  */
 export function resolveFallbackTaskSessionId(params: ResolveFallbackParams): string | undefined {
@@ -54,13 +54,16 @@ export function resolveFallbackTaskSessionId(params: ResolveFallbackParams): str
     isTaskTool,
     parentSessionId,
     taskStartTime,
-    isTaskFinalized = false,
     sessions,
     sessionStatusMap,
     hasRetried = false,
   } = params;
 
   if (!isTaskTool || !parentSessionId) {
+    return undefined;
+  }
+
+  if (typeof taskStartTime !== 'number') {
     return undefined;
   }
 
@@ -72,19 +75,14 @@ export function resolveFallbackTaskSessionId(params: ResolveFallbackParams): str
     return true;
   });
 
-  // When the task is still running, apply no time window — late-appearing
-  // child sessions should still match. Once finalized, restrict to sessions
-  // created within a generous window around the task start to avoid binding
-  // to stale siblings. If taskStartTime is unavailable (cross-OpenCode
-  // sessions), skip the time filter entirely.
-  if (typeof taskStartTime === 'number' && isTaskFinalized) {
-    const windowMs = hasRetried ? TASK_SESSION_MATCH_WINDOW_WIDE_MS : TASK_SESSION_MATCH_WINDOW_MS;
-    const latestAllowed = taskStartTime + windowMs;
-    candidates = candidates.filter((session) => {
-      const created = session.time?.created;
-      return typeof created === 'number' && created >= taskStartTime - 2_000 && created <= latestAllowed;
-    });
-  }
+  // Apply the time window even while running. Without it, a newly rendered task
+  // can briefly bind to the previous child session before its own child exists.
+  const windowMs = hasRetried ? TASK_SESSION_MATCH_WINDOW_WIDE_MS : TASK_SESSION_MATCH_WINDOW_MS;
+  const latestAllowed = taskStartTime + windowMs;
+  candidates = candidates.filter((session) => {
+    const created = session.time?.created;
+    return typeof created === 'number' && created >= taskStartTime && created <= latestAllowed;
+  });
 
   if (candidates.length === 0) {
     return undefined;
@@ -103,18 +101,6 @@ export function resolveFallbackTaskSessionId(params: ResolveFallbackParams): str
 
   if (liveCandidates.length === 1) {
     return liveCandidates[0].id;
-  }
-
-  // All idle: pick the most recently created child session.
-  // This handles the common case where a delegation completed and the
-  // user is viewing the task tool result inline.
-  if (liveCandidates.length === 0 && candidates.length > 1) {
-    const sorted = [...candidates].sort((a, b) => {
-      const aCreated = typeof a.time?.created === 'number' ? a.time.created : 0;
-      const bCreated = typeof b.time?.created === 'number' ? b.time.created : 0;
-      return bCreated - aCreated;
-    });
-    return sorted[0].id;
   }
 
   // Ambiguous — do not guess
