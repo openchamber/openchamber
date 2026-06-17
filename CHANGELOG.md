@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Chat: tool-call duration now shows real elapsed time past 5 minutes instead of freezing at 300s.
+
 ## [1.13.1] - 2026-06-17
 
 - Chat: inline math delimiters no longer incorrectly treat currency amounts like `$50` as LaTeX math expressions — only `$$...$$` display math and `\(...\)` inline math are recognized.
