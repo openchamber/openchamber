@@ -3,6 +3,7 @@ import type { Part } from '@opencode-ai/sdk/v2';
 
 import UserTextPart from './parts/UserTextPart';
 import ToolPart from './parts/ToolPart';
+
 import AssistantTextPart from './parts/AssistantTextPart';
 import ReasoningPart, { MergedReasoningPart } from './parts/ReasoningPart';
 import { MessageFilesDisplay } from '../FileAttachment';
@@ -10,6 +11,7 @@ import { TurnChangedFilesDropdown } from '../TurnChangedFilesDropdown';
 import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
 import type { StreamPhase, ToolPopupContent, AgentMentionInfo } from './types';
 import type { TurnChangedFile, TurnGroupingContext } from '../lib/turns/types';
+import { computeTpsText, computeTtftText } from './metricsUtils';
 import { cn } from '@/lib/utils';
 import { isEmptyTextPart, extractTextContent } from './partUtils';
 import { FadeInOnReveal } from './FadeInOnReveal';
@@ -336,6 +338,7 @@ interface MessageBodyProps {
     messageFinish?: string;
     messageCompletedAt?: number;
     messageCreatedAt?: number;
+    outputTokens?: number;
 
 
     isMobile: boolean;
@@ -948,6 +951,7 @@ const AssistantMessageBody = React.memo(({
     messageFinish,
     messageCompletedAt,
     messageCreatedAt,
+    outputTokens,
 
     isMobile,
     alwaysShowActions,
@@ -1875,6 +1879,17 @@ const AssistantMessageBody = React.memo(({
         return formatTurnDuration(messageCompletedAt - userCreatedAt);
     }, [isLastAssistantInTurn, hasStopFinish, turnGroupingContext?.userMessageCreatedAt, messageCompletedAt]);
 
+    const tpsText = React.useMemo(() => {
+        if (!isLastAssistantInTurn || !hasStopFinish) return undefined;
+        if (typeof outputTokens !== 'number') return undefined;
+        return computeTpsText(visibleParts, outputTokens);
+    }, [isLastAssistantInTurn, hasStopFinish, visibleParts, outputTokens]);
+
+    const ttftText = React.useMemo(() => {
+        if (!isLastAssistantInTurn || !hasStopFinish) return undefined;
+        return computeTtftText(turnGroupingContext?.earliestPartStart, turnGroupingContext?.userMessageCreatedAt);
+    }, [isLastAssistantInTurn, hasStopFinish, turnGroupingContext?.earliestPartStart, turnGroupingContext?.userMessageCreatedAt]);
+
     const footerTimestamp = React.useMemo(() => {
         void locale;
         const timestamp = typeof messageCompletedAt === 'number' && messageCompletedAt > 0
@@ -2050,37 +2065,61 @@ const AssistantMessageBody = React.memo(({
                             {messageActionButtons}
                             {finalTurnActionButtons}
                         </div>
-                        {turnDurationText ? (
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <span className="text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1">
-                                        <Icon name="hourglass" className="h-3.5 w-3.5" />
-                                        <span className="message-footer__label">{turnDurationText}</span>
-                                    </span>
-                                </TooltipTrigger>
-                                <TooltipContent>{turnDurationText}</TooltipContent>
-                            </Tooltip>
-                        ) : null}
-                        {footerTimestamp ? (
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <span
-                                        className={footerTimestampClassName}
-                                        aria-label={`Message time: ${footerTimestamp}`}
-                                    >
-                                        <Icon name="time" className="h-3.5 w-3.5" />
-                                        <span className="message-footer__label">{footerTimestamp}</span>
-                                    </span>
-                                </TooltipTrigger>
-                                <TooltipContent>{footerTimestamp}</TooltipContent>
-                            </Tooltip>
-                        ) : null}
-                        {!isMiniChatSurface && isLastAssistantInTurn && hasStopFinish ? (
-                            <TurnChangedFilesDropdown activityParts={turnGroupingContext?.activityParts} />
-                        ) : null}
-                        {!isMiniChatSurface && isLastAssistantInTurn && hasStopFinish ? (
-                            <TurnChangedFilePills files={turnGroupingContext?.changedFiles} />
-                        ) : null}
+                        <div className="flex items-center gap-1.5">
+                            {turnDurationText ? (
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <span className="text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1" aria-label={t('chat.messageBody.footer.totalTimeAria', { value: turnDurationText })}>
+                                            <Icon name="hourglass" className="h-3.5 w-3.5" />
+                                            <span className="message-footer__label">{turnDurationText}</span>
+                                        </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent sideOffset={6}>{t('chat.messageBody.footer.totalTime')}</TooltipContent>
+                                </Tooltip>
+                            ) : null}
+                            {tpsText ? (
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <span className="text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1" aria-label={t('chat.messageBody.footer.tpsAria', { value: tpsText })}>
+                                            <Icon name="pulse" className="h-3.5 w-3.5" />
+                                            <span className="message-footer__label">{tpsText}</span>
+                                        </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent sideOffset={6}>{t('chat.messageBody.footer.tps')}</TooltipContent>
+                                </Tooltip>
+                            ) : null}
+                            {ttftText ? (
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <span className="text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1" aria-label={t('chat.messageBody.footer.ttftAria', { value: ttftText })}>
+                                            <Icon name="flashlight" className="h-3.5 w-3.5" />
+                                            <span className="message-footer__label">{ttftText}</span>
+                                        </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent sideOffset={6}>{t('chat.messageBody.footer.ttft')}</TooltipContent>
+                                </Tooltip>
+                            ) : null}
+                            {footerTimestamp ? (
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <span
+                                            className={footerTimestampClassName}
+                                            aria-label={t('chat.messageBody.footer.completedAtAria', { value: footerTimestamp })}
+                                        >
+                                            <Icon name="time" className="h-3.5 w-3.5" />
+                                            <span className="message-footer__label">{footerTimestamp}</span>
+                                        </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent sideOffset={6}>{t('chat.messageBody.footer.completedAt')}</TooltipContent>
+                                </Tooltip>
+                            ) : null}
+                            {!isMiniChatSurface && isLastAssistantInTurn && hasStopFinish ? (
+                                <TurnChangedFilesDropdown activityParts={turnGroupingContext?.activityParts} />
+                            ) : null}
+                            {!isMiniChatSurface && isLastAssistantInTurn && hasStopFinish ? (
+                                <TurnChangedFilePills files={turnGroupingContext?.changedFiles} />
+                            ) : null}
+                        </div>
                     </div>
                 )}
 

@@ -19,6 +19,7 @@ import { normalizeParts } from './message/partUtils';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { getReviewTransferDirection, type ReviewTransferDirection } from '@/lib/reviewFlow';
 import { getOriginalSessionID, getReviewSessionID } from '@/lib/sessionReviewMetadata';
+import { computeEarliestPartStart } from './message/metricsUtils';
 
 const MESSAGE_LIST_VIRTUALIZE_THRESHOLD = 5;
 const EMPTY_STATIC_ENTRY_MESSAGES: ChatMessageEntry[] = [];
@@ -708,6 +709,11 @@ const TurnBlock = React.memo(({
             .filter((segment): segment is NonNullable<typeof segment> => segment !== null);
     }, [chatRenderMode, visibleActivityMessageIdSet, turn.activitySegments, turn.assistantMessages.length]);
 
+    const earliestPartStart = React.useMemo(
+        () => computeEarliestPartStart(turn.assistantMessages),
+        [turn.assistantMessages],
+    );
+
     const turnGroupingContextBase = React.useMemo(() => {
         const userCreatedAt = (turn.userMessage.info.time as { created?: number } | undefined)?.created;
         // OpenCode 1.4.0 moved variant from top-level to model.variant on UserMessage.
@@ -728,9 +734,10 @@ const TurnBlock = React.memo(({
             diffStats: turn.diffStats,
             changedFiles: turn.changedFiles,
             userMessageCreatedAt: typeof userCreatedAt === 'number' ? userCreatedAt : undefined,
+            earliestPartStart,
             userMessageVariant,
         };
-    }, [turn.changedFiles, turn.diffStats, turn.hasReasoning, turn.hasTools, turn.headerMessageId, turn.summaryText, turn.turnId, turn.userMessage.info, visibleActivityParts, visibleActivitySegments]);
+    }, [turn.changedFiles, turn.diffStats, turn.hasReasoning, turn.hasTools, turn.headerMessageId, turn.summaryText, turn.turnId, turn.userMessage.info, visibleActivityParts, visibleActivitySegments, earliestPartStart]);
 
     const renderMessage = React.useCallback(
         (message: ChatMessageEntry) => {
@@ -780,6 +787,7 @@ const TurnBlock = React.memo(({
                         diffStats: turnGroupingContextBase.diffStats,
                         changedFiles: turnGroupingContextBase.changedFiles,
                         userMessageCreatedAt: turnGroupingContextBase.userMessageCreatedAt,
+                        earliestPartStart: turnGroupingContextBase.earliestPartStart,
                         userMessageVariant: turnGroupingContextBase.userMessageVariant,
                         isGroupExpanded: turnUiState.isExpanded,
                         toggleGroup: handleToggleTurnGroup,

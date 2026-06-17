@@ -122,6 +122,111 @@ describe("materializeSessionSnapshots", () => {
 
     expect(result.part.msg_1).toEqual([serverPart])
   })
+
+  test("preserves tool part state.time.start when snapshot has state.time.end but no start", () => {
+    const localTool = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      callID: "call_1",
+      tool: "bash",
+      state: { status: "completed", time: { start: 2000, end: 32000 } },
+    } as Part
+    const snapshotTool = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      callID: "call_1",
+      tool: "bash",
+      state: { status: "completed", time: { end: 32000 } },
+    } as Part
+    const state = {
+      message: { ses_1: [message("msg_1")] },
+      part: { msg_1: [localTool] },
+    }
+
+    const result = materializeSessionSnapshots(
+      state,
+      "ses_1",
+      [{ info: message("msg_1"), parts: [snapshotTool] }],
+    )
+
+    expect(result.partsChanged).toBe(true)
+    const merged = result.part.msg_1[0] as { state?: { time?: { start?: number; end?: number } } }
+    expect(merged.state?.time?.start).toBe(2000)
+    expect(merged.state?.time?.end).toBe(32000)
+  })
+
+  test("uses snapshot start time when both local and snapshot have state.time.start", () => {
+    const localTool = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      callID: "call_1",
+      tool: "bash",
+      state: { status: "completed", time: { start: 2000, end: 32000 } },
+    } as Part
+    const snapshotTool = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      callID: "call_1",
+      tool: "bash",
+      state: { status: "completed", time: { start: 5000, end: 32000 } },
+    } as Part
+    const state = {
+      message: { ses_1: [message("msg_1")] },
+      part: { msg_1: [localTool] },
+    }
+
+    const result = materializeSessionSnapshots(
+      state,
+      "ses_1",
+      [{ info: message("msg_1"), parts: [snapshotTool] }],
+    )
+
+    const merged = result.part.msg_1[0] as { state?: { time?: { start?: number } } }
+    expect(merged.state?.time?.start).toBe(5000)
+  })
+
+  test("preserves tool part state.time.start for running tool snapshot without end time", () => {
+    const localTool = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      callID: "call_1",
+      tool: "bash",
+      state: { status: "running", time: { start: 2000 }, input: {} },
+      output: "partial output",
+    } as unknown as Part
+    const snapshotTool = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      callID: "call_1",
+      tool: "bash",
+      state: { status: "running", input: {} },
+    } as unknown as Part
+    const state = {
+      message: { ses_1: [message("msg_1")] },
+      part: { msg_1: [localTool] },
+    }
+
+    const result = materializeSessionSnapshots(
+      state,
+      "ses_1",
+      [{ info: message("msg_1"), parts: [snapshotTool] }],
+    )
+
+    const merged = result.part.msg_1[0] as { state?: { time?: { start?: number } } }
+    expect(merged.state?.time?.start).toBe(2000)
+  })
 })
 
 describe("getSessionMaterializationStatus", () => {
