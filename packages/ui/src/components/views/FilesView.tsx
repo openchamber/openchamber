@@ -46,7 +46,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { cn, getModifierLabel, getRevealLabelKey, hasModifier } from '@/lib/utils';
 import { getLanguageFromExtension, getImageMimeType, isDrawioFile, isImageFile, isPdfFile } from '@/lib/toolHelpers';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
-import { refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
+import { clearRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { getOutsideFileGrant } from '@/lib/outsideFileGrants';
 import { DiagramEditor } from '@/components/diagram';
@@ -853,6 +853,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [imageAssetAuthReadyKey, setImageAssetAuthReadyKey] = React.useState('');
   const [htmlAssetAuthReadyKey, setHtmlAssetAuthReadyKey] = React.useState('');
   const [pdfAssetAuthReadyKey, setPdfAssetAuthReadyKey] = React.useState('');
+
+  const [htmlPreviewNonce, setHtmlPreviewNonce] = React.useState(0);
 
   const [loadedFilePath, setLoadedFilePath] = React.useState<string | null>(null);
 
@@ -2909,20 +2911,29 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     let cancelled = false;
     setHtmlAssetAuthReadyKey('');
-    void refreshRuntimeUrlAuthToken(getRuntimeApiBaseUrl())
-      .then((token) => {
-        if (!cancelled && token) {
-          setHtmlAssetAuthReadyKey(htmlAssetAuthKey);
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setFileError(error instanceof Error ? error.message : t('filesView.error.readFileFailed'));
-        }
-      });
+
+    const refreshToken = () => {
+      clearRuntimeUrlAuthToken();
+      void refreshRuntimeUrlAuthToken(getRuntimeApiBaseUrl())
+        .then((token) => {
+          if (!cancelled && token) {
+            setHtmlAssetAuthReadyKey(htmlAssetAuthKey);
+            setHtmlPreviewNonce((n) => n + 1);
+          }
+        })
+        .catch((error) => {
+          if (!cancelled) {
+            setFileError(error instanceof Error ? error.message : t('filesView.error.readFileFailed'));
+          }
+        });
+    };
+
+    refreshToken();
+    const id = setInterval(refreshToken, 45_000);
 
     return () => {
       cancelled = true;
+      clearInterval(id);
     };
   }, [htmlAssetAuthKey, t]);
 
@@ -3834,6 +3845,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                   if (!basePath) return fileContent;
                   return fileContent.replace(/<head([^>]*)>/i, `<head$1><base href="${basePath}">`);
                 })() : undefined}
+                key={htmlPreviewNonce}
                 className="w-full h-full border-none"
                 sandbox="allow-scripts allow-same-origin allow-forms"
                 title={t('filesView.editor.htmlPreviewTitle')}
