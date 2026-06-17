@@ -362,6 +362,129 @@ export const isDesktopLocalOriginActive = (): boolean => {
   return Boolean(currentUrl && isLoopbackHost(currentUrl.hostname));
 };
 
+export const isDesktopLoopbackOrigin = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  if (!isElectronShell()) return false;
+  if (getRuntimeKey() === 'local') return true;
+  const currentUrl = parseUrl(window.location.origin);
+  return Boolean(currentUrl && isLoopbackHost(currentUrl.hostname));
+};
+
+let _remoteSshCache: { value: boolean; checkedAt: number } | null = null;
+let _remoteSshPending = false;
+let _remoteSshContextPromise: Promise<SshContext | null> | null = null;
+const REMOTE_SSH_CACHE_TTL_MS = 10_000;
+
+const _remoteSshSubscribers = new Set<() => void>();
+
+const notifyRemoteSshSubscribers = () => {
+  _remoteSshSubscribers.forEach((fn) => {
+    try { fn(); } catch {
+      // subscriber error is swallowed
+    }
+  });
+};
+
+export const subscribeRemoteSshActive = (callback: () => void): (() => void) => {
+  _remoteSshSubscribers.add(callback);
+  return () => { _remoteSshSubscribers.delete(callback); };
+};
+
+export const getRemoteSshSnapshot = (): boolean => {
+  return _remoteSshCache?.value ?? false;
+};
+
+export const invalidateRemoteSshCache = (): void => {
+  _remoteSshCache = { value: false, checkedAt: Date.now() };
+  _remoteSshPending = false;
+  _remoteSshContextPromise = null;
+  notifyRemoteSshSubscribers();
+};
+
+export const isRemoteSshActive = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  if (!isDesktopShell()) return false;
+  if (isDesktopLocalOriginActive()) return false;
+
+  const currentUrl = parseUrl(window.location.origin);
+  if (!currentUrl || !isLoopbackHost(currentUrl.hostname)) {
+    _remoteSshCache = { value: false, checkedAt: Date.now() };
+    return false;
+  }
+
+  // Return cached result within TTL
+  if (_remoteSshCache && (Date.now() - _remoteSshCache.checkedAt) < REMOTE_SSH_CACHE_TTL_MS) {
+    return _remoteSshCache.value;
+  }
+
+  // Initial heuristic: a non-local loopback origin is likely an SSH
+  // tunnel. Eagerly verify against the main process; subscribers are
+  // notified on completion so React can re-render with the verified
+  // result.
+  _remoteSshCache = { value: true, checkedAt: Date.now() };
+
+  if (_remoteSshPending) {
+    return true;
+  }
+  _remoteSshPending = true;
+
+  const contextPromise = getActiveSshContext();
+  _remoteSshContextPromise = contextPromise;
+  const timeoutPromise = new Promise<SshContext | null>((resolve) => {
+    setTimeout(() => resolve(null), 5000);
+  });
+
+  Promise.race([contextPromise, timeoutPromise]).then((ctx) => {
+    _remoteSshCache = { value: ctx !== null, checkedAt: Date.now() };
+    _remoteSshPending = false;
+    _remoteSshContextPromise = null;
+    notifyRemoteSshSubscribers();
+  }).catch(() => {
+    _remoteSshCache = { value: false, checkedAt: Date.now() };
+    _remoteSshPending = false;
+    _remoteSshContextPromise = null;
+    notifyRemoteSshSubscribers();
+  });
+
+  return true;
+};
+
+export const isOpenInAppAvailable = (): boolean => {
+  if (!isElectronShell()) return false;
+  return isDesktopLocalOriginActive() || isRemoteSshActive();
+};
+
+export type SshContext = {
+  host: string;
+  port: number;
+  instanceId: string;
+};
+
+export const getActiveSshContext = async (): Promise<SshContext | null> => {
+  if (!isElectronShell()) return null;
+
+  if (_remoteSshContextPromise) return _remoteSshContextPromise;
+
+  try {
+    const result = await invokeDesktop('desktop_get_active_ssh_info', {
+      origin: window.location.origin,
+    });
+    if (result && typeof result === 'object') {
+      const ctx = result as { host?: string; port?: number; instanceId?: string };
+      if (typeof ctx.host === 'string' && ctx.host.length > 0) {
+        return {
+          host: ctx.host,
+          port: typeof ctx.port === 'number' ? ctx.port : 22,
+          instanceId: typeof ctx.instanceId === 'string' ? ctx.instanceId : '',
+        };
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+};
+
 export const isDesktopShell = (): boolean => {
   if (typeof window === 'undefined') return false;
   return isElectronShell();
@@ -760,6 +883,127 @@ export const openDesktopFileInApp = async (
   }
 };
 
+export const openDesktopRemoteProjectInApp = async (
+  projectPath: string,
+  appId: string,
+  appName: string,
+): Promise<boolean> => {
+  if (!isElectronShell() || !isRemoteSshActive()) {
+    return false;
+  }
+
+  const trimmedProjectPath = projectPath?.trim();
+  const trimmedAppId = appId?.trim();
+  const trimmedAppName = appName?.trim();
+
+  if (!trimmedProjectPath || !trimmedAppId || !trimmedAppName) {
+    return false;
+  }
+
+  try {
+    await invokeDesktop('desktop_open_remote_in_app', {
+      projectPath: trimmedProjectPath,
+      appId: trimmedAppId,
+      appName: trimmedAppName,
+      origin: window.location.origin,
+    });
+    return true;
+  } catch (error) {
+    console.warn('Failed to open remote project in app', error);
+    invalidateRemoteSshCache();
+    return false;
+  }
+};
+
+export const openDesktopRemoteFileInApp = async (
+  filePath: string,
+  appId: string,
+  appName: string,
+): Promise<boolean> => {
+  if (!isElectronShell() || !isRemoteSshActive()) {
+    return false;
+  }
+
+  const trimmedFilePath = filePath?.trim();
+  const trimmedAppId = appId?.trim();
+  const trimmedAppName = appName?.trim();
+
+  if (!trimmedFilePath || !trimmedAppId || !trimmedAppName) {
+    return false;
+  }
+
+  try {
+    await invokeDesktop('desktop_open_remote_file_in_app', {
+      filePath: trimmedFilePath,
+      appId: trimmedAppId,
+      appName: trimmedAppName,
+      origin: window.location.origin,
+    });
+    return true;
+  } catch (error) {
+    console.warn('Failed to open remote file in app', error);
+    invalidateRemoteSshCache();
+    return false;
+  }
+};
+
+export const filterInstalledDesktopApps = async (apps: string[]): Promise<string[]> => {
+  if (!isDesktopLoopbackOrigin()) {
+    return [];
+  }
+
+  const candidate = Array.isArray(apps) ? apps.filter((value) => typeof value === 'string') : [];
+  if (candidate.length === 0) {
+    return [];
+  }
+
+  try {
+    const result = await invokeDesktop<string[]>('desktop_filter_installed_apps', {
+      apps: candidate,
+    });
+    return Array.isArray(result) ? result.filter((value) => typeof value === 'string') : [];
+  } catch (error) {
+    console.warn('Failed to check installed apps', error);
+    return [];
+  }
+};
+
+export const fetchDesktopAppIcons = async (apps: string[]): Promise<Record<string, string>> => {
+  if (!isDesktopLoopbackOrigin()) {
+    return {};
+  }
+
+  const candidate = Array.isArray(apps) ? apps.filter((value) => typeof value === 'string') : [];
+  if (candidate.length === 0) {
+    return {};
+  }
+
+  try {
+    const result = await invokeDesktop<unknown[]>('desktop_fetch_app_icons', {
+      apps: candidate,
+    });
+    if (!Array.isArray(result)) {
+      return {};
+    }
+    const map: Record<string, string> = {};
+    for (const entry of result) {
+      if (!entry || typeof entry !== 'object') continue;
+      const candidateEntry = entry as { app?: unknown; dataUrl?: unknown; data_url?: unknown };
+      const dataUrl = typeof candidateEntry.dataUrl === 'string'
+        ? candidateEntry.dataUrl
+        : typeof candidateEntry.data_url === 'string'
+          ? candidateEntry.data_url
+          : undefined;
+      if (typeof candidateEntry.app !== 'string' || typeof dataUrl !== 'string') continue;
+      map[candidateEntry.app] = dataUrl;
+    }
+    return map;
+  } catch (error) {
+    console.warn('Failed to fetch installed app icons', error);
+    return {};
+  }
+};
+
 export type InstalledDesktopAppInfo = {
   name: string;
   iconDataUrl?: string | null;
@@ -776,7 +1020,7 @@ export const fetchDesktopInstalledApps = async (
   apps: string[],
   force?: boolean
 ): Promise<FetchDesktopInstalledAppsResult> => {
-  if (!hasDesktopInvoke() || !isDesktopLocalOriginActive()) {
+  if (!isDesktopLoopbackOrigin()) {
     return { apps: [], success: false, hasCache: false, isCacheStale: false };
   }
 

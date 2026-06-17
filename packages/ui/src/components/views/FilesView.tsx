@@ -69,8 +69,9 @@ import { Icon } from "@/components/icon/Icon";
 import { useMessageTTS } from '@/hooks/useMessageTTS';
 import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
 import { getDefaultTheme } from '@/lib/theme/themes';
-import { openDesktopFileInApp, openDesktopPath } from '@/lib/desktop';
+import { isElectronShell, isDesktopLocalOriginActive, openDesktopFileInApp, openDesktopPath, subscribeRemoteSshActive, getRemoteSshSnapshot, openDesktopRemoteFileInApp } from '@/lib/desktop';
 import { useOpenInAppsStore } from '@/stores/useOpenInAppsStore';
+import { OPEN_IN_APPS } from '@/lib/openInApps';
 import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { useI18n } from '@/lib/i18n';
 
@@ -968,6 +969,18 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const initializeOpenInApps = useOpenInAppsStore((state) => state.initialize);
   const loadOpenInApps = useOpenInAppsStore((state) => state.loadInstalledApps);
 
+  const isRemote = React.useSyncExternalStore(subscribeRemoteSshActive, getRemoteSshSnapshot);
+
+  const isAvailable = isElectronShell() && (isDesktopLocalOriginActive() || isRemote);
+
+  const displayableOpenInApps = React.useMemo(() => {
+    if (!isRemote) return openInApps;
+    return openInApps.filter((app) => {
+      const meta = OPEN_IN_APPS.find((a) => a.id === app.id);
+      return meta?.supportsRemote === true;
+    });
+  }, [openInApps, isRemote]);
+
   React.useEffect(() => {
     initializeOpenInApps();
   }, [initializeOpenInApps]);
@@ -981,6 +994,16 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
   const handleOpenInApp = React.useCallback(async (app: { id: string; appName: string }) => {
     if (!selectedFile?.path) {
+      return;
+    }
+
+    if (isRemote) {
+      const openedRemotely = await openDesktopRemoteFileInApp(selectedFile.path, app.id, app.appName);
+      if (openedRemotely) {
+        return;
+      }
+      await copyTextToClipboard(selectedFile.path);
+      toast.warning(t('openInApp.toast.remoteOpenFailed'));
       return;
     }
 
@@ -1002,7 +1025,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       }
     }
     toast.error(t('filesView.toast.openInAppFailed', { app: app.appName }));
-  }, [root, selectedFile?.path, t]);
+  }, [root, selectedFile?.path, t, isRemote]);
 
   const handleOpenDialog = React.useCallback((type: 'createFile' | 'createFolder' | 'rename' | 'delete', data: { path: string; name?: string; type?: 'file' | 'directory' }) => {
     setActiveDialog(type);
@@ -3192,6 +3215,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           </>
         )}
 
+        {isAvailable && (displayableOpenInApps.length > 0 || openInCacheStale) && (
         <DropdownMenu onOpenChange={handleToolbarDropdownOpenChange}>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -3212,7 +3236,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             <TooltipContent side="bottom" sideOffset={6}>{t('filesView.editor.openInDesktopApp')}</TooltipContent>
           </Tooltip>
           <DropdownMenuContent align="end" className="w-56 max-h-[70vh] overflow-y-auto">
-            {openInApps.map((app) => (
+            {displayableOpenInApps.map((app) => (
               <DropdownMenuItem
                 key={app.id}
                 className="flex items-center gap-2"
@@ -3233,6 +3257,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
+        )}
 
         {!isSelectedImage && !isSelectedPdf && (
           <>

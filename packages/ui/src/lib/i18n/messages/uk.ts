@@ -2174,6 +2174,7 @@ export const dict: Record<I18nKey, string> = {
   "openInApp.actions.copyPath": "Копіювати шлях",
   "openInApp.actions.refreshApps": "Оновити застосунки",
   "openInApp.toast.pathCopied": "Шлях скопійовано в буфер обміну",
+  "openInApp.toast.remoteOpenFailed": "Не вдалося відкрити віддалений шлях у програмі",
   "projectActions.actions.addActionAria": "Додати дію",
   "projectActions.actions.addAction": "Додати дію",
   "projectActions.actions.addNewAction": "Додати нову дію",

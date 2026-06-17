@@ -10,7 +10,7 @@ import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { cn } from '@/lib/utils';
-import { isDesktopLocalOriginActive, isDesktopShell, openDesktopPath, openDesktopProjectInApp } from '@/lib/desktop';
+import { isElectronShell, isDesktopLocalOriginActive, subscribeRemoteSshActive, getRemoteSshSnapshot, openDesktopPath, openDesktopProjectInApp, openDesktopRemoteProjectInApp } from '@/lib/desktop';
 import { DEFAULT_OPEN_IN_APP_ID, OPEN_IN_APPS } from '@/lib/openInApps';
 import { useOpenInAppsStore, type OpenInAppOption } from '@/stores/useOpenInAppsStore';
 import { useI18n } from '@/lib/i18n';
@@ -87,31 +87,49 @@ export const OpenInAppButton = ({ directory, className }: OpenInAppButtonProps) 
     initialize();
   }, [initialize]);
 
-  const isDesktopLocal = isDesktopShell() && isDesktopLocalOriginActive();
+  const isRemote = React.useSyncExternalStore(subscribeRemoteSshActive, getRemoteSshSnapshot);
+
+  const isAvailable = isElectronShell() && (isDesktopLocalOriginActive() || isRemote);
+
+  const displayableApps = React.useMemo(() => {
+    if (!isRemote) return availableApps;
+    return availableApps.filter((app) => {
+      const meta = OPEN_IN_APPS.find((a) => a.id === app.id);
+      return meta?.supportsRemote === true;
+    });
+  }, [availableApps, isRemote]);
 
   const selectedApp = React.useMemo(() => {
-    const known = availableApps.find((app) => app.id === selectedAppId)
-      ?? availableApps.find((app) => app.id === DEFAULT_OPEN_IN_APP_ID)
-      ?? availableApps[0]
+    const known = displayableApps.find((app) => app.id === selectedAppId)
+      ?? displayableApps.find((app) => app.id === DEFAULT_OPEN_IN_APP_ID)
+      ?? displayableApps[0]
       ?? OPEN_IN_APPS[0];
     if (known) {
       return withFallbackIcon(known);
     }
     return withFallbackIcon(OPEN_IN_APPS[0]);
-  }, [availableApps, selectedAppId]);
+  }, [displayableApps, selectedAppId]);
 
-  if (!isDesktopLocal || !directory) {
+  if (!isAvailable || !directory) {
     return null;
   }
 
-  if (availableApps.length === 0) {
+  if (displayableApps.length === 0) {
     return null;
   }
 
   const handleOpen = async (app: OpenInAppOption) => {
-    const opened = await openDesktopProjectInApp(directory, app.id, app.appName);
-    if (!opened) {
-      await openDesktopPath(directory, app.appName);
+    if (isRemote) {
+      const opened = await openDesktopRemoteProjectInApp(directory, app.id, app.appName);
+      if (!opened) {
+        await copyTextToClipboard(directory);
+        toast.warning(t('openInApp.toast.remoteOpenFailed'));
+      }
+    } else {
+      const opened = await openDesktopProjectInApp(directory, app.id, app.appName);
+      if (!opened) {
+        await openDesktopPath(directory, app.appName);
+      }
     }
   };
 
@@ -177,7 +195,7 @@ export const OpenInAppButton = ({ directory, className }: OpenInAppButtonProps) 
             <span className="typography-ui-label text-foreground">{t('openInApp.actions.copyPath')}</span>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          {availableApps.map((app) => {
+          {displayableApps.map((app) => {
             const appWithFallback = withFallbackIcon(app);
             return (
               <DropdownMenuItem
