@@ -29,6 +29,7 @@ import {
   nodeContainsSessionId,
   resolveMenuOpenSessionId,
 } from './sessionNodeItemUtils';
+import type { SessionNodeRenderExtras } from './sessionNodeItemUtils';
 import type { SessionFolder } from '@/stores/useSessionFoldersStore';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
@@ -69,18 +70,7 @@ type Props = {
     archivedBucket?: boolean,
     secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null } | null,
     renderContext?: 'project' | 'recent',
-    renderExtras?: {
-      subtreeContainsActive: Set<string>;
-      subtreeContainsEditing: Set<string>;
-      menuOpenSessionId: string | null;
-      nodeStructureKey: string;
-      childRenderExtrasFor?: (child: SessionNode) => {
-        subtreeContainsActive: Set<string>;
-        subtreeContainsEditing: Set<string>;
-        menuOpenSessionId: string | null;
-        nodeStructureKey: string;
-      };
-    },
+    renderExtras?: SessionNodeRenderExtras,
   ) => React.ReactNode;
   projectRepoStatus: Map<string, boolean | null>;
   lastRepoStatus: boolean;

@@ -1085,6 +1085,11 @@ export async function fetchMessagesForSession(sessionID: string, directory?: str
       .filter((record: { info?: { id?: string } }) => !!record?.info?.id)
     if (records.length === 0) return
 
+    // Staleness guard: a rapid session switch may have moved the user off this
+    // session while the fetch was in flight. Skip the write so a slow fetch
+    // can't repopulate (and un-evict) a session already navigated away from.
+    if (useSessionUIStore.getState().currentSessionId !== sessionID) return
+
     store.setState((state) => {
       const materialized = materializeSessionSnapshots(
         state,

@@ -8,6 +8,7 @@ import {
   computeNodeStructureKey,
   resolveMenuOpenSessionId,
 } from './sessionNodeItemUtils';
+import type { SessionNodeRenderExtras } from './sessionNodeItemUtils';
 
 type ActivityItem = {
   node: SessionNode;
@@ -35,18 +36,7 @@ type Props = {
     archivedBucket?: boolean,
     secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null } | null,
     renderContext?: 'project' | 'recent',
-    renderExtras?: {
-      subtreeContainsActive: Set<string>;
-      subtreeContainsEditing: Set<string>;
-      menuOpenSessionId: string | null;
-      nodeStructureKey: string;
-      childRenderExtrasFor?: (child: SessionNode) => {
-        subtreeContainsActive: Set<string>;
-        subtreeContainsEditing: Set<string>;
-        menuOpenSessionId: string | null;
-        nodeStructureKey: string;
-      };
-    },
+    renderExtras?: SessionNodeRenderExtras,
   ) => React.ReactNode;
   currentSessionId: string | null;
   editingId: string | null;
@@ -56,13 +46,7 @@ type Props = {
   batchSize?: number;
 };
 
-type RenderExtras = {
-  subtreeContainsActive: Set<string>;
-  subtreeContainsEditing: Set<string>;
-  menuOpenSessionId: string | null;
-  nodeStructureKey: string;
-  childRenderExtrasFor?: (child: SessionNode) => RenderExtras;
-};
+type RenderExtras = SessionNodeRenderExtras;
 
 const MAX_VISIBLE_RECENT_SESSIONS = 7;
 

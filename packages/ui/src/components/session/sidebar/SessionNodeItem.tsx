@@ -26,6 +26,7 @@ import { useSync } from '@/sync/use-sync';
 import { useViewportStore, viewportSessionKey } from '@/sync/viewport-store';
 import { DraggableSessionRow } from './sessionFolderDnd';
 import { nodeContainsSessionId } from './sessionNodeItemUtils';
+import type { SessionNodeChildRenderExtras, SessionNodeRenderExtras } from './sessionNodeItemUtils';
 import type { SessionNode } from './types';
 import { formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from './utils';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
@@ -92,18 +93,7 @@ type Props = {
     archivedBucket?: boolean,
     secondaryMeta?: SecondaryMeta | null,
     renderContext?: 'project' | 'recent',
-    renderExtras?: {
-      subtreeContainsActive: Set<string>;
-      subtreeContainsEditing: Set<string>;
-      menuOpenSessionId: string | null;
-      nodeStructureKey: string;
-      childRenderExtrasFor?: (child: SessionNode) => {
-        subtreeContainsActive: Set<string>;
-        subtreeContainsEditing: Set<string>;
-        menuOpenSessionId: string | null;
-        nodeStructureKey: string;
-      };
-    },
+    renderExtras?: SessionNodeRenderExtras,
   ) => React.ReactNode;
   secondaryMeta?: SecondaryMeta | null;
   renderContext?: 'project' | 'recent';
@@ -137,12 +127,7 @@ type Props = {
    * descendant; SessionNodeItem's recursive child render uses this lookup
    * to fetch the right key for each child it produces.
    */
-  childRenderExtrasFor?: (child: SessionNode) => {
-    subtreeContainsActive: Set<string>;
-    subtreeContainsEditing: Set<string>;
-    menuOpenSessionId: string | null;
-    nodeStructureKey: string;
-  };
+  childRenderExtrasFor?: (child: SessionNode) => SessionNodeChildRenderExtras;
   /**
    * Batched index of live session objects keyed by id. The previous
    * implementation called `useSession(session.id)` per row, which used
@@ -1126,12 +1111,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       </DraggableSessionRow>
       {hasChildren && isExpanded
         ? node.children.map((child): React.ReactNode => {
-          const childRenderExtras: {
-            subtreeContainsActive: Set<string>;
-            subtreeContainsEditing: Set<string>;
-            menuOpenSessionId: string | null;
-            nodeStructureKey: string;
-          } = childRenderExtrasFor
+          const childRenderExtras: SessionNodeChildRenderExtras = childRenderExtrasFor
             ? childRenderExtrasFor(child)
             : {
                 subtreeContainsActive,
@@ -1309,7 +1289,8 @@ const areSessionNodeItemPropsEqual = (prev: Props, next: Props): boolean => {
   if (getNodeSessionDirectory(prev.node) !== getNodeSessionDirectory(next.node)) return false;
   if (!isSecondaryMetaEqual(prev.secondaryMeta, next.secondaryMeta)) return false;
 
-  if (hasResolvedSessionChangeInNode(prev.node, next.node, prev.liveSessionById, next.liveSessionById)) {
+  if (prev.liveSessionById !== next.liveSessionById
+    && hasResolvedSessionChangeInNode(prev.node, next.node, prev.liveSessionById, next.liveSessionById)) {
     return false;
   }
 

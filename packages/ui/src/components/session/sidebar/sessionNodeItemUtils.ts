@@ -1,6 +1,26 @@
 import type { SessionNode } from './types';
 
 /**
+ * Per-row render extras precomputed once per group render and threaded down to
+ * each `SessionNodeItem`. Hoisting these out of the row `React.memo` comparator
+ * turns an O(rows × subtree-depth) walk into per-row `Set.has`/string compares.
+ *
+ * The child variant intentionally omits `childRenderExtrasFor` — the resolver is
+ * shared from the group and re-passed, so it does not need to recurse through
+ * each child's extras object.
+ */
+export type SessionNodeChildRenderExtras = {
+  subtreeContainsActive: Set<string>;
+  subtreeContainsEditing: Set<string>;
+  menuOpenSessionId: string | null;
+  nodeStructureKey: string;
+};
+
+export type SessionNodeRenderExtras<TNode = SessionNode> = SessionNodeChildRenderExtras & {
+  childRenderExtrasFor?: (child: TNode) => SessionNodeChildRenderExtras;
+};
+
+/**
  * Walk `nodes` and add `node.session.id` to `result` for every node
  * whose subtree contains `targetId`. This is used to precompute, once
  * per SessionGroupSection render, which rows need to update when

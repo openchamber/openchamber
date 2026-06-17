@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils';
 import type { SessionFolder } from '@/stores/useSessionFoldersStore';
 import { useI18n } from '@/lib/i18n';
 import { Icon } from "@/components/icon/Icon";
+import type { SessionNodeChildRenderExtras, SessionNodeRenderExtras } from './sidebar/sessionNodeItemUtils';
 
 interface SessionFolderItemProps<TSessionNode> {
   folder: SessionFolder;
@@ -21,12 +22,7 @@ interface SessionFolderItemProps<TSessionNode> {
     archivedBucket?: boolean,
     secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null } | null,
     renderContext?: 'project' | 'recent',
-    renderExtras?: {
-      subtreeContainsActive: Set<string>;
-      subtreeContainsEditing: Set<string>;
-      menuOpenSessionId: string | null;
-      nodeStructureKey: string;
-    },
+    renderExtras?: SessionNodeChildRenderExtras,
   ) => React.ReactNode;
   /**
    * Returns the precomputed per-row render extras for a given node. The
@@ -34,18 +30,7 @@ interface SessionFolderItemProps<TSessionNode> {
    * per-node structure key here so SessionNodeItem's React.memo comparator
    * can answer with a single string compare instead of a recursive walk.
    */
-  getRenderExtras?: (node: TSessionNode) => {
-    subtreeContainsActive: Set<string>;
-    subtreeContainsEditing: Set<string>;
-    menuOpenSessionId: string | null;
-    nodeStructureKey: string;
-    childRenderExtrasFor?: (child: TSessionNode) => {
-      subtreeContainsActive: Set<string>;
-      subtreeContainsEditing: Set<string>;
-      menuOpenSessionId: string | null;
-      nodeStructureKey: string;
-    };
-  } | undefined;
+  getRenderExtras?: (node: TSessionNode) => SessionNodeRenderExtras<TSessionNode> | undefined;
   groupDirectory?: string | null;
   projectId?: string | null;
   mobileVariant?: boolean;

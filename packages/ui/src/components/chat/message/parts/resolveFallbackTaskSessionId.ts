@@ -29,8 +29,6 @@ export interface ResolveFallbackParams {
   parentSessionId: string | undefined;
   /** When the task tool started (ms timestamp) */
   taskStartTime: number | undefined;
-  /** True when the task tool is finalized (completed/error/etc.) */
-  isTaskFinalized?: boolean;
   /** Sessions from the directory store */
   sessions: Session[];
   /** Session status map from the sync store */

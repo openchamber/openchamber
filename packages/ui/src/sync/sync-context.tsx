@@ -47,7 +47,7 @@ import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry"
 import { setSessionPrefetch } from "./session-prefetch-cache"
 import { listGlobalSessionPages } from "@/stores/globalSessions"
 import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
-import { areRequestArraysReferentiallyEqual, collectScopedBlockingRequests, computeSubtreeIds } from "./scoped-blocking-requests"
+import { areRequestArraysReferentiallyEqual, collectScopedBlockingRequests } from "./scoped-blocking-requests"
 import { EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT, buildUserMessageHistorySnapshot, type UserMessageHistorySnapshot } from "./user-message-history"
 
 // ---------------------------------------------------------------------------
@@ -2182,7 +2182,6 @@ export function useSessions(directory?: string) {
   )
 }
 
-const EMPTY_SCOPED_IDS = new Set<string>()
 const selectPermissionRequestsBySession = (state: State) => state.permission
 const selectQuestionRequestsBySession = (state: State) => state.question
 
@@ -2191,16 +2190,6 @@ type ScopedBlockingRequestCache<T extends { id: string }> = {
   sessions: Session[] | null
   requestsBySession: Record<string, T[] | undefined> | null
   result: T[]
-}
-
-export function useScopedSubtreeIds(sessionID: string | null, directory?: string): Set<string> {
-  return useDirectorySync(
-    useCallback((state: State) => {
-      if (!sessionID) return EMPTY_SCOPED_IDS
-      return computeSubtreeIds(state.session, sessionID)
-    }, [sessionID]),
-    directory,
-  )
 }
 
 function useScopedBlockingRequests<T extends { id: string }>(

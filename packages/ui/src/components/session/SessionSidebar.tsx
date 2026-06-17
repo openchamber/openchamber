@@ -41,6 +41,7 @@ import { SidebarActivitySections } from './sidebar/SidebarActivitySections';
 import { SidebarFooter } from './sidebar/SidebarFooter';
 import { SidebarProjectsList } from './sidebar/SidebarProjectsList';
 import { SessionNodeItem } from './sidebar/SessionNodeItem';
+import type { SessionNodeRenderExtras } from './sidebar/sessionNodeItemUtils';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useShallow } from 'zustand/react/shallow';
 import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
@@ -1014,8 +1015,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     openNewSessionDraft,
     setActiveMainTab,
     setSessionSwitcherOpen,
-    sessions,
-    worktreeMetadata,
   });
 
   const { getOrderedGroups } = useGroupOrdering(groupOrderByProject);
@@ -1295,18 +1294,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       archivedBucket: boolean = false,
       secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null } | null,
       renderContext: 'project' | 'recent' = 'project',
-      renderExtras?: {
-        subtreeContainsActive: Set<string>;
-        subtreeContainsEditing: Set<string>;
-        menuOpenSessionId: string | null;
-        nodeStructureKey: string;
-        childRenderExtrasFor?: (child: SessionNode) => {
-          subtreeContainsActive: Set<string>;
-          subtreeContainsEditing: Set<string>;
-          menuOpenSessionId: string | null;
-          nodeStructureKey: string;
-        };
-      },
+      renderExtras?: SessionNodeRenderExtras,
     ): React.ReactNode => (
       <SessionNodeItem
         node={node}

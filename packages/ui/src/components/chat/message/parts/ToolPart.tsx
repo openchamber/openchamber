@@ -2180,12 +2180,11 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                 isTaskTool,
                 parentSessionId: currentSessionId ?? undefined,
                 taskStartTime: taskSessionResolutionStart,
-                isTaskFinalized: isFinalized,
                 sessions: storeState.session,
                 sessionStatusMap: storeState.session_status,
                 hasRetried: taskFallbackRetried,
             });
-        }, [explicitTaskSessionId, isTaskTool, currentSessionId, taskSessionResolutionStart, isFinalized, taskFallbackRetried]),
+        }, [explicitTaskSessionId, isTaskTool, currentSessionId, taskSessionResolutionStart, taskFallbackRetried]),
         currentDirectory,
     );
 
