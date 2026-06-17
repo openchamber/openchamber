@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Chat: adjacent paragraphs in assistant messages now render with a visible gap instead of collapsing into a single visual line, matching the spacing users see when copying the text out.
+
 ## [1.13.1] - 2026-06-17
 
 - Chat: inline math delimiters no longer incorrectly treat currency amounts like `$50` as LaTeX math expressions — only `$$...$$` display math and `\(...\)` inline math are recognized.

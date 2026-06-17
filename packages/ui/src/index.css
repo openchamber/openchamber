@@ -932,6 +932,16 @@ html:not(.dark) .chat-scroll {
   line-height: inherit;
 }
 
+/* Restore paragraph block spacing inside markdown content.
+   --markdown-paragraph-spacing is defined in design-system.css but
+   was never wired up, so adjacent <p> blocks collapsed to a single
+   visual line. Callers (MessageBody, UserTextPart) already nullify
+   the first/last child margins via the [&_.markdown-content>*] pattern,
+   so this rule is safe to apply unconditionally. */
+.markdown-content p {
+  margin: 0 0 var(--markdown-paragraph-spacing) 0;
+}
+
 /* Tool markdown should render at code size to match tool card typography. */
 .markdown-content.markdown-tool {
   font-size: var(--text-code) !important;
