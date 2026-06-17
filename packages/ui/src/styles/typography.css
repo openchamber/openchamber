@@ -158,3 +158,18 @@
     font-weight: var(--markdown-h4-font-weight);
   }
 }
+
+/* Chat message column width — intentionally UNLAYERED so it always wins the
+   cascade. The same rule inside `@layer components` above is correct in steady
+   state, but a layered rule can be momentarily out-ranked during a heavy style
+   recalc (e.g. a large session's virtualized list re-laying-out when the
+   background history prepend lands, or a late-loaded CSS chunk re-establishing
+   layer order). That dropped the clamp for a frame and flashed message text to
+   full width. An unlayered duplicate of just the width keeps it robust. */
+.chat-message-column {
+  width: min(100%, 48rem);
+}
+
+.wide-chat-layout .chat-message-column {
+  width: min(100%, 64rem);
+}
