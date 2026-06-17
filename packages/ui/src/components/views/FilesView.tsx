@@ -855,6 +855,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [pdfAssetAuthReadyKey, setPdfAssetAuthReadyKey] = React.useState('');
 
   const [htmlPreviewNonce, setHtmlPreviewNonce] = React.useState(0);
+  const [imagePreviewNonce, setImagePreviewNonce] = React.useState(0);
+  const [pdfPreviewNonce, setPdfPreviewNonce] = React.useState(0);
 
   const [loadedFilePath, setLoadedFilePath] = React.useState<string | null>(null);
 
@@ -2890,16 +2892,33 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     let cancelled = false;
     setImageAssetAuthReadyKey('');
-    void refreshRuntimeUrlAuthToken(getRuntimeApiBaseUrl())
-      .then((token) => {
-        if (!cancelled && token) setImageAssetAuthReadyKey(imageAssetAuthKey);
-      })
-      .catch(() => {});
+
+    const refreshToken = () => {
+      clearRuntimeUrlAuthToken();
+      void refreshRuntimeUrlAuthToken(getRuntimeApiBaseUrl())
+        .then((token) => {
+          if (!cancelled && token) {
+            setImageAssetAuthReadyKey(imageAssetAuthKey);
+            setImagePreviewNonce((n) => n + 1);
+            setFileError(null);
+          }
+        })
+        .catch((error) => {
+          if (!cancelled) {
+            setFileError(error instanceof Error ? error.message : t('filesView.error.readFileFailed'));
+            setImageAssetAuthReadyKey(imageAssetAuthKey);
+          }
+        });
+    };
+
+    refreshToken();
+    const id = setInterval(refreshToken, 45_000);
 
     return () => {
       cancelled = true;
+      clearInterval(id);
     };
-  }, [imageAssetAuthKey]);
+  }, [imageAssetAuthKey, t]);
 
   const isImageAssetAuthLoading = Boolean(imageAssetAuthKey && imageAssetAuthReadyKey !== imageAssetAuthKey);
 
@@ -2919,6 +2938,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           if (!cancelled && token) {
             setHtmlAssetAuthReadyKey(htmlAssetAuthKey);
             setHtmlPreviewNonce((n) => n + 1);
+            setFileError(null);
           }
         })
         .catch((error) => {
@@ -2947,19 +2967,31 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     let cancelled = false;
     setPdfAssetAuthReadyKey('');
-    void refreshRuntimeUrlAuthToken(getRuntimeApiBaseUrl())
-      .then((token) => {
-        if (!cancelled && token) setPdfAssetAuthReadyKey(pdfAssetAuthKey);
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setFileError(error instanceof Error ? error.message : t('filesView.error.readFileFailed'));
-          setPdfAssetAuthReadyKey(pdfAssetAuthKey);
-        }
-      });
+
+    const refreshToken = () => {
+      clearRuntimeUrlAuthToken();
+      void refreshRuntimeUrlAuthToken(getRuntimeApiBaseUrl())
+        .then((token) => {
+          if (!cancelled && token) {
+            setPdfAssetAuthReadyKey(pdfAssetAuthKey);
+            setPdfPreviewNonce((n) => n + 1);
+            setFileError(null);
+          }
+        })
+        .catch((error) => {
+          if (!cancelled) {
+            setFileError(error instanceof Error ? error.message : t('filesView.error.readFileFailed'));
+            setPdfAssetAuthReadyKey(pdfAssetAuthKey);
+          }
+        });
+    };
+
+    refreshToken();
+    const id = setInterval(refreshToken, 45_000);
 
     return () => {
       cancelled = true;
+      clearInterval(id);
     };
   }, [pdfAssetAuthKey, t]);
 
@@ -2992,12 +3024,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const renderPdfPreview = React.useCallback((file: FileNode) => (
     <div className="h-full overflow-hidden bg-[var(--surface-background)]">
       <iframe
+        key={pdfPreviewNonce}
         src={pdfSrc}
         className="h-full w-full border-0"
         title={file.name}
       />
     </div>
-  ), [pdfSrc]);
+  ), [pdfSrc, pdfPreviewNonce]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -3768,6 +3801,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           ) : isSelectedImage ? (
             <div className="flex h-full items-center justify-center p-3">
               <img
+                key={imagePreviewNonce}
                 src={imageSrc}
                 alt={selectedFile?.name ?? t('filesView.editor.imageAltFallback')}
                 className="max-w-full max-h-[70vh] object-contain rounded-md border border-border/30 bg-primary/10"
@@ -4138,6 +4172,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           ) : isSelectedImage ? (
             <div className="flex h-full items-center justify-center p-4">
               <img
+                key={imagePreviewNonce}
                 src={imageSrc}
                 alt={selectedFile.name}
                 className="max-w-full max-h-full object-contain rounded-md border border-border/30 bg-primary/10"
