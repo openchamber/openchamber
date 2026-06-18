@@ -99,7 +99,7 @@
     },
     "packages/electron": {
       "name": "@openchamber/electron",
-      "version": "1.13.0",
+      "version": "1.13.2",
       "dependencies": {
         "@openchamber/web": "workspace:*",
         "electron-context-menu": "^4.1.2",
@@ -114,7 +114,7 @@
     },
     "packages/ui": {
       "name": "@openchamber/ui",
-      "version": "1.13.0",
+      "version": "1.13.2",
       "dependencies": {
         "@base-ui/react": "^1.4.0",
         "@codemirror/autocomplete": "^6.20.0",
@@ -214,7 +214,7 @@
     },
     "packages/vscode": {
       "name": "openchamber",
-      "version": "1.13.0",
+      "version": "1.13.2",
       "dependencies": {
         "@openchamber/ui": "workspace:*",
         "@opencode-ai/sdk": "^1.17.7",
@@ -237,7 +237,7 @@
     },
     "packages/web": {
       "name": "@openchamber/web",
-      "version": "1.13.0",
+      "version": "1.13.2",
       "bin": {
         "openchamber": "./bin/cli.js",
       },
@@ -309,6 +309,7 @@
         "react-dom": "^19.1.1",
         "react-markdown": "^10.1.0",
         "remark-gfm": "^4.0.1",
+        "shiki": "^3.23.0",
         "sonner": "^2.0.7",
         "strip-json-comments": "^5.0.3",
         "supertest": "^7.2.2",
@@ -3378,8 +3379,6 @@
     "@npmcli/agent/lru-cache": ["lru-cache@10.4.3", "", {}, "sha512-JNAzZcXrCt42VGLuYz0zfAzDfAvJWW6AfYlDBQyDV5DClI2m5sAmK+OIO7s59XfsRsWHp02jAJrRadPRGTt6SQ=="],
 
     "@npmcli/agent/socks-proxy-agent": ["socks-proxy-agent@8.0.5", "", { "dependencies": { "agent-base": "^7.1.2", "debug": "^4.3.4", "socks": "^2.8.3" } }, "sha512-HehCEsotFqbPW9sJ8WVYB6UbmIMv7kUUORIF2Nncq4VQvBfNBLibW9YZR5dlYCSUhwcD628pRllm7n+E+YTzJw=="],
-
-    "@openchamber/ui/ghostty-web": ["ghostty-web@0.4.0", "", {}, "sha512-0puDBik2qapbD/QQBW9o5ZHfXnZBqZWx/ctBiVtKZ6ZLds4NYb+wZuw1cRLXZk9zYovIQ908z3rvFhexAvc5Hg=="],
 
     "@openchamber/web/cron-parser": ["cron-parser@4.9.0", "", { "dependencies": { "luxon": "^3.2.1" } }, "sha512-p0SaNjrHOnQeR8/VnfGbmg9te2kfyYSQ7Sc/j/6DtPL3JQvKxmjO9TSjNFpujqV3vEYYBvNNvXSxzyksBWAx1Q=="],
 
