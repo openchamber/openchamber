@@ -8,7 +8,16 @@ import {
   updateConfigUpdateMessage,
 } from "@/lib/configUpdate";
 import { getSafeStorage } from "./utils/safeStorage";
-import { runtimeFetch } from "@/lib/runtime-fetch";
+import {
+  fetchSkills,
+  fetchSkillDetail,
+  installSkill as apiInstallSkill,
+  updateSkill as apiUpdateSkill,
+  uninstallSkill as apiUninstallSkill,
+  readSupportingFile as apiReadSupportingFile,
+  writeSupportingFile as apiWriteSupportingFile,
+  deleteSupportingFile as apiDeleteSupportingFile,
+} from "@/lib/api/skillsApi";
 
 import { opencodeClient } from '@/lib/opencode/client';
 
@@ -84,19 +93,6 @@ function parseSkillGroup(path: string): string | undefined {
   // Grouped layout: <group>/<name>/SKILL.md → parts.length >= 3
   // Flat layout:    <name>/SKILL.md         → parts.length == 2
   return parts.length >= 3 ? parts[0] : undefined;
-}
-
-// Raw skill response from API before transformation
-interface RawSkillResponse {
-  name: string;
-  path: string;
-  scope?: SkillScope;
-  source?: SkillSource;
-  sources?: {
-    md?: {
-      description?: string;
-    };
-  };
 }
 
 export interface SkillConfig {
@@ -219,21 +215,13 @@ export const useSkillsStore = create<SkillsStore>()(
 
             for (let attempt = 0; attempt < 3; attempt++) {
               try {
-                const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
-
-                const response = await runtimeFetch(`/api/config/skills${queryParams}`);
-                if (!response.ok) {
-                  throw new Error(`Failed to list skills: ${response.status}`);
-                }
-
-                const data = await response.json();
-                const rawSkills: RawSkillResponse[] = data.skills || [];
-                const configSkills: DiscoveredSkill[] = rawSkills.map((s) => ({
+                const skills = await fetchSkills(currentDirectory ?? undefined);
+                const configSkills: DiscoveredSkill[] = skills.map((s) => ({
                   name: s.name,
                   path: s.path,
                   scope: s.scope ?? 'user',
                   source: s.source ?? 'opencode',
-                  description: s.sources?.md?.description || '',
+                  description: s.description || '',
                   group: parseSkillGroup(s.path),
                 }));
 
@@ -263,14 +251,7 @@ export const useSkillsStore = create<SkillsStore>()(
         getSkillDetail: async (name: string) => {
           try {
             const currentDirectory = getCurrentDirectory();
-            const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
-            
-            const response = await runtimeFetch(`/api/config/skills/${encodeURIComponent(name)}${queryParams}`);
-            if (!response.ok) {
-              return null;
-            }
-            
-            return await response.json() as SkillDetail;
+            return await fetchSkillDetail(name, currentDirectory ?? undefined);
           } catch {
             return null;
           }
@@ -291,27 +272,15 @@ export const useSkillsStore = create<SkillsStore>()(
             if (config.supportingFiles) skillConfig.supportingFiles = config.supportingFiles;
 
             const currentDirectory = getCurrentDirectory();
-            const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
-
-            const response = await runtimeFetch(`/api/config/skills/${encodeURIComponent(config.name)}${queryParams}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(skillConfig)
-            });
-
-            const payload = await response.json().catch(() => null);
-            if (!response.ok) {
-              const message = payload?.error || 'Failed to create skill';
-              throw new Error(message);
-            }
+            const payload = await apiInstallSkill(config.name, skillConfig, currentDirectory ?? undefined);
 
             const needsReload = payload?.requiresReload ?? false;
             invalidateSkillsLoadCache(currentDirectory);
             if (needsReload) {
               requiresReload = true;
               await refreshSkillsAfterOpenCodeRestart({
-                message: payload?.message,
-                delayMs: payload?.reloadDelayMs,
+                message: payload?.message as string | undefined,
+                delayMs: payload?.reloadDelayMs as number | undefined,
               });
               return true;
             }
@@ -342,19 +311,7 @@ export const useSkillsStore = create<SkillsStore>()(
             if (config.targetPath !== undefined) skillConfig.targetPath = config.targetPath;
 
             const currentDirectory = getCurrentDirectory();
-            const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
-
-            const response = await runtimeFetch(`/api/config/skills/${encodeURIComponent(name)}${queryParams}`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(skillConfig)
-            });
-
-            const payload = await response.json().catch(() => null);
-            if (!response.ok) {
-              const message = payload?.error || 'Failed to update skill';
-              throw new Error(message);
-            }
+            const payload = await apiUpdateSkill(name, skillConfig, currentDirectory ?? undefined);
 
             const needsReload = payload?.requiresReload ?? false;
             invalidateSkillsLoadCache(currentDirectory);
@@ -386,17 +343,7 @@ export const useSkillsStore = create<SkillsStore>()(
           let requiresReload = false;
           try {
             const currentDirectory = getCurrentDirectory();
-            const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
-
-            const response = await runtimeFetch(`/api/config/skills/${encodeURIComponent(name)}${queryParams}`, {
-              method: 'DELETE'
-            });
-
-            const payload = await response.json().catch(() => null);
-            if (!response.ok) {
-              const message = payload?.error || 'Failed to delete skill';
-              throw new Error(message);
-            }
+            const payload = await apiUninstallSkill(name, currentDirectory ?? undefined);
 
             const needsReload = payload?.requiresReload ?? false;
             invalidateSkillsLoadCache(currentDirectory);
@@ -436,17 +383,8 @@ export const useSkillsStore = create<SkillsStore>()(
         readSupportingFile: async (skillName: string, filePath: string) => {
           try {
             const currentDirectory = getCurrentDirectory();
-            const queryParams = currentDirectory ? `&directory=${encodeURIComponent(currentDirectory)}` : '';
-            
-            const response = await runtimeFetch(
-              `/api/config/skills/${encodeURIComponent(skillName)}/files/${encodeURIComponent(filePath)}?${queryParams.slice(1)}`
-            );
-            if (!response.ok) {
-              return null;
-            }
-            
-            const data = await response.json();
-            return data.content ?? null;
+            const result = await apiReadSupportingFile(skillName, filePath, currentDirectory ?? undefined);
+            return result;
           } catch {
             return null;
           }
@@ -455,18 +393,7 @@ export const useSkillsStore = create<SkillsStore>()(
         writeSupportingFile: async (skillName: string, filePath: string, content: string) => {
           try {
             const currentDirectory = getCurrentDirectory();
-            const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
-            
-            const response = await runtimeFetch(
-              `/api/config/skills/${encodeURIComponent(skillName)}/files/${encodeURIComponent(filePath)}${queryParams}`,
-              {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content })
-              }
-            );
-            
-            return response.ok;
+            return await apiWriteSupportingFile(skillName, filePath, content, currentDirectory ?? undefined);
           } catch {
             return false;
           }
@@ -475,14 +402,7 @@ export const useSkillsStore = create<SkillsStore>()(
         deleteSupportingFile: async (skillName: string, filePath: string) => {
           try {
             const currentDirectory = getCurrentDirectory();
-            const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
-            
-            const response = await runtimeFetch(
-              `/api/config/skills/${encodeURIComponent(skillName)}/files/${encodeURIComponent(filePath)}${queryParams}`,
-              { method: 'DELETE' }
-            );
-            
-            return response.ok;
+            return await apiDeleteSupportingFile(skillName, filePath, currentDirectory ?? undefined);
           } catch {
             return false;
           }

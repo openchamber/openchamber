@@ -147,6 +147,10 @@ const normalizeEventType = (payload: Event): Event => {
     return payload
   }
 
+  if (type.startsWith("team.")) {
+    syncDebug.pipeline.teamEvent(type, (payload as { properties?: unknown }).properties)
+  }
+
   return {
     ...payload,
     type: match[1] as Event["type"],

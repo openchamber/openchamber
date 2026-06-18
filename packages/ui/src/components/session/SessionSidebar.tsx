@@ -1003,7 +1003,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     </div>
   );
 
-  useProjectSessionSelection({
+  const { currentSessionDirectory } = useProjectSessionSelection({
     projectSections,
     activeProjectId,
     activeSessionByProject,
@@ -1015,6 +1015,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     openNewSessionDraft,
     setActiveMainTab,
     setSessionSwitcherOpen,
+    sessions,
+    worktreeMetadata,
+    hasLoadedGlobalSessions,
   });
 
   const { getOrderedGroups } = useGroupOrdering(groupOrderByProject);

@@ -31,6 +31,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
       setupProxy,
       scheduleOpenCodeApiDetection,
       bootstrapOpenCodeAtStartup,
+      autoUpdatePlugins,
       staticRoutesRuntime,
       process,
       crypto,
@@ -88,6 +89,28 @@ export const createStartupPipelineRuntime = (dependencies) => {
     setupProxy(app);
     scheduleOpenCodeApiDetection();
     void bootstrapOpenCodeAtStartup();
+
+    // Auto-update npm plugins after bootstrap (fire-and-forget)
+    if (autoUpdatePlugins) {
+      void (async () => {
+        try {
+          const results = await autoUpdatePlugins(null);
+          if (results.length > 0) {
+            const updated = results.filter((r) => r.success).length;
+            console.log(`[Plugin Auto-Update] Updated ${updated}/${results.length} plugins`);
+            for (const result of results) {
+              if (result.success) {
+                console.log(`  \u2713 ${result.spec} \u2192 ${result.toVersion}`);
+              } else {
+                console.log(`  \u2717 ${result.spec}: ${result.error}`);
+              }
+            }
+          }
+        } catch (error) {
+          console.error('[Plugin Auto-Update] Failed:', error);
+        }
+      })();
+    }
 
     if (apiOnly) {
       staticRoutesRuntime.registerApiOnlyFallbackRoutes(app);

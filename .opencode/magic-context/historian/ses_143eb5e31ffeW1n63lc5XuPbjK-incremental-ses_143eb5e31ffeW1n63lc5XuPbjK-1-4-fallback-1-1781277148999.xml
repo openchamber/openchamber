@@ -1,0 +1,32 @@
+Entiendo el objetivo: revisar los issues/PRs en GitHub y aplicar correcciones localmente. 
+
+Sin embargo, necesito información específica para proceder efectivamente:
+
+## Lo que necesito de ti:
+
+1. **Números de issue específicos** o **enlaces a los issues** que has reportado tú (para priorizarlos)
+2. **Lista de issues/PRs de la comunidad** que consideras relevantes o bloqueantes
+3. **Errores específicos** que estás experimentando actualmente
+
+## Lo que puedo hacer ahora:
+
+Dado que no tengo acceso directo a la API de GitHub desde este entorno, puedo:
+
+1. **Explorar el código local** para entender cambios recientes y estructura
+2. **Buscar referencias a issues/fixes** en los commits o comentarios del código
+3. **Preparar el entorno** para aplicar correcciones una vez identificadas
+4. **Verificar el estado actual** del build y dependencias
+
+## Estado actual detectado:
+
+- Repo clonado en `/home/herjarsa/GITHUB/openchamber`
+- Rama local: `fix/integration-openchamber-fixes` 
+- Versión: **v1.12.4**
+- Múltiples remotos configurados (origin + herjarsa + varios PRs de colaboradores)
+
+**¿Puedes compartir los números de issue o enlaces específicos?** Por ejemplo:
+- "Resuelve issue #1630"
+- "Mira el PR #1627 de la comunidad"
+- "El error específico que veo es X cuando hago Y"
+
+Con esa información podré investigar el código relevante y aplicar las correcciones necesarias.

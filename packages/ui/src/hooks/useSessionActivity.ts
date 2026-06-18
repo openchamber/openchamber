@@ -51,7 +51,7 @@ export function useSessionActivity(sessionId: string | null | undefined, directo
     const statusWorking = hasAuthoritativeStatus && phase !== 'idle';
     const isWorking = statusWorking || hasPendingAssistant;
 
-    if (hasAuthoritativeStatus && !statusWorking) return IDLE_RESULT;
+    if (hasAuthoritativeStatus && !statusWorking && !hasPendingAssistant) return IDLE_RESULT;
 
     if (!isWorking) return IDLE_RESULT;
 

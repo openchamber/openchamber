@@ -22,9 +22,12 @@ type Args = {
   openNewSessionDraft: (options?: { directoryOverride?: string | null }) => void;
   setActiveMainTab: (tab: MainTab) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
+  sessions: Session[];
+  worktreeMetadata: Map<string, { path?: string | null }>;
+  hasLoadedGlobalSessions: boolean;
 };
 
-export const useProjectSessionSelection = (args: Args): void => {
+export const useProjectSessionSelection = (args: Args): { currentSessionDirectory: string | null } => {
   const {
     projectSections,
     activeProjectId,
@@ -37,7 +40,11 @@ export const useProjectSessionSelection = (args: Args): void => {
     openNewSessionDraft,
     setActiveMainTab,
     setSessionSwitcherOpen,
+    sessions,
+    worktreeMetadata,
+    hasLoadedGlobalSessions,
   } = args;
+
 
   const projectSessionMeta = React.useMemo(() => {
     const metaByProject = new Map<string, Map<string, { directory: string | null }>>();
@@ -117,6 +124,10 @@ export const useProjectSessionSelection = (args: Args): void => {
       return;
     }
 
+    if (!hasLoadedGlobalSessions) {
+      return;
+    }
+
     if (!projectMap || projectMap.size === 0) {
       setActiveMainTab('chat');
       if (mobileVariant) {
@@ -150,6 +161,7 @@ export const useProjectSessionSelection = (args: Args): void => {
     setActiveMainTab,
     setSessionSwitcherOpen,
     setActiveSessionByProject,
+    hasLoadedGlobalSessions,
   ]);
 
   React.useEffect(() => {
@@ -169,5 +181,22 @@ export const useProjectSessionSelection = (args: Args): void => {
       return next;
     });
   }, [activeProjectId, currentSessionId, projectSessionMeta, setActiveSessionByProject]);
+
+  const currentSessionDirectory = React.useMemo(() => {
+    if (!currentSessionId) {
+      return null;
+    }
+    const metadataPath = worktreeMetadata.get(currentSessionId)?.path;
+    if (metadataPath) {
+      return normalizePath(metadataPath) ?? metadataPath;
+    }
+    const activeSession = sessions.find((session) => session.id === currentSessionId);
+    if (!activeSession) {
+      return null;
+    }
+    return normalizePath((activeSession as Session & { directory?: string | null }).directory ?? null);
+  }, [currentSessionId, sessions, worktreeMetadata]);
+
+  return { currentSessionDirectory };
 
 };

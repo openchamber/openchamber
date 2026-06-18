@@ -731,6 +731,12 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
             return;
         }
 
+        if (!hasRenderableSessionSnapshot) {
+            // Session content not materialized yet — defer restoreSnapshot
+            // until hydration completes (handled by effect below).
+            return;
+        }
+
         const run = () => {
             void restoreSnapshot();
         };
@@ -739,7 +745,20 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         } else {
             window.requestAnimationFrame(run);
         }
-    }, [currentSessionId, releaseAutoFollow, restoreSnapshot]);
+    }, [currentSessionId, hasRenderableSessionSnapshot, releaseAutoFollow, restoreSnapshot]);
+
+    // Retry restoreSnapshot once session hydration completes.
+    // This covers the case where the session-switch effect deferred
+    // because the session wasn't materialized yet.
+    React.useEffect(() => {
+        if (!currentSessionId) return;
+        if (lastScrolledSessionRef.current !== currentSessionId) return;
+        if (!hasRenderableSessionSnapshot) return;
+        if (isSessionHydrating) return;
+        window.requestAnimationFrame(() => {
+            void restoreSnapshot();
+        });
+    }, [hasRenderableSessionSnapshot, currentSessionId, isSessionHydrating, restoreSnapshot]);
 
     React.useEffect(() => {
         if (!currentSessionId) return;

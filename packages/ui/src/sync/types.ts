@@ -52,6 +52,7 @@ export type State = {
   session: Session[]
   sessionTotal: number
   session_status: Record<string, SessionStatus>
+  session_error: Record<string, SubagentErrorRecord>
   session_diff: Record<string, FileDiff[]>
   todo: Record<string, Todo[]>
   permission: Record<string, PermissionRequest[]>
@@ -62,6 +63,19 @@ export type State = {
   limit: number
   message: Record<string, Message[]>
   part: Record<string, Part[]>
+}
+
+/** Error state persisted from session.error events. */
+export type SubagentError = {
+  message?: string
+  code?: string
+}
+export type SubagentErrorRecord = {
+  sessionID: string
+  parentSessionID?: string
+  error: SubagentError
+  timestamp: number
+  toolCallID?: string
 }
 
 /** Global store state */
@@ -128,6 +142,7 @@ export const INITIAL_STATE: State = {
   session: [],
   sessionTotal: 0,
   session_status: {},
+  session_error: {},
   session_diff: {},
   todo: {},
   permission: {},

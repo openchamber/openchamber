@@ -1,0 +1,22 @@
+[
+  "/home/herjarsa/GITHUB/openchamber/AGENTS.md",
+  "/home/herjarsa/GITHUB/openchamber/CHANGELOG.md",
+  "/home/herjarsa/GITHUB/openchamber/CLAUDE.md",
+  "/home/herjarsa/GITHUB/openchamber/CONTRIBUTING.md",
+  "/home/herjarsa/GITHUB/openchamber/README.md",
+  "/home/herjarsa/GITHUB/openchamber/SECURITY.md",
+  "/home/herjarsa/GITHUB/openchamber/SETTINGS_SEARCH_PLAN.md",
+  "/home/herjarsa/GITHUB/openchamber/docker-compose.yml",
+  "/home/herjarsa/GITHUB/openchamber/review-flow-implementation-plan.md",
+  "/home/herjarsa/GITHUB/openchamber/.agents/skills/clack-cli-patterns/SKILL.md",
+  "/home/herjarsa/GITHUB/openchamber/.agents/skills/drag-to-reorder/SKILL.md",
+  "/home/herjarsa/GITHUB/openchamber/.agents/skills/locale-ui-patterns/SKILL.md",
+  "/home/herjarsa/GITHUB/openchamber/.agents/skills/settings-ui-patterns/SKILL.md",
+  "/home/herjarsa/GITHUB/openchamber/.agents/skills/theme-system/SKILL.md",
+  "/home/herjarsa/GITHUB/openchamber/.agents/skills/theme-system/references/adding-themes.md",
+  "/home/herjarsa/GITHUB/openchamber/.agents/skills/ui-api-decoupling/SKILL.md",
+  "/home/herjarsa/GITHUB/openchamber/.claude/skills/clack-cli-patterns/SKILL.md",
+  "/home/herjarsa/GITHUB/openchamber/.claude/skills/drag-to-reorder/SKILL.md",
+  "/home/herjarsa/GITHUB/openchamber/.claude/skills/locale-ui-patterns/SKILL.md",
+  "/home/herjarsa/GITHUB/openchamber/.claude/skills/settings-ui-patterns/SKILL.md"
+]

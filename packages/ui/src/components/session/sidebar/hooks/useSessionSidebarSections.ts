@@ -100,6 +100,11 @@ export const useSessionSidebarSections = (args: Args) => {
       return result;
     }
 
+    // countNodes recurses into node.children. When the subagent-visibility
+    // toggle is OFF, useSessionGrouping already returns parent nodes with an
+    // empty children array, so this stays a flat top-level count. The recursion
+    // remains in place for the toggle-ON case where legacy nested children
+    // should still contribute to the match count.
     const countNodes = (nodes: SessionNode[]): number => nodes.reduce((total, node) => total + 1 + countNodes(node.children), 0);
 
     visibleProjectSections.forEach((section) => {

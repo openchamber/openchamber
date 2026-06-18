@@ -6,7 +6,8 @@ import {
   readConfigFile,
   writeConfig,
 } from './shared.js';
-import { isPathSpec } from './plugin-spec.js';
+import { isPathSpec, parseNpmSpec, parsePathSpec, isExactSemver } from './plugin-spec.js';
+import { getNpmInfo } from './npm-registry.js';
 
 const PLUGIN_FILE_NAME_PATTERN = /^[a-z0-9][a-z0-9-_.]*\.(js|ts|mjs|cjs)$/;
 
@@ -374,6 +375,267 @@ function deletePluginDirFile(id, workingDirectory) {
     throw codedError(`Plugin file "${target.fileName}" not found`, 'NOT_FOUND');
   }
   fs.unlinkSync(target.absolutePath);
+}
+
+/**
+ * @typedef {Object} PluginStatusItem
+ * @property {string} id
+ * @property {string} name
+ * @property {string} shortName
+ * @property {'ok'|'warning'|'error'} status
+ * @property {string} [error]
+ * @property {string} command
+ * @property {string} [version]
+ */
+
+/**
+ * Truncate a name to at most 24 characters, adding ellipsis if truncated.
+ * @param {string} name
+ * @returns {string}
+ */
+function truncateShortName(name) {
+  if (name.length <= 24) return name;
+  return name.slice(0, 24) + '\u2026';
+}
+
+/**
+ * Build an investigation command string for a plugin status item.
+ * @param {string} name
+ * @param {string} id
+ * @param {'ok'|'warning'|'error'} status
+ * @param {string} [error]
+ * @returns {string}
+ */
+function buildInvestigateCommand(name, id, status, error) {
+  const errorPart = error ? `. Error: ${error}` : '';
+  return `Investigate plugin '${name}' (id: ${id}). Status: ${status}${errorPart}.`;
+}
+
+/**
+ * Build a PluginStatusItem result object.
+ * @param {string} id
+ * @param {string} name
+ * @param {'ok'|'warning'|'error'} status
+ * @param {string|undefined} error
+ * @returns {PluginStatusItem}
+ */
+function buildPluginStatusResult(id, name, status, error, version) {
+  return {
+    id,
+    name,
+    shortName: truncateShortName(name),
+    status,
+    ...(error !== undefined ? { error } : {}),
+    command: buildInvestigateCommand(name, id, status, error),
+    ...(version ? { version } : {}),
+  };
+}
+
+/**
+ * Derive status for a single plugin entry.
+ * @param {PluginEntry} entry
+ * @param {string|null} directory
+ * @returns {Promise<PluginStatusItem>}
+ */
+async function getStatusForEntry(entry, directory) {
+  const { id, spec, parsedKind } = entry;
+  let name = spec;
+  let status = 'ok';
+  let error = undefined;
+  let version = undefined;
+
+  if (parsedKind === 'npm') {
+    try {
+      const parsed = parseNpmSpec(spec);
+      if (parsed.malformed) {
+        status = 'error';
+        error = 'Spec syntax is malformed';
+        name = spec;
+      } else {
+        name = parsed.name;
+        const info = await getNpmInfo(parsed.name);
+        if (!info.ok) {
+          status = 'error';
+          error = info.error || `Registry lookup failed (status ${info.status})`;
+        } else {
+          // Report the resolved version: exact pin from spec, or latest from registry
+          if (parsed.version && isExactSemver(parsed.version)) {
+            version = parsed.version;
+          } else if (info.latest) {
+            version = info.latest;
+          }
+          if (parsed.version !== null && !isExactSemver(parsed.version)) {
+            status = 'ok';
+          } else if (parsed.version !== null && isExactSemver(parsed.version) && !info.versions.includes(parsed.version)) {
+            status = 'error';
+            error = `Version ${parsed.version} not found in registry`;
+          }
+        }
+      }
+    } catch (e) {
+      status = 'error';
+      error = String(e?.message ?? e);
+    }
+    return buildPluginStatusResult(id, name, status, error, version);
+  }
+
+  if (parsedKind === 'path') {
+    try {
+      const { absolutePath } = parsePathSpec(spec, {
+        homedir: os.homedir(),
+        cwd: directory || os.homedir(),
+      });
+
+      try {
+        await fs.promises.access(absolutePath, fs.constants.R_OK);
+      } catch {
+        const basename = path.basename(absolutePath);
+        const ext = path.extname(absolutePath);
+        name = ext ? basename.slice(0, -ext.length) : basename;
+        return buildPluginStatusResult(
+          id, name, 'error',
+          `File not found or not readable: ${basename}`,
+        );
+      }
+
+      try {
+        const content = await fs.promises.readFile(absolutePath, 'utf8');
+        let pluginMeta;
+        try {
+          pluginMeta = JSON.parse(content);
+        } catch {
+          // File exists and is readable but not JSON (e.g. JS/TS plugin file).
+          // Treat as ok — cannot validate JSON-only fields like name/type.
+          const basename = path.basename(absolutePath);
+          const ext = path.extname(absolutePath);
+          name = ext ? basename.slice(0, -ext.length) : basename;
+          return buildPluginStatusResult(id, name, 'ok');
+        }
+
+        name = typeof pluginMeta.name === 'string' && pluginMeta.name
+          ? pluginMeta.name
+          : path.basename(absolutePath).replace(path.extname(absolutePath), '');
+
+        if (!pluginMeta.name || typeof pluginMeta.name !== 'string' || !pluginMeta.type || typeof pluginMeta.type !== 'string') {
+          status = 'error';
+          error = 'Plugin file missing required fields (name or type)';
+        } else if (pluginMeta.deprecated) {
+          status = 'warning';
+          error = 'Plugin uses deprecated field';
+        }
+      } catch (e) {
+        status = 'error';
+        error = String(e?.message ?? e);
+      }
+    } catch (e) {
+      status = 'error';
+      error = String(e?.message ?? e);
+    }
+    return buildPluginStatusResult(id, name, status, error);
+  }
+
+  // Unknown kind
+  return buildPluginStatusResult(
+    id,
+    spec,
+    'error',
+    `Unknown plugin kind: ${parsedKind}`,
+  );
+}
+
+/**
+ * Get status health check for every plugin entry.
+ * Validates npm specs against the registry, checks path specs for file existence
+ * and metadata completeness. Never throws — returns error status per item.
+ *
+ * @param {string|null} directory working directory
+ * @returns {Promise<Array<PluginStatusItem>>}
+ */
+export async function getPluginStatus(directory) {
+  const entries = listPluginEntries(directory);
+  const results = await Promise.all(
+    entries.map((entry) => getStatusForEntry(entry, directory)),
+  );
+  return results;
+}
+
+/**
+ * @typedef {Object} AutoUpdateResult
+ * @property {string} spec
+ * @property {boolean} success
+ * @property {string} [toVersion]
+ * @property {string} [error]
+ */
+
+/**
+ * Auto-update all npm plugins to their latest version.
+ * Skips path-based plugins and exact-version pins.
+ * Skips entirely if OPENCHAMBER_SKIP_PLUGIN_AUTO_UPDATE env is set.
+ *
+ * @param {string|null} directory working directory
+ * @returns {Promise<Array<AutoUpdateResult>>}
+ */
+export async function autoUpdatePlugins(directory) {
+  if (process.env.OPENCHAMBER_SKIP_PLUGIN_AUTO_UPDATE) {
+    return [];
+  }
+
+  const entries = listPluginEntries(directory);
+  const npmEntries = entries.filter((e) => e.parsedKind === 'npm');
+
+  if (npmEntries.length === 0) return [];
+
+  const results = [];
+
+  for (const entry of npmEntries) {
+    const { spec } = entry;
+    try {
+      const parsed = parseNpmSpec(spec);
+      if (parsed.malformed) {
+        results.push({ spec, success: false, error: 'Malformed spec' });
+        continue;
+      }
+
+      const info = await getNpmInfo(parsed.name);
+      if (!info.ok) {
+        results.push({ spec, success: false, error: info.error || 'Registry lookup failed' });
+        continue;
+      }
+
+      const latestVersion = info.latest;
+      if (!latestVersion) {
+        results.push({ spec, success: false, error: 'No latest version found' });
+        continue;
+      }
+
+      // Skip unpinned specs (user intends "always latest")
+      if (parsed.version === null) {
+        results.push({ spec, success: true, toVersion: info.latest || 'latest' });
+        continue;
+      }
+
+      // Skip range specs (^ ~ etc.) — the range governs resolution
+      if (!isExactSemver(parsed.version)) {
+        results.push({ spec, success: true, toVersion: info.latest || 'latest' });
+        continue;
+      }
+
+      // Skip if already at latest version
+      if (parsed.version === latestVersion) {
+        results.push({ spec, success: true, toVersion: latestVersion });
+        continue;
+      }
+
+      // Build new spec with latest version
+      const newSpec = `${parsed.name}@${latestVersion}`;
+      updatePluginEntry(entry.id, { spec: newSpec }, directory);
+      results.push({ spec, success: true, toVersion: latestVersion });
+    } catch (e) {
+      results.push({ spec, success: false, error: String(e?.message ?? e) });
+    }
+  }
+
+  return results;
 }
 
 export {
