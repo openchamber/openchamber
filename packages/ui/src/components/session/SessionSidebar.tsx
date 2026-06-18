@@ -361,7 +361,12 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     const liveById = new Map(liveSessions.map((session) => [session.id, session]));
     const merged = globalActiveSessions.map((session) => {
       const liveSession = liveById.get(session.id);
-      return liveSession ? mergeSessionDirectoryMetadata(liveSession, session) : session;
+      if (!liveSession) return session;
+      const mergedSession = mergeSessionDirectoryMetadata(liveSession, session);
+      if (mergedSession.share !== session.share) {
+        return { ...mergedSession, share: session.share };
+      }
+      return mergedSession;
     });
     const seenIds = new Set(merged.map((session) => session.id));
 
