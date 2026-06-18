@@ -472,8 +472,8 @@ export const AgentsPage: React.FC = () => {
       const modeValue = agentDraft.mode || 'subagent';
       const modelValue = agentDraft.model || '';
       const variantValue = agentDraft.variant || '';
-      const temperatureValue = agentDraft.temperature ?? undefined;
-      const topPValue = agentDraft.top_p ?? undefined;
+      const temperatureValue = agentDraft.temperature;
+      const topPValue = agentDraft.top_p;
       const promptValue = agentDraft.prompt || '';
 
       setDraftName(draftNameValue);
@@ -512,8 +512,8 @@ export const AgentsPage: React.FC = () => {
         ? `${selectedAgent.model.providerID}/${selectedAgent.model.modelID}`
         : '';
       const variantValue = selectedAgent.variant || '';
-      const temperatureValue = selectedAgent.temperature ?? undefined;
-      const topPValue = selectedAgent.topP ?? undefined;
+      const temperatureValue = selectedAgent.temperature;
+      const topPValue = selectedAgent.topP;
       const promptValue = selectedAgent.prompt || '';
 
       setDescription(descriptionValue);
@@ -596,8 +596,8 @@ export const AgentsPage: React.FC = () => {
         mode,
         model: trimmedModel === '' ? null : trimmedModel,
         variant: trimmedVariant === '' ? null : trimmedVariant || undefined,
-        temperature: temperature ?? null,
-        top_p: topP ?? null,
+        temperature,
+        top_p: topP,
         prompt: trimmedPrompt || (isNewAgent ? undefined : null),
         permission: permissionConfig,
         scope: isNewAgent ? draftScope : undefined,

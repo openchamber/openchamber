@@ -2055,7 +2055,10 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     const input = stateWithData.input;
     const time = stateWithData.time;
 
-    const [pinnedTime, setPinnedTime] = React.useState<{ start?: number; end?: number }>({});
+    const [pinnedTime, setPinnedTime] = React.useState<{ start?: number; end?: number }>(() => ({
+        start: typeof time?.start === 'number' ? time.start : undefined,
+        end: typeof time?.end === 'number' ? time.end : undefined,
+    }));
     const [localStartAt, setLocalStartAt] = React.useState<number | undefined>(undefined);
     const [localFinalizedAt, setLocalFinalizedAt] = React.useState<number | undefined>(undefined);
 
