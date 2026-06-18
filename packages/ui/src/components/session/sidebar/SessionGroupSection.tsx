@@ -350,6 +350,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
     setRenameFolderDraft,
     setRenamingFolderId,
     pinnedSessionIds,
+    expandedParents,
     sessionOrderIndex,
     currentSessionId,
     editingId,
@@ -568,6 +569,16 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
     && !hasSessionSearchQuery
     && visibleSessions.length >= ACTIVE_VIRTUALIZE_THRESHOLD;
   const shouldVirtualize = shouldVirtualizeArchived || shouldVirtualizeActive;
+
+  // Check if any parent node is expanded - expanded parents render their
+  // children inline, making them much taller than the fixed estimate.
+  // When expanded parents exist, increase bufferSize to cover the extra height.
+  const hasExpandedParent = shouldVirtualize && visibleSessions.some((node) => {
+    if (node.children.length === 0) return false;
+    const sessionId = node.session.id;
+    const expansionKey = sessionId;
+    return hasSessionSearchQuery ? true : expandedParents.has(expansionKey);
+  });
 
   const archivedVirtualContainerRef = React.useRef<HTMLDivElement | null>(null);
   const archivedScrollRef = React.useRef<HTMLElement | null>(null);
@@ -904,7 +915,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
           <Virtualizer
             data={visibleSessions}
             itemSize={ARCHIVED_ROW_ESTIMATE_PX}
-            bufferSize={ARCHIVED_ROW_ESTIMATE_PX * 8}
+            bufferSize={hasExpandedParent ? ARCHIVED_ROW_ESTIMATE_PX * 20 : ARCHIVED_ROW_ESTIMATE_PX * 8}
             scrollRef={archivedScrollRef}
             startMargin={archivedScrollMargin}
           >
