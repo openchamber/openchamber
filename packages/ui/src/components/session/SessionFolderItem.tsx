@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils';
 import type { SessionFolder } from '@/stores/useSessionFoldersStore';
 import { useI18n } from '@/lib/i18n';
 import { Icon } from "@/components/icon/Icon";
+import type { SessionNodeChildRenderExtras, SessionNodeRenderExtras } from './sidebar/sessionNodeItemUtils';
 
 interface SessionFolderItemProps<TSessionNode> {
   folder: SessionFolder;
@@ -19,7 +20,17 @@ interface SessionFolderItemProps<TSessionNode> {
     groupDir?: string | null,
     projectId?: string | null,
     archivedBucket?: boolean,
+    secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null } | null,
+    renderContext?: 'project' | 'recent',
+    renderExtras?: SessionNodeChildRenderExtras,
   ) => React.ReactNode;
+  /**
+   * Returns the precomputed per-row render extras for a given node. The
+   * group precomputes subtree-contains lookups once, then resolves a
+   * per-node structure key here so SessionNodeItem's React.memo comparator
+   * can answer with a single string compare instead of a recursive walk.
+   */
+  getRenderExtras?: (node: TSessionNode) => SessionNodeRenderExtras<TSessionNode> | undefined;
   groupDirectory?: string | null;
   projectId?: string | null;
   mobileVariant?: boolean;
@@ -54,6 +65,7 @@ const SessionFolderItemBase = <TSessionNode,>({
   onRename,
   onDelete,
   renderSessionNode,
+  getRenderExtras,
   groupDirectory,
   projectId,
   mobileVariant = false,
@@ -320,7 +332,7 @@ const SessionFolderItemBase = <TSessionNode,>({
           {/* Then sessions */}
           {sessions.length > 0 ? (
             sessions.map((node) =>
-              renderSessionNode(node, 0, groupDirectory ?? null, projectId ?? null, archivedBucket),
+              renderSessionNode(node, 0, groupDirectory ?? null, projectId ?? null, archivedBucket, undefined, 'project', getRenderExtras?.(node)),
             )
           ) : !subFolderItems ? (
             <div className="py-1 pl-1.5 text-left typography-micro text-muted-foreground/70">

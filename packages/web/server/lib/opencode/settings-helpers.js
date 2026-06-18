@@ -441,6 +441,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.stickyUserHeader === 'boolean') {
       result.stickyUserHeader = candidate.stickyUserHeader;
     }
+    if (typeof candidate.expandedEditorToolbar === 'boolean') {
+      result.expandedEditorToolbar = candidate.expandedEditorToolbar;
+    }
     if (typeof candidate.showSplitAssistantMessageActions === 'boolean') {
       result.showSplitAssistantMessageActions = candidate.showSplitAssistantMessageActions;
     }
@@ -478,12 +481,6 @@ export const createSettingsHelpers = (dependencies) => {
       const mode = candidate.diffLayoutPreference.trim();
       if (mode === 'dynamic' || mode === 'inline' || mode === 'side-by-side') {
         result.diffLayoutPreference = mode;
-      }
-    }
-    if (typeof candidate.diffViewMode === 'string') {
-      const mode = candidate.diffViewMode.trim();
-      if (mode === 'single' || mode === 'stacked') {
-        result.diffViewMode = mode;
       }
     }
     if (typeof candidate.gitChangesViewMode === 'string') {

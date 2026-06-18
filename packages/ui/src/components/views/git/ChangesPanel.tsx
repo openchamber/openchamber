@@ -1,5 +1,5 @@
 import React from 'react';
-import { useVirtualizer } from '@tanstack/react-virtual';
+import { Virtualizer, type VirtualizerHandle } from 'virtua';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -195,30 +195,16 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
 
   const rowCount = rows.length;
   const shouldVirtualize = rowCount >= CHANGE_LIST_VIRTUALIZE_THRESHOLD;
-  const rowVirtualizer = useVirtualizer({
-    count: rowCount,
-    getScrollElement: () => scrollRef.current,
-    estimateSize: () => CHANGE_ROW_ESTIMATE_PX,
-    overscan: 12,
-    enabled: shouldVirtualize,
-  });
+  const rowVirtualizerRef = React.useRef<VirtualizerHandle | null>(null);
+  const [visibleStartIndex, setVisibleStartIndex] = React.useState(0);
 
-  // Remeasure when the container transitions from display:none (hidden tab) back
-  // to visible layout, otherwise stale zero-height measurements render no rows.
-  React.useEffect(() => {
-    if (!shouldVirtualize) return;
-    const el = scrollRef.current;
-    if (!el) return;
-    const observer = new ResizeObserver(() => rowVirtualizer.measure());
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [shouldVirtualize, rowVirtualizer]);
-
-  const totalSize = rowVirtualizer.getTotalSize();
-  const virtualRows = React.useMemo(
-    () => (shouldVirtualize && totalSize >= 0 ? rowVirtualizer.getVirtualItems() : []),
-    [shouldVirtualize, rowVirtualizer, totalSize]
-  );
+  const updateVisibleStartIndex = React.useCallback((offset: number) => {
+    const virtualizer = rowVirtualizerRef.current;
+    const next = virtualizer
+      ? virtualizer.findItemIndex(offset)
+      : Math.floor(offset / CHANGE_ROW_ESTIMATE_PX);
+    setVisibleStartIndex((previous) => (previous === next ? previous : next));
+  }, []);
 
   React.useEffect(() => {
     if (!onVisiblePathsChange) {
@@ -246,11 +232,16 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
     }
 
     onVisiblePathsChange(
-      virtualRows
-        .map((item) => collectFromRow(rows[item.index]))
+      rows
+        .slice(
+          visibleStartIndex,
+          visibleStartIndex + Math.ceil((scrollRef.current?.clientHeight ?? 0) / CHANGE_ROW_ESTIMATE_PX) + VISIBLE_PREFETCH_LIMIT
+        )
+        .map((row) => collectFromRow(row))
         .filter((value): value is string => Boolean(value))
+        .slice(0, VISIBLE_PREFETCH_LIMIT)
     );
-  }, [onVisiblePathsChange, rowCount, rows, shouldVirtualize, virtualRows]);
+  }, [onVisiblePathsChange, rowCount, rows, shouldVirtualize, visibleStartIndex]);
 
   const toggleGroupCollapsed = React.useCallback((groupId: string) => {
     setCollapsedGroups((previous) => {
@@ -490,27 +481,27 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
           className="overlay-scrollbar-target overlay-scrollbar-container min-h-0 w-full flex-1 overflow-x-hidden overflow-y-auto"
         >
           {shouldVirtualize ? (
-            <div className="relative w-full" style={{ height: `${rowVirtualizer.getTotalSize()}px` }}>
-              {virtualRows.map((item) => {
-                const row = rows[item.index];
-                if (!row) return null;
-                return (
-                  <div
-                    key={row.key}
-                    ref={rowVirtualizer.measureElement}
-                    data-index={item.index}
-                    className={cn(
-                      'absolute left-0 top-0 w-full',
-                      showDivider(item.index) &&
-                        'before:pointer-events-none before:absolute before:left-0 before:right-2 before:top-0 before:border-t before:border-border/60'
-                    )}
-                    style={{ transform: `translateY(${item.start}px)` }}
-                  >
-                    {renderRow(row, item.index === 0)}
-                  </div>
-                );
-              })}
-            </div>
+            <Virtualizer
+              ref={rowVirtualizerRef}
+              data={rows}
+              itemSize={CHANGE_ROW_ESTIMATE_PX}
+              bufferSize={CHANGE_ROW_ESTIMATE_PX * 12}
+              scrollRef={scrollRef}
+              onScroll={updateVisibleStartIndex}
+            >
+              {(row, index) => (
+                <div
+                  key={row.key}
+                  className={cn(
+                    'relative',
+                    showDivider(index) &&
+                      'before:pointer-events-none before:absolute before:left-0 before:right-2 before:top-0 before:border-t before:border-border/60'
+                  )}
+                >
+                  {renderRow(row, index === 0)}
+                </div>
+              )}
+            </Virtualizer>
           ) : (
             <div role="list" aria-label={t('gitView.changes.changedFilesAria')}>
               {rows.map((row, index) => (

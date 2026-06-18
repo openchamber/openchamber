@@ -467,6 +467,24 @@ const sameOrigin = (left, right) => {
   }
 };
 
+const shouldUseSameOriginDevProxy = (uiUrl, apiBaseUrl) => (
+  isDev
+  && uiUrl
+  && apiBaseUrl
+  && !shouldUsePackagedUi()
+  && !sameOrigin(uiUrl, apiBaseUrl)
+  && isLocalRuntimeUrl(apiBaseUrl)
+);
+
+const buildRendererRuntimeConfig = (uiUrl, runtimeConfig = {}) => {
+  const apiBaseUrl = typeof runtimeConfig.apiBaseUrl === 'string' ? runtimeConfig.apiBaseUrl : (state.apiBaseUrl || '');
+  const clientToken = typeof runtimeConfig.clientToken === 'string' ? runtimeConfig.clientToken : (state.clientToken || '');
+  if (shouldUseSameOriginDevProxy(uiUrl, apiBaseUrl)) {
+    return { apiBaseUrl: '', clientToken: '' };
+  }
+  return { apiBaseUrl, clientToken };
+};
+
 const readDesktopLocalClientToken = () => {
   return sanitizeClientTokenForStorage(readSettingsRoot().desktopLocalClientToken) || '';
 };
@@ -892,6 +910,37 @@ const focusForegroundWindow = () => {
 // click events to silently stop firing after ~1 min.
 // See https://blog.bloomca.me/2025/02/22/electron-mac-notifications
 const activeNotifications = new Set();
+const nativeNotificationClaims = new Map();
+const NATIVE_NOTIFICATION_DEDUPE_TTL_MS = 5000;
+
+const getNativeNotificationClaimKey = (payload) => {
+  const tag = typeof payload?.tag === 'string' ? payload.tag.trim() : '';
+  if (tag) return tag;
+  return [payload?.sessionId, payload?.kind, payload?.title, payload?.body]
+    .filter((value) => typeof value === 'string' && value.trim())
+    .map((value) => value.trim())
+    .join('|');
+};
+
+const claimNativeNotification = (payload) => {
+  const key = getNativeNotificationClaimKey(payload);
+  if (!key) return true;
+
+  const now = Date.now();
+  for (const [claimKey, claimedAt] of nativeNotificationClaims) {
+    if (now - claimedAt > NATIVE_NOTIFICATION_DEDUPE_TTL_MS) {
+      nativeNotificationClaims.delete(claimKey);
+    }
+  }
+
+  const claimedAt = nativeNotificationClaims.get(key) ?? 0;
+  if (now - claimedAt < NATIVE_NOTIFICATION_DEDUPE_TTL_MS) {
+    return false;
+  }
+
+  nativeNotificationClaims.set(key, now);
+  return true;
+};
 
 const maybeShowNativeNotification = (rawInput) => {
   const payload = normalizeNotificationInput(rawInput);
@@ -902,6 +951,10 @@ const maybeShowNativeNotification = (rawInput) => {
   }
 
   if (!Notification.isSupported()) {
+    return;
+  }
+
+  if (!claimNativeNotification(payload)) {
     return;
   }
 
@@ -1789,6 +1842,12 @@ const reloadMenuTargetWindow = () => {
   target.webContents.reload();
 };
 
+const openDevToolsForMenuTarget = () => {
+  const target = getMenuTargetWindow();
+  if (!target || target.isDestroyed()) return;
+  target.webContents.toggleDevTools();
+};
+
 const relaunchFromMenu = () => {
   prepareForQuit();
   app.relaunch();
@@ -1835,8 +1894,9 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   const useSaved = saved && typeof saved.width === 'number' && typeof saved.height === 'number';
   const restoredBounds = useSaved ? clampWindowBoundsToVisibleWorkArea(saved) : null;
   const desktopLocalOrigin = state.localOrigin || state.sidecarUrl || '';
-  const desktopApiBaseUrl = typeof runtimeConfig.apiBaseUrl === 'string' ? runtimeConfig.apiBaseUrl : (state.apiBaseUrl || '');
-  const desktopClientToken = typeof runtimeConfig.clientToken === 'string' ? runtimeConfig.clientToken : (state.clientToken || '');
+  const rendererRuntimeConfig = buildRendererRuntimeConfig(url, runtimeConfig);
+  const desktopApiBaseUrl = rendererRuntimeConfig.apiBaseUrl;
+  const desktopClientToken = rendererRuntimeConfig.clientToken;
   const desktopHome = os.homedir() || '';
   const desktopMacosMajor = String(macosMajorVersion());
   const usesCustomTitleBar = process.platform === 'darwin' || process.platform === 'win32';
@@ -2081,11 +2141,20 @@ const activateMainWindow = async (url, localOrigin, bootOutcome, runtimeConfig =
   state.apiBaseUrl = typeof runtimeConfig.apiBaseUrl === 'string' ? runtimeConfig.apiBaseUrl : state.apiBaseUrl;
   state.clientToken = typeof runtimeConfig.clientToken === 'string' ? runtimeConfig.clientToken : '';
   state.bootOutcome = bootOutcome ?? null;
-  state.initScript = buildInitScript(localOrigin, state.bootOutcome, state.apiBaseUrl, state.clientToken);
+  const rendererRuntimeConfig = buildRendererRuntimeConfig(url, {
+    apiBaseUrl: state.apiBaseUrl || '',
+    clientToken: state.clientToken || '',
+  });
+  state.initScript = buildInitScript(
+    localOrigin,
+    state.bootOutcome,
+    rendererRuntimeConfig.apiBaseUrl,
+    rendererRuntimeConfig.clientToken,
+  );
 
   const mainWindow = state.mainWindow;
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.__ocRuntimeConfig = { apiBaseUrl: state.apiBaseUrl || '', clientToken: state.clientToken || '' };
+    mainWindow.__ocRuntimeConfig = rendererRuntimeConfig;
     mainWindow.__ocInitScript = state.initScript;
     await navigateWindow(mainWindow, url, { allowAbort: true });
     mainWindow.show();
@@ -3813,6 +3882,7 @@ const buildMacMenu = () => {
       submenu: [
         { label: 'Keyboard Shortcuts', accelerator: 'Cmd+.', click: () => dispatchAction('help-dialog') },
         { label: 'Show Diagnostics', accelerator: 'Cmd+Shift+L', click: () => dispatchAction('download-logs') },
+        { label: 'Toggle Developer Tools', accelerator: 'Cmd+Alt+I', click: () => openDevToolsForMenuTarget() },
         { type: 'separator' },
         { label: 'Clear Cache', click: () => void handleInvoke(null, 'desktop_clear_cache') },
         { type: 'separator' },
@@ -3880,7 +3950,7 @@ const buildAutoHiddenMenu = () => {
       submenu: [
         { role: 'reload' },
         { role: 'forceReload' },
-        ...(isDev ? [{ role: 'toggleDevTools' }] : []),
+        { label: 'Toggle Developer Tools', accelerator: 'Ctrl+Alt+I', click: () => openDevToolsForMenuTarget() },
         { type: 'separator' },
         { label: 'Toggle Right Sidebar', accelerator: 'Ctrl+B', click: () => dispatchAction('toggle-right-sidebar') },
         { label: 'Open Git Sidebar', accelerator: 'Ctrl+Shift+G', click: () => dispatchAction('open-right-sidebar-git') },

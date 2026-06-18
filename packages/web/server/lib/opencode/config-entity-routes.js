@@ -159,7 +159,8 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
         return res.status(400).json({ error });
       }
 
-      deleteAgent(agentName, directory);
+      const scope = req.body?.scope;
+      deleteAgent(agentName, directory, scope);
       await refreshOpenCodeAfterConfigChange('agent deletion');
 
       res.json({

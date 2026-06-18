@@ -36,7 +36,6 @@ type AppearanceSlice = {
   inputBarOffset: number;
   mobileKeyboardMode: MobileKeyboardMode;
   diffLayoutPreference: 'dynamic' | 'inline' | 'side-by-side';
-  diffViewMode: 'single' | 'stacked';
   gitChangesViewMode: 'flat' | 'tree';
 };
 
@@ -76,7 +75,6 @@ export const startAppearanceAutoSave = (): void => {
     inputBarOffset: useUIStore.getState().inputBarOffset,
     mobileKeyboardMode: useUIStore.getState().mobileKeyboardMode,
     diffLayoutPreference: useUIStore.getState().diffLayoutPreference,
-    diffViewMode: useUIStore.getState().diffViewMode,
     gitChangesViewMode: useUIStore.getState().gitChangesViewMode,
   };
 
@@ -128,7 +126,6 @@ export const startAppearanceAutoSave = (): void => {
       inputBarOffset: state.inputBarOffset,
       mobileKeyboardMode: state.mobileKeyboardMode,
       diffLayoutPreference: state.diffLayoutPreference,
-      diffViewMode: state.diffViewMode,
       gitChangesViewMode: state.gitChangesViewMode,
     };
 
@@ -211,9 +208,6 @@ export const startAppearanceAutoSave = (): void => {
     }
     if (current.diffLayoutPreference !== previous.diffLayoutPreference) {
       diff.diffLayoutPreference = current.diffLayoutPreference;
-    }
-    if (current.diffViewMode !== previous.diffViewMode) {
-      diff.diffViewMode = current.diffViewMode;
     }
     if (current.gitChangesViewMode !== previous.gitChangesViewMode) {
       diff.gitChangesViewMode = current.gitChangesViewMode;

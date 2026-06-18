@@ -43,7 +43,15 @@ type Props = {
   hasSessionSearchQuery: boolean;
   emptyState: React.ReactNode;
   searchEmptyState: React.ReactNode;
-  renderGroupSessions: (group: SessionGroup, groupKey: string, projectId?: string | null, hideGroupLabel?: boolean, dragHandleProps?: SortableDragHandleProps | null, compactBodyPadding?: boolean) => React.ReactNode;
+  renderGroupSessions: (
+    group: SessionGroup,
+    groupKey: string,
+    projectId?: string | null,
+    hideGroupLabel?: boolean,
+    dragHandleProps?: SortableDragHandleProps | null,
+    compactBodyPadding?: boolean,
+    scrollContainerRef?: React.RefObject<HTMLElement | null>,
+  ) => React.ReactNode;
   homeDirectory: string | null;
   collapsedProjects: Set<string>;
   hideDirectoryControls: boolean;
@@ -80,6 +88,39 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
   );
 
+  // Threaded into SessionGroupSection so the archived-bucket virtualizer
+  // can resolve the scrolling ancestor synchronously (no getComputedStyle
+  // walk) and skip the cost of a style recalc on every render.
+  const scrollContainerRef = React.useRef<HTMLElement | null>(null);
+
+  // Memoize the result of getOrderedGroups. The callback is stable
+  // (deps: [groupOrderByProject]) and `section.groups` is a stable
+  // reference from useSessionSidebarSections, but the caller discards
+  // the result on every render and the callback allocates a new array
+  // each time. With many projects and many sidebar re-renders this
+  // builds O(P) arrays per render. The cache returns the same array
+  // reference when the inputs haven't changed, so the downstream
+  // orderedGroups.filter/find work and any consumer-memoization see a
+  // stable reference.
+  const orderedGroupsCacheRef = React.useRef<Map<string, { groups: SessionGroup[]; ordered: SessionGroup[] }>>(new Map());
+  const cachedGetOrderedGroups = (projectId: string, groups: SessionGroup[]): SessionGroup[] => {
+    const cache = orderedGroupsCacheRef.current;
+    const hit = cache.get(projectId);
+    if (hit && hit.groups === groups) {
+      return hit.ordered;
+    }
+    const ordered = props.getOrderedGroups(projectId, groups);
+    cache.set(projectId, { groups, ordered });
+    // Bound the cache so re-ordering projects (which replaces the
+    // projects list and invalidates every projectId) doesn't grow
+    // unboundedly.
+    if (cache.size > 256) {
+      const firstKey = cache.keys().next().value;
+      if (firstKey !== undefined) cache.delete(firstKey);
+    }
+    return ordered;
+  };
+
   if (props.sharedSessionsOnly) {
     return (
       <ScrollableOverlay useScrollShadow scrollShadowSize={96} outerClassName="flex-1 min-h-0" className={cn('space-y-1 pb-1 pr-2', props.mobileVariant ? '' : '')}>
@@ -98,7 +139,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
   }
 
   return (
-    <ScrollableOverlay useScrollShadow scrollShadowSize={96} outerClassName="flex-1 min-h-0" className={cn('space-y-1 pb-1 pl-2.5 pr-2', props.mobileVariant ? '' : '')}>
+    <ScrollableOverlay ref={scrollContainerRef} useScrollShadow scrollShadowSize={96} outerClassName="flex-1 min-h-0" className={cn('space-y-1 pb-1 pl-2.5 pr-2', props.mobileVariant ? '' : '')}>
       {props.topContent}
       {props.showOnlyMainWorkspace ? (
         <div className="space-y-[0.6rem] py-1">
@@ -126,7 +167,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
               const hideGroupLabel = group.id === primaryGroup.id;
               return (
                 <React.Fragment key={groupKey}>
-                  {props.renderGroupSessions(group, groupKey, activeSection.project.id, hideGroupLabel, null, true)}
+                  {props.renderGroupSessions(group, groupKey, activeSection.project.id, hideGroupLabel, null, true, scrollContainerRef)}
                 </React.Fragment>
               );
             });
@@ -160,7 +201,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                 const isCollapsed = props.collapsedProjects.has(projectKey);
                 const isActiveProject = projectKey === props.activeProjectId;
                 const isRepo = props.projectRepoStatus.get(projectKey);
-                const orderedGroups = props.getOrderedGroups(projectKey, section.groups);
+                const orderedGroups = cachedGetOrderedGroups(projectKey, section.groups);
                 const rootGroup = orderedGroups.find((group) => group.isMain) ?? null;
                 const nestedGroups = rootGroup
                   ? orderedGroups.filter((group) => group.id !== rootGroup.id)
@@ -194,7 +235,6 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                     onNewWorktreeSession={() => {
                       if (projectKey !== props.activeProjectId) props.setActiveProjectIdOnly(projectKey);
                       props.setActiveMainTab('chat');
-                      if (props.mobileVariant) props.setSessionSwitcherOpen(false);
                       props.openNewWorktreeDialog();
                     }}
                     onRenameStart={() => props.openProjectEditDialog(projectKey)}
@@ -226,13 +266,13 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                               });
                             }}
                           >
-                            {rootGroup ? props.renderGroupSessions(rootGroup, `${projectKey}:${rootGroup.id}`, projectKey, true) : null}
+                            {rootGroup ? props.renderGroupSessions(rootGroup, `${projectKey}:${rootGroup.id}`, projectKey, true, null, undefined, scrollContainerRef) : null}
                             <SortableContext items={nestedGroups.map((group) => group.id)} strategy={verticalListSortingStrategy}>
                               {nestedGroups.map((group) => {
                                 const groupKey = `${projectKey}:${group.id}`;
                                 return (
                                   <SortableGroupItem key={group.id} id={group.id} disabled={props.isInlineEditing}>
-                                    {(dragHandleProps) => props.renderGroupSessions(group, groupKey, projectKey, false, dragHandleProps)}
+                                    {(dragHandleProps) => props.renderGroupSessions(group, groupKey, projectKey, false, dragHandleProps, undefined, scrollContainerRef)}
                                   </SortableGroupItem>
                                 );
                               })}

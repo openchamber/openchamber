@@ -64,6 +64,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
     const effectiveDirectory = useEffectiveDirectory();
     const { t } = useI18n();
     const normalizedRenderingMode = normalizeUserMessageRenderingMode(userMessageRenderingMode);
+    const isCollapsed = collapsibleUserMessages && !isExpanded;
     const textRef = React.useRef<HTMLDivElement>(null);
     const skillByName = React.useMemo(() => new Map(skills.map((skill) => [skill.name, skill])), [skills]);
 
@@ -247,7 +248,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
                     "break-words font-sans typography-markdown-body",
                     isExpanded && "pb-3",
                     normalizedRenderingMode === 'plain' && 'whitespace-pre-wrap',
-                    collapsibleUserMessages && !isExpanded && "line-clamp-2",
+                    isCollapsed && "line-clamp-2",
                     collapsibleUserMessages && isTruncated && !isExpanded && "cursor-pointer"
                 )}
                 ref={textRef}
@@ -256,8 +257,23 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
                 {normalizedRenderingMode === 'markdown' ? (
                     <SimpleMarkdownRenderer
                         content={processedMarkdownContent}
-                        className="[&_.markdown-content>*:first-child]:mt-0 [&_.markdown-content>*:last-child]:mb-0"
-                        disableLinkSafety 
+                        className={cn(
+                            "[&_.markdown-content>*:first-child]:mt-0 [&_.markdown-content>*:last-child]:mb-0",
+                            isCollapsed && [
+                                "[&_.markdown-content>*]:my-0",
+                                "[&_[data-component='markdown-code']]:my-0",
+                                "[&_[data-component='markdown-code']]:inline",
+                                "[&_[data-component='markdown-code']]:border-0",
+                                "[&_[data-component='markdown-code']]:bg-transparent",
+                                "[&_[data-component='markdown-code']>*:first-child]:hidden",
+                                "[&_[data-component='markdown-code']>div]:inline",
+                                "[&_[data-component='markdown-code']>div]:p-0",
+                                "[&_[data-component='markdown-code']_pre]:inline",
+                                "[&_[data-component='markdown-code']_code]:inline",
+                            ]
+                        )}
+                        disableLinkSafety
+                        enableFileReferences={false}
                     />
                 ) : (
                     plainTextContent

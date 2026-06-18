@@ -140,6 +140,7 @@ const VisualSectionContent: React.FC = () => {
         'fileEditorKeymap',
         'spacing',
         'inputBarOffset',
+        'expandedEditorToolbar',
         ...(!isVSCode ? ['terminalQuickKeys' as const] : []),
         'reportUsage',
     ]} />;

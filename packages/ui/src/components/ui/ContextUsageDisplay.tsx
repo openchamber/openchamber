@@ -4,6 +4,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
+import { clampPercent, resolveUsageTone } from '@/lib/quota';
 
 interface ContextUsageDisplayProps {
   totalTokens: number;
@@ -41,6 +42,13 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
   const { t } = useI18n();
   const [mobileTooltipOpen, setMobileTooltipOpen] = React.useState(false);
   const colorPct = typeof colorPercentage === 'number' ? colorPercentage : percentage;
+  const progressPct = clampPercent(percentage) ?? 0;
+  const progressTone = resolveUsageTone(colorPct);
+  const progressColor = progressTone === 'critical'
+    ? 'var(--status-error)'
+    : progressTone === 'warn'
+      ? 'var(--status-warning)'
+      : 'var(--status-success)';
 
   const formatTokens = (tokens: number) => {
     if (tokens >= 1_000_000) {
@@ -58,6 +66,12 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
     return 'text-status-success';
   };
 
+  const circularProgressSize = 20;
+  const circularProgressStroke = 3;
+  const circularProgressRadius = (circularProgressSize - circularProgressStroke) / 2;
+  const circularProgressCircumference = 2 * Math.PI * circularProgressRadius;
+  const circularProgressOffset = circularProgressCircumference * (1 - progressPct / 100);
+
   const safeOutputLimit = typeof outputLimit === 'number' ? Math.max(outputLimit, 0) : 0;
   const tooltipLines = [
     t('contextUsage.tooltip.usedTokens', { tokens: formatTokens(totalTokens) }),
@@ -73,10 +87,35 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
       <span className={cn('font-medium inline-flex items-center gap-1.5', valueClassName)}>
         {showPercentIcon ? (
           <>
-            <Icon name="donut-chart-fill"
-              className={cn('h-3.5 w-3.5', percentIconClassName, getPercentageColor(colorPct))}
-              aria-hidden="true"
-            />
+            <svg
+              viewBox={`0 0 ${circularProgressSize} ${circularProgressSize}`}
+              className={cn('h-3.5 w-3.5 -rotate-90', percentIconClassName)}
+              role="progressbar"
+              aria-valuenow={Math.round(progressPct)}
+              aria-valuemin={0}
+              aria-valuemax={100}
+            >
+              <circle
+                cx={circularProgressSize / 2}
+                cy={circularProgressSize / 2}
+                r={circularProgressRadius}
+                fill="none"
+                stroke="var(--interactive-border)"
+                strokeWidth={circularProgressStroke}
+              />
+              <circle
+                cx={circularProgressSize / 2}
+                cy={circularProgressSize / 2}
+                r={circularProgressRadius}
+                fill="none"
+                stroke={progressColor}
+                strokeWidth={circularProgressStroke}
+                strokeLinecap="round"
+                strokeDasharray={circularProgressCircumference}
+                strokeDashoffset={circularProgressOffset}
+                className="transition-[stroke-dashoffset,stroke] duration-300"
+              />
+            </svg>
             <span className="text-foreground">{Math.min(percentage, 999).toFixed(1)}%</span>
           </>
         ) : (

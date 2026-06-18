@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import type { OpencodeClient, Session } from '@opencode-ai/sdk/v2';
 import { opencodeClient } from '@/lib/opencode/client';
 import { listGlobalSessionPages } from '@/stores/globalSessions';
+import { getReviewTransferDirection, type ReviewTransferDirection } from '@/lib/reviewFlow';
+import { getOriginalSessionID, getReviewSessionID } from '@/lib/sessionReviewMetadata';
 
 type GlobalSessionsStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -14,6 +16,7 @@ type GlobalSessionsState = {
   activeSessions: Session[];
   archivedSessions: Session[];
   sessionsByDirectory: Map<string, Session[]>;
+  reviewTransferBySessionId: Map<string, ReviewTransferDirection>;
   hasLoaded: boolean;
   status: GlobalSessionsStatus;
   loadSessions: (fallbackActive?: Session[]) => Promise<LoadResult>;
@@ -297,11 +300,15 @@ const applySnapshot = (
   const nextSessionsByDirectory = nextActiveSessions === state.activeSessions
     ? state.sessionsByDirectory
     : buildSessionsByDirectory(nextActiveSessions);
+  const nextReviewTransferMap = nextActiveSessions === state.activeSessions
+    ? state.reviewTransferBySessionId
+    : buildReviewTransferMap(nextActiveSessions);
 
   if (
     nextActiveSessions === state.activeSessions
     && nextArchivedSessions === state.archivedSessions
     && nextSessionsByDirectory === state.sessionsByDirectory
+    && nextReviewTransferMap === state.reviewTransferBySessionId
     && state.hasLoaded
     && state.status === status
   ) {
@@ -312,15 +319,32 @@ const applySnapshot = (
     activeSessions: nextActiveSessions,
     archivedSessions: nextArchivedSessions,
     sessionsByDirectory: nextSessionsByDirectory,
+    reviewTransferBySessionId: nextReviewTransferMap,
     hasLoaded: true,
     status,
   };
 };
 
+const buildReviewTransferMap = (sessions: Session[]): Map<string, ReviewTransferDirection> => {
+  const next = new Map<string, ReviewTransferDirection>()
+  const activeIds = new Set(sessions.map((s) => s.id))
+  for (const session of sessions) {
+    const direction = getReviewTransferDirection(session)
+    if (!direction) continue
+    const targetSessionId = direction === 'review-to-original'
+      ? getOriginalSessionID(session)
+      : getReviewSessionID(session)
+    if (!targetSessionId || !activeIds.has(targetSessionId)) continue
+    next.set(session.id, direction)
+  }
+  return next
+}
+
 export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => ({
   activeSessions: [],
   archivedSessions: [],
   sessionsByDirectory: new Map(),
+  reviewTransferBySessionId: new Map(),
   hasLoaded: false,
   status: 'idle',
 
@@ -424,6 +448,9 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         activeSessions: nextActiveSessions,
         archivedSessions: nextArchivedSessions,
         sessionsByDirectory: nextSessionsByDirectory,
+        reviewTransferBySessionId: nextActiveSessions === state.activeSessions
+          ? state.reviewTransferBySessionId
+          : buildReviewTransferMap(nextActiveSessions),
       };
     });
 
@@ -458,6 +485,9 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         sessionsByDirectory: nextActiveSessions === state.activeSessions
           ? state.sessionsByDirectory
           : buildSessionsByDirectory(nextActiveSessions),
+        reviewTransferBySessionId: nextActiveSessions === state.activeSessions
+          ? state.reviewTransferBySessionId
+          : buildReviewTransferMap(nextActiveSessions),
       };
     });
   },
@@ -483,6 +513,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         activeSessions: nextActiveSessions,
         archivedSessions: nextArchivedSessions,
         sessionsByDirectory: buildSessionsByDirectory(nextActiveSessions),
+        reviewTransferBySessionId: buildReviewTransferMap(nextActiveSessions),
       };
     });
   },
@@ -520,6 +551,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         activeSessions: nextActiveSessions,
         archivedSessions: [...movedSessions, ...remainingArchivedSessions],
         sessionsByDirectory: buildSessionsByDirectory(nextActiveSessions),
+        reviewTransferBySessionId: buildReviewTransferMap(nextActiveSessions),
       };
     });
   },

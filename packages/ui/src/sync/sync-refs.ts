@@ -5,7 +5,7 @@
  * session-actions) use them to read child-store domain data without hooks.
  */
 
-import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
+import type { Config, OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import type { ChildStoreManager } from "./child-store"
 import { getSessionMaterializationStatus } from "./materialization"
 import type { State } from "./types"
@@ -14,6 +14,7 @@ let _sdk: OpencodeClient | null = null
 let _childStores: ChildStoreManager | null = null
 let _directory: string = ""
 let _registerSessionDirectory: ((sessionID: string, directory: string) => void) | null = null
+const configListeners = new Set<(directory: string, config: Config) => void>()
 
 export function setSyncRefs(
   sdk: OpencodeClient,
@@ -57,6 +58,26 @@ export function getDirectoryState(directory?: string): State | undefined {
   const dir = directory || _directory
   if (!dir) return undefined
   return stores.getState(dir)
+}
+
+/** Read resolved OpenCode config from a directory child store, if bootstrapped. */
+export function getSyncConfig(directory?: string): Config | undefined {
+  const config = getDirectoryState(directory)?.config
+  return config && Object.keys(config).length > 0 ? config : undefined
+}
+
+export function subscribeToSyncConfigChanges(listener: (directory: string, config: Config) => void): () => void {
+  configListeners.add(listener)
+  return () => {
+    configListeners.delete(listener)
+  }
+}
+
+export function emitSyncConfigChanged(directory: string, config: Config): void {
+  if (!directory) return
+  for (const listener of configListeners) {
+    listener(directory, config)
+  }
 }
 
 /** Read sessions from current directory's child store */
