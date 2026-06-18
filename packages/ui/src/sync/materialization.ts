@@ -77,6 +77,15 @@ function hasLiveStreamingField(part: Part): boolean {
   })
 }
 
+function getPartStateTime(part: Part): { start?: number; end?: number } | undefined {
+  const stateTime = (part as { state?: { time?: { start?: unknown; end?: unknown } } }).state?.time
+  if (!stateTime || typeof stateTime !== "object") return undefined
+  const start = typeof stateTime.start === "number" ? stateTime.start : undefined
+  const end = typeof stateTime.end === "number" ? stateTime.end : undefined
+  if (start === undefined && end === undefined) return undefined
+  return { start, end }
+}
+
 function mergeMaterializedPart(existing: Part | undefined, next: Part): Part {
   if (!existing || getPartEndTime(next) !== undefined) return next
 
@@ -92,6 +101,20 @@ function mergeMaterializedPart(existing: Part | undefined, next: Part): Part {
     if (merged === next) merged = { ...next }
     const mergedRecord = merged as Record<string, unknown>
     mergedRecord[field] = existingValue
+  }
+
+  const existingTime = getPartStateTime(existing)
+  if (existingTime) {
+    const nextTime = getPartStateTime(next)
+    const preservedStart = nextTime?.start ?? existingTime.start
+    const preservedEnd = nextTime?.end ?? existingTime.end
+    if (preservedStart !== nextTime?.start || preservedEnd !== nextTime?.end) {
+      if (merged === next) merged = { ...next }
+      const mergedRecord = merged as Record<string, unknown>
+      const nextState = (next as Record<string, unknown>).state as Record<string, unknown> | undefined
+      const newState = { ...(nextState ?? {}), time: { start: preservedStart, end: preservedEnd } }
+      mergedRecord.state = newState
+    }
   }
 
   return merged
