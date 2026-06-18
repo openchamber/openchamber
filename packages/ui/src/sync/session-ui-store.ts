@@ -619,6 +619,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       if (explicitProject || explicitDirectory !== null) {
         return explicitProject ?? inferredProjectFromDir ?? fallbackProject
       }
+      if (activeProject) return activeProject
       if (currentDirectory) return currentDirProject ?? fallbackProject
       return persistedProjectByDir ?? persistedProjectById ?? fallbackProject
     })()
@@ -626,6 +627,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const directory = (() => {
       if (explicitDirectory !== null) return explicitDirectory
       if (explicitProject) return normalizePath(explicitProject.path ?? null)
+      const selectedProjectPath = normalizePath(selectedProject?.path ?? null)
+      if (selectedProjectPath && selectedProjectPath !== currentDirectory) return selectedProjectPath
       if (currentDirectory) return currentDirectory
       if (persistedTarget?.directory) return persistedTarget.directory
       return normalizePath(selectedProject?.path ?? null)
