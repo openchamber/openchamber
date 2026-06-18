@@ -51,7 +51,8 @@ export const createOpenCodeAuthStateRuntime = (dependencies) => {
       return {};
     }
 
-    const credentials = Buffer.from(`opencode:${password}`).toString('base64');
+    const username = process.env.OPENCODE_SERVER_USERNAME || 'opencode';
+    const credentials = Buffer.from(`${username}:${password}`).toString('base64');
     return { Authorization: `Basic ${credentials}` };
   };
 

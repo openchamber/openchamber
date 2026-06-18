@@ -73,7 +73,8 @@ function generateSecureOpenCodePassword(): string {
 }
 
 function buildOpenCodeAuthHeader(password: string): string {
-  return `Basic ${Buffer.from(`opencode:${password}`, 'utf8').toString('base64')}`;
+  const username = process.env.OPENCODE_SERVER_USERNAME || 'opencode';
+  return `Basic ${Buffer.from(`${username}:${password}`, 'utf8').toString('base64')}`;
 }
 
 function isValidOpenCodePassword(password: string): boolean {
