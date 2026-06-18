@@ -271,8 +271,8 @@ export const useSessionGrouping = (args: Args) => {
         t: ((key: string, params?: Record<string, unknown>) =>
           t(key as Parameters<typeof t>[0], params as Parameters<typeof t>[1])) as BuildGroupedSessionsArgs['t'],
       });
-    },
-    [homeDirectory, worktreeMetadata, pinnedSessionIds, gitBranches, isVSCode, showSubagentSessionsInSidebar, t],
+},
+    [args.homeDirectory, args.worktreeMetadata, args.pinnedSessionIds, args.gitBranches, args.isVSCode, showSubagentSessionsInSidebar, t],
   );
 
   return {

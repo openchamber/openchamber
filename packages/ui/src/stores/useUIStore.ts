@@ -525,7 +525,7 @@ interface UIStore {
   todoPanelHeight: number;
   isSessionSwitcherOpen: boolean;
   isSessionDropdownOpen: boolean;
-  showSubagentSessionsInSidebar: boolean;
+showSubagentSessionsInSidebar: boolean;
   activeMainTab: MainTab;
   mainTabGuard: MainTabGuard | null;
   sidebarOpenBeforeFullscreenTab: boolean | null;
@@ -668,7 +668,7 @@ interface UIStore {
   setTodoPanelHeight: (height: number) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
   setSessionDropdownOpen: (open: boolean) => void;
-  setShowSubagentSessionsInSidebar: (show: boolean) => void;
+setShowSubagentSessionsInSidebar: (show: boolean) => void;
   setActiveMainTab: (tab: MainTab) => void;
   prepareForRuntimeSwitch: (runtimeKey?: string | null) => void;
   restoreForRuntimeSwitch: (runtimeKey?: string | null) => void;
@@ -815,7 +815,7 @@ export const useUIStore = create<UIStore>()(
         todoPanelHeight: 259,
         isSessionSwitcherOpen: false,
         isSessionDropdownOpen: false,
-        showSubagentSessionsInSidebar: false,
+showSubagentSessionsInSidebar: false,
         activeMainTab: 'chat',
         mainTabGuard: null,
         sidebarOpenBeforeFullscreenTab: null,
@@ -1371,6 +1371,12 @@ export const useUIStore = create<UIStore>()(
             return;
           }
           set({ isSessionDropdownOpen: open });
+        },
+setShowSubagentSessionsInSidebar: (show) => {
+          if (get().showSubagentSessionsInSidebar === show) {
+            return;
+          }
+          set({ showSubagentSessionsInSidebar: show });
         },
 
         setShowSubagentSessionsInSidebar: (show) => {
