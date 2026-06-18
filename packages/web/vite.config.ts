@@ -50,8 +50,16 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,ttf,otf,eot}'],
         // iOS Safari/PWA is much more reliable with a classic (non-module) SW bundle.
         rollupFormat: 'iife',
-        // We already keep a custom manifest in index.html
-        injectionPoint: undefined,
+        // Allow the build to complete even though a few optional chunks are huge.
+        maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
+        // Do not precache oversized optional chunks (shiki all languages, font
+        // effects, graph layouts, etc.). They will still load from the network
+        // when needed; the SW precaches the core assets that matter for first paint.
+        manifestTransforms: [
+          async (manifest) => ({
+            manifest: manifest.filter((entry) => (entry.size ?? 0) <= 2 * 1024 * 1024),
+          }),
+        ],
       },
       devOptions: {
         enabled: pwaDevEnabled,
@@ -111,11 +119,15 @@ export default defineConfig({
         manualChunks(id) {
           if (!id.includes('node_modules')) return undefined;
 
-          const match = id.split('node_modules/')[1];
-          if (!match) return undefined;
+          // Resolve the real package path. Bun caches dependencies under
+          // node_modules/.bun/<pkg>@<version>/node_modules/<pkg>/..., which used
+          // to collapse every cached package into a single `vendor-.bun` chunk.
+          const parts = id.split('/node_modules/');
+          const realPath = parts[parts.length - 1];
+          if (!realPath) return undefined;
 
-          const segments = match.split('/');
-          const packageName = match.startsWith('@') ? `${segments[0]}/${segments[1]}` : segments[0];
+          const segments = realPath.split('/');
+          const packageName = realPath.startsWith('@') ? `${segments[0]}/${segments[1]}` : segments[0];
 
           if (packageName === 'react' || packageName === 'react-dom') return 'vendor-react';
           if (packageName === 'zustand' || packageName === 'zustand/middleware') return 'vendor-zustand';
@@ -124,6 +136,13 @@ export default defineConfig({
           if (packageName.includes('remark') || packageName.includes('rehype') || packageName === 'react-markdown') return 'vendor-markdown';
           if (packageName === '@base-ui/react' || packageName.startsWith('@base-ui')) return 'vendor-base-ui';
           if (packageName.includes('react-syntax-highlighter') || packageName.includes('highlight.js')) return 'vendor-syntax';
+
+          // Heavy, optional vendors that mobile does not need on first paint.
+          if (packageName === 'onnxruntime-web') return 'vendor-ml';
+          if (packageName === 'mermaid') return 'vendor-mermaid';
+          if (packageName === 'katex') return 'vendor-katex';
+          if (packageName === 'diff') return 'vendor-diff';
+          if (packageName.startsWith('@radix-ui')) return 'vendor-radix';
 
           const sanitized = packageName.replace(/^@/, '').replace(/\//g, '-');
           return `vendor-${sanitized}`;

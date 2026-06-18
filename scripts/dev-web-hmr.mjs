@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -146,6 +146,15 @@ async function shutdown(exitCode = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
   await Promise.all([stopChildTree(api), stopChildTree(vite)]);
+  // Clean up orphaned OpenCode processes that weren't killed by
+  // the Express server's shutdown (e.g. when nodemon is killed first).
+  // Scope to auto-started instances only (--hostname 127.0.0.1), avoids
+  // killing the user's external server on 0.0.0.0.
+  try {
+    spawnSync('pkill', ['-f', 'opencode serve.*--hostname 127.0.0.1'], { stdio: 'ignore' });
+  } catch {
+    // best-effort
+  }
   process.exit(exitCode);
 }
 
