@@ -7,6 +7,7 @@ import type {
   GitLogResponse,
   GitIdentitySummary,
 } from '@/lib/api/types';
+import { getSafeStorage } from '@/stores/utils/safeStorage';
 
 const LOG_STALE_THRESHOLD = 10000;
 const REPO_CHECK_STALE_THRESHOLD = 60_000;
@@ -139,6 +140,53 @@ const createEmptyDirectoryState = (): DirectoryGitState => ({
   isLoadingBranches: false,
   isLoadingIdentity: false,
 });
+
+// ---------------------------------------------------------------------------
+// Persisted branch cache (stale-while-revalidate)
+//
+// `git branch` is slow on cold start and the draft branch selector above the
+// composer is gated behind it — it's the slowest-loading composer element.
+// Cache the per-directory branch list to localStorage and seed the store on
+// init so the selector paints instantly from the last-known branches; a stale
+// refresh runs in the background (see ChatInput's draft-branch effect). Only the
+// branch list is cached — never status/log/diff.
+// ---------------------------------------------------------------------------
+const GIT_BRANCH_CACHE_KEY = 'oc.gitBranchCache';
+
+const readBranchCache = (): Record<string, GitBranch> => {
+  try {
+    const raw = getSafeStorage().getItem(GIT_BRANCH_CACHE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, GitBranch>;
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const writeCachedBranches = (directory: string, branches: GitBranch): void => {
+  if (!directory || !branches) return;
+  try {
+    const cache = readBranchCache();
+    cache[directory] = branches;
+    getSafeStorage().setItem(GIT_BRANCH_CACHE_KEY, JSON.stringify(cache));
+  } catch {
+    // quota / serialization — ignore; live fetch still refreshes the store
+  }
+};
+
+const seedDirectoriesFromBranchCache = (): Map<string, DirectoryGitState> => {
+  const directories = new Map<string, DirectoryGitState>();
+  const cache = readBranchCache();
+  for (const [directory, branches] of Object.entries(cache)) {
+    if (!directory || !branches || !Array.isArray(branches.all)) continue;
+    // A cached branch list implies the directory was a git repo. Seed isGitRepo
+    // so the selector's gate passes immediately; lastBranchesFetch stays 0 so the
+    // ChatInput effect treats it as stale and refreshes in the background.
+    directories.set(directory, { ...createEmptyDirectoryState(), isGitRepo: true, branches });
+  }
+  return directories;
+};
 
 // LRU eviction helper for diff cache
 const evictDiffCacheIfNeeded = (
@@ -373,7 +421,7 @@ const isCleanStatusFile = (file: GitStatus['files'][number]): boolean =>
 export const useGitStore = create<GitStore>()(
   devtools(
     (set, get) => ({
-      directories: new Map(),
+      directories: seedDirectoriesFromBranchCache(),
       activeDirectory: null,
 
       setActiveDirectory: (directory) => {
@@ -650,6 +698,7 @@ export const useGitStore = create<GitStore>()(
           const dirState = newDirectories.get(directory) ?? createEmptyDirectoryState();
           newDirectories.set(directory, { ...dirState, branches, isLoadingBranches: false, lastBranchesFetch: Date.now() });
           set({ directories: newDirectories });
+          writeCachedBranches(directory, branches);
         } catch (error) {
           console.error('Failed to fetch git branches:', error);
           const newDirectories = new Map(get().directories);

@@ -14,6 +14,7 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
     - `POST /api/fs/mkdir`
     - `GET /api/fs/read`
     - `GET /api/fs/raw`
+    - `GET /api/fs/serve/:path(*)`
     - `POST /api/fs/write`
     - `POST /api/fs/delete`
     - `POST /api/fs/rename`

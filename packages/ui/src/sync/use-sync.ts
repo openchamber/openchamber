@@ -23,10 +23,11 @@ import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./
 import { assertSdkSuccess } from "./sdk-utils"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
-const INITIAL_MESSAGE_PAGE_SIZE = 150
+const INITIAL_MESSAGE_PAGE_SIZE = 50
 const VSCODE_INITIAL_MESSAGE_PAGE_SIZE = 30
 const MOBILE_INITIAL_MESSAGE_PAGE_SIZE = 30
-const HISTORY_MESSAGE_PAGE_SIZE = 200
+const HISTORY_MESSAGE_PAGE_SIZE = 100
+const INITIAL_PAGE_EXPANSION_LIMITS = [100, 150] as const
 const VSCODE_INITIAL_PAGE_EXPANSION_LIMITS = [50, 80, 120] as const
 const MAX_SEEN_DIRS = 30
 const VSCODE_SESSION_CACHE_LIMIT = 4
@@ -40,6 +41,12 @@ const seenByDirectory = new Map<string, Set<string>>()
 // Shared across useSync() hook instances. Chat, model controls, and sidebar can
 // all request the same session during startup; coalesce them into one HTTP load.
 const syncSessionInflightByKey = new Map<string, Promise<void>>()
+
+// Per-session generation counter. When a newer syncSession request starts for
+// the same session, older in-flight requests become stale and must not write
+// to the store. This prevents rapid session switches (e.g. 1→2→3 in the
+// sidebar) from having each completed fetch fight for focus.
+const syncSessionGenerationByKey = new Map<string, number>()
 
 type SyncMeta = {
   limit: number
@@ -61,6 +68,9 @@ const getInitialMessagePageSize = () => {
   if (isMobileSurfaceRuntime()) return MOBILE_INITIAL_MESSAGE_PAGE_SIZE
   return INITIAL_MESSAGE_PAGE_SIZE
 }
+const getInitialPageExpansionLimits = () => isConstrainedSessionRuntime()
+  ? VSCODE_INITIAL_PAGE_EXPANSION_LIMITS
+  : INITIAL_PAGE_EXPANSION_LIMITS
 const getDefaultMeta = (): SyncMeta => ({ limit: getInitialMessagePageSize(), cursor: undefined, complete: false, loading: false })
 
 function getPrefetchMeta(directory: string, sessionID: string): SyncMeta | undefined {
@@ -307,7 +317,7 @@ export function useSync() {
 
   // Load messages for a session
   const loadMessages = useCallback(
-    async (sessionID: string, options?: { before?: string; mode?: "replace" | "prepend" }) => {
+    async (sessionID: string, options?: { before?: string; mode?: "replace" | "prepend"; isStale?: () => boolean }) => {
       const m = getMetaFor(sessionID)
       if (m.loading) return
       setMetaFor(sessionID, { loading: true })
@@ -316,13 +326,13 @@ export function useSync() {
         const limit = options?.before ? HISTORY_MESSAGE_PAGE_SIZE : m.limit
         let page = await fetchMessages(sessionID, limit, options?.before)
 
-        // Constrained shells keep the initial page small for switch performance. Some
-        // sessions have a very large final turn, so the latest 30 records can
+        // Keep the initial page small for switch performance. Some sessions
+        // have a very large final turn, so the latest records can
         // contain only assistant/tool records and no user boundary. That makes
         // turn projection render an empty chat until the user manually loads
         // older messages. Expand only this initial tail fetch, with a hard cap.
-        if (!options?.before && isConstrainedSessionRuntime() && !page.complete && !hasUserMessage(page.session)) {
-          for (const nextLimit of VSCODE_INITIAL_PAGE_EXPANSION_LIMITS) {
+        if (!options?.before && !page.complete && !hasUserMessage(page.session)) {
+          for (const nextLimit of getInitialPageExpansionLimits()) {
             if (nextLimit <= limit) continue
             page = await fetchMessages(sessionID, nextLimit)
             if (page.complete || hasUserMessage(page.session)) break
@@ -336,6 +346,11 @@ export function useSync() {
           clearOptimistic(sessionID, messageID)
         }
 
+        if (options?.isStale?.()) {
+          setMetaFor(sessionID, { loading: false })
+          return
+        }
+
         const current = store.getState()
         const materialized = materializeSessionSnapshots(
           current,
@@ -346,6 +361,11 @@ export function useSync() {
           })),
           { skipPartTypes: SKIP_PARTS, mode: options?.mode === "prepend" ? "prepend" : "merge" },
         )
+
+        if (options?.isStale?.()) {
+          setMetaFor(sessionID, { loading: false })
+          return
+        }
 
         setMetaFor(sessionID, {
           limit: materialized.messages.length,
@@ -377,6 +397,13 @@ export function useSync() {
       // Dedup inflight requests
       const existing = syncSessionInflightByKey.get(key)
       if (existing) return existing
+
+      // This is a new request. Bump generation so any older request that
+      // might still be finishing (e.g. from a previous component lifecycle)
+      // knows it is stale and should not write to the store.
+      const generation = (syncSessionGenerationByKey.get(key) ?? 0) + 1
+      syncSessionGenerationByKey.set(key, generation)
+      const isStale = () => syncSessionGenerationByKey.get(key) !== generation
 
       const current = store.getState()
       const m = getMetaFor(sessionID)
@@ -423,7 +450,7 @@ export function useSync() {
                     assertSdkSuccess(response, "session.get")
                     return response
                   })
-                  if (result.data) {
+                  if (result.data && !isStale()) {
                     const nextSession = stripSessionDiffSnapshots(result.data)
                     const s = store.getState()
                     const sessions = [...s.session]
@@ -433,15 +460,30 @@ export function useSync() {
                     } else {
                       sessions.splice(idx.index, 0, nextSession)
                     }
-                    store.setState({ session: sessions })
+                    if (!isStale()) {
+                      store.setState({ session: sessions })
+                    }
                   }
                 } catch (e) {
                   console.error("[sync] failed to fetch session", sessionID, e)
                 }
               })()
             : Promise.resolve(),
-          shouldLoadMessages ? loadMessages(sessionID) : Promise.resolve(),
+          shouldLoadMessages ? loadMessages(sessionID, { isStale }) : Promise.resolve(),
         ])
+
+        // Progressive mount: after the initial page resolves, if the session
+        // isn't stale and the server indicated more messages, dispatch a
+        // second fetch to prepend older history. The user sees the first page
+        // immediately; the rest arrive shortly after. This gives the scroll
+        // container headroom above the viewport so the "load older on
+        // scroll-up" trigger fires before the user hits the absolute top.
+        if (!isStale()) {
+          const currentMeta = getMetaFor(sessionID)
+          if (currentMeta.cursor && !currentMeta.complete) {
+            loadMessages(sessionID, { before: currentMeta.cursor, mode: "prepend", isStale })
+          }
+        }
       })()
 
       syncSessionInflightByKey.set(key, promise)

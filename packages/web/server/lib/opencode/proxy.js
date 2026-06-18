@@ -411,44 +411,69 @@ export const registerOpenCodeProxy = (app, deps) => {
     }
   };
 
-  const forwardSanitizedSessionListRequest = async (req, res, next, logLabel) => {
-    try {
-      const requestUrl = typeof req.originalUrl === 'string' && req.originalUrl.length > 0
-        ? req.originalUrl
-        : (typeof req.url === 'string' ? req.url : '');
-      const upstreamPathRaw = requestUrl.startsWith('/api') ? requestUrl.slice(4) || '/' : requestUrl;
-      const upstreamPath = await canonicalizeDirectoryQuery(upstreamPathRaw);
-      const upstream = await fetch(buildOpenCodeUrl(upstreamPath, ''), {
-        method: 'GET',
-        headers: {
+  const fetchSessionListPayload = async (upstreamPath, { req = null, timeoutMs = null } = {}) => {
+    const headers = req
+      ? {
           ...collectForwardProxyHeaders(req.headers, getOpenCodeAuthHeaders()),
           accept: 'application/json',
           'accept-encoding': 'identity',
-        },
-      });
+        }
+      : {
+          Accept: 'application/json',
+          ...getOpenCodeAuthHeaders(),
+          'accept-encoding': 'identity',
+        };
+    const upstream = await fetch(buildOpenCodeUrl(upstreamPath, ''), {
+      method: 'GET',
+      headers,
+      ...(typeof timeoutMs === 'number' ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
+    });
+    const contentType = upstream.headers.get('content-type') || 'application/json; charset=utf-8';
+    const bodyText = await upstream.text();
+    const isJson = contentType.toLowerCase().includes('application/json');
 
-      res.status(upstream.status);
-      applyForwardProxyResponseHeaders(upstream.headers, res);
+    if (!isJson) {
+      return { upstream, contentType, bodyText, payload: null, isJson: false };
+    }
 
-      const contentType = upstream.headers.get('content-type') || 'application/json; charset=utf-8';
-      const bodyText = await upstream.text();
-      if (!contentType.toLowerCase().includes('application/json')) {
-        res.setHeader('content-type', contentType);
-        res.end(bodyText);
+    try {
+      const payload = JSON.parse(bodyText);
+      return { upstream, contentType, bodyText, payload, isJson: true, parseError: null };
+    } catch (parseError) {
+      return { upstream, contentType, bodyText, payload: null, isJson: true, parseError };
+    }
+  };
+
+  const getRequestUpstreamPath = async (req) => {
+    const requestUrl = typeof req.originalUrl === 'string' && req.originalUrl.length > 0
+      ? req.originalUrl
+      : (typeof req.url === 'string' ? req.url : '');
+    const upstreamPathRaw = requestUrl.startsWith('/api') ? requestUrl.slice(4) || '/' : requestUrl;
+    return canonicalizeDirectoryQuery(upstreamPathRaw);
+  };
+
+  const forwardSanitizedSessionListRequest = async (req, res, next, logLabel) => {
+    try {
+      const upstreamPath = await getRequestUpstreamPath(req);
+      const result = await fetchSessionListPayload(upstreamPath, { req });
+
+      res.status(result.upstream.status);
+      applyForwardProxyResponseHeaders(result.upstream.headers, res);
+
+      if (!result.isJson) {
+        res.setHeader('content-type', result.contentType);
+        res.end(result.bodyText);
         return;
       }
 
-      let payload;
-      try {
-        payload = JSON.parse(bodyText);
-      } catch {
-        res.setHeader('content-type', contentType);
-        res.end(bodyText);
+      if (result.parseError || !Array.isArray(result.payload)) {
+        res.setHeader('content-type', result.contentType);
+        res.end(result.bodyText);
         return;
       }
 
-      res.setHeader('content-type', contentType);
-      res.json(sanitizeSessionListPayload(payload));
+      res.setHeader('content-type', result.contentType);
+      res.json(sanitizeSessionListPayload(result.payload));
     } catch (error) {
       if (isAbortError(error)) {
         return;
@@ -468,8 +493,26 @@ export const registerOpenCodeProxy = (app, deps) => {
     next();
   });
 
-  // Readiness gate — return 503 while OpenCode is starting/restarting
-  app.use('/api', (req, res, next) => {
+  // Readiness gate — while OpenCode is starting/restarting, HOLD the request and
+  // poll readiness instead of returning 503 immediately. A bare 503 pushes the
+  // client into an exponential-backoff retry loop (500ms → 1s → …) that wastes
+  // seconds of cold-start time and can fail bootstrap outright. Holding the
+  // request until OpenCode is ready (typically well under a second) lets the
+  // first call simply succeed. We still 503 if readiness doesn't arrive within a
+  // bounded window so genuinely-down servers fail fast.
+  const READINESS_HOLD_POLL_MS = 75;
+  const READINESS_HOLD_MAX_MS = 6000;
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const isStillWaiting = (runtimeState) => {
+    const waitElapsed = runtimeState.openCodeNotReadySince === 0 ? 0 : Date.now() - runtimeState.openCodeNotReadySince;
+    return (
+      (!runtimeState.isOpenCodeReady && (runtimeState.openCodeNotReadySince === 0 || waitElapsed < OPEN_CODE_READY_GRACE_MS)) ||
+      runtimeState.isRestartingOpenCode ||
+      !runtimeState.openCodePort
+    );
+  };
+
+  app.use('/api', async (req, res, next) => {
     if (
       req.path.startsWith('/themes/custom') ||
       req.path.startsWith('/push') ||
@@ -483,21 +526,26 @@ export const registerOpenCodeProxy = (app, deps) => {
       return next();
     }
 
-    const runtimeState = getRuntime();
-    const waitElapsed = runtimeState.openCodeNotReadySince === 0 ? 0 : Date.now() - runtimeState.openCodeNotReadySince;
-    const stillWaiting =
-      (!runtimeState.isOpenCodeReady && (runtimeState.openCodeNotReadySince === 0 || waitElapsed < OPEN_CODE_READY_GRACE_MS)) ||
-      runtimeState.isRestartingOpenCode ||
-      !runtimeState.openCodePort;
+    if (!isStillWaiting(getRuntime())) {
+      return next();
+    }
 
-    if (stillWaiting) {
-      return res.status(503).json({
+    const deadline = Date.now() + Math.min(OPEN_CODE_READY_GRACE_MS, READINESS_HOLD_MAX_MS);
+    while (Date.now() < deadline) {
+      // Client gave up (closed/aborted) — stop holding.
+      if (res.writableEnded || req.aborted) return;
+      await sleep(READINESS_HOLD_POLL_MS);
+      if (!isStillWaiting(getRuntime())) {
+        return next();
+      }
+    }
+
+    if (!res.headersSent) {
+      res.status(503).json({
         error: 'OpenCode is restarting',
         restarting: true,
       });
     }
-
-    next();
   });
 
   // Windows: session merge for cross-directory session listing
@@ -506,16 +554,17 @@ export const registerOpenCodeProxy = (app, deps) => {
       const rawUrl = req.originalUrl || req.url || '';
       if (rawUrl.includes('directory=')) return next();
 
+      const fetchWindowsSessionList = async (sessionPath) => {
+        const result = await fetchSessionListPayload(sessionPath, { req, timeoutMs: 10000 });
+        if (!result.upstream.ok || !Array.isArray(result.payload)) return null;
+        return sanitizeSessionListPayload(result.payload);
+      };
+
       try {
-        const authHeaders = getOpenCodeAuthHeaders();
-        const fetchOpts = {
-          method: 'GET',
-          headers: { Accept: 'application/json', ...authHeaders },
-          signal: AbortSignal.timeout(10000),
-        };
-        const globalRes = await fetch(buildOpenCodeUrl('/session', ''), fetchOpts);
-        const globalPayload = globalRes.ok ? await globalRes.json().catch(() => []) : [];
-        const globalSessions = Array.isArray(globalPayload) ? globalPayload : [];
+        const globalSessions = await fetchWindowsSessionList('/session').catch((error) => {
+          console.log(`[SessionMerge] Global session list failed: ${error.message}`);
+          return null;
+        });
 
         const settingsPath = path.join(os.homedir(), '.config', 'openchamber', 'settings.json');
         let projectDirs = [];
@@ -529,11 +578,12 @@ export const registerOpenCodeProxy = (app, deps) => {
         }
 
         const seen = new Set(
-          globalSessions
+          (globalSessions || [])
             .map((session) => (session && typeof session.id === 'string' ? session.id : null))
             .filter((id) => typeof id === 'string')
         );
         const extraSessions = [];
+        let successfulProjectReads = 0;
         for (const dir of projectDirs) {
           const candidates = Array.from(new Set([
             dir,
@@ -543,16 +593,15 @@ export const registerOpenCodeProxy = (app, deps) => {
           for (const candidateDir of candidates) {
             const encoded = encodeURIComponent(candidateDir);
             try {
-              const dirRes = await fetch(buildOpenCodeUrl(`/session?directory=${encoded}`, ''), fetchOpts);
-              if (dirRes.ok) {
-                const dirPayload = await dirRes.json().catch(() => []);
-                const dirSessions = Array.isArray(dirPayload) ? dirPayload : [];
-                for (const session of dirSessions) {
-                  const id = session && typeof session.id === 'string' ? session.id : null;
-                  if (id && !seen.has(id)) {
-                    seen.add(id);
-                    extraSessions.push(session);
-                  }
+              const dirSessions = await fetchWindowsSessionList(`/session?directory=${encoded}`);
+              if (dirSessions) {
+                successfulProjectReads += 1;
+              }
+              for (const session of dirSessions || []) {
+                const id = session && typeof session.id === 'string' ? session.id : null;
+                if (id && !seen.has(id)) {
+                  seen.add(id);
+                  extraSessions.push(session);
                 }
               }
             } catch {
@@ -560,17 +609,21 @@ export const registerOpenCodeProxy = (app, deps) => {
           }
         }
 
-        const merged = [...globalSessions, ...extraSessions];
+        if (!globalSessions && successfulProjectReads === 0) {
+          return res.status(504).json({ error: 'OpenCode session list timed out' });
+        }
+
+        const merged = [...(globalSessions || []), ...extraSessions];
         merged.sort((a, b) => {
           const aTime = a && typeof a.time_updated === 'number' ? a.time_updated : 0;
           const bTime = b && typeof b.time_updated === 'number' ? b.time_updated : 0;
           return bTime - aTime;
         });
-        console.log(`[SessionMerge] ${globalSessions.length} global + ${extraSessions.length} extra = ${merged.length} total`);
+        console.log(`[SessionMerge] ${globalSessions?.length || 0} global + ${extraSessions.length} extra = ${merged.length} total`);
         return res.json(sanitizeSessionListPayload(merged));
       } catch (error) {
-        console.log(`[SessionMerge] Error: ${error.message}, falling through`);
-        next();
+        console.log(`[SessionMerge] Error: ${error.message}`);
+        return res.status(500).json({ error: error.message || 'Failed to merge Windows sessions' });
       }
     });
   }

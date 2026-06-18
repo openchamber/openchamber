@@ -287,3 +287,76 @@ describe('runtimeFetch transport contract', () => {
     }
   });
 });
+
+describe('runtimeFetch read coalescing', () => {
+  test('coalesces concurrent identical GET reads into one fetch', async () => {
+    const previous = getRuntimeUrlResolver();
+    let calls = 0;
+    try {
+      configureRuntimeUrlResolver({ apiBaseUrl: 'https://api.example' });
+      globalThis.fetch = (async () => {
+        calls += 1;
+        await new Promise((r) => setTimeout(r, 20));
+        return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }) as typeof fetch;
+
+      const [a, b] = await Promise.all([
+        runtimeFetch('/api/config/providers'),
+        runtimeFetch('/api/config/providers'),
+      ]);
+
+      expect(calls).toBe(1);
+      // Each caller gets an independently-readable clone.
+      expect(await a.json()).toEqual({ ok: true });
+      expect(await b.json()).toEqual({ ok: true });
+
+      // After settle the entry is gone — a later call re-fetches.
+      await runtimeFetch('/api/config/providers');
+      expect(calls).toBe(2);
+    } finally {
+      setRuntimeUrlResolver(previous);
+      globalThis.fetch = originalFetch;
+      clearRuntimeAuthCredentialProvider();
+    }
+  });
+
+  test('does not coalesce non-GET, non-allowlisted, or signal-bearing requests', async () => {
+    const previous = getRuntimeUrlResolver();
+    let calls = 0;
+    try {
+      configureRuntimeUrlResolver({ apiBaseUrl: 'https://api.example' });
+      globalThis.fetch = (async () => {
+        calls += 1;
+        await new Promise((r) => setTimeout(r, 10));
+        return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+      }) as typeof fetch;
+
+      // POST to an allowlisted path → not coalesced.
+      await Promise.all([
+        runtimeFetch('/api/config/providers', { method: 'POST' }),
+        runtimeFetch('/api/config/providers', { method: 'POST' }),
+      ]);
+      expect(calls).toBe(2);
+
+      calls = 0;
+      // GET to a non-allowlisted path → not coalesced.
+      await Promise.all([
+        runtimeFetch('/api/session'),
+        runtimeFetch('/api/session'),
+      ]);
+      expect(calls).toBe(2);
+
+      calls = 0;
+      // GET to an allowlisted path but carrying an AbortSignal → not coalesced.
+      await Promise.all([
+        runtimeFetch('/api/config/providers', { signal: AbortSignal.timeout(1000) }),
+        runtimeFetch('/api/config/providers', { signal: AbortSignal.timeout(1000) }),
+      ]);
+      expect(calls).toBe(2);
+    } finally {
+      setRuntimeUrlResolver(previous);
+      globalThis.fetch = originalFetch;
+      clearRuntimeAuthCredentialProvider();
+    }
+  });
+});

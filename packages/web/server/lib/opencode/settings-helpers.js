@@ -480,12 +480,6 @@ export const createSettingsHelpers = (dependencies) => {
         result.diffLayoutPreference = mode;
       }
     }
-    if (typeof candidate.diffViewMode === 'string') {
-      const mode = candidate.diffViewMode.trim();
-      if (mode === 'single' || mode === 'stacked') {
-        result.diffViewMode = mode;
-      }
-    }
     if (typeof candidate.gitChangesViewMode === 'string') {
       const mode = candidate.gitChangesViewMode.trim();
       if (mode === 'flat' || mode === 'tree') {

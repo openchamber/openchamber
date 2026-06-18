@@ -182,6 +182,37 @@ describe('ui auth client credential seam', () => {
     expect(await auth.ensureSessionToken(urlReq, urlRes)).toBe('client:device-1');
     expect(await auth.resolveAuthContext(urlReq, urlRes, { allowUrlToken: false })).toBe(null);
 
+    const serveReq = { method: 'GET', path: '/api/fs/serve/tmp/index.html', url: `/api/fs/serve/tmp/index.html?oc_url_token=${encodeURIComponent(urlToken)}`, headers: {} };
+    const serveRes = createResponse();
+    let serveCalled = false;
+    await auth.requireAuth(serveReq, serveRes, () => {
+      serveCalled = true;
+    });
+    expect(serveCalled).toBe(true);
+
+    const absoluteServeReq = { method: 'GET', path: '/api/fs/serve/Users/test/project/preview-test.html', url: `/api/fs/serve/Users/test/project/preview-test.html?oc_url_token=${encodeURIComponent(urlToken)}`, headers: {} };
+    const absoluteServeRes = createResponse();
+    let absoluteServeCalled = false;
+    await auth.requireAuth(absoluteServeReq, absoluteServeRes, () => {
+      absoluteServeCalled = true;
+    });
+    expect(absoluteServeCalled).toBe(true);
+
+    const mountedServeReq = {
+      method: 'GET',
+      baseUrl: '/api',
+      path: '/fs/serve/Users/test/project/preview-test.html',
+      originalUrl: `/api/fs/serve/Users/test/project/preview-test.html?oc_url_token=${encodeURIComponent(urlToken)}`,
+      url: `/fs/serve/Users/test/project/preview-test.html?oc_url_token=${encodeURIComponent(urlToken)}`,
+      headers: {},
+    };
+    const mountedServeRes = createResponse();
+    let mountedServeCalled = false;
+    await auth.requireAuth(mountedServeReq, mountedServeRes, () => {
+      mountedServeCalled = true;
+    });
+    expect(mountedServeCalled).toBe(true);
+
     const arbitraryGetReq = { method: 'GET', path: '/api/config/settings', url: `/api/config/settings?oc_url_token=${encodeURIComponent(urlToken)}`, headers: { accept: 'application/json' } };
     const arbitraryGetRes = createResponse();
     let arbitraryGetCalled = false;

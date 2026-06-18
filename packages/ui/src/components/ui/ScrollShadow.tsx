@@ -140,10 +140,11 @@ export const ScrollShadow = React.forwardRef<HTMLElement, ScrollShadowProps>(
 
       el.addEventListener("scroll", handleScroll, { passive: true });
       resizeObserver?.observe(el);
+      // checkOverflow mutates our data-scroll attributes; observing attributes
+      // would make the component trigger its own observer indefinitely.
       mutationObserver?.observe(el, {
         childList: true,
         subtree: true,
-        attributes: true,
         characterData: true,
       });
 

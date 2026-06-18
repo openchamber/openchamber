@@ -33,6 +33,12 @@ const normalizeBaseUrl = (value: string | null | undefined): string => {
   return value.trim().replace(/\/+$/, '');
 };
 
+const readInjectedApiBaseUrl = (): string => {
+  if (typeof window === 'undefined') return '';
+  const injected = (window as typeof window & { __OPENCHAMBER_API_BASE_URL__?: string }).__OPENCHAMBER_API_BASE_URL__;
+  return normalizeBaseUrl(injected);
+};
+
 const currentHref = (config: RuntimeUrlConfig): string => {
   const configured = config.currentHref?.();
   if (configured) return configured;
@@ -107,11 +113,14 @@ const toWebSocketUrl = (candidate: string, config: RuntimeUrlConfig): string => 
 };
 
 export const createRuntimeUrlResolver = (config: RuntimeUrlConfig = {}): RuntimeUrlResolver => {
-  const apiBaseUrl = normalizeBaseUrl(config.apiBaseUrl);
-  const realtimeBaseUrl = normalizeBaseUrl(config.realtimeBaseUrl) || apiBaseUrl;
+  const configuredApiBaseUrl = normalizeBaseUrl(config.apiBaseUrl);
+  const configuredRealtimeBaseUrl = normalizeBaseUrl(config.realtimeBaseUrl);
 
-  const http = (path: string, query?: RuntimeUrlQuery): string => buildHttpUrl(apiBaseUrl, path, query);
-  const realtime = (path: string, query?: RuntimeUrlQuery): string => buildHttpUrl(realtimeBaseUrl, path, query);
+  const apiBaseUrl = (): string => configuredApiBaseUrl || readInjectedApiBaseUrl();
+  const realtimeBaseUrl = (): string => configuredRealtimeBaseUrl || apiBaseUrl();
+
+  const http = (path: string, query?: RuntimeUrlQuery): string => buildHttpUrl(apiBaseUrl(), path, query);
+  const realtime = (path: string, query?: RuntimeUrlQuery): string => buildHttpUrl(realtimeBaseUrl(), path, query);
 
   return {
     api: http,

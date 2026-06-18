@@ -98,6 +98,38 @@ const createGitCheckIgnoreTimeoutMs = () => {
   return 2500;
 };
 
+const FILE_MIME_MAP = Object.freeze({
+  '.html': 'text/html',
+  '.htm': 'text/html',
+  '.css': 'text/css',
+  '.js': 'application/javascript',
+  '.mjs': 'application/javascript',
+  '.json': 'application/json',
+  '.wasm': 'application/wasm',
+  '.xml': 'application/xml',
+  '.txt': 'text/plain',
+  '.md': 'text/markdown',
+  '.pdf': 'application/pdf',
+  '.csv': 'text/csv',
+  '.woff2': 'font/woff2',
+  '.woff': 'font/woff',
+  '.ttf': 'font/ttf',
+  '.eot': 'application/vnd.ms-fontobject',
+  '.mp3': 'audio/mpeg',
+  '.mp4': 'video/mp4',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.bmp': 'image/bmp',
+  '.avif': 'image/avif',
+});
+
+const MAX_SERVE_BYTES = 100 * 1024 * 1024;
+
 // Only deterministic, side-effect-free git plumbing path queries are cacheable.
 // Anything outside this allowlist (including any non-git command) runs normally
 // — we never cache arbitrary exec.
@@ -667,6 +699,7 @@ export const registerFsRoutes = (app, dependencies) => {
 
   app.get('/api/fs/stat', async (req, res) => {
     const filePath = typeof req.query.path === 'string' ? req.query.path.trim() : '';
+    const optional = req.query.optional === 'true';
     if (!filePath) {
       return res.status(400).json({ error: 'Path is required' });
     }
@@ -708,6 +741,9 @@ export const registerFsRoutes = (app, dependencies) => {
     } catch (error) {
       const err = error;
       if (err && typeof err === 'object' && err.code === 'ENOENT') {
+        if (optional) {
+          return res.json({ path: filePath, exists: false });
+        }
         return res.status(404).json({ error: 'File not found' });
       }
       if (err && typeof err === 'object' && err.code === 'EACCES') {
@@ -866,6 +902,67 @@ export const registerFsRoutes = (app, dependencies) => {
       }
       console.error('Failed to read raw file:', error);
       return res.status(500).json({ error: (error && error.message) || 'Failed to read file' });
+    }
+  });
+
+  app.get(/^\/api\/fs\/serve\/(.+)$/, async (req, res) => {
+    const rawPath = req.params[0] || '';
+    if (!rawPath) {
+      return res.status(400).json({ error: 'Path is required' });
+    }
+
+    try {
+      if (req.query?.allowOutsideWorkspace === 'true') {
+        return res.status(403).json({ error: 'allowOutsideWorkspace is not permitted for this endpoint' });
+      }
+
+      const filePath = path.resolve('/', rawPath);
+      const resolved = await resolveReadPathFromContext({
+        req,
+        targetPath: filePath,
+        resolveProjectDirectory,
+        path,
+        os,
+        normalizeDirectoryPath,
+        openchamberUserConfigRoot,
+      });
+      if (!resolved.ok) {
+        return res.status(400).json({ error: resolved.error });
+      }
+
+      const [canonicalPath, canonicalBase] = await Promise.all([
+        fsPromises.realpath(resolved.resolved),
+        fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base)),
+      ]);
+
+      if (!isPathWithinRoot(canonicalPath, canonicalBase, path, os)) {
+        return res.status(403).json({ error: 'Access to file denied' });
+      }
+
+      const stats = await fsPromises.stat(canonicalPath);
+      if (!stats.isFile()) {
+        return res.status(400).json({ error: 'Specified path is not a file' });
+      }
+      if (stats.size > MAX_SERVE_BYTES) {
+        return res.status(413).json({ error: 'File too large to serve' });
+      }
+
+      const ext = path.extname(canonicalPath).toLowerCase();
+      const mimeType = FILE_MIME_MAP[ext] || 'application/octet-stream';
+      const content = await fsPromises.readFile(canonicalPath);
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      return res.type(mimeType).send(content);
+    } catch (error) {
+      const err = error;
+      if (err && typeof err === 'object' && err.code === 'ENOENT') {
+        return res.status(404).json({ error: 'File not found' });
+      }
+      if (err && typeof err === 'object' && err.code === 'EACCES') {
+        return res.status(403).json({ error: 'Access to file denied' });
+      }
+      console.error('Failed to serve file:', error);
+      return res.status(500).json({ error: (error && error.message) || 'Failed to serve file' });
     }
   });
 

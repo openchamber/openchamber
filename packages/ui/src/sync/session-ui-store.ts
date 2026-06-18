@@ -51,6 +51,7 @@ import {
   revertToMessage as revertToMessageAction,
   unrevertSession as unrevertSessionAction,
   forkFromMessage as forkFromMessageAction,
+  fetchMessagesForSession,
 } from "./session-actions"
 import { useInputStore, type SyntheticContextPart } from "./input-store"
 import { useSelectionStore } from "./selection-store"
@@ -408,6 +409,47 @@ const writeRuntimeSessionMemory = (key: string, patch: Partial<RuntimeSessionMem
 // Store
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Persisted worktree map (stale-while-revalidate)
+//
+// Worktree discovery is async (git), so the worktree→project map isn't ready at
+// startup. Persist it so (a) the sidebar worktree list paints instantly, and
+// (b) useConfigStore.resolveConfigDirectory can map a worktree to its project on
+// the FIRST launch — yielding a single project-scoped config load instead of a
+// worktree+project double-load. Discovery refreshes it in the background.
+// ---------------------------------------------------------------------------
+const WORKTREE_MAP_STORAGE_KEY = 'oc.worktreeMap'
+
+const loadPersistedWorktreeMap = (): Map<string, WorktreeMetadata[]> => {
+  try {
+    const raw = getSafeStorage().getItem(WORKTREE_MAP_STORAGE_KEY)
+    if (!raw) return new Map()
+    const entries = JSON.parse(raw) as Array<[string, WorktreeMetadata[]]>
+    if (!Array.isArray(entries)) return new Map()
+    return new Map(
+      entries.filter((entry) => Array.isArray(entry) && typeof entry[0] === 'string' && Array.isArray(entry[1])),
+    )
+  } catch {
+    return new Map()
+  }
+}
+
+const persistWorktreeMap = (map: Map<string, WorktreeMetadata[]>): void => {
+  try {
+    getSafeStorage().setItem(WORKTREE_MAP_STORAGE_KEY, JSON.stringify([...map.entries()]))
+  } catch {
+    // quota / serialization error — ignore; discovery still refreshes at runtime
+  }
+}
+
+const flattenWorktreeMap = (map: Map<string, WorktreeMetadata[]>): WorktreeMetadata[] => {
+  const out: WorktreeMetadata[] = []
+  for (const list of map.values()) out.push(...list)
+  return out
+}
+
+const PERSISTED_WORKTREE_MAP = loadPersistedWorktreeMap()
+
 export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   currentSessionId: null,
   currentSessionDirectory: null,
@@ -416,8 +458,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   abortPromptExpiresAt: null,
   error: null,
   worktreeMetadata: new Map(),
-  availableWorktrees: [],
-  availableWorktreesByProject: new Map(),
+  availableWorktrees: flattenWorktreeMap(PERSISTED_WORKTREE_MAP),
+  availableWorktreesByProject: PERSISTED_WORKTREE_MAP,
   webUICreatedSessions: new Set(),
   sessionAbortFlags: new Map(),
   abortControllers: new Map(),
@@ -461,6 +503,13 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // same child store that send/SSE events will update during startup races.
     set({ currentSessionId: id, currentSessionDirectory: id ? resolvedDir ?? null : null })
     writeRuntimeSessionMemory(key, { sessionId: id, directory: resolvedDir ?? null })
+
+    // Kick off the message fetch on the same tick, before React commits the
+    // state change and fires ChatContainer.useEffect. The fetch is
+    // fire-and-forget — any transient failure gets retried by the reactive path.
+    if (id) {
+      void fetchMessagesForSession(id, resolvedDir)
+    }
 
     try {
       if (resolvedDir && directoryState.currentDirectory !== resolvedDir) {
@@ -623,7 +672,20 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       useInputStore.getState().setPendingInputText(options.initialPrompt)
     }
 
-    void activateConfigForDirectory(directory)
+    // Config (providers/agents/default model+agent) lives at the PROJECT level. When the user
+    // came from a worktree session, `directory` is the worktree path, whose provider list does
+    // not include project/global-scoped providers (e.g. the default agent's non-opencode model)
+    // — resolving defaults against it would wrongly fall back to opencode/big-pickle. Activate
+    // the project's config instead so the default cascade matches app startup, then re-apply it
+    // (a fresh draft must start from defaults, not inherit the previous session's selection).
+    const configDirectory = normalizePath(selectedProject?.path ?? null) ?? directory
+    void activateConfigForDirectory(configDirectory).then(() => {
+      useConfigStore.getState().applyDefaultModelAgentSelection()
+    })
+
+    if (directory && directory !== useDirectoryStore.getState().currentDirectory) {
+      useDirectoryStore.getState().setDirectory(directory)
+    }
   },
 
   // ---------------------------------------------------------------------------
@@ -662,6 +724,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       }
     })
     void activateConfigForDirectory(nextDirectory)
+
+    if (nextDirectory && nextDirectory !== useDirectoryStore.getState().currentDirectory) {
+      useDirectoryStore.getState().setDirectory(nextDirectory)
+    }
   },
 
   setDraftPreserveDirectoryOverride: (value) =>
@@ -780,6 +846,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       return { newSessionDraft: nextDraft }
     })
     void activateConfigForDirectory(nextDirectory)
+
+    if (nextDirectory && nextDirectory !== useDirectoryStore.getState().currentDirectory) {
+      useDirectoryStore.getState().setDirectory(nextDirectory)
+    }
   },
 
   resolvePendingDraftWorktreeTarget: (requestId, directory, options) =>
@@ -1414,4 +1484,13 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
 setSessionOpener((sessionID, directory) => {
   useSessionUIStore.getState().setCurrentSession(sessionID, directory)
+})
+
+// Write-through persist of the worktree map whenever discovery refreshes it.
+// Cheap reference-equality guard — this fires only when the map actually
+// changes (discovery / worktree create/remove), not on hot session updates.
+useSessionUIStore.subscribe((state, prev) => {
+  if (state.availableWorktreesByProject !== prev.availableWorktreesByProject) {
+    persistWorktreeMap(state.availableWorktreesByProject)
+  }
 })

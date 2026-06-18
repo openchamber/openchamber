@@ -660,10 +660,11 @@ export const HistoryCommitRow = React.memo(({
                              original={cached.original}
                              modified={cached.modified}
                              language={getLanguageFromExtension(file.path) || ''}
-                             fileName={file.path}
-                             renderSideBySide={false}
-                             layout="inline"
-                           />
+                              fileName={file.path}
+                              renderSideBySide={false}
+                              layout="inline"
+                              enableComments={false}
+                            />
                         );
                       })()}
                     </div>

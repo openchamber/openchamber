@@ -32,6 +32,7 @@ export type MagicPromptId =
   | 'session.reviewHandoff.visible'
   | 'session.reviewHandoff.instructions'
   | 'session.reviewSession.visible'
+  | 'session.reviewSessionWithoutHandoff.visible'
   | 'session.reviewFeedbackToImplementer.visible'
   | 'session.implementationResponseToReviewer.visible'
   | 'session.plan.visible'
@@ -650,6 +651,17 @@ Formatting:
 Focus on correctness, regressions, missing implementation, missing tests, and whether the implementation satisfies the stated intent. Provide concise, actionable feedback for the agent implementing the changes.
 
 {{handoff}}`,
+  },
+  {
+    id: 'session.reviewSessionWithoutHandoff.visible',
+    title: 'Review Session Starter Prompt Without Handoff',
+    group: 'Session',
+    description: 'Visible user message sent to a generated review session when no implementation handoff is generated first.',
+    template: `Please review the current workspace changes.
+
+There is no generated implementation handoff. Infer the likely user intent from the current diff, recent session context if available, changed files, and surrounding code. Judge whether the implementation is correct for that inferred intent, and call out uncertainty explicitly when intent cannot be recovered.
+
+Focus on correctness, regressions, missing implementation, missing tests, and whether the implementation is the smallest maintainable way to satisfy the likely goal. Provide concise, actionable feedback for the agent implementing the changes.`,
   },
   {
     id: 'session.reviewFeedbackToImplementer.visible',

@@ -289,6 +289,43 @@ export async function unstageGitFiles(directory: string, filePaths: string[]): P
   }
 }
 
+export async function stageGitHunk(directory: string, filePath: string, patch: string): Promise<void> {
+  await applyGitHunk(directory, filePath, patch, 'stage');
+}
+
+export async function unstageGitHunk(directory: string, filePath: string, patch: string): Promise<void> {
+  await applyGitHunk(directory, filePath, patch, 'unstage');
+}
+
+export async function revertGitHunk(directory: string, filePath: string, patch: string): Promise<void> {
+  await applyGitHunk(directory, filePath, patch, 'discard');
+}
+
+async function applyGitHunk(
+  directory: string,
+  filePath: string,
+  patch: string,
+  action: 'stage' | 'unstage' | 'discard',
+): Promise<void> {
+  if (!filePath) {
+    throw new Error('path is required to apply a git hunk');
+  }
+  if (typeof patch !== 'string' || !patch.trim()) {
+    throw new Error('patch is required to apply a git hunk');
+  }
+
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/apply-hunk`, directory), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: filePath, patch, action }),
+  });
+
+  if (!response.ok) {
+    const message = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(message.error || 'Failed to apply git hunk');
+  }
+}
+
 export async function isLinkedWorktree(directory: string): Promise<boolean> {
   if (!directory) {
     return false;

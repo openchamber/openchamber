@@ -12,7 +12,7 @@ import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { desktopHostsGet, desktopHostsSet, getDesktopHostApiUrl, normalizeHostUrl } from '@/lib/desktopHosts';
 import {
   authenticateWithPasskey,
@@ -181,7 +181,7 @@ const applyDesktopClientToken = async (clientToken: string): Promise<void> => {
   if (!clientToken) return;
   const apiBaseUrl = getRuntimeApiBaseUrl();
   await persistDesktopClientToken(apiBaseUrl, clientToken);
-  switchRuntimeEndpoint({ apiBaseUrl, clientToken, runtimeKey: getRuntimeKey() });
+  switchRuntimeEndpoint({ apiBaseUrl, clientToken });
 };
 
 const AuthShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {

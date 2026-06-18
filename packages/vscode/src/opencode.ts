@@ -673,7 +673,12 @@ async function spawnManagedOpenCodeServer(
 
     const timer = setTimeout(() => {
       cleanup();
-      reject(new Error(`Timeout waiting for server to start after ${timeoutMs}ms`));
+      // Surface whatever OpenCode printed while we waited — otherwise a hung or
+      // misconfigured start is indistinguishable from a slow one in the status
+      // report, leaving no thread to pull on.
+      const trimmedOutput = output.trim();
+      const outputHint = trimmedOutput ? ` Output: ${trimmedOutput}` : ' Output: (none — process printed nothing)';
+      reject(new Error(`Timeout waiting for server to start after ${timeoutMs}ms.${outputHint}`));
     }, timeoutMs);
 
     child.stdout?.on('data', onStdout);

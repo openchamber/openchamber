@@ -1527,6 +1527,7 @@ export const PullRequestSection: React.FC<{
                           <SimpleMarkdownRenderer
                             content={pr.body}
                             className="typography-markdown-body text-muted-foreground break-words mt-1"
+                            enableFileReferences={false}
                           />
                         ) : (
                           <div className="typography-micro text-muted-foreground whitespace-pre-wrap break-words mt-1">
@@ -2031,6 +2032,7 @@ export const PullRequestSection: React.FC<{
                                   'typography-markdown-body text-foreground break-words [&_a]:no-underline [&_a:hover]:no-underline',
                                   selfMentionHighlightClass,
                                 ].filter(Boolean).join(' ')}
+                                enableFileReferences={false}
                               />
                             </div>
                           </div>

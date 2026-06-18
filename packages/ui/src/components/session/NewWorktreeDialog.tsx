@@ -360,6 +360,12 @@ export function NewWorktreeDialog({
   }, [projectDirectory, git, fetchBranches]);
 
   React.useEffect(() => {
+    if (!open || !projectDirectory || !git) return;
+    if (branches?.all) return;
+    void fetchBranches(projectDirectory, git);
+  }, [open, projectDirectory, git, branches?.all, fetchBranches]);
+
+  React.useEffect(() => {
     if (!existingBranchDropdownOpen && !existingBranchPickerOpen) {
       setExistingBranchQuery('');
     }

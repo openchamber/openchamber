@@ -2,7 +2,7 @@ import { create, type StoreApi } from "zustand"
 import type { DirState, State } from "./types"
 import { INITIAL_STATE, MAX_DIR_STORES, DIR_IDLE_TTL_MS } from "./types"
 import { pickDirectoriesToEvict, canDisposeDirectory, hasPendingBlockingRequests } from "./eviction"
-import { readDirCache, persistVcs, persistProjectMeta, persistIcon } from "./persist-cache"
+import { readDirCache, persistVcs, persistProjectMeta, persistIcon, persistSessions } from "./persist-cache"
 
 export type DirectoryStore = State & {
   /** Apply a partial state update */
@@ -15,11 +15,19 @@ function createDirectoryStore(directory: string): StoreApi<DirectoryStore> {
   // Restore cached metadata from localStorage
   const cached = readDirCache(directory)
 
+  // Stale-while-revalidate: seed the session list from cache so the sidebar
+  // paints chats instantly. Bootstrap phase-3 loadSessions overwrites with the
+  // fresh list (its empty-list race guard preserves these until then).
+  const cachedSessions = cached.sessions ?? INITIAL_STATE.session
+
   const store = create<DirectoryStore>()((set) => ({
     ...INITIAL_STATE,
     vcs: cached.vcs ?? INITIAL_STATE.vcs,
     projectMeta: cached.projectMeta ?? INITIAL_STATE.projectMeta,
     icon: cached.icon ?? INITIAL_STATE.icon,
+    session: cachedSessions,
+    sessionTotal: cachedSessions.length,
+    limit: Math.max(cachedSessions.length, INITIAL_STATE.limit),
     patch: (partial) => set(partial),
     replace: (next) => set(next),
   }))
@@ -29,6 +37,7 @@ function createDirectoryStore(directory: string): StoreApi<DirectoryStore> {
     if (state.vcs !== prev.vcs) persistVcs(directory, state.vcs)
     if (state.projectMeta !== prev.projectMeta) persistProjectMeta(directory, state.projectMeta)
     if (state.icon !== prev.icon) persistIcon(directory, state.icon)
+    if (state.session !== prev.session) persistSessions(directory, state.session)
   })
 
   return store

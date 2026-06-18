@@ -7,6 +7,7 @@ import { useI18n } from '@/lib/i18n';
 import { useProjectActionsContext } from '@/hooks/useProjectActionsContext';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
+import { invokeDesktop } from '@/lib/desktop';
 
 const ICON_BUTTON_CLASS =
   'app-region-no-drag inline-flex h-8 w-8 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary hover:bg-interactive-hover transition-colors';
@@ -31,6 +32,22 @@ export const TitlebarLeftControls: React.FC = () => {
   const clusterRef = React.useRef<HTMLDivElement | null>(null);
 
   const toggleShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_sidebar', shortcutOverrides));
+  const isWindowsElectronDesktop = React.useMemo(() => {
+    if (typeof window === 'undefined') {
+      return false;
+    }
+    return Boolean(window.__OPENCHAMBER_ELECTRON__) && window.__OPENCHAMBER_PLATFORM__ === 'win32';
+  }, []);
+
+  const handleOpenWindowsAppMenu = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    void invokeDesktop('desktop_show_app_menu', {
+      x: rect.left,
+      y: rect.bottom,
+    }).catch((error) => {
+      console.warn('[titlebar] failed to open app menu', error);
+    });
+  }, []);
 
   React.useEffect(() => {
     if (typeof document === 'undefined') {
@@ -71,6 +88,24 @@ export const TitlebarLeftControls: React.FC = () => {
       }}
     >
       <div ref={clusterRef} className="flex items-center gap-2">
+        {isWindowsElectronDesktop ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={handleOpenWindowsAppMenu}
+                aria-label={t('header.actions.openAppMenuAria')}
+                className={cn(ICON_BUTTON_CLASS, 'shrink-0')}
+              >
+                <Icon name="menu-2" className="h-[18px] w-[18px]" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>{t('header.actions.openAppMenu')}</p>
+            </TooltipContent>
+          </Tooltip>
+        ) : null}
+
         <Tooltip>
           <TooltipTrigger asChild>
             <button
