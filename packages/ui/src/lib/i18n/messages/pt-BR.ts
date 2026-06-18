@@ -143,6 +143,7 @@ export const dict: Record<I18nKey, string> = {
   "layout.rightSidebar.context": "Contexto",
   "layout.services.instance": "Instância",
   "layout.services.usage": "Uso",
+  "layout.services.pluginStatus": "Plugin Status",
   "sessions.sidebar.header.actions.closeSessions": "Fechar sessões",
   "sessions.sidebar.header.actions.addProject": "Adicionar projeto",
   "sessions.sidebar.header.actions.newSession": "Nova sessão",

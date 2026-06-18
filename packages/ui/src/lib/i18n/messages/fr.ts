@@ -32,6 +32,7 @@ export const dict = {
   'layout.rightSidebar.context': 'Contexte',
   'layout.services.instance': 'Instance',
   'layout.services.usage': 'Usage',
+  'layout.services.pluginStatus': 'Plugin Status',
   'sessions.sidebar.header.actions.closeSessions': 'Fermer les sessions',
   'sessions.sidebar.header.actions.addProject': 'Ajouter un projet',
   'sessions.sidebar.header.actions.newSession': 'Nouvelle session',
