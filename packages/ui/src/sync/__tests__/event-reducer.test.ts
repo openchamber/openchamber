@@ -199,6 +199,50 @@ describe("applyDirectoryEvent", () => {
     expect((draft.session_status.ses_1 as Extract<SessionStatus, { type: "retry" }>).attempt).toBe(2)
   })
 
+  test("archives sessions without dropping materialized messages", () => {
+    const message = { id: "msg_1", sessionID: "ses_1", role: "assistant", time: { created: 2 } } as never
+    const part = { id: "prt_1", messageID: "msg_1", sessionID: "ses_1", type: "text", text: "hello" } as Part
+    const draft = state({
+      sessionTotal: 1,
+      session: [
+        { id: "ses_1", time: { created: 1, updated: 2 } } as never,
+      ],
+      message: { ses_1: [message] },
+      part: { msg_1: [part] },
+      todo: { ses_1: [] },
+      session_status: { ses_1: { type: "idle" } as SessionStatus },
+      session_diff: { ses_1: [] },
+      permission: { ses_1: [{ id: "perm_1", sessionID: "ses_1" } as PermissionRequest] },
+      question: { ses_1: [{ id: "ques_1", sessionID: "ses_1" } as QuestionRequest] },
+    })
+    let clearedTodo: { sessionID: string; todos: unknown } | undefined
+
+    const result = applyDirectoryEvent(
+      draft,
+      {
+        type: "session.updated",
+        properties: { info: { id: "ses_1", time: { created: 1, updated: 3, archived: 4 } } },
+      } as Event,
+      {
+        onSetSessionTodo: (sessionID, todos) => {
+          clearedTodo = { sessionID, todos }
+        },
+      },
+    )
+
+    expect(result).toBe(true)
+    expect(draft.session).toEqual([])
+    expect(draft.sessionTotal).toBe(0)
+    expect(draft.message.ses_1).toEqual([message])
+    expect(draft.part.msg_1).toEqual([part])
+    expect(draft.todo.ses_1).toBeUndefined()
+    expect(draft.session_status.ses_1).toBeUndefined()
+    expect(draft.session_diff.ses_1).toBeUndefined()
+    expect(draft.permission.ses_1).toBeUndefined()
+    expect(draft.question.ses_1).toBeUndefined()
+    expect(clearedTodo).toEqual({ sessionID: "ses_1", todos: undefined })
+  })
+
   test("updates permission request arrays immutably", () => {
     const initialPermissions = [
       { id: "perm_1", sessionID: "ses_1" } as PermissionRequest,
