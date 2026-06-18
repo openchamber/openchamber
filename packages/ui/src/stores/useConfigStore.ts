@@ -2446,7 +2446,13 @@ export const useConfigStore = create<ConfigStore>()(
                             const agentModel = agentProvider?.models.find((model) => model.id === modelID);
 
                             if (agentModel) {
-                                applyResolvedModelSelection(providerID, modelID, undefined);
+                                const agentVariant = (agent as { variant?: string }).variant;
+                                const validatedVariant = agentVariant
+                                    && agentModel.variants
+                                    && Object.prototype.hasOwnProperty.call(agentModel.variants, agentVariant)
+                                    ? agentVariant
+                                    : undefined;
+                                applyResolvedModelSelection(providerID, modelID, validatedVariant);
                                 return;
                             }
                         }
