@@ -1004,6 +1004,7 @@ function parseArgs(argv = process.argv.slice(2)) {
   const subcommand = command === 'tunnel' ? (positional[1] || 'help') : null;
   const tunnelAction = command === 'tunnel' ? (positional[2] || null) : null;
   const startupAction = command === 'startup' ? (positional[1] || 'status') : null;
+  const quotaAction = command === 'quota' ? (positional[1] || 'status') : null;
 
   if (options.lan && typeof options.host !== 'string') {
     options.host = '0.0.0.0';
@@ -1018,6 +1019,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     subcommand,
     tunnelAction,
     startupAction,
+    quotaAction,
     options,
     removedFlagErrors,
     helpRequested,
@@ -1042,6 +1044,7 @@ COMMANDS:
   logs           Tail OpenChamber logs
   connect-url    Generate URL/QR for connecting another client
   update         Check for and install updates
+  quota          Quota provider commands (status, login)
 
 OPTIONS:
   -p, --port              Web server port (default: ${DEFAULT_PORT})
@@ -1138,6 +1141,30 @@ EXAMPLES:
   openchamber connect-url --port 3000 --qr
   openchamber connect-url --port 3000 --api-only --lan --server http://workstation.local:3000 --qr
   openchamber connect-url --server https://openchamber.example.com --name Workstation
+`);
+}
+
+function showQuotaHelp() {
+  console.log(`
+ Quota Provider Commands
+
+USAGE:
+  openchamber quota <SUBCOMMAND> [OPTIONS]
+
+SUBCOMMANDS:
+  status      Show quota provider status
+  login       Log in to a quota provider via browser cookie detection
+
+OPTIONS:
+  --provider <id>  Quota provider ID (default: opencode-go)
+  --json           Output machine-readable JSON
+  -q, --quiet      Suppress non-essential output
+  -h, --help       Show this help
+
+EXAMPLES:
+  openchamber quota login
+  openchamber quota login --provider ollama-cloud
+  openchamber quota login --json
 `);
 }
 
@@ -5569,11 +5596,79 @@ const commands = {
       process.stdout.write(`updated ${updateInfo.version || 'latest'}\n`);
     }
   },
+
+  async quota(options, action) {
+    if (action === 'login') {
+      const providerId = options.provider || 'opencode-go';
+      let mod;
+      try {
+        mod = await import(`../server/lib/quota/providers/${providerId}.js`);
+      } catch {
+        if (isJsonMode(options)) {
+          printJson({ status: 'error', provider: providerId, message: `Unknown provider '${providerId}'` });
+        } else {
+          console.error(`Error: Unknown quota provider '${providerId}'.`);
+        }
+        process.exit(EXIT_CODE.USAGE_ERROR);
+      }
+      if (typeof mod.login !== 'function') {
+        if (isJsonMode(options)) {
+          printJson({ status: 'error', provider: providerId, message: `Provider '${providerId}' does not support login` });
+        } else {
+          console.error(`Error: Provider '${providerId}' does not support login.`);
+        }
+        process.exit(EXIT_CODE.USAGE_ERROR);
+      }
+      try {
+        await mod.login(options);
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        if (isJsonMode(options)) {
+          printJson({ status: 'error', provider: providerId, message: msg });
+        } else {
+          console.error(`Error: ${msg}`);
+        }
+        process.exit(EXIT_CODE.GENERAL_ERROR);
+      }
+      return;
+    }
+
+    if (action === 'status') {
+      const { listConfiguredQuotaProviders } = await import('../server/lib/quota/providers/index.js');
+
+      if (isJsonMode(options)) {
+        const configured = listConfiguredQuotaProviders();
+        printJson({ status: 'ok', provider: options.provider || 'all', configuredProviders: configured });
+        return;
+      }
+      if (isQuietMode(options)) {
+        process.stdout.write('quota status\n');
+        return;
+      }
+      clackIntro(boldText('Quota Status'));
+      const configured = listConfiguredQuotaProviders();
+      if (configured.length > 0) {
+        logStatus('success', `Configured providers: ${configured.join(', ')}`);
+      } else {
+        clackLog.info('No quota providers configured.');
+        clackLog.info('Use `openchamber quota login` to set up a quota provider.');
+      }
+      clackOutro('');
+      return;
+    }
+
+    if (isJsonMode(options)) {
+      printJson({ status: 'error', error: `Unknown quota action '${action}'` });
+    } else {
+      console.error(`Error: Unknown quota action '${action}'. Use: status, login`);
+    }
+    process.exit(EXIT_CODE.USAGE_ERROR);
+  },
 };
 
 async function main() {
   const parsed = parseArgs();
-  const { command, subcommand, tunnelAction, startupAction, options, removedFlagErrors, helpRequested, versionRequested } = parsed;
+  const { command, subcommand, tunnelAction, startupAction, quotaAction, options, removedFlagErrors, helpRequested, versionRequested } = parsed;
   activeCommandOptions = options;
 
   if (versionRequested) {
@@ -5609,6 +5704,8 @@ async function main() {
       showStartupHelp();
     } else if (command === 'connect-url') {
       showConnectUrlHelp();
+    } else if (command === 'quota') {
+      showQuotaHelp();
     } else {
       showHelp();
     }
@@ -5625,8 +5722,13 @@ async function main() {
     return;
   }
 
+  if (command === 'quota') {
+    await commands.quota(options, quotaAction);
+    return;
+  }
+
   if (!commands[command]) {
-    const knownCommands = ['serve', 'stop', 'restart', 'status', 'tunnel', 'startup', 'logs', 'update'];
+    const knownCommands = ['serve', 'stop', 'restart', 'status', 'tunnel', 'startup', 'logs', 'update', 'quota'];
     const suggestion = findClosestMatch(command, knownCommands);
     const hint = suggestion ? ` Did you mean '${suggestion}'?` : '';
     if (isJsonMode(options)) {

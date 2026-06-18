@@ -5,8 +5,11 @@ import {
   buildResult,
   toUsageWindow,
   toNumber,
-  formatMoney
+  formatMoney,
+  loginWithAuthCheck,
 } from '../utils/index.js';
+
+import { isJsonMode, isQuietMode, printJson, log } from '../../../../bin/cli-output.js';
 
 export const providerId = 'openrouter';
 export const providerName = 'OpenRouter';
@@ -17,6 +20,9 @@ export const isConfigured = () => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
   return Boolean(entry?.key || entry?.token);
 };
+
+export const login = async (options = {}) =>
+  loginWithAuthCheck({ options, id: providerId, name: providerName, aliases });
 
 export const fetchQuota = async () => {
   const auth = readAuthFile();
