@@ -356,6 +356,7 @@
   'settings.agents.sidebar.toast.agentDeleted': 'Agent「{name}」已刪除',
   'settings.agents.sidebar.toast.agentReset': 'Agent「{name}」已重設為預設值',
   'settings.agents.sidebar.toast.deleteFailed': '刪除 agent 失敗',
+  'settings.agents.sidebar.toast.definitionNotFound': '找不到 agent 定義。未變更任何內容。',
   'settings.agents.sidebar.toast.resetFailed': '重設 agent 失敗',
   'settings.agents.sidebar.toast.agentNameRequired': 'Agent 名稱為必填項',
   'settings.agents.sidebar.toast.agentExists': '已存在同名 agent',

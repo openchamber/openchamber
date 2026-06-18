@@ -359,6 +359,7 @@ export const settingsDict = {
   "settings.agents.sidebar.toast.agentDeleted": "Агент \"{name}\" успішно видалено",
   "settings.agents.sidebar.toast.agentReset": "Агента \"{name}\" скинуто до значень за замовчуванням",
   "settings.agents.sidebar.toast.deleteFailed": "Не вдалося видалити агента",
+  "settings.agents.sidebar.toast.definitionNotFound": "Визначення агента не знайдено. Нічого не змінено.",
   "settings.agents.sidebar.toast.resetFailed": "Не вдалося скинути агента",
   "settings.agents.sidebar.toast.agentNameRequired": "Потрібно вказати ім’я агента",
   "settings.agents.sidebar.toast.agentExists": "Агент із такою назвою вже існує",

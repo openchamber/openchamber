@@ -2,6 +2,7 @@ import type { OpencodeClient, PermissionRequest, Project, QuestionRequest } from
 import { retry } from "./retry"
 import type { GlobalState, State } from "./types"
 import { runtimeFetch } from "../lib/runtime-fetch"
+import { emitSyncConfigChanged } from "./sync-refs"
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
@@ -80,7 +81,6 @@ export async function bootstrapGlobal(
         set({ projects })
       }),
     ),
-    retry(() => sdk.provider.list().then((x) => set({ providers: unwrap(x, "provider.list") }))),
   ])
 
   const errors = results
@@ -125,7 +125,6 @@ export async function bootstrapDirectory(input: {
   global: {
     config: Record<string, unknown>
     projects: Project[]
-    providers: { all: unknown[]; connected: unknown[]; default: Record<string, unknown> }
   }
   loadSessions: (directory: string) => Promise<void> | void
 }) {
@@ -136,11 +135,10 @@ export async function bootstrapDirectory(input: {
   // Seed from global state while we fetch directory-specific data
   const seededProject = projectID(directory, g.projects)
   if (seededProject) set({ project: seededProject })
-  if (state.provider.all.length === 0 && g.providers.all.length > 0) {
-    set({ provider: g.providers as State["provider"] })
-  }
   if (Object.keys(state.config ?? {}).length === 0 && Object.keys(g.config ?? {}).length > 0) {
-    set({ config: g.config as State["config"] })
+    const seededConfig = g.config as State["config"]
+    set({ config: seededConfig })
+    emitSyncConfigChanged(directory, seededConfig)
   }
   if (loading) set({ status: "partial" })
 
@@ -152,8 +150,11 @@ export async function bootstrapDirectory(input: {
     seededProject
       ? Promise.resolve()
       : retry(() => sdk.project.current().then((x) => set({ project: unwrap(x, "project.current").id }))),
-    retry(() => sdk.provider.list().then((x) => set({ provider: unwrap(x, "provider.list") }))),
-    retry(() => sdk.config.get().then((x) => set({ config: unwrap(x, "config.get") }))),
+    retry(() => sdk.config.get().then((x) => {
+      const config = unwrap(x, "config.get")
+      set({ config })
+      emitSyncConfigChanged(directory, config)
+    })),
     retry(() =>
       sdk.path.get().then((x) => {
         const data = unwrap(x, "path.get")
@@ -177,7 +178,7 @@ export async function bootstrapDirectory(input: {
   //   - path.get feeds project resolution, but if we already resolved a project
   //     (from global projects) its failure is tolerable; the worktree path is
   //     refreshed by later events.
-  const [, , , pathResult] = phase1Results
+  const [, , pathResult] = phase1Results
   const pathFailedWithoutProject =
     pathResult.status === "rejected" && !getState().project
 
@@ -194,7 +195,6 @@ export async function bootstrapDirectory(input: {
   // These enrich the UI but aren't required for basic functionality.
   // ---------------------------------------------------------------------------
   void Promise.allSettled([
-    retry(() => sdk.app.agents().then((x) => set({ agent: unwrap(x, "app.agents") }))),
     retry(() => sdk.command.list().then((x) => set({ command: unwrap(x, "command.list") }))),
     retry(() => sdk.mcp.status().then((x) => set({ mcp: unwrap(x, "mcp.status") }))),
     retry(() => sdk.lsp.status().then((x) => set({ lsp: unwrap(x, "lsp.status") }))),

@@ -4,6 +4,35 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.13.2] - 2026-06-18
+
+- Chat/Performance: long conversations and large session lists now stay smooth and responsive while a response is streaming (thanks to @bashrusakh).
+- Chat: the end of a streamed response is no longer occasionally cut off — messages now always settle on their complete text (thanks to @IbrahimKhan12).
+- Chat: paragraphs in assistant messages now have proper spacing instead of collapsing into a single block (thanks to @foundryseven).
+- Files: HTML, image, and PDF previews no longer cycle to "authentication required" every ~50 seconds (thanks to @bashrusakh).
+- Startup: the app starts faster by no longer waiting on default OpenCode config, while your manual and per-directory model selections are preserved.
+
+## [1.13.1] - 2026-06-17
+
+- Chat: inline math delimiters no longer incorrectly treat currency amounts like `$50` as LaTeX math expressions — only `$$...$$` display math and `\(...\)` inline math are recognized.
+- Chat: pinned welcome starters now appear immediately when a new draft session opens, without needing to open the add dialog.
+- Chat: clicking a Mermaid diagram in a chat message now opens a fullscreen pan/zoom preview.
+- Chat: code-block highlighting now runs off the main thread, preventing UI freezes when rendering code-heavy responses.
+- Chat: the context usage indicator now shows as a circular progress ring with the same color thresholds, visible in all workspace headers.
+- Chat/UI: embedded chat views and context panel previews now consistently match the current theme.
+- Chat/Mobile: the session status button now responds more reliably to taps on Android.
+- Scheduled Tasks: the task editor dialog now supports Cron expressions with inline validation, quick-example chips, and a preview of the next four upcoming runs (thanks to @tomzx).
+- Files: syntax highlighting in the file editor, Plan View, and Skills page now uses Shiki for broader language support.
+- Agents: deleting a built-in agent no longer creates a disable override — the agent stays as-is and shows a clear explanation instead of silently disappearing.
+- Agents: deleting an agent now shows an error toast when the definition is missing, instead of failing silently.
+- Startup: providers and agents now load faster by avoiding the full provider catalog on initial load.
+- Right Sidebar: switching between sidebar tabs is less likely to re-render unrelated content (thanks to @bashrusakh).
+- Sessions: the app no longer crashes on startup when there are many sessions in folders.
+- Notifications: desktop notifications no longer show duplicate alerts, and reasoning text is excluded from notification bodies.
+- Security: self-hosted instances now include noindex headers and a robots.txt to block search engine crawlers.
+- CLI/Installer: the installer now requires Node.js 22 and handles version detection failures with clearer guidance.
+- Reliability: session list loading handles Windows paths and concurrent requests more steadily, and duplicate health-check URLs are removed from diagnostics.
+
 ## [1.13.0] - 2026-06-15
 
 - Security: LAN and remote browser access now require a UI password before the server will start.

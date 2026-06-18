@@ -467,6 +467,24 @@ const sameOrigin = (left, right) => {
   }
 };
 
+const shouldUseSameOriginDevProxy = (uiUrl, apiBaseUrl) => (
+  isDev
+  && uiUrl
+  && apiBaseUrl
+  && !shouldUsePackagedUi()
+  && !sameOrigin(uiUrl, apiBaseUrl)
+  && isLocalRuntimeUrl(apiBaseUrl)
+);
+
+const buildRendererRuntimeConfig = (uiUrl, runtimeConfig = {}) => {
+  const apiBaseUrl = typeof runtimeConfig.apiBaseUrl === 'string' ? runtimeConfig.apiBaseUrl : (state.apiBaseUrl || '');
+  const clientToken = typeof runtimeConfig.clientToken === 'string' ? runtimeConfig.clientToken : (state.clientToken || '');
+  if (shouldUseSameOriginDevProxy(uiUrl, apiBaseUrl)) {
+    return { apiBaseUrl: '', clientToken: '' };
+  }
+  return { apiBaseUrl, clientToken };
+};
+
 const readDesktopLocalClientToken = () => {
   return sanitizeClientTokenForStorage(readSettingsRoot().desktopLocalClientToken) || '';
 };
@@ -1876,8 +1894,9 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   const useSaved = saved && typeof saved.width === 'number' && typeof saved.height === 'number';
   const restoredBounds = useSaved ? clampWindowBoundsToVisibleWorkArea(saved) : null;
   const desktopLocalOrigin = state.localOrigin || state.sidecarUrl || '';
-  const desktopApiBaseUrl = typeof runtimeConfig.apiBaseUrl === 'string' ? runtimeConfig.apiBaseUrl : (state.apiBaseUrl || '');
-  const desktopClientToken = typeof runtimeConfig.clientToken === 'string' ? runtimeConfig.clientToken : (state.clientToken || '');
+  const rendererRuntimeConfig = buildRendererRuntimeConfig(url, runtimeConfig);
+  const desktopApiBaseUrl = rendererRuntimeConfig.apiBaseUrl;
+  const desktopClientToken = rendererRuntimeConfig.clientToken;
   const desktopHome = os.homedir() || '';
   const desktopMacosMajor = String(macosMajorVersion());
   const usesCustomTitleBar = process.platform === 'darwin' || process.platform === 'win32';
@@ -2122,11 +2141,20 @@ const activateMainWindow = async (url, localOrigin, bootOutcome, runtimeConfig =
   state.apiBaseUrl = typeof runtimeConfig.apiBaseUrl === 'string' ? runtimeConfig.apiBaseUrl : state.apiBaseUrl;
   state.clientToken = typeof runtimeConfig.clientToken === 'string' ? runtimeConfig.clientToken : '';
   state.bootOutcome = bootOutcome ?? null;
-  state.initScript = buildInitScript(localOrigin, state.bootOutcome, state.apiBaseUrl, state.clientToken);
+  const rendererRuntimeConfig = buildRendererRuntimeConfig(url, {
+    apiBaseUrl: state.apiBaseUrl || '',
+    clientToken: state.clientToken || '',
+  });
+  state.initScript = buildInitScript(
+    localOrigin,
+    state.bootOutcome,
+    rendererRuntimeConfig.apiBaseUrl,
+    rendererRuntimeConfig.clientToken,
+  );
 
   const mainWindow = state.mainWindow;
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.__ocRuntimeConfig = { apiBaseUrl: state.apiBaseUrl || '', clientToken: state.clientToken || '' };
+    mainWindow.__ocRuntimeConfig = rendererRuntimeConfig;
     mainWindow.__ocInitScript = state.initScript;
     await navigateWindow(mainWindow, url, { allowAbort: true });
     mainWindow.show();

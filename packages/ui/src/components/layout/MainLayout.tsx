@@ -361,7 +361,7 @@ export const MainLayout: React.FC = () => {
             case 'plan':
                 return <React.Suspense fallback={null}><PlanView /></React.Suspense>;
             case 'git':
-                return <React.Suspense fallback={null}><GitView /></React.Suspense>;
+                return <React.Suspense fallback={null}><GitView isActive={!mobileRightSidebarOpen} /></React.Suspense>;
             case 'diff':
                 return <React.Suspense fallback={null}><DiffView /></React.Suspense>;
             case 'terminal':
@@ -375,7 +375,7 @@ export const MainLayout: React.FC = () => {
             default:
                 return null;
         }
-    }, [activeMainTab]);
+    }, [activeMainTab, mobileRightSidebarOpen]);
 
     const isChatActive = activeMainTab === 'chat';
 
@@ -467,7 +467,7 @@ export const MainLayout: React.FC = () => {
                             {mobileRightDrawerVisible && (
                                 <motion.div className="absolute inset-0 z-20 bg-sidebar" data-page-scroll-lock="true" style={{ x: rightDrawerX }} aria-hidden={!mobileRightSidebarOpen}>
                                     <ErrorBoundary>
-                                        <React.Suspense fallback={null}><GitView /></React.Suspense>
+                                        <React.Suspense fallback={null}><GitView isActive={mobileRightSidebarOpen} /></React.Suspense>
                                     </ErrorBoundary>
                                 </motion.div>
                             )}

@@ -79,6 +79,7 @@ export const settingsDict = {
   'settings.agents.sidebar.toast.agentReset': 'Agent "{name}" został zresetowany do domyślnych ustawień',
   'settings.agents.sidebar.toast.builtInCannotDelete': 'Wbudowanych agentów nie można usuwać',
   'settings.agents.sidebar.toast.deleteFailed': 'Nie udało się usunąć agenta',
+  'settings.agents.sidebar.toast.definitionNotFound': 'Nie znaleziono definicji agenta. Nic nie zmieniono.',
   'settings.agents.sidebar.toast.removeOldAfterRenameFailed': 'Nie udało się usunąć starego agenta po zmianie nazwy',
   'settings.agents.sidebar.toast.renameFailed': 'Nie udało się zmienić nazwy agenta',
   'settings.agents.sidebar.toast.resetFailed': 'Nie udało się zresetować agenta',

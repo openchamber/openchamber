@@ -43,6 +43,7 @@ interface PierreDiffViewerProps {
   renderSideBySide: boolean;
   wrapLines?: boolean;
   layout?: 'fill' | 'inline';
+  enableComments?: boolean;
 }
 
 /**
@@ -468,6 +469,7 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
   renderSideBySide,
   wrapLines,
   layout = 'fill',
+  enableComments = true,
 }) => {
   const themeContext = useOptionalThemeSystem();
 
@@ -528,6 +530,10 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
   }, [commentText]);
 
   const handleSelectionChange = useCallback((range: SelectedLineRange | null) => {
+    if (!enableComments) {
+      return;
+    }
+
     // Ignore callbacks while we're programmatically applying selection
     if (isApplyingSelectionRef.current) {
       return;
@@ -554,7 +560,7 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
         setCommentText('');
       }
     }
-  }, [isMobile, setCommentText, setSelection]);
+  }, [enableComments, isMobile, setCommentText, setSelection]);
 
   const handleCancelComment = useCallback(() => {
     cancel();
@@ -751,21 +757,25 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
     expansionLineCount: 20,
     overflow: wrapLines ? ('wrap' as const) : ('scroll' as const),
     disableFileHeader: true,
-    enableLineSelection: true,
+    enableLineSelection: enableComments,
     enableHoverUtility: false,
-    onLineSelected: handleSelectionChange,
+    onLineSelected: enableComments ? handleSelectionChange : undefined,
     unsafeCSS: WEBKIT_SCROLL_FIX_CSS,
-    renderAnnotation,
-  }), [darkTheme.metadata.id, isDark, isLargeContent, lightTheme.metadata.id, renderSideBySide, wrapLines, handleSelectionChange, renderAnnotation]);
+    renderAnnotation: enableComments ? renderAnnotation : undefined,
+  }), [darkTheme.metadata.id, enableComments, isDark, isLargeContent, lightTheme.metadata.id, renderSideBySide, wrapLines, handleSelectionChange, renderAnnotation]);
 
 
   const lineAnnotations = useMemo(() => {
+    if (!enableComments) {
+      return [];
+    }
+
     return buildPierreLineAnnotations({
       drafts: fileDrafts,
       editingDraftId,
       selection,
     });
-  }, [editingDraftId, fileDrafts, selection]);
+  }, [editingDraftId, enableComments, fileDrafts, selection]);
 
   const lineAnnotationsRef = useRef(lineAnnotations);
 
@@ -958,6 +968,8 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
   }, [selection]);
 
   useEffect(() => {
+    if (!enableComments) return;
+
     const container = diffContainerRef.current;
     if (!container) return;
 
@@ -1009,7 +1021,7 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
       }
       cleanup();
     };
-  }, [diffThemeKey, fileName, handleSelectionChange, resolveClickedSide]);
+  }, [diffThemeKey, enableComments, fileName, handleSelectionChange, resolveClickedSide]);
 
   // MutationObserver to trigger re-renders when annotation DOM nodes are added/removed
   useEffect(() => {
@@ -1052,7 +1064,7 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
     return null;
   }
 
-  const commentOverlays = (
+  const commentOverlays = enableComments ? (
     <PierreDiffCommentOverlays
       diffRootRef={diffRootRef}
       drafts={fileDrafts}
@@ -1073,7 +1085,7 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
       }}
       onDelete={deleteDraft}
     />
-  );
+  ) : null;
 
   if (layout === 'fill') {
     return (

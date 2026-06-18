@@ -334,24 +334,67 @@ export const useChatTimelineController = ({
         return messageListRef.current?.restoreViewportAnchor(anchor) ?? false;
     }, [messageListRef]);
 
+    // Tracks the timeline edges + height of the previous commit so a prepend
+    // that did NOT go through fetchOlderHistory (e.g. the background history
+    // prepend dispatched from useSync) can be compensated too. With
+    // overflow-anchor:none the browser leaves scrollTop unchanged when content
+    // is inserted above, so without this the viewport visibly jumps and
+    // auto-follow yanks it back on the next frame — a one-shot up/down judder.
+    const prependTrackingRef = React.useRef<{
+        oldestId: string | null;
+        newestId: string | null;
+        scrollHeight: number;
+    } | null>(null);
+
     React.useLayoutEffect(() => {
-        const snap = prePrependScrollRef.current;
         const container = scrollRef.current;
-        if (!snap || !container) return;
-        prePrependScrollRef.current = null;
+        if (!container) return;
 
-        // When a viewport anchor is available, delegate to MessageList
-        // restoreViewportAnchor which falls back to virtualizer-aware
-        // scrollHistoryIndexIntoView when the element is not in the DOM.
-        if (snap.anchor && restoreViewportAnchor(snap.anchor)) {
-            return;
+        const snap = prePrependScrollRef.current;
+        if (snap) {
+            prePrependScrollRef.current = null;
+            // When a viewport anchor is available, delegate to MessageList
+            // restoreViewportAnchor which falls back to virtualizer-aware
+            // scrollHistoryIndexIntoView when the element is not in the DOM.
+            if (!(snap.anchor && restoreViewportAnchor(snap.anchor))) {
+                // Fallback: height-delta compensation
+                const delta = container.scrollHeight - snap.height;
+                if (delta > 0) {
+                    container.scrollTop = snap.top + delta;
+                }
+            }
+        } else {
+            // Auto-detect a prepend: the oldest message changed while the newest
+            // stayed the same (distinguishes a real prepend from a session
+            // switch, a bottom append, or a streaming part growing). Compensate
+            // synchronously by the exact height delta — for a bottom-pinned
+            // viewport this keeps it pinned, for a released one it preserves the
+            // read position, with no intermediate frame for auto-follow to fight.
+            const prev = prependTrackingRef.current;
+            const currentOldestId = renderedMessages[0]?.info?.id ?? null;
+            const currentNewestId = renderedMessages[renderedMessages.length - 1]?.info?.id ?? null;
+            const isPrepend = Boolean(
+                prev
+                && prev.oldestId
+                && currentOldestId
+                && currentOldestId !== prev.oldestId
+                && prev.newestId
+                && currentNewestId
+                && currentNewestId === prev.newestId,
+            );
+            if (isPrepend && prev) {
+                const delta = container.scrollHeight - prev.scrollHeight;
+                if (delta > 0) {
+                    container.scrollTop = container.scrollTop + delta;
+                }
+            }
         }
 
-        // Fallback: height-delta compensation
-        const delta = container.scrollHeight - snap.height;
-        if (delta > 0) {
-            container.scrollTop = snap.top + delta;
-        }
+        prependTrackingRef.current = {
+            oldestId: renderedMessages[0]?.info?.id ?? null,
+            newestId: renderedMessages[renderedMessages.length - 1]?.info?.id ?? null,
+            scrollHeight: container.scrollHeight,
+        };
     }, [renderedMessages, scrollRef, restoreViewportAnchor]);
 
     const revealBufferedTurns = React.useCallback(async (): Promise<boolean> => false, []);

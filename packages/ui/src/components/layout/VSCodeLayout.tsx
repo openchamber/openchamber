@@ -1018,7 +1018,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
           valueClassName="font-semibold leading-none"
           hideIcon
           showPercentIcon
-          percentIconClassName="h-5 w-5"
+          percentIconClassName="h-4.5 w-4.5"
         />
       )}
     </div>

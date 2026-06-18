@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/ui",
-  "version": "1.13.0",
+  "version": "1.13.2",
   "private": true,
   "type": "module",
   "main": "src/main.tsx",
@@ -51,6 +51,7 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "codemirror-lang-elixir": "^4.0.0",
+    "cron-parser": "^5.5.0",
     "dompurify": "^3.2.7",
     "express": "^5.1.0",
     "fuse.js": "^7.1.0",

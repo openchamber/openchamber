@@ -1816,48 +1816,72 @@ export const updateAgent = (agentName: string, updates: Record<string, unknown>,
   }
 };
 
-export const deleteAgent = (agentName: string, workingDirectory?: string) => {
-  let deleted = false;
+const deleteJsonAgentEntry = (config: Record<string, unknown>, agentName: string): boolean => {
+  const agentMap = config.agent as Record<string, unknown> | undefined;
+  if (!agentMap?.[agentName]) return false;
+  delete agentMap[agentName];
+  if (Object.keys(agentMap).length > 0) {
+    config.agent = agentMap;
+  } else {
+    delete config.agent;
+  }
+  return true;
+};
+
+export const deleteAgent = (agentName: string, workingDirectory?: string, scope?: AgentScope) => {
+  const requestedScope = scope === AGENT_SCOPE.PROJECT || scope === AGENT_SCOPE.USER ? scope : null;
 
   // Check project level first (takes precedence)
-  if (workingDirectory) {
+  if ((!requestedScope || requestedScope === AGENT_SCOPE.PROJECT) && workingDirectory) {
     const projectPath = getProjectAgentPath(workingDirectory, agentName);
     if (fs.existsSync(projectPath)) {
       fs.unlinkSync(projectPath);
-      deleted = true;
+      resetAgentLookupCache(globalAgentLookupCache);
+      return;
     }
   }
 
   // Then check user level
-  const userPath = getUserAgentPath(agentName);
-  if (fs.existsSync(userPath)) {
-    fs.unlinkSync(userPath);
-    deleted = true;
+  if (!requestedScope || requestedScope === AGENT_SCOPE.USER) {
+    const userPath = getUserAgentPath(agentName);
+    if (fs.existsSync(userPath)) {
+      fs.unlinkSync(userPath);
+      resetAgentLookupCache(globalAgentLookupCache);
+      return;
+    }
+  }
+
+  const layers = readConfigLayers(workingDirectory);
+
+  if (requestedScope === AGENT_SCOPE.PROJECT) {
+    if (layers.paths.projectPath && deleteJsonAgentEntry(layers.projectConfig, agentName)) {
+      writeConfig(layers.projectConfig, layers.paths.projectPath);
+      resetAgentLookupCache(globalAgentLookupCache);
+      return;
+    }
+    throw new Error(`Project agent ${agentName} not found`);
+  }
+
+  if (requestedScope === AGENT_SCOPE.USER) {
+    const userJsonPath = layers.paths.customPath || layers.paths.userPath;
+    const userJsonConfig = layers.paths.customPath ? layers.customConfig : layers.userConfig;
+    if (userJsonPath && deleteJsonAgentEntry(userJsonConfig, agentName)) {
+      writeConfig(userJsonConfig, userJsonPath);
+      resetAgentLookupCache(globalAgentLookupCache);
+      return;
+    }
+    throw new Error(`User agent ${agentName} not found`);
   }
 
   // Also check json config (highest precedence entry only)
-  const layers = readConfigLayers(workingDirectory);
   const jsonSource = getJsonEntrySource(layers, 'agent', agentName);
-  if (jsonSource.exists && jsonSource.config && jsonSource.path) {
-    const targetConfig = jsonSource.config as Record<string, unknown>;
-    const agentMap = (targetConfig.agent as Record<string, unknown> | undefined) ?? {};
-    delete agentMap[agentName];
-    targetConfig.agent = agentMap;
-    writeConfig(targetConfig, jsonSource.path);
-    deleted = true;
+  if (jsonSource.exists && jsonSource.config && jsonSource.path && deleteJsonAgentEntry(jsonSource.config, agentName)) {
+    writeConfig(jsonSource.config, jsonSource.path);
+    resetAgentLookupCache(globalAgentLookupCache);
+    return;
   }
 
-  // If nothing was deleted (built-in agent), disable it in highest-precedence config
-  if (!deleted) {
-    const jsonTarget = getJsonWriteTarget(layers, workingDirectory ? AGENT_SCOPE.PROJECT : AGENT_SCOPE.USER);
-    const targetConfig = (jsonTarget.config || {}) as Record<string, unknown>;
-    const agentMap = (targetConfig.agent as Record<string, unknown> | undefined) ?? {};
-    agentMap[agentName] = { disable: true };
-    targetConfig.agent = agentMap;
-    writeConfig(targetConfig, jsonTarget.path || CONFIG_FILE);
-  }
-
-  resetAgentLookupCache(globalAgentLookupCache);
+  throw new Error(`Agent ${agentName} is built-in or not deletable`);
 };
 
 export const getCommandSources = (commandName: string, workingDirectory?: string): ConfigSources => {

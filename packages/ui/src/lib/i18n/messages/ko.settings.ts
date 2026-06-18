@@ -359,6 +359,7 @@ export const settingsDict = {
   'settings.agents.sidebar.toast.agentDeleted': '"{name}" 에이전트를 삭제했습니다',
   'settings.agents.sidebar.toast.agentReset': '"{name}" 에이전트를 기본값으로 초기화했습니다',
   'settings.agents.sidebar.toast.deleteFailed': '에이전트를 삭제하지 못했습니다',
+  'settings.agents.sidebar.toast.definitionNotFound': '에이전트 정의를 찾을 수 없습니다. 변경된 내용이 없습니다.',
   'settings.agents.sidebar.toast.resetFailed': '에이전트를 초기화하지 못했습니다',
   'settings.agents.sidebar.toast.agentNameRequired': '에이전트 이름은 필수입니다',
   'settings.agents.sidebar.toast.agentExists': '같은 이름의 에이전트가 이미 존재합니다',

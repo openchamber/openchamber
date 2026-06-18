@@ -107,9 +107,64 @@ export const streamBlocks = (text: string, live: boolean): MarkdownBlock[] => {
 // marked parser (HTML string output) with safe external links
 // ---------------------------------------------------------------------------
 
+// Math delimiters that use backslashes — `\(...\)` (inline) and `\[...\]`
+// (display) — must be caught during lexing: marked treats `\(`/`\[` as
+// backslash escapes and strips the slash before any HTML post-process can see
+// them. Registering them as tokenizers also makes them code-safe for free
+// (marked tokenizes code spans/fences first, so these never fire inside code).
+// Single-dollar `$...$` is intentionally NOT supported — it collides with
+// currency text ($50, US$ 680); only `$$...$$` survives as display math (see
+// renderMathExpressions). This mirrors KaTeX auto-render's default delimiters.
+type MathToken = { type: string; raw: string; text: string };
+
+const renderKatex = (math: string, raw: string, displayMode: boolean): string => {
+  try {
+    return katex.renderToString(math, { displayMode, throwOnError: false });
+  } catch {
+    return raw;
+  }
+};
+
+const inlineMathExtension = {
+  name: 'inlineMath',
+  level: 'inline' as const,
+  start(src: string) {
+    const index = src.indexOf('\\(');
+    return index < 0 ? undefined : index;
+  },
+  tokenizer(src: string): MathToken | undefined {
+    const match = /^\\\(([\s\S]+?)\\\)/.exec(src);
+    if (!match) return undefined;
+    return { type: 'inlineMath', raw: match[0], text: match[1] ?? '' };
+  },
+  renderer(token: Tokens.Generic) {
+    const math = token as MathToken;
+    return renderKatex(math.text, math.raw, false);
+  },
+};
+
+const blockMathExtension = {
+  name: 'blockMath',
+  level: 'block' as const,
+  start(src: string) {
+    const index = src.indexOf('\\[');
+    return index < 0 ? undefined : index;
+  },
+  tokenizer(src: string): MathToken | undefined {
+    const match = /^\\\[([\s\S]+?)\\\]/.exec(src);
+    if (!match) return undefined;
+    return { type: 'blockMath', raw: match[0], text: match[1] ?? '' };
+  },
+  renderer(token: Tokens.Generic) {
+    const math = token as MathToken;
+    return renderKatex(math.text, math.raw, true);
+  },
+};
+
 const parser = marked.use({
   gfm: true,
   breaks: false,
+  extensions: [inlineMathExtension, blockMathExtension],
   renderer: {
     link({ href, title, text }) {
       const target = href ?? '';
@@ -131,8 +186,14 @@ const parser = marked.use({
 // Math (KaTeX) — post-process the parsed HTML, skipping code/pre/kbd content
 // ---------------------------------------------------------------------------
 
-const renderMathInText = (text: string): string => {
-  let result = text.replace(/\$\$([\s\S]*?)\$\$/g, (_match, math: string) => {
+// Only `$$...$$` (display) is handled here. Single-dollar `$...$` inline math is
+// deliberately omitted: it parses currency text ($50, US$ 680, "$50M to $72M")
+// as math and corrupts it. Inline math is supported via `\(...\)` (see the
+// marked extensions above). `$$` survives marked untouched (no backslash), so
+// post-processing the parsed HTML — skipping code via renderMathExpressions —
+// stays correct and code-safe.
+const renderMathInText = (text: string): string =>
+  text.replace(/\$\$([\s\S]*?)\$\$/g, (_match, math: string) => {
     try {
       return katex.renderToString(math, { displayMode: true, throwOnError: false });
     } catch {
@@ -140,18 +201,11 @@ const renderMathInText = (text: string): string => {
     }
   });
 
-  result = result.replace(/(?<!\$)\$(?!\$)((?:[^$\\]|\\.)+?)\$(?!\$)/g, (_match, math: string) => {
-    try {
-      return katex.renderToString(math, { displayMode: false, throwOnError: false });
-    } catch {
-      return `$${math}$`;
-    }
-  });
-
-  return result;
-};
-
 const renderMathExpressions = (html: string): string => {
+  // No `$` anywhere means no math to render — skip the split + regex passes on
+  // the hot streaming path (the overwhelming majority of blocks have no math).
+  if (html.indexOf('$') === -1) return html;
+
   const codeBlockPattern = /(<(?:pre|code|kbd)[^>]*>[\s\S]*?<\/(?:pre|code|kbd)>)/gi;
   return html
     .split(codeBlockPattern)
@@ -252,16 +306,6 @@ const sanitize = (html: string): string => {
   return DOMPurify.sanitize(html, SANITIZE_CONFIG) as unknown as string;
 };
 
-const escapeHtml = (text: string): string =>
-  text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-
-export const fallbackHtml = (markdown: string): string =>
-  escapeHtml(markdown).replace(/\r\n?/g, '\n').replace(/\n/g, '<br>');
 
 // ---------------------------------------------------------------------------
 // Per-block HTML cache (LRU, mirrors OpenCode's checksum cache)
@@ -293,6 +337,22 @@ const parseBlock = async (block: MarkdownBlock): Promise<string> => {
   const withMath = renderMathExpressions(parsed);
   const highlighted = block.highlight ? await highlightCodeBlocks(withMath) : withMath;
   return sanitize(highlighted);
+};
+
+/**
+ * Synchronous styled render for the first paint, before the async pipeline
+ * (Shiki-in-worker highlight) resolves. Produces the SAME structural HTML as
+ * `renderMarkdownBlocks` minus syntax coloring: paragraphs, lists, code blocks
+ * and bold all render at their final width, so the async pass only upgrades
+ * code-block colors — no flash of full-width raw markdown source. `parser.parse`
+ * is synchronous (marked is not configured `async`), so this never blocks on a
+ * worker round-trip.
+ */
+export const renderMarkdownSync = (text: string): string => {
+  if (!text) return '';
+  const parsed = parser.parse(text) as string;
+  const withMath = renderMathExpressions(parsed);
+  return sanitize(withMath);
 };
 
 export type RenderedBlock = {

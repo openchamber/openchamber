@@ -2203,7 +2203,7 @@ export const Header: React.FC<HeaderProps> = ({
               pressed={isContextPanelActive}
               className={!showMiniChatHeaderAction ? 'mr-3.5' : ''}
               valueClassName="typography-ui-label font-medium leading-none text-foreground"
-              percentIconClassName="h-5 w-5"
+              percentIconClassName="h-4.5 w-4.5"
             />
           ) : null}
           {desktopChangesPanelAction}

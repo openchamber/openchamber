@@ -2,10 +2,11 @@
 # OpenChamber Install Script
 # Usage: curl -fsSL https://raw.githubusercontent.com/btriapitsyn/openchamber/main/scripts/install.sh | bash
 
-set -e
+set -euo pipefail
 
 PACKAGE_NAME="@openchamber/web"
-MIN_NODE_VERSION=20
+BIN_NAME="openchamber"
+MIN_NODE_VERSION=22
 
 # Colors
 RED='\033[0;31m'
@@ -38,7 +39,15 @@ command_exists() {
 # Get Node.js major version
 get_node_version() {
   if command_exists node; then
-    node -v | sed 's/v//' | cut -d. -f1
+    local version
+    version=$(node -v 2>/dev/null || true)
+    version=${version#v}
+    version=${version%%.*}
+    if [[ "$version" =~ ^[0-9]+$ ]]; then
+      echo "$version"
+    else
+      echo "0"
+    fi
   else
     echo "0"
   fi
@@ -47,7 +56,7 @@ get_node_version() {
 # Detect preferred package manager
 detect_package_manager() {
   # Check if running inside an npm/pnpm/yarn/bun context
-  if [ -n "$npm_config_user_agent" ]; then
+  if [ -n "${npm_config_user_agent:-}" ]; then
     case "$npm_config_user_agent" in
       pnpm*) echo "pnpm"; return ;;
       yarn*) echo "yarn"; return ;;
@@ -61,7 +70,7 @@ detect_package_manager() {
     echo "pnpm"; return
   elif [ -f "yarn.lock" ]; then
     echo "yarn"; return
-  elif [ -f "bun.lockb" ]; then
+  elif [ -f "bun.lock" ] || [ -f "bun.lockb" ]; then
     echo "bun"; return
   elif [ -f "package-lock.json" ]; then
     echo "npm"; return
@@ -101,7 +110,7 @@ suggest_node_install() {
   echo "Install Node.js using one of these methods:"
   echo ""
   
-  if [[ "$OSTYPE" == "darwin"* ]]; then
+  if [[ "${OSTYPE:-}" == "darwin"* ]]; then
     echo "  Using Homebrew:"
     echo "    brew install node"
     echo ""
@@ -156,7 +165,7 @@ main() {
   # Check Node.js
   info "Checking Node.js..."
   NODE_VERSION=$(get_node_version)
-  
+
   if [ "$NODE_VERSION" -lt "$MIN_NODE_VERSION" ]; then
     if [ "$NODE_VERSION" -eq "0" ]; then
       suggest_node_install
@@ -166,6 +175,27 @@ main() {
     fi
   fi
   success "Node.js v$NODE_VERSION found"
+
+  # If OpenChamber is already installed, hand off to its own updater instead
+  # of guessing a package manager. `openchamber update` detects which manager
+  # actually owns the existing global install and reinstalls with that one —
+  # reinstalling with a different manager here would orphan files and break PATH.
+  if command_exists "$BIN_NAME"; then
+    info "OpenChamber is already installed — updating via 'openchamber update'..."
+    echo ""
+    if openchamber update; then
+      echo ""
+      success "OpenChamber is up to date!"
+      exit 0
+    fi
+    echo ""
+    error "Update failed."
+    echo ""
+    echo "  Try running it manually:"
+    echo "    openchamber update"
+    echo ""
+    exit 1
+  fi
 
   # Detect package manager
   info "Detecting package manager..."
@@ -192,11 +222,46 @@ main() {
   
   if eval "$INSTALL_CMD"; then
     echo ""
+    # Wordmark (toilet "pagga", "Open"/"Chamber" stacked).
+    # Hardcoded so the user needs no extra tools.
+    printf '%b' "$BLUE"
+    cat <<'EOF'
+  ░█▀█░█▀█░█▀▀░█▀█
+  ░█░█░█▀▀░█▀▀░█░█
+  ░▀▀▀░▀░░░▀▀▀░▀░▀
+  ░█▀▀░█░█░█▀█░█▄█░█▀▄░█▀▀░█▀▄
+  ░█░░░█▀█░█▀█░█░█░█▀▄░█▀▀░█▀▄
+  ░▀▀▀░▀░▀░▀░▀░▀░▀░▀▀░░▀▀▀░▀░▀
+EOF
+    printf '%b\n' "$NC"
     success "OpenChamber installed successfully!"
     echo ""
-    echo "  Get started:"
-    echo "    openchamber              # Start server on port 3000"
-    echo "    openchamber --help       # Show all options"
+
+    # Verify the binary is actually reachable. Global installs frequently
+    # land in a directory that isn't on PATH — surface that instead of
+    # letting the user hit a confusing "command not found".
+    if command_exists "$BIN_NAME"; then
+      echo "  Get started:"
+      echo "    openchamber              # Start server on port 3000"
+      echo "    openchamber --help       # Show all options"
+    else
+      warn "'$BIN_NAME' was installed but isn't on your PATH yet."
+      echo ""
+      bin_dir=""
+      case "$PM" in
+        npm)  bin_dir=$(npm prefix -g 2>/dev/null)/bin ;;
+        pnpm) bin_dir=$(pnpm bin -g 2>/dev/null || true) ;;
+        yarn) bin_dir=$(yarn global bin 2>/dev/null || true) ;;
+        bun)  bin_dir="${BUN_INSTALL:-$HOME/.bun}/bin" ;;
+      esac
+      if [ -n "$bin_dir" ]; then
+        echo "  Add it to your PATH (then restart your terminal):"
+        echo "    export PATH=\"$bin_dir:\$PATH\""
+      else
+        echo "  Add your package manager's global bin directory to PATH,"
+        echo "  then restart your terminal and run: openchamber"
+      fi
+    fi
     echo ""
     echo "  Prerequisites:"
     echo "    Make sure OpenCode is running: opencode serve"

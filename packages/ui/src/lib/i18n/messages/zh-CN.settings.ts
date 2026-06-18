@@ -359,6 +359,7 @@ export const settingsDict = {
   'settings.agents.sidebar.toast.agentDeleted': '智能体“{name}”已删除',
   'settings.agents.sidebar.toast.agentReset': '智能体“{name}”已重置为默认值',
   'settings.agents.sidebar.toast.deleteFailed': '删除智能体失败',
+  'settings.agents.sidebar.toast.definitionNotFound': '未找到智能体定义。未进行任何更改。',
   'settings.agents.sidebar.toast.resetFailed': '重置智能体失败',
   'settings.agents.sidebar.toast.agentNameRequired': '智能体名称为必填项',
   'settings.agents.sidebar.toast.agentExists': '已存在同名智能体',

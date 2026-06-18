@@ -348,6 +348,7 @@ export const settingsDict = {
   'settings.agents.sidebar.toast.agentDeleted': 'Agent "{name}" supprimé avec succès',
   'settings.agents.sidebar.toast.agentReset': 'Agent "{name}" réinitialisé aux valeurs par défaut',
   'settings.agents.sidebar.toast.deleteFailed': 'Échec de la suppression de l\'agent',
+  'settings.agents.sidebar.toast.definitionNotFound': 'Définition de l’agent introuvable. Aucune modification effectuée.',
   'settings.agents.sidebar.toast.resetFailed': 'Échec de la réinitialisation de l\'agent',
   'settings.agents.sidebar.toast.agentNameRequired': 'Le nom de l\'agent est requis',
   'settings.agents.sidebar.toast.agentExists': 'Un agent portant ce nom existe déjà',

@@ -23,6 +23,7 @@ import type { ModelMetadata } from '@/types';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { fetchProviderSource } from '@/lib/api/providersApi';
 import { opencodeClient } from '@/lib/opencode/client';
+import { shouldLoadAvailableProviders } from './providerAvailability';
 
 const formatCompactNumber = (value: number) => new Intl.NumberFormat(getCurrentIntlLocale(), {
   notation: 'compact',
@@ -169,6 +170,7 @@ export const ProvidersPage: React.FC = () => {
   const [providerDropdownOpen, setProviderDropdownOpen] = React.useState(false);
   const [providerSources, setProviderSources] = React.useState<Record<string, ProviderSources>>({});
   const [showAuthPanel, setShowAuthPanel] = React.useState(false);
+  const isAddMode = selectedProviderId === ADD_PROVIDER_ID;
 
   React.useEffect(() => {
     if (!selectedProviderId && providers.length > 0) {
@@ -177,6 +179,10 @@ export const ProvidersPage: React.FC = () => {
   }, [providers, selectedProviderId, setSelectedProvider]);
 
   React.useEffect(() => {
+    if (!isAddMode) {
+      return;
+    }
+
     let isMounted = true;
 
     const loadAuthMethods = async () => {
@@ -204,9 +210,13 @@ export const ProvidersPage: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [t]);
+  }, [isAddMode, t]);
 
   React.useEffect(() => {
+    if (!shouldLoadAvailableProviders(isAddMode)) {
+      return;
+    }
+
     let isMounted = true;
 
     const loadAvailableProviders = async () => {
@@ -235,7 +245,7 @@ export const ProvidersPage: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [t]);
+  }, [isAddMode, t]);
 
   const connectedProviderIds = React.useMemo(
     () => new Set(providers.map((provider) => provider.id)),
@@ -469,8 +479,6 @@ export const ProvidersPage: React.FC = () => {
       setAuthBusyKey(null);
     }
   };
-
-  const isAddMode = selectedProviderId === ADD_PROVIDER_ID;
 
   if (!isAddMode && providers.length === 0) {
     return (
