@@ -102,6 +102,8 @@ export const dict = {
   'mobile.sessions.sheet.title': 'Sessions',
   'mobile.sessions.sheet.description': 'Switch projects, open sessions, or start a new chat.',
   'mobile.sessions.search.placeholder': 'Search sessions',
+'mobile.sessions.subagent.toggle': 'Show subagent sessions',
+  'mobile.sessions.subagent.toggleDescription': 'When off, only top-level sessions are listed.',
   'mobile.sessions.empty': 'No sessions found.',
   'mobile.sessions.unassignedProject': 'Other sessions',
   'mobile.sessions.newSessionAria': 'Start a new session in this project',

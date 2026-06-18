@@ -44,6 +44,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useI18n } from '@/lib/i18n';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/projectMeta';
 import { cn } from '@/lib/utils';
+import { useUIStore } from '@/stores/useUIStore';
 import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { mergeSessionDirectoryMetadata, refreshGlobalSessions, refreshGlobalSessionsForDirectories, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
@@ -525,6 +526,8 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const toggleParent = useMobileSessionExpansionStore((state) => state.toggleParent);
   const showSubagentSessionsInSidebar = useUIStore((state) => state.showSubagentSessionsInSidebar);
   const [query, setQuery] = React.useState('');
+const showSubagentSessionsInSidebar = useUIStore((state) => state.showSubagentSessionsInSidebar);
+  const setShowSubagentSessionsInSidebar = useUIStore((state) => state.setShowSubagentSessionsInSidebar);
   const [editingProjectId, setEditingProjectId] = React.useState<string | null>(null);
   const [confirmingArchiveSessionId, setConfirmingArchiveSessionId] = React.useState<string | null>(null);
   // Bumped to force a re-list of worktrees (e.g. after one is deleted in the editor).
@@ -746,9 +749,10 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const renderBucketSessions = (node: ProjectNode, bucket: WorktreeBucket, indent: number) => {
     const bucketKey = `${node.project.id}::${bucket.key}`;
 
-    // Group children by parent within this bucket, and treat sessions whose parent
-    // is not in this bucket as top-level so nothing is hidden.
-    const idsInBucket = new Set(bucket.sessions.map((entry) => entry.id));
+    const filteredSessions = showSubagentSessionsInSidebar
+      ? bucket.sessions
+      : bucket.sessions.filter((entry) => !getParentId(entry));
+    const idsInBucket = new Set(filteredSessions.map((entry) => entry.id));
     const childrenByParent = new Map<string, Session[]>();
     for (const candidate of bucket.sessions) {
       const parentId = getParentId(candidate);
@@ -758,13 +762,14 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         childrenByParent.set(parentId, list);
       }
     }
-    const roots = bucket.sessions.filter((entry) => {
+    const roots = filteredSessions.filter((entry) => {
       const parentId = getParentId(entry);
       return !parentId || !idsInBucket.has(parentId);
     });
 
     const visibleCount = visibleCountByBucket.get(bucketKey) ?? SESSIONS_PER_BUCKET;
     const visibleRoots = roots.slice(0, visibleCount);
+
     const remaining = roots.length - visibleRoots.length;
     const canShowFewer = roots.length > SESSIONS_PER_BUCKET && remaining === 0;
 
