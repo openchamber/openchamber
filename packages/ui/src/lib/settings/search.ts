@@ -429,6 +429,13 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['model', 'provider'],
   },
   {
+    id: 'agents.variant',
+    page: 'agents',
+    titleKey: 'settings.agents.page.field.variant',
+    descriptionKey: 'settings.agents.page.field.variantTooltip',
+    keywords: ['thinking', 'reasoning', 'variant', 'depth'],
+  },
+  {
     id: 'agents.temperature',
     page: 'agents',
     titleKey: 'settings.agents.page.field.temperature',

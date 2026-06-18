@@ -221,6 +221,7 @@ export const AgentsPage: React.FC = () => {
   const [description, setDescription] = React.useState('');
   const [mode, setMode] = React.useState<'primary' | 'subagent' | 'all'>('subagent');
   const [model, setModel] = React.useState('');
+  const [variant, setVariant] = React.useState('');
   const [temperature, setTemperature] = React.useState<number | undefined>(undefined);
   const [topP, setTopP] = React.useState<number | undefined>(undefined);
   const [prompt, setPrompt] = React.useState('');
@@ -237,6 +238,7 @@ export const AgentsPage: React.FC = () => {
     description: string;
     mode: 'primary' | 'subagent' | 'all';
     model: string;
+    variant: string;
     temperature: number | undefined;
     topP: number | undefined;
     prompt: string;
@@ -469,8 +471,9 @@ export const AgentsPage: React.FC = () => {
       const descriptionValue = agentDraft.description || '';
       const modeValue = agentDraft.mode || 'subagent';
       const modelValue = agentDraft.model || '';
-      const temperatureValue = agentDraft.temperature;
-      const topPValue = agentDraft.top_p;
+      const variantValue = agentDraft.variant || '';
+      const temperatureValue = agentDraft.temperature ?? undefined;
+      const topPValue = agentDraft.top_p ?? undefined;
       const promptValue = agentDraft.prompt || '';
 
       setDraftName(draftNameValue);
@@ -478,6 +481,7 @@ export const AgentsPage: React.FC = () => {
       setDescription(descriptionValue);
       setMode(modeValue);
       setModel(modelValue);
+      setVariant(variantValue);
       setTemperature(temperatureValue);
       setTopP(topPValue);
       setPrompt(promptValue);
@@ -491,6 +495,7 @@ export const AgentsPage: React.FC = () => {
         description: descriptionValue,
         mode: modeValue,
         model: modelValue,
+        variant: variantValue,
         temperature: temperatureValue,
         topP: topPValue,
         prompt: promptValue,
@@ -506,14 +511,16 @@ export const AgentsPage: React.FC = () => {
       const modelValue = selectedAgent.model?.providerID && selectedAgent.model?.modelID
         ? `${selectedAgent.model.providerID}/${selectedAgent.model.modelID}`
         : '';
-      const temperatureValue = selectedAgent.temperature;
-      const topPValue = selectedAgent.topP;
+      const variantValue = selectedAgent.variant || '';
+      const temperatureValue = selectedAgent.temperature ?? undefined;
+      const topPValue = selectedAgent.topP ?? undefined;
       const promptValue = selectedAgent.prompt || '';
 
       setDescription(descriptionValue);
       setMode(modeValue);
 
       setModel(modelValue);
+      setVariant(variantValue);
       setTemperature(temperatureValue);
       setTopP(topPValue);
       setPrompt(promptValue);
@@ -528,6 +535,7 @@ export const AgentsPage: React.FC = () => {
         description: descriptionValue,
         mode: modeValue,
         model: modelValue,
+        variant: variantValue,
         temperature: temperatureValue,
         topP: topPValue,
         prompt: promptValue,
@@ -551,6 +559,7 @@ export const AgentsPage: React.FC = () => {
     if (description !== initial.description) return true;
     if (mode !== initial.mode) return true;
     if (model !== initial.model) return true;
+    if (variant !== initial.variant) return true;
     if (temperature !== initial.temperature) return true;
     if (topP !== initial.topP) return true;
     if (prompt !== initial.prompt) return true;
@@ -558,7 +567,7 @@ export const AgentsPage: React.FC = () => {
     if (!areRulesEqual(permissionRules, initial.permissionRules)) return true;
 
     return false;
-  }, [description, draftName, draftScope, globalPermission, isNewAgent, mode, model, permissionRules, prompt, temperature, topP]);
+  }, [description, draftName, draftScope, globalPermission, isNewAgent, mode, model, permissionRules, prompt, temperature, topP, variant]);
 
   const handleSave = async () => {
     const agentName = isNewAgent ? draftName.trim().replace(/\s+/g, '-') : selectedAgentName?.trim();
@@ -578,6 +587,7 @@ export const AgentsPage: React.FC = () => {
 
     try {
       const trimmedModel = model.trim();
+      const trimmedVariant = variant.trim();
       const trimmedPrompt = prompt.trim();
       const permissionConfig = buildPermissionConfigWithGlobal(globalPermission, permissionRules);
       const config: AgentConfig = {
@@ -585,8 +595,9 @@ export const AgentsPage: React.FC = () => {
         description: description.trim() || undefined,
         mode,
         model: trimmedModel === '' ? null : trimmedModel,
-        temperature,
-        top_p: topP,
+        variant: trimmedVariant === '' ? null : trimmedVariant || undefined,
+        temperature: temperature ?? null,
+        top_p: topP ?? null,
         prompt: trimmedPrompt || (isNewAgent ? undefined : null),
         permission: permissionConfig,
         scope: isNewAgent ? draftScope : undefined,
@@ -779,6 +790,36 @@ export const AgentsPage: React.FC = () => {
                     }
                   }}
                 />
+              </div>
+            </div>
+
+            <div data-settings-item="agents.variant" className={cn("py-1.5", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
+              <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "sm:w-56 shrink-0")}>
+                <div className="flex items-center gap-1.5">
+                  <span className="typography-ui-label text-foreground">{t('settings.agents.page.field.variant')}</span>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                    </TooltipTrigger>
+                    <TooltipContent sideOffset={8} className="max-w-xs">
+                      {t('settings.agents.page.field.variantTooltip')}
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+                <span className="typography-meta text-muted-foreground">{t('settings.agents.page.field.variantHint')}</span>
+              </div>
+              <div className={cn("flex items-center gap-2", isMobile ? "w-full" : "w-fit")}>
+                <Input
+                  value={variant}
+                  onChange={(e) => setVariant(e.target.value)}
+                  placeholder={t('settings.agents.page.field.variantPlaceholder')}
+                  className="w-40"
+                />
+                {variant && (
+                  <Button size="sm" variant="ghost" onClick={() => setVariant('')}>
+                    {t('settings.common.actions.clear')}
+                  </Button>
+                )}
               </div>
             </div>
 
