@@ -879,7 +879,7 @@ export const Header: React.FC<HeaderProps> = ({
   const [desktopServicesTab, setDesktopServicesTab] = React.useState<'instance' | 'usage' | 'mcp' | 'plugin-status'>(
     isDesktopApp ? 'instance' : 'usage'
   );
-  const [mobileServicesTab, setMobileServicesTab] = React.useState<'usage' | 'mcp'>('usage');
+  const [mobileServicesTab, setMobileServicesTab] = React.useState<'usage' | 'mcp' | 'plugin-status'>('usage');
   useEffect(() => {
     if (!isDesktopApp && desktopServicesTab === 'instance') {
       setDesktopServicesTab('usage');
@@ -1884,6 +1884,7 @@ export const Header: React.FC<HeaderProps> = ({
     return [
       { id: 'usage', label: t('layout.services.usage'), icon: <Icon name="timer" className="h-3.5 w-3.5" /> },
       { id: 'mcp', label: 'MCP', icon: <McpIcon className="h-3.5 w-3.5" /> },
+      { id: 'plugin-status', label: t('layout.services.pluginStatus'), icon: <Icon name="plug" className="h-3.5 w-3.5" /> },
     ];
   }, [t]);
 
@@ -2397,7 +2398,7 @@ export const Header: React.FC<HeaderProps> = ({
                           items={mobileServicesTabItems}
                           activeId={mobileServicesTab}
                           onSelect={(tabID) => {
-                            const value = tabID as 'usage' | 'mcp';
+                            const value = tabID as 'usage' | 'mcp' | 'plugin-status';
                             setMobileServicesTab(value);
                             if (value === 'usage' && quotaResults.length === 0) {
                               fetchAllQuotas();
@@ -2423,6 +2424,12 @@ export const Header: React.FC<HeaderProps> = ({
 
                   {mobileServicesTab === 'mcp' && (
                     <McpDropdownContent active={isMobileRateLimitsOpen && mobileServicesTab === 'mcp'} />
+                  )}
+
+                  {mobileServicesTab === 'plugin-status' && (
+                    <div className="flex-1 overflow-y-auto overflow-x-hidden pb-[calc(4rem+env(safe-area-inset-bottom))]">
+                      <PluginStatusPage onClose={() => setMobileServicesTab('usage')} />
+                    </div>
                   )}
 
                   {mobileServicesTab === 'usage' && (
