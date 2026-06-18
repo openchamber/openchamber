@@ -573,11 +573,11 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
   // Check if any parent node is expanded - expanded parents render their
   // children inline, making them much taller than the fixed estimate.
   // When expanded parents exist, increase bufferSize to cover the extra height.
+  const bucketTag = group.isArchivedBucket ? 'archived' : 'active';
   const hasExpandedParent = shouldVirtualize && visibleSessions.some((node) => {
     if (node.children.length === 0) return false;
-    const sessionId = node.session.id;
-    const expansionKey = sessionId;
-    return hasSessionSearchQuery ? true : expandedParents.has(expansionKey);
+    const expansionKey = `project:${bucketTag}:${node.session.id}`;
+    return expandedParents.has(expansionKey);
   });
 
   const archivedVirtualContainerRef = React.useRef<HTMLDivElement | null>(null);
