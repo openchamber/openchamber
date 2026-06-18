@@ -45,7 +45,7 @@ import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/pro
 import { cn } from '@/lib/utils';
 import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { mergeSessionDirectoryMetadata, refreshGlobalSessions, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { mergeLiveSessionWithGlobalSession, refreshGlobalSessions, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useMobileSessionExpansionStore } from '@/stores/useMobileSessionExpansionStore';
 import { useMobileSessionTreeStore } from '@/stores/useMobileSessionTreeStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -618,12 +618,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     const liveById = new Map(liveSessions.map((session) => [session.id, session]));
     const merged = globalActiveSessions.map((session) => {
       const liveSession = liveById.get(session.id);
-      if (!liveSession) return session;
-      const mergedSession = mergeSessionDirectoryMetadata(liveSession, session);
-      if (mergedSession.share !== session.share) {
-        return { ...mergedSession, share: session.share };
-      }
-      return mergedSession;
+      return liveSession ? mergeLiveSessionWithGlobalSession(liveSession, session) : session;
     });
     const seenIds = new Set(merged.map((session) => session.id));
     for (const session of liveSessions) {
