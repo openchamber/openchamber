@@ -13,6 +13,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { formatDirectoryName, cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { SidebarFilesTree } from './SidebarFilesTree';
+import { SubagentsPanel } from './SubagentsPanel';
 
 type RightTab = 'git' | 'files' | 'context' | 'subagents';
 
