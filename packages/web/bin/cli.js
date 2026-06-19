@@ -2239,7 +2239,21 @@ function buildWindowsStartupActionCommand(options = {}) {
 // Scheduler's 72-hour default ceiling.
 function buildWindowsRegisterScheduledTaskScript({ taskName, actionCommand }) {
   const tn = powershellQuote(taskName);
-  const actionArgument = `-NoProfile -ExecutionPolicy Bypass -Command ${powershellQuote(actionCommand)}`;
+  // The action payload mixes single and double quotes (the env-file loader uses
+  // double-quoted PowerShell strings). Task Scheduler launches powershell.exe
+  // directly via CreateProcess, whose CommandLineToArgvW tokenization treats
+  // only " as special: single quotes survive verbatim, so wrapping the script
+  // in '...' would collapse it into one inert string literal that PowerShell
+  // evaluates and discards; any literal " in the payload gets stripped/mangled.
+  // -EncodedCommand (base64 UTF-16LE) carries the script with zero quoting
+  // ambiguity and is the standard remedy for nested PowerShell quoting.
+  const encodedActionCommand = Buffer.from(actionCommand, 'utf16le').toString('base64');
+  // No -WindowStyle Hidden: some endpoint security products enforce "hidden
+  // PowerShell execution" rules that silently block scheduled tasks launching
+  // powershell.exe -WindowStyle Hidden, which would stop the server from ever
+  // starting at logon. Leaving the window visible is the reliable choice; the
+  // foreground server keeps its console open for its lifetime by design.
+  const actionArgument = `-NoProfile -ExecutionPolicy Bypass -EncodedCommand ${encodedActionCommand}`;
   return [
     `$ErrorActionPreference='Stop'`,
     `$u=[Security.Principal.WindowsIdentity]::GetCurrent().Name`,
