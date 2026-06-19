@@ -1,4 +1,5 @@
 import type { Part } from '@opencode-ai/sdk/v2';
+import { getPartInlineComment } from '@/lib/messages/commentNote';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string };
 
@@ -29,6 +30,14 @@ export const isEmptyTextPart = (part: Part): boolean => {
 
 type PartWithSynthetic = Part & { synthetic?: boolean };
 
+// Synthetic parts that carry an inline comment (OpenChamber / OpenCode Desktop
+// "Add Comment" flow) are meant to render as visible cards alongside the typed
+// message, so they must survive the synthetic-stripping pass below. Detection
+// matches OpenCode Desktop: structured metadata first, then text-format fallback.
+export const isInlineCommentPart = (part: Part): boolean => {
+    return Boolean(getPartInlineComment(part));
+};
+
 interface VisibleFilterOptions {
     includeReasoning?: boolean;
 }
@@ -55,8 +64,9 @@ export const filterVisibleParts = (parts: Part[], options: VisibleFilterOptions 
         }
 
         // Only filter out synthetic parts if there are non-synthetic parts present
-        // Otherwise, show synthetic parts so the message is displayed
-        if (isSynthetic && hasNonSynthetic) {
+        // Otherwise, show synthetic parts so the message is displayed.
+        // Inline comment parts are an exception: they always render as cards.
+        if (isSynthetic && hasNonSynthetic && !isInlineCommentPart(part)) {
             return false;
         }
         if (!includeReasoning && part.type === 'reasoning') {
