@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import type { AttachedFile } from './types/sessionTypes';
+import type { InlineCommentPartPayload } from '@/lib/messages/inlineComments';
 import { updateDesktopSettings } from '@/lib/persistence';
 
 export type FollowUpBehavior = 'steer' | 'queue';
@@ -43,6 +44,8 @@ export interface QueuedMessage {
     content: string;
     attachments?: AttachedFile[];
     createdAt: number;
+    /** Structured inline comment parts captured at queue time */
+    inlineCommentParts?: InlineCommentPartPayload[];
     /** Send config captured at queue time — used as-is when auto-sending */
     sendConfig?: {
         providerID: string;

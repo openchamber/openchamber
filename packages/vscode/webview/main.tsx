@@ -1264,6 +1264,55 @@ onCommand('addContextSelection', (payload) => {
   });
 });
 
+onCommand('addLineComment', (payload) => {
+  const record = payload as {
+    filePath?: unknown;
+    relativePath?: unknown;
+    startLine?: unknown;
+    endLine?: unknown;
+    code?: unknown;
+    language?: unknown;
+    comment?: unknown;
+  };
+
+  const relativePath = typeof record.relativePath === 'string' ? record.relativePath : '';
+  const startLine = typeof record.startLine === 'number' ? record.startLine : 1;
+  const endLine = typeof record.endLine === 'number' ? record.endLine : startLine;
+  const code = typeof record.code === 'string' ? record.code : '';
+  const language = typeof record.language === 'string' ? record.language : 'text';
+  const comment = typeof record.comment === 'string' ? record.comment.trim() : '';
+
+  if (!relativePath) {
+    return;
+  }
+
+  const basename = relativePath.replace(/\\/g, '/').split('/').pop() || relativePath;
+  const fileLabel = `${basename}:${startLine}${startLine !== endLine ? `-${endLine}` : ''}`;
+
+  import('@/sync/session-ui-store').then(({ useSessionUIStore }) => {
+    const currentSessionId = useSessionUIStore.getState().currentSessionId;
+    const sessionKey = currentSessionId ?? 'draft';
+
+    import('@/stores/useInlineCommentDraftStore').then(({ useInlineCommentDraftStore }) => {
+      const draftId = useInlineCommentDraftStore.getState().addDraft({
+        sessionKey,
+        source: 'file',
+        fileLabel,
+        startLine,
+        endLine,
+        code,
+        language,
+        text: comment,
+      });
+      // No comment text was captured up-front (multi-line capture flow): open the
+      // in-webview editor for this draft so the user can type with line breaks.
+      if (!comment && draftId) {
+        useInlineCommentDraftStore.getState().setAutoEditDraftId(draftId);
+      }
+    });
+  });
+});
+
 onCommand('addFileMentions', (payload) => {
   const rawPaths = Array.isArray((payload as { paths?: unknown[] })?.paths)
     ? (payload as { paths: unknown[] }).paths

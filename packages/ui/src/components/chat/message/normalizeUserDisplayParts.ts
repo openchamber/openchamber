@@ -1,4 +1,5 @@
 import type { Part } from '@opencode-ai/sdk/v2';
+import { getPartInlineComment } from '@/lib/messages/commentNote';
 
 const GITHUB_ISSUE_CONTEXT_PREFIX = 'GitHub issue context (JSON)';
 const GITHUB_PR_CONTEXT_PREFIX = 'GitHub pull request context (JSON)';
@@ -99,6 +100,13 @@ export const normalizeUserDisplayParts = (parts: Part[], options?: { planModeEna
             const text = (part as { text?: unknown }).text;
             if (typeof text !== 'string') {
                 return false;
+            }
+
+            // Inline comment parts ("Add Comment" flow) are synthetic so OpenCode
+            // Desktop renders them as cards; keep them here so OpenChamber renders
+            // its card too instead of stripping them as ordinary synthetic context.
+            if (getPartInlineComment(part)) {
+                return true;
             }
 
             const normalizedText = text.trimStart();

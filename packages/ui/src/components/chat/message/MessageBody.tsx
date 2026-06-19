@@ -2,6 +2,8 @@ import React from 'react';
 import type { Part } from '@opencode-ai/sdk/v2';
 
 import UserTextPart from './parts/UserTextPart';
+import InlineCommentPart from './parts/InlineCommentPart';
+import { getPartInlineComment, getRedundantCommentFileUrls } from '@/lib/messages/commentNote';
 import ToolPart from './parts/ToolPart';
 import AssistantTextPart from './parts/AssistantTextPart';
 import ReasoningPart from './parts/ReasoningPart';
@@ -498,6 +500,17 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
         });
     }, [parts]);
 
+    // OpenCode attaches a line-anchored file part per inline comment; when the
+    // comment already renders as a card, its file chip is redundant. Hide those.
+    const userFileDisplayParts = React.useMemo(() => {
+        const redundant = getRedundantCommentFileUrls(parts);
+        if (redundant.size === 0) return parts;
+        return parts.filter((part) => {
+            const url = (part as { type?: string; url?: unknown }).url;
+            return !(part.type === 'file' && typeof url === 'string' && redundant.has(url));
+        });
+    }, [parts]);
+
     const mentionToken = agentMention?.token;
     let mentionInjected = false;
 
@@ -744,6 +757,23 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
                             mentionInjected = true;
                         }
                     }
+                    const userInlineComment = getPartInlineComment(part);
+                    if (userInlineComment) {
+                        return (
+                            <React.Fragment key={part.id ?? `user-comment-${index}`}>
+                                <InlineCommentPart
+                                    comment={userInlineComment.comment}
+                                    path={userInlineComment.path}
+                                    startLine={userInlineComment.selection?.startLine ?? 0}
+                                    endLine={userInlineComment.selection?.endLine ?? 0}
+                                    preview={userInlineComment.preview}
+                                    origin={userInlineComment.origin}
+                                    isUser
+                                />
+                            </React.Fragment>
+                        );
+                    }
+
                     return (
                         <React.Fragment key={part.id ?? `user-text-${index}`}>
                             <UserTextPart
@@ -756,7 +786,7 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
                     );
                 })}
             </div>
-            <MessageFilesDisplay files={parts} onShowPopup={onShowPopup} compact />
+            <MessageFilesDisplay files={userFileDisplayParts} onShowPopup={onShowPopup} compact />
             {actionsBlock}
         </div>
     );
@@ -1795,6 +1825,22 @@ const AssistantMessageBody = React.memo(({
                 }
                 if (activity?.kind === 'justification') {
                     i += 1;
+                    continue;
+                }
+                const assistantInlineComment = getPartInlineComment(part);
+                if (assistantInlineComment) {
+                    rendered.push(
+                        <InlineCommentPart
+                            key={`assistant-comment-${messageId}-${i}`}
+                            comment={assistantInlineComment.comment}
+                            path={assistantInlineComment.path}
+                            startLine={assistantInlineComment.selection?.startLine ?? 0}
+                            endLine={assistantInlineComment.selection?.endLine ?? 0}
+                            preview={assistantInlineComment.preview}
+                            origin={assistantInlineComment.origin}
+                        />
+                    );
+                    i++;
                     continue;
                 }
                 rendered.push(
