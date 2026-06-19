@@ -534,7 +534,16 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // skeleton to render and reads messages which can be expensive.
     if (previousSessionId && previousSessionId !== id) {
       const prevId = previousSessionId
-      setTimeout(() => {
+      const newId = id
+      // queueMicrotask runs after the current synchronous call stack (and
+      // before the next macrotask / setTimeout(0) / paint), so the previous
+      // session's anchor is saved before the new session's restoreSnapshot
+      // effect fires. This eliminates the race where save and restore
+      // interleave against the same viewport store entry.
+      queueMicrotask(() => {
+        // Bail if the user already switched again — save is now stale.
+        const current = get().currentSessionId
+        if (current !== newId) return
         const memState = getViewportSessionMemory(prevId)
         if (!memState?.isStreaming) {
           const prevMessages = getSyncMessages(prevId)
@@ -542,7 +551,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
             useViewportStore.getState().updateViewportAnchor(prevId, prevMessages.length - 1)
           }
         }
-      }, 0)
+      })
     }
 
     // Mark session viewed in notification store + update active session ref

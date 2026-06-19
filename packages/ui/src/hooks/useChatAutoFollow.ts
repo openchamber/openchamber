@@ -358,7 +358,17 @@ export const useChatAutoFollow = ({
         }
         pendingInitialRestoreRef.current = null;
 
+        // Guard: Virtualizer may not have flushed its measurements yet, so
+        // scrollHeight/clientHeight can be 0 or smaller than the saved snapshot.
+        // If so, defer the restore one more frame and let the replay effect
+        // pick it up once layout is stable.
+        const hasLayout = container.scrollHeight > 0;
         const saved = getViewportSessionMemory(sessionId)?.scrollPosition;
+        const savedHeight = saved ? saved.scrollHeight : 0;
+        if (hasLayout && saved && savedHeight > 0 && container.scrollHeight < Math.min(savedHeight, savedHeight * 0.5)) {
+            pendingInitialRestoreRef.current = sessionId;
+            return false;
+        }
 
         if (!saved || isAtBottomSnapshot(saved, isMobile)) {
             setStateValue('following');
@@ -555,6 +565,15 @@ export const useChatAutoFollow = ({
             if (stateRef.current === 'following') {
                 startFollowLoop();
             }
+            // Replay a deferred restoreSnapshot once the scroll container has
+            // enough layout to map the saved ratio (Virtualizer flushed).
+            if (
+                pendingInitialRestoreRef.current
+                && pendingInitialRestoreRef.current === currentSessionId
+                && container.scrollHeight > 0
+            ) {
+                void restoreSnapshot();
+            }
         });
         observer.observe(container);
         const inner = container.firstElementChild;
@@ -562,7 +581,7 @@ export const useChatAutoFollow = ({
             observer.observe(inner);
         }
         return () => observer.disconnect();
-    }, [containerEl, startFollowLoop, updateOverflowAndButton]);
+    }, [containerEl, currentSessionId, restoreSnapshot, startFollowLoop, updateOverflowAndButton]);
 
     React.useEffect(() => {
         updateOverflowAndButton();

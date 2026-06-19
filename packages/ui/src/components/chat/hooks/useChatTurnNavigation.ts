@@ -168,6 +168,16 @@ export const useChatTurnNavigation = ({
             return;
         }
 
+        // Clear any stale hash inherited from a previous session — a hash
+        // pointing to a turn/message that doesn't exist in the new session
+        // used to release auto-follow, fail to scroll, and leave the view
+        // stuck at an intermediate point.
+        const currentHash = window.location.hash;
+        const parsed = parseChatHashTarget(currentHash);
+        if (parsed) {
+            setHash(null);
+        }
+
         const applyHash = () => {
             const target = parseChatHashTarget(window.location.hash);
             if (!target) {
