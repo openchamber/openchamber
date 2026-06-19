@@ -647,8 +647,6 @@ const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActi
                                     startLine={userInlineComment.selection?.startLine ?? 0}
                                     endLine={userInlineComment.selection?.endLine ?? 0}
                                     preview={userInlineComment.preview}
-                                    origin={userInlineComment.origin}
-                                    isUser
                                 />
                             </React.Fragment>
                         );
@@ -1724,7 +1722,6 @@ const AssistantMessageBody = React.memo(({
                             startLine={assistantInlineComment.selection?.startLine ?? 0}
                             endLine={assistantInlineComment.selection?.endLine ?? 0}
                             preview={assistantInlineComment.preview}
-                            origin={assistantInlineComment.origin}
                         />
                     );
                     i++;

@@ -8,8 +8,6 @@ type Props = {
     startLine: number;
     endLine: number;
     preview?: string;
-    origin?: 'file' | 'review';
-    isUser?: boolean;
 };
 
 const InlineCommentPart: React.FC<Props> = ({
