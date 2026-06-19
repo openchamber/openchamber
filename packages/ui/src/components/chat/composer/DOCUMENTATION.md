@@ -89,9 +89,21 @@ and the send path reading the same grammar.
   selection has to be the update that follows the focus.
 - `submit/buildOutgoingMessage.ts` flattens queued messages, the composer text,
   inline comments and context into OpenCode's one-primary-plus-parts shape. The
-  oldest queued message becomes primary; **inline comments attach to the last
-  body the user authored** rather than becoming their own part; PR instructions
-  precede the PR diff.
+  oldest queued message becomes primary; PR instructions precede the PR diff.
+  Comments split by kind, and `lib/messages/inlineComments.ts`'s
+  `isCommentCardSource` is the only authority on which is which. Terminal
+  captures and attached context are prose and **attach to the last body the user
+  authored**; code comments become their own parts carrying `opencodeComment`
+  metadata, which is what makes both OpenChamber and OpenCode Desktop render
+  them as cards. **Cards interleave with authored bodies** — a queued message's
+  cards sit between it and the next body — so the last authored part is tracked
+  as it is pushed rather than read off the tail of `additionalParts`. Reading
+  the tail attached the user's terminal context to a comment card instead of to
+  their message.
+- A queued message carries the cards it was written with (`inlineCommentParts`
+  on the queue entry). They are captured at queue time for the same reason the
+  provider and model are: what gets sent must be what the user composed, not
+  whatever the draft store holds when the queue drains.
 - `state/useComposerDraft.ts` — a draft belongs to a (runtime, directory,
   session) identity. Writes are debounced while typing but forced at every edge
   where the page may stop running, because a pending timer is not a saved

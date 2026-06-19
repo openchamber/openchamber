@@ -2,9 +2,13 @@
  * Context chips above the composer.
  *
  * Each chip stands for context that will be attached to the next message but
- * is not part of its text: review comments left in a diff, captured dev-server
- * logs, preview annotations, terminal selections. They are shown so the user
- * knows what is riding along and can drop any of it before sending.
+ * is not part of its text: comments left on code, captured dev-server logs,
+ * preview annotations, terminal selections. They are shown so the user knows
+ * what is riding along and can drop any of it before sending.
+ *
+ * Two shapes appear here. Attached context is summarized by a count, because
+ * the user pointed at it rather than wrote it. Code comments each get their own
+ * card, because the user wrote each one and may want to edit or drop that one.
  */
 
 import React from 'react';
@@ -13,18 +17,19 @@ import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import type { InlineCommentDraft, InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
 import type { Theme } from '@/types/theme';
+import { InlineCommentChip } from './InlineCommentChip';
 
 export interface ComposerContextChipsProps {
     /** Terminal selections, which show their own label and line range. */
     terminalDrafts: readonly InlineCommentDraft[];
-    reviewCount: number;
+    /** Code comments, each rendered as its own editable card. */
+    commentDrafts: readonly InlineCommentDraft[];
     prCommentCount: number;
     prCheckCount: number;
     previewConsoleCount: number;
     previewAnnotationCount: number;
     draftTarget: InlineCommentDraftTarget | null;
     onRemoveDraft: (target: InlineCommentDraftTarget, draftId: string) => void;
-    onRemoveReviewDrafts: () => void;
     onRemovePreviewDrafts: (source: 'preview-console' | 'preview-annotation' | 'pr-comment' | 'pr-check') => void;
     colors: Theme['colors'];
 }
@@ -69,14 +74,13 @@ export function ComposerContextChips(props: ComposerContextChipsProps) {
     const { t } = useI18n();
     const {
         terminalDrafts,
-        reviewCount,
+        commentDrafts,
         prCommentCount,
         prCheckCount,
         previewConsoleCount,
         previewAnnotationCount,
         draftTarget,
         onRemoveDraft,
-        onRemoveReviewDrafts,
         onRemovePreviewDrafts,
         colors,
     } = props;
@@ -109,15 +113,11 @@ export function ComposerContextChips(props: ComposerContextChipsProps) {
                 </div>
             ))}
 
-            {reviewCount > 0 ? (
-                <CountChip
-                    label={t('chat.chatInput.reviewComments')}
-                    count={reviewCount}
-                    removeLabel={t('chat.chatInput.reviewCommentsRemove')}
-                    onRemove={onRemoveReviewDrafts}
-                    colors={colors}
-                />
-            ) : null}
+            {draftTarget
+                ? commentDrafts.map((draft) => (
+                    <InlineCommentChip key={draft.id} draft={draft} target={draftTarget} />
+                ))
+                : null}
 
             {prCommentCount > 0 ? (
                 <CountChip

@@ -116,6 +116,11 @@
         "title": "%command.addToContext.title%"
       },
       {
+        "command": "openchamber.addLineComment",
+        "category": "OpenChamber",
+        "title": "Add Comment"
+      },
+      {
         "command": "openchamber.explain",
         "category": "OpenChamber",
         "title": "%command.explain.title%"
@@ -200,6 +205,9 @@
         },
         {
           "command": "openchamber.addToContext"
+        },
+        {
+          "command": "openchamber.addLineComment"
         }
       ]
     },
