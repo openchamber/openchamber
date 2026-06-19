@@ -474,15 +474,17 @@ export async function activate(context: vscode.ExtensionContext) {
       const selectedText = editor.document.getText(selection);
       const language = editor.document.languageId;
 
-      // Reveal the chat view and drop the user straight into the in-webview
-      // comment editor (which supports multi-line input with Shift+Enter),
-      // instead of the single-line native input box. An empty comment signals
-      // the webview to open the editor for the new draft.
-      if (!(await revealChatViewForPayload())) {
-        return;
+      // Drop the user straight into the in-webview comment editor (multi-line,
+      // Shift+Enter aware). An empty comment signals the webview to open the
+      // editor for the new draft. Route to the active session editor panel when
+      // one is focused, otherwise fall back to the sidebar chat.
+      const payload = { filePath, relativePath, startLine, endLine, code: selectedText, language, comment: '' };
+      if (!sessionEditorProvider?.addLineCommentToActivePanel(payload)) {
+        if (!(await revealChatViewForPayload())) {
+          return;
+        }
+        chatViewProvider?.addLineComment(payload);
       }
-
-      chatViewProvider?.addLineComment({ filePath, relativePath, startLine, endLine, code: selectedText, language, comment: '' });
     })
   );
 
