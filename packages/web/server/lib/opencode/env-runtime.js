@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { mergePathValues } from './path-utils.js';
 
+const SHELL_PROBE_TIMEOUT_MS = 5_000;
+
 export const createOpenCodeEnvRuntime = (deps) => {
   const {
     state,
@@ -207,6 +209,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
           stdio: ['ignore', 'pipe', 'pipe'],
           maxBuffer: 10 * 1024 * 1024,
           windowsHide: true,
+          timeout: SHELL_PROBE_TIMEOUT_MS,
         });
 
         if (result.status !== 0) {
@@ -367,6 +370,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
           windowsHide: true,
+          timeout: SHELL_PROBE_TIMEOUT_MS,
         });
         if (result.status === 0) {
           const found = (result.stdout || '').trim().split(/\s+/).pop() || '';
@@ -434,6 +438,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
           windowsHide: true,
+          timeout: SHELL_PROBE_TIMEOUT_MS,
         });
         if (result.status === 0) {
           const found = (result.stdout || '').trim().split(/\s+/).pop() || '';
@@ -515,6 +520,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
           windowsHide: true,
+          timeout: SHELL_PROBE_TIMEOUT_MS,
         });
         if (result.status === 0) {
           const found = (result.stdout || '').trim().split(/\s+/).pop() || '';
