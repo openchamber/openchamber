@@ -8,6 +8,7 @@ import { openSseProxy } from './sseProxy';
 import { resolveWebviewDevServerUrl } from './webviewDevServer';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 import { resolveWorkspaceFolders } from './workspaceResolver';
+import { pickActivePanelId } from './activePanelRouting';
 
 const t = vscode.l10n.t;
 
@@ -210,8 +211,10 @@ export class SessionEditorPanelProvider {
   }
 
   private _getActivePanelEntry(): SessionPanelState | null {
-    const activeEntry = Array.from(this._panels.entries()).find(([, entry]) => entry.panel.active);
-    const panelId = activeEntry?.[0] ?? this._lastActivePanelId;
+    const panelId = pickActivePanelId(
+      Array.from(this._panels.entries()).map(([id, entry]) => ({ id, active: entry.panel.active })),
+      this._lastActivePanelId,
+    );
     if (!panelId) {
       return null;
     }
@@ -234,6 +237,33 @@ export class SessionEditorPanelProvider {
       type: 'command',
       command: 'addContextSelection',
       payload: selection,
+    });
+    return true;
+  }
+
+  public addLineCommentToActivePanel(payload: {
+    filePath: string;
+    relativePath: string;
+    startLine: number;
+    endLine: number;
+    code: string;
+    language: string;
+    comment: string;
+  }): boolean {
+    if (!payload.relativePath.trim()) {
+      return false;
+    }
+
+    const entry = this._getActivePanelEntry();
+    if (!entry) {
+      return false;
+    }
+
+    entry.panel.reveal(entry.panel.viewColumn ?? vscode.ViewColumn.Active, true);
+    void entry.panel.webview.postMessage({
+      type: 'command',
+      command: 'addLineComment',
+      payload,
     });
     return true;
   }
