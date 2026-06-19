@@ -36,7 +36,9 @@ export function formatSdkError(error: unknown): string {
 export function assertSdkSuccess<T>(result: SdkResult<T>, operation: string): T | undefined {
   if (!result.error) return result.data
   const status = result.response?.status
-  throw new Error(`${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`)
+  const err = new Error(`${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`) as Error & { status?: number }
+  if (status !== undefined) err.status = status
+  throw err
 }
 
 export function assertSdkData<T>(result: SdkResult<T>, operation: string): T {

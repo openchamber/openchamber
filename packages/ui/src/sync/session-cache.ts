@@ -82,6 +82,7 @@ export function dropSessionCaches(store: SessionCache, sessionIDs: Iterable<stri
     delete store.session_status[sessionID]
     delete store.session_error?.[sessionID]
     delete store.permission[sessionID]
+    delete store.question[sessionID]
   }
 }
 
