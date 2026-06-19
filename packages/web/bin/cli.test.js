@@ -3,7 +3,7 @@ import path from 'path';
 import { pathToFileURL } from 'url';
 
 import { isModuleCliExecution, normalizeCliEntryPath } from './cli-entry.js';
-import { assertAuthenticatedNetworkExposure, parseArgs } from './cli.js';
+import { assertAuthenticatedNetworkExposure, buildWindowsStartupTaskCommand, parseArgs } from './cli.js';
 
 describe('cli args', () => {
   it('accepts legacy daemon flags as no-ops', () => {
@@ -153,5 +153,39 @@ describe('cli entry detection', () => {
     };
 
     expect(normalizeCliEntryPath(unresolvedPath, realpath)).toBe(path.resolve(unresolvedPath));
+  });
+});
+
+describe('Windows startup task command builder', () => {
+  it('default-path length stays under 200 chars', () => {
+    const cmd = buildWindowsStartupTaskCommand(
+      'C:\\Users\\test\\.config\\openchamber\\bin\\OpenChamber.ps1'
+    );
+    expect(cmd).toMatch(/^powershell\.exe -NoProfile -ExecutionPolicy Bypass -File /);
+    expect(cmd.length).toBeLessThan(200);
+  });
+
+  it('worst-case long path stays under 261-char Task Scheduler ceiling', () => {
+    // Build a wrapper path ≥ 180 chars (simulates long OPENCHAMBER_DATA_DIR)
+    // Overhead = 57 chars (prefix + closing quote), so max wrapper for <261 total is 203
+    const longPath =
+      'C:\\Users\\' +
+      'a'.repeat(139) +
+      '\\.config\\openchamber\\bin\\OpenChamber.ps1';
+    expect(longPath.length).toBeGreaterThanOrEqual(180);
+
+    const cmd = buildWindowsStartupTaskCommand(longPath);
+    expect(cmd.length).toBeLessThan(261);
+  });
+
+  it('does NOT inline SetEnvironmentVariable (externalization invariant)', () => {
+    const cmd = buildWindowsStartupTaskCommand('C:\\wrapper.ps1');
+    expect(cmd).not.toContain('SetEnvironmentVariable');
+  });
+
+  it('uses -File form, not -Command', () => {
+    const cmd = buildWindowsStartupTaskCommand('C:\\wrapper.ps1');
+    expect(cmd).toContain('-File ');
+    expect(cmd).not.toContain('-Command ');
   });
 });
