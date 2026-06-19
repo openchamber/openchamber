@@ -177,9 +177,11 @@ export function getRedundantCommentFileUrls(parts: Part[]): Set<string> {
       const sel = comment.selection;
       if (!sel || sel.startLine !== start || sel.endLine !== end) return false;
       const commentPath = comment.path.replace(/\\/g, '/');
+      // Match the same file: an exact path, or a path/basename that aligns on a
+      // segment boundary. A bare endsWith would false-positive across files
+      // (e.g. "myconfig.ts" ending with "config.ts").
       return normalizedFilePath === commentPath
-        || normalizedFilePath.endsWith(`/${commentPath}`)
-        || normalizedFilePath.endsWith(commentPath);
+        || normalizedFilePath.endsWith(`/${commentPath}`);
     });
 
     if (matchesComment) {

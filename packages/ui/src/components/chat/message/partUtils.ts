@@ -34,7 +34,7 @@ type PartWithSynthetic = Part & { synthetic?: boolean };
 // "Add Comment" flow) are meant to render as visible cards alongside the typed
 // message, so they must survive the synthetic-stripping pass below. Detection
 // matches OpenCode Desktop: structured metadata first, then text-format fallback.
-export const isInlineCommentPart = (part: Part): boolean => {
+const isInlineCommentPart = (part: Part): boolean => {
     return Boolean(getPartInlineComment(part));
 };
 
