@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import path from 'path';
+import { spawn } from 'child_process';
 import { pathToFileURL } from 'url';
 
 import { isModuleCliExecution, normalizeCliEntryPath } from './cli-entry.js';
-import { assertAuthenticatedNetworkExposure, parseArgs } from './cli.js';
+import { assertAuthenticatedNetworkExposure, isOpenchamberCmdline, isProcessRunning, parseArgs } from './cli.js';
 
 describe('cli args', () => {
   it('accepts legacy daemon flags as no-ops', () => {
@@ -153,5 +154,35 @@ describe('cli entry detection', () => {
     };
 
     expect(normalizeCliEntryPath(unresolvedPath, realpath)).toBe(path.resolve(unresolvedPath));
+  });
+});
+
+describe('isOpenchamberCmdline', () => {
+  it('accepts OpenChamber CLI and daemon cmdlines', () => {
+    expect(isOpenchamberCmdline('node /x/@openchamber/web/bin/cli.js serve')).toBe(true);
+    expect(isOpenchamberCmdline('node /x/@openchamber/web/server/index.js --port 9090')).toBe(true);
+  });
+
+  it('rejects recycled and unrelated processes (issue #1721)', () => {
+    expect(isOpenchamberCmdline('node /home/herjarsa/npm-global/bin/agentmemory')).toBe(false);
+    expect(isOpenchamberCmdline('node /usr/lib/node_modules/npm/bin/npm-cli.js install')).toBe(false);
+    expect(isOpenchamberCmdline('')).toBe(false);
+    expect(isOpenchamberCmdline(null)).toBe(false);
+  });
+});
+
+describe('isProcessRunning', () => {
+  it('returns false for a dead PID', () => {
+    expect(isProcessRunning(2147483646)).toBe(false);
+  });
+
+  it.skipIf(process.platform !== 'linux')('returns false for a live non-OpenChamber PID (issue #1721)', async () => {
+    const child = spawn('sleep', ['30'], { stdio: 'ignore' });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(isProcessRunning(child.pid)).toBe(false);
+    } finally {
+      child.kill('SIGKILL');
+    }
   });
 });

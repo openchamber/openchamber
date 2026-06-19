@@ -2390,13 +2390,39 @@ function removeInstanceFile(instanceFilePath) {
   }
 }
 
+function readProcessCmdline(pid) {
+  if (process.platform !== 'linux') {
+    return null;
+  }
+  try {
+    // /proc/<pid>/cmdline is a NUL-delimited argv list.
+    return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ').trim();
+  } catch {
+    return null;
+  }
+}
+
+function isOpenchamberCmdline(cmdline) {
+  if (typeof cmdline !== 'string' || cmdline.length === 0) {
+    return false;
+  }
+  // Match the install path, not a generic "cli.js", so a recycled npm-cli.js isn't mistaken for us.
+  return cmdline.toLowerCase().includes('openchamber');
+}
+
 function isProcessRunning(pid) {
   try {
     process.kill(pid, 0);
-    return true;
   } catch {
     return false;
   }
+  // A live PID may be a recycled stranger (issue #1721): confirm identity on Linux,
+  // and fall back to liveness-only when it can't be determined.
+  const cmdline = readProcessCmdline(pid);
+  if (cmdline === null) {
+    return true;
+  }
+  return isOpenchamberCmdline(cmdline);
 }
 
 function waitForProcessExit(pid, timeoutMs) {
@@ -5734,6 +5760,8 @@ export {
   isValidTunnelDoctorResponse,
   readDesktopLocalPortFromSettings,
   getPidFilePath,
+  isProcessRunning,
+  isOpenchamberCmdline,
   resolveTunnelProviders,
   fetchTunnelProvidersFromPort,
   fetchSystemInfoFromPort,
