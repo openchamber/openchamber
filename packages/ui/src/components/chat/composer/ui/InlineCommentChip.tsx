@@ -236,5 +236,3 @@ export const InlineCommentChip: React.FC<InlineCommentChipProps> = React.memo(({
 });
 
 InlineCommentChip.displayName = 'InlineCommentChip';
-
-export default InlineCommentChip;

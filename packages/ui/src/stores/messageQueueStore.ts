@@ -156,6 +156,7 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                         content: message.content,
                         attachments: message.attachments,
                         createdAt: Date.now(),
+                        inlineCommentParts: message.inlineCommentParts,
                         sendConfig: message.sendConfig,
                     };
 

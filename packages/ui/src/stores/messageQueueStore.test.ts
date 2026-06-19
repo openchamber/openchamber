@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test"
+import type { InlineCommentPartPayload } from "@/lib/messages/inlineComments"
 import {
   createMessageQueueTarget,
   getMessageQueueKey,
@@ -50,6 +51,7 @@ describe("message queue runtime ownership", () => {
   })
 })
 
+
 describe("in-flight queued sends", () => {
   test("hides a dispatched message from the sendable queue but keeps it visible", () => {
     const target = createMessageQueueTarget("session-1", "/repo", "runtime-a")!
@@ -92,5 +94,38 @@ describe("in-flight queued sends", () => {
     useMessageQueueStore.getState().clearQueue(target)
 
     expect(useMessageQueueStore.getState().getQueueForTarget(target)).toHaveLength(0)
+  })
+})
+const commentPart = (): InlineCommentPartPayload => ({
+  text: "The user made the following comment regarding line 1 of a.ts: note",
+  synthetic: true,
+  metadata: {
+    opencodeComment: {
+      path: "a.ts",
+      selection: { startLine: 1, endLine: 1, startChar: 0, endChar: 0 },
+      comment: "note",
+      preview: "const x = 1",
+      origin: "file",
+    },
+  },
+})
+
+describe("message queue inline comments", () => {
+  test("preserves inlineCommentParts captured at queue time", () => {
+    const target = createMessageQueueTarget("session-1", "/repo", "runtime-a")!
+    const parts = [commentPart()]
+    useMessageQueueStore.getState().addToQueue(target, { content: "hi", inlineCommentParts: parts })
+
+    const queue = useMessageQueueStore.getState().getQueueForTarget(target)
+    expect(queue).toHaveLength(1)
+    expect(queue[0]?.inlineCommentParts).toEqual(parts)
+  })
+
+  test("queues messages without comments as undefined", () => {
+    const target = createMessageQueueTarget("session-2", "/repo", "runtime-a")!
+    useMessageQueueStore.getState().addToQueue(target, { content: "hi" })
+
+    const queue = useMessageQueueStore.getState().getQueueForTarget(target)
+    expect(queue[0]?.inlineCommentParts).toBe(undefined)
   })
 })
