@@ -121,4 +121,12 @@ describe("getRedundantCommentFileUrls", () => {
   test("returns an empty set when there are no comments", () => {
     expect(getRedundantCommentFileUrls([filePart("file:///x.ts?start=1&end=1")]).size).toBe(0)
   })
+
+  test("does not suppress a file whose name is only a suffix of the comment path", () => {
+    const parts = [
+      metadataPart({ path: "config.ts", selection: { startLine: 5, endLine: 5, startChar: 0, endChar: 0 } }),
+      filePart("file:///repo/myconfig.ts?start=5&end=5"),
+    ]
+    expect(getRedundantCommentFileUrls(parts).size).toBe(0)
+  })
 })
