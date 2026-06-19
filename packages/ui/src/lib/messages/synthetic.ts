@@ -1,4 +1,5 @@
 import type { Part } from "@opencode-ai/sdk/v2";
+import { getPartInlineComment } from "./commentNote";
 
 const GITHUB_ISSUE_CONTEXT_PREFIX = 'GitHub issue context (JSON)';
 const GITHUB_PR_CONTEXT_PREFIX = 'GitHub pull request context (JSON)';
@@ -42,6 +43,12 @@ export const filterSyntheticParts = (parts: Part[] | undefined): Part[] => {
         const text = (part as { text?: unknown }).text;
         if (typeof text !== 'string') {
             return false;
+        }
+
+        // Inline comment parts ("Add Comment" flow, from OpenChamber or OpenCode)
+        // are synthetic but must remain visible so they render as comment cards.
+        if (getPartInlineComment(part)) {
+            return true;
         }
 
         const trimmed = text.trimStart();

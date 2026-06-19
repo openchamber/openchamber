@@ -1,5 +1,41 @@
-import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
+import type { InlineCommentDraft, InlineCommentSource } from '@/stores/useInlineCommentDraftStore';
 import { appendTerminalContexts } from './terminalContext';
+import { formatCommentNote } from './commentNote';
+
+export type InlineCommentPartPayload = {
+  text: string
+  synthetic: true
+  metadata?: {
+    opencodeComment: {
+      path: string
+      selection: { startLine: number; endLine: number; startChar: number; endChar: number }
+      comment: string
+      preview: string
+      origin: 'file' | 'review'
+    }
+  }
+}
+
+// Sources that ride along as attached context rather than as a comment card:
+// captured dev-server logs, preview annotations, and GitHub PR comments and
+// checks. They describe something the user pointed at, not something the user
+// wrote against a range of code.
+const CONTEXT_SOURCES: ReadonlySet<InlineCommentSource> = new Set([
+  'preview-console',
+  'preview-annotation',
+  'pr-comment',
+  'pr-check',
+]);
+
+/**
+ * Whether a draft renders as an OpenCode Desktop comment card.
+ *
+ * Single source of truth for the split: the composer partitions drafts with it,
+ * and `buildInlineCommentParts` decides metadata with it. Terminal captures are
+ * excluded because they serialize into message text instead.
+ */
+export const isCommentCardSource = (source: InlineCommentSource): boolean =>
+  source !== 'terminal' && !CONTEXT_SOURCES.has(source);
 
 /**
  * Format a single inline comment draft into the standard message format
@@ -7,7 +43,7 @@ import { appendTerminalContexts } from './terminalContext';
  */
 function formatInlineCommentDraft(draft: InlineCommentDraft): string {
   const { fileLabel, startLine, endLine, side, language, code, text } = draft;
-  
+
   // Diff format includes side (original/modified)
   if (draft.source === 'diff' && side) {
     return `Comment on \`${fileLabel}\` lines ${startLine}-${endLine} (${side}):\n\`\`\`${language}\n${code}\n\`\`\`\n\n${text}`;
@@ -28,7 +64,7 @@ function formatInlineCommentDraft(draft: InlineCommentDraft): string {
   if (draft.source === 'pr-check') {
     return `Attached failed GitHub PR check (${fileLabel}):\n\`\`\`\n${code}\n\`\`\`${text ? `\n\n${text}` : ''}`;
   }
-  
+
   // Plan and file format (no side)
   return `Comment on \`${fileLabel}\` lines ${startLine}-${endLine}:\n\`\`\`${language}\n${code}\n\`\`\`\n\n${text}`;
 }
@@ -43,14 +79,60 @@ function formatInlineCommentDrafts(drafts: InlineCommentDraft[]): string {
   if (drafts.every((draft) => draft.source === 'preview-annotation')) {
     return drafts.map(formatInlineCommentDraft).join('\n\n---\n\n');
   }
-   
+
   return drafts.map(formatInlineCommentDraft).join('\n\n');
 }
 
 /**
- * Append inline comment drafts to an existing message text
- * If the text is empty, returns just the formatted comments
- * Otherwise, appends comments after a blank line separator
+ * Convert inline comment drafts to synthetic message parts.
+ *
+ * Real inline comments (file/diff/plan) are emitted in OpenCode Desktop's text
+ * format with `opencodeComment` metadata, so both apps render them as comment
+ * cards. Context drafts (dev server console/annotations, PR comments and checks)
+ * are a different feature and are emitted as plain synthetic context, without
+ * comment metadata.
+ */
+export function buildInlineCommentParts(drafts: InlineCommentDraft[]): InlineCommentPartPayload[] {
+  return drafts.map(draft => {
+    if (!isCommentCardSource(draft.source)) {
+      return { text: formatInlineCommentDraft(draft), synthetic: true as const };
+    }
+
+    const path = draft.fileLabel.replace(/:\d+(-\d+)?$/, '');
+    return {
+      text: formatCommentNote({
+        path,
+        startLine: draft.startLine,
+        endLine: draft.endLine,
+        comment: draft.text,
+      }),
+      synthetic: true as const,
+      metadata: {
+        opencodeComment: {
+          path,
+          selection: {
+            startLine: draft.startLine,
+            endLine: draft.endLine,
+            startChar: 0,
+            endChar: 0,
+          },
+          comment: draft.text,
+          preview: draft.code,
+          origin: (draft.source === 'diff' ? 'review' : 'file') as 'file' | 'review',
+        },
+      },
+    };
+  });
+}
+
+/**
+ * Append inline comment drafts to an existing message text.
+ *
+ * Kept for the `terminal` comment source, which serializes terminal output as
+ * message text (not as an `opencodeComment` card). Code and context comments go
+ * through `buildInlineCommentParts` instead.
+ * If the text is empty, returns just the formatted comments; otherwise appends
+ * comments after a blank line separator.
  */
 export function appendInlineComments(text: string, drafts: InlineCommentDraft[]): string {
   if (drafts.length === 0) return text;

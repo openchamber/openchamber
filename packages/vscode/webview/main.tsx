@@ -1317,6 +1317,69 @@ onCommand('addContextSelection', (payload) => {
   });
 });
 
+onCommand('addLineComment', (payload) => {
+  const record = payload as {
+    filePath?: unknown;
+    relativePath?: unknown;
+    startLine?: unknown;
+    endLine?: unknown;
+    code?: unknown;
+    language?: unknown;
+    comment?: unknown;
+  };
+
+  const relativePath = typeof record.relativePath === 'string' ? record.relativePath : '';
+  const startLine = typeof record.startLine === 'number' ? record.startLine : 1;
+  const endLine = typeof record.endLine === 'number' ? record.endLine : startLine;
+  const code = typeof record.code === 'string' ? record.code : '';
+  const language = typeof record.language === 'string' ? record.language : 'text';
+  const comment = typeof record.comment === 'string' ? record.comment.trim() : '';
+
+  if (!relativePath) {
+    return;
+  }
+
+  const basename = relativePath.replace(/\\/g, '/').split('/').pop() || relativePath;
+  const fileLabel = `${basename}:${startLine}${startLine !== endLine ? `-${endLine}` : ''}`;
+
+  void Promise.all([
+    import('@/sync/session-ui-store'),
+    import('@/stores/useDirectoryStore'),
+    import('@/stores/useInlineCommentDraftStore'),
+  ]).then(([{ useSessionUIStore }, { useDirectoryStore }, { useInlineCommentDraftStore }]) => {
+    const sessionState = useSessionUIStore.getState();
+    const currentSessionId = sessionState.currentSessionId;
+    const sessionKey = currentSessionId ?? 'draft';
+
+    // Inline drafts are owned by runtime + directory + session. Resolve the
+    // directory with the same precedence the composer uses, otherwise the draft
+    // lands under a key ChatInput never reads and the comment silently vanishes.
+    const sessionDirectory = currentSessionId ? sessionState.getDirectoryForSession(currentSessionId) : null;
+    const draftDirectory = sessionState.newSessionDraft?.open
+      ? sessionState.newSessionDraft.bootstrapPendingDirectory ?? sessionState.newSessionDraft.directoryOverride ?? null
+      : null;
+    const directory = sessionDirectory ?? draftDirectory ?? useDirectoryStore.getState().currentDirectory;
+    if (!directory) {
+      return;
+    }
+
+    const draftId = useInlineCommentDraftStore.getState().addDraft({ directory, sessionKey }, {
+      source: 'file',
+      fileLabel,
+      startLine,
+      endLine,
+      code,
+      language,
+      text: comment,
+    });
+    // No comment text was captured up-front (multi-line capture flow): open the
+    // in-webview editor for this draft so the user can type with line breaks.
+    if (!comment && draftId) {
+      useInlineCommentDraftStore.getState().setAutoEditDraftId(draftId);
+    }
+  });
+});
+
 onCommand('addFileMentions', (payload) => {
   const rawPaths = Array.isArray((payload as { paths?: unknown[] })?.paths)
     ? (payload as { paths: unknown[] }).paths
