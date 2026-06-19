@@ -3,7 +3,7 @@ import path from 'path';
 import { pathToFileURL } from 'url';
 
 import { isModuleCliExecution, normalizeCliEntryPath } from './cli-entry.js';
-import { assertAuthenticatedNetworkExposure, parseArgs } from './cli.js';
+import { assertAuthenticatedNetworkExposure, parseArgs, buildWindowsStartupActionCommand, buildWindowsRegisterScheduledTaskScript } from './cli.js';
 
 describe('cli args', () => {
   it('accepts legacy daemon flags as no-ops', () => {
@@ -153,5 +153,73 @@ describe('cli entry detection', () => {
     };
 
     expect(normalizeCliEntryPath(unresolvedPath, realpath)).toBe(path.resolve(unresolvedPath));
+  });
+});
+
+describe('Windows startup scheduled task builder', () => {
+  it('registers a per-user task that does not require elevation', () => {
+    const actionCommand = buildWindowsStartupActionCommand({ port: 3000 });
+    const script = buildWindowsRegisterScheduledTaskScript({
+      taskName: 'dev.openchamber.web',
+      actionCommand,
+    });
+
+    expect(script).toContain('Register-ScheduledTask -TaskName');
+    expect(script).toContain("'dev.openchamber.web'");
+    expect(script).toContain('LogonType Interactive');
+    expect(script).toContain('RunLevel Limited');
+    expect(script).toContain('New-ScheduledTaskTrigger -AtLogOn');
+    expect(script).toContain('ExecutionTimeLimit ([TimeSpan]::Zero)');
+  });
+
+  it('does not use the legacy schtasks.exe /SC ONLOGON path', () => {
+    const script = buildWindowsRegisterScheduledTaskScript({
+      taskName: 'dev.openchamber.web',
+      actionCommand: 'noop',
+    });
+
+    expect(script).not.toMatch(/schtasks/i);
+    expect(script).not.toMatch(/\/SC\s+ONLOGON/i);
+    expect(script).not.toMatch(/\/TR\b/);
+  });
+
+  it('binds the task to the current user via interactive principal', () => {
+    const script = buildWindowsRegisterScheduledTaskScript({
+      taskName: 'dev.openchamber.web',
+      actionCommand: 'noop',
+    });
+
+    expect(script).toContain('[Security.Principal.WindowsIdentity]::GetCurrent().Name');
+    expect(script).toContain('New-ScheduledTaskPrincipal -UserId $u');
+  });
+
+  it('wraps the action as a powershell.exe command that loads env and serves', () => {
+    const actionCommand = buildWindowsStartupActionCommand({ port: 3000 });
+    const script = buildWindowsRegisterScheduledTaskScript({
+      taskName: 'dev.openchamber.web',
+      actionCommand,
+    });
+
+    expect(script).toContain("New-ScheduledTaskAction -Execute 'powershell.exe'");
+    expect(script).toContain('-NoProfile -ExecutionPolicy Bypass -Command');
+  });
+});
+
+describe('Windows startup action command', () => {
+  it('loads the persisted startup env then runs node serve with the port', () => {
+    const command = buildWindowsStartupActionCommand({ port: 3000 });
+
+    expect(command).toContain('Test-Path $envFile');
+    expect(command).toContain('Get-Content $envFile');
+    expect(command).toContain('SetEnvironmentVariable');
+    expect(command).toContain("'--port', '3000'");
+    expect(command).toContain("'serve'");
+    expect(command).toContain("'--foreground'");
+  });
+
+  it('references node to launch the cli entrypoint', () => {
+    const command = buildWindowsStartupActionCommand({ port: 4000 });
+
+    expect(command).toMatch(/&\s+'[^']+'[^;]*'serve'/);
   });
 });

@@ -2210,6 +2210,47 @@ function runStartupCommand(command, args, options = {}) {
   return result;
 }
 
+// Runs a PowerShell script in the current user's session (hidden, non-interactive).
+function runWindowsPowershell(script, options = {}) {
+  return runStartupCommand('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], options);
+}
+
+// Builds the PowerShell command the scheduled task runs: it loads the persisted
+// startup.env snapshot into the process environment, then starts the foreground
+// server under node. Used as the task action's -Command.
+function buildWindowsStartupActionCommand(options = {}) {
+  const envFilePath = getStartupEnvFilePath();
+  const startupArgs = buildStartupArgs(options).map(powershellQuote).join(', ');
+  return [
+    `$envFile=${powershellQuote(envFilePath)}`,
+    `if (Test-Path $envFile) { Get-Content $envFile | ForEach-Object { if ($_ -match '^([^=]+)=(.*)$') { $v=$matches[2]; if ($v.StartsWith("'") -and $v.EndsWith("'")) { $v=$v.Substring(1,$v.Length-2).Replace("'\\''","'") }; [Environment]::SetEnvironmentVariable($matches[1], $v, 'Process') } } }`,
+    `& ${powershellQuote(process.execPath)} ${startupArgs}`,
+  ].join('; ');
+}
+
+// Builds the Register-ScheduledTask PowerShell script that installs the
+// OpenChamber startup task for the current user WITHOUT elevation.
+// `schtasks.exe /Create /SC ONLOGON` creates a system-level (any-user-logon)
+// trigger that requires administrator rights, so non-admin `startup enable`
+// failed with Access Denied. Register-ScheduledTask with LogonType Interactive
+// + RunLevel Limited, bound to the current user, works without elevation, and
+// takes the action as an object so there is no schtasks /TR 261-char limit.
+// ExecutionTimeLimit is zero so the foreground server is not killed by Task
+// Scheduler's 72-hour default ceiling.
+function buildWindowsRegisterScheduledTaskScript({ taskName, actionCommand }) {
+  const tn = powershellQuote(taskName);
+  const actionArgument = `-NoProfile -ExecutionPolicy Bypass -Command ${powershellQuote(actionCommand)}`;
+  return [
+    `$ErrorActionPreference='Stop'`,
+    `$u=[Security.Principal.WindowsIdentity]::GetCurrent().Name`,
+    `$p=New-ScheduledTaskPrincipal -UserId $u -LogonType Interactive -RunLevel Limited`,
+    `$t=New-ScheduledTaskTrigger -AtLogOn -User $u`,
+    `$a=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ${powershellQuote(actionArgument)}`,
+    `$s=New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero)`,
+    `Register-ScheduledTask -TaskName ${tn} -Action $a -Trigger $t -Principal $p -Settings $s -Force | Out-Null`,
+  ].join('; ');
+}
+
 function getStartupStatus() {
   const paths = getStartupServicePaths();
   if (!paths.servicePath) {
@@ -2267,23 +2308,14 @@ function enableStartupService(options = {}) {
     return getStartupStatus();
   }
 
-  const envFilePath = writeStartupEnvFile(options);
-  const startupArgs = buildStartupArgs(options).map(powershellQuote).join(', ');
-  const powerShellCommand = [
-    `$envFile=${powershellQuote(envFilePath)}`,
-    `if (Test-Path $envFile) { Get-Content $envFile | ForEach-Object { if ($_ -match '^([^=]+)=(.*)$') { $v=$matches[2]; if ($v.StartsWith("'") -and $v.EndsWith("'")) { $v=$v.Substring(1,$v.Length-2).Replace("'\\''","'") }; [Environment]::SetEnvironmentVariable($matches[1], $v, 'Process') } } }`,
-    `& ${powershellQuote(process.execPath)} ${startupArgs}`,
-  ].join('; ');
-  const taskArgs = `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "${powerShellCommand.replace(/"/g, '\\"')}"`;
-  runStartupCommand('schtasks.exe', [
-    '/Create',
-    '/TN', STARTUP_SERVICE_ID,
-    '/SC', 'ONLOGON',
-    '/RL', 'LIMITED',
-    '/F',
-    '/TR', taskArgs,
-  ]);
-  runStartupCommand('schtasks.exe', ['/Run', '/TN', STARTUP_SERVICE_ID], { allowFailure: true });
+  writeStartupEnvFile(options);
+  const actionCommand = buildWindowsStartupActionCommand(options);
+  const registerScript = buildWindowsRegisterScheduledTaskScript({
+    taskName: STARTUP_SERVICE_ID,
+    actionCommand,
+  });
+  runWindowsPowershell(registerScript);
+  runWindowsPowershell(`Start-ScheduledTask -TaskName ${powershellQuote(STARTUP_SERVICE_ID)}`, { allowFailure: true });
   return getStartupStatus();
 }
 
@@ -2306,8 +2338,8 @@ function disableStartupService() {
     return getStartupStatus();
   }
 
-  runStartupCommand('schtasks.exe', ['/End', '/TN', STARTUP_SERVICE_ID], { allowFailure: true });
-  runStartupCommand('schtasks.exe', ['/Delete', '/TN', STARTUP_SERVICE_ID, '/F'], { allowFailure: true });
+  runWindowsPowershell(`Stop-ScheduledTask -TaskName ${powershellQuote(STARTUP_SERVICE_ID)} -ErrorAction SilentlyContinue`, { allowFailure: true });
+  runWindowsPowershell(`Unregister-ScheduledTask -TaskName ${powershellQuote(STARTUP_SERVICE_ID)} -Confirm:$false -ErrorAction SilentlyContinue`, { allowFailure: true });
   return getStartupStatus();
 }
 
@@ -5748,4 +5780,6 @@ export {
   TunnelCliError,
   EXIT_CODE,
   warnIfUnsafeFilePermissions,
+  buildWindowsStartupActionCommand,
+  buildWindowsRegisterScheduledTaskScript,
 };
