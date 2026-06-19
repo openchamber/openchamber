@@ -2023,6 +2023,10 @@ function getMacosStartupWrapperPath() {
   return path.join(getDataDir(), 'bin', 'OpenChamber');
 }
 
+function getWindowsStartupWrapperPath() {
+  return path.join(getDataDir(), 'bin', 'OpenChamber.ps1');
+}
+
 function collectStartupEnv(options = {}) {
   const env = options.envSnapshot === false ? {} : Object.fromEntries(
     Object.entries(process.env)
@@ -2136,6 +2140,24 @@ exec ${startupShellQuote(process.execPath)} ${args}
   fs.mkdirSync(path.dirname(wrapperPath), { recursive: true, mode: 0o700 });
   fs.writeFileSync(wrapperPath, content, { mode: 0o700 });
   return wrapperPath;
+}
+
+function writeWindowsStartupWrapper(options = {}) {
+  const wrapperPath = getWindowsStartupWrapperPath();
+  const envFilePath = getStartupEnvFilePath();
+  const startupArgs = buildStartupArgs(options).map(powershellQuote).join(' ');
+  const ps1Content = [
+    `$envFile=${powershellQuote(envFilePath)}`,
+    `if (Test-Path $envFile) { Get-Content $envFile | ForEach-Object { if ($_ -match '^([^=]+)=(.*)$') { $v=$matches[2]; if ($v.StartsWith("'") -and $v.EndsWith("'")) { $v=$v.Substring(1,$v.Length-2).Replace("'\\''","'") }; [Environment]::SetEnvironmentVariable($matches[1], $v, 'Process') } } }`,
+    `& ${powershellQuote(process.execPath)} ${startupArgs}`,
+  ].join('; ');
+  fs.mkdirSync(path.dirname(wrapperPath), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(wrapperPath, ps1Content, { mode: 0o700 });
+  return wrapperPath;
+}
+
+function buildWindowsStartupTaskCommand(wrapperPath) {
+  return `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${wrapperPath}"`;
 }
 
 function buildMacosLaunchAgent(options = {}) {
@@ -2267,21 +2289,16 @@ function enableStartupService(options = {}) {
     return getStartupStatus();
   }
 
-  const envFilePath = writeStartupEnvFile(options);
-  const startupArgs = buildStartupArgs(options).map(powershellQuote).join(', ');
-  const powerShellCommand = [
-    `$envFile=${powershellQuote(envFilePath)}`,
-    `if (Test-Path $envFile) { Get-Content $envFile | ForEach-Object { if ($_ -match '^([^=]+)=(.*)$') { $v=$matches[2]; if ($v.StartsWith("'") -and $v.EndsWith("'")) { $v=$v.Substring(1,$v.Length-2).Replace("'\\''","'") }; [Environment]::SetEnvironmentVariable($matches[1], $v, 'Process') } } }`,
-    `& ${powershellQuote(process.execPath)} ${startupArgs}`,
-  ].join('; ');
-  const taskArgs = `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "${powerShellCommand.replace(/"/g, '\\"')}"`;
+  writeStartupEnvFile(options);
+  const wrapperPath = writeWindowsStartupWrapper(options);
+  const taskCommand = buildWindowsStartupTaskCommand(wrapperPath);
   runStartupCommand('schtasks.exe', [
     '/Create',
     '/TN', STARTUP_SERVICE_ID,
     '/SC', 'ONLOGON',
     '/RL', 'LIMITED',
     '/F',
-    '/TR', taskArgs,
+    '/TR', taskCommand,
   ]);
   runStartupCommand('schtasks.exe', ['/Run', '/TN', STARTUP_SERVICE_ID], { allowFailure: true });
   return getStartupStatus();
@@ -5748,4 +5765,5 @@ export {
   TunnelCliError,
   EXIT_CODE,
   warnIfUnsafeFilePermissions,
+  buildWindowsStartupTaskCommand,
 };
