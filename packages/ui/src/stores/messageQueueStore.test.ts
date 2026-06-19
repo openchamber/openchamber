@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test"
+import { createContextPart, type ContextPart } from "@/lib/messages/contextParts"
 import {
   createMessageQueueTarget,
   getMessageQueueKey,
@@ -50,6 +51,7 @@ describe("message queue runtime ownership", () => {
   })
 })
 
+
 describe("in-flight queued sends", () => {
   test("hides a dispatched message from the sendable queue but keeps it visible", () => {
     const target = createMessageQueueTarget("session-1", "/repo", "runtime-a")!
@@ -92,5 +94,35 @@ describe("in-flight queued sends", () => {
     useMessageQueueStore.getState().clearQueue(target)
 
     expect(useMessageQueueStore.getState().getQueueForTarget(target)).toHaveLength(0)
+  })
+})
+const contextPart = (): ContextPart => createContextPart({
+  kind: "code-comment",
+  source: "file",
+  fileLabel: "a.ts",
+  startLine: 1,
+  endLine: 1,
+  language: "ts",
+  code: "const x = 1",
+  text: "note",
+})
+
+describe("message queue context", () => {
+  test("preserves contextParts captured at queue time", () => {
+    const target = createMessageQueueTarget("session-1", "/repo", "runtime-a")!
+    const parts = [contextPart()]
+    useMessageQueueStore.getState().addToQueue(target, { content: "hi", contextParts: parts })
+
+    const queue = useMessageQueueStore.getState().getQueueForTarget(target)
+    expect(queue).toHaveLength(1)
+    expect(queue[0]?.contextParts).toEqual(parts)
+  })
+
+  test("queues messages without context as undefined", () => {
+    const target = createMessageQueueTarget("session-2", "/repo", "runtime-a")!
+    useMessageQueueStore.getState().addToQueue(target, { content: "hi" })
+
+    const queue = useMessageQueueStore.getState().getQueueForTarget(target)
+    expect(queue[0]?.contextParts).toBe(undefined)
   })
 })
