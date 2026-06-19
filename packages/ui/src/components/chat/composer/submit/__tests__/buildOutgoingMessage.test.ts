@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
-import { CONTEXT_METADATA_KEY, contextPayloadFromDraft } from '@/lib/messages/contextParts';
+import { CONTEXT_METADATA_KEY, contextPayloadFromDraft, createContextPart } from '@/lib/messages/contextParts';
 import {
     buildOutgoingMessage,
     type OutgoingMessageDeps,
@@ -147,6 +147,9 @@ const commentDraft = (overrides: Partial<InlineCommentDraft> = {}): InlineCommen
     ...overrides,
 });
 
+const contextPart = (overrides: Partial<InlineCommentDraft> = {}) =>
+    createContextPart(contextPayloadFromDraft(commentDraft(overrides)));
+
 describe('context drafts', () => {
     test('each becomes a synthetic part carrying structured metadata', () => {
         const result = buildOutgoingMessage(input({
@@ -177,6 +180,43 @@ describe('context drafts', () => {
     test('no drafts changes nothing', () => {
         expect(buildOutgoingMessage(input({ composerText: 'body' }), deps()).additionalParts)
             .toEqual([]);
+    });
+});
+
+describe('queued context', () => {
+    test('follows the queued message it was captured with', () => {
+        const first = contextPart({ fileLabel: 'first.ts' });
+        const second = contextPart({ id: 'icd-2', fileLabel: 'second.ts' });
+        const result = buildOutgoingMessage(input({
+            queued: [
+                { content: 'q1', contextParts: [first] },
+                { content: 'q2', contextParts: [second] },
+            ],
+        }), deps());
+
+        expect(result.primaryText).toBe('q1');
+        expect(result.additionalParts).toEqual([first, { text: 'q2', attachments: [] }, second]);
+    });
+
+    test('stays ahead of a later composer body and its context', () => {
+        const queued = contextPart({ fileLabel: 'queued.ts' });
+        const result = buildOutgoingMessage(input({
+            queued: [{ content: 'queued', contextParts: [queued] }],
+            composerText: 'typed',
+            inlineComments: [commentDraft({ id: 'typed-context', fileLabel: 'typed.ts' })],
+        }), deps());
+
+        expect(result.additionalParts[0]).toEqual(queued);
+        expect(result.additionalParts[1]).toEqual({ text: 'typed', attachments: [] });
+        expect(result.additionalParts[2].metadata?.[CONTEXT_METADATA_KEY])
+            .toEqual(contextPayloadFromDraft(commentDraft({ id: 'typed-context', fileLabel: 'typed.ts' })));
+    });
+
+    test('is worth sending even when its queued body is empty', () => {
+        const result = buildOutgoingMessage(input({
+            queued: [{ content: '', contextParts: [contextPart()] }],
+        }), deps());
+        expect(result.isEmpty).toBe(false);
     });
 });
 

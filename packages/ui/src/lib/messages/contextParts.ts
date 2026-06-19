@@ -20,6 +20,7 @@ import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
 import { appendTerminalContexts } from './terminalContext';
 
 export const CONTEXT_METADATA_KEY = 'openchamberContext';
+const OPENCODE_COMMENT_METADATA_KEY = 'opencodeComment';
 
 export type CodeCommentContext = {
     kind: 'code-comment';
@@ -115,7 +116,18 @@ export type ContextPartPayload =
     | GitHubPrContext
     | LinearIssueContext;
 
-export type ContextPartMetadata = { [K in typeof CONTEXT_METADATA_KEY]: ContextPartPayload };
+type OpenCodeCommentMetadata = {
+    path: string;
+    selection?: { startLine: number; endLine: number; startChar?: number; endChar?: number };
+    comment: string;
+    preview?: string;
+    origin?: 'file' | 'review';
+};
+
+export type ContextPartMetadata = {
+    [CONTEXT_METADATA_KEY]: ContextPartPayload;
+    [OPENCODE_COMMENT_METADATA_KEY]?: OpenCodeCommentMetadata;
+};
 
 export type ContextPart = {
     text: string;
@@ -177,10 +189,25 @@ export function formatContextText(payload: ContextPartPayload): string {
  */
 export function createContextPart(payload: ContextPartPayload, text?: string): ContextPart {
     const resolvedText = text ?? formatContextText(payload);
+    const metadata: ContextPartMetadata = { [CONTEXT_METADATA_KEY]: payload };
+    if (payload.kind === 'code-comment') {
+        metadata[OPENCODE_COMMENT_METADATA_KEY] = {
+            path: payload.fileLabel.replace(/:\d+(-\d+)?$/, ''),
+            selection: {
+                startLine: payload.startLine,
+                endLine: payload.endLine,
+                startChar: 0,
+                endChar: 0,
+            },
+            comment: payload.text,
+            preview: payload.code,
+            origin: payload.source === 'diff' ? 'review' : 'file',
+        };
+    }
     return {
         text: resolvedText,
         synthetic: true,
-        metadata: { [CONTEXT_METADATA_KEY]: payload },
+        metadata,
     };
 }
 
@@ -315,8 +342,21 @@ const contextPayloadSchema = z.discriminatedUnion('kind', [
     }),
 ]);
 
+const openCodeCommentSchema = z.object({
+    path: z.string(),
+    selection: z.object({
+        startLine: z.number().finite(),
+        endLine: z.number().finite(),
+        startChar: z.number().finite().optional(),
+        endChar: z.number().finite().optional(),
+    }).optional(),
+    comment: z.string(),
+    preview: z.string().optional(),
+    origin: z.enum(['file', 'review']).optional(),
+});
+
 /** The subset of a message part that context read-back inspects. */
-export type ContextCarrierPart = { type: string } & Pick<TextPart, 'metadata'>;
+export type ContextCarrierPart = { type: string; text?: string } & Pick<TextPart, 'metadata'>;
 
 /**
  * Read the structured context payload from a message part, if it carries one.
@@ -326,7 +366,64 @@ export type ContextCarrierPart = { type: string } & Pick<TextPart, 'metadata'>;
 export function readContextPart(part: ContextCarrierPart): ContextPartPayload | null {
     if (part.type !== 'text') return null;
     const parsed = contextPayloadSchema.safeParse(part.metadata?.[CONTEXT_METADATA_KEY]);
-    return parsed.success ? parsed.data : null;
+    if (parsed.success) return parsed.data;
+
+    const compatible = openCodeCommentSchema.safeParse(part.metadata?.[OPENCODE_COMMENT_METADATA_KEY]);
+    if (compatible.success) {
+        const comment = compatible.data;
+        if (!comment.selection) {
+            return {
+                kind: 'file-quote',
+                fileLabel: comment.path,
+                quote: comment.preview ?? '',
+                text: comment.comment,
+            };
+        }
+        return {
+            kind: 'code-comment',
+            source: comment.origin === 'review' ? 'diff' : 'file',
+            fileLabel: comment.path,
+            startLine: comment.selection.startLine,
+            endLine: comment.selection.endLine,
+            language: '',
+            code: comment.preview ?? '',
+            text: comment.comment,
+        };
+    }
+
+    const text = part.text ?? '';
+    const desktop = text.match(/^The user made the following comment regarding (this file|line (\d+)|lines (\d+) through (\d+)) of (.+?): ([\s\S]+)$/);
+    if (desktop) {
+        const startLine = desktop[2] ? Number(desktop[2]) : desktop[3] ? Number(desktop[3]) : null;
+        const endLine = desktop[2] ? Number(desktop[2]) : desktop[4] ? Number(desktop[4]) : null;
+        if (startLine === null || endLine === null) {
+            return { kind: 'file-quote', fileLabel: desktop[5], quote: '', text: desktop[6] };
+        }
+        return {
+            kind: 'code-comment',
+            source: 'file',
+            fileLabel: desktop[5],
+            startLine,
+            endLine,
+            language: '',
+            code: '',
+            text: desktop[6],
+        };
+    }
+
+    const legacy = text.match(/^Comment on `(.+?)` lines (\d+)-(\d+)(?: \((original|modified)\))?:\n```([^\n]*)\n([\s\S]*?)\n```\n\n([\s\S]+)$/);
+    if (!legacy) return null;
+    return {
+        kind: 'code-comment',
+        source: legacy[4] ? 'diff' : 'file',
+        fileLabel: legacy[1].replace(/:\d+(-\d+)?$/, ''),
+        startLine: Number(legacy[2]),
+        endLine: Number(legacy[3]),
+        ...(legacy[4] ? { side: legacy[4] as 'original' | 'modified' } : {}),
+        language: legacy[5],
+        code: legacy[6],
+        text: legacy[7],
+    };
 }
 
 /** Whether a message carries any user-attached context part. */

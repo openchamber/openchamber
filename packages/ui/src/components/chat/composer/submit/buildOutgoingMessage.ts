@@ -15,7 +15,7 @@
 
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
-import { contextPayloadFromDraft, createContextPart, type ContextPartMetadata } from '@/lib/messages/contextParts';
+import { contextPayloadFromDraft, createContextPart, type ContextPart, type ContextPartMetadata } from '@/lib/messages/contextParts';
 
 export interface OutgoingPart {
     text: string;
@@ -39,6 +39,8 @@ export interface OutgoingMessage {
 export interface QueuedInput {
     content: string;
     attachments?: AttachedFile[];
+    /** Structured context captured when this message was queued, in order. */
+    contextParts?: readonly ContextPart[];
 }
 
 export interface OutgoingMessageInput {
@@ -103,8 +105,15 @@ export function buildOutgoingMessage(
         return mentions;
     };
 
+    const pushContextParts = (parts: readonly ContextPart[] | undefined) => {
+        for (const part of parts ?? []) {
+            additionalParts.push(part);
+        }
+    };
+
     // Queued messages come first, in the order they were queued: the oldest
-    // becomes the primary message so the turn reads chronologically.
+    // becomes the primary message so the turn reads chronologically. Context
+    // captured with a queued message follows that message directly.
     input.queued.forEach((queued, index) => {
         const resolved = resolve(queued.content);
         const attachments = [
@@ -115,9 +124,11 @@ export function buildOutgoingMessage(
         if (index === 0) {
             primaryText = resolved.text;
             primaryAttachments = attachments;
-            return;
+        } else {
+            additionalParts.push({ text: resolved.text, attachments });
         }
-        additionalParts.push({ text: resolved.text, attachments });
+
+        pushContextParts(queued.contextParts);
     });
 
     // The composer's own text follows, becoming primary only when nothing was

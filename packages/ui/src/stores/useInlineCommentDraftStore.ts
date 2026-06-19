@@ -33,9 +33,15 @@ export const EMPTY_INLINE_COMMENT_DRAFTS: InlineCommentDraft[] = [];
 interface InlineCommentDraftState {
   drafts: Record<string, InlineCommentDraft[]>;
   touchedAt: Record<string, number>;
+  // Transient (not persisted): id of a freshly-added draft whose editor should
+  // auto-open (e.g. the VS Code "Add Comment" flow drops the user straight into
+  // the multi-line editor instead of a single-line native input box).
+  autoEditDraftId: string | null;
 }
 
 interface InlineCommentDraftActions {
+  // Returns the new draft id, or null when the draft is rejected (unresolved
+  // target, bounds eviction, or an empty terminal-context selection).
   addDraft: (target: InlineCommentDraftTarget, draft: Omit<InlineCommentDraft, 'id' | 'createdAt' | 'sessionKey'>) => string | null;
   updateDraft: (target: InlineCommentDraftTarget, draftId: string, updates: Partial<Omit<InlineCommentDraft, 'id' | 'createdAt' | 'sessionKey'>>) => void;
   removeDraft: (target: InlineCommentDraftTarget, draftId: string) => void;
@@ -46,6 +52,7 @@ interface InlineCommentDraftActions {
   getDraftCount: (target: InlineCommentDraftTarget) => number;
   hasDrafts: (target: InlineCommentDraftTarget) => boolean;
   clearSessionDrafts: (runtimeKey: string, directory: string, sessionId: string) => void;
+  setAutoEditDraftId: (draftId: string | null) => void;
 }
 
 type InlineCommentDraftStore = InlineCommentDraftState & InlineCommentDraftActions;
@@ -165,7 +172,9 @@ const boundState = (
   return { drafts: retainedDrafts, touchedAt: retainedTouchedAt };
 };
 
-const EMPTY_PERSISTED_STATE: InlineCommentDraftState = { drafts: {}, touchedAt: {} };
+type PersistedInlineCommentDraftState = Pick<InlineCommentDraftState, 'drafts' | 'touchedAt'>;
+
+const EMPTY_PERSISTED_STATE: PersistedInlineCommentDraftState = { drafts: {}, touchedAt: {} };
 
 const persistedDraftSchema = z.object({
   id: z.string(),
@@ -195,7 +204,7 @@ type PersistedDraftEnvelopeResult = z.ZodSafeParseResult<z.infer<typeof persiste
  * source are dropped, as are malformed entries. Pre-v2 or unreadable payloads
  * reset entirely (the pre-v3 behavior).
  */
-export const migratePersistedDrafts = (envelope: PersistedDraftEnvelopeResult, version: number): InlineCommentDraftState => {
+export const migratePersistedDrafts = (envelope: PersistedDraftEnvelopeResult, version: number): PersistedInlineCommentDraftState => {
   if (version < 2) return EMPTY_PERSISTED_STATE;
   if (!envelope.success) return EMPTY_PERSISTED_STATE;
 
@@ -222,7 +231,7 @@ export const migratePersistedDrafts = (envelope: PersistedDraftEnvelopeResult, v
   return { drafts, touchedAt };
 };
 
-const removeDraftKey = (state: InlineCommentDraftState, key: string): InlineCommentDraftState => {
+const removeDraftKey = (state: InlineCommentDraftState, key: string): PersistedInlineCommentDraftState => {
   if (!(key in state.drafts)) return state;
 
   const drafts = { ...state.drafts };
@@ -238,6 +247,12 @@ export const useInlineCommentDraftStore = create<InlineCommentDraftStore>()(
       (set, get) => ({
         drafts: {},
         touchedAt: {},
+        autoEditDraftId: null,
+
+        setAutoEditDraftId: (draftId) => {
+          set({ autoEditDraftId: draftId });
+        },
+
         addDraft: (target, draft) => {
           const key = getCurrentKey(target);
           if (!key || (draft.source === 'terminal' && !draft.code.trim())) return null;

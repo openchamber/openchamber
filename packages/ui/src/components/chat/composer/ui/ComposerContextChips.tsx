@@ -24,7 +24,6 @@ import {
     type InlineCommentSource,
 } from '@/stores/useInlineCommentDraftStore';
 import type { Theme } from '@/types/theme';
-
 export interface ComposerContextChipsProps {
     draftTarget: InlineCommentDraftTarget | null;
     colors: Theme['colors'];
@@ -64,9 +63,10 @@ const DraftPreviewEntry: React.FC<{
     editing: boolean;
     onStartEdit: () => void;
     onEndEdit: () => void;
+    onCancelEdit: () => void;
     onRemove: () => void;
     onSaveComment: ((text: string) => void) | null;
-}> = ({ draft, index, title, editing, onStartEdit, onEndEdit, onRemove, onSaveComment }) => {
+}> = ({ draft, index, title, editing, onStartEdit, onEndEdit, onCancelEdit, onRemove, onSaveComment }) => {
     const { t } = useI18n();
     const [editText, setEditText] = React.useState(draft.text);
     const editRef = React.useRef<HTMLTextAreaElement>(null);
@@ -95,7 +95,7 @@ const DraftPreviewEntry: React.FC<{
 
     const cancelEdit = () => {
         setEditText(draft.text);
-        onEndEdit();
+        onCancelEdit();
     };
 
     // Keep focus in the textarea while a header button is pressed: without
@@ -171,7 +171,7 @@ const DraftPreviewEntry: React.FC<{
                                     } else if (event.key === 'Escape') {
                                         event.preventDefault();
                                         setEditText(draft.text);
-                                        onEndEdit();
+                                        onCancelEdit();
                                     }
                                 }}
                                 placeholder={t('chat.textSelection.comment.placeholder')}
@@ -201,6 +201,8 @@ export function ComposerContextChips({ draftTarget, colors }: ComposerContextChi
     );
     const removeDraft = useInlineCommentDraftStore((state) => state.removeDraft);
     const updateDraft = useInlineCommentDraftStore((state) => state.updateDraft);
+    const autoEditDraftId = useInlineCommentDraftStore((state) => state.autoEditDraftId);
+    const setAutoEditDraftId = useInlineCommentDraftStore((state) => state.setAutoEditDraftId);
 
     const [openGroupKey, setOpenGroupKey] = React.useState<string | null>(null);
     const [editingDraftId, setEditingDraftId] = React.useState<string | null>(null);
@@ -236,12 +238,16 @@ export function ComposerContextChips({ draftTarget, colors }: ComposerContextChi
             // SAFETY: a pointer event target inside the document is always a
             // Node; `contains` only needs that.
             if (containerRef.current?.contains(event.target as Node)) return;
+            const editingDraft = drafts.find((draft) => draft.id === editingRef.current);
+            if (draftTarget && editingDraft && !editingDraft.text.trim()) {
+                removeDraft(draftTarget, editingDraft.id);
+            }
             setOpenGroupKey(null);
             setEditingDraftId(null);
         };
         document.addEventListener('pointerdown', handlePointerDown);
         return () => document.removeEventListener('pointerdown', handlePointerDown);
-    }, [openGroupKey]);
+    }, [draftTarget, drafts, openGroupKey, removeDraft]);
 
     const titleFor = React.useCallback((draft: InlineCommentDraft): string => {
         switch (draft.source) {
@@ -309,6 +315,15 @@ export function ComposerContextChips({ draftTarget, colors }: ComposerContextChi
     }, [drafts, t]);
 
     React.useEffect(() => {
+        if (!autoEditDraftId) return;
+        const group = groups.find((entry) => entry.drafts.some((draft) => draft.id === autoEditDraftId));
+        if (!group) return;
+        setOpenGroupKey(group.key);
+        setEditingDraftId(autoEditDraftId);
+        setAutoEditDraftId(null);
+    }, [autoEditDraftId, groups, setAutoEditDraftId]);
+
+    React.useEffect(() => {
         if (openGroupKey && !groups.some((group) => group.key === openGroupKey)) {
             setOpenGroupKey(null);
             setEditingDraftId(null);
@@ -337,6 +352,10 @@ export function ComposerContextChips({ draftTarget, colors }: ComposerContextChi
                                 editing={editingDraftId === draft.id}
                                 onStartEdit={() => setEditingDraftId(draft.id)}
                                 onEndEdit={() => setEditingDraftId((current) => (current === draft.id ? null : current))}
+                                onCancelEdit={() => {
+                                    setEditingDraftId((current) => (current === draft.id ? null : current));
+                                    if (!draft.text.trim()) removeDraft(draftTarget, draft.id);
+                                }}
                                 onRemove={() => removeDraft(draftTarget, draft.id)}
                                 onSaveComment={editableSource(draft.source)
                                     ? (text) => updateDraft(draftTarget, draft.id, { text })

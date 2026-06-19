@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import type { AttachedFile } from './types/sessionTypes';
+import type { ContextPart } from '@/lib/messages/contextParts';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { normalizePath } from '@/lib/pathNormalization';
@@ -45,6 +46,8 @@ export interface QueuedMessage {
     content: string;
     attachments?: AttachedFile[];
     createdAt: number;
+    /** Structured context captured at queue time. */
+    contextParts?: ContextPart[];
     /** Send config captured at queue time — used as-is when auto-sending */
     sendConfig?: {
         providerID: string;
@@ -153,6 +156,7 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                         content: message.content,
                         attachments: message.attachments,
                         createdAt: Date.now(),
+                        contextParts: message.contextParts,
                         sendConfig: message.sendConfig,
                     };
 

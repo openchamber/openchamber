@@ -131,7 +131,7 @@ const randomBase62 = (length: number): string => {
   return result;
 };
 
-const ascendingId = (prefix: "msg"): string => {
+const ascendingId = (prefix: "msg" | "prt"): string => {
   const timestamp = Date.now();
   if (timestamp !== lastIdTimestamp) {
     lastIdTimestamp = timestamp;
@@ -920,7 +920,13 @@ class OpencodeService {
     if (params.additionalParts && params.additionalParts.length > 0) {
       for (const additional of params.additionalParts) {
         if (additional.text && additional.text.trim()) {
-          const additionalTextPart: TextPartInput = { type: 'text', text: additional.text };
+          // Metadata-bearing parts need a persisted part ID. Other prefixes are
+          // rejected and an omitted ID leaves the part as ephemeral context.
+          const additionalTextPart: TextPartInput = {
+            ...(additional.metadata ? { id: ascendingId('prt') } : {}),
+            type: 'text',
+            text: additional.text,
+          };
           if (additional.synthetic) additionalTextPart.synthetic = true;
           if (additional.metadata) additionalTextPart.metadata = additional.metadata;
           parts.push(additionalTextPart);

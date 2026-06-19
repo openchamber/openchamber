@@ -291,7 +291,7 @@ describe('buildQueuedAutoSendPayload', () => {
       'agent-1',
       [],
       undefined,
-      undefined,
+      [],
       'variant-1',
       'normal',
       {

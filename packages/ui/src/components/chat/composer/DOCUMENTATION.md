@@ -159,8 +159,11 @@ and the send path reading the same grammar.
   linked issue/PR) becomes its own synthetic text part carrying structured
   metadata** built by `lib/messages/contextParts.ts`; the timeline reads that
   metadata back to render context blocks. PR instructions precede the PR diff.
-  Queueing a message leaves context drafts in their store on purpose — the send
-  that later delivers the queue consumes them.
+  Queueing captures the current context parts with that queue entry for the same
+  reason it captures provider and model: delivery must use what the user composed,
+  not whatever the draft store holds when the queue drains. A queued message's
+  context parts follow it before the next authored body, preserving that
+  association when several queued messages are delivered together.
 - `state/useComposerDraft.ts` — a draft belongs to a (runtime, directory,
   session) identity. Writes are debounced while typing but forced at every edge
   where the page may stop running, because a pending timer is not a saved

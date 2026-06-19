@@ -21,6 +21,7 @@ import { buildLinkedIssue, buildLinkedLinearIssue } from '@/lib/linkedIssues';
 import { useUserMessageHistory } from "@/sync/sync-context";
 import { getInlineCommentDraftKey, useInlineCommentDraftStore, type InlineCommentDraft, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
+import { contextPayloadFromDraft, createContextPart } from '@/lib/messages/contextParts';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { startReviewFlow } from '@/lib/reviewFlow';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -917,14 +918,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const inputSnapshot = getCurrentInputSnapshot();
         if (!inputSnapshot.hasContent || !currentSessionId || !messageQueueTarget) return;
 
-        // Context drafts stay in their store: the send that later delivers the
-        // queue consumes them and attaches them as structured context parts.
+        const drafts = inlineDraftTarget ? consumeDrafts(inlineDraftTarget) : [];
+        const contextParts = drafts.map((draft) => createContextPart(contextPayloadFromDraft(draft)));
         const messageToQueue = inputSnapshot.message.replace(/^\n+|\n+$/g, '');
         const attachmentsToQueue = sanitizeAttachmentsForSend(attachedFiles);
 
         addToQueue(messageQueueTarget, {
             content: messageToQueue,
             attachments: attachmentsToQueue.length > 0 ? attachmentsToQueue : undefined,
+            contextParts: contextParts.length > 0 ? contextParts : undefined,
             sendConfig: currentProviderId && currentModelId ? {
                 providerID: currentProviderId,
                 modelID: currentModelId,
@@ -951,7 +953,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         if (!isMobile) {
             composerRef.current?.focus();
         }
-    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, attachedFiles, sanitizeAttachmentsForSend, addToQueue, clearAttachedFiles, isMobile, currentProviderId, currentModelId, currentAgentName, currentVariant, scrollToLatest]);
+    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inlineDraftTarget, consumeDrafts, attachedFiles, sanitizeAttachmentsForSend, addToQueue, clearAttachedFiles, isMobile, currentProviderId, currentModelId, currentAgentName, currentVariant, scrollToLatest]);
 
     const handleQueuedMessageEdit = React.useCallback((content: string) => {
         setMessage(content);
@@ -1142,12 +1144,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             }
         }
 
-        // Inline review comments and synthetic context are consumed before
-        // assembly so a failed send can restore exactly what it took. Context
-        // drafts ride with whichever send goes out next, including queued
-        // auto-sends: queueing leaves them in the store on purpose.
-        const syntheticParts = consumePendingSyntheticParts();
-        const consumedDraftTarget = inlineDraftTarget;
+        // Fresh composer context belongs only to a send that includes the
+        // composer. Queued entries already carry their own captured context.
+        const syntheticParts = queuedOnly ? [] : consumePendingSyntheticParts();
+        const consumedDraftTarget = queuedOnly ? null : inlineDraftTarget;
         const drafts: InlineCommentDraft[] = consumedDraftTarget
             ? consumeDrafts(consumedDraftTarget)
             : [];
@@ -1157,7 +1157,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         );
 
         const outgoing = buildOutgoingMessage({
-            queued: queuedMessagesToSend,
+            queued: queuedMessagesToSend.map((queued) => ({
+                content: queued.content,
+                attachments: queued.attachments,
+                contextParts: queued.contextParts,
+            })),
             composerText: !queuedOnly && inputSnapshot.hasContent ? inputSnapshot.message : null,
             composerAttachments: attachedFiles,
             inlineComments: drafts,
