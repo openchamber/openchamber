@@ -113,9 +113,9 @@ export const useSessionGrouping = (args: Args) => {
         if (!args.showSubagentSessionsInSidebar) {
           return { session, children: [], worktree: getSessionWorktree(session) };
         }
-const children = childrenMap.get(session.id) ?? [];
-return { session, children: children.map((child) => buildProjectNode(child)), worktree: getSessionWorktree(session) };
-};
+        const children = childrenMap.get(session.id) ?? [];
+        return { session, children: children.map((child) => buildProjectNode(child)), worktree: getSessionWorktree(session) };
+      };
 
       const roots = sortedProjectSessions.filter((session) => {
         const parentID = (session as Session & { parentID?: string | null }).parentID;
