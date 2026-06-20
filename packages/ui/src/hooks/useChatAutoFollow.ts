@@ -366,6 +366,10 @@ export const useChatAutoFollow = ({
         const saved = getViewportSessionMemory(sessionId)?.scrollPosition;
         const savedHeight = saved ? saved.scrollHeight : 0;
         if (hasLayout && saved && savedHeight > 0 && container.scrollHeight < Math.min(savedHeight, savedHeight * 0.5)) {
+            // Don't restore yet — Virtualizer hasn't flushed. Set state to
+            // 'released' so the follow loop does NOT engage and scroll the
+            // user toward the bottom while we wait for more messages to load.
+            setStateValue('released');
             pendingInitialRestoreRef.current = sessionId;
             return false;
         }
