@@ -252,7 +252,7 @@ async function main() {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
-        timeout: 10000,
+        timeout: 5000,
       });
       if (result.status === 0) {
         const found = (result.stdout || '').trim().split(/\s+/).pop() || '';

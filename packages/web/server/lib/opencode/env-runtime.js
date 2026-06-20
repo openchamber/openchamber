@@ -362,9 +362,10 @@ export const createOpenCodeEnvRuntime = (deps) => {
       return null;
     }
 
-    // Fast path: 'command -v' via plain sh (no login shell, no .zshrc sourcing).
-    // This is much faster than the full login shell probe below and catches
-    // standard brew paths even when launched with minimal PATH.
+// Fast path: 'command -v' via plain sh (no login shell, no .zshrc sourcing).
+// This is much faster than the full login shell probe below and catches
+// brew paths when the Electron login shell env merge already augmented PATH
+// or when /bin/sh has a broader default PATH than the process.
     if (process.platform !== 'win32') {
       try {
         const fastResult = runSpawnSync('/bin/sh', ['-c', 'command -v opencode'], {
@@ -454,9 +455,10 @@ export const createOpenCodeEnvRuntime = (deps) => {
       return null;
     }
 
-    // Fast path: 'command -v' via plain sh (no login shell, no .zshrc sourcing).
-    // This is much faster than the full login shell probe below and catches
-    // standard brew paths even when launched with minimal PATH.
+// Fast path: 'command -v' via plain sh (no login shell, no .zshrc sourcing).
+// This is much faster than the full login shell probe below and catches
+// brew paths when the Electron login shell env merge already augmented PATH
+// or when /bin/sh has a broader default PATH than the process.
     if (process.platform !== 'win32') {
       try {
         const fastResult = runSpawnSync('/bin/sh', ['-c', 'command -v node'], {
@@ -558,9 +560,10 @@ export const createOpenCodeEnvRuntime = (deps) => {
       return null;
     }
 
-    // Fast path: 'command -v' via plain sh (no login shell, no .zshrc sourcing).
-    // This is much faster than the full login shell probe below and catches
-    // standard brew paths even when launched with minimal PATH.
+// Fast path: 'command -v' via plain sh (no login shell, no .zshrc sourcing).
+// This is much faster than the full login shell probe below and catches
+// brew paths when the Electron login shell env merge already augmented PATH
+// or when /bin/sh has a broader default PATH than the process.
     if (process.platform !== 'win32') {
       try {
         const fastResult = runSpawnSync('/bin/sh', ['-c', 'command -v bun'], {
