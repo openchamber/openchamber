@@ -10,10 +10,11 @@
  * Detection chain in packages/web/server/lib/opencode/env-runtime.js:
  *   Step 1: Check env vars (OPENCODE_BINARY, OPENCODE_PATH, etc.)
  *   Step 2: searchPathFor('opencode') — walks process.env.PATH
- *   Step 3: Hardcoded fallback paths (includes /opt/homebrew/bin/opencode,
+ *   Step 3a: Hardcoded fallback paths (includes /opt/homebrew/bin/opencode,
  *            /usr/local/bin/opencode, etc.)
+ *   Step 3b: Fast-path: /bin/sh -c 'command -v opencode' (with timeout)
  *   Step 4: Shell probing — $SHELL -lic 'command -v opencode'
- *            (⚠️  NO TIMEOUT on spawnSync)
+ *            (with timeout, fixed)
  *
  * On macOS, apps launched from the Dock/Finder inherit a minimal PATH:
  *   /usr/bin:/bin:/usr/sbin:/sbin
@@ -24,9 +25,9 @@
  *   spawnSync($SHELL, ['-il', '-c', 'env -0'], { timeout: 5000 })
  *
  * If the shell startup is slow (>5s due to nvm, pyenv, etc.), this times
- * out and PATH stays minimal. The server-side probing (in index.js:652)
- * also calls spawnSync but with NO timeout at all — potentially hanging
- * the module initialization indefinitely.
+ * out and PATH stays minimal. The fast-path (Step 3b) catches standard brew
+ * paths even with minimal PATH, and all shell probes now have a 5s timeout
+ * to prevent blocking startup indefinitely.
  */
 
 import fs from 'node:fs';
@@ -208,6 +209,30 @@ async function main() {
     if (ok) foundInFallbacks = true;
   }
 
+  // 3c-fp. Fast-path (command -v via /bin/sh)
+  console.log('\n  🔹 Step 3c-fp: Fast-path (command -v via /bin/sh)');
+  let fastPathFound = false;
+  try {
+    const fastResult = spawnSync('/bin/sh', ['-c', 'command -v opencode'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 5000,
+    });
+    if (fastResult.status === 0) {
+      const found = (fastResult.stdout || '').trim().split(/\s+/).pop() || '';
+      if (found && isExecutable(found)) {
+        console.log(`     ✓ Found: ${found}`);
+        fastPathFound = true;
+      } else {
+        console.log(`     ✗ Not found (${found || 'empty'})`);
+      }
+    } else {
+      console.log(`     ✗ Status ${fastResult.status} (${fastResult.error?.message || ''})`);
+    }
+  } catch (err) {
+    console.log(`     ⚠ Exception: ${err.message}`);
+  }
+
   // 3d. Shell probing (last resort)
   console.log('\n  🔹 Step 3d: Shell probing (last resort)');
   const shellCandidates = [
@@ -255,7 +280,7 @@ async function main() {
 
   section('Root Cause Analysis');
 
-  const found = pathResult || foundInFallbacks || shellFound || (whichPath && isExecutable(whichPath));
+  const found = pathResult || foundInFallbacks || fastPathFound || shellFound || (whichPath && isExecutable(whichPath));
 
   if (found) {
     console.log(`
@@ -263,28 +288,36 @@ async function main() {
      this system. However, this does not rule out the bug on all
      macOS configurations.
 
-  ⚠️  POTENTIAL ISSUES (macOS-specific):
+  🔧 FIXES APPLIED (issue #1720):
 
-  1. SHELL PROBING HAS NO TIMEOUT (env-runtime.js:366):
-     The shell probing step at line 366 calls spawnSync without
-     a timeout. If the user's shell startup is slow (>5s due to
-     nvm, pyenv, etc.), this blocks indefinitely.
+   1. ✅ SHELL PROBING TIMEOUT (env-runtime.js):
+       All 4 shell probe spawnSync calls now have a 5-second
+       timeout. Prevents indefinite blocking on slow shells.
 
-  2. ELECTRON PROBE HAS 5s TIMEOUT (main.mjs:1023):
-     The Electron main process probes the shell with a 5-second
-     timeout. If the shell takes >5s, PATH is NOT augmented.
+   2. ✅ FAST-PATH PROBE (env-runtime.js):
+       Added /bin/sh -c 'command -v opencode' before the full
+       login shell probe. Catches brew binaries at ~10ms instead
+       of potentially seconds. (Standard brew paths are also
+       covered by hardcoded fallbacks.)
 
-  3. SERVER-SIDE SHELL PROBE HAS NO TIMEOUT (env-runtime.js:205):
-     The server's getLoginShellEnvSnapshot() also has no timeout,
-     potentially blocking module initialization at index.js:652.
+   3. ✅ TOOLCHAIN_SEGMENTS (path-utils.js):
+       Added '/usr/local/' to TOOLCHAIN_SEGMENTS so a PATH
+       containing /usr/local/bin is recognized as user-configured.
 
-  4. FILE-SYSTEM PERMISSION ISSUE:
-     On macOS with Full Disk Protection, the Electron sandbox
-     may restrict access to files outside the app container.
+   4. ✅ VS CODE FALLBACK ORDER (opencode.ts):
+       Brew fallback order now matches server: /opt/homebrew
+       (Apple Silicon) before /usr/local (Intel).
 
-  5. BREW INSTALLATION PATH NOT COVERED:
-     If brew is installed at a custom prefix (not /opt/homebrew
-     or /usr/local), the hardcoded fallbacks won't match.
+  ⚠️  REMAINING ISSUES (not addressed by this fix):
+
+   1. FILE-SYSTEM PERMISSION ISSUE:
+      On macOS with Full Disk Protection, the Electron sandbox
+      may restrict access to files outside the app container.
+
+   2. CUSTOM BREW PREFIX:
+      If brew is installed at a custom prefix (not /opt/homebrew
+      or /usr/local), the hardcoded fallbacks won't match — but
+      the fast-path (command -v via sh) may still find it.
 `);
   } else {
     console.log(`
@@ -308,14 +341,14 @@ async function main() {
 
   console.log(`
   ──────────────────────────────────────────────────────────
-  Recommended fixes:
-  1. Add a timeout to ALL spawnSync calls in the detection chain
-     (especially env-runtime.js lines 205, 366)
-  2. Consider using 'which opencode' or 'command -v opencode'
-     as a standalone fallback with a short timeout
-  3. The existing hardcoded paths DO cover standard brew paths,
-     so if the binary is at /opt/homebrew/bin/opencode or
-     /usr/local/bin/opencode, detection should work
+  Fixes applied:
+  1. ✅ All 4 shell probe spawnSync calls now have a 5s timeout
+     (SHELL_PROBE_TIMEOUT_MS, added at env-runtime.js module level)
+  2. ✅ Fast-path via /bin/sh -c 'command -v opencode' added
+     before login shell probing in all 3 resolvers
+  3. ✅ /usr/local/ added to TOOLCHAIN_SEGMENTS in path-utils.js
+  4. ✅ Brew fallback order fixed in VS Code extension
+     (/opt/homebrew before /usr/local)
 `);
 }
 
