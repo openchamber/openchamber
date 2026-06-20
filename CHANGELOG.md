@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Desktop: opencode installed via Homebrew on macOS is now found even when the app is launched from the Dock — shell probes won't block startup, a fast `command -v` catch catches brew paths without sourcing shell config, and brew path ordering is consistent across runtimes (issue #1720).
+
 ## [1.13.2] - 2026-06-18
 
 - Chat/Performance: long conversations and large session lists now stay smooth and responsive while a response is streaming (thanks to @bashrusakh).
