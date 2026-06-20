@@ -1,4 +1,5 @@
 import { getCurrentIntlLocale } from '@/lib/i18n';
+import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 import type { TimeFormatPreference } from '@/stores/useUIStore';
 
 type TimePrecision = 'minute' | 'second';
@@ -56,4 +57,36 @@ export const formatDateTimeForPreference = (
     ...options,
     hour12: options.hour ? getHour12Option(preference) : options.hour12,
   });
+};
+
+const MINUTE_MS = 60_000;
+const HOUR_MS = 3_600_000;
+const DAY_MS = 86_400_000;
+
+export const formatRelativeMessageTime = (timestamp: number, now: number): string => {
+  if (!Number.isFinite(timestamp) || !Number.isFinite(now)) {
+    return '';
+  }
+  const diff = now - timestamp;
+  const elapsed = diff < 0 ? 0 : diff;
+  const dictionary = useI18nStore.getState().dictionary;
+
+  if (elapsed < MINUTE_MS) {
+    return formatMessage(dictionary, 'common.relative.justNow');
+  }
+
+  if (elapsed < HOUR_MS) {
+    const minutes = Math.floor(elapsed / MINUTE_MS);
+    return formatMessage(dictionary, 'common.relative.minutesAgoShort2', { count: minutes });
+  }
+
+  const days = Math.floor(elapsed / DAY_MS);
+  const hours = Math.floor((elapsed % DAY_MS) / HOUR_MS);
+  const minutes = Math.floor((elapsed % HOUR_MS) / MINUTE_MS);
+
+  if (days > 0) {
+    return formatMessage(dictionary, 'common.relative.daysHoursMinutesAgoShort', { days, hours, minutes });
+  }
+
+  return formatMessage(dictionary, 'common.relative.hoursMinutesAgoShort', { hours, minutes });
 };

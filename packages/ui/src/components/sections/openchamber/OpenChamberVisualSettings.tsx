@@ -214,6 +214,29 @@ const TIME_FORMAT_OPTIONS: Option<'auto' | '12h' | '24h'>[] = [
     },
 ];
 
+const MESSAGE_TIMESTAMP_FORMAT_OPTIONS: Option<'hidden' | 'relative' | 'absolute' | 'hybrid'>[] = [
+    {
+        id: 'hidden',
+        labelKey: 'settings.openchamber.visual.option.messageTimestampFormat.hidden.label',
+        descriptionKey: 'settings.openchamber.visual.option.messageTimestampFormat.hidden.description',
+    },
+    {
+        id: 'relative',
+        labelKey: 'settings.openchamber.visual.option.messageTimestampFormat.relative.label',
+        descriptionKey: 'settings.openchamber.visual.option.messageTimestampFormat.relative.description',
+    },
+    {
+        id: 'absolute',
+        labelKey: 'settings.openchamber.visual.option.messageTimestampFormat.absolute.label',
+        descriptionKey: 'settings.openchamber.visual.option.messageTimestampFormat.absolute.description',
+    },
+    {
+        id: 'hybrid',
+        labelKey: 'settings.openchamber.visual.option.messageTimestampFormat.hybrid.label',
+        descriptionKey: 'settings.openchamber.visual.option.messageTimestampFormat.hybrid.description',
+    },
+];
+
 const WEEK_START_OPTIONS: Option<'auto' | 'monday' | 'sunday'>[] = [
     {
         id: 'auto',
@@ -234,7 +257,68 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-export type VisibleSetting = 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar';
+const parseDurationToMinutes = (text: string): number | null => {
+    const trimmed = text.trim().toLowerCase();
+    if (!trimmed) return null;
+    const bare = Number(trimmed);
+    if (Number.isFinite(bare) && bare > 0) return Math.floor(bare);
+    const matches = [...trimmed.matchAll(/(\d+)\s*(d|h|m)/g)];
+    if (matches.length === 0) return null;
+    let total = 0;
+    for (const match of matches) {
+        const count = parseInt(match[1], 10);
+        if (match[2] === 'd') total += count * 1440;
+        else if (match[2] === 'h') total += count * 60;
+        else total += count;
+    }
+    return total > 0 ? total : null;
+};
+
+const formatMinutesToDuration = (minutes: number): string => {
+    const days = Math.floor(minutes / 1440);
+    const hours = Math.floor((minutes % 1440) / 60);
+    const mins = minutes % 60;
+    const parts: string[] = [];
+    if (days > 0) parts.push(`${days}d`);
+    if (hours > 0) parts.push(`${hours}h`);
+    if (mins > 0) parts.push(`${mins}m`);
+    return parts.length > 0 ? parts.join(' ') : '0m';
+};
+
+const DurationInput: React.FC<{
+    value: number;
+    onChange: (minutes: number) => void;
+    className?: string;
+    ariaLabel?: string;
+}> = ({ value, onChange, className, ariaLabel }) => {
+    const [text, setText] = React.useState(() => formatMinutesToDuration(value));
+
+    React.useEffect(() => {
+        setText(formatMinutesToDuration(value));
+    }, [value]);
+
+    const commit = React.useCallback(() => {
+        const parsed = parseDurationToMinutes(text);
+        if (parsed !== null) {
+            onChange(parsed);
+        } else {
+            setText(formatMinutesToDuration(value));
+        }
+    }, [text, value, onChange]);
+
+    return (
+        <Input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => { if (e.key === 'Enter') commit(); }}
+            className={className}
+            aria-label={ariaLabel}
+        />
+    );
+};
+
+export type VisibleSetting = 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'messageTimestampFormat' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -304,6 +388,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setShowExpandedEditTools = useUIStore(state => state.setShowExpandedEditTools);
     const timeFormatPreference = useUIStore(state => state.timeFormatPreference);
     const setTimeFormatPreference = useUIStore(state => state.setTimeFormatPreference);
+    const messageTimestampFormat = useUIStore(state => state.messageTimestampFormat);
+    const setMessageTimestampFormat = useUIStore(state => state.setMessageTimestampFormat);
+    const messageTimestampHybridThresholdMinutes = useUIStore(state => state.messageTimestampHybridThresholdMinutes);
+    const setMessageTimestampHybridThresholdMinutes = useUIStore(state => state.setMessageTimestampHybridThresholdMinutes);
     const weekStartPreference = useUIStore(state => state.weekStartPreference);
     const setWeekStartPreference = useUIStore(state => state.setWeekStartPreference);
     const showSplitAssistantMessageActions = useUIStore(state => state.showSplitAssistantMessageActions);
@@ -478,6 +566,16 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         void updateDesktopSettings({ timeFormatPreference: value });
     }, [setTimeFormatPreference]);
 
+    const handleMessageTimestampFormatChange = React.useCallback((value: 'hidden' | 'relative' | 'absolute' | 'hybrid') => {
+        setMessageTimestampFormat(value);
+        void updateDesktopSettings({ messageTimestampFormat: value });
+    }, [setMessageTimestampFormat]);
+
+    const handleMessageTimestampHybridThresholdChange = React.useCallback((value: number) => {
+        setMessageTimestampHybridThresholdMinutes(value);
+        void updateDesktopSettings({ messageTimestampHybridThresholdMinutes: value });
+    }, [setMessageTimestampHybridThresholdMinutes]);
+
     const handleWeekStartPreferenceChange = React.useCallback((value: 'auto' | 'monday' | 'sunday') => {
         setWeekStartPreference(value);
         void updateDesktopSettings({ weekStartPreference: value });
@@ -529,6 +627,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const hasBehaviorSettings = shouldShow('mermaidRendering')
         || shouldShow('userMessageRendering')
         || shouldShow('chatRenderMode')
+        || shouldShow('messageTimestampFormat')
         || shouldShow('messageTransport')
         || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted')
         || shouldShow('collapsibleUserMessages')
@@ -555,6 +654,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         const option = TIME_FORMAT_OPTIONS.find((item) => item.id === timeFormatPreference);
         return tUnsafe(option?.labelKey ?? 'settings.openchamber.visual.option.timeFormat.auto.label');
     }, [timeFormatPreference, tUnsafe]);
+    const selectedMessageTimestampFormatLabel = React.useMemo(() => {
+        const option = MESSAGE_TIMESTAMP_FORMAT_OPTIONS.find((item) => item.id === messageTimestampFormat);
+        return tUnsafe(option?.labelKey ?? 'settings.openchamber.visual.option.messageTimestampFormat.hybrid.label');
+    }, [messageTimestampFormat, tUnsafe]);
     const selectedWeekStartLabel = React.useMemo(() => {
         const option = WEEK_START_OPTIONS.find((item) => item.id === weekStartPreference);
         return tUnsafe(option?.labelKey ?? 'settings.openchamber.visual.option.weekStart.auto.label');
@@ -1681,6 +1784,34 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         </section>
                                     )}
 
+                                </div>
+                            )}
+
+                            {shouldShow('messageTimestampFormat') && (
+                                <div data-settings-item="chat.message-timestamp-format" className="grid grid-cols-1 gap-2 px-2 py-1.5 md:grid-cols-[14rem_auto] md:gap-x-8 md:gap-y-2">
+                                    <div className="flex min-w-0 flex-col">
+                                        <span className="typography-ui-label text-foreground shrink-0">{t('settings.openchamber.visual.field.messageTimestampFormat')}</span>
+                                    </div>
+                                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                        <Select value={messageTimestampFormat} onValueChange={(value: 'hidden' | 'relative' | 'absolute' | 'hybrid') => handleMessageTimestampFormatChange(value)}>
+                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectMessageTimestampFormatAria')} className="w-fit">
+                                                <SelectValue>{selectedMessageTimestampFormatLabel}</SelectValue>
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {MESSAGE_TIMESTAMP_FORMAT_OPTIONS.map((option) => (
+                                                    <SelectItem key={option.id} value={option.id}>{tUnsafe(option.labelKey)}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        {messageTimestampFormat === 'hybrid' && (
+                                            <DurationInput
+                                                value={messageTimestampHybridThresholdMinutes}
+                                                onChange={handleMessageTimestampHybridThresholdChange}
+                                                className="h-7 w-32"
+                                                ariaLabel={t('settings.openchamber.visual.field.messageTimestampHybridThreshold')}
+                                            />
+                                        )}
+                                    </div>
                                 </div>
                             )}
 

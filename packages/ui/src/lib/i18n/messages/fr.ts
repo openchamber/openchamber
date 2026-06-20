@@ -2623,6 +2623,9 @@ export const dict = {
   'vscodeLayout.actions.archiveAllSuccess': '{count} session(s) archivée(s)',
   'vscodeLayout.actions.archiveAllError': 'Impossible d’archiver {count} session(s)',
   'vscodeLayout.actions.cancel': 'Annuler',
+  'common.relative.minutesAgoShort2': '{count}m ago',
+  'common.relative.hoursMinutesAgoShort': '{hours}h {minutes}m ago',
+  'common.relative.daysHoursMinutesAgoShort': '{days}d {hours}h {minutes}m ago',
 } as const;
 
 export type I18nKey = keyof typeof dict;

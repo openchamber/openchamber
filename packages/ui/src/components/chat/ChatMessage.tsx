@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils';
 import type { AnimationHandlers, ContentChangeReason } from '@/hooks/useChatAutoFollow';
 import MessageHeader from './message/MessageHeader';
 import MessageBody from './message/MessageBody';
+import { MessageTimestamp } from './message/MessageTimestamp';
 import type { AgentMentionInfo } from './message/types';
 import type { StreamPhase, ToolPopupContent } from './message/types';
 import { deriveMessageRole } from './message/messageRole';
@@ -993,6 +994,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                 ref={messageContainerRef}
             >
                 <div className="chat-message-column relative">
+                    <MessageTimestamp
+                        completedAt={messageCompletedAt}
+                        createdAt={messageCreatedAt}
+                        className={cn('absolute top-0 z-10 text-xs', isUser ? 'left-0' : 'right-0')}
+                    />
                     {isUser ? (
                         displayParts.length === 0 ? null : (
                             <FadeInOnReveal
