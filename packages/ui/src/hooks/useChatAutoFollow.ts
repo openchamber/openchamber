@@ -375,12 +375,16 @@ export const useChatAutoFollow = ({
         }
 
         if (!saved || isAtBottomSnapshot(saved, isMobile)) {
-            setStateValue('following');
+            // Set state to 'released' (NOT 'following'). The container is still being
+            // hydrated on session switch and scrollHeight will grow as more messages
+            // load; if state were 'following', the ResizeObserver would re-engage the
+            // follow loop and LERP the scroll toward a growing target — visible as a
+            // 'scroll jumps down' effect. The follow loop will start naturally when
+            // the user sends a message and sessionIsWorking becomes true.
+            setStateValue('released');
             lastUserReleaseAtRef.current = 0;
             const target = Math.max(0, container.scrollHeight - container.clientHeight);
             writeScrollTopInstant(target);
-            startFollowLoop();
-            startSettleBurst();
             return false;
         }
 
@@ -462,10 +466,10 @@ export const useChatAutoFollow = ({
 
         updateOverflowAndButton();
 
-        if (programmatic) {
-            return;
-        }
-
+        // Always allow user-driven upward scroll to release auto-follow BEFORE the
+        // programmatic-window guard. If we gate this on isInProgrammaticWindow(), a
+        // follow-loop LERP that fires within 200ms of a user scroll-up can swallow
+        // the release signal and the loop keeps dragging scrollTop back toward target.
         if (currentTop < previousTop && stateRef.current === 'following') {
             stopFollowLoop();
             stopSettleBurst();
@@ -473,9 +477,19 @@ export const useChatAutoFollow = ({
             setStateValue('released');
         }
 
+        if (programmatic) {
+            return;
+        }
+
         const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
         const inGrace = (now - lastUserReleaseAtRef.current) < REPIN_GRACE_AFTER_RELEASE_MS;
-        if (stateRef.current === 'released' && isNearBottom(container, isMobile) && !inGrace) {
+        // Suppress re-pin during initial session hydration. When restoreSnapshot sets the
+        // scroll position to the current bottom of a partially-loaded container, the
+        // user is 'near bottom' but the container is still growing. Without this guard,
+        // the re-pin would re-engage the follow loop and LERP the scroll toward the
+        // growing target, producing the visible 'scroll jumps down' effect.
+        const isInitialHydration = pendingInitialRestoreRef.current === currentSessionIdRef.current;
+        if (!isInitialHydration && stateRef.current === 'released' && isNearBottom(container, isMobile) && !inGrace) {
             setStateValue('following');
             startFollowLoop();
         }
