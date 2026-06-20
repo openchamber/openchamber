@@ -1746,6 +1746,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             return;
         }
 
+        // Sending is authoritative: if a question prompt is open, dismiss it
+        // so the prompt cannot linger or strand the session. The dismiss clears
+        // the card instantly (optimistic) and formally rejects the question.
+        // Rejecting unblocks the agent's tool but does NOT end its turn, so a
+        // direct send would race with the still-active run and be silently
+        // discarded by the OpenCode runner. Instead we queue the message; the
+        // queued-message auto-send hook delivers it as the next turn once the
+        // rejected turn winds down and the session returns to idle. This avoids
+        // aborting the turn (which would surface an "aborted" notice).
+        if (currentSessionId && !queuedOnly) {
+            const dismissedQuestions = await sessionActions.dismissOpenQuestionsForSession(currentSessionId);
+            if (dismissedQuestions) {
+                handleQueueMessage();
+                return;
+            }
+        }
+
         // Build the primary message (first part) and additional parts
         let primaryText = '';
         let primaryAttachments: AttachedFile[] = [];
