@@ -16,6 +16,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useI18n } from '@/lib/i18n';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
+import { useConfigStore } from '@/stores/useConfigStore';
 import {
   Select,
   SelectContent,
@@ -23,7 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Icon } from "@/components/icon/Icon";
+import { Icon } from '@/components/icon/Icon';
 
 type PermissionAction = 'allow' | 'ask' | 'deny';
 type PermissionRule = { permission: string; pattern: string; action: PermissionAction };
@@ -192,9 +193,45 @@ const buildPermissionConfigWithGlobal = (
   return result as AgentConfig['permission'];
 };
 
+type AgentVariantProvider = {
+  id: string;
+  models?: Array<{
+    id?: string;
+    variants?: Record<string, unknown>;
+  }>;
+};
+
+const getVariantOptionsForModel = (
+  providers: AgentVariantProvider[],
+  modelValue: string,
+): string[] => {
+  const parsedModel = parseModelIdentifier(modelValue);
+  if (!parsedModel) {
+    return [];
+  }
+
+  const provider = providers.find((item) => item.id === parsedModel.providerId);
+  const model = provider?.models?.find((item) => item.id === parsedModel.modelId);
+  return model?.variants ? Object.keys(model.variants) : [];
+};
+
+const normalizeVariantForModel = (
+  providers: AgentVariantProvider[],
+  modelValue: string,
+  variantValue: string,
+): string => {
+  if (!variantValue) {
+    return '';
+  }
+
+  const variantOptions = getVariantOptionsForModel(providers, modelValue);
+  return variantOptions.includes(variantValue) ? variantValue : '';
+};
+
 export const AgentsPage: React.FC = () => {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
+  const providers = useConfigStore((state) => state.providers) as AgentVariantProvider[];
   const {
     selectedAgentName,
     getAgentByName,
@@ -248,6 +285,14 @@ export const AgentsPage: React.FC = () => {
 
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory ?? null);
   const [toolIds, setToolIds] = React.useState<string[]>([]);
+  const variantOptions = React.useMemo(() => getVariantOptionsForModel(providers, model), [model, providers]);
+  const hasVariantOptions = variantOptions.length > 0;
+  const selectedVariantValue = React.useMemo(() => {
+    if (!variant || !variantOptions.includes(variant)) {
+      return '__default';
+    }
+    return variant;
+  }, [variant, variantOptions]);
 
   const permissionsBySession = useDirectorySync((state) => state.permission);
 
@@ -471,7 +516,7 @@ export const AgentsPage: React.FC = () => {
       const descriptionValue = agentDraft.description || '';
       const modeValue = agentDraft.mode || 'subagent';
       const modelValue = agentDraft.model || '';
-      const variantValue = agentDraft.variant || '';
+      const variantValue = normalizeVariantForModel(providers, modelValue, agentDraft.variant || '');
       const temperatureValue = agentDraft.temperature;
       const topPValue = agentDraft.top_p;
       const promptValue = agentDraft.prompt || '';
@@ -511,7 +556,7 @@ export const AgentsPage: React.FC = () => {
       const modelValue = selectedAgent.model?.providerID && selectedAgent.model?.modelID
         ? `${selectedAgent.model.providerID}/${selectedAgent.model.modelID}`
         : '';
-      const variantValue = selectedAgent.variant || '';
+      const variantValue = normalizeVariantForModel(providers, modelValue, selectedAgent.variant || '');
       const temperatureValue = selectedAgent.temperature;
       const topPValue = selectedAgent.topP;
       const promptValue = selectedAgent.prompt || '';
@@ -543,7 +588,19 @@ export const AgentsPage: React.FC = () => {
         permissionRules: permissionState.rules,
       };
     }
-  }, [agentDraft, isNewAgent, selectedAgent, selectedAgentName]);
+  }, [agentDraft, isNewAgent, providers, selectedAgent, selectedAgentName]);
+
+  React.useEffect(() => {
+    if (!variant) {
+      return;
+    }
+
+    if (variantOptions.includes(variant)) {
+      return;
+    }
+
+    setVariant('');
+  }, [variant, variantOptions]);
 
   const isDirty = React.useMemo(() => {
     const initial = initialStateRef.current;
@@ -788,6 +845,7 @@ export const AgentsPage: React.FC = () => {
                     } else {
                       setModel('');
                     }
+                    setVariant('');
                   }}
                 />
               </div>
@@ -808,18 +866,24 @@ export const AgentsPage: React.FC = () => {
                 </div>
                 <span className="typography-meta text-muted-foreground">{t('settings.agents.page.field.variantHint')}</span>
               </div>
-              <div className={cn("flex items-center gap-2", isMobile ? "w-full" : "w-fit")}>
-                <Input
-                  value={variant}
-                  onChange={(e) => setVariant(e.target.value)}
-                  placeholder={t('settings.agents.page.field.variantPlaceholder')}
-                  className="w-40"
-                />
-                {variant && (
-                  <Button size="sm" variant="ghost" onClick={() => setVariant('')}>
-                    {t('settings.common.actions.clear')}
-                  </Button>
-                )}
+              <div className={cn('flex items-center gap-2', isMobile ? 'w-full' : 'w-fit')}>
+                <Select
+                  value={selectedVariantValue}
+                  disabled={!model || !hasVariantOptions}
+                  onValueChange={(value) => setVariant(value === '__default' ? '' : value)}
+                >
+                  <SelectTrigger className={cn('max-w-full', isMobile ? 'w-full' : 'w-fit min-w-[10rem]')}>
+                    <SelectValue placeholder={t('settings.agents.page.field.variantPlaceholder')}>
+                      {(value) => value === '__default' ? t('chat.modelControls.default') : value}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__default">{t('chat.modelControls.default')}</SelectItem>
+                    {variantOptions.map((variantOption) => (
+                      <SelectItem key={variantOption} value={variantOption}>{variantOption}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
 
