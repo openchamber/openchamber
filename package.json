@@ -131,7 +131,7 @@
   "devDependencies": {
     "@eslint/js": "^9.33.0",
     "@tailwindcss/postcss": "^4.0.0",
-    "@types/dom-speech-recognition": "^0.0.11",
+    "@types/dom-speech-recognition": "^0.0.12",
     "@types/node": "^24.3.1",
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
@@ -149,7 +149,7 @@
     "nodemon": "^3.1.7",
     "patch-package": "^8.0.0",
     "@remixicon/react": "^4.7.0",
-    "sharp": "^0.34.5",
+    "sharp": "^0.35.0",
     "tailwindcss": "^4.0.0",
     "tsx": "^4.20.6",
     "tw-animate-css": "^1.3.8",
