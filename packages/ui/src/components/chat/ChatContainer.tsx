@@ -210,9 +210,8 @@ const ChatViewport = React.memo(({
             <div className="absolute inset-0">
                 <ScrollShadow
                     className="absolute inset-0 overflow-y-auto overflow-x-hidden z-0 chat-scroll overlay-scrollbar-target"
-                    style={isSwitchingSession ? { visibility: 'hidden' } : undefined}
+                    style={isSwitchingSession ? { visibility: 'hidden' as const, ...CHAT_SCROLL_STYLE } : CHAT_SCROLL_STYLE}
                     ref={scrollRef}
-                    style={CHAT_SCROLL_STYLE}
                     observeMutations={false}
                     hideTopShadow={isMobile && stickyUserHeader}
                     tabIndex={0}
