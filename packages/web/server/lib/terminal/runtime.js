@@ -30,41 +30,59 @@ export function createTerminalRuntime({
   TERMINAL_INPUT_WS_REBIND_WINDOW_MS,
   TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW,
 }) {
-  let ptyProviderPromise = null;
-  const getPtyProvider = async () => {
-    if (ptyProviderPromise) {
-      return ptyProviderPromise;
+  const useBunTerminalPty = String(process.env.USE_BUN_TERMINAL_PTY || '').trim().toLowerCase() === 'true';
+  let ptyProvidersPromise = null;
+  const getPtyProviders = async () => {
+    if (ptyProvidersPromise) {
+      return ptyProvidersPromise;
     }
 
-    ptyProviderPromise = (async () => {
+    ptyProvidersPromise = (async () => {
       const isBunRuntime = typeof globalThis.Bun !== 'undefined';
+      const providers = [];
+      const loadErrors = [];
+
+      if (useBunTerminalPty && isBunRuntime && typeof Bun.Terminal !== 'undefined') {
+        try {
+          const bunTerminal = await import('./bun-terminal-pty.js');
+          providers.push({ spawn: bunTerminal.spawn, backend: 'bun-terminal' });
+        } catch (error) {
+          loadErrors.push(`Bun.Terminal adapter: ${error && error.message ? error.message : error}`);
+        }
+      }
 
       if (isBunRuntime) {
         try {
           const bunPty = await import('bun-pty');
-          console.log('Using bun-pty for terminal sessions');
-          return { spawn: bunPty.spawn, backend: 'bun-pty' };
+          providers.push({ spawn: bunPty.spawn, backend: 'bun-pty' });
         } catch (error) {
-          console.warn('bun-pty unavailable, falling back to node-pty');
+          loadErrors.push(`bun-pty: ${error && error.message ? error.message : error}`);
         }
       }
 
       try {
         const nodePty = await import('node-pty');
-        console.log('Using node-pty for terminal sessions');
-        return { spawn: nodePty.spawn, backend: 'node-pty' };
+        providers.push({ spawn: nodePty.spawn, backend: 'node-pty' });
       } catch (error) {
-        console.error('Failed to load node-pty:', error && error.message ? error.message : error);
-        if (isBunRuntime) {
-          throw new Error('No PTY backend available. Install bun-pty or node-pty.');
-        }
-        throw new Error('node-pty is not available. Run: npm rebuild node-pty (or install Bun for bun-pty)');
+        loadErrors.push(`node-pty: ${error && error.message ? error.message : error}`);
       }
+
+      if (providers.length > 0) {
+        return providers;
+      }
+
+      if (isBunRuntime) {
+        throw new Error(`No PTY backend available. ${loadErrors.join(' | ') || 'Install bun-pty or node-pty.'}`);
+      }
+
+      throw new Error(
+        `node-pty is not available. ${loadErrors.join(' | ') || 'Run: npm rebuild node-pty (or install Bun for bun-pty)'}`
+      );
     })();
 
-    return ptyProviderPromise;
+    return ptyProvidersPromise;
   };
-
+  
   const getTerminalShellCandidates = () => {
     if (process.platform === 'win32') {
       const windowsCandidates = [
@@ -124,44 +142,52 @@ export function createTerminalRuntime({
   const utf8LocaleFallback = process.platform === 'darwin' ? 'en_US.UTF-8' : 'C.UTF-8';
   const lcCtypeFallback = process.platform === 'darwin' ? 'UTF-8' : 'C.UTF-8';
 
-  const spawnTerminalPtyWithFallback = (pty, { cols, rows, cwd, env }) => {
+  const spawnTerminalPtyWithFallback = async ({ cols, rows, cwd, env }) => {
     const shellCandidates = getTerminalShellCandidates();
     if (shellCandidates.length === 0) {
       throw new Error('No executable shell found for terminal session');
     }
 
+    const ptyProviders = await getPtyProviders();
     let lastError = null;
-    for (const shell of shellCandidates) {
-      try {
-        const ptyOptions = {
-          name: 'xterm-256color',
-          cols: cols || 80,
-          rows: rows || 24,
-          cwd,
-          env: {
-            ...env,
-            TERM: 'xterm-256color',
-            COLORTERM: 'truecolor',
-            LANG: env.LANG || process.env.LANG || utf8LocaleFallback,
-            LC_CTYPE: env.LC_CTYPE || process.env.LC_CTYPE || lcCtypeFallback,
-          },
-        };
+    for (const pty of ptyProviders) {
+      for (const shell of shellCandidates) {
+        try {
+          const ptyOptions = {
+            name: 'xterm-256color',
+            cols: cols || 80,
+            rows: rows || 24,
+            cwd,
+            env: {
+              ...env,
+              TERM: 'xterm-256color',
+              COLORTERM: 'truecolor',
+              LANG: env.LANG || process.env.LANG || utf8LocaleFallback,
+              LC_CTYPE: env.LC_CTYPE || process.env.LC_CTYPE || lcCtypeFallback,
+            },
+          };
 
-        if (process.platform === 'win32') {
-          ptyOptions.useConpty = true;
+          if (process.platform === 'win32') {
+            ptyOptions.useConpty = true;
+          }
+
+          const ptyProcess = pty.spawn(shell, [], ptyOptions);
+          console.log(`Using ${pty.backend} for terminal sessions`);
+          return { ptyProcess, shell, backend: pty.backend };
+        } catch (error) {
+          lastError = error;
+          console.warn(
+            `Failed to spawn PTY using backend ${pty.backend} and shell ${shell}:`,
+            error && error.message ? error.message : error
+          );
         }
-
-        const ptyProcess = pty.spawn(shell, [], ptyOptions);
-
-        return { ptyProcess, shell };
-      } catch (error) {
-        lastError = error;
-        console.warn(`Failed to spawn PTY using shell ${shell}:`, error && error.message ? error.message : error);
       }
     }
 
     const baseMessage = lastError && lastError.message ? lastError.message : 'PTY spawn failed';
-    throw new Error(`Failed to spawn terminal PTY with available shells (${shellCandidates.join(', ')}): ${baseMessage}`);
+    throw new Error(
+      `Failed to spawn terminal PTY with available backends and shells (${shellCandidates.join(', ')}): ${baseMessage}`
+    );
   };
 
   const terminalSessions = new Map();
@@ -525,8 +551,7 @@ export function createTerminalRuntime({
       const envPath = buildAugmentedPath();
       const resolvedEnv = sanitizeTerminalEnv({ ...process.env, PATH: envPath });
 
-      const pty = await getPtyProvider();
-      const { ptyProcess, shell } = spawnTerminalPtyWithFallback(pty, {
+      const { ptyProcess, shell, backend } = await spawnTerminalPtyWithFallback({
         cols,
         rows,
         cwd,
@@ -535,7 +560,7 @@ export function createTerminalRuntime({
 
       const session = {
         ptyProcess,
-        ptyBackend: pty.backend,
+        ptyBackend: backend,
         cwd,
         lastActivity: Date.now(),
         clients: new Set(),
@@ -750,8 +775,7 @@ export function createTerminalRuntime({
       const envPath = buildAugmentedPath();
       const resolvedEnv = sanitizeTerminalEnv({ ...process.env, PATH: envPath });
 
-      const pty = await getPtyProvider();
-      const { ptyProcess, shell } = spawnTerminalPtyWithFallback(pty, {
+      const { ptyProcess, shell, backend } = await spawnTerminalPtyWithFallback({
         cols,
         rows,
         cwd,
@@ -760,7 +784,7 @@ export function createTerminalRuntime({
 
       const session = {
         ptyProcess,
-        ptyBackend: pty.backend,
+        ptyBackend: backend,
         cwd,
         lastActivity: Date.now(),
         clients: new Set(),
