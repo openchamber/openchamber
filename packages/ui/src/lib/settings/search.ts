@@ -66,6 +66,22 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => ctx.isDesktopLocalOrigin,
   },
   {
+    id: 'pet.enabled',
+    page: 'pet',
+    titleKey: 'settings.openchamber.pet.enable.label',
+    descriptionKey: 'settings.openchamber.pet.enable.hint',
+    keywords: ['pet', 'codex', 'mascot', 'companion', 'floating', 'overlay'],
+    isAvailable: (ctx) => ctx.isDesktopLocalOrigin,
+  },
+  {
+    id: 'pet.select',
+    page: 'pet',
+    titleKey: 'settings.openchamber.pet.select.label',
+    descriptionKey: 'settings.openchamber.pet.section',
+    keywords: ['pet', 'codex', 'mascot', 'companion', 'import', 'spritesheet'],
+    isAvailable: (ctx) => ctx.isDesktopLocalOrigin,
+  },
+  {
     id: 'appearance.pwa-install-name',
     page: 'appearance',
     titleKey: 'settings.openchamber.visual.field.installAppName',

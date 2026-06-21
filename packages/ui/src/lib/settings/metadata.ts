@@ -15,6 +15,7 @@ export type SettingsPageSlug =
   | 'skills.catalog'
   | 'git'
   | 'appearance'
+  | 'pet'
   | 'chat'
   | 'shortcuts'
   | 'sessions'
@@ -164,6 +165,14 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     group: 'appearance',
     kind: 'single',
     keywords: ['theme', 'font', 'spacing', 'padding', 'corner radius', 'radius', 'input bar', 'keyboard', 'viewport', 'mobile', 'terminal', 'pwa', 'install name', 'app shortcuts'],
+  },
+  {
+    slug: 'pet',
+    title: 'Desktop Pet',
+    group: 'appearance',
+    kind: 'single',
+    keywords: ['pet', 'codex', 'mascot', 'companion', 'floating', 'overlay', 'avatar', 'sprite'],
+    isAvailable: (ctx) => ctx.isDesktop,
   },
   {
     slug: 'chat',
