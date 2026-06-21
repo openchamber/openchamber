@@ -158,6 +158,7 @@ type ChatViewportProps = {
     sessionQuestions: QuestionRequest[];
     sessionPermissions: PermissionRequest[];
     isProgrammaticFollowActive: boolean;
+    isSwitchingSession: boolean;
 };
 
 const ChatViewport = React.memo(({
@@ -182,6 +183,7 @@ const ChatViewport = React.memo(({
     sessionQuestions,
     sessionPermissions,
     isProgrammaticFollowActive,
+    isSwitchingSession,
 }: ChatViewportProps) => {
     const focusScrollContainer = React.useCallback((event: React.MouseEvent<HTMLElement>) => {
         if (event.defaultPrevented || shouldIgnoreChatNavigationTarget(event.target)) {
@@ -208,6 +210,7 @@ const ChatViewport = React.memo(({
             <div className="absolute inset-0">
                 <ScrollShadow
                     className="absolute inset-0 overflow-y-auto overflow-x-hidden z-0 chat-scroll overlay-scrollbar-target"
+                    style={isSwitchingSession ? { visibility: 'hidden' } : undefined}
                     ref={scrollRef}
                     style={CHAT_SCROLL_STYLE}
                     observeMutations={false}
@@ -574,6 +577,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         isPinned,
         isFollowingProgrammatically,
         showScrollButton,
+        isSwitchingSession,
     } = useChatAutoFollow({
         currentSessionId,
         sessionMessageCount,
@@ -937,6 +941,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 sessionQuestions={sessionQuestions}
                 sessionPermissions={sessionPermissions}
                 isProgrammaticFollowActive={isFollowingProgrammatically}
+                isSwitchingSession={isSwitchingSession}
             />
 
             <div

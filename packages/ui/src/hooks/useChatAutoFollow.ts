@@ -39,6 +39,7 @@ export interface UseChatAutoFollowResult {
     releaseAutoFollow: () => void;
     saveSnapshotNow: () => void;
     restoreSnapshot: () => Promise<boolean>;
+    isSwitchingSession: boolean;
 }
 
 const BOTTOM_SPACER_DESKTOP_VH = 0.10;
@@ -120,6 +121,7 @@ export const useChatAutoFollow = ({
     const [isOverflowing, setIsOverflowing] = React.useState(false);
     const [showScrollButton, setShowScrollButton] = React.useState(false);
     const [isFollowingProgrammatically, setIsFollowingProgrammatically] = React.useState(false);
+    const [isSwitchingSession, setIsSwitchingSession] = React.useState(false);
 
     const stateRef = React.useRef<AutoFollowState>('following');
     const sessionMessageCountRef = React.useRef(sessionMessageCount);
@@ -135,6 +137,7 @@ export const useChatAutoFollow = ({
     if (currentSessionIdRef.current !== currentSessionId) {
         currentSessionIdRef.current = currentSessionId;
         pendingInitialRestoreRef.current = currentSessionId;
+        setIsSwitchingSession(true);
     }
 
     const lastSessionIdRef = React.useRef<string | null>(null);
@@ -437,7 +440,13 @@ export const useChatAutoFollow = ({
         if (pendingInitialRestoreRef.current && pendingInitialRestoreRef.current === currentSessionId) {
             void restoreSnapshot();
         }
-    }, [containerEl, currentSessionId, restoreSnapshot]);
+        // Clear the switching flag AFTER restoreSnapshot writes scrollTop.
+        // The browser paints AFTER all useLayoutEffects, so by the time it
+        // paints, scrollTop is already correct and visibility:hidden is removed.
+        if (isSwitchingSession) {
+            requestAnimationFrame(() => setIsSwitchingSession(false));
+        }
+    }, [containerEl, currentSessionId, restoreSnapshot, isSwitchingSession]);
 
     const updateOverflowAndButton = React.useCallback(() => {
         const container = scrollRef.current;
@@ -737,6 +746,7 @@ export const useChatAutoFollow = ({
         isOverflowing,
         isFollowingProgrammatically,
         showScrollButton,
+        isSwitchingSession,
         notifyContentChange,
         getAnimationHandlers,
         goToBottom,
