@@ -125,7 +125,15 @@ export const useChatAutoFollow = ({
     const sessionMessageCountRef = React.useRef(sessionMessageCount);
     sessionMessageCountRef.current = sessionMessageCount;
     const currentSessionIdRef = React.useRef(currentSessionId);
-    currentSessionIdRef.current = currentSessionId;
+    // Sync refs during the render phase (before commit) so that the scroll-clamp
+    // event that fires synchronously during commit sees the correct session id
+    // and the hydration flag. Only flag pendingInitialRestoreRef when the session
+    // actually changed — not on every render — otherwise the release/re-pin guards
+    // are always active and block the user's scroll events during normal operation.
+    if (currentSessionIdRef.current !== currentSessionId) {
+        currentSessionIdRef.current = currentSessionId;
+        pendingInitialRestoreRef.current = currentSessionId;
+    }
 
     const lastSessionIdRef = React.useRef<string | null>(null);
     const programmaticWriteUntilRef = React.useRef(0);
@@ -476,7 +484,13 @@ export const useChatAutoFollow = ({
         // programmatic-window guard. If we gate this on isInProgrammaticWindow(), a
         // follow-loop LERP that fires within 200ms of a user scroll-up can swallow
         // the release signal and the loop keeps dragging scrollTop back toward target.
-        if (currentTop < previousTop && stateRef.current === 'following') {
+        //
+        // BUT suppress this during initial session hydration: the synchronous scrollTop
+        // clamp that fires when the new session's container is smaller than the old one
+        // triggers a scroll event with currentTop < previousTop, which this check would
+        // interpret as 'user scrolled up' — killing the follow loop before it starts.
+        const isInitialHydration = pendingInitialRestoreRef.current === currentSessionIdRef.current;
+        if (!isInitialHydration && currentTop < previousTop && stateRef.current === 'following') {
             stopFollowLoop();
             stopSettleBurst();
             lastUserReleaseAtRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now();
@@ -494,7 +508,7 @@ export const useChatAutoFollow = ({
         // user is 'near bottom' but the container is still growing. Without this guard,
         // the re-pin would re-engage the follow loop and LERP the scroll toward the
         // growing target, producing the visible 'scroll jumps down' effect.
-        const isInitialHydration = pendingInitialRestoreRef.current === currentSessionIdRef.current;
+        isInitialHydration = pendingInitialRestoreRef.current === currentSessionIdRef.current;
         if (!isInitialHydration && stateRef.current === 'released' && isNearBottom(container, isMobile) && !inGrace) {
             setStateValue('following');
             startFollowLoop();
