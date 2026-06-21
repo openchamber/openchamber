@@ -480,26 +480,24 @@ const MobileInstancesSurface: React.FC<{
   const [isScanning, setIsScanning] = React.useState(false);
   const qrScanSupported = React.useMemo(() => isQrScanSupported(), []);
 
-  React.useEffect(() => {
-    if (!editingConnection) {
-      setUrl('');
-      setLabel('');
-      setClientToken('');
-      setError(null);
-      return;
-    }
-    setUrl(editingConnection.url);
-    setLabel(editingConnection.label);
-    setClientToken(editingConnection.clientToken || '');
+  // Populate/clear the form imperatively (on edit tap / cancel / save) rather than via
+  // an effect keyed on the derived connection object. With an effect, any churn of the
+  // connections list re-fires it and overwrites what the user is typing — the keyboard
+  // "resets" mid-edit. Imperative population is immune to that.
+  const resetForm = React.useCallback(() => {
+    setEditingId(null);
+    setUrl('');
+    setLabel('');
+    setClientToken('');
     setError(null);
-  }, [editingConnection, setError]);
+  }, [setError]);
 
   const saveInstance = React.useCallback((event: React.FormEvent) => {
     event.preventDefault();
     void saveConnection({ url, label, clientToken }).then((saved) => {
-      if (saved) setEditingId(null);
+      if (saved) resetForm();
     });
-  }, [clientToken, label, saveConnection, url]);
+  }, [clientToken, label, resetForm, saveConnection, url]);
 
   // Scan a pairing QR into the add/edit form fields (does not change edit mode, so
   // the form-reset effect doesn't wipe the scanned values). The user reviews + saves.
@@ -554,13 +552,13 @@ const MobileInstancesSurface: React.FC<{
 
   const confirmDelete = React.useCallback((id: string) => {
     setConfirmingDeleteId(null);
-    if (editingId === id) setEditingId(null);
+    if (editingId === id) resetForm();
     void removeConnection(id).then((removed) => {
       if (removed && isSameConnectionUrl(removed.url, getRuntimeApiBaseUrl())) {
         onActiveConnectionDeleted();
       }
     });
-  }, [editingId, onActiveConnectionDeleted, removeConnection]);
+  }, [editingId, onActiveConnectionDeleted, removeConnection, resetForm]);
 
   const inputClass = 'h-12 w-full rounded-[16px] border border-border/70 bg-surface-elevated px-4 text-[16px] text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20';
 
@@ -648,7 +646,13 @@ const MobileInstancesSurface: React.FC<{
                           type="button"
                           aria-label={t('mobile.instances.edit')}
                           className="flex size-9 items-center justify-center rounded-full text-muted-foreground transition-colors active:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                          onClick={() => setEditingId(connection.id)}
+                          onClick={() => {
+                            setEditingId(connection.id);
+                            setUrl(connection.url);
+                            setLabel(connection.label);
+                            setClientToken(connection.clientToken || '');
+                            setError(null);
+                          }}
                           style={{ touchAction: 'manipulation' }}
                         >
                           <Icon name="edit" className="size-[18px]" />
@@ -682,7 +686,7 @@ const MobileInstancesSurface: React.FC<{
                 {editingConnection ? t('mobile.instances.editTitle') : t('mobile.instances.addTitle')}
               </h3>
               {editingConnection ? (
-                <Button type="button" variant="ghost" size="xs" onClick={() => setEditingId(null)}>
+                <Button type="button" variant="ghost" size="xs" onClick={resetForm}>
                   {t('mobile.instances.cancelEdit')}
                 </Button>
               ) : null}
@@ -1776,6 +1780,7 @@ export function MobileApp({ apis }: MobileAppProps) {
   const initializeApp = useConfigStore((state) => state.initializeApp);
   const isInitialized = useConfigStore((state) => state.isInitialized);
   const isConnected = useConfigStore((state) => state.isConnected);
+  const connectionPhase = useConfigStore((state) => state.connectionPhase);
   const providersCount = useConfigStore((state) => state.providers.length);
   const agentsCount = useConfigStore((state) => state.agents.length);
   const loadProviders = useConfigStore((state) => state.loadProviders);
@@ -1927,7 +1932,14 @@ export function MobileApp({ apis }: MobileAppProps) {
   useWindowTitle();
   useRouter();
 
-  if (!isConnected && isNativeMobileApp) {
+  // `isConnected` is a LIVE flag that flips false on every transient SSE/WS drop and
+  // back true on reconnect. We must NOT blank the whole app to a loader on those —
+  // only on the initial connect / instance switch (connectionPhase 'connecting').
+  // While 'reconnecting' (we were connected before), keep MobileShell mounted so the
+  // UI doesn't reload on every network blip.
+  const isReconnecting = !isConnected && connectionPhase === 'reconnecting';
+
+  if (!isConnected && !isReconnecting && isNativeMobileApp) {
     // A runtime endpoint is already selected (first connect or switching instances):
     // show a loader while it re-bootstraps instead of flashing the onboarding screen.
     if (getRuntimeApiBaseUrl()) {
@@ -1960,7 +1972,7 @@ export function MobileApp({ apis }: MobileAppProps) {
     return <MobileConnectionWelcome onConnected={() => setConnectionEpoch((value) => value + 1)} />;
   }
 
-  if (!isConnected) {
+  if (!isConnected && !isReconnecting) {
     return (
       <main className="flex min-h-dvh items-center justify-center bg-background px-6 text-center text-foreground">
         <div className="max-w-sm space-y-3">
