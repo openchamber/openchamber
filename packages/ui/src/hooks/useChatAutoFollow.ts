@@ -347,6 +347,11 @@ export const useChatAutoFollow = ({
     const restoreSnapshot = React.useCallback(async (): Promise<boolean> => {
         const sessionId = currentSessionIdRef.current;
         if (!sessionId) return false;
+        // Reset the scroll-tracker so the synchronous scroll-clamp event
+        // that fires when the new session's container is smaller doesn't
+        // trigger the release check (currentTop < previousTop) and stop
+        // the follow loop before it even starts.
+        lastScrollTopRef.current = 0;
 
         const container = scrollRef.current;
         if (!container) {
@@ -375,16 +380,17 @@ export const useChatAutoFollow = ({
         }
 
         if (!saved || isAtBottomSnapshot(saved, isMobile)) {
-            // Set state to 'released' (NOT 'following'). The container is still being
-            // hydrated on session switch and scrollHeight will grow as more messages
-            // load; if state were 'following', the ResizeObserver would re-engage the
-            // follow loop and LERP the scroll toward a growing target — visible as a
-            // 'scroll jumps down' effect. The follow loop will start naturally when
-            // the user sends a message and sessionIsWorking becomes true.
-            setStateValue('released');
+            // 'following' state + follow loop (LERP) tracks the bottom as it
+            // grows from progressive content loading. No settleBurst here — it
+            // would yank scrollTop = target every rAF as scrollHeight grows,
+            // causing a visible 'scroll jumps down' effect. The follow loop's
+            // LERP is smooth and the user can always release by scrolling up
+            // (the upward-scroll check runs before the programmatic guard).
+            setStateValue('following');
             lastUserReleaseAtRef.current = 0;
             const target = Math.max(0, container.scrollHeight - container.clientHeight);
             writeScrollTopInstant(target);
+            startFollowLoop();
             return false;
         }
 
