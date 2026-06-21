@@ -3,6 +3,15 @@ import { settingsDict } from './uk.settings';
 
 export const dict: Record<I18nKey, string> = {
   ...settingsDict,
+  "pet.resize.aria": "Змінити розмір улюбленця",
+  "pet.bubble.working": "Працюю…",
+  "pet.bubble.review": "Готово до перегляду",
+  "pet.bubble.failed": "Щось пішло не так",
+  "pet.bubble.waitingQuestion": "Очікує вашої відповіді",
+  "pet.bubble.minimizeAria": "Згорнути",
+  "pet.bubble.expandAria": "Показати статус",
+  "pet.action.allow": "Дозволити",
+  "pet.action.deny": "Відхилити",
   "common.loading": "Завантаження...",
   "common.unavailable": "Недоступно",
   "common.language.english": "англійська",

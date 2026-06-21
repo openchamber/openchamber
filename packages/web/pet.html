@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <title>OpenChamber Pet</title>
+    <style>
+      /* The pet window is a transparent overlay — only the sprite (and its
+         status bubble) should paint. Force transparency even though index.css
+         paints the themed app background on <body>. overflow:hidden keeps the
+         sprite from ever producing scrollbars in the small fixed window. */
+      html,
+      body,
+      #root {
+        margin: 0;
+        height: 100%;
+        background: transparent !important;
+        overflow: hidden;
+      }
+      body {
+        -webkit-user-select: none;
+        user-select: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/pet-main.tsx"></script>
+  </body>
+</html>

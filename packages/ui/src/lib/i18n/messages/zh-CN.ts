@@ -3,6 +3,15 @@ import { settingsDict } from './zh-CN.settings';
 
 export const dict: Record<I18nKey, string> = {
   ...settingsDict,
+  'pet.resize.aria': '调整宠物大小',
+  'pet.bubble.working': '处理中…',
+  'pet.bubble.review': '可以查看了',
+  'pet.bubble.failed': '出了点问题',
+  'pet.bubble.waitingQuestion': '等待你的回答',
+  'pet.bubble.minimizeAria': '最小化',
+  'pet.bubble.expandAria': '显示状态',
+  'pet.action.allow': '允许',
+  'pet.action.deny': '拒绝',
   'common.loading': '加载中...',
   'common.unavailable': '不可用',
   'common.language.english': 'English',

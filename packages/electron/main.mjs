@@ -12,6 +12,7 @@ import { promisify } from 'node:util';
 import updaterPkg from 'electron-updater';
 import { ElectronSshManager } from './ssh-manager.mjs';
 import { createTrayController } from './tray.mjs';
+import { listPets, getPet, createPet, editPet, deletePet, loadSpritesheetPreview } from './pets.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
 import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
 
@@ -149,6 +150,20 @@ const MINI_CHAT_WINDOW_WIDTH = 520;
 const MINI_CHAT_WINDOW_HEIGHT = 760;
 const MINI_CHAT_MIN_WINDOW_WIDTH = 360;
 const MINI_CHAT_MIN_WINDOW_HEIGHT = 480;
+// Floating desktop pet overlay. Transparent/frameless/always-on-top; sized to
+// fit the 192x208 sprite (rendered at <1x) plus a status bubble above it.
+const PET_WINDOW_WIDTH = 300;
+const PET_WINDOW_HEIGHT = 320;
+// The overlay is user-resizable in WIDTH (hover grab in the renderer relays a
+// new width, which drives the sprite scale); HEIGHT is content-fit — the
+// renderer relays the measured bubble+sprite height so there is no dead space
+// above the pet. These bound both. Width must mirror MIN/MAX_WINDOW.width in
+// ElectronPetApp.tsx; the min height is low so content-fit can hug a small/idle
+// pet without reintroducing dead space.
+const PET_WINDOW_MIN_WIDTH = 180;
+const PET_WINDOW_MIN_HEIGHT = 90;
+const PET_WINDOW_MAX_WIDTH = 720;
+const PET_WINDOW_MAX_HEIGHT = 760;
 const MAX_CAPTURE_PAGE_RECT_AREA = 4_000_000;
 const LOCAL_HOST_ID = 'local';
 const LOCAL_DESKTOP_CLIENT_KIND = 'desktop-local';
@@ -187,6 +202,11 @@ const state = {
   windowGeometryRevisions: new Map(),
   windowGeometryTimers: new Map(),
   miniChatWindowsBySession: new Map(),
+  // Single floating pet overlay window (desktop-only companion).
+  petWindow: null,
+  // Anchor captured at drag start ({ cursor, win }) so drag-move can reposition
+  // the overlay from the live cursor without per-frame coordinate drift.
+  petDragAnchor: null,
   sshStatuses: new Map(),
   sshLogs: new Map(),
   trayController: null,
@@ -385,6 +405,10 @@ const settingsFilePath = () => {
   }
   return path.join(os.homedir(), '.config', 'openchamber', 'settings.json');
 };
+
+// Pets live next to settings.json under the OpenChamber config dir:
+//   ~/.config/openchamber/pets/<slug>/{ pet.json, spritesheet.webp }
+const petsDirPath = () => path.join(path.dirname(settingsFilePath()), 'pets');
 
 const sshManager = new ElectronSshManager({
   settingsFilePath: settingsFilePath(),
@@ -2020,7 +2044,10 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   browserWindow.on('close', (event) => {
     if (process.platform === 'darwin' && !state.quitRequested) {
       const remainingVisible = BrowserWindow.getAllWindows().filter(
-        (window) => !window.isDestroyed() && window.isVisible(),
+        // The floating pet is a companion overlay, not a "real" window. Exclude
+        // it so closing the last real window still hides (not destroys) the main
+        // window — keeping the main renderer alive to feed the pet's live state.
+        (window) => !window.isDestroyed() && window.isVisible() && !window.__ocPet,
       ).length;
 
       if (remainingVisible <= 1) {
@@ -2390,6 +2417,242 @@ const resolveMiniChatRuntimeConfig = (browserWindow, args = {}) => {
     apiBaseUrl: targetUrl,
     clientToken: providedToken || windowToken || storedToken || '',
   };
+};
+
+// Floating pet overlay (desktop-only): a thin transparent always-on-top window
+// fed by the main renderer over BroadcastChannel. See pets.mjs + petContract.ts.
+
+const readPetSettings = () => {
+  const root = readSettingsRoot();
+  const pet = root && typeof root.desktopPet === 'object' && root.desktopPet ? root.desktopPet : {};
+  const clampSize = (value, fallback, min, max) => {
+    const numeric = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : fallback;
+    return Math.max(min, Math.min(max, numeric));
+  };
+  return {
+    enabled: pet.enabled === true,
+    selectedSlug: typeof pet.selectedSlug === 'string' ? pet.selectedSlug : '',
+    width: clampSize(pet.width, PET_WINDOW_WIDTH, PET_WINDOW_MIN_WIDTH, PET_WINDOW_MAX_WIDTH),
+    height: clampSize(pet.height, PET_WINDOW_HEIGHT, PET_WINDOW_MIN_HEIGHT, PET_WINDOW_MAX_HEIGHT),
+  };
+};
+
+const writePetSettings = (patch) => mutateSettingsRoot((root) => {
+  const current = root.desktopPet && typeof root.desktopPet === 'object' ? root.desktopPet : {};
+  root.desktopPet = { ...current, ...patch };
+});
+
+const buildPetUrl = (slug) => {
+  const base = state.localOrigin || state.sidecarUrl;
+  if (!base) {
+    throw new Error('Local UI is not available');
+  }
+  const url = new URL(shouldUsePackagedUi() ? buildPackagedUiUrl('/pet.html') : '/pet.html', base);
+  if (slug) url.searchParams.set('slug', slug);
+  return url.toString();
+};
+
+const isPetWindowAlive = () => Boolean(state.petWindow && !state.petWindow.isDestroyed());
+
+// Mirror the persisted pet state to every renderer so the main window's
+// useDesktopPetStore can gate usePetSync on it (covers the native menu toggle
+// and restore-on-launch paths, where the renderer didn't initiate the change).
+const emitPetState = () => {
+  const pet = readPetSettings();
+  emitToAllWindows('openchamber:pet-window-state', {
+    enabled: pet.enabled,
+    selectedSlug: pet.selectedSlug,
+  });
+};
+
+const createPetWindow = async () => {
+  if (isPetWindowAlive()) {
+    state.petWindow.showInactive();
+    return state.petWindow;
+  }
+
+  const desktopLocalOrigin = state.localOrigin || '';
+  const desktopApiBaseUrl = state.apiBaseUrl || state.localOrigin || state.sidecarUrl || '';
+  const desktopClientToken = state.clientToken || '';
+  const desktopHome = os.homedir() || '';
+  const desktopMacosMajor = String(macosMajorVersion());
+  // Fall back to the first installed pet so any enable path (menu, restore,
+  // Settings) shows a visible sprite rather than an empty transparent window.
+  let selectedSlug = readPetSettings().selectedSlug;
+  if (!selectedSlug) {
+    const available = listPets(petsDirPath());
+    if (available.length > 0) {
+      selectedSlug = available[0].slug;
+      await writePetSettings({ selectedSlug });
+    }
+  }
+
+  const petSize = readPetSettings();
+
+  const browserWindow = new BrowserWindow({
+    title: 'OpenChamber Pet',
+    width: petSize.width,
+    height: petSize.height,
+    minWidth: PET_WINDOW_MIN_WIDTH,
+    minHeight: PET_WINDOW_MIN_HEIGHT,
+    maxWidth: PET_WINDOW_MAX_WIDTH,
+    maxHeight: PET_WINDOW_MAX_HEIGHT,
+    icon: getWindowIconPath(),
+    show: false,
+    // Fully transparent, frameless overlay — only the sprite + bubble paint.
+    transparent: true,
+    backgroundColor: '#00000000',
+    frame: false,
+    hasShadow: false,
+    // User-resizable via the renderer's hover grab (relayed over IPC); the OS
+    // edge handles stay available too. Min/max above bound it.
+    resizable: true,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    roundedCorners: false,
+    // Never take key focus from the user's editor: the overlay is a companion,
+    // not an app window. Clicks (Allow/Deny, drag) still register without focus
+    // via acceptFirstMouse + per-hover setIgnoreMouseEvents (see below). Keeping
+    // it non-focusable is also part of what keeps it out of Mission Control.
+    focusable: false,
+    // First click (e.g. Allow/Deny) should register without a focusing click,
+    // and showing the pet must never steal focus from the user's editor.
+    acceptFirstMouse: true,
+    webPreferences: {
+      additionalArguments: [
+        `--openchamber-local-origin=${desktopLocalOrigin}`,
+        `--openchamber-api-base-url=${desktopApiBaseUrl}`,
+        `--openchamber-client-token=${desktopClientToken}`,
+        `--openchamber-home=${desktopHome}`,
+        `--openchamber-macos-major=${desktopMacosMajor}`,
+      ],
+      preload: isDev ? path.join(__dirname, 'preload.mjs') : path.join(app.getAppPath(), 'preload.mjs'),
+      backgroundThrottling: false,
+      contextIsolation: true,
+      nodeIntegration: false,
+      // sandbox must stay off
+      sandbox: false,
+    },
+  });
+
+  browserWindow.__ocLabel = nextWindowLabel();
+  browserWindow.__ocPet = true;
+  browserWindow.__ocRuntimeConfig = { apiBaseUrl: desktopApiBaseUrl, clientToken: desktopClientToken };
+  browserWindow.__ocInitScript = buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken);
+  state.petWindow = browserWindow;
+
+  browserWindow.setAlwaysOnTop(true, 'floating');
+  if (process.platform === 'darwin') {
+    // Keep the companion visible across Spaces and over fullscreen apps.
+    // skipTransformProcessType avoids flipping the app's activation policy
+    // (which would otherwise briefly steal focus / reshuffle Spaces).
+    browserWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+    // Hide the overlay from Mission Control / Exposé so it doesn't appear as a
+    // separate window tile when the user invokes them (Codex parity).
+    try {
+      browserWindow.setHiddenInMissionControl(true);
+    } catch {
+      // Older Electron without the API: non-fatal, just skip.
+    }
+  }
+
+  browserWindow.on('closed', () => {
+    if (state.petWindow === browserWindow) {
+      state.petWindow = null;
+    }
+    state.petDragAnchor = null;
+  });
+
+  // Click-through by default: the transparent overlay is much larger than the
+  // sprite, so without this the empty area would block the desktop and apps
+  // behind it. `forward: true` still delivers mousemove to the renderer, which
+  // hit-tests the pointer against the pet and toggles interactivity back on via
+  // desktop_pet_set_interactive while hovering it (Codex's avatar-overlay model).
+  browserWindow.webContents.once('did-finish-load', () => {
+    if (!browserWindow.isDestroyed()) browserWindow.setIgnoreMouseEvents(true, { forward: true });
+  });
+
+  // Right-click shows a single "Disable Pet" action instead of the default
+  // editor/inspect menu. electron-context-menu auto-attaches its menu to every
+  // window on `browser-window-created` (fired synchronously inside the
+  // BrowserWindow constructor above), so by now its listener is already on this
+  // webContents — drop it and install ours so the overlay can't expose
+  // inspect-element or image actions. Native menu, so the label stays English
+  // like the tray. Survives same-window navigations (reloadPetWindow).
+  browserWindow.webContents.removeAllListeners('context-menu');
+  browserWindow.webContents.on('context-menu', () => {
+    if (browserWindow.isDestroyed()) return;
+    const menu = Menu.buildFromTemplate([
+      {
+        label: 'Disable Pet',
+        click: () => {
+          void closePetWindow().catch((error) => log.warn('[electron] pet disable failed', error));
+        },
+      },
+    ]);
+    menu.popup({ window: browserWindow });
+  });
+
+  browserWindow.once('ready-to-show', () => {
+    // showInactive: float beside the active app without stealing focus.
+    browserWindow.showInactive();
+  });
+
+  browserWindow.webContents.setWindowOpenHandler(({ url }) => {
+    void shell.openExternal(url).catch(() => {});
+    return { action: 'deny' };
+  });
+  browserWindow.webContents.on('will-navigate', (event, url) => {
+    try {
+      const target = new URL(url);
+      const local = new URL(shouldUsePackagedUi() ? packagedUiOrigin() : (state.localOrigin || state.sidecarUrl || ''));
+      if (target.origin === local.origin) return;
+    } catch {
+    }
+    event.preventDefault();
+    void shell.openExternal(url).catch(() => {});
+  });
+  browserWindow.webContents.on('dom-ready', () => {
+    const initScript = browserWindow.__ocInitScript || state.initScript;
+    if (initScript) {
+      void browserWindow.webContents.executeJavaScript(initScript).catch(() => {});
+    }
+  });
+
+  await navigateWindow(browserWindow, buildPetUrl(selectedSlug));
+  return browserWindow;
+};
+
+// Point the live pet window at a different pet (Settings -> Appearance -> Pets).
+const reloadPetWindow = async (slug) => {
+  if (!isPetWindowAlive()) return;
+  await navigateWindow(state.petWindow, buildPetUrl(slug), { allowAbort: true });
+};
+
+const openPetWindow = async () => {
+  await writePetSettings({ enabled: true });
+  const petWindow = await createPetWindow();
+  emitPetState();
+  return petWindow;
+};
+
+const closePetWindow = async () => {
+  await writePetSettings({ enabled: false });
+  if (isPetWindowAlive()) {
+    state.petWindow.close();
+  }
+  emitPetState();
+};
+
+const togglePetWindow = async () => {
+  if (isPetWindowAlive()) {
+    await closePetWindow();
+    return { open: false };
+  }
+  await openPetWindow();
+  return { open: true };
 };
 
 const resolveInitialUrl = async () => {
@@ -3679,6 +3942,147 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return null;
     }
 
+    case 'desktop_open_pet_window':
+      await openPetWindow();
+      return { open: true };
+
+    case 'desktop_close_pet_window':
+      await closePetWindow();
+      return { open: false };
+
+    case 'desktop_toggle_pet_window':
+      return togglePetWindow();
+
+    case 'desktop_get_pet_window_state': {
+      const pet = readPetSettings();
+      return {
+        enabled: pet.enabled,
+        selectedSlug: pet.selectedSlug,
+      };
+    }
+
+    case 'desktop_set_pet': {
+      const slug = typeof args.slug === 'string' ? args.slug.trim() : '';
+      await writePetSettings({ selectedSlug: slug });
+      await reloadPetWindow(slug);
+      emitPetState();
+      return { selectedSlug: slug };
+    }
+
+    case 'desktop_resize_pet_window': {
+      // Width is the user's size knob (relayed by the hover grab; drives the
+      // sprite scale). Height is content-fit: the renderer relays the measured
+      // bubble+sprite height with anchor:'bottom' so the pet — rendered at the
+      // window's bottom — stays put while the bubble grows/shrinks above it.
+      // Either dimension may be omitted. The shell owns and re-clamps the bounds.
+      if (!isPetWindowAlive()) return null;
+      const win = state.petWindow;
+      const bounds = win.getBounds();
+      const hasWidth = Number.isFinite(Number(args.width));
+      const hasHeight = Number.isFinite(Number(args.height));
+      let nextWidth = bounds.width;
+      let nextHeight = bounds.height;
+      if (hasWidth) nextWidth = Math.max(PET_WINDOW_MIN_WIDTH, Math.min(PET_WINDOW_MAX_WIDTH, Math.round(Number(args.width))));
+      if (hasHeight) nextHeight = Math.max(PET_WINDOW_MIN_HEIGHT, Math.min(PET_WINDOW_MAX_HEIGHT, Math.round(Number(args.height))));
+      if (nextWidth === bounds.width && nextHeight === bounds.height) {
+        return { width: nextWidth, height: nextHeight };
+      }
+      // Bottom-anchor height changes so the character doesn't drift when the
+      // bubble resizes. Skip while the user is dragging (the drag owns position).
+      let nextY = bounds.y;
+      if (args.anchor === 'bottom' && !state.petDragAnchor) {
+        nextY = bounds.y + (bounds.height - nextHeight);
+      }
+      win.setBounds({ x: bounds.x, y: nextY, width: nextWidth, height: nextHeight });
+      // Persist only the user-chosen width; height is content-derived (re-fit on
+      // launch), so writing it on every bubble change would just churn the file.
+      if (hasWidth && nextWidth !== bounds.width) await writePetSettings({ width: nextWidth });
+      return { width: nextWidth, height: nextHeight };
+    }
+
+    case 'desktop_pet_set_interactive': {
+      // Renderer hit-tests the cursor against the pet and flips this: interactive
+      // while hovering it (so clicks/drag land), click-through otherwise (so the
+      // transparent overlay never blocks the desktop). forward:true keeps
+      // mousemove flowing to the renderer even while click-through.
+      if (!isPetWindowAlive()) return null;
+      if (args.interactive === true) {
+        state.petWindow.setIgnoreMouseEvents(false);
+      } else {
+        state.petWindow.setIgnoreMouseEvents(true, { forward: true });
+      }
+      return null;
+    }
+
+    case 'desktop_pet_drag_start': {
+      // Custom drag (the window is frameless + non-focusable, so no titlebar /
+      // app-region drag). Anchor the current cursor + window origin; drag-move
+      // repositions from the live cursor delta. Avoids the transparent-window
+      // repaint flicker that OS window-drag causes on release.
+      if (!isPetWindowAlive()) return null;
+      state.petDragAnchor = {
+        cursor: screen.getCursorScreenPoint(),
+        win: state.petWindow.getPosition(),
+      };
+      return null;
+    }
+
+    case 'desktop_pet_drag_move': {
+      if (!isPetWindowAlive() || !state.petDragAnchor) return null;
+      const current = screen.getCursorScreenPoint();
+      const { cursor, win } = state.petDragAnchor;
+      state.petWindow.setPosition(
+        Math.round(win[0] + (current.x - cursor.x)),
+        Math.round(win[1] + (current.y - cursor.y)),
+        false,
+      );
+      return null;
+    }
+
+    case 'desktop_pet_drag_end':
+      state.petDragAnchor = null;
+      return null;
+
+    case 'desktop_pet_list':
+      // `dir` lets the Settings UI show the custom-pets path and open it via
+      // desktop_open_path, mirroring Codex's "Custom pets / Open folder" footer.
+      return { pets: listPets(petsDirPath()), dir: petsDirPath() };
+
+    case 'desktop_pet_get': {
+      const slug = typeof args.slug === 'string' ? args.slug.trim() : '';
+      return getPet(petsDirPath(), slug);
+    }
+
+    case 'desktop_pet_create': {
+      return createPet(petsDirPath(), {
+        displayName: typeof args.displayName === 'string' ? args.displayName : '',
+        description: typeof args.description === 'string' ? args.description : '',
+        imagePath: typeof args.imagePath === 'string' ? args.imagePath : '',
+      });
+    }
+
+    case 'desktop_pet_edit': {
+      const slug = typeof args.slug === 'string' ? args.slug.trim() : '';
+      return editPet(petsDirPath(), slug, {
+        displayName: typeof args.displayName === 'string' ? args.displayName : '',
+        description: typeof args.description === 'string' ? args.description : '',
+        imagePath: typeof args.imagePath === 'string' ? args.imagePath : '',
+      });
+    }
+
+    case 'desktop_pet_delete': {
+      const slug = typeof args.slug === 'string' ? args.slug.trim() : '';
+      return deletePet(petsDirPath(), slug);
+    }
+
+    case 'desktop_pet_preview_image': {
+      // Inline a chosen spritesheet as a data URL so the Create dialog can show a
+      // live animated preview before the pet is written to disk. Same MIME
+      // allowlist + size cap as getPet; gated to local senders like all pet IPC.
+      const imagePath = typeof args.imagePath === 'string' ? args.imagePath : '';
+      return { dataUrl: loadSpritesheetPreview(imagePath) };
+    }
+
     case 'desktop_set_window_pinned':
       return setMiniChatPinned(browserWindow, args.pinned === true);
 
@@ -3864,6 +4268,7 @@ const buildMacMenu = () => {
         { type: 'separator' },
         { label: 'Toggle Session Sidebar', accelerator: 'Cmd+L', click: () => dispatchAction('toggle-sidebar') },
         { label: 'Toggle Memory Debug', accelerator: 'Cmd+Shift+D', click: () => dispatchAction('toggle-memory-debug') },
+        { label: 'Toggle Pet', click: () => { void togglePetWindow(); } },
         { type: 'separator' },
         { role: 'togglefullscreen' },
       ],
@@ -3965,6 +4370,7 @@ const buildAutoHiddenMenu = () => {
         { type: 'separator' },
         { label: 'Toggle Session Sidebar', accelerator: 'Ctrl+L', click: () => dispatchAction('toggle-sidebar') },
         { label: 'Toggle Memory Debug', accelerator: 'Ctrl+Shift+D', click: () => dispatchAction('toggle-memory-debug') },
+        { label: 'Toggle Pet', click: () => { void togglePetWindow(); } },
         { type: 'separator' },
         { role: 'togglefullscreen' },
       ],
@@ -4460,6 +4866,13 @@ app.whenReady().then(async () => {
 
   const { initialUrl, localOrigin, bootOutcome, apiBaseUrl, clientToken } = await resolveInitialUrl();
   await activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken });
+
+  // Restore the floating pet if it was left enabled last session. Done here (not
+  // in the background-start path) because the pet's live state comes from the
+  // main renderer, which only exists once a window is up.
+  if (readPetSettings().enabled) {
+    void createPetWindow().catch((error) => log.warn('[electron] pet restore failed', error));
+  }
 
   // Notify renderer on OS wake-from-sleep so the SSE event pipeline can
   // reconnect immediately instead of waiting for the heartbeat watchdog.
