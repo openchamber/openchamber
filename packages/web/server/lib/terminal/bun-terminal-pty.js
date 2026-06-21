@@ -105,6 +105,10 @@ export function spawn(file, args, opts = {}) {
         closeTerminal();
       }
     },
+    // Bun.Terminal currently exposes write/resize/close, but not a native
+    // pause/resume hook for PTY output flow control. SSE backpressure in
+    // runtime.js therefore cannot stop output for this backend during the
+    // env-gated rollout path.
     pause() {},
     resume() {},
   };

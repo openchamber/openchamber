@@ -40,14 +40,13 @@ export function createTerminalRuntime({
     ptyProvidersPromise = (async () => {
       const isBunRuntime = typeof globalThis.Bun !== 'undefined';
       const providers = [];
-      const loadErrors = [];
 
       if (useBunTerminalPty && isBunRuntime && typeof Bun.Terminal !== 'undefined') {
         try {
           const bunTerminal = await import('./bun-terminal-pty.js');
           providers.push({ spawn: bunTerminal.spawn, backend: 'bun-terminal' });
         } catch (error) {
-          loadErrors.push(`Bun.Terminal adapter: ${error && error.message ? error.message : error}`);
+          console.warn('Bun.Terminal adapter unavailable, falling back to bun-pty/node-pty:', error);
         }
       }
 
@@ -56,7 +55,7 @@ export function createTerminalRuntime({
           const bunPty = await import('bun-pty');
           providers.push({ spawn: bunPty.spawn, backend: 'bun-pty' });
         } catch (error) {
-          loadErrors.push(`bun-pty: ${error && error.message ? error.message : error}`);
+          console.warn('bun-pty unavailable, falling back to node-pty:', error);
         }
       }
 
@@ -64,7 +63,7 @@ export function createTerminalRuntime({
         const nodePty = await import('node-pty');
         providers.push({ spawn: nodePty.spawn, backend: 'node-pty' });
       } catch (error) {
-        loadErrors.push(`node-pty: ${error && error.message ? error.message : error}`);
+        console.error('Failed to load node-pty:', error);
       }
 
       if (providers.length > 0) {
@@ -72,17 +71,15 @@ export function createTerminalRuntime({
       }
 
       if (isBunRuntime) {
-        throw new Error(`No PTY backend available. ${loadErrors.join(' | ') || 'Install bun-pty or node-pty.'}`);
+        throw new Error('No PTY backend available. Install bun-pty or node-pty.');
       }
 
-      throw new Error(
-        `node-pty is not available. ${loadErrors.join(' | ') || 'Run: npm rebuild node-pty (or install Bun for bun-pty)'}`
-      );
+      throw new Error('node-pty is not available. Run: npm rebuild node-pty (or install Bun for bun-pty)');
     })();
 
     return ptyProvidersPromise;
   };
-  
+
   const getTerminalShellCandidates = () => {
     if (process.platform === 'win32') {
       const windowsCandidates = [
@@ -600,7 +597,6 @@ export function createTerminalRuntime({
 
     const heartbeatInterval = setInterval(() => {
       try {
-
         res.write(': heartbeat\n\n');
       } catch (error) {
         console.error(`Heartbeat failed for client ${clientId}:`, error);
