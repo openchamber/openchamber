@@ -238,6 +238,8 @@ export const useChatAutoFollow = ({
                     setIsSwitchingSession(false);
                 }
                 snapToBottomRef.current = false;
+                // Hydration phase complete — enable normal release/re-pin checks
+                pendingInitialRestoreRef.current = null;
                 stopFollowLoop();
                 return;
             }
@@ -327,6 +329,8 @@ export const useChatAutoFollow = ({
         } else {
             lastUserReleaseAtRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now();
         }
+        // Clear hydration guard: user explicitly released, enable normal release checks
+        pendingInitialRestoreRef.current = null;
     }, [setStateValue, stopFollowLoop, stopSettleBurst]);
 
     const goToBottom = React.useCallback((mode: 'instant' | 'smooth' = 'instant') => {
@@ -404,7 +408,6 @@ export const useChatAutoFollow = ({
             setStateValue('following');
             return false;
         }
-        pendingInitialRestoreRef.current = null;
 
         // Guard: Virtualizer may not have flushed its measurements yet, so
         // scrollHeight/clientHeight can be 0 or smaller than the saved snapshot.
@@ -415,9 +418,11 @@ export const useChatAutoFollow = ({
         const savedHeight = saved ? saved.scrollHeight : 0;
         if (hasLayout && saved && savedHeight > 0 && container.scrollHeight < Math.min(savedHeight, savedHeight * 0.5)) {
             // Don't restore yet — Virtualizer hasn't flushed. Set state to
-            // 'released' so the follow loop does NOT engage and scroll the
-            // user toward the bottom while we wait for more messages to load.
-            setStateValue('released');
+            // 'following' with snapToBottomRef=true so the follow loop (started
+            // by the useLayoutEffect) instantly snaps to the growing bottom as
+            // content loads. Previously was 'released', but that prevented the
+            // follow loop from ever starting when the ResizeObserver replay fires.
+            setStateValue('following');
             pendingInitialRestoreRef.current = sessionId;
             return false;
         }
