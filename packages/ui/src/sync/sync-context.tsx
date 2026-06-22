@@ -551,6 +551,22 @@ export function needsSnapshotAfterStatusPoll(
   return Boolean(currentStatus && currentStatus.type !== "idle")
 }
 
+export function shouldUseDisconnectedTransportPhase(reason: string | null): boolean {
+  if (typeof reason !== "string" || reason.length === 0) return false
+  // A close before the WS stream ever becomes ready typically means the
+  // server rejected the upgrade (for example missing/expired URL auth). Treat
+  // it as a terminal disconnect so the indicator stays red instead of looking
+  // like an in-progress reconnect that can self-heal without user action.
+  if (reason === "ws_closed_before_ready") return true
+  return (
+    reason.includes("auth")
+    || reason === "401"
+    || reason === "403"
+    || reason === "unauthorized"
+    || reason === "forbidden"
+  )
+}
+
 type EventRoutingIndex = {
   sessionDirectoryById: Map<string, string>
   messageSessionById: Map<string, string>
@@ -1828,13 +1844,16 @@ export function SyncProvider(props: {
       },
       onDisconnect: (reason) => {
         const { hasEverConnected } = useConfigStore.getState()
+        const transportPhase = shouldUseDisconnectedTransportPhase(reason)
+          ? "disconnected"
+          : hasEverConnected ? "reconnecting" : "connecting"
         useConfigStore.setState({
           isConnected: false,
           connectionPhase: hasEverConnected ? "reconnecting" : "connecting",
           lastDisconnectReason: reason,
         })
         useConfigStore.getState().setRuntimeTransportState({
-          phase: hasEverConnected ? "reconnecting" : "connecting",
+          phase: transportPhase,
           reason,
           updatedAt: Date.now(),
         })

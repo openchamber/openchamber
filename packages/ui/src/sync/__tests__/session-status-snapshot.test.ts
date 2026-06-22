@@ -7,6 +7,7 @@ import type { DirectoryStore } from "../child-store"
 import {
   applySessionStatusSnapshot,
   needsSnapshotAfterStatusPoll,
+  shouldUseDisconnectedTransportPhase,
 } from "../sync-context"
 
 type StatusSnapshot = Record<string, { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }>
@@ -113,5 +114,23 @@ describe("needsSnapshotAfterStatusPoll", () => {
   test("does NOT escalate when the store already considers the session idle", () => {
     const store = createDirectoryStore({ session_status: {} })
     expect(needsSnapshotAfterStatusPoll(store.getState(), "ses_a", undefined)).toBe(false)
+  })
+})
+
+describe("shouldUseDisconnectedTransportPhase", () => {
+  test("returns true for auth-like terminal disconnect reasons", () => {
+    expect(shouldUseDisconnectedTransportPhase("ws_auth_token_unavailable")).toBe(true)
+    expect(shouldUseDisconnectedTransportPhase("401")).toBe(true)
+    expect(shouldUseDisconnectedTransportPhase("forbidden")).toBe(true)
+  })
+
+  test("returns true when websocket closes before ready", () => {
+    expect(shouldUseDisconnectedTransportPhase("ws_closed_before_ready")).toBe(true)
+  })
+
+  test("returns false for transient reconnect reasons", () => {
+    expect(shouldUseDisconnectedTransportPhase("ws_closed:code=1006")).toBe(false)
+    expect(shouldUseDisconnectedTransportPhase("ws_heartbeat_timeout")).toBe(false)
+    expect(shouldUseDisconnectedTransportPhase(null)).toBe(false)
   })
 })
