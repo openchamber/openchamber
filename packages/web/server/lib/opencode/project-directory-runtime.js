@@ -50,7 +50,8 @@ export const createProjectDirectoryRuntime = (dependencies) => {
   };
 
   const resolveProjectDirectory = async (req) => {
-    const headerDirectory = typeof req.get === 'function' ? req.get('x-opencode-directory') : null;
+    const rawHeaderDirectory = typeof req.get === 'function' ? req.get('x-opencode-directory') : null;
+    const headerDirectory = rawHeaderDirectory ? decodeURIComponent(rawHeaderDirectory) : null;
     const queryDirectory = Array.isArray(req.query?.directory)
       ? req.query.directory[0]
       : req.query?.directory;
@@ -103,7 +104,8 @@ export const createProjectDirectoryRuntime = (dependencies) => {
   };
 
   const resolveOptionalProjectDirectory = async (req) => {
-    const headerDirectory = typeof req.get === 'function' ? req.get('x-opencode-directory') : null;
+    const rawHeaderDirectory = typeof req.get === 'function' ? req.get('x-opencode-directory') : null;
+    const headerDirectory = rawHeaderDirectory ? decodeURIComponent(rawHeaderDirectory) : null;
     const queryDirectory = Array.isArray(req.query?.directory)
       ? req.query.directory[0]
       : req.query?.directory;

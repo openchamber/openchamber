@@ -33,7 +33,7 @@ describe('createWebFilesAPI', () => {
     await api.statFile?.('/worktree-b/file.txt', { directory: '/worktree-a' });
 
     expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/stat?path=%2Fworktree-b%2Ffile.txt', {
-      headers: { 'x-opencode-directory': '/worktree-a' },
+      headers: { 'x-opencode-directory': encodeURIComponent('/worktree-a') },
     });
 
     runtimeFetchMock.mockResolvedValueOnce(new Response('content'));
@@ -41,7 +41,19 @@ describe('createWebFilesAPI', () => {
 
     expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/read?path=%2Fworktree-b%2Ffile.txt', {
       cache: 'default',
-      headers: { 'x-opencode-directory': '/worktree-a' },
+      headers: { 'x-opencode-directory': encodeURIComponent('/worktree-a') },
+    });
+  });
+
+  it('encodes Unicode workspace directory for header safety', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ urls, getDirectory: () => '/stale-workspace' });
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ path: '/中文/file.txt', isFile: true, size: 12 }));
+    await api.statFile?.('/中文/file.txt', { directory: '/中文路径' });
+
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/stat?path=%2F%E4%B8%AD%E6%96%87%2Ffile.txt', {
+      headers: { 'x-opencode-directory': encodeURIComponent('/中文路径') },
     });
   });
 
@@ -54,7 +66,7 @@ describe('createWebFilesAPI', () => {
 
     expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/raw', {
       query: { path: '/current-workspace/file.txt', download: true },
-      headers: { 'x-opencode-directory': '/current-workspace' },
+      headers: { 'x-opencode-directory': encodeURIComponent('/current-workspace') },
     });
   });
 });

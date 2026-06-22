@@ -96,10 +96,40 @@ const shouldAttachRuntimeAuth = (input: string | URL | Request): boolean => {
   }
 };
 
+const sanitizeDirectoryHeader = (headers?: HeadersInit): HeadersInit => {
+  if (!headers) return headers;
+
+  if (headers instanceof Headers) {
+    const dir = headers.get('x-opencode-directory');
+    if (dir && !dir.includes('%')) {
+      const clone = new Headers(headers);
+      clone.set('x-opencode-directory', encodeURIComponent(dir));
+      return clone;
+    }
+    return headers;
+  }
+
+  if (Array.isArray(headers)) {
+    return headers.map(([key, value]) => [
+      key,
+      key.toLowerCase() === 'x-opencode-directory' && typeof value === 'string' && !value.includes('%')
+        ? encodeURIComponent(value)
+        : value,
+    ]);
+  }
+
+  const record = headers as Record<string, string>;
+  const dir = record['x-opencode-directory'];
+  if (typeof dir === 'string' && !dir.includes('%')) {
+    return { ...record, 'x-opencode-directory': encodeURIComponent(dir) };
+  }
+  return headers;
+};
+
 const mergeHeaders = async (inputHeaders?: HeadersInit, initHeaders?: HeadersInit, attachAuth = true): Promise<Headers> => {
-  const headers = new Headers(inputHeaders);
+  const headers = new Headers(sanitizeDirectoryHeader(inputHeaders));
   if (initHeaders) {
-    new Headers(initHeaders).forEach((value, key) => headers.set(key, value));
+    new Headers(sanitizeDirectoryHeader(initHeaders)).forEach((value, key) => headers.set(key, value));
   }
   if (!attachAuth) {
     return headers;

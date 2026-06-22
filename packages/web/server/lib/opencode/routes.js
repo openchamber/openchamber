@@ -346,10 +346,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       }
 
       const headerDirectory = typeof req.get === 'function' ? req.get('x-opencode-directory') : null;
-      const queryDirectory = Array.isArray(req.query?.directory)
-        ? req.query.directory[0]
-        : req.query?.directory;
-      const requestedDirectory = headerDirectory || queryDirectory || null;
+      const requestedDirectory = (headerDirectory ? decodeURIComponent(headerDirectory) : null) || queryDirectory || null;
 
       let directory = null;
       const resolved = await resolveProjectDirectory(req);
@@ -383,10 +380,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
 
       const scope = typeof req.query?.scope === 'string' ? req.query.scope : 'auth';
       const headerDirectory = typeof req.get === 'function' ? req.get('x-opencode-directory') : null;
-      const queryDirectory = Array.isArray(req.query?.directory)
-        ? req.query.directory[0]
-        : req.query?.directory;
-      const requestedDirectory = headerDirectory || queryDirectory || null;
+      const requestedDirectory = (headerDirectory ? decodeURIComponent(headerDirectory) : null) || queryDirectory || null;
       let directory = null;
 
       if (scope === 'project' || requestedDirectory) {

@@ -78,11 +78,13 @@ type ConfigRuntimeDeps = {
 const AGENTS_MD_PATH = path.join(os.homedir(), '.config', 'opencode', 'AGENTS.md');
 const MAX_BEHAVIOR_PROMPT_SIZE = 1024 * 1024;
 
-const resolveWorkingDirectory = (ctx: BridgeContext | undefined, directory?: string): string | undefined => (
-  (typeof directory === 'string' && directory.trim())
-    ? directory.trim()
-    : (ctx?.manager?.getWorkingDirectory() || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath)
-);
+const resolveWorkingDirectory = (ctx: BridgeContext | undefined, directory?: string): string | undefined => {
+  const decodedDirectory = (typeof directory === 'string' && directory.trim())
+    ? decodeURIComponent(directory.trim())
+    : undefined;
+  return decodedDirectory
+    || (ctx?.manager?.getWorkingDirectory() || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
+};
 
 const pluginMutationPayload = async (
   ctx: BridgeContext | undefined,

@@ -48,7 +48,7 @@ const toDirectoryListResult = (fallbackDirectory: string, payload: WebDirectoryL
 
 const directoryHeaders = (getDirectory?: () => string | undefined, override?: string): Record<string, string> | undefined => {
   const directory = override || getDirectory?.();
-  return directory ? { 'x-opencode-directory': directory } : undefined;
+  return directory ? { 'x-opencode-directory': encodeURIComponent(directory) } : undefined;
 };
 
 export const createWebFilesAPI = ({ urls, getDirectory }: WebFilesAPIOptions): FilesAPI => ({

@@ -128,6 +128,24 @@ describe('project directory runtime', () => {
       expect(result).toEqual({ directory: '/real/workspace/project', error: null });
     });
 
+    it('decodes percent-encoded Unicode paths in x-opencode-directory header', async () => {
+      const runtime = createTestRuntime({
+        fsPromises: {
+          stat: async () => ({ isDirectory: () => true }),
+          realpath: async () => '/real/中文路径',
+        },
+      });
+
+      const req = {
+        get: (header) => header === 'x-opencode-directory' ? encodeURIComponent('/home/user/中文路径') : null,
+        query: {},
+      };
+
+      const result = await runtime.resolveProjectDirectory(req);
+
+      expect(result).toEqual({ directory: '/real/中文路径', error: null });
+    });
+
     it('resolves symlinks in query directory parameter', async () => {
       const runtime = createTestRuntime({
         fsPromises: {
