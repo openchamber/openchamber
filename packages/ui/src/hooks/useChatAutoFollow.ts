@@ -122,6 +122,10 @@ export const useChatAutoFollow = ({
     const [showScrollButton, setShowScrollButton] = React.useState(false);
     const [isFollowingProgrammatically, setIsFollowingProgrammatically] = React.useState(false);
     const [isSwitchingSession, setIsSwitchingSession] = React.useState(false);
+    const isSwitchingSessionRef = React.useRef(false);
+    // When true, tickFollow writes scrollTop = target instantly (no LERP).
+    // This prevents the visible backward drift during session-switch Virtualizer remount.
+    const snapToBottomRef = React.useRef(false);
 
     const stateRef = React.useRef<AutoFollowState>('following');
     const sessionMessageCountRef = React.useRef(sessionMessageCount);
@@ -138,6 +142,8 @@ export const useChatAutoFollow = ({
         currentSessionIdRef.current = currentSessionId;
         pendingInitialRestoreRef.current = currentSessionId;
         setIsSwitchingSession(true);
+        isSwitchingSessionRef.current = true;
+        snapToBottomRef.current = true;
     }
 
     const lastSessionIdRef = React.useRef<string | null>(null);
@@ -187,6 +193,13 @@ export const useChatAutoFollow = ({
         followRafRef.current = null;
         settledFramesRef.current = 0;
         setIsFollowingProgrammatically(false);
+        // Safety: if user scrolled or follow loop stopped before settling,
+        // show the container anyway — don't leave it hidden forever.
+        if (isSwitchingSessionRef.current) {
+            isSwitchingSessionRef.current = false;
+            setIsSwitchingSession(false);
+        }
+        snapToBottomRef.current = false;
     }, []);
 
     const tickFollow = React.useCallback(() => {
@@ -213,6 +226,13 @@ export const useChatAutoFollow = ({
             }
             settledFramesRef.current += 1;
             if (settledFramesRef.current >= SETTLE_FRAMES) {
+                // Clear session-switching flag: the follow loop has confirmed
+                // scrollTop is stable at bottom. Container can become visible.
+                if (isSwitchingSessionRef.current) {
+                    isSwitchingSessionRef.current = false;
+                    setIsSwitchingSession(false);
+                }
+                snapToBottomRef.current = false;
                 stopFollowLoop();
                 return;
             }
@@ -221,10 +241,19 @@ export const useChatAutoFollow = ({
         }
 
         settledFramesRef.current = 0;
-        const next = current + delta * LERP;
-        markProgrammaticWrite();
-        container.scrollTop = next;
-        lastScrollTopRef.current = container.scrollTop;
+        // During session switch, snap to bottom instantly — no LERP.
+        // The Virtualizer adds content which moves the bottom target each frame;
+        // LERP(0.18) drifts behind and the user sees the backward jump.
+        if (snapToBottomRef.current) {
+            markProgrammaticWrite();
+            container.scrollTop = target;
+            lastScrollTopRef.current = target;
+        } else {
+            const next = current + delta * LERP;
+            markProgrammaticWrite();
+            container.scrollTop = next;
+            lastScrollTopRef.current = container.scrollTop;
+        }
         followRafRef.current = window.requestAnimationFrame(tickFollow);
     }, [markProgrammaticWrite, stopFollowLoop]);
 
@@ -439,12 +468,6 @@ export const useChatAutoFollow = ({
         if (!containerEl) return;
         if (pendingInitialRestoreRef.current && pendingInitialRestoreRef.current === currentSessionId) {
             void restoreSnapshot();
-        }
-        // Clear the switching flag AFTER restoreSnapshot writes scrollTop.
-        // The browser paints AFTER all useLayoutEffects, so by the time it
-        // paints, scrollTop is already correct and visibility:hidden is removed.
-        if (isSwitchingSession) {
-            requestAnimationFrame(() => setIsSwitchingSession(false));
         }
     }, [containerEl, currentSessionId, restoreSnapshot, isSwitchingSession]);
 
