@@ -422,7 +422,6 @@ export async function materializeOpenDraftSession(selection: {
   const trimmedAgent = typeof selection.agent === "string" && selection.agent.trim().length > 0
     ? selection.agent.trim()
     : undefined
-  const draftTargetFolderId = draft.targetFolderId
   let draftDirectoryOverride = draft.bootstrapPendingDirectory ?? draft.directoryOverride ?? null
   const draftProjectId = draft.selectedProjectId ?? null
 
@@ -462,15 +461,7 @@ export async function materializeOpenDraftSession(selection: {
 
   store.initializeNewOpenChamberSession(created.id, configState.agents ?? [])
 
-  store.closeNewSessionDraft()
   store.setCurrentSession(created.id, createdDirectory)
-
-  if (draftTargetFolderId) {
-    const scopeKey = draftDirectoryOverride || created.directory || null
-    if (scopeKey) {
-      useSessionFoldersStore.getState().addSessionToFolder(scopeKey, draftTargetFolderId, created.id)
-    }
-  }
 
   return {
     sessionId: created.id,
