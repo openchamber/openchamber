@@ -52,6 +52,11 @@ const SETTLE_FRAMES = 4;
 const TOUCH_FINGER_DOWN_THRESHOLD = 2;
 const SETTLE_BURST_DURATION_MS = 280;
 const REPIN_GRACE_AFTER_RELEASE_MS = 1200;
+// Minimum upward scroll delta (px) to qualify as user-intent release.
+// Browser scroll anchoring from textarea growth or layout shifts produces
+// sub-16px adjustments; real user scroll-up (wheel, touch, PageUp) is 50-100+ px.
+// This threshold prevents anchoring from falsely killing the follow loop/settleBurst.
+const RELEASE_DELTA_THRESHOLD = 16;
 
 // The bottom of the chat has an empty spacer (10vh on desktop, 40px on mobile)
 // — its height is exactly how far above scrollHeight the user can be while still
@@ -461,15 +466,20 @@ export const useChatAutoFollow = ({
         }
     }, [sessionIsWorking, startFollowLoop, startSettleBurst]);
 
-    // Replay a deferred restoreSnapshot once ChatViewport mounts.
-    // useLayoutEffect ensures scroll position is set before the browser paints,
-    // preventing a visible flash of content at the wrong scroll position.
     React.useLayoutEffect(() => {
         if (!containerEl) return;
         if (pendingInitialRestoreRef.current && pendingInitialRestoreRef.current === currentSessionId) {
             void restoreSnapshot();
+            // Start the follow loop immediately after restoring scroll position.
+            // The session-switch effect stops the follow loop, and nothing restarts
+            // it if sessionIsWorking didn't change (remained true during the switch).
+            // Without this, content loading pushes the bottom away and scroll drifts.
+            if (stateRef.current === 'following') {
+                startFollowLoop();
+                startSettleBurst();
+            }
         }
-    }, [containerEl, currentSessionId, restoreSnapshot, isSwitchingSession]);
+    }, [containerEl, currentSessionId, restoreSnapshot, isSwitchingSession, startFollowLoop, startSettleBurst]);
 
     const updateOverflowAndButton = React.useCallback(() => {
         const container = scrollRef.current;
@@ -509,7 +519,12 @@ export const useChatAutoFollow = ({
         // triggers a scroll event with currentTop < previousTop, which this check would
         // interpret as 'user scrolled up' — killing the follow loop before it starts.
         const isInitialHydration = pendingInitialRestoreRef.current === currentSessionIdRef.current;
-        if (!isInitialHydration && currentTop < previousTop && stateRef.current === 'following') {
+        // Only release if the upward delta exceeds the threshold. Sub-16px movements
+        // are browser scroll anchoring (textarea growth, layout shifts), not user intent.
+        // Anchoring falsely killing the follow loop is the root cause of the bounce-back bug.
+        const releaseDelta = previousTop - currentTop;
+        if (!isInitialHydration && currentTop < previousTop && stateRef.current === 'following'
+            && releaseDelta > RELEASE_DELTA_THRESHOLD) {
             stopFollowLoop();
             stopSettleBurst();
             lastUserReleaseAtRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now();
