@@ -4,6 +4,7 @@ import { vscodeStreamPerfCount, vscodeStreamPerfMeasure, vscodeStreamPerfObserve
 import { extractBodyBase64, extractBodyText, extractJsonBody, hasInitBody } from './requestBodyTransport';
 import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
 import { opencodeClient } from '@openchamber/ui/lib/opencode/client';
+import { sanitizeHeadersForBrowser } from '@openchamber/ui/lib/runtime-fetch';
 import {
   buildVSCodeThemeFromPalette,
   readVSCodeThemePalette,
@@ -279,25 +280,7 @@ const normalizeUrl = (input: string | URL) => {
 
 const headersToRecord = (headers: HeadersInit | undefined): Record<string, string> => {
   if (!headers) return {};
-  const isLatin1Safe = (v: string): boolean => {
-    for (let i = 0; i < v.length; i += 1) {
-      if (v.charCodeAt(i) > 0xFF) return false;
-    }
-    return true;
-  };
-  const sanitize = (init: HeadersInit): HeadersInit => {
-    const sourceEntries: [string, string][] = init instanceof Headers
-      ? Array.from(init.entries())
-      : Array.isArray(init)
-        ? init
-        : Object.entries(init);
-    const entries: [string, string][] = [];
-    for (const [key, value] of sourceEntries) {
-      entries.push([key, isLatin1Safe(value) ? value : encodeURIComponent(value)]);
-    }
-    return entries;
-  };
-  const normalized = headers instanceof Headers ? headers : new Headers(sanitize(headers));
+  const normalized = headers instanceof Headers ? headers : new Headers(sanitizeHeadersForBrowser(headers) ?? headers);
   const result: Record<string, string> = {};
   normalized.forEach((value, key) => {
     result[key] = value;

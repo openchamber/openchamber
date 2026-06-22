@@ -100,14 +100,14 @@ const shouldAttachRuntimeAuth = (input: string | URL | Request): boolean => {
 // characters outside \u0000-\u00FF causes "Failed to construct/set 'Headers':
 // String contains non ISO-8859-1 code point." Encode those values so they round-trip
 // safely through the browser's Headers API.
-const isLatin1Safe = (value: string): boolean => {
+export const isLatin1Safe = (value: string): boolean => {
   for (let i = 0; i < value.length; i += 1) {
     if (value.charCodeAt(i) > 0xFF) return false;
   }
   return true;
 };
 
-const sanitizeHeadersForBrowser = (init?: HeadersInit): [string, string][] | undefined => {
+export const sanitizeHeadersForBrowser = (init?: HeadersInit): [string, string][] | undefined => {
   if (!init) return undefined;
   // Normalize any HeadersInit shape into a plain array of entries so we can
   // safely inspect and re-encode non-Latin-1 values.
