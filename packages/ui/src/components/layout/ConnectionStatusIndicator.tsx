@@ -53,6 +53,33 @@ const toneToDotClass = (tone: ConnectionTone): string => {
   }
 };
 
+const hop1LabelKeyToTone = (labelKey: ConnectionStatusViewModel['hop1']['labelKey']): ConnectionTone => {
+  switch (labelKey) {
+    case 'connectionStatus.hop1.connected':
+      return 'ok';
+    case 'connectionStatus.hop1.connecting':
+    case 'connectionStatus.hop1.reconnecting':
+      return 'muted';
+    case 'connectionStatus.hop1.disconnected':
+      return 'error';
+    default:
+      return 'muted';
+  }
+};
+
+const hop2LabelKeyToTone = (labelKey: ConnectionStatusViewModel['hop2']['labelKey']): ConnectionTone => {
+  switch (labelKey) {
+    case 'connectionStatus.hop2.healthy':
+      return 'ok';
+    case 'connectionStatus.hop2.unhealthy':
+      return 'warn';
+    case 'connectionStatus.hop2.unknown':
+      return 'muted';
+    default:
+      return 'muted';
+  }
+};
+
 type ConnectionStatusIndicatorBodyProps = {
   viewModel: ConnectionStatusViewModel;
 };
@@ -90,6 +117,12 @@ const ConnectionStatusIndicatorBody = React.memo(function ConnectionStatusIndica
     return text;
   });
 
+  const tooltipLineDotClasses = [
+    null,
+    toneToDotClass(hop1LabelKeyToTone(viewModel.hop1.labelKey)),
+    toneToDotClass(hop2LabelKeyToTone(viewModel.hop2.labelKey)),
+  ];
+
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -104,17 +137,25 @@ const ConnectionStatusIndicatorBody = React.memo(function ConnectionStatusIndica
       <TooltipContent>
         <div className="flex flex-col gap-0.5">
           {translatedLines.map((line, index) => (
-            <p
+            <div
               // Index-keyed list of a fixed-size array (always 3 entries);
               // the view model is the actual key.
               key={index}
               className={cn(
-                'typography-micro',
+                'flex items-center gap-2 typography-micro',
                 index === 0 && 'font-medium text-foreground'
               )}
             >
-              {line}
-            </p>
+              {tooltipLineDotClasses[index] !== null ? (
+                <span
+                  aria-hidden="true"
+                  className={cn(CONNECTION_DOT_CLASS, 'shrink-0', tooltipLineDotClasses[index])}
+                />
+              ) : (
+                <span aria-hidden="true" className="w-2 shrink-0" />
+              )}
+              <span>{line}</span>
+            </div>
           ))}
         </div>
       </TooltipContent>
