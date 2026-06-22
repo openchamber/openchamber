@@ -941,6 +941,25 @@ const resolveSelectionWithManualGuard = ({
     };
 };
 
+// Hop-separated normalized state for the aggregated header connection
+// indicator (issue #1737 / #1556). These objects are the source of truth for
+// the per-hop view; reason strings are short stable codes that the user-facing
+// reason mapper (Phase 2) translates into hover copy. They are intentionally
+// not part of the persisted state shape — live connection status must always
+// start fresh on reload.
+export type RuntimeTransportPhase = "connecting" | "connected" | "reconnecting" | "disconnected" | "offline";
+export type RuntimeTransportState = {
+    phase: RuntimeTransportPhase;
+    reason: string | null;
+    updatedAt: number;
+};
+export type OpenCodeRuntimePhase = "unknown" | "healthy" | "unhealthy";
+export type OpenCodeRuntimeState = {
+    phase: OpenCodeRuntimePhase;
+    reason: string | null;
+    updatedAt: number;
+};
+
 interface ConfigStore {
 
     activeDirectoryKey: string;
@@ -960,6 +979,15 @@ interface ConfigStore {
     hasEverConnected: boolean;
     connectionPhase: "connecting" | "connected" | "reconnecting";
     lastDisconnectReason: string | null;
+    // Hop-separated normalized state (issue #1737 / #1556). The legacy fields
+    // above still drive readiness gating; the two new fields drive the
+    // aggregated header indicator and are the source of truth for which hop is
+    // unhealthy. They are intentionally low-frequency, narrow, and never
+    // coupled to streaming/session state to avoid render fanout.
+    runtimeTransportState: RuntimeTransportState;
+    openCodeRuntimeState: OpenCodeRuntimeState;
+    setRuntimeTransportState: (state: RuntimeTransportState) => void;
+    setOpenCodeRuntimeState: (state: OpenCodeRuntimeState) => void;
     isInitialized: boolean;
     modelsMetadata: Map<string, ModelMetadata>;
     // OpenChamber settings-based defaults (take precedence over agent preferences)
@@ -1109,6 +1137,14 @@ export const useConfigStore = create<ConfigStore>()(
                 hasEverConnected: false,
                 connectionPhase: "connecting",
                 lastDisconnectReason: null,
+                runtimeTransportState: { phase: "connecting", reason: null, updatedAt: 0 },
+                openCodeRuntimeState: { phase: "unknown", reason: null, updatedAt: 0 },
+                setRuntimeTransportState: (state) => {
+                    set({ runtimeTransportState: state });
+                },
+                setOpenCodeRuntimeState: (state) => {
+                    set({ openCodeRuntimeState: state });
+                },
                 isInitialized: false,
                 modelsMetadata: new Map<string, ModelMetadata>(),
                 settingsDefaultModel: undefined,
@@ -2983,6 +3019,7 @@ export const useConfigStore = create<ConfigStore>()(
                     const isHealthy = await probeOpenCodeHealth(options?.timeoutMs);
                     if (isHealthy) {
                         set({ isConnected: true, hasEverConnected: true, connectionPhase: "connected" });
+                        get().setOpenCodeRuntimeState({ phase: 'healthy', reason: null, updatedAt: Date.now() });
                         return true;
                     }
 
@@ -2996,6 +3033,7 @@ export const useConfigStore = create<ConfigStore>()(
                         connectionPhase: state.hasEverConnected ? "reconnecting" : "connecting",
                         lastDisconnectReason: 'health_probe_unhealthy',
                     });
+                    get().setOpenCodeRuntimeState({ phase: 'unhealthy', reason: 'health_probe_unhealthy', updatedAt: Date.now() });
                     return false;
                 },
 
@@ -3033,6 +3071,9 @@ export const useConfigStore = create<ConfigStore>()(
                                     connectionPhase: hasEverConnected ? "reconnecting" : "connecting",
                                     lastDisconnectReason: 'health_check_unhealthy',
                                 });
+                            get().setOpenCodeRuntimeState(isHealthy
+                                ? { phase: 'healthy', reason: null, updatedAt: Date.now() }
+                                : { phase: 'unhealthy', reason: 'health_check_unhealthy', updatedAt: Date.now() });
                             markStartupTrace('checkConnection:end', { healthy: isHealthy, attempts: attempt + 1 });
                             return isHealthy;
                         } catch (error) {
@@ -3051,6 +3092,7 @@ export const useConfigStore = create<ConfigStore>()(
                         connectionPhase: get().hasEverConnected ? "reconnecting" : "connecting",
                         lastDisconnectReason: 'health_check_failed',
                     });
+                    get().setOpenCodeRuntimeState({ phase: 'unhealthy', reason: 'health_check_failed', updatedAt: Date.now() });
                     markStartupTrace('checkConnection:end', { healthy: false, attempts: maxAttempts });
                     return false;
                 },
@@ -3145,6 +3187,7 @@ export const useConfigStore = create<ConfigStore>()(
                                 connectionPhase: get().hasEverConnected ? "reconnecting" : "connecting",
                                 lastDisconnectReason: 'init_error',
                             });
+                            get().setOpenCodeRuntimeState({ phase: 'unhealthy', reason: 'init_error', updatedAt: Date.now() });
                             markStartupTrace('initializeApp:error', { error: error instanceof Error ? error.message : String(error) });
                         }
                     })().finally(() => {
