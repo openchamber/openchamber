@@ -977,7 +977,7 @@ interface ConfigStore {
     selectionSource: "auto" | "manual";
     isConnected: boolean;
     hasEverConnected: boolean;
-    connectionPhase: "connecting" | "connected" | "reconnecting";
+    connectionPhase: "connecting" | "connected" | "reconnecting" | "disconnected";
     lastDisconnectReason: string | null;
     // Hop-separated normalized state (issue #1737 / #1556). The legacy fields
     // above still drive readiness gating; the two new fields drive the

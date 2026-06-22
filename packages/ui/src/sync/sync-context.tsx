@@ -1849,7 +1849,7 @@ export function SyncProvider(props: {
           : hasEverConnected ? "reconnecting" : "connecting"
         useConfigStore.setState({
           isConnected: false,
-          connectionPhase: hasEverConnected ? "reconnecting" : "connecting",
+          connectionPhase: transportPhase,
           lastDisconnectReason: reason,
         })
         useConfigStore.getState().setRuntimeTransportState({
