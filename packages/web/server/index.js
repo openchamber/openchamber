@@ -50,7 +50,6 @@ import { createOpenCodeEnvRuntime } from './lib/opencode/env-runtime.js';
 import { resolveOpenCodeEnvConfig } from './lib/opencode/env-config.js';
 import { createHmrStateRuntime } from './lib/opencode/hmr-state-runtime.js';
 import { createOpenCodeNetworkRuntime } from './lib/opencode/network-runtime.js';
-import { createOpenCodeAuthStateRuntime } from './lib/opencode/auth-state-runtime.js';
 import { createProjectDirectoryRuntime } from './lib/opencode/project-directory-runtime.js';
 import { createSettingsNormalizationRuntime } from './lib/opencode/settings-normalization-runtime.js';
 import { createSettingsHelpers } from './lib/opencode/settings-helpers.js';
@@ -528,24 +527,35 @@ const ENV_DESKTOP_NOTIFY = (() => {
   const argv1 = typeof process.argv?.[1] === 'string' ? process.argv[1] : '';
   return /openchamber-server/i.test(argv0) || /openchamber-server/i.test(argv1);
 })();
-const openCodeAuthStateRuntime = createOpenCodeAuthStateRuntime({
-  crypto,
-  process,
-  getAuthPassword: () => openCodeAuthPassword,
-  setAuthPassword: (value) => {
-    openCodeAuthPassword = value;
-  },
-  getAuthSource: () => openCodeAuthSource,
-  setAuthSource: (value) => {
-    openCodeAuthSource = value;
-  },
-  getUserProvidedPassword: () => userProvidedOpenCodePassword,
-  syncToHmrState,
-});
+const getOpenCodeAuthHeaders = () => {
+  const password = typeof process.env.OPENCODE_SERVER_PASSWORD === 'string'
+    ? process.env.OPENCODE_SERVER_PASSWORD.trim()
+    : '';
+  if (!password) return {};
+  const credentials = Buffer.from(`opencode:${password}`).toString('base64');
+  return { Authorization: `Basic ${credentials}` };
+};
 
-const getOpenCodeAuthHeaders = (...args) => openCodeAuthStateRuntime.getOpenCodeAuthHeaders(...args);
-const isOpenCodeConnectionSecure = (...args) => openCodeAuthStateRuntime.isOpenCodeConnectionSecure(...args);
-const ensureLocalOpenCodeServerPassword = (...args) => openCodeAuthStateRuntime.ensureLocalOpenCodeServerPassword(...args);
+const isOpenCodeConnectionSecure = () => Boolean(process.env.OPENCODE_SERVER_PASSWORD);
+
+const ensureLocalOpenCodeServerPassword = async ({ rotateManaged = false } = {}) => {
+  const existingPassword = typeof process.env.OPENCODE_SERVER_PASSWORD === 'string'
+    ? process.env.OPENCODE_SERVER_PASSWORD.trim()
+    : '';
+  if (existingPassword && !rotateManaged) {
+    return existingPassword;
+  }
+  if (isExternalOpenCode) {
+    return null;
+  }
+  const newPassword = crypto.randomBytes(32).toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+  process.env.OPENCODE_SERVER_PASSWORD = newPassword;
+  syncToHmrState();
+  return newPassword;
+};
 
 const openCodeNetworkState = {};
 Object.defineProperties(openCodeNetworkState, {
