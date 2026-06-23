@@ -1484,7 +1484,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
         };
 
         return (
-            <div className={cn('flex flex-1 min-h-0 h-full', flushContent ? 'gap-0' : 'gap-3 px-3 pb-3 pt-2')}>
+            <div className={cn('flex min-w-0 flex-1 min-h-0 h-full', flushContent ? 'gap-0' : 'gap-3 px-3 pb-3 pt-2')}>
                 {showFileSidebar && (
                     <section className="hidden lg:flex w-72 flex-col rounded-xl border border-border/60 bg-background/70 overflow-hidden">
                         <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/40">
@@ -1498,7 +1498,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                         />
                     </section>
                 )}
-                <div className="relative flex-1 min-h-0 h-full">
+                <div className="relative flex-1 min-w-0 min-h-0 h-full">
                     <ScrollableOverlay
                         ref={diffScrollRef}
                         outerClassName="min-h-0 h-full"

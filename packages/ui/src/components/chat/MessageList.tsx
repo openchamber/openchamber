@@ -6,19 +6,19 @@ import ChatMessage from './ChatMessage';
 import { areOptionalRenderRelevantMessagesEqual, areRelevantTurnGroupingContextsEqual, areRenderRelevantMessagesEqual } from './message/renderCompare';
 import TurnItem from './components/TurnItem';
 import type { AnimationHandlers, ContentChangeReason } from '@/hooks/useChatAutoFollow';
-import { filterSyntheticParts } from '@/lib/messages/synthetic';
 import type { ChatMessageEntry, TurnRecord, TurnGroupingContext } from './lib/turns/types';
 import { useTurnRecords } from './hooks/useTurnRecords';
 import { applyRetryOverlay } from './lib/turns/applyRetryOverlay';
+import { buildLiveStreamingEntry } from './lib/turns/streamingTailEntry';
+import { getNormalizedMessageForDisplay, hasCompactionPart } from './lib/messageDisplayNormalization';
 import { useUIStore } from '@/stores/useUIStore';
 import { FadeInDisabledProvider } from './message/FadeInOnReveal';
 import { hasPendingUserSendAnimation, consumePendingUserSendAnimation } from '@/lib/userSendAnimation';
 import { streamPerfCount, streamPerfMeasure } from '@/stores/utils/streamDebug';
 import type { StreamPhase } from './message/types';
-import { normalizeParts } from './message/partUtils';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
-import { getReviewTransferDirection, type ReviewTransferDirection } from '@/lib/reviewFlow';
-import { getOriginalSessionID, getReviewSessionID } from '@/lib/sessionReviewMetadata';
+import { useSessionParts } from '@/sync/sync-context';
+import type { ReviewTransferDirection } from '@/lib/reviewFlow';
 
 const MESSAGE_LIST_VIRTUALIZE_THRESHOLD = 5;
 const EMPTY_STATIC_ENTRY_MESSAGES: ChatMessageEntry[] = [];
@@ -88,13 +88,6 @@ const resolveMessageRole = (message: ChatMessageEntry): string | null => {
         ?? null;
 };
 
-const hasCompactionPart = (message: ChatMessageEntry): boolean => {
-    return message.parts.some((part) => {
-        const type = (part as { type?: unknown } | null | undefined)?.type;
-        return type === 'compaction';
-    });
-};
-
 const getPartText = (part: Part): string => {
     const text = (part as { text?: unknown }).text;
     if (typeof text === 'string') {
@@ -105,40 +98,6 @@ const getPartText = (part: Part): string => {
         return content;
     }
     return '';
-};
-
-const normalizeCompactionCommandMessage = (message: ChatMessageEntry): ChatMessageEntry => {
-    if (!hasCompactionPart(message)) {
-        return message;
-    }
-
-    let changedParts = false;
-    const nextParts = message.parts.map((part) => {
-        const type = (part as { type?: unknown } | null | undefined)?.type;
-        if (type !== 'compaction') {
-            return part;
-        }
-        changedParts = true;
-        return { type: 'text', text: '/compact' } as Part;
-    });
-
-    const info = message.info as unknown as { clientRole?: string | null | undefined };
-    const needsClientRole = info.clientRole !== 'user';
-
-    if (!changedParts && !needsClientRole) {
-        return message;
-    }
-
-    return {
-        ...message,
-        info: needsClientRole
-            ? ({
-                ...(message.info as unknown as Record<string, unknown>),
-                clientRole: 'user',
-            } as unknown as typeof message.info)
-            : message.info,
-        parts: changedParts ? nextParts : message.parts,
-    };
 };
 
 const normalizeCompactionSummaryMessage = (
@@ -391,39 +350,6 @@ const withShellBridgeDetails = (message: ChatMessageEntry, details: ShellBridgeD
     };
 };
 
-const normalizeMessageParts = (message: ChatMessageEntry): ChatMessageEntry => {
-    const parts = normalizeParts(message.parts);
-    if (parts.length === message.parts.length) {
-        return message;
-    }
-    return {
-        ...message,
-        parts,
-    };
-};
-
-const normalizedMessageBySource = new WeakMap<ChatMessageEntry, ChatMessageEntry>();
-
-const getNormalizedMessageForDisplay = (message: ChatMessageEntry): ChatMessageEntry => {
-    const cached = normalizedMessageBySource.get(message);
-    if (cached) {
-        return cached;
-    }
-
-    const normalizedPartMessage = normalizeMessageParts(message);
-    const normalizedCompactionMessage = normalizeCompactionCommandMessage(normalizedPartMessage);
-    const filteredParts = filterSyntheticParts(normalizedCompactionMessage.parts);
-    const normalized = filteredParts === normalizedCompactionMessage.parts
-        ? normalizedCompactionMessage
-        : {
-            ...normalizedCompactionMessage,
-            parts: filteredParts,
-        };
-
-    normalizedMessageBySource.set(message, normalized);
-    return normalized;
-};
-
 interface MessageListProps {
     sessionKey: string;
     disableStaging?: boolean;
@@ -442,6 +368,7 @@ interface MessageListProps {
     isLoadingOlder: boolean;
     scrollToBottom?: () => void;
     scrollRef?: React.RefObject<HTMLDivElement | null>;
+    directory?: string;
 }
 
 export interface MessageListHandle {
@@ -1007,11 +934,10 @@ type StaticHistoryListProps = {
     chatRenderMode: 'sorted' | 'live';
     shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
     onUserAnimationConsumed: (messageId: string) => void;
-    activeStreamingPhase?: StreamPhase | null;
     reviewTransferDirection?: ReviewTransferDirection | null;
 };
 
-const StaticHistoryList = React.memo(({ entries, shouldVirtualize, contentRef, scrollRef, virtualizerRef, virtualizerKey, virtualCache, shift, onMessageContentChange, getAnimationHandlers, scrollToBottom, stickyUserHeader, defaultActivityExpanded, turnUiStates, onToggleTurnGroup, chatRenderMode, shouldAnimateUserMessage, onUserAnimationConsumed, activeStreamingPhase, reviewTransferDirection }: StaticHistoryListProps) => {
+const StaticHistoryList = React.memo(({ entries, shouldVirtualize, contentRef, scrollRef, virtualizerRef, virtualizerKey, virtualCache, shift, onMessageContentChange, getAnimationHandlers, scrollToBottom, stickyUserHeader, defaultActivityExpanded, turnUiStates, onToggleTurnGroup, chatRenderMode, shouldAnimateUserMessage, onUserAnimationConsumed, reviewTransferDirection }: StaticHistoryListProps) => {
     const renderEntry = React.useCallback((entry: RenderEntry) => {
         return (
             <MessageListEntry
@@ -1029,11 +955,11 @@ const StaticHistoryList = React.memo(({ entries, shouldVirtualize, contentRef, s
                 shouldAnimateUserMessage={shouldAnimateUserMessage}
                 onUserAnimationConsumed={onUserAnimationConsumed}
                 activeStreamingMessageId={null}
-                activeStreamingPhase={activeStreamingPhase}
+                activeStreamingPhase={null}
                 reviewTransferDirection={reviewTransferDirection}
             />
         );
-    }, [activeStreamingPhase, chatRenderMode, defaultActivityExpanded, getAnimationHandlers, onMessageContentChange, onToggleTurnGroup, onUserAnimationConsumed, reviewTransferDirection, scrollToBottom, shouldAnimateUserMessage, stickyUserHeader, turnUiStates]);
+    }, [chatRenderMode, defaultActivityExpanded, getAnimationHandlers, onMessageContentChange, onToggleTurnGroup, onUserAnimationConsumed, reviewTransferDirection, scrollToBottom, shouldAnimateUserMessage, stickyUserHeader, turnUiStates]);
 
     if (!shouldVirtualize) {
         return (
@@ -1074,6 +1000,7 @@ StaticHistoryList.displayName = 'StaticHistoryList';
 
 const StreamingTailContent: React.FC<{
     entry: RenderEntry;
+    directory?: string;
     onMessageContentChange: (reason?: ContentChangeReason) => void;
     getAnimationHandlers: (messageId: string) => AnimationHandlers;
     scrollToBottom?: () => void;
@@ -1083,6 +1010,7 @@ const StreamingTailContent: React.FC<{
     turnUiStates: Map<string, TurnUiState>;
     onToggleTurnGroup: (turnId: string) => void;
     chatRenderMode: 'sorted' | 'live';
+    showTurnChangedFiles: boolean;
     shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
     onUserAnimationConsumed: (messageId: string) => void;
     activeStreamingMessageId?: string | null;
@@ -1090,6 +1018,7 @@ const StreamingTailContent: React.FC<{
     reviewTransferDirection?: ReviewTransferDirection | null;
 }> = ({
     entry,
+    directory,
     onMessageContentChange,
     getAnimationHandlers,
     scrollToBottom,
@@ -1099,15 +1028,24 @@ const StreamingTailContent: React.FC<{
     turnUiStates,
     onToggleTurnGroup,
     chatRenderMode,
+    showTurnChangedFiles,
     shouldAnimateUserMessage,
     onUserAnimationConsumed,
     activeStreamingMessageId,
     activeStreamingPhase,
     reviewTransferDirection,
 }) => {
+    const liveParts = useSessionParts(activeStreamingMessageId ?? '', directory);
+    const liveEntry = React.useMemo(() => buildLiveStreamingEntry(entry, {
+        activeStreamingMessageId,
+        liveParts,
+        showTextJustificationActivity: chatRenderMode === 'sorted',
+        showTurnChangedFiles,
+    }), [activeStreamingMessageId, chatRenderMode, entry, liveParts, showTurnChangedFiles]);
+
     return (
         <MessageListEntry
-            entry={entry}
+            entry={liveEntry}
             onMessageContentChange={onMessageContentChange}
             getAnimationHandlers={getAnimationHandlers}
             scrollToBottom={scrollToBottom}
@@ -1141,6 +1079,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     isLoadingOlder,
     scrollToBottom,
     scrollRef,
+    directory,
 }, ref) => {
     streamPerfCount('ui.message_list.render');
     const stickyUserHeader = useUIStore(state => state.stickyUserHeader);
@@ -1149,18 +1088,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     const showTurnChangedFiles = useUIStore((state) => state.showTurnChangedFiles);
     const defaultActivityExpanded = activityRenderMode === 'summary';
     const reviewTransferDirection = useGlobalSessionsStore((state) => {
-        const currentSession = state.activeSessions.find((session) => session.id === sessionKey);
-        const direction = getReviewTransferDirection(currentSession);
-        if (!currentSession || !direction) return null;
-
-        const targetSessionId = direction === 'review-to-original'
-            ? getOriginalSessionID(currentSession)
-            : getReviewSessionID(currentSession);
-        if (!targetSessionId) return null;
-
-        return state.activeSessions.some((session) => session.id === targetSessionId)
-            ? direction
-            : null;
+        return state.reviewTransferBySessionId.get(sessionKey) ?? null;
     });
     const [turnUiStates, setTurnUiStates] = React.useState<Map<string, TurnUiState>>(() => new Map());
     const userAnimationRef = React.useRef<{
@@ -1665,12 +1593,12 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                             chatRenderMode={chatRenderMode}
                             shouldAnimateUserMessage={shouldAnimateUserMessage}
                             onUserAnimationConsumed={onUserAnimationConsumed}
-                            activeStreamingPhase={activeStreamingPhase}
                             reviewTransferDirection={reviewTransferDirection}
                         />
                         {trailingStreamingEntry ? (
                             <StreamingTailContent
                                 entry={trailingStreamingEntry}
+                                directory={directory}
                                 onMessageContentChange={stableTailContentChange}
                                 getAnimationHandlers={stableGetAnimationHandlers}
                                 scrollToBottom={stableScrollToBottom}
@@ -1680,6 +1608,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                                 turnUiStates={turnUiStates}
                                 onToggleTurnGroup={toggleTurnGroup}
                                 chatRenderMode={chatRenderMode}
+                                showTurnChangedFiles={showTurnChangedFiles}
                                 shouldAnimateUserMessage={shouldAnimateUserMessage}
                                 onUserAnimationConsumed={onUserAnimationConsumed}
                                 activeStreamingMessageId={activeStreamingMessageId}

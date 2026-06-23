@@ -31,13 +31,16 @@ describe('resolveFallbackTaskSessionId', () => {
     expect(result).toBeUndefined();
   });
 
-  it('returns undefined when task is finalized', () => {
+  it('returns undefined when multiple idle candidates are ambiguous', () => {
     const result = resolveFallbackTaskSessionId({
       isTaskTool: true,
       parentSessionId,
       taskStartTime,
-      sessions: [],
-      isTaskFinalized: true,
+      sessions: [
+        makeSession({ id: 'child-a', parentID: parentSessionId, time: { created: taskStartTime + 100 } }),
+        makeSession({ id: 'child-b', parentID: parentSessionId, time: { created: taskStartTime + 200 } }),
+      ],
+      sessionStatusMap: {},
     });
     expect(result).toBeUndefined();
   });

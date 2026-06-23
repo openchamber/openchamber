@@ -105,9 +105,9 @@ export const useSessionActions = (args: Args) => {
     args.setEditTitle(sessionTitle);
   }, [args]);
 
-  const handleSaveEdit = React.useCallback(async () => {
+  const handleSaveEdit = React.useCallback(async (titleOverride?: string) => {
     if (!args.editingId) return;
-    const trimmed = args.editTitle.trim();
+    const trimmed = (titleOverride ?? args.editTitle).trim();
     if (trimmed) {
       await args.updateSessionTitle(args.editingId, trimmed);
     }

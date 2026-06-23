@@ -1,5 +1,5 @@
 import React from 'react';
-import { isDesktopShell } from '@/lib/desktop';
+import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 
 export type DeviceType = 'desktop' | 'mobile' | 'tablet';
 
@@ -108,7 +108,8 @@ export function getDeviceInfo(): DeviceInfo {
   const prefersCoarsePointer = pointerQuery?.matches ?? false;
   const noHover = hoverQuery?.matches ?? false;
   const maxTouchPoints = typeof navigator !== 'undefined' ? navigator.maxTouchPoints ?? 0 : 0;
-  const isDesktopShellRuntime = isDesktopShell();
+  // VS Code is a desktop surface — don't misdetect a narrow panel as mobile (#1261)
+  const isDesktopShellRuntime = isDesktopShell() || isVSCodeRuntime();
   const { isExplicitTablet } = getNavigatorDeviceHints(maxTouchPoints);
 
   const hasTouchInput = prefersCoarsePointer || noHover || maxTouchPoints > 0;

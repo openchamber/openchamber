@@ -52,6 +52,7 @@ import {
   revertToMessage as revertToMessageAction,
   unrevertSession as unrevertSessionAction,
   forkFromMessage as forkFromMessageAction,
+  fetchMessagesForSession,
 } from "./session-actions"
 import { useInputStore, type SyntheticContextPart } from "./input-store"
 import { useSelectionStore } from "./selection-store"
@@ -503,6 +504,13 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // same child store that send/SSE events will update during startup races.
     set({ currentSessionId: id, currentSessionDirectory: id ? resolvedDir ?? null : null })
     writeRuntimeSessionMemory(key, { sessionId: id, directory: resolvedDir ?? null })
+
+    // Kick off the message fetch on the same tick, before React commits the
+    // state change and fires ChatContainer.useEffect. The fetch is
+    // fire-and-forget — any transient failure gets retried by the reactive path.
+    if (id) {
+      void fetchMessagesForSession(id, resolvedDir)
+    }
 
     try {
       if (resolvedDir && directoryState.currentDirectory !== resolvedDir) {

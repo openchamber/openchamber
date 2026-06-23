@@ -46,7 +46,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { cn, getModifierLabel, getRevealLabelKey, hasModifier } from '@/lib/utils';
 import { getLanguageFromExtension, getImageMimeType, isDrawioFile, isImageFile, isPdfFile } from '@/lib/toolHelpers';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
-import { refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
+import { acquireRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken, subscribeRuntimeUrlAuthToken } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { getOutsideFileGrant } from '@/lib/outsideFileGrants';
 import { DiagramEditor } from '@/components/diagram';
@@ -670,6 +670,62 @@ interface FilesViewProps {
   mode?: 'full' | 'editor-only';
 }
 
+/**
+ * Keeps a token-bearing asset preview (image/HTML/PDF) authenticated. While
+ * `assetKey` is set this registers an active url-token consumer (so runtime-auth
+ * proactively refreshes the shared token before it expires) and subscribes to
+ * token replacements, bumping `nonce` so the iframe/img remounts with the fresh
+ * token — but only when the token actually changed, not on every interval.
+ */
+const useAssetAuthRefresh = (
+  assetKey: string,
+  setFileError: React.Dispatch<React.SetStateAction<string | null>>,
+  errorFallback: string,
+): { readyKey: string; nonce: number } => {
+  const [readyKey, setReadyKey] = React.useState('');
+  const [nonce, setNonce] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!assetKey) {
+      setReadyKey('');
+      return;
+    }
+
+    let cancelled = false;
+    setReadyKey('');
+    const apiBaseUrl = getRuntimeApiBaseUrl();
+    const release = acquireRuntimeUrlAuthToken(apiBaseUrl);
+
+    void refreshRuntimeUrlAuthToken(apiBaseUrl)
+      .then((token) => {
+        if (cancelled || !token) return;
+        setReadyKey(assetKey);
+        setFileError(null);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setFileError(error instanceof Error ? error.message : errorFallback);
+        setReadyKey(assetKey);
+      });
+
+    const unsubscribe = subscribeRuntimeUrlAuthToken(() => {
+      if (cancelled) return;
+      // Token was refreshed underneath us — remount the asset with the fresh URL.
+      setReadyKey(assetKey);
+      setNonce((n) => n + 1);
+      setFileError(null);
+    });
+
+    return () => {
+      cancelled = true;
+      release();
+      unsubscribe();
+    };
+  }, [assetKey, setFileError, errorFallback]);
+
+  return { readyKey, nonce };
+};
+
 export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const { t } = useI18n();
   const { files, runtime } = useRuntimeAPIs();
@@ -850,9 +906,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [fileError, setFileError] = React.useState<string | null>(null);
   const [desktopImageSrc, setDesktopImageSrc] = React.useState<string>('');
   const desktopImageBlobUrlRef = React.useRef<string>('');
-  const [imageAssetAuthReadyKey, setImageAssetAuthReadyKey] = React.useState('');
-  const [htmlAssetAuthReadyKey, setHtmlAssetAuthReadyKey] = React.useState('');
-  const [pdfAssetAuthReadyKey, setPdfAssetAuthReadyKey] = React.useState('');
 
   const [loadedFilePath, setLoadedFilePath] = React.useState<string | null>(null);
 
@@ -2880,78 +2933,16 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     ? selectedFile.path
     : '';
 
-  React.useEffect(() => {
-    if (!imageAssetAuthKey) {
-      setImageAssetAuthReadyKey('');
-      return;
-    }
-
-    let cancelled = false;
-    setImageAssetAuthReadyKey('');
-    void refreshRuntimeUrlAuthToken(getRuntimeApiBaseUrl())
-      .then((token) => {
-        if (!cancelled && token) setImageAssetAuthReadyKey(imageAssetAuthKey);
-      })
-      .catch(() => {});
-
-    return () => {
-      cancelled = true;
-    };
-  }, [imageAssetAuthKey]);
+  const assetAuthErrorFallback = t('filesView.error.readFileFailed');
+  const { readyKey: imageAssetAuthReadyKey, nonce: imagePreviewNonce } =
+    useAssetAuthRefresh(imageAssetAuthKey, setFileError, assetAuthErrorFallback);
+  const { readyKey: htmlAssetAuthReadyKey, nonce: htmlPreviewNonce } =
+    useAssetAuthRefresh(htmlAssetAuthKey, setFileError, assetAuthErrorFallback);
+  const { readyKey: pdfAssetAuthReadyKey, nonce: pdfPreviewNonce } =
+    useAssetAuthRefresh(pdfAssetAuthKey, setFileError, assetAuthErrorFallback);
 
   const isImageAssetAuthLoading = Boolean(imageAssetAuthKey && imageAssetAuthReadyKey !== imageAssetAuthKey);
-
-  React.useEffect(() => {
-    if (!htmlAssetAuthKey) {
-      setHtmlAssetAuthReadyKey('');
-      return;
-    }
-
-    let cancelled = false;
-    setHtmlAssetAuthReadyKey('');
-    void refreshRuntimeUrlAuthToken(getRuntimeApiBaseUrl())
-      .then((token) => {
-        if (!cancelled && token) {
-          setHtmlAssetAuthReadyKey(htmlAssetAuthKey);
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setFileError(error instanceof Error ? error.message : t('filesView.error.readFileFailed'));
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [htmlAssetAuthKey, t]);
-
   const isHtmlAssetAuthLoading = Boolean(htmlAssetAuthKey && htmlAssetAuthReadyKey !== htmlAssetAuthKey);
-
-  React.useEffect(() => {
-    if (!pdfAssetAuthKey) {
-      setPdfAssetAuthReadyKey('');
-      return;
-    }
-
-    let cancelled = false;
-    setPdfAssetAuthReadyKey('');
-    void refreshRuntimeUrlAuthToken(getRuntimeApiBaseUrl())
-      .then((token) => {
-        if (!cancelled && token) setPdfAssetAuthReadyKey(pdfAssetAuthKey);
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setFileError(error instanceof Error ? error.message : t('filesView.error.readFileFailed'));
-          setPdfAssetAuthReadyKey(pdfAssetAuthKey);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [pdfAssetAuthKey, t]);
-
   const isPdfAssetAuthLoading = Boolean(pdfAssetAuthKey && pdfAssetAuthReadyKey !== pdfAssetAuthKey);
 
   const imageSrc = selectedFile?.path && isSelectedImage
@@ -2981,12 +2972,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const renderPdfPreview = React.useCallback((file: FileNode) => (
     <div className="h-full overflow-hidden bg-[var(--surface-background)]">
       <iframe
+        key={pdfPreviewNonce}
         src={pdfSrc}
         className="h-full w-full border-0"
         title={file.name}
       />
     </div>
-  ), [pdfSrc]);
+  ), [pdfSrc, pdfPreviewNonce]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -3757,6 +3749,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           ) : isSelectedImage ? (
             <div className="flex h-full items-center justify-center p-3">
               <img
+                key={imagePreviewNonce}
                 src={imageSrc}
                 alt={selectedFile?.name ?? t('filesView.editor.imageAltFallback')}
                 className="max-w-full max-h-[70vh] object-contain rounded-md border border-border/30 bg-primary/10"
@@ -3825,6 +3818,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             ) : (
             <div className="h-full overflow-hidden">
               <iframe
+                key={htmlPreviewNonce}
                 src={!runtime.isVSCode && htmlAssetAuthReadyKey === htmlAssetAuthKey ? (() => {
                   const encoded = selectedFile.path.split('/').map((segment) => encodeURIComponent(segment)).join('/');
                   return getRuntimeUrlResolver().authenticatedAsset(`/api/fs/serve${encoded.startsWith('/') ? encoded : `/${encoded}`}`);
@@ -4126,6 +4120,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           ) : isSelectedImage ? (
             <div className="flex h-full items-center justify-center p-4">
               <img
+                key={imagePreviewNonce}
                 src={imageSrc}
                 alt={selectedFile.name}
                 className="max-w-full max-h-full object-contain rounded-md border border-border/30 bg-primary/10"
