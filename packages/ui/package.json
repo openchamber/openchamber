@@ -59,7 +59,7 @@
     "heic2any": "^0.0.4",
     "html-to-image": "^1.11.13",
     "http-proxy-middleware": "^3.0.5",
-    "katex": "^0.16.21",
+    "katex": "^0.17.0",
     "marked": "^17.0.3",
     "morphdom": "^2.7.7",
     "motion": "^12.23.24",

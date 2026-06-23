@@ -1254,13 +1254,19 @@ export const syncDesktopSettings = async (): Promise<void> => {
 // Coalesce rapid updateDesktopSettings calls into a single PUT
 let _pendingSettingsChanges: Partial<DesktopSettings> | null = null;
 let _settingsFlushTimer: ReturnType<typeof setTimeout> | null = null;
+let _settingsFlushWaiters: Array<() => void> = [];
 const SETTINGS_DEBOUNCE_MS = 200;
 
 const _flushSettingsUpdate = async (): Promise<void> => {
   const changes = _pendingSettingsChanges;
+  const waiters = _settingsFlushWaiters;
   _pendingSettingsChanges = null;
   _settingsFlushTimer = null;
-  if (!changes || Object.keys(changes).length === 0) return;
+  _settingsFlushWaiters = [];
+  if (!changes || Object.keys(changes).length === 0) {
+    waiters.forEach((resolve) => resolve());
+    return;
+  }
 
   const runtimeSettings = getRuntimeSettingsAPI();
   if (runtimeSettings) {
@@ -1270,7 +1276,9 @@ const _flushSettingsUpdate = async (): Promise<void> => {
         persistToLocalStorage(updated);
         applyDesktopUiPreferences(updated);
         dispatchSettingsSynced(updated);
+        _settingsCache = null;
       }
+      waiters.forEach((resolve) => resolve());
       return;
     } catch (error) {
       console.warn('Failed to update settings via runtime settings API:', error);
@@ -1302,6 +1310,8 @@ const _flushSettingsUpdate = async (): Promise<void> => {
     }
   } catch (error) {
     console.warn('Failed to update shared settings via API:', error);
+  } finally {
+    waiters.forEach((resolve) => resolve());
   }
 };
 
@@ -1315,7 +1325,11 @@ export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): 
   if (_settingsFlushTimer) {
     clearTimeout(_settingsFlushTimer);
   }
+  const flushed = new Promise<void>((resolve) => {
+    _settingsFlushWaiters.push(resolve);
+  });
   _settingsFlushTimer = setTimeout(() => void _flushSettingsUpdate(), SETTINGS_DEBOUNCE_MS);
+  return flushed;
 };
 
 export const initializeAppearancePreferences = async (): Promise<void> => {

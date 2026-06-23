@@ -24,6 +24,7 @@ import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from "@/stores/
 import { useDirectoryStore } from "@/stores/useDirectoryStore"
 import { useSessionFoldersStore } from "@/stores/useSessionFoldersStore"
 import { useCommandsStore } from "@/stores/useCommandsStore"
+import { useSkillsStore } from "@/stores/useSkillsStore"
 import { getSafeStorage } from "@/stores/utils/safeStorage"
 import { markPendingUserSendAnimation } from "@/lib/userSendAnimation"
 import { flattenAssistantTextParts } from "@/lib/messages/messageText"
@@ -101,8 +102,14 @@ export function routeMessage(params: {
     const syncCommands = dirState?.command ?? []
     const storeCommands = useCommandsStore.getState().commands
 
+    // OpenCode registers every skill as a command (source: "skill"), but the
+    // commands store filters skills out and the synced command list is only
+    // hydrated at bootstrap. Consult the live skills store so a skill selected
+    // from the slash menu is invoked via session.command (injecting its
+    // content) instead of being sent as a literal "/name" message (#1605).
     const isCommand = syncCommands.find((c) => c.name === cmdName)
       || storeCommands.find((c) => c.name === cmdName)
+      || useSkillsStore.getState().skills.some((s) => s.name === cmdName)
 
     if (isCommand) {
       return optimisticSend({
