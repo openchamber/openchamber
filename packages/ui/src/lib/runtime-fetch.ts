@@ -229,11 +229,38 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
 
 let runtimeFetchBridgeInstalled = false;
 
+// Cross-origin fetches (e.g. the SDK talking to an external OpenCode upstream
+// in proxy-bypass mode) MUST NOT use credentials: 'include' — the browser
+// requires Access-Control-Allow-Credentials: true on the response, but the
+// OpenCode upstream only sets Access-Control-Allow-Origin. Since we send
+// Authorization: Basic (or Bearer) on every cross-origin call, we don't need
+// cookies / credentials mode — drop it to keep CORS preflight happy.
+const resolveFetchCredentials = (target: string, init?: RequestInit): RequestCredentials | undefined => {
+  if (init && typeof init.credentials === 'string') {
+    return init.credentials;
+  }
+  if (typeof window === 'undefined') return init?.credentials;
+  try {
+    const targetOrigin = new URL(target, window.location.href).origin;
+    if (targetOrigin !== window.location.origin) {
+      return 'omit';
+    }
+  } catch {
+    // Non-URL target — fall through and let the browser handle it.
+  }
+  return init?.credentials;
+};
+
 export const installRuntimeFetchBridge = (): void => {
   if (runtimeFetchBridgeInstalled || typeof window === 'undefined') return;
   runtimeFetchBridgeInstalled = true;
 
   const nativeFetch = window.fetch.bind(window);
+  const mergedInit = (input: RequestInfo | URL, init?: RequestInit, targetOverride?: string) => {
+    const target = targetOverride ?? (typeof input === 'string' || input instanceof URL ? input.toString() : input.url);
+    return { ...init, credentials: resolveFetchCredentials(target, init) };
+  };
+
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     if (typeof input === 'string') {
       if (!shouldResolveFetchInput(input)) {
@@ -241,15 +268,16 @@ export const installRuntimeFetchBridge = (): void => {
           const url = new URL(input);
           if (isActiveRuntimeServiceUrl(url)) {
             const headers = await mergeHeaders(undefined, init?.headers);
-            return nativeFetch(input, { ...init, headers });
+            return nativeFetch(input, { ...mergedInit(input, init), headers });
           }
         } catch {
           // Non-URL fetch inputs should fall through unchanged.
         }
         return nativeFetch(input, init);
       }
+      const target = buildRuntimeFetchUrl(input);
       const headers = await mergeHeaders(undefined, init?.headers);
-      return nativeFetch(buildRuntimeFetchUrl(input), { ...init, headers });
+      return nativeFetch(target, { ...mergedInit(input, init, target), headers });
     }
 
     if (input instanceof URL) {
@@ -257,12 +285,13 @@ export const installRuntimeFetchBridge = (): void => {
       if (!shouldResolveFetchInput(raw)) {
         if (isActiveRuntimeServiceUrl(input)) {
           const headers = await mergeHeaders(undefined, init?.headers);
-          return nativeFetch(input, { ...init, headers });
+          return nativeFetch(input, { ...mergedInit(input, init), headers });
         }
         return nativeFetch(input, init);
       }
+      const target = buildRuntimeFetchUrl(raw);
       const headers = await mergeHeaders(undefined, init?.headers);
-      return nativeFetch(buildRuntimeFetchUrl(raw), { ...init, headers });
+      return nativeFetch(target, { ...mergedInit(input, init, target), headers });
     }
 
     if (input instanceof Request) {
@@ -271,7 +300,7 @@ export const installRuntimeFetchBridge = (): void => {
           const url = new URL(input.url);
           if (isActiveRuntimeServiceUrl(url)) {
             const headers = await mergeHeaders(input.headers, init?.headers);
-            return nativeFetch(new Request(input, { ...init, headers }));
+            return nativeFetch(new Request(input, { ...mergedInit(input, init), headers }));
           }
         } catch {
           // Non-URL request inputs should fall through unchanged.
@@ -281,7 +310,7 @@ export const installRuntimeFetchBridge = (): void => {
       const headers = await mergeHeaders(input.headers, init?.headers);
       const target = buildRuntimeFetchUrl(input.url);
       const request = target === input.url ? input : new Request(target, input);
-      return nativeFetch(new Request(request, { ...init, headers }));
+      return nativeFetch(new Request(request, { ...mergedInit(input, init, target), headers }));
     }
 
     return nativeFetch(input, init);
