@@ -1417,16 +1417,6 @@ export const Header: React.FC<HeaderProps> = ({
     toggleSidebar();
   }, [blurActiveElement, isMobile, isSessionSwitcherOpen, setSessionSwitcherOpen, toggleSidebar]);
 
-  const handleOpenWindowsAppMenu = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    void invokeDesktop('desktop_show_app_menu', {
-      x: rect.left,
-      y: rect.bottom,
-    }).catch((error) => {
-      console.warn('[header] failed to open app menu', error);
-    });
-  }, []);
-
   const handleOpenDraftMiniChat = React.useCallback(() => {
     void invokeDesktop('desktop_open_draft_mini_chat_window', {
       directory: normalize(openDirectory || activeProject?.path || ''),
@@ -2154,15 +2144,6 @@ export const Header: React.FC<HeaderProps> = ({
         className="app-region-no-drag shrink-0 self-stretch transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
         style={{ width: headerControlsSpacerWidth }}
       />
-      {isWindowsElectronDesktop ? (
-        <HeaderIconActionButton
-          title={t('header.actions.openAppMenu')}
-          ariaLabel={t('header.actions.openAppMenuAria')}
-          onClick={handleOpenWindowsAppMenu}
-          className={`${desktopHeaderIconButtonClass} shrink-0`}
-          Icon={'menu-2'}
-        />
-      ) : null}
       {/* Sidebar toggle + project actions live in the persistent
           TitlebarLeftControls overlay; the header reserves matching left space
           via padding (see headerStyle) when the sidebar is collapsed. */}
@@ -2222,7 +2203,7 @@ export const Header: React.FC<HeaderProps> = ({
               pressed={isContextPanelActive}
               className={!showMiniChatHeaderAction ? 'mr-3.5' : ''}
               valueClassName="typography-ui-label font-medium leading-none text-foreground"
-              percentIconClassName="h-5 w-5"
+              percentIconClassName="h-4.5 w-4.5"
             />
           ) : null}
           {desktopChangesPanelAction}

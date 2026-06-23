@@ -235,7 +235,7 @@ export const buildOpenCodeStatusReport = async (): Promise<string> => {
   };
 
   const probeTargets: Array<{ label: string; path: string; includeDirectory?: boolean; timeoutMs?: number }> = [
-    { label: 'health', path: '/api/health', includeDirectory: false },
+    { label: 'health', path: '/health', includeDirectory: false },
     { label: 'config', path: '/config', includeDirectory: true },
     { label: 'providers', path: '/config/providers', includeDirectory: true },
     { label: 'agents', path: '/agent', includeDirectory: true, timeoutMs: 12000 },

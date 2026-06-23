@@ -1,41 +1,32 @@
 import React from 'react';
-import 'katex/dist/katex.min.css';
+import morphdom from 'morphdom';
 import { renderMermaidASCII, renderMermaidSVG } from 'beautiful-mermaid';
-import ReactMarkdown from 'react-markdown';
-import type { Components } from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
-import { marked, type Tokens } from 'marked';
-import remend from 'remend';
-import { FadeInOnReveal } from './message/FadeInOnReveal';
 import type { Part } from '@opencode-ai/sdk/v2';
 import { cn } from '@/lib/utils';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { toast } from '@/components/ui';
-import { Icon } from "@/components/icon/Icon";
-import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-
-import { getExternalFaviconUrl, isExternalHttpUrl, isLoopbackHttpUrl, openExternalUrl } from '@/lib/url';
-import {
-  buildAgentMentionUrl,
-  parseAgentHref,
-  parseSkillHref,
-} from '@/lib/messages/inlineMessageLinks';
+import { isExternalHttpUrl, openExternalUrl } from '@/lib/url';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { getDefaultTheme } from '@/lib/theme/themes';
-import { generateSyntaxTheme } from '@/lib/theme/syntaxThemeGenerator';
+import type { Theme } from '@/types/theme';
 import type { ToolPopupContent } from './message/types';
+import { FadeInOnReveal } from './message/FadeInOnReveal';
 import { useUIStore } from '@/stores/useUIStore';
-import { useDeviceInfo } from '@/lib/device';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { EditorAPI } from '@/lib/api/types';
 import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { ensureOutsideFileGrantForDesktop } from '@/lib/outsideFileGrants';
 import { getDirectoryForFilePath, isAbsoluteFilePath, isFilePathWithinDirectory, normalizeFilePath, toAbsoluteFilePath } from '@/lib/path-utils';
+import { renderMarkdownBlocks, renderMarkdownSync } from './markdown/markdownCore';
+import { ensureMarkdownShikiTheme, getMarkdownSyntaxVars } from './markdown/markdownTheme';
+import {
+  attachMarkdownInteractions,
+  decorateMarkdown,
+  type DecorateContext,
+  type DecorateLabels,
+  type MermaidRender,
+} from './markdown/decorate';
 
 const useCurrentMermaidTheme = () => {
   const themeSystem = useOptionalThemeSystem();
@@ -101,442 +92,6 @@ const useExternalLinkInteractions = ({
   }, [containerRef, enabled]);
 };
 
-const ExternalLinkFavicon: React.FC<{ href: string }> = ({ href }) => {
-  const [failed, setFailed] = React.useState(false);
-  const faviconUrl = React.useMemo(() => getExternalFaviconUrl(href), [href]);
-
-  if (!faviconUrl || failed) {
-    return null;
-  }
-
-  return (
-    <span className="mr-1 inline-flex size-[18px] items-center justify-center rounded border border-[var(--border)] bg-[var(--interactive-hover)] align-middle">
-      <img
-        src={faviconUrl}
-        alt=""
-        aria-hidden="true"
-        loading="lazy"
-        decoding="async"
-        className="size-3.5 rounded-sm"
-        onError={() => setFailed(true)}
-      />
-    </span>
-  );
-};
-
-// Table utility functions
-const extractTableData = (tableEl: HTMLTableElement): { headers: string[]; rows: string[][] } => {
-  const headers: string[] = [];
-  const rows: string[][] = [];
-  
-  const thead = tableEl.querySelector('thead');
-  if (thead) {
-    const headerCells = thead.querySelectorAll('th');
-    headerCells.forEach(cell => headers.push(cell.innerText.trim()));
-  }
-  
-  const tbody = tableEl.querySelector('tbody');
-  if (tbody) {
-    const rowEls = tbody.querySelectorAll('tr');
-    rowEls.forEach(row => {
-      const cells = row.querySelectorAll('td');
-      const rowData: string[] = [];
-      cells.forEach(cell => rowData.push(cell.innerText.trim()));
-      rows.push(rowData);
-    });
-  }
-  
-  return { headers, rows };
-};
-
-const tableToCSV = ({ headers, rows }: { headers: string[]; rows: string[][] }): string => {
-  const escapeCell = (cell: string): string => {
-    if (cell.includes(',') || cell.includes('"') || cell.includes('\n')) {
-      return `"${cell.replace(/"/g, '""')}"`;
-    }
-    return cell;
-  };
-  
-  const lines: string[] = [];
-  if (headers.length > 0) {
-    lines.push(headers.map(escapeCell).join(','));
-  }
-  rows.forEach(row => lines.push(row.map(escapeCell).join(',')));
-  return lines.join('\n');
-};
-
-const tableToTSV = ({ headers, rows }: { headers: string[]; rows: string[][] }): string => {
-  const escapeCell = (cell: string): string => {
-    return cell.replace(/\t/g, '\\t').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
-  };
-  
-  const lines: string[] = [];
-  if (headers.length > 0) {
-    lines.push(headers.map(escapeCell).join('\t'));
-  }
-  rows.forEach(row => lines.push(row.map(escapeCell).join('\t')));
-  return lines.join('\n');
-};
-
-const tableToMarkdown = ({ headers, rows }: { headers: string[]; rows: string[][] }): string => {
-  if (headers.length === 0) return '';
-  
-  const escapeCell = (cell: string): string => {
-    return cell.replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
-  };
-  
-  const lines: string[] = [];
-  lines.push(`| ${headers.map(escapeCell).join(' | ')} |`);
-  lines.push(`| ${headers.map(() => '---').join(' | ')} |`);
-  rows.forEach(row => {
-    const paddedRow = headers.map((_, i) => escapeCell(row[i] || ''));
-    lines.push(`| ${paddedRow.join(' | ')} |`);
-  });
-  return lines.join('\n');
-};
-
-const downloadFile = (filename: string, content: string, mimeType: string) => {
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-};
-
-
-// Table copy button with dropdown
-const TableCopyButton: React.FC<{ tableRef: React.RefObject<HTMLDivElement | null> }> = ({ tableRef }) => {
-  const { t } = useI18n();
-  const [copied, setCopied] = React.useState(false);
-  const [showMenu, setShowMenu] = React.useState(false);
-  const menuRef = React.useRef<HTMLDivElement>(null);
-
-  React.useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setShowMenu(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  const handleCopy = async (format: 'csv' | 'tsv' | 'markdown') => {
-    const tableEl = tableRef.current?.querySelector('table');
-    if (!tableEl) return;
-    
-    const data = extractTableData(tableEl);
-    let content: string;
-    if (format === 'csv') {
-      content = tableToCSV(data);
-    } else if (format === 'tsv') {
-      content = tableToTSV(data);
-    } else {
-      content = tableToMarkdown(data);
-    }
-
-
-    try {
-      await navigator.clipboard.write([
-        new ClipboardItem({
-          'text/plain': new Blob([content], { type: 'text/plain' }),
-          'text/html': new Blob([tableEl.outerHTML], { type: 'text/html' }),
-        }),
-      ]);
-      setCopied(true);
-      setShowMenu(false);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      const fallbackResult = await copyTextToClipboard(content);
-      if (fallbackResult.ok) {
-        setCopied(true);
-        setShowMenu(false);
-        setTimeout(() => setCopied(false), 2000);
-        return;
-      }
-      console.error('Failed to copy table:', err);
-    }
-  };
-
-  return (
-    <div className="relative" ref={menuRef}>
-      <button
-        onClick={() => setShowMenu(!showMenu)}
-        className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-        title={t("markdownRenderer.table.actions.copyTitle")}
-      >
-        {copied ? (
-          <Icon name="check" className="size-3.5" />
-        ) : (
-          <Icon name="file-copy" className="size-3.5" />
-        )}
-      </button>
-      {showMenu && (
-        <div className="absolute top-full right-0 z-10 mt-1 min-w-[100px] overflow-hidden rounded-md border border-border bg-background shadow-none">
-          <button
-            className="w-full px-3 py-1.5 text-left text-sm transition-colors hover:bg-interactive-hover/40"
-            onClick={() => handleCopy("csv")}
-          >
-            CSV
-          </button>
-          <button
-            className="w-full px-3 py-1.5 text-left text-sm transition-colors hover:bg-interactive-hover/40"
-            onClick={() => handleCopy("tsv")}
-          >
-            TSV
-          </button>
-          <button
-            className="w-full px-3 py-1.5 text-left text-sm transition-colors hover:bg-interactive-hover/40"
-            onClick={() => handleCopy("markdown")}
-          >
-            Markdown
-          </button>
-        </div>
-      )}
-    </div>
-  );
-};
-
-// Table download button with dropdown
-const TableDownloadButton: React.FC<{ tableRef: React.RefObject<HTMLDivElement | null> }> = ({ tableRef }) => {
-  const { t } = useI18n();
-  const [showMenu, setShowMenu] = React.useState(false);
-  const menuRef = React.useRef<HTMLDivElement>(null);
-
-  React.useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setShowMenu(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-   const handleDownload = (format: 'csv' | 'markdown') => {
-      const tableEl = tableRef.current?.querySelector('table');
-      if (!tableEl) return;
-
-      const data = extractTableData(tableEl);
-      const content = format === 'csv' ? tableToCSV(data) : tableToMarkdown(data);
-      const filename = format === 'csv' ? 'table.csv' : 'table.md';
-      const mimeType = format === 'csv' ? 'text/csv' : 'text/markdown';
-      downloadFile(filename, content, mimeType);
-      setShowMenu(false);
-      toast.success(t('markdownRenderer.table.toast.downloadedAsFormat', { format: format.toUpperCase() }));
-    };
-
-  return (
-    <div className="relative" ref={menuRef}>
-      <button
-        onClick={() => setShowMenu(!showMenu)}
-        className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-        title={t('markdownRenderer.table.actions.downloadTitle')}
-      >
-        <Icon name="download" className="size-3.5" />
-      </button>
-      {showMenu && (
-        <div className="absolute top-full right-0 z-10 mt-1 min-w-[100px] overflow-hidden rounded-md border border-border bg-background shadow-none">
-          <button
-            className="w-full px-3 py-1.5 text-left text-sm transition-colors hover:bg-interactive-hover/40"
-            onClick={() => handleDownload('csv')}
-          >
-            CSV
-          </button>
-          <button
-            className="w-full px-3 py-1.5 text-left text-sm transition-colors hover:bg-interactive-hover/40"
-            onClick={() => handleDownload('markdown')}
-          >
-            Markdown
-          </button>
-        </div>
-      )}
-    </div>
-  );
-};
-
-// Table wrapper with custom controls
-const TableWrapper: React.FC<{ children?: React.ReactNode; className?: string }> = ({ children, className }) => {
-  const tableRef = React.useRef<HTMLDivElement>(null);
-  const { isMobile, isTablet } = useDeviceInfo();
-  const alwaysShowActions = isMobile || isTablet;
-
-  return (
-    <div className="group my-4 flex flex-col space-y-2" data-markdown="table-wrapper" ref={tableRef}>
-      <div className={cn(
-        "flex items-center justify-end gap-1 transition-opacity",
-        alwaysShowActions ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-      )}>
-        <TableCopyButton tableRef={tableRef} />
-        <TableDownloadButton tableRef={tableRef} />
-      </div>
-      <div className="overflow-x-auto rounded-lg border border-border/80 bg-[var(--surface-elevated)]">
-        <table className={cn('w-full border-collapse text-sm', className)} data-markdown="table">
-          {children}
-        </table>
-      </div>
-    </div>
-  );
-};
-
-const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii' }> = ({ source, mode }) => {
-  const { t } = useI18n();
-  const currentTheme = useCurrentMermaidTheme();
-  const { isMobile, isTablet } = useDeviceInfo();
-  const [copied, setCopied] = React.useState(false);
-  const [downloaded, setDownloaded] = React.useState(false);
-
-  const svg = React.useMemo(() => {
-    if (mode !== 'svg') return '';
-    try {
-      return renderMermaidSVG(source, {
-        bg: currentTheme.colors.surface.elevated,
-        fg: currentTheme.colors.surface.foreground,
-        line: currentTheme.colors.interactive.border,
-        accent: currentTheme.colors.primary.base,
-        muted: currentTheme.colors.surface.mutedForeground,
-        surface: currentTheme.colors.surface.muted,
-        border: currentTheme.colors.interactive.border,
-        transparent: true,
-        font: 'IBM Plex Sans, sans-serif',
-      });
-    } catch {
-      return '';
-    }
-  }, [currentTheme, mode, source]);
-
-  const ascii = React.useMemo(() => {
-    if (mode !== 'ascii') return '';
-    try {
-      return renderMermaidASCII(source);
-    } catch {
-      return '';
-    }
-  }, [mode, source]);
-
-  const copyVisibilityClass = isMobile || isTablet ? 'opacity-100' : 'opacity-0 group-hover:opacity-100';
-
-  const handleCopyAscii = async (asciiText: string) => {
-    if (!asciiText) return;
-    const result = await copyTextToClipboard(asciiText);
-    if (result.ok) {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
-
-  const handleCopyMermaidSource = async () => {
-    if (!source) return;
-    const result = await copyTextToClipboard(source);
-    if (result.ok) {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
-
-  const handleDownloadSvg = () => {
-    if (!svg) return;
-    try {
-      const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `diagram-${Date.now()}.svg`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-      setDownloaded(true);
-      setTimeout(() => setDownloaded(false), 2000);
-    } catch {
-      toast.error(t('markdownRenderer.mermaid.toast.downloadFailed'));
-    }
-  };
-
-  if (mode === 'ascii') {
-    const asciiText = ascii || source;
-
-    return (
-      <div data-markdown="mermaid-block" className="group">
-        <div data-markdown="mermaid-scroll">
-          <pre data-markdown="mermaid-ascii">{asciiText}</pre>
-        </div>
-        <div
-          className={cn(
-            'absolute top-1 right-2 transition-opacity',
-            copyVisibilityClass,
-          )}
-        >
-          <button
-            onClick={() => handleCopyAscii(asciiText)}
-            className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-            title={t('markdownRenderer.mermaid.actions.copyTitle')}
-          >
-            {copied ? <Icon name="check" className="size-3.5" /> : <Icon name="file-copy" className="size-3.5" />}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (!svg) {
-    return (
-      <div data-markdown="mermaid-block" className="group">
-        <div data-markdown="mermaid-scroll">
-          <pre data-markdown="mermaid-ascii">{source}</pre>
-        </div>
-        <div
-          className={cn(
-            'absolute top-1 right-2 transition-opacity',
-            copyVisibilityClass,
-          )}
-        >
-          <button
-            onClick={() => handleCopyAscii(source)}
-            className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-            title={t('markdownRenderer.mermaid.actions.copyTitle')}
-          >
-            {copied ? <Icon name="check" className="size-3.5" /> : <Icon name="file-copy" className="size-3.5" />}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div data-markdown="mermaid-block" className="group">
-      <div data-markdown="mermaid-scroll">
-        <div data-markdown="mermaid" dangerouslySetInnerHTML={{ __html: svg }} />
-      </div>
-      <div
-        className={cn(
-          'absolute top-1 right-2 flex items-center gap-1 transition-opacity',
-          copyVisibilityClass,
-        )}
-      >
-        <button
-          onClick={handleCopyMermaidSource}
-          className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-          title={t('markdownRenderer.mermaid.actions.copySourceTitle')}
-        >
-          {copied ? <Icon name="check" className="size-3.5" /> : <Icon name="file-copy" className="size-3.5" />}
-        </button>
-        <button
-          onClick={handleDownloadSvg}
-          className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-          title={t('markdownRenderer.mermaid.actions.downloadSvgTitle')}
-        >
-          {downloaded ? <Icon name="check" className="size-3.5" /> : <Icon name="download" className="size-3.5" />}
-        </button>
-      </div>
-    </div>
-  );
-};
-
 type MermaidControlOptions = {
   download: boolean;
   copy: boolean;
@@ -573,519 +128,6 @@ const stripLeadingFrontmatter = (markdown: string): string => {
 
 export type MarkdownVariant = 'assistant' | 'tool' | 'reasoning';
 
-type MarkdownStreamBlock = {
-  key: string;
-  raw: string;
-  src: string;
-  mode: 'full' | 'live';
-};
-
-const hasReferenceDefinitions = (text: string): boolean => {
-  return /^\[[^\]]+\]:\s+\S+/m.test(text) || /^\[\^[^\]]+\]:\s+/m.test(text);
-};
-
-const hasOpenFence = (raw: string): boolean => {
-  const match = raw.match(/^[ \t]{0,3}(`{3,}|~{3,})/);
-  if (!match) return false;
-  const marker = match[1];
-  if (!marker) return false;
-  const char = marker[0];
-  const size = marker.length;
-  const last = raw.trimEnd().split('\n').at(-1)?.trim() ?? '';
-  return !new RegExp(`^[\\t ]{0,3}${char}{${size},}[\\t ]*$`).test(last);
-};
-
-const healMarkdown = (text: string): string => {
-  return remend(text, { linkMode: 'text-only' });
-};
-
-const fnv1a32 = (input: string): string => {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < input.length; i += 1) {
-    hash ^= input.charCodeAt(i);
-    hash = (hash + ((hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24))) >>> 0;
-  }
-  return hash.toString(16);
-};
-
-const buildMarkdownCacheKey = (baseKey: string, raw: string, index: number, mode: 'full' | 'live'): string => {
-  const sample = raw.length > 400 ? `${raw.slice(0, 200)}${raw.slice(-200)}` : raw;
-  return `${baseKey}:${index}:${mode}:${raw.length}:${fnv1a32(sample)}`;
-};
-
-const streamMarkdownBlocks = (text: string, live: boolean, baseKey: string): MarkdownStreamBlock[] => {
-  if (!live) {
-    return [{
-      key: buildMarkdownCacheKey(baseKey, text, 0, 'full'),
-      raw: text,
-      src: text,
-      mode: 'full',
-    }];
-  }
-
-  const healed = healMarkdown(text);
-  if (hasReferenceDefinitions(text)) {
-    return [{
-      key: buildMarkdownCacheKey(baseKey, text, 0, 'live'),
-      raw: text,
-      src: healed,
-      mode: 'live',
-    }];
-  }
-
-  const tokens = marked.lexer(text);
-  const blocks: MarkdownStreamBlock[] = [];
-  let blockIndex = 0;
-  for (let index = 0; index < tokens.length; index += 1) {
-    const token = tokens[index] as Tokens.Generic;
-    if (token.type === 'space') {
-      continue;
-    }
-
-    const raw = token.raw ?? '';
-    const isLast = index === tokens.length - 1 || tokens.slice(index + 1).every((nextToken) => nextToken.type === 'space');
-    const mode: 'full' | 'live' = isLast ? 'live' : 'full';
-    const src = isLast && token.type === 'code' && hasOpenFence(raw)
-      ? raw
-      : healMarkdown(raw);
-
-    blocks.push({
-      key: buildMarkdownCacheKey(baseKey, raw, blockIndex, mode),
-      raw,
-      src,
-      mode,
-    });
-    blockIndex += 1;
-  }
-
-  if (blocks.length === 0) {
-    return [{
-      key: buildMarkdownCacheKey(baseKey, text, 0, 'live'),
-      raw: text,
-      src: healed,
-      mode: 'live',
-    }];
-  }
-
-  return blocks;
-};
-
-const useStableMarkdownBlocks = (text: string, live: boolean, baseKey: string): MarkdownStreamBlock[] => {
-  const previousRef = React.useRef<MarkdownStreamBlock[]>([]);
-
-  return React.useMemo(() => {
-    const nextBlocks = streamMarkdownBlocks(text, live, baseKey);
-    const previousBlocks = previousRef.current;
-    const stabilized = nextBlocks.map((block, index) => {
-      const previous = previousBlocks[index];
-      if (previous && previous.key === block.key && previous.src === block.src) {
-        return previous;
-      }
-      return block;
-    });
-
-    const unchanged = stabilized.length === previousBlocks.length
-      && stabilized.every((block, index) => block === previousBlocks[index]);
-
-    if (unchanged) {
-      return previousBlocks;
-    }
-
-    previousRef.current = stabilized;
-    return stabilized;
-  }, [baseKey, live, text]);
-};
-
-const extractCodeText = (children: React.ReactNode): string => {
-  if (typeof children === 'string') return children;
-  if (Array.isArray(children)) {
-    return children.map((child) => extractCodeText(child)).join('');
-  }
-  if (React.isValidElement(children)) {
-    return extractCodeText((children.props as { children?: React.ReactNode }).children);
-  }
-  return '';
-};
-
-const getCodeLanguage = (className: string | undefined): string => {
-  const match = className?.match(/language-([\w-]+)/);
-  return match?.[1]?.toLowerCase() ?? 'text';
-};
-
-const decodeHtmlEntities = (value: string): string => {
-  let decoded = value;
-  for (let i = 0; i < 3; i += 1) {
-    const next = decoded
-      .replace(/&quot;/g, '"')
-      .replace(/&#34;/g, '"')
-      .replace(/&apos;/g, "'")
-      .replace(/&#39;/g, "'")
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&amp;/g, '&');
-    if (next === decoded) {
-      return decoded;
-    }
-    decoded = next;
-  }
-  return decoded;
-};
-
-const normalizeCodeBlockText = (code: string, language: string): string => {
-  if (!['json', 'jsonc', 'json5'].includes(language)) {
-    return code;
-  }
-  if (!/&(quot|#34|amp;quot|lt|gt|amp|apos|#39);/.test(code)) {
-    return code;
-  }
-  return decodeHtmlEntities(code);
-};
-
-const CODE_HIGHLIGHT_SETTLE_MS = 300;
-const CODE_HIGHLIGHT_LINE_LIMIT = 1200;
-const VSCODE_CODE_HIGHLIGHT_LINE_LIMIT = 200;
-const CODE_SHARED_STYLE: React.CSSProperties = {
-  margin: 0,
-  background: 'transparent',
-  padding: 0,
-  fontSize: 'var(--text-code)',
-  lineHeight: 'var(--markdown-code-block-line-height)',
-};
-
-const exceedsLineLimit = (value: string, limit: number): boolean => {
-  let lineCount = 1;
-  for (let index = 0; index < value.length; index += 1) {
-    if (value.charCodeAt(index) === 10) {
-      lineCount += 1;
-      if (lineCount > limit) {
-        return true;
-      }
-    }
-  }
-  return false;
-};
-
-const getCodeHighlightLineLimit = (): number => (
-  isVSCodeRuntime() ? VSCODE_CODE_HIGHLIGHT_LINE_LIMIT : CODE_HIGHLIGHT_LINE_LIMIT
-);
-
-const downloadTextFile = (content: string, filename: string, mimeType: string) => {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  try {
-    const blob = new Blob([content], { type: mimeType });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  } catch {
-    // Best-effort; callers can optionally toast.
-  }
-};
-
-const MarkdownCodeBlock: React.FC<{
-  code: string;
-  language: string;
-  syntaxTheme: { [key: string]: React.CSSProperties };
-}> = ({ code, language, syntaxTheme }) => {
-  const [copied, setCopied] = React.useState(false);
-  const [highlight, setHighlight] = React.useState(true);
-  const [viewMode, setViewMode] = React.useState<'code' | 'preview'>('code');
-  const prevCodeRef = React.useRef<string>(code);
-  const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const { isMobile, isTablet } = useDeviceInfo();
-  const skipHighlight = exceedsLineLimit(code, getCodeHighlightLineLimit());
-
-  const canPreview = language === 'html' || language === 'htm';
-
-  React.useEffect(() => {
-    if (!canPreview && viewMode !== 'code') {
-      setViewMode('code');
-    }
-  }, [canPreview, viewMode]);
-
-  // Defer Prism highlighting while code is actively streaming.
-  // Initial mount renders highlighted immediately (plays nice with finalized blocks).
-  React.useEffect(() => {
-    if (prevCodeRef.current === code) return;
-    prevCodeRef.current = code;
-
-    if (timerRef.current) clearTimeout(timerRef.current);
-    setHighlight(false);
-    timerRef.current = setTimeout(() => {
-      setHighlight(true);
-      timerRef.current = null;
-    }, CODE_HIGHLIGHT_SETTLE_MS);
-
-    return () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
-    };
-  }, [code]);
-
-  const handleCopy = React.useCallback(async () => {
-    const result = await copyTextToClipboard(code);
-    if (!result.ok) return;
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 2000);
-  }, [code]);
-
-  const handleDownload = React.useCallback(() => {
-    if (!canPreview) {
-      return;
-    }
-
-    const safeSuffix = Date.now().toString(36);
-    downloadTextFile(code, `preview-${safeSuffix}.html`, 'text/html;charset=utf-8');
-  }, [canPreview, code]);
-
-  return (
-    <div data-component="markdown-code" className="my-4 group overflow-hidden rounded-2xl border border-border/80 bg-[var(--surface-elevated)]">
-      <div className="flex items-center justify-between border-b border-border/70 px-3 py-1.5">
-        <span className="font-mono text-[13px] text-muted-foreground">{language}</span>
-        <div className={cn(
-          "flex items-center gap-1 transition-opacity",
-          isMobile || isTablet ? "opacity-100" : "opacity-100 md:opacity-0 md:group-hover:opacity-100"
-        )}>
-          {canPreview ? (
-            <button
-              type="button"
-              onClick={() => setViewMode((mode) => (mode === 'preview' ? 'code' : 'preview'))}
-              className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-              title={viewMode === 'preview' ? 'Show code' : 'Preview'}
-              aria-pressed={viewMode === 'preview'}
-              aria-label={viewMode === 'preview' ? 'Show code' : 'Preview HTML'}
-            >
-              {viewMode === 'preview' ? <Icon name="code" className="size-3.5" /> : <Icon name="eye" className="size-3.5" />}
-            </button>
-          ) : null}
-          {canPreview ? (
-            <button
-              type="button"
-              onClick={handleDownload}
-              className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-              title="Download HTML"
-              aria-label="Download HTML"
-            >
-              <Icon name="download" className="size-3.5" />
-            </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={() => { void handleCopy(); }}
-            className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-            title={copied ? 'Copied' : 'Copy code'}
-            aria-label={copied ? 'Copied' : 'Copy code'}
-          >
-            {copied ? <Icon name="check" className="size-3.5" /> : <Icon name="file-copy" className="size-3.5" />}
-          </button>
-        </div>
-      </div>
-      {canPreview && viewMode === 'preview' ? (
-        <div className="h-[320px] md:h-[420px] bg-background">
-          <iframe
-            srcDoc={code}
-            title="HTML preview"
-            className="h-full w-full border-0"
-            sandbox="allow-scripts allow-forms"
-          />
-        </div>
-      ) : (
-        <div className="px-3 py-2.5">
-          {highlight && !skipHighlight ? (
-            <SyntaxHighlighter
-              language={language}
-              style={syntaxTheme}
-              customStyle={CODE_SHARED_STYLE}
-              codeTagProps={{ style: CODE_SHARED_STYLE }}
-              PreTag="pre"
-            >
-              {code}
-            </SyntaxHighlighter>
-          ) : (
-            <pre style={CODE_SHARED_STYLE}>
-              <code style={CODE_SHARED_STYLE}>{code}</code>
-            </pre>
-          )}
-        </div>
-      )}
-    </div>
-  );
-};
-
-const buildMarkdownComponents = ({
-  syntaxTheme,
-  onPreviewLoopback,
-  previewLabel,
-  previewTitle,
-}: {
-  syntaxTheme: { [key: string]: React.CSSProperties };
-  onPreviewLoopback?: (url: string) => void;
-  previewLabel?: string;
-  previewTitle?: string;
-}): Components => ({
-  table({ children, ...props }) {
-    return <TableWrapper className={props.className}>{children}</TableWrapper>;
-  },
-  h1({ children, ...props }) {
-    return <h1 {...props} className={cn('typography-markdown-h1 mt-4 mb-2 text-[var(--markdown-heading1,var(--primary))] font-semibold', props.className)}>{children}</h1>;
-  },
-  h2({ children, ...props }) {
-    return <h2 {...props} className={cn('typography-markdown-h2 mt-3.5 mb-1.5 text-[var(--markdown-heading2,var(--primary))] font-semibold', props.className)}>{children}</h2>;
-  },
-  h3({ children, ...props }) {
-    return <h3 {...props} className={cn('typography-markdown-h3 mt-3 mb-1 text-[var(--markdown-heading3,var(--primary))] font-semibold', props.className)}>{children}</h3>;
-  },
-  h4({ children, ...props }) {
-    return <h4 {...props} className={cn('typography-markdown-h4 mt-2.5 mb-1 text-[var(--markdown-heading4,var(--foreground))] font-semibold', props.className)}>{children}</h4>;
-  },
-  h5({ children, ...props }) {
-    return <h5 {...props} className={cn('typography-markdown-h4 mt-2.5 mb-1 text-[var(--markdown-heading4,var(--foreground))] font-semibold', props.className)}>{children}</h5>;
-  },
-  h6({ children, ...props }) {
-    return <h6 {...props} className={cn('typography-markdown-h4 mt-2.5 mb-1 text-[var(--markdown-heading4,var(--foreground))] font-semibold', props.className)}>{children}</h6>;
-  },
-  p({ children, ...props }) {
-    return <p {...props} className={cn('typography-markdown-body my-2 text-foreground/90', props.className)}>{children}</p>;
-  },
-  thead({ children, ...props }) {
-    return <thead {...props} className={cn('[&_tr]:border-b [&_tr]:border-border/80', props.className)}>{children}</thead>;
-  },
-  tbody({ children, ...props }) {
-    return <tbody {...props} className={cn('[&_tr:last-child]:border-0', props.className)}>{children}</tbody>;
-  },
-  tr({ children, ...props }) {
-    return <tr {...props} className={cn('border-b border-border/60', props.className)}>{children}</tr>;
-  },
-  th({ children, ...props }) {
-    return <th {...props} className={cn('border-r border-border/60 px-4 py-2.5 text-left align-middle font-semibold text-foreground last:border-r-0', props.className)}>{children}</th>;
-  },
-  td({ children, ...props }) {
-    return <td {...props} className={cn('border-r border-border/60 px-4 py-2.5 align-middle text-foreground/90 last:border-r-0', props.className)}>{children}</td>;
-  },
-  ul({ children, ...props }) {
-    return <ul {...props} className={cn('typography-markdown-body my-2', props.className)}>{children}</ul>;
-  },
-  ol({ children, ...props }) {
-    return <ol {...props} className={cn('typography-markdown-body my-2', props.className)}>{children}</ol>;
-  },
-  li({ children, ...props }) {
-    return <li {...props} className={cn('typography-markdown-body my-0.5 text-foreground/90', props.className)}>{children}</li>;
-  },
-  blockquote({ children, ...props }) {
-    return <blockquote {...props} className={cn('my-3 border-l-2 border-[var(--markdown-blockquote-border,var(--border))] pl-4 typography-markdown-body text-[var(--markdown-blockquote,var(--muted-foreground))]', props.className)}>{children}</blockquote>;
-  },
-  pre({ children, ...props }) {
-    const child = React.Children.only(children) as React.ReactElement<{ className?: string; children?: React.ReactNode }>;
-    const className = child.props.className;
-    const language = getCodeLanguage(className);
-    const code = normalizeCodeBlockText(extractCodeText(child.props.children).replace(/\n$/, ''), language);
-    if (language === 'mermaid') {
-      return <MermaidBlock source={code} mode={useUIStore.getState().mermaidRenderingMode} />;
-    }
-    return <MarkdownCodeBlock code={code} language={language} syntaxTheme={syntaxTheme} {...props} />;
-  },
-  code({ className, children, ...props }) {
-    return (
-      <code
-        {...props}
-        className={cn('rounded bg-[var(--surface-elevated)] px-1 py-0.5 font-mono text-[0.95em]', className)}
-        data-markdown="inline-code"
-      >
-        {children}
-      </code>
-    );
-  },
-  a({ href, children, ...props }) {
-    const targetHref = href ?? '';
-    const agentName = parseAgentHref(targetHref);
-    if (agentName) {
-      return (
-        <a
-          {...props}
-          href={buildAgentMentionUrl(agentName)}
-          data-openchamber-agent-mention="true"
-          className={cn('text-primary hover:underline', props.className)}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={(event) => event.stopPropagation()}
-        >
-          {children}
-        </a>
-      );
-    }
-
-    const skillName = parseSkillHref(targetHref);
-    if (skillName) {
-      return (
-        <a
-          {...props}
-          href={targetHref}
-          data-skill-name={skillName}
-          className={cn('text-primary hover:underline', props.className)}
-          onClick={(event) => event.stopPropagation()}
-        >
-          {children}
-        </a>
-      );
-    }
-
-    const isExternal = isExternalHttpUrl(targetHref);
-    const isLoopback = onPreviewLoopback ? isLoopbackHttpUrl(targetHref) : false;
-    return (
-      <>
-        <a
-          {...props}
-          href={href}
-          target={isExternal ? '_blank' : undefined}
-          rel={isExternal ? 'noopener noreferrer' : undefined}
-        >
-          {isExternal ? <ExternalLinkFavicon href={targetHref} /> : null}
-          {children}
-        </a>
-        {isLoopback && onPreviewLoopback ? (
-          <button
-            type="button"
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              onPreviewLoopback(targetHref);
-            }}
-            className="ml-1 inline-flex h-5 items-center gap-0.5 rounded border border-[var(--border)] bg-[var(--surface-background)] px-1.5 align-middle text-[11px] leading-none text-[var(--muted-foreground)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)]"
-            aria-label={previewTitle ?? previewLabel ?? 'Open preview pane'}
-            title={previewTitle ?? previewLabel ?? 'Open preview pane'}
-            data-loopback-preview-trigger="true"
-          >
-            <Icon name="eye" className="size-3"  aria-hidden="true"/>
-            <span className="font-medium">{previewLabel ?? 'Preview'}</span>
-          </button>
-        ) : null}
-      </>
-    );
-  },
-});
-
-const MarkdownBlockView: React.FC<{
-  block: MarkdownStreamBlock;
-  components: Components;
-}> = React.memo(({ block, components }) => {
-  return (
-    <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[[rehypeKatex, { throwOnError: false, errorColor: 'var(--destructive)' }]]} components={components}>
-      {block.src}
-    </ReactMarkdown>
-  );
-}, (prev, next) => prev.block === next.block && prev.components === next.components);
-
-MarkdownBlockView.displayName = 'MarkdownBlockView';
-
 interface MarkdownRendererProps {
   content: string;
   part?: Part;
@@ -1119,8 +161,9 @@ const MAX_BLOCK_CODE_SCAN_LENGTH = 200_000;
 const FILE_REFERENCE_STAT_CONCURRENCY = 4;
 const FILE_REFERENCE_STAT_CACHE_MAX = 1000;
 const VSCODE_FILE_REFERENCE_STAT_CACHE_MAX = 200;
-const FILE_REFERENCE_LINK_LIMIT = 200;
+const FILE_REFERENCE_LINK_LIMIT = 80;
 const VSCODE_FILE_REFERENCE_LINK_LIMIT = 40;
+const FILE_REFERENCE_ANNOTATION_DELAY_MS = 160;
 const FILE_REFERENCE_STAT_CACHE = new Map<string, Promise<boolean>>();
 let activeFileReferenceStatCount = 0;
 const pendingFileReferenceStats: Array<() => void> = [];
@@ -1462,11 +505,18 @@ const fileReferenceExists = (resolvedPath: string): Promise<boolean> => {
   const request = new Promise<boolean>((resolve) => {
     const run = () => {
       activeFileReferenceStatCount += 1;
-      void runtimeFetch(`/api/fs/stat?path=${encodeURIComponent(normalizedPath)}`, {
+      void runtimeFetch(`/api/fs/stat?path=${encodeURIComponent(normalizedPath)}&optional=true`, {
         method: 'GET',
         cache: 'no-store',
       })
-        .then((response) => resolve(response.ok))
+        .then(async (response) => {
+          if (!response.ok) {
+            resolve(false);
+            return;
+          }
+          const payload = await response.json().catch(() => null) as { exists?: unknown } | null;
+          resolve(payload?.exists !== false);
+        })
         .catch(() => resolve(false))
         .finally(() => {
           activeFileReferenceStatCount = Math.max(0, activeFileReferenceStatCount - 1);
@@ -1546,6 +596,24 @@ const useFileReferenceInteractions = ({
       clearAnnotatedFileLinks();
       return;
     }
+
+    const scheduleAnnotation = (delayMs = 0) => {
+      if (annotationDebounceRef.current !== null && typeof window !== 'undefined') {
+        window.clearTimeout(annotationDebounceRef.current);
+      }
+      if (typeof window === 'undefined') {
+        annotateFileLinks();
+        return;
+      }
+      annotationDebounceRef.current = window.setTimeout(() => {
+        annotationDebounceRef.current = null;
+        window.requestAnimationFrame(() => {
+          if (!cancelled) {
+            annotateFileLinks();
+          }
+        });
+      }, delayMs);
+    };
 
     const annotateFileLinks = () => {
       if (enabled) {
@@ -1674,20 +742,10 @@ const useFileReferenceInteractions = ({
       void openFileReference(target);
     };
 
-    annotateFileLinks();
+    scheduleAnnotation(FILE_REFERENCE_ANNOTATION_DELAY_MS);
 
     const observer = new MutationObserver(() => {
-      if (annotationDebounceRef.current !== null && typeof window !== 'undefined') {
-        window.clearTimeout(annotationDebounceRef.current);
-      }
-      if (typeof window === 'undefined') {
-        annotateFileLinks();
-        return;
-      }
-      annotationDebounceRef.current = window.setTimeout(() => {
-        annotationDebounceRef.current = null;
-        annotateFileLinks();
-      }, 120);
+      scheduleAnnotation(FILE_REFERENCE_ANNOTATION_DELAY_MS);
     });
     observer.observe(container, {
       childList: true,
@@ -1803,6 +861,255 @@ const useMermaidInlineInteractions = ({
   }, [allowWheelZoom, containerRef, mermaidBlocks, onShowPopup]);
 };
 
+// ---------------------------------------------------------------------------
+// Rendering core: marked -> math -> shiki -> sanitize -> decorate -> morphdom
+// ---------------------------------------------------------------------------
+
+// Single tuning knob: the streaming reveal cadence. Lower = smoother but more
+// CPU (more re-parse steps/sec); higher = cheaper but chunkier. Step sizes are
+// auto-scaled from this so reveal throughput (chars/sec) stays constant no
+// matter the cadence — text always keeps up with the incoming stream.
+const TEXT_PACE_MS = 64;
+const PACE_BASELINE_MS = 24;
+const PACE_RATIO = TEXT_PACE_MS / PACE_BASELINE_MS;
+const TEXT_SNAP = /[\s.,!?;:)\]]/;
+
+const paceStep = (remaining: number): number => {
+  const base = remaining <= 12 ? 2 : remaining <= 48 ? 4 : remaining <= 96 ? 8 : Math.min(24, Math.ceil(remaining / 8));
+  return Math.max(1, Math.round(base * PACE_RATIO));
+};
+
+const nextRevealIndex = (text: string, start: number): number => {
+  const end = Math.min(text.length, start + paceStep(text.length - start));
+  for (let i = end; i < Math.min(text.length, end + 8); i += 1) {
+    if (TEXT_SNAP.test(text[i] ?? '')) return i + 1;
+  }
+  return end;
+};
+
+// Granular streaming reveal. Cheap because each step only re-runs the
+// marked->morphdom pipeline (patching changed DOM nodes), with no React tree
+// reconciliation of the markdown body.
+const usePacedText = (content: string, streaming: boolean): string => {
+  const [shown, setShown] = React.useState<number>(() => (streaming ? 0 : content.length));
+  const shownRef = React.useRef(shown);
+  shownRef.current = shown;
+
+  React.useEffect(() => {
+    if (!streaming || typeof window === 'undefined') {
+      setShown(content.length);
+      return;
+    }
+    if (shownRef.current > content.length) {
+      setShown(content.length);
+    }
+
+    let timer: number | null = null;
+    const tick = () => {
+      const current = Math.min(shownRef.current, content.length);
+      if (current >= content.length) {
+        timer = null;
+        return;
+      }
+      setShown(nextRevealIndex(content, current));
+      timer = window.setTimeout(tick, TEXT_PACE_MS);
+    };
+
+    if (shownRef.current < content.length) {
+      timer = window.setTimeout(tick, TEXT_PACE_MS);
+    }
+
+    return () => {
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [content, streaming]);
+
+  if (!streaming) return content;
+  return content.slice(0, Math.min(shown, content.length));
+};
+
+// Mermaid layout is expensive; `decorate` would otherwise re-render every
+// diagram on every paced-stream step (~40/sec). Memoize by theme+mode+source
+// so a stable diagram is laid out once and served from cache thereafter.
+const MERMAID_RENDER_CACHE = new Map<string, MermaidRender>();
+const MERMAID_RENDER_CACHE_MAX = 100;
+
+const cachedMermaidRender = (key: string, compute: () => MermaidRender): MermaidRender => {
+  const existing = MERMAID_RENDER_CACHE.get(key);
+  if (existing) {
+    MERMAID_RENDER_CACHE.delete(key);
+    MERMAID_RENDER_CACHE.set(key, existing);
+    return existing;
+  }
+  const value = compute();
+  MERMAID_RENDER_CACHE.set(key, value);
+  if (MERMAID_RENDER_CACHE.size > MERMAID_RENDER_CACHE_MAX) {
+    const oldest = MERMAID_RENDER_CACHE.keys().next().value;
+    if (oldest) MERMAID_RENDER_CACHE.delete(oldest);
+  }
+  return value;
+};
+
+const mermaidColorsFromTheme = (theme: Theme) => ({
+  bg: theme.colors.surface.elevated,
+  fg: theme.colors.surface.foreground,
+  line: theme.colors.interactive.border,
+  accent: theme.colors.primary.base,
+  muted: theme.colors.surface.mutedForeground,
+  surface: theme.colors.surface.muted,
+  border: theme.colors.interactive.border,
+  transparent: true,
+  font: 'IBM Plex Sans, sans-serif',
+});
+
+const useDecorateContext = (
+  currentTheme: Theme,
+  onPreviewLoopback?: (url: string) => void,
+): DecorateContext => {
+  const { t } = useI18n();
+  const labels: DecorateLabels = React.useMemo(() => ({
+    copy: 'Copy code',
+    copied: 'Copied',
+    copyTable: t('markdownRenderer.table.actions.copyTitle'),
+    downloadTable: t('markdownRenderer.table.actions.downloadTitle'),
+    copyDiagram: t('markdownRenderer.mermaid.actions.copySourceTitle'),
+    downloadDiagram: t('markdownRenderer.mermaid.actions.downloadSvgTitle'),
+    previewLabel: t('terminalView.preview.open'),
+    previewTitle: t('terminalView.preview.openTitle'),
+  }), [t]);
+
+  return React.useMemo<DecorateContext>(() => {
+    const colors = mermaidColorsFromTheme(currentTheme);
+    const mode = useUIStore.getState().mermaidRenderingMode;
+    const themeId = currentTheme.metadata?.id ?? 'theme';
+    const renderMermaid = (source: string): MermaidRender =>
+      cachedMermaidRender(`${themeId}:${mode}:${source}`, () => {
+        try {
+          if (mode === 'ascii') return { ascii: renderMermaidASCII(source) };
+          return { svg: renderMermaidSVG(source, colors) };
+        } catch {
+          return {};
+        }
+      });
+    return { labels, renderMermaid, onPreviewLoopback };
+  }, [currentTheme, labels, onPreviewLoopback]);
+};
+
+// Runs the async render pipeline into the container and keeps a stable
+// delegated interaction listener attached.
+const useMorphdomMarkdown = ({
+  containerRef,
+  text,
+  streaming,
+  cacheKey,
+  syntaxVars,
+  ctx,
+}: {
+  containerRef: React.RefObject<HTMLDivElement | null>;
+  text: string;
+  streaming: boolean;
+  cacheKey: string;
+  syntaxVars: Record<string, string>;
+  ctx: DecorateContext;
+}) => {
+  React.useEffect(() => {
+    ensureMarkdownShikiTheme();
+  }, []);
+
+  // Synchronous first paint: while the async parse is in-flight, show escaped
+  // plain text immediately so there is no blank frame on initial mount. Only
+  // runs when the target is empty — subsequent updates keep the prior rich DOM
+  // until the next async render morphs in (no flash). Mirrors OpenCode's
+  // `initialValue: fallback(text)` resource pattern.
+  React.useLayoutEffect(() => {
+    const container = containerRef.current;
+    const target = container?.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
+    if (!target) return;
+    if (text && target.childNodes.length === 0) {
+      const block = document.createElement('div');
+      block.setAttribute('data-md-block', '');
+      // `display:contents` keeps margin-collapsing/spacing identical to a flat
+      // HTML body — the wrapper exists only for per-block reconciliation.
+      block.style.display = 'contents';
+      block.innerHTML = renderMarkdownSync(text);
+      // Decorate synchronously too: wrap code blocks in their framed card,
+      // mark inline code, build table controls, etc. The async pass re-decorates
+      // its own DOM before morphing, so without this the first paint shows bare
+      // <pre>/tables that "snap" into their decorated form a tick later. Matching
+      // the structure here keeps the async morph to syntax colors only.
+      decorateMarkdown(block, ctx);
+      target.appendChild(block);
+    }
+  }, [containerRef, text, ctx]);
+
+  React.useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const target = container.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
+    let active = true;
+
+    void renderMarkdownBlocks(text, streaming, cacheKey).then((blocks) => {
+      if (!active) return;
+      const existing = Array.from(target.children) as HTMLElement[];
+
+      // Reconcile per block: only re-morph blocks whose content changed, leaving
+      // stable leading blocks untouched. Keeps per-stream-step DOM work bounded
+      // to the trailing (growing) block instead of the whole message.
+      blocks.forEach((block, index) => {
+        let el = existing[index];
+        if (!el) {
+          el = document.createElement('div');
+          el.setAttribute('data-md-block', '');
+          el.style.display = 'contents';
+          target.appendChild(el);
+        }
+        if (el.getAttribute('data-md-id') === block.id) return;
+
+        const temp = document.createElement('div');
+        temp.innerHTML = block.html;
+        decorateMarkdown(temp, ctx);
+        morphdom(el, temp, {
+          childrenOnly: true,
+          onBeforeElUpdated: (fromEl, toEl) => !fromEl.isEqualNode(toEl),
+        });
+        el.setAttribute('data-md-id', block.id);
+      });
+
+      // Remove any trailing block elements no longer present.
+      for (let i = existing.length - 1; i >= blocks.length; i -= 1) {
+        existing[i]?.remove();
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [containerRef, text, streaming, cacheKey, ctx]);
+
+  React.useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    return attachMarkdownInteractions(container, ctx);
+  }, [containerRef, ctx]);
+
+  // Apply syntax CSS variables imperatively so they survive morphdom updates.
+  React.useEffect(() => {
+    const container = containerRef.current;
+    const target = container?.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
+    if (!target) return;
+    for (const [key, value] of Object.entries(syntaxVars)) {
+      target.style.setProperty(key, value);
+    }
+  }, [containerRef, syntaxVars]);
+};
+
+const markdownContentClassName = (variant: MarkdownVariant): string =>
+  variant === 'tool'
+    ? 'markdown-content markdown-tool'
+    : variant === 'reasoning'
+      ? 'markdown-content markdown-reasoning'
+      : 'markdown-content leading-relaxed';
+
 const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   content,
   part,
@@ -1820,6 +1127,16 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   const { editor, runtime } = useRuntimeAPIs();
   const containerRef = React.useRef<HTMLDivElement>(null);
   const effectiveDirectory = useEffectiveDirectory() ?? '';
+  const openContextPreview = useUIStore((state) => state.openContextPreview);
+
+  const handlePreviewLoopback = React.useCallback((url: string) => {
+    if (!effectiveDirectory) return;
+    openContextPreview(effectiveDirectory, url);
+  }, [effectiveDirectory, openContextPreview]);
+
+  const live = isStreaming && !disableStreamAnimation;
+  const pacedText = usePacedText(content, live);
+
   const mermaidBlocks = React.useMemo(() => extractMermaidBlocks(content), [content]);
   useMermaidInlineInteractions({ containerRef, mermaidBlocks, onShowPopup });
   useFileReferenceInteractions({
@@ -1830,46 +1147,22 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
     enabled: enableFileReferences && !isStreaming,
   });
   useExternalLinkInteractions({ containerRef });
-  const openContextPreview = useUIStore((state) => state.openContextPreview);
-  const { t } = useI18n();
-  const handlePreviewLoopback = React.useCallback((url: string) => {
-    if (!effectiveDirectory) return;
-    openContextPreview(effectiveDirectory, url);
-  }, [effectiveDirectory, openContextPreview]);
-  const previewLabel = t('terminalView.preview.open');
-  const previewTitle = t('terminalView.preview.openTitle');
-  const syntaxTheme = React.useMemo(() => generateSyntaxTheme(currentTheme), [currentTheme]);
-  const markdownComponents = React.useMemo(
-    () => buildMarkdownComponents({
-      syntaxTheme,
-      onPreviewLoopback: effectiveDirectory ? handlePreviewLoopback : undefined,
-      previewLabel,
-      previewTitle,
-    }),
-    [syntaxTheme, effectiveDirectory, handlePreviewLoopback, previewLabel, previewTitle],
-  );
-  const componentKey = `markdown-${part?.id ? `part-${part.id}` : `message-${messageId}`}`;
-  const markdownBlocks = useStableMarkdownBlocks(content, isStreaming && !disableStreamAnimation, componentKey);
 
-  const markdownClassName = variant === 'tool'
-    ? 'markdown-content markdown-tool'
-    : variant === 'reasoning'
-      ? 'markdown-content markdown-reasoning'
-      : 'markdown-content leading-relaxed';
+  const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme), [currentTheme]);
+  const ctx = useDecorateContext(currentTheme, effectiveDirectory ? handlePreviewLoopback : undefined);
+  const cacheKey = `markdown-${part?.id ? `part-${part.id}` : `message-${messageId}`}`;
+
+  useMorphdomMarkdown({ containerRef, text: pacedText, streaming: live, cacheKey, syntaxVars, ctx });
 
   const markdownContent = (
     <div className={cn('break-words w-full min-w-0', className)} ref={containerRef}>
-      <div className={markdownClassName}>
-        {markdownBlocks.map((block) => (
-          <MarkdownBlockView key={block.key} block={block} components={markdownComponents} />
-        ))}
-      </div>
+      <div className={markdownContentClassName(variant)} data-markdown-content />
     </div>
   );
 
   if (isAnimated) {
     return (
-      <FadeInOnReveal key={componentKey} skipAnimation={skipFadeIn}>
+      <FadeInOnReveal key={cacheKey} skipAnimation={skipFadeIn}>
         {markdownContent}
       </FadeInOnReveal>
     );
@@ -1888,6 +1181,7 @@ export const MarkdownRenderer = React.memo(MarkdownRendererImpl, (prev, next) =>
     && prev.className === next.className
     && prev.messageId === next.messageId
     && prev.onShowPopup === next.onShowPopup
+    && prev.enableFileReferences === next.enableFileReferences
     && prev.part?.id === next.part?.id;
 });
 
@@ -1912,13 +1206,15 @@ const SimpleMarkdownRendererImpl: React.FC<{
   enableFileReferences = true,
 }) => {
   const { editor, runtime } = useRuntimeAPIs();
+  const currentTheme = useCurrentMermaidTheme();
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const effectiveDirectory = useEffectiveDirectory() ?? '';
+
   const renderedContent = React.useMemo(
     () => (stripFrontmatter ? stripLeadingFrontmatter(content) : content),
     [content, stripFrontmatter],
   );
-  const currentTheme = useCurrentMermaidTheme();
-  const containerRef = React.useRef<HTMLDivElement>(null);
-  const effectiveDirectory = useEffectiveDirectory() ?? '';
+
   const mermaidBlocks = React.useMemo(() => extractMermaidBlocks(renderedContent), [renderedContent]);
   useMermaidInlineInteractions({
     containerRef,
@@ -1934,23 +1230,22 @@ const SimpleMarkdownRendererImpl: React.FC<{
     enabled: enableFileReferences,
   });
   useExternalLinkInteractions({ containerRef, enabled: !disableLinkSafety });
-  const syntaxTheme = React.useMemo(() => generateSyntaxTheme(currentTheme), [currentTheme]);
-  const markdownComponents = React.useMemo(() => buildMarkdownComponents({ syntaxTheme }), [syntaxTheme]);
-  const markdownBlocks = useStableMarkdownBlocks(renderedContent, false, `simple:${variant}`);
 
-  const markdownClassName = variant === 'tool'
-    ? 'markdown-content markdown-tool'
-    : variant === 'reasoning'
-      ? 'markdown-content markdown-reasoning'
-      : 'markdown-content leading-relaxed';
+  const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme), [currentTheme]);
+  const ctx = useDecorateContext(currentTheme);
+
+  useMorphdomMarkdown({
+    containerRef,
+    text: renderedContent,
+    streaming: false,
+    cacheKey: `simple:${variant}`,
+    syntaxVars,
+    ctx,
+  });
 
   return (
     <div className={cn('break-words w-full min-w-0', className)} ref={containerRef}>
-      <div className={markdownClassName}>
-        {markdownBlocks.map((block) => (
-          <MarkdownBlockView key={block.key} block={block} components={markdownComponents} />
-        ))}
-      </div>
+      <div className={markdownContentClassName(variant)} data-markdown-content />
     </div>
   );
 };

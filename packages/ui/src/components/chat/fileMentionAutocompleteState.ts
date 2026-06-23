@@ -4,12 +4,14 @@ export const getFileMentionAutocompleteQuery = ({
     value,
     cursorPosition,
     inputSource = 'manual',
+    insertedText,
 }: {
     value: string;
     cursorPosition: number;
     inputSource?: FileMentionAutocompleteInputSource;
+    insertedText?: string;
 }): string | null => {
-    if (inputSource === 'paste') {
+    if (inputSource === 'paste' && insertedText?.includes('@')) {
         return null;
     }
 

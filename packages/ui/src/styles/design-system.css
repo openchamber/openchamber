@@ -328,7 +328,7 @@
   --markdown-blockquote-border: var(--markdown-blockquote-border);
 
   /* Markdown spacing defaults */
-  --markdown-paragraph-spacing: 0.35rem;
+  --markdown-paragraph-spacing: 0.75rem;
   --markdown-heading-primary-top: 0.75rem;
   --markdown-heading-primary-bottom: 0.35rem;
   --markdown-heading-secondary-top: 0.6rem;

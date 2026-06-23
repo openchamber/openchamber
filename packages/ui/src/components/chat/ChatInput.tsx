@@ -64,14 +64,17 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { createWorktreeDraft } from '@/lib/worktreeSessionCreator';
 import { buildSessionTargetOptions } from '@/sync/session-worktree-contract';
 import { usePermissionStore } from '@/stores/permissionStore';
 import { extractGitChangedFiles } from './changedFiles';
 import { useI18n } from '@/lib/i18n';
+import { sessionEvents } from '@/lib/sessionEvents';
 import { fetchResponseStyleInstruction } from '@/lib/responseStyle';
 import { wrapSystemReminder } from '@/lib/systemReminder';
 import { getSyncMessages } from '@/sync/sync-refs';
+import { EMPTY_REVERTED_MESSAGE_DOCK_STATE, buildRevertedMessageDockState, type RevertedMessageDockState } from './revertedMessageDockState';
 import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
 import { isSyntheticPart } from '@/lib/messages/synthetic';
 import {
@@ -88,11 +91,10 @@ import {
     findAttachmentCitationRanges,
 } from './attachmentCitations';
 import { getFileMentionAutocompleteQuery, type FileMentionAutocompleteInputSource } from './fileMentionAutocompleteState';
-import type { Message, Part } from '@opencode-ai/sdk/v2/client';
+import type { Part } from '@opencode-ai/sdk/v2/client';
 
 const MAX_VISIBLE_TEXTAREA_LINES = 8;
 const EMPTY_QUEUE: QueuedMessage[] = [];
-const EMPTY_MESSAGES: Message[] = [];
 const FILE_MENTION_TOKEN = /^@[^\s]+$/;
 // Single-line URL pasted over a selection becomes a markdown link.
 const PASTE_LINK_URL_PATTERN = /^(https?:\/\/|mailto:)\S+$/i;
@@ -126,6 +128,38 @@ const buildImagePasteInsertion = (pastedText: string, citationText: string): str
     }
     return `${text}${/\s$/.test(text) ? '' : ' '}${citationText}`;
 };
+
+const getInsertedTextFromChange = (previousValue: string, nextValue: string): string => {
+    if (previousValue === nextValue) {
+        return '';
+    }
+
+    let prefixLength = 0;
+    while (
+        prefixLength < previousValue.length
+        && prefixLength < nextValue.length
+        && previousValue[prefixLength] === nextValue[prefixLength]
+    ) {
+        prefixLength += 1;
+    }
+
+    let previousSuffix = previousValue.length;
+    let nextSuffix = nextValue.length;
+    while (
+        previousSuffix > prefixLength
+        && nextSuffix > prefixLength
+        && previousValue[previousSuffix - 1] === nextValue[nextSuffix - 1]
+    ) {
+        previousSuffix -= 1;
+        nextSuffix -= 1;
+    }
+
+    return nextValue.slice(prefixLength, nextSuffix);
+};
+
+const getFileMentionInputSourceForInsertedText = (insertedText: string): FileMentionAutocompleteInputSource => (
+    insertedText.includes('@') ? 'paste' : 'manual'
+);
 
 const withInlineInsertionBoundaries = (content: string, before: string, after: string): string => {
     if (!content) {
@@ -362,34 +396,28 @@ const RevertedMessageDock: React.FC<RevertedMessageDockProps> = React.memo(({ se
     const [restoringId, setRestoringId] = React.useState<string | null>(null);
     const [forkingId, setForkingId] = React.useState<string | null>(null);
     const [collapsed, setCollapsed] = React.useState(true);
-    const revertMessageID = useDirectorySync(
+    const revertedStateRef = React.useRef<RevertedMessageDockState>(EMPTY_REVERTED_MESSAGE_DOCK_STATE);
+    const revertedState = useDirectorySync(
         React.useCallback((state) => {
-            if (!sessionId) return undefined;
-            const session = state.session.find((item) => item.id === sessionId);
-            return (session as { revert?: { messageID?: string } } | undefined)?.revert?.messageID;
+            const next = buildRevertedMessageDockState(state, sessionId, revertedStateRef.current);
+            revertedStateRef.current = next;
+            return next;
         }, [sessionId]),
         directory,
     );
-    const sessionMessages = useDirectorySync(
-        React.useCallback((state) => (sessionId ? state.message[sessionId] ?? EMPTY_MESSAGES : EMPTY_MESSAGES), [sessionId]),
-        directory,
-    );
-    const partsByMessage = useDirectorySync(React.useCallback((state) => state.part, []), directory);
-
+    const revertMessageID = revertedState.revertMessageID;
     const userMessages = React.useMemo(
-        () => sessionMessages.filter((message): message is Message & { role: 'user' } => message.role === 'user'),
-        [sessionMessages],
+        () => revertedState.records.map((record) => record.message),
+        [revertedState],
     );
     const noTextContent = t('chat.revertPopover.noTextContent');
     const items = React.useMemo(() => {
         if (!revertMessageID) return [];
-        return userMessages
-            .filter((message) => message.id >= revertMessageID)
-            .map((message) => ({
-                id: message.id,
-                text: getRevertedPreview(partsByMessage[message.id] ?? [], noTextContent),
-            }));
-    }, [noTextContent, partsByMessage, revertMessageID, userMessages]);
+        return revertedState.records.map((record) => ({
+            id: record.message.id,
+            text: getRevertedPreview(record.parts, noTextContent),
+        }));
+    }, [noTextContent, revertMessageID, revertedState]);
     const firstRevertedMessageId = items[0]?.id;
 
     React.useEffect(() => {
@@ -990,7 +1018,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         Promise.resolve((useSessionUIStore.getState().sendMessage as (...a: unknown[]) => unknown)(...args)),
     ).current;
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
-    const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
+    const fallbackDirectory = useDirectoryStore((s) => s.currentDirectory);
+    const currentDirectory = useEffectiveDirectory() ?? fallbackDirectory;
     const currentSessionDirectoryForSync = useSessionUIStore(
         React.useCallback((s) => currentSessionId ? s.getDirectoryForSession(currentSessionId) : null, [currentSessionId]),
     );
@@ -1047,6 +1076,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const currentGitStatus = useGitStore((state) =>
         currentDirectory ? state.directories.get(currentDirectory)?.status ?? null : null,
     );
+    const ensureGitStatus = useGitStore((state) => state.ensureStatus);
+    const fetchGitStatus = useGitStore((state) => state.fetchStatus);
     const [showAbortStatus, setShowAbortStatus] = React.useState(false);
     const setSessionAutoAccept = usePermissionStore((state) => state.setSessionAutoAccept);
     const composerHighlightRef = React.useRef<HTMLDivElement | null>(null);
@@ -1067,6 +1098,19 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         setAttachmentPreview((prev) => ({ ...prev, open }));
         setImagePreviewOpen(open);
     }, [setImagePreviewOpen]);
+
+    React.useEffect(() => {
+        if (!currentDirectory || !runtimeGit) return;
+        void ensureGitStatus(currentDirectory, runtimeGit);
+    }, [currentDirectory, runtimeGit, ensureGitStatus]);
+
+    React.useEffect(() => {
+        if (!currentDirectory || !runtimeGit) return;
+        return sessionEvents.onGitRefreshHint((hint) => {
+            if (normalizePath(hint.directory) !== normalizePath(currentDirectory)) return;
+            void fetchGitStatus(currentDirectory, runtimeGit);
+        });
+    }, [currentDirectory, runtimeGit, fetchGitStatus]);
 
     const handleStartReviewFlow = React.useCallback(async (execution: ReviewFlowExecution) => {
         if (!currentSessionId) return;
@@ -2695,6 +2739,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         value: string,
         cursorPosition: number,
         inputSource: FileMentionAutocompleteInputSource = 'manual',
+        insertedText?: string,
     ) => {
         if (inputMode === 'shell') {
             setShowCommandAutocomplete(false);
@@ -2760,7 +2805,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         setShowSnippetAutocomplete(false);
 
-        const nextMentionQuery = getFileMentionAutocompleteQuery({ value, cursorPosition, inputSource });
+        const nextMentionQuery = getFileMentionAutocompleteQuery({ value, cursorPosition, inputSource, insertedText });
         if (nextMentionQuery === null) {
             setShowFileMention(false);
         } else {
@@ -2791,7 +2836,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!textarea) {
             const nextValue = message + text;
             setMessage(nextValue);
-            updateAutocompleteState(nextValue, nextValue.length, inputSource);
+            updateAutocompleteState(nextValue, nextValue.length, inputSource, text);
             requestAnimationFrame(() => adjustTextareaHeight());
             return;
         }
@@ -2811,7 +2856,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             adjustTextareaHeight();
         });
 
-        updateAutocompleteState(nextValue, cursorPosition, inputSource);
+        updateAutocompleteState(nextValue, cursorPosition, inputSource, text);
     }, [adjustTextareaHeight, message, updateAutocompleteState]);
 
     const clearDropTextSuppression = React.useCallback(() => {
@@ -2878,8 +2923,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         const value = e.target.value;
         const cursorPosition = e.target.selectionStart ?? value.length;
-        const isPasteInput = nativeInputEvent?.inputType?.startsWith('insertFromPaste')
-            || suppressNextFileMentionPasteRef.current;
+        const pastedInsertedText = nativeInputEvent?.inputType?.startsWith('insertFromPaste')
+            ? getInsertedTextFromChange(messageRef.current, value)
+            : '';
+        const isPasteInput = pastedInsertedText.includes('@') || suppressNextFileMentionPasteRef.current;
         if (suppressNextFileMentionPasteRef.current) {
             clearFileMentionPasteSuppression();
         }
@@ -2907,7 +2954,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         setMessage(value);
         adjustTextareaHeight();
-        updateAutocompleteState(value, cursorPosition, inputSource);
+        updateAutocompleteState(value, cursorPosition, inputSource, pastedInsertedText);
     };
 
     React.useEffect(() => {
@@ -2946,7 +2993,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         }
                         adjustTextareaHeight();
                     });
-                    updateAutocompleteState(next, caret, 'paste');
+                    updateAutocompleteState(next, caret, getFileMentionInputSourceForInsertedText(url), url);
                     return;
                 }
             }
@@ -2972,14 +3019,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         const imageFiles = Array.from(fileMap.values());
         const pastedText = e.clipboardData.getData('text');
         if (imageFiles.length === 0) {
-            if (pastedText) {
+            if (pastedText.includes('@')) {
                 markFileMentionPasteSuppression();
             }
             return;
         }
 
         if (!currentSessionId && !newSessionDraftOpen) {
-            if (pastedText) {
+            if (pastedText.includes('@')) {
                 markFileMentionPasteSuppression();
             }
             return;
@@ -3004,7 +3051,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             message.slice(selectionEnd),
         );
 
-        insertTextAtSelection(insertionText, 'paste');
+        insertTextAtSelection(insertionText, getFileMentionInputSourceForInsertedText(insertionText));
 
         for (let index = 0; index < imageFiles.length; index += 1) {
             const filename = assignedFilenames[index];
@@ -3588,8 +3635,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const draftProjectLabel = selectedDraftProject ? getProjectDisplayLabel(selectedDraftProject) : null;
 
     const selectedDraftProjectBranches = useGitBranches(selectedDraftProjectPath);
+    const selectedDraftProjectBranchesFetchedAt = useGitStore(
+        (s) => (selectedDraftProjectPath ? s.directories.get(selectedDraftProjectPath)?.lastBranchesFetch ?? 0 : 0),
+    );
     const selectedDraftProjectIsGitRepo = useIsGitRepo(selectedDraftProjectPath);
-    const fetchGitStatus = useGitStore((state) => state.fetchStatus);
+    const hasDraftBranchList = Boolean(selectedDraftProjectBranches?.all);
     const fetchBranches = useGitStore((state) => state.fetchBranches);
     const [isDiscoveringDraftBranches, setIsDiscoveringDraftBranches] = React.useState(false);
 
@@ -3607,13 +3657,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             return;
         }
 
-        if (selectedDraftProjectBranches?.all) {
+        // Stale-while-revalidate: branches seeded from the persisted cache show
+        // instantly. Refresh based on staleness (not mere presence) so a cached
+        // list can't go stale, while only showing the discovering spinner when
+        // there is nothing to display yet.
+        const DRAFT_BRANCHES_SWR_TTL_MS = 30_000;
+        const isStale =
+            !selectedDraftProjectBranchesFetchedAt ||
+            Date.now() - selectedDraftProjectBranchesFetchedAt > DRAFT_BRANCHES_SWR_TTL_MS;
+
+        if (hasDraftBranchList && !isStale) {
             setIsDiscoveringDraftBranches(false);
             return;
         }
 
         let cancelled = false;
-        setIsDiscoveringDraftBranches(true);
+        setIsDiscoveringDraftBranches(!hasDraftBranchList);
 
         void fetchBranches(selectedDraftProjectPath, runtimeGit)
             .finally(() => {
@@ -3625,7 +3684,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         return () => {
             cancelled = true;
         };
-    }, [fetchBranches, runtimeGit, selectedDraftProject, selectedDraftProjectBranches?.all, selectedDraftProjectIsGitRepo, selectedDraftProjectPath, showDraftTargetSelectors]);
+    }, [fetchBranches, runtimeGit, selectedDraftProject, selectedDraftProjectBranchesFetchedAt, hasDraftBranchList, selectedDraftProjectIsGitRepo, selectedDraftProjectPath, showDraftTargetSelectors]);
 
     const selectedDraftProjectCurrentBranch = selectedDraftProjectBranches?.current?.trim() ?? '';
 
@@ -4564,7 +4623,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         <ToolOutputDialog
             popup={attachmentPreview}
             onOpenChange={handleAttachmentPreviewOpenChange}
-            syntaxTheme={{}}
             isMobile={isMobile}
         />
         </>

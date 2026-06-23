@@ -64,11 +64,7 @@ export const useSessionActions = (args: Args) => {
   }, []);
 
   const handleSessionSelect = React.useCallback(
-    (sessionId: string, sessionDirectory?: string | null, disabled?: boolean, projectId?: string | null) => {
-      if (disabled) {
-        return;
-      }
-
+    (sessionId: string, sessionDirectory?: string | null, projectId?: string | null) => {
       const resetSessionSearch = () => {
         if (!args.isSessionSearchOpen && args.sessionSearchQuery.length === 0) {
           return;
@@ -109,9 +105,9 @@ export const useSessionActions = (args: Args) => {
     args.setEditTitle(sessionTitle);
   }, [args]);
 
-  const handleSaveEdit = React.useCallback(async () => {
+  const handleSaveEdit = React.useCallback(async (titleOverride?: string) => {
     if (!args.editingId) return;
-    const trimmed = args.editTitle.trim();
+    const trimmed = (titleOverride ?? args.editTitle).trim();
     if (trimmed) {
       await args.updateSessionTitle(args.editingId, trimmed);
     }

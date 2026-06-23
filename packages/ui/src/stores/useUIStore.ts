@@ -111,7 +111,8 @@ const CONTEXT_PANEL_MAX_WIDTH = 1400;
 const CONTEXT_PANEL_MAX_TABS = 12;
 const CONTEXT_PANEL_MAX_LABEL_LENGTH = 120;
 const LEFT_SIDEBAR_MIN_WIDTH = 280;
-const RIGHT_SIDEBAR_MIN_WIDTH = 360;
+export const RIGHT_SIDEBAR_MIN_WIDTH = 360;
+export const RIGHT_SIDEBAR_MAX_WIDTH = 860;
 const activeMainTabByRuntime = new Map<string, MainTab>();
 
 const runtimeMemoryKey = (value?: string | null): string => {
@@ -350,6 +351,7 @@ const upsertContextPanelTab = (
           dedupeKey: nextTab.dedupeKey,
           label: nextTab.label,
           stagedDiff: nextTab.stagedDiff,
+          readOnly: nextTab.readOnly,
           touchedAt: Date.now(),
         }
       : tab));
@@ -979,29 +981,24 @@ export const useUIStore = create<UIStore>()(
         setRightSidebarOpen: (open) => {
           set((state) => {
             if (state.isRightSidebarOpen === open) {
-              if (!open) {
-                return state;
-              }
-              if (!state.hasManuallyResizedRightSidebar && state.rightSidebarWidth !== RIGHT_SIDEBAR_MIN_WIDTH) {
-                return {
-                  isRightSidebarOpen: open,
-                  rightSidebarWidth: RIGHT_SIDEBAR_MIN_WIDTH,
-                };
-              }
               return state;
             }
-            if (open && !state.hasManuallyResizedRightSidebar) {
-              return {
-                isRightSidebarOpen: open,
-                rightSidebarWidth: RIGHT_SIDEBAR_MIN_WIDTH,
-              };
-            }
-            return { isRightSidebarOpen: open };
+            const shouldResetWidth = open
+              && !state.hasManuallyResizedRightSidebar
+              && state.rightSidebarWidth !== RIGHT_SIDEBAR_MIN_WIDTH;
+            return {
+              isRightSidebarOpen: open,
+              rightSidebarWidth: shouldResetWidth ? RIGHT_SIDEBAR_MIN_WIDTH : state.rightSidebarWidth,
+            };
           });
         },
 
         setRightSidebarWidth: (width) => {
-          set({ rightSidebarWidth: width, hasManuallyResizedRightSidebar: true });
+          const clamped = Math.min(
+            RIGHT_SIDEBAR_MAX_WIDTH,
+            Math.max(RIGHT_SIDEBAR_MIN_WIDTH, width)
+          );
+          set({ rightSidebarWidth: clamped, hasManuallyResizedRightSidebar: true });
         },
 
         setRightSidebarTab: (tab) => {

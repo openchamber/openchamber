@@ -1096,6 +1096,17 @@ async function main(options = {}) {
   const serverStartedAt = new Date().toISOString();
   const packagedClientOrigins = new Set(['openchamber-ui://app']);
   app.set('trust proxy', true);
+  // Keep self-hosted instances out of search engines. The app shell is served
+  // publicly (it loads before prompting for the UI password), so without this
+  // even a password-protected instance gets crawled and indexed. Applies to
+  // every response; the robots.txt route makes the intent explicit for crawlers.
+  app.use((_req, res, next) => {
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+    next();
+  });
+  app.get('/robots.txt', (_req, res) => {
+    res.type('text/plain').send('User-agent: *\nDisallow: /\n');
+  });
   app.use((req, res, next) => {
     const origin = typeof req.headers.origin === 'string' ? req.headers.origin : '';
     if (packagedClientOrigins.has(origin)) {

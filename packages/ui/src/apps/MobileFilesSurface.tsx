@@ -493,7 +493,7 @@ const MobileTextFile: React.FC<{ path: string; content: string }> = ({ path, con
   if (isMarkdownFile(path)) {
     return (
       <ScrollShadow className="h-full overflow-y-auto px-4 py-4">
-        <SimpleMarkdownRenderer content={content} />
+        <SimpleMarkdownRenderer content={content} enableFileReferences={false} />
       </ScrollShadow>
     );
   }

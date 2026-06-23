@@ -279,8 +279,8 @@ export const createNotificationTriggerRuntime = (deps) => {
             directory: notificationDirectory,
             requireHidden: settings.notificationMode !== 'always',
           };
-          emitDesktopNotification(notificationPayload);
-          broadcastUiNotification(notificationPayload);
+          const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
+          broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
         }
 
         await sendPushToAllUiSessions(
@@ -341,8 +341,8 @@ export const createNotificationTriggerRuntime = (deps) => {
             directory: notificationDirectory,
             requireHidden: settings.notificationMode !== 'always',
           };
-          emitDesktopNotification(notificationPayload);
-          broadcastUiNotification(notificationPayload);
+          const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
+          broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
         }
 
         await sendPushToAllUiSessions(
@@ -408,7 +408,7 @@ export const createNotificationTriggerRuntime = (deps) => {
         }
 
         if (settings.nativeNotificationsEnabled) {
-          emitDesktopNotification({
+          const notificationPayload = {
             kind: 'question',
             title,
             body,
@@ -416,17 +416,9 @@ export const createNotificationTriggerRuntime = (deps) => {
             sessionId,
             directory: notificationDirectory,
             requireHidden: settings.notificationMode !== 'always',
-          });
-
-          broadcastUiNotification({
-            kind: 'question',
-            title,
-            body,
-            tag: `question-${sessionId}`,
-            sessionId,
-            directory: notificationDirectory,
-            requireHidden: settings.notificationMode !== 'always',
-          });
+          };
+          const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
+          broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
         }
 
         void sendPushToAllUiSessions(
@@ -530,7 +522,7 @@ export const createNotificationTriggerRuntime = (deps) => {
         }
 
         if (settings.nativeNotificationsEnabled) {
-          emitDesktopNotification({
+          const notificationPayload = {
             kind: 'permission',
             title,
             body,
@@ -538,17 +530,9 @@ export const createNotificationTriggerRuntime = (deps) => {
             sessionId,
             directory: notificationDirectory,
             requireHidden: settings.notificationMode !== 'always',
-          });
-
-          broadcastUiNotification({
-            kind: 'permission',
-            title,
-            body,
-            tag: requestKey ? `permission-${requestKey}` : `permission-${sessionId}`,
-            sessionId,
-            directory: notificationDirectory,
-            requireHidden: settings.notificationMode !== 'always',
-          });
+          };
+          const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
+          broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
         }
 
         if (requestKey) {

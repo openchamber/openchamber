@@ -272,7 +272,8 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
                                 "[&_[data-component='markdown-code']_code]:inline",
                             ]
                         )}
-                        disableLinkSafety 
+                        disableLinkSafety
+                        enableFileReferences={false}
                     />
                 ) : (
                     plainTextContent

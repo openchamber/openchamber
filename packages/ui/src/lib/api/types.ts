@@ -296,6 +296,8 @@ export interface GitIdentityProfile {
   userEmail: string;
   authType?: GitIdentityAuthType;
   sshKey?: string | null;
+  signCommits?: boolean;
+  signingKey?: string | null;
   host?: string | null;
   color?: string | null;
   icon?: string | null;
@@ -597,6 +599,7 @@ export interface FileReadOptions {
   allowOutsideWorkspace?: boolean;
   outsideFileGrant?: string;
   optional?: boolean;
+  directory?: string;
 }
 
 export interface FilesAPI {
