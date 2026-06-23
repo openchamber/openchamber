@@ -114,11 +114,19 @@ const OPENCHAMBER_INTERNAL_PREFIXES = [
   '/api/mini-chat/',
 ];
 
-const isOpenChamberInternalPath = (path: string): boolean => {
+export const isOpenChamberInternalPath = (path: string): boolean => {
   const normalized = path.trim();
   if (normalized === '/auth') return true;
-  return OPENCHAMBER_INTERNAL_PREFIXES.some((prefix) =>
-    normalized === prefix.replace(/\/$/, '') || normalized.startsWith(prefix));
+  // The OpenCode SDK strips the /api/ prefix when calling internal paths,
+  // so /api/fs/home arrives at runtimeFetch as /fs/home. Match both forms.
+  return OPENCHAMBER_INTERNAL_PREFIXES.some((prefix) => {
+    const slashed = prefix.replace(/\/$/, '');
+    const stripped = slashed.replace(/^\/api/, '');
+    return normalized === slashed
+      || normalized.startsWith(prefix)
+      || normalized === stripped
+      || normalized.startsWith(stripped + '/');
+  });
 };
 
 // In proxy-bypass mode VITE_OPENCODE_URL points the SDK at an external

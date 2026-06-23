@@ -1,5 +1,5 @@
 import { buildRuntimeAuthHeaders } from './runtime-auth';
-import { getRuntimeUrlResolver, type RuntimeUrlQuery } from './runtime-url';
+import { getRuntimeUrlResolver, isOpenChamberInternalPath, type RuntimeUrlQuery } from './runtime-url';
 
 export interface RuntimeFetchOptions extends RequestInit {
   query?: RuntimeUrlQuery;
@@ -103,12 +103,54 @@ const isRuntimeUpstreamUrl = (raw: string): boolean => {
 };
 
 const shouldAttachRuntimeAuth = (input: string | URL | Request): boolean => {
-  const raw = input instanceof Request ? input.url : input.toString();
-  if (!isAbsoluteUrl(raw)) {
-    return shouldResolveApiPath(raw);
+const raw = input instanceof Request ? input.url : input.toString();
+if (!isAbsoluteUrl(raw)) {
+return shouldResolveApiPath(raw);
+}
+  // Absolute URL: any path targeting the OpenCode upstream origin gets auth,
+  // BUT only if the path is NOT an OpenChamber-internal path (those get
+  // rewritten to page origin by runtimeFetch and don't need auth).
+  try {
+    if (isOpenChamberInternalPath(new URL(raw).pathname)) return false;
+  } catch {
+    // ignore parse errors
   }
-  // Absolute URL: any path targeting the OpenCode upstream origin gets auth.
-  return isRuntimeUpstreamUrl(raw);
+return isRuntimeUpstreamUrl(raw);
+};
+
+// In proxy-bypass mode the OpenCode SDK has its baseUrl set to the
+// external OpenCode upstream. But some OpenChamber code calls the SDK
+// for OpenChamber-internal endpoints (e.g. /fs/home, /path,
+// /session-folders, /project/current, /config/settings).
+// Those calls arrive at runtimeFetch as absolute URLs to :4096 with
+// OpenChamber-internal paths — and 401 because OpenCode upstream
+// doesn't have them.
+//
+// This helper detects that case and rewrites the URL to the page
+// origin (with the /api/ prefix inserted if missing) so the request
+// reaches OpenChamber Express instead.
+const rewriteOpenChamberInternalUrl = (input: string | URL | Request): string | URL | Request => {
+  if (typeof window === 'undefined') return input;
+  let raw: string;
+  try {
+    if (typeof input === 'string') raw = input;
+    else if (input instanceof URL) raw = input.toString();
+    else raw = input.url;
+  } catch {
+    return input;
+  }
+  if (!/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) return input;
+  try {
+    const url = new URL(raw);
+    if (url.origin === window.location.origin) return input;
+    if (!isOpenChamberInternalPath(url.pathname + url.search)) return input;
+    // OpenChamber Express serves the /api/* form. If the URL doesn't
+    // already start with /api/, insert it before the pathname.
+    const apiPrefix = url.pathname.startsWith('/api/') || url.pathname === '/api' ? '' : '/api';
+    return `${window.location.origin}${apiPrefix}${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return input;
+  }
 };
 
 // Headers API only accepts ISO-8859-1 (Latin-1) characters. Any value containing
@@ -207,10 +249,15 @@ const coalesceReadKey = (method: string, url: string, hasSignal: boolean): strin
 
 export const runtimeFetch = async (input: string | URL | Request, init: RuntimeFetchOptions = {}): Promise<Response> => {
   const { query, ...requestInit } = init;
-  const resolvedInput = resolveRuntimeFetchInput(input, query);
+  // Rewrite absolute URLs to OpenCode upstream that target OpenChamber-internal
+  // endpoints (e.g. /fs/home, /path, /session-folders) back to the page origin
+  // (where OpenChamber Express serves /api/fs/home, /api/path, etc.). The SDK
+  // strips /api/ when calling internal endpoints but the Express routes require
+  // it, so we re-insert it in the rewrite.
+  const rewrittenInput = rewriteOpenChamberInternalUrl(input);
+  const resolvedInput = resolveRuntimeFetchInput(rewrittenInput, query);
   const inputHeaders = resolvedInput instanceof Request ? resolvedInput.headers : undefined;
   const headers = await mergeHeaders(inputHeaders, requestInit.headers, shouldAttachRuntimeAuth(resolvedInput));
-
   const doFetch = (): Promise<Response> =>
     resolvedInput instanceof Request
       ? fetch(new Request(resolvedInput, { ...requestInit, headers }))

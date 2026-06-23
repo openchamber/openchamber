@@ -1272,7 +1272,7 @@ async function main(options = {}) {
     terminalMaxRebindsPerWindow: TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW,
     scheduleOpenCodeApiDetection,
     bootstrapOpenCodeAtStartup,
-    autoUpdatePlugins,
+
     refreshOpenCodeAfterConfigChange,
     staticRoutesRuntime,
     process,
