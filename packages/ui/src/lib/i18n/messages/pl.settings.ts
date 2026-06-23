@@ -920,6 +920,9 @@ export const settingsDict = {
 
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': 'Włącz sprawdzanie pisowni w polach tekstowych',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputsAria': 'Włącz sprawdzanie pisowni w polach tekstowych',
+  'settings.openchamber.visual.field.stripSlashOnSubmitAria': 'Usuń wiodący ukośnik przy wysyłaniu, aby polecenia slash nie były rozwijane',
+  'settings.openchamber.visual.field.stripSlashOnSubmit': 'Usuń ukośnik przy wysyłaniu',
+  'settings.openchamber.visual.field.stripSlashOnSubmitDescription': 'Po włączeniu, wysłanie polecenia lub umiejętności slash usuwa wiodący ukośnik i wysyła tekst jako zwykłą wiadomość. Polecenie lub umiejętność nie zostanie wywołana, a w rozmowie pojawi się to, co wpisałeś.',
   'settings.openchamber.visual.field.fontSizePercentageAria': 'Procentowy rozmiar czcionki',
   'settings.openchamber.visual.field.inputBarOffset': 'Przesunięcie paska wpisywania',
   'settings.openchamber.visual.field.inputBarOffsetTooltip': 'Podnieś pasek wpisywania, aby uniknąć zasłaniania przez systemowe elementy ekranu, takie jak pasek gestów.',

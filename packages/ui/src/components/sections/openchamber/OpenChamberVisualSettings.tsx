@@ -2044,7 +2044,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             <Checkbox
                                                 checked={stripSlashOnSubmit}
                                                 onChange={handleStripSlashOnSubmitChange}
-                                                ariaLabel={t('settings.openchamber.visual.field.stripSlashOnSubmitAria')}
+                                                ariaLabel={t('settings.openchamber.visual.field.stripSlashOnSubmit')}
                                             />
                                             <div className="flex flex-col">
                                                 <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.stripSlashOnSubmit')}</span>
