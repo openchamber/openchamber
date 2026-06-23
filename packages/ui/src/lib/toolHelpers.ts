@@ -213,6 +213,136 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
       category: 'ai',
       outputLanguage: 'json',
       inputFields: []
+    },
+
+    // LSP Tools
+    lsp_diagnostics: {
+      displayName: 'LSP Diagnostics',
+      category: 'code',
+      outputLanguage: 'text',
+      inputFields: [
+        { key: 'filePath', label: 'File Path', type: 'file' },
+        { key: 'severity', label: 'Severity', type: 'text' }
+      ]
+    },
+    lsp_goto_definition: {
+      displayName: 'Go to Definition',
+      category: 'code',
+      outputLanguage: 'text',
+      inputFields: [
+        { key: 'filePath', label: 'File Path', type: 'file' },
+        { key: 'line', label: 'Line', type: 'text' },
+        { key: 'character', label: 'Character', type: 'text' }
+      ]
+    },
+    lsp_find_references: {
+      displayName: 'Find References',
+      category: 'code',
+      outputLanguage: 'text',
+      inputFields: [
+        { key: 'filePath', label: 'File Path', type: 'file' },
+        { key: 'line', label: 'Line', type: 'text' },
+        { key: 'character', label: 'Character', type: 'text' }
+      ]
+    },
+    lsp_symbols: {
+      displayName: 'Document Symbols',
+      category: 'code',
+      outputLanguage: 'text',
+      inputFields: [
+        { key: 'filePath', label: 'File Path', type: 'file' }
+      ]
+    },
+    lsp_rename: {
+      displayName: 'Rename Symbol',
+      category: 'code',
+      outputLanguage: 'text',
+      inputFields: [
+        { key: 'filePath', label: 'File Path', type: 'file' },
+        { key: 'line', label: 'Line', type: 'text' },
+        { key: 'character', label: 'Character', type: 'text' },
+        { key: 'newName', label: 'New Name', type: 'text' }
+      ]
+    },
+    lsp_prepare_rename: {
+      displayName: 'Prepare Rename',
+      category: 'code',
+      outputLanguage: 'text',
+      inputFields: [
+        { key: 'filePath', label: 'File Path', type: 'file' },
+        { key: 'line', label: 'Line', type: 'text' },
+        { key: 'character', label: 'Character', type: 'text' }
+      ]
+    },
+
+    // Session Manager Tools
+    session_list: {
+      displayName: 'List Sessions',
+      category: 'system',
+      outputLanguage: 'text',
+      inputFields: [
+        { key: 'limit', label: 'Limit', type: 'text' },
+        { key: 'from_date', label: 'From Date', type: 'text' },
+        { key: 'to_date', label: 'To Date', type: 'text' }
+      ]
+    },
+    session_read: {
+      displayName: 'Read Session',
+      category: 'system',
+      outputLanguage: 'text',
+      inputFields: [
+        { key: 'session_id', label: 'Session ID', type: 'text' },
+        { key: 'limit', label: 'Limit', type: 'text' }
+      ]
+    },
+    session_info: {
+      displayName: 'Session Info',
+      category: 'system',
+      outputLanguage: 'text',
+      inputFields: [
+        { key: 'session_id', label: 'Session ID', type: 'text' }
+      ]
+    },
+    session_search: {
+      displayName: 'Search Sessions',
+      category: 'system',
+      outputLanguage: 'text',
+      inputFields: [
+        { key: 'query', label: 'Search Query', type: 'text' },
+        { key: 'session_id', label: 'Session ID', type: 'text' },
+        { key: 'limit', label: 'Limit', type: 'text' }
+      ]
+    },
+
+    // Background Task Tools
+    background_output: {
+      displayName: 'Background Output',
+      category: 'system',
+      outputLanguage: 'text',
+      inputFields: [
+        { key: 'task_id', label: 'Task ID', type: 'text' }
+      ]
+    },
+
+    // Monitor Tools
+    monitor_output: {
+      displayName: 'Monitor Output',
+      category: 'system',
+      outputLanguage: 'json',
+      inputFields: [
+        { key: 'monitor_id', label: 'Monitor ID', type: 'text' }
+      ]
+    },
+
+    // Other Tools
+    hashline_edit: {
+      displayName: 'Hashline Edit',
+      category: 'file',
+      outputLanguage: 'text',
+      inputFields: [
+        { key: 'filePath', label: 'File Path', type: 'file' },
+        { key: 'edits', label: 'Edits', type: 'code', language: 'json' }
+      ]
     }
   };
 
