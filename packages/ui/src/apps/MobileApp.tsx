@@ -62,6 +62,7 @@ import { isSameConnectionUrl, useMobileConnection } from './mobileConnections';
 import { isQrScanSupported, parseConnectionPayload, scanConnectionQr } from './mobileQrScan';
 import { resetAppForRuntimeEndpointChange } from './runtimeEndpointReset';
 import { useAppFontEffects } from './useAppFontEffects';
+import { useFontsReady } from './useFontsReady';
 
 const MOBILE_SETTINGS_PAGES = [
   'appearance',
@@ -1984,6 +1985,7 @@ export function MobileApp({ apis }: MobileAppProps) {
   useUpdatePolling();
   useWindowTitle();
   useRouter();
+  const fontsReady = useFontsReady();
 
   // `isConnected` is a LIVE flag that flips false on every transient SSE/WS drop and
   // back true on reconnect. We must NOT blank the whole app to a loader on those —
@@ -1991,6 +1993,16 @@ export function MobileApp({ apis }: MobileAppProps) {
   // While 'reconnecting' (we were connected before), keep MobileShell mounted so the
   // UI doesn't reload on every network blip.
   const isReconnecting = !isConnected && connectionPhase === 'reconnecting';
+
+  // Hold a logo splash until the UI web font is loaded, so the first UI the user sees
+  // already uses the real font instead of flashing the fallback and reflowing (FOUT).
+  if (!fontsReady) {
+    return (
+      <main className="flex min-h-dvh items-center justify-center bg-background text-foreground">
+        <OpenChamberLogo width={96} height={96} isAnimated />
+      </main>
+    );
+  }
 
   if (!isConnected && !isReconnecting && isNativeMobileApp) {
     // A runtime endpoint is already selected (first connect or switching instances):
