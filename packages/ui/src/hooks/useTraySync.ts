@@ -15,7 +15,7 @@ import {
   resolveGlobalSessionDirectory,
 } from '@/stores/useGlobalSessionsStore';
 import { useQuotaStore } from '@/stores/useQuotaStore';
-import { QUOTA_PROVIDERS, formatWindowLabel, formatQuotaValueLabel } from '@/lib/quota';
+import { formatWindowLabel, formatQuotaValueLabel, mergeQuotaProviders } from '@/lib/quota';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGitStore } from '@/stores/useGitStore';
@@ -166,7 +166,7 @@ const buildUsage = (): TrayUsage => {
 
   const byProvider = new Map(results.map((result) => [result.providerId, result]));
   const groups: TrayUsageGroup[] = [];
-  for (const meta of QUOTA_PROVIDERS) {
+  for (const meta of mergeQuotaProviders(results)) {
     if (!dropdownProviderIds.includes(meta.id)) continue;
     const result = byProvider.get(meta.id);
     if (!result || result.configured !== true) continue;

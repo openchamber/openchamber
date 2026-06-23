@@ -1,4 +1,4 @@
-export { QUOTA_PROVIDERS, QUOTA_PROVIDER_MAP } from './providers';
+export { QUOTA_PROVIDERS, QUOTA_PROVIDER_MAP, getQuotaProviderMeta, mergeQuotaProviders } from './providers';
 export type { QuotaProviderMeta } from './providers';
 export {
   clampPercent,

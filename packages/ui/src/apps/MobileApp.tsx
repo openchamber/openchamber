@@ -26,7 +26,7 @@ import { opencodeClient } from '@/lib/opencode/client';
 import type { ProjectEntry, RuntimeAPIs } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { resolveProjectForDirectory, resolveProjectForSessionDirectory } from '@/lib/projectResolution';
-import { clampPercent, formatQuotaResetLabel, formatQuotaValueLabel, formatWindowLabel, QUOTA_PROVIDERS, resolveUsageTone } from '@/lib/quota';
+import { clampPercent, formatQuotaResetLabel, formatQuotaValueLabel, formatWindowLabel, mergeQuotaProviders, resolveUsageTone } from '@/lib/quota';
 import { getDisplayModelName } from '@/lib/quota/model-families';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { sessionEvents } from '@/lib/sessionEvents';
@@ -610,7 +610,7 @@ const MobileSessionMetadataButton = React.memo(function MobileSessionMetadataBut
 
   const usageGroups = React.useMemo<MobileUsageProviderGroup[]>(() => {
     const resultsByProvider = new Map(quotaResults.map((result) => [result.providerId, result]));
-    return QUOTA_PROVIDERS
+    return mergeQuotaProviders(quotaResults)
       .filter((providerMeta) => dropdownProviderIds.includes(providerMeta.id))
       .filter((providerMeta) => resultsByProvider.get(providerMeta.id)?.configured === true)
       .map((providerMeta) => {

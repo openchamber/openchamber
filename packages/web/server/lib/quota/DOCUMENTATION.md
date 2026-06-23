@@ -43,6 +43,10 @@ All providers should return results via shared helpers to preserve API shape:
 - Unsupported provider requests should return `ok: false`, `configured: false`, `error: Unsupported provider`
 
 ## Add a new provider (quick steps)
+For local/private providers, prefer an OpenChamber quota plugin in `~/.config/openchamber/plugins/quota/`. Plugins survive package updates and avoid maintaining a core fork. See `packages/web/server/lib/plugins/DOCUMENTATION.md` for the quota plugin interface.
+
+For providers that should ship as built-in OpenChamber integrations:
+
 1. Choose module shape based on complexity:
    - Simple providers: create `packages/web/server/lib/quota/providers/<provider>.js`.
    - Complex providers (multi-source auth, multiple API calls, non-trivial transforms): create `packages/web/server/lib/quota/providers/<provider>/` with split modules like Google (`index.js`, `auth.js`, `api.js`, `transforms.js`).
