@@ -2,7 +2,7 @@ import type { DesktopSettings } from '@/lib/desktop';
 import { createProjectIdFromPath } from '@/lib/projectId';
 import { useUIStore } from '@/stores/useUIStore';
 import { isMonoFontOption, isUiFontOption } from '@/lib/fontOptions';
-import { isFollowUpBehavior, normalizeFollowUpBehavior, useMessageQueueStore } from '@/stores/messageQueueStore';
+import { isFollowUpBehavior, normalizeFollowUpBehavior, useMessageQueueStore, type FollowUpBehavior } from '@/stores/messageQueueStore';
 import { setDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { setFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { loadAppearancePreferences, applyAppearancePreferences } from '@/lib/appearancePersistence';
@@ -408,11 +408,12 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
     }
   }
 
-  const nextFollowUpBehavior = isFollowUpBehavior(settings.followUpBehavior)
-    ? settings.followUpBehavior
-    : typeof settings.queueModeEnabled === 'boolean'
-      ? normalizeFollowUpBehavior(undefined, settings.queueModeEnabled)
-      : null;
+  let nextFollowUpBehavior: FollowUpBehavior | null = null;
+  if (isFollowUpBehavior(settings.followUpBehavior)) {
+    nextFollowUpBehavior = settings.followUpBehavior;
+  } else if (typeof settings.queueModeEnabled === 'boolean') {
+    nextFollowUpBehavior = normalizeFollowUpBehavior(undefined, settings.queueModeEnabled);
+  }
   if (nextFollowUpBehavior && nextFollowUpBehavior !== queueStore.followUpBehavior) {
     queueStore.setFollowUpBehavior(nextFollowUpBehavior);
   }
