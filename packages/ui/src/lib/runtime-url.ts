@@ -86,6 +86,50 @@ const buildHttpUrl = (baseUrl: string, path: string, query?: RuntimeUrlQuery): s
   appendQuery(url, query);
   return url.toString();
 };
+// OpenChamber-internal endpoint prefixes. Always served by OpenChamber Express,
+// NOT the OpenCode upstream — must NOT honor VITE_OPENCODE_URL in bypass mode.
+const OPENCHAMBER_INTERNAL_PREFIXES = [
+  '/auth/',
+  '/health',
+  '/api/opencode/',
+  '/api/config/themes',
+  '/api/notifications/',
+  '/api/openchamber/',
+  '/api/tts/',
+  '/api/voice/',
+  '/api/scheduled-tasks/',
+  '/api/projects/',
+  '/api/fs/',
+  '/api/chamber/',
+  '/api/github/',
+  '/api/skills/',
+  '/api/preview/',
+  '/api/remote-clients/',
+  '/api/worktree/',
+  '/api/git/',
+  '/api/files/',
+  '/api/sessions/',
+  '/api/desktop/',
+  '/api/mobile/',
+  '/api/mini-chat/',
+];
+
+const isOpenChamberInternalPath = (path: string): boolean => {
+  const normalized = path.trim();
+  if (normalized === '/auth') return true;
+  return OPENCHAMBER_INTERNAL_PREFIXES.some((prefix) =>
+    normalized === prefix.replace(/\/$/, '') || normalized.startsWith(prefix));
+};
+
+// In proxy-bypass mode VITE_OPENCODE_URL points the SDK at an external
+// OpenCode upstream. That URL must NOT be used for OpenChamber-internal
+// endpoints (they don't exist upstream). When the path is OpenChamber-
+// internal, drop apiBase and let the browser use the page origin.
+const resolveBypassBaseUrl = (apiBase: string, path: string): string => {
+  if (!apiBase) return '';
+  if (!isOpenChamberInternalPath(path)) return apiBase;
+  return '';
+};
 
 const withUrlAuth = (urlValue: string): string => {
   const token = getRuntimeUrlAuthTokenSync();
@@ -117,8 +161,10 @@ export const createRuntimeUrlResolver = (config: RuntimeUrlConfig = {}): Runtime
   const apiBaseUrl = (): string => configuredApiBaseUrl || readInjectedApiBaseUrl();
   const realtimeBaseUrl = (): string => configuredRealtimeBaseUrl || apiBaseUrl();
 
-  const http = (path: string, query?: RuntimeUrlQuery): string => buildHttpUrl(apiBaseUrl(), path, query);
-  const realtime = (path: string, query?: RuntimeUrlQuery): string => buildHttpUrl(realtimeBaseUrl(), path, query);
+  const http = (path: string, query?: RuntimeUrlQuery): string =>
+    buildHttpUrl(resolveBypassBaseUrl(apiBaseUrl(), path), path, query);
+  const realtime = (path: string, query?: RuntimeUrlQuery): string =>
+    buildHttpUrl(resolveBypassBaseUrl(realtimeBaseUrl(), path), path, query);
 
   return {
     api: http,
