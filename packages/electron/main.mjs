@@ -161,6 +161,7 @@ const DISCORD_INVITE_URL = 'https://discord.gg/ZYRSdnwwKA';
 const INSTALLED_APPS_CACHE_TTL_SECS = 60 * 60 * 24;
 const INSTALLED_APPS_CACHE_FILE = 'discovered-apps.json';
 const OPENCODE_SHUTDOWN_GRACE_MS = 100;
+const GRACEFUL_SHUTDOWN_TIMEOUT_MS = 10_000;
 
 const { autoUpdater } = updaterPkg;
 
@@ -223,14 +224,25 @@ const quitConfirmationMessage = () => {
   return `OpenChamber detected ${reasons.join(', ')}. Quitting now will stop sidecar/background processes and may interrupt pending work.`;
 };
 
-const shutdownBackgroundServices = () => {
+const shutdownBackgroundServices = async () => {
   if (state.backgroundShutdownComplete) return;
   state.backgroundShutdownComplete = true;
   if (state.installingUpdate) return;
-  killSidecar();
-  setImmediate(() => {
-    void shutdownSshSessions();
-  });
+
+  // Graceful server shutdown — stops SSE watcher, terminal, opencode process, etc.
+  const handle = state.serverHandle;
+  if (handle) {
+    try {
+      await handle.stop({ exitProcess: false });
+    } catch (error) {
+      log.warn('[electron] graceful server shutdown failed, using fallback:', error);
+      killSidecar();
+    }
+  } else {
+    killSidecar();
+  }
+
+  await shutdownSshSessions();
 };
 
 const shutdownSshSessions = async () => {
@@ -248,7 +260,7 @@ const shutdownSshSessions = async () => {
   await state.sshShutdownPromise;
 };
 
-const prepareForQuit = ({ installingUpdate = false } = {}) => {
+const prepareForQuit = async ({ installingUpdate = false } = {}) => {
   state.quitRequested = true;
   state.quitConfirmed = true;
   state.installingUpdate = installingUpdate;
@@ -274,14 +286,28 @@ const prepareForQuit = ({ installingUpdate = false } = {}) => {
     return;
   }
 
-  shutdownBackgroundServices();
+  await shutdownBackgroundServices();
 };
 
-const performConfirmedQuit = () => {
+const performConfirmedQuit = async () => {
   if (state.quitInProgress) return;
   state.quitInProgress = true;
 
-  prepareForQuit();
+  let shutdownCompleted = false;
+  try {
+    shutdownCompleted = await Promise.race([
+      prepareForQuit().then(() => true),
+      new Promise((resolve) => setTimeout(() => resolve(false), GRACEFUL_SHUTDOWN_TIMEOUT_MS)),
+    ]);
+  } catch (error) {
+    log.warn('[electron] graceful shutdown failed, using fallback:', error);
+  }
+
+  if (!shutdownCompleted) {
+    log.warn('[electron] graceful shutdown timed out, using fallback');
+    killSidecar();
+  }
+
   app.exit(0);
 };
 
@@ -289,7 +315,7 @@ const requestQuitWithConfirmation = async () => {
   await refreshQuitRiskFlags();
 
   if (!shouldRequireQuitConfirmation()) {
-    performConfirmedQuit();
+    await performConfirmedQuit();
     return;
   }
 
@@ -320,7 +346,7 @@ const requestQuitWithConfirmation = async () => {
     });
     state.quitConfirmationPending = false;
     if (result.response === 0) {
-      performConfirmedQuit();
+      await performConfirmedQuit();
     }
   } catch (error) {
     state.quitConfirmationPending = false;
@@ -1848,8 +1874,8 @@ const openDevToolsForMenuTarget = () => {
   target.webContents.toggleDevTools();
 };
 
-const relaunchFromMenu = () => {
-  prepareForQuit();
+const relaunchFromMenu = async () => {
+  await prepareForQuit();
   app.relaunch();
   app.exit(0);
 };
@@ -2043,7 +2069,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
         if (state.installingUpdate) {
           app.quit();
         } else {
-          performConfirmedQuit();
+          void performConfirmedQuit();
         }
       }
     }
@@ -3490,9 +3516,9 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       await mutateSettingsRoot((root) => {
         root.desktopVibrancy = enabled;
       });
-      setImmediate(() => {
+      setImmediate(async () => {
         try {
-          prepareForQuit();
+          await prepareForQuit();
           app.relaunch();
           app.exit(0);
         } catch (err) {
@@ -3604,13 +3630,13 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       // Defer so the IPC reply flushes before the app starts shutting down.
       // Without this, quitAndInstall() can race with the renderer's pending
       // invoke and the restart appears to do nothing from the UI side.
-      setImmediate(() => {
+      setImmediate(async () => {
         try {
           if (applyUpdate) {
             killSidecar();
             autoUpdater.quitAndInstall();
           } else {
-            prepareForQuit();
+            await prepareForQuit();
             app.relaunch();
             app.exit(0);
           }
@@ -4343,7 +4369,7 @@ app.on('window-all-closed', () => {
     if (state.installingUpdate) {
       app.quit();
     } else {
-      performConfirmedQuit();
+      void performConfirmedQuit();
     }
   }
 });
@@ -4361,9 +4387,11 @@ app.on('before-quit', (event) => {
     return;
   }
 
-  if (!state.backgroundShutdownComplete) {
+  if (state.quitInProgress || !state.backgroundShutdownComplete) {
     event.preventDefault();
-    performConfirmedQuit();
+    if (!state.quitInProgress) {
+      void performConfirmedQuit();
+    }
   }
 });
 
