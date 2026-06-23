@@ -3001,58 +3001,39 @@ export const useConfigStore = create<ConfigStore>()(
 
                 checkConnection: async () => {
                     markStartupTrace('checkConnection:start');
-                    const maxAttempts = 5;
-                    let attempt = 0;
-                    let lastError: unknown = null;
 
-                    while (attempt < maxAttempts) {
-                        try {
-                            markStartupTrace('checkConnection:attempt', { attempt: attempt + 1 });
-                            const isHealthy = await measureStartupTrace(
-                                'checkConnection:health',
-                                () => opencodeClient.checkHealth(),
-                                { attempt: attempt + 1 },
-                            );
-                            if (!isHealthy && attempt < maxAttempts - 1) {
-                                const hasEverConnected = get().hasEverConnected;
-                                set({
-                                    isConnected: false,
-                                    connectionPhase: hasEverConnected ? "reconnecting" : "connecting",
-                                    lastDisconnectReason: 'health_check_unhealthy',
-                                });
-                                attempt += 1;
-                                await sleep(400 * attempt);
-                                continue;
-                            }
-
-                            const hasEverConnected = get().hasEverConnected;
-                            set(isHealthy
-                                ? { isConnected: true, hasEverConnected: true, connectionPhase: "connected" }
-                                : {
-                                    isConnected: false,
-                                    connectionPhase: hasEverConnected ? "reconnecting" : "connecting",
-                                    lastDisconnectReason: 'health_check_unhealthy',
-                                });
-                            markStartupTrace('checkConnection:end', { healthy: isHealthy, attempts: attempt + 1 });
-                            return isHealthy;
-                        } catch (error) {
-                            lastError = error;
-                            attempt += 1;
-                            const delay = 400 * attempt;
-                            await sleep(delay);
-                        }
+                    // Single-shot readiness probe. The SSE event pipeline owns
+                    // reconnection (see packages/ui/src/sync/event-pipeline.ts
+                    // runWsAttempt/runSseAttempt exponential backoff), so the
+                    // previous 5x linear retry here just delayed first-render
+                    // and duplicated the recovery path. A failure flips the
+                    // store to reconnecting and lets SSE drive the next probe.
+                    try {
+                        const isHealthy = await measureStartupTrace(
+                            'checkConnection:health',
+                            () => opencodeClient.checkHealth(),
+                            { attempt: 1 },
+                        );
+                        const hasEverConnected = get().hasEverConnected;
+                        set(isHealthy
+                            ? { isConnected: true, hasEverConnected: true, connectionPhase: "connected" }
+                            : {
+                                isConnected: false,
+                                connectionPhase: hasEverConnected ? "reconnecting" : "connecting",
+                                lastDisconnectReason: 'health_check_failed',
+                            });
+                        markStartupTrace('checkConnection:end', { healthy: isHealthy, attempts: 1 });
+                        return isHealthy;
+                    } catch (error) {
+                        console.warn("[ConfigStore] OpenCode health probe failed:", error);
+                        set({
+                            isConnected: false,
+                            connectionPhase: get().hasEverConnected ? "reconnecting" : "connecting",
+                            lastDisconnectReason: 'health_check_failed',
+                        });
+                        markStartupTrace('checkConnection:end', { healthy: false, attempts: 1 });
+                        return false;
                     }
-
-                    if (lastError) {
-                        console.warn("[ConfigStore] Failed to reach OpenCode after retrying:", lastError);
-                    }
-                    set({
-                        isConnected: false,
-                        connectionPhase: get().hasEverConnected ? "reconnecting" : "connecting",
-                        lastDisconnectReason: 'health_check_failed',
-                    });
-                    markStartupTrace('checkConnection:end', { healthy: false, attempts: maxAttempts });
-                    return false;
                 },
 
                 initializeApp: async () => {
