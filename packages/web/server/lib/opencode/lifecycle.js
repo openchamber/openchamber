@@ -31,7 +31,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     resolveManagedOpenCodeLaunchSpec,
     setOpenCodePort,
     setDetectedOpenCodeApiPrefix,
-    setupProxy,
     ensureOpenCodeApiPrefix,
     clearResolvedOpenCodeBinary,
     buildAugmentedPath,
@@ -564,7 +563,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         }
 
         if (state.expressApp) {
-          setupProxy(state.expressApp);
           ensureOpenCodeApiPrefix();
         }
         return;
@@ -608,7 +606,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       syncToHmrState();
 
       if (state.expressApp) {
-        setupProxy(state.expressApp);
         ensureOpenCodeApiPrefix();
       }
     })();

@@ -28,7 +28,6 @@ export const createStartupPipelineRuntime = (dependencies) => {
       terminalHeartbeatIntervalMs,
       terminalRebindWindowMs,
       terminalMaxRebindsPerWindow,
-      setupProxy,
       scheduleOpenCodeApiDetection,
       bootstrapOpenCodeAtStartup,
       autoUpdatePlugins,
@@ -87,7 +86,6 @@ export const createStartupPipelineRuntime = (dependencies) => {
       upstreamStallTimeoutMs,
     });
 
-    setupProxy(app);
     scheduleOpenCodeApiDetection();
     void bootstrapOpenCodeAtStartup();
 
