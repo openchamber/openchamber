@@ -10,6 +10,7 @@ import type { RuntimeAPIs } from '@/lib/api/types';
 import { startAppearanceAutoSave } from '@/lib/appearanceAutoSave';
 import { getDeviceInfo } from '@/lib/device';
 import { markAppBootReady } from './appBootReady';
+import { createNativeNotificationsAPI } from './nativeNotifications';
 import { applyPersistedDirectoryPreferences } from '@/lib/directoryPersistence';
 import { initializeLocale, I18nProvider } from '@/lib/i18n';
 import { initializeAppearancePreferences, syncDesktopSettings } from '@/lib/persistence';
@@ -54,13 +55,21 @@ export function renderMobileApp(apis: RuntimeAPIs) {
     throw new Error('Root element not found');
   }
 
+  // On the native Capacitor shell, deliver notifications as iOS Local Notifications. The
+  // Web Notifications API the web runtime uses doesn't display inside a WKWebView.
+  const capacitor = (window as typeof window & { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
+  const isNativeShell = capacitor?.isNativePlatform?.() === true || window.location.protocol === 'capacitor:';
+  const resolvedApis = isNativeShell
+    ? { ...apis, notifications: createNativeNotificationsAPI() }
+    : apis;
+
   createRoot(rootElement).render(
     <StrictMode>
       <I18nProvider>
         <ThemeSystemProvider>
           <ThemeProvider>
             <DiffWorkerProvider>
-              <MobileApp apis={apis} />
+              <MobileApp apis={resolvedApis} />
             </DiffWorkerProvider>
           </ThemeProvider>
         </ThemeSystemProvider>

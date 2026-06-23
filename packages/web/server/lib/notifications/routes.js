@@ -35,6 +35,8 @@ export const registerNotificationRoutes = (app, dependencies) => {
     writeSettingsToDisk,
     addOrUpdatePushSubscription,
     removePushSubscription,
+    addOrUpdateApnsToken,
+    removeApnsToken,
     updateUiVisibility,
     isUiVisible,
     getUiNotificationClients,
@@ -135,6 +137,49 @@ export const registerNotificationRoutes = (app, dependencies) => {
     }
 
     await removePushSubscription(uiToken, parsed.endpoint);
+    return res.json({ ok: true });
+  });
+
+  // Native iOS APNs device token registration (mirrors /api/push/subscribe). The token
+  // is a hex APNs device token from @capacitor/push-notifications, scoped to the UI
+  // session like web-push subscriptions.
+  app.post('/api/push/apns-token', async (req, res) => {
+    await ensureSessionWatcher();
+
+    const uiToken = uiAuthController?.ensureSessionToken
+      ? await uiAuthController.ensureSessionToken(req, res)
+      : getUiSessionTokenFromRequest(req);
+    if (!uiToken) {
+      return res.status(401).json({ error: 'UI session missing' });
+    }
+
+    const deviceToken = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+    if (!deviceToken) {
+      return res.status(400).json({ error: 'Invalid body' });
+    }
+
+    if (typeof addOrUpdateApnsToken === 'function') {
+      await addOrUpdateApnsToken(uiToken, deviceToken, req.headers['user-agent']);
+    }
+    return res.json({ ok: true });
+  });
+
+  app.delete('/api/push/apns-token', async (req, res) => {
+    const uiToken = uiAuthController?.ensureSessionToken
+      ? await uiAuthController.ensureSessionToken(req, res)
+      : getUiSessionTokenFromRequest(req);
+    if (!uiToken) {
+      return res.status(401).json({ error: 'UI session missing' });
+    }
+
+    const deviceToken = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+    if (!deviceToken) {
+      return res.status(400).json({ error: 'Invalid body' });
+    }
+
+    if (typeof removeApnsToken === 'function') {
+      await removeApnsToken(uiToken, deviceToken);
+    }
     return res.json({ ok: true });
   });
 

@@ -63,6 +63,8 @@ import { isQrScanSupported, parseConnectionPayload, scanConnectionQr } from './m
 import { resetAppForRuntimeEndpointChange } from './runtimeEndpointReset';
 import { useAppFontEffects } from './useAppFontEffects';
 import { useFontsReady } from './useFontsReady';
+import { useNativeLocalNotifications } from './useNativeLocalNotifications';
+import { useWebNotificationStream } from '@/hooks/useWebNotificationStream';
 
 const MOBILE_SETTINGS_PAGES = [
   'appearance',
@@ -1985,6 +1987,12 @@ export function MobileApp({ apis }: MobileAppProps) {
   useUpdatePolling();
   useWindowTitle();
   useRouter();
+  useNativeLocalNotifications({ enabled: isNativeMobileApp });
+  // Subscribe to the server's notification SSE stream so agent ready/error/question/
+  // permission events become native local notifications (delivery via the native
+  // notifications API wired in renderMobileApp). Gated internally on the notification
+  // settings + focus.
+  useWebNotificationStream({ enabled: isConnected });
   const fontsReady = useFontsReady();
 
   // `isConnected` is a LIVE flag that flips false on every transient SSE/WS drop and

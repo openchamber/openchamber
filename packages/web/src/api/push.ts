@@ -1,4 +1,4 @@
-import type { PushAPI, PushSubscribePayload, PushUnsubscribePayload } from '@openchamber/ui/lib/api/types';
+import type { ApnsTokenPayload, PushAPI, PushSubscribePayload, PushUnsubscribePayload } from '@openchamber/ui/lib/api/types';
 import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
 
 const fetchJson = async <T>(input: string | URL | Request, init?: RequestInit): Promise<T | null> => {
@@ -55,6 +55,26 @@ export const createWebPushAPI = (): PushAPI => ({
       },
       body: JSON.stringify(payload),
       keepalive: true,
+    });
+  },
+
+  async registerApnsToken(payload: ApnsTokenPayload) {
+    return fetchJson<{ ok: true }>('/api/push/apns-token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async unregisterApnsToken(payload: ApnsTokenPayload) {
+    return fetchJson<{ ok: true }>('/api/push/apns-token', {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
     });
   },
 });

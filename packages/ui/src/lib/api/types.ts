@@ -781,11 +781,18 @@ export interface PushUnsubscribePayload {
   endpoint: string;
 }
 
+export interface ApnsTokenPayload {
+  token: string;
+}
+
 export interface PushAPI {
   getVapidPublicKey(): Promise<{ publicKey: string } | null>;
   subscribe(payload: PushSubscribePayload): Promise<{ ok: true } | null>;
   unsubscribe(payload: PushUnsubscribePayload): Promise<{ ok: true } | null>;
   setVisibility(payload: { visible: boolean }): Promise<{ ok: true } | null>;
+  /** Register a native iOS APNs device token (Capacitor mobile app only). */
+  registerApnsToken(payload: ApnsTokenPayload): Promise<{ ok: true } | null>;
+  unregisterApnsToken(payload: ApnsTokenPayload): Promise<{ ok: true } | null>;
 }
 
 export type GitHubUserSummary = {

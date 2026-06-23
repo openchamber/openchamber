@@ -16,6 +16,8 @@
     "@capacitor/app": "^8.0.0",
     "@capacitor/core": "^8.4.1",
     "@capacitor/keyboard": "^8.0.0",
+    "@capacitor/local-notifications": "^8.2.0",
+    "@capacitor/push-notifications": "^8.1.1",
     "@capacitor/status-bar": "^8.0.0",
     "@codemirror/autocomplete": "^6.20.0",
     "@codemirror/commands": "^6.10.1",

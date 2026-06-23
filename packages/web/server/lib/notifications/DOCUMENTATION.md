@@ -7,6 +7,7 @@ This module provides notification message preparation utilities for the web serv
 - `packages/web/server/lib/notifications/index.js`: public entrypoint imported by `packages/web/server/index.js`.
 - `packages/web/server/lib/notifications/routes.js`: route registration for push, visibility, and session status/attention endpoints.
 - `packages/web/server/lib/notifications/push-runtime.js`: push subscription persistence, VAPID initialization, and UI visibility runtime.
+- `packages/web/server/lib/notifications/apns-runtime.js`: native iOS APNs device-token persistence and HTTP/2 push delivery (token-based ES256 JWT, no extra dependency). Mirrors push-runtime; shares the push runtime's UI visibility gate via the injected `isAnyUiVisible`. **Dormant/frozen**: config-gated so it never fires unless APNs credentials are set, and the client no longer registers tokens — see `APNS.md` for status and reinstatement. The native app currently delivers notifications via iOS/Android **Local Notifications** (`packages/ui/src/apps/nativeNotifications.ts`).
 - `packages/web/server/lib/notifications/emitter-runtime.js`: desktop/stdout + UI SSE notification emission runtime.
 - `packages/web/server/lib/notifications/runtime.js`: trigger runtime for OpenCode event-driven notification fanout.
 - `packages/web/server/lib/notifications/template-runtime.js`: notification template variables and session text/title enrichment runtime. Zen-model helpers are retained as compatibility stubs only.
@@ -24,6 +25,8 @@ This module provides notification message preparation utilities for the web serv
   - `GET /api/push/vapid-public-key`
   - `POST /api/push/subscribe`
   - `DELETE /api/push/subscribe`
+  - `POST /api/push/apns-token` (native iOS APNs device-token registration)
+  - `DELETE /api/push/apns-token`
   - `POST /api/push/visibility`
   - `GET /api/push/visibility`
   - `GET /api/notifications/stream`
@@ -60,6 +63,16 @@ This module provides notification message preparation utilities for the web serv
   - `updateUiVisibility(token, visible)`
   - `isAnyUiVisible()`
   - `isUiVisible(token)`
+
+### APNs runtime API (apns-runtime.js)
+- `createApnsRuntime(dependencies)`: creates runtime for native iOS APNs push and device-token state. Dependencies: `fsPromises`, `path`, `crypto`, `http2`, `APNS_TOKENS_FILE_PATH`, `readSettingsFromDiskMigrated`, `isAnyUiVisible` (shared from the push runtime).
+- Returned API:
+  - `addOrUpdateApnsToken(uiSessionToken, deviceToken, userAgent)`
+  - `removeApnsToken(uiSessionToken, deviceToken)`
+  - `removeApnsTokenFromAllSessions(deviceToken)`
+  - `sendApnsToAllUiSessions(payload, { requireNoSse })` — same focus gate as web push; no-ops with a single warning when APNs is unconfigured. Drops tokens on `410` / `BadDeviceToken` / `Unregistered`.
+  - `resolveApnsConfig()`
+- Configuration (env first, then `settings.apnsConfig`): `OPENCHAMBER_APNS_KEY_ID`, `OPENCHAMBER_APNS_TEAM_ID`, `OPENCHAMBER_APNS_P8` (PEM contents; literal `\n` accepted) or `OPENCHAMBER_APNS_P8_PATH`, `OPENCHAMBER_APNS_BUNDLE_ID` (default `com.openchamber.app`), `OPENCHAMBER_APNS_ENVIRONMENT` (`sandbox` default, or `production`).
 
 ### Emitter runtime API (emitter-runtime.js)
 - `createNotificationEmitterRuntime(dependencies)`: creates runtime for unified notification emission channels.

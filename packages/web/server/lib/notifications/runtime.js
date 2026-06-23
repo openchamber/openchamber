@@ -10,9 +10,22 @@ export const createNotificationTriggerRuntime = (deps) => {
     emitDesktopNotification,
     broadcastUiNotification,
     sendPushToAllUiSessions,
+    sendApnsToAllUiSessions,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
   } = deps;
+
+  // Fan a push payload out to every delivery channel: browser web-push and native
+  // iOS APNs. Both share the same payload, dedup tag, and `requireNoSse` focus gate;
+  // failures in one channel must not block the other.
+  const fanoutPush = (payload, options) => Promise.all([
+    Promise.resolve(sendPushToAllUiSessions?.(payload, options)).catch((error) => {
+      console.warn('[Push] web-push fanout failed:', error?.message ?? error);
+    }),
+    Promise.resolve(sendApnsToAllUiSessions?.(payload, options)).catch((error) => {
+      console.warn('[APNs] fanout failed:', error?.message ?? error);
+    }),
+  ]);
 
   let getIsWindowFocused = typeof deps.getIsWindowFocused === 'function'
     ? deps.getIsWindowFocused
@@ -283,7 +296,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
         }
 
-        await sendPushToAllUiSessions(
+        await fanoutPush(
           {
             title,
             body,
@@ -345,7 +358,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
         }
 
-        await sendPushToAllUiSessions(
+        await fanoutPush(
           {
             title,
             body,
@@ -421,7 +434,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
         }
 
-        void sendPushToAllUiSessions(
+        void fanoutPush(
           {
             title,
             body,
@@ -539,7 +552,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           notifiedPermissionRequests.add(requestKey);
         }
 
-        void sendPushToAllUiSessions(
+        void fanoutPush(
           {
             title,
             body,

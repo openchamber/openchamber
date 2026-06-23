@@ -44,6 +44,18 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         return ApplicationDelegateProxy.shared.application(application, continue: userActivity, restorationHandler: restorationHandler)
     }
 
+    // Forward APNs registration to Capacitor so @capacitor/push-notifications can
+    // deliver the device token / error to the JS `registration` / `registrationError`
+    // listeners. Required because this app uses a custom AppDelegate (not the stock
+    // Capacitor template, which already posts these notifications).
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        NotificationCenter.default.post(name: .capacitorDidRegisterForRemoteNotifications, object: deviceToken)
+    }
+
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        NotificationCenter.default.post(name: .capacitorDidFailToRegisterForRemoteNotifications, object: error)
+    }
+
 }
 
 // iOS 26 (TN3187) requires apps built with the latest SDK to adopt the UIScene
