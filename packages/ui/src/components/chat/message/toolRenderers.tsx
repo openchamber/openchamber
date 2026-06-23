@@ -4,9 +4,11 @@ import { typography } from '@/lib/typography';
 import { formatToolInput, detectToolOutputLanguage } from '@/lib/toolHelpers';
 import { SimpleMarkdownRenderer } from '../MarkdownRenderer';
 import { Icon } from "@/components/icon/Icon";
-import { useI18n } from '@/lib/i18n';
+import { useI18n, type I18nKey, type I18nParams } from '@/lib/i18n';
 import { JsonTreeViewer } from '@/components/ui/JsonTreeViewer';
 import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
+
+export type TranslateFn = (key: I18nKey, params?: I18nParams) => string;
 
 const cleanOutput = (output: string) => {
     let cleaned = output.replace(/^<file>\s*\n?/, '').replace(/\n?<\/file>\s*$/, '');
@@ -897,7 +899,7 @@ export const renderLspGotoDefinitionOutput = (output: string, options?: { unstyl
     }
 };
 
-export const renderLspFindReferencesOutput = (output: string, options?: { unstyled?: boolean }) => {
+export const renderLspFindReferencesOutput = (output: string, options?: { unstyled?: boolean }, t?: TranslateFn) => {
     try {
         const refs = output.trim().split('\n').filter(Boolean);
         if (refs.length === 0) return null;
@@ -914,7 +916,9 @@ export const renderLspFindReferencesOutput = (output: string, options?: { unstyl
 
         return (
             <div className={cn('space-y-2 w-full min-w-0', options?.unstyled ? null : 'p-3 bg-muted/20 rounded-xl border border-border/30')} style={typography.tool.popup}>
-                <div className="typography-meta text-muted-foreground">Found {refs.length} reference{refs.length !== 1 ? 's' : ''} in {Object.keys(grouped).length} file{Object.keys(grouped).length !== 1 ? 's' : ''}</div>
+                <div className="typography-meta text-muted-foreground">
+                    {t ? t('chat.toolPart.foundReferences', { count: refs.length }) : `Found ${refs.length} reference${refs.length !== 1 ? 's' : ''}`}
+                </div>
                 {Object.entries(grouped).map(([file, locs]) => (
                     <div key={file} className="space-y-1">
                         <div className="typography-code font-medium text-muted-foreground">{file} ({locs.length})</div>
@@ -976,7 +980,7 @@ export const renderLspSymbolsOutput = (output: string, options?: { unstyled?: bo
     }
 };
 
-export const renderLspRenameOutput = (output: string, options?: { unstyled?: boolean }) => {
+export const renderLspRenameOutput = (output: string, options?: { unstyled?: boolean }, t?: TranslateFn) => {
     try {
         const match = output.match(/Applied\s+(\d+)\s+edit\(s\)\s+to\s+(\d+)\s+file\(s\):/);
         if (!match) return null;
@@ -989,7 +993,9 @@ export const renderLspRenameOutput = (output: string, options?: { unstyled?: boo
             <div className={cn('space-y-2 w-full min-w-0', options?.unstyled ? null : 'p-3 bg-muted/20 rounded-xl border border-border/30')} style={typography.tool.popup}>
                 <div className="flex items-center gap-2">
                     <Icon name="checkbox-circle" className="h-4 w-4" style={{ color: 'var(--status-success)' }} />
-                    <span className="typography-meta font-medium" style={{ color: 'var(--status-success)' }}>Rename completed</span>
+                    <span className="typography-meta font-medium" style={{ color: 'var(--status-success)' }}>
+                        {t ? t('chat.toolPart.renameCompleted') : 'Rename completed'}
+                    </span>
                 </div>
                 <div className="typography-code text-foreground">Applied {edits} edit(s) to {files} file(s)</div>
                 {fileList.length > 0 && (
@@ -1006,7 +1012,7 @@ export const renderLspRenameOutput = (output: string, options?: { unstyled?: boo
     }
 };
 
-export const renderLspPrepareRenameOutput = (output: string, options?: { unstyled?: boolean }) => {
+export const renderLspPrepareRenameOutput = (output: string, options?: { unstyled?: boolean }, t?: TranslateFn) => {
     try {
         const match = output.match(/Rename available at\s+(\d+):(\d+)-(\d+):(\d+)\s+\(current:\s+"([^"]+)"\)/);
         if (!match) return null;
@@ -1017,7 +1023,9 @@ export const renderLspPrepareRenameOutput = (output: string, options?: { unstyle
             <div className={cn('space-y-1 w-full min-w-0', options?.unstyled ? null : 'p-3 bg-muted/20 rounded-xl border border-border/30')} style={typography.tool.popup}>
                 <div className="flex items-center gap-2">
                     <Icon name="information" className="h-3.5 w-3.5" style={{ color: 'var(--status-info)' }} />
-                    <span className="typography-meta font-medium" style={{ color: 'var(--status-info)' }}>Rename available</span>
+                    <span className="typography-meta font-medium" style={{ color: 'var(--status-info)' }}>
+                        {t ? t('chat.toolPart.renameAvailable') : 'Rename available'}
+                    </span>
                 </div>
                 <div className="typography-code text-foreground">Current name: <span className="font-semibold">{currentName}</span></div>
                 <div className="typography-code text-muted-foreground">Range: {startLine}:{startCol} - {endLine}:{endCol}</div>
@@ -1168,7 +1176,7 @@ export const renderSessionSearchOutput = (output: string, options?: { unstyled?:
     }
 };
 
-export const renderBackgroundOutputOutput = (output: string, options?: { unstyled?: boolean }) => {
+export const renderBackgroundOutputOutput = (output: string, options?: { unstyled?: boolean }, t?: TranslateFn) => {
     try {
         if (output.includes('# Task Status')) {
             const lines = output.split('\n');
@@ -1186,7 +1194,9 @@ export const renderBackgroundOutputOutput = (output: string, options?: { unstyle
                 <div className={cn('space-y-2 w-full min-w-0', options?.unstyled ? null : 'p-3 bg-muted/20 rounded-xl border border-border/30')} style={typography.tool.popup}>
                     <div className="flex items-center gap-2 mb-2">
                         <Icon name="loader-4" className="h-4 w-4 animate-spin" style={{ color: 'var(--status-info)' }} />
-                        <span className="typography-meta font-semibold" style={{ color: 'var(--status-info)' }}>Task Running</span>
+                        <span className="typography-meta font-semibold" style={{ color: 'var(--status-info)' }}>
+                            {t ? t('chat.toolPart.taskRunning') : 'Task Running'}
+                        </span>
                     </div>
                     {Object.entries(info).map(([key, value]) => (
                         <div key={key} className="flex gap-2">
@@ -1210,7 +1220,9 @@ export const renderBackgroundOutputOutput = (output: string, options?: { unstyle
                 <div className={cn('space-y-2 w-full min-w-0', options?.unstyled ? null : 'p-3 bg-muted/20 rounded-xl border border-border/30')} style={typography.tool.popup}>
                     <div className="flex items-center gap-2">
                         <Icon name="checkbox-circle" className="h-4 w-4" style={{ color: 'var(--status-success)' }} />
-                        <span className="typography-meta font-semibold" style={{ color: 'var(--status-success)' }}>Task Completed</span>
+                        <span className="typography-meta font-semibold" style={{ color: 'var(--status-success)' }}>
+                            {t ? t('chat.toolPart.taskCompleted') : 'Task Completed'}
+                        </span>
                     </div>
                     {taskId && <div className="typography-code text-muted-foreground">Task ID: {taskId}</div>}
                     {description && <div className="typography-code text-foreground">{description}</div>}
@@ -1230,7 +1242,7 @@ export const renderBackgroundOutputOutput = (output: string, options?: { unstyle
     }
 };
 
-export const renderMonitorOutputOutput = (output: string, options?: { unstyled?: boolean }) => {
+export const renderMonitorOutputOutput = (output: string, options?: { unstyled?: boolean }, t?: TranslateFn) => {
     try {
         const data = JSON.parse(output);
         if (!data.lines || !Array.isArray(data.lines)) return null;
@@ -1239,7 +1251,9 @@ export const renderMonitorOutputOutput = (output: string, options?: { unstyled?:
             <div className={cn('space-y-2 w-full min-w-0', options?.unstyled ? null : 'p-3 bg-muted/20 rounded-xl border border-border/30')} style={typography.tool.popup}>
                 <div className="flex items-center gap-2">
                     <Icon name="terminal-box" className="h-3.5 w-3.5 text-muted-foreground" />
-                    <span className="typography-meta font-medium text-foreground">Monitor Output</span>
+                    <span className="typography-meta font-medium text-foreground">
+                        {t ? t('chat.toolPart.monitorOutput') : 'Monitor Output'}
+                    </span>
                     {data.counters && (
                         <span className="typography-micro text-muted-foreground ml-auto">
                             {data.counters.total_lines} lines
@@ -1294,7 +1308,7 @@ export const renderSkillMcpOutput = (output: string, options?: { unstyled?: bool
     }
 };
 
-export const renderHashlineEditOutput = (output: string, options?: { unstyled?: boolean }) => {
+export const renderHashlineEditOutput = (output: string, options?: { unstyled?: boolean }, t?: TranslateFn) => {
     try {
         const isError = output.toLowerCase().includes('error:');
         const icon = isError ? 'close-circle' : 'checkbox-circle';
@@ -1305,7 +1319,9 @@ export const renderHashlineEditOutput = (output: string, options?: { unstyled?: 
                 <div className="flex items-center gap-2">
                     {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
                     <Icon name={icon as any} className="h-4 w-4" style={{ color }} />
-                    <span className="typography-meta font-semibold" style={{ color }}>{isError ? 'Edit Failed' : 'Edit Applied'}</span>
+                    <span className="typography-meta font-semibold" style={{ color }}>
+                        {isError ? (t ? t('chat.toolPart.editFailed') : 'Edit Failed') : (t ? t('chat.toolPart.editApplied') : 'Edit Applied')}
+                    </span>
                 </div>
                 <div className="typography-code text-foreground whitespace-pre-wrap pl-6">{output}</div>
             </div>
@@ -1342,13 +1358,12 @@ const detectContentType = (output: string): ContentType => {
 
 export const renderWebFetchOutput = (output: string, options?: { unstyled?: boolean }) => {
     const WebFetchContent = () => {
-        const { t } = useI18n();
         const contentType = detectContentType(output);
         
         const container = (children: React.ReactNode) => (
             <div className={cn('w-full min-w-0', options?.unstyled ? null : 'p-3 bg-muted/20 rounded-xl border border-border/30')} style={typography.tool.popup}>
                 <div className="typography-meta text-muted-foreground mb-2">
-                    {t('chat.toolPart.contentType', { type: contentType })}
+                    Content type: {contentType}
                 </div>
                 {children}
             </div>
@@ -1386,7 +1401,7 @@ export const renderWebFetchOutput = (output: string, options?: { unstyled?: bool
     }
 };
 
-export const renderCodeSearchOutput = (output: string, options?: { unstyled?: boolean }) => {
+export const renderCodeSearchOutput = (output: string, options?: { unstyled?: boolean }, t?: TranslateFn) => {
     try {
         const lines = output.trim().split('\n').filter(Boolean);
         if (lines.length === 0) return null;
@@ -1429,7 +1444,7 @@ export const renderCodeSearchOutput = (output: string, options?: { unstyled?: bo
                 style={typography.tool.popup}
             >
                 <div className="typography-meta text-muted-foreground mb-2">
-                    Found {totalMatches} match{totalMatches !== 1 ? 'es' : ''} in {Object.keys(fileGroups).length} file{Object.keys(fileGroups).length !== 1 ? 's' : ''}
+                    {t ? t('chat.toolPart.codesearchResults', { count: totalMatches, files: Object.keys(fileGroups).length }) : `Found ${totalMatches} match${totalMatches !== 1 ? 'es' : ''} in ${Object.keys(fileGroups).length} file${Object.keys(fileGroups).length !== 1 ? 's' : ''}`}
                 </div>
                 {Object.entries(fileGroups).map(([filepath, matches]) => (
                     <div key={filepath} className="space-y-1">

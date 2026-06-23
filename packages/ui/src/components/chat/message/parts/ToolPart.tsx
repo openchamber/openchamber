@@ -1977,7 +1977,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         }
 
         if (part.tool === 'lsp_find_references' && hasStringOutput) {
-            const rendered = renderLspFindReferencesOutput(outputString);
+            const rendered = renderLspFindReferencesOutput(outputString, undefined, t);
             if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
         }
 
@@ -1987,12 +1987,12 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         }
 
         if (part.tool === 'lsp_rename' && hasStringOutput) {
-            const rendered = renderLspRenameOutput(outputString);
+            const rendered = renderLspRenameOutput(outputString, undefined, t);
             if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
         }
 
         if (part.tool === 'lsp_prepare_rename' && hasStringOutput) {
-            const rendered = renderLspPrepareRenameOutput(outputString);
+            const rendered = renderLspPrepareRenameOutput(outputString, undefined, t);
             if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
         }
 
@@ -2019,12 +2019,12 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
 
         // Background & Monitor Tools
         if (part.tool === 'background_output' && hasStringOutput) {
-            const rendered = renderBackgroundOutputOutput(outputString);
+            const rendered = renderBackgroundOutputOutput(outputString, undefined, t);
             if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
         }
 
         if (part.tool === 'monitor_output' && hasStringOutput) {
-            const rendered = renderMonitorOutputOutput(outputString);
+            const rendered = renderMonitorOutputOutput(outputString, undefined, t);
             if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
         }
 
@@ -2071,13 +2071,13 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         }
 
         if (part.tool === 'hashline_edit' && hasStringOutput) {
-            const rendered = renderHashlineEditOutput(outputString);
+            const rendered = renderHashlineEditOutput(outputString, undefined, t);
             if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
         }
 
         // Code Search & Web Tools
         if (part.tool === 'codesearch' && hasStringOutput) {
-            const rendered = renderCodeSearchOutput(outputString);
+            const rendered = renderCodeSearchOutput(outputString, undefined, t);
             if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
         }
 
