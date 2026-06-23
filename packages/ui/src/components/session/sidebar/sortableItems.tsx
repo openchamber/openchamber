@@ -42,6 +42,7 @@ export interface SortableProjectItemProps {
   hideHeader?: boolean;
   openSidebarMenuKey: string | null;
   setOpenSidebarMenuKey: (key: string | null) => void;
+  onRefreshProject?: () => void;
 }
 
 export type SortableDragHandleProps = {
@@ -75,6 +76,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   hideHeader = false,
   openSidebarMenuKey,
   setOpenSidebarMenuKey,
+  onRefreshProject,
 }) => {
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
@@ -91,6 +93,16 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   const menuInstanceKey = `project:${id}`;
   const isMenuOpen = openSidebarMenuKey === menuInstanceKey;
   const [isContextMenuOpen, setIsContextMenuOpen] = React.useState(false);
+  const projectTitleRightPadding = React.useMemo(() => {
+    if (isRepo && !hideDirectoryControls) {
+      return alwaysShowActions
+        ? (onRefreshProject ? 'pr-24' : 'pr-20')
+        : (onRefreshProject ? 'pr-24 group-hover/project:pr-24 group-focus-within/project:pr-24' : 'pr-7 group-hover/project:pr-20 group-focus-within/project:pr-20');
+    }
+    return alwaysShowActions
+      ? (onRefreshProject ? 'pr-18' : 'pr-14')
+      : (onRefreshProject ? 'pr-18 group-hover/project:pr-18 group-focus-within/project:pr-18' : 'pr-7 group-hover/project:pr-14 group-focus-within/project:pr-14');
+  }, [isRepo, hideDirectoryControls, alwaysShowActions, onRefreshProject]);
 
   const projectIconName = projectIcon ? PROJECT_ICON_MAP[projectIcon] : null;
   const iconColor = projectColor ? (PROJECT_COLOR_MAP[projectColor] ?? null) : null;
@@ -112,6 +124,12 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
         <Icon name="pencil-ai" className="mr-1.5 h-4 w-4" />
         {t('sessions.sidebar.session.menu.rename')}
       </Item>
+      {onRefreshProject && (
+        <Item onClick={onRefreshProject}>
+          <Icon name="refresh" className="mr-1.5 h-4 w-4" />
+          {t('sessions.sidebar.project.actions.refreshProject')}
+        </Item>
+      )}
       <Item onClick={onClose} className="text-destructive focus:text-destructive">
         <Icon name="close" className="mr-1.5 h-4 w-4" />
         {t('sessions.sidebar.project.actions.closeProject')}
@@ -187,9 +205,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                       {...listeners}
                       className={cn(
                         'flex-1 min-w-0 flex items-center gap-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 rounded-md cursor-grab active:cursor-grabbing transition-[padding]',
-                        isRepo && !hideDirectoryControls
-                          ? (alwaysShowActions ? 'pr-20' : 'pr-7 group-hover/project:pr-20 group-focus-within/project:pr-20')
-                          : (alwaysShowActions ? 'pr-14' : 'pr-7 group-hover/project:pr-14 group-focus-within/project:pr-14'),
+                        projectTitleRightPadding,
                       )}
                     >
                     <span className="inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center">
@@ -264,6 +280,29 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                     </TooltipTrigger>
                     <TooltipContent side="bottom" sideOffset={4}>
                       <p>{t('sessions.sidebar.project.actions.newWorktreeEllipsis')}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                ) : null}
+                {onRefreshProject ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onRefreshProject();
+                        }}
+                        className={cn(
+                          'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 hover:text-foreground transition-opacity',
+                          alwaysShowActions ? 'opacity-100' : 'opacity-0 pointer-events-none group-hover/project:opacity-100 group-hover/project:pointer-events-auto group-focus-within/project:opacity-100 group-focus-within/project:pointer-events-auto',
+                        )}
+                        aria-label={t('sessions.sidebar.project.actions.refreshProjectTooltip')}
+                      >
+                        <Icon name="refresh" className="h-4 w-4" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" sideOffset={4}>
+                      <p>{t('sessions.sidebar.project.actions.refreshProjectTooltip')}</p>
                     </TooltipContent>
                   </Tooltip>
                 ) : null}

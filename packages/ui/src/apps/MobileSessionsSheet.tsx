@@ -3,6 +3,7 @@ import {
   RiAddLine,
   RiArchiveLine,
   RiArrowDownSLine,
+  RiRefreshLine,
   RiArrowUpSLine,
   RiCheckLine,
   RiCloseLine,
@@ -43,12 +44,15 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useI18n } from '@/lib/i18n';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/projectMeta';
 import { cn } from '@/lib/utils';
+import { useUIStore } from '@/stores/useUIStore';
 import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { mergeSessionDirectoryMetadata, refreshGlobalSessions, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { mergeSessionDirectoryMetadata, refreshGlobalSessions, refreshGlobalSessionsForDirectories, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useMobileSessionExpansionStore } from '@/stores/useMobileSessionExpansionStore';
 import { useMobileSessionTreeStore } from '@/stores/useMobileSessionTreeStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+
 import { orderWorktrees, useWorktreeOrderStore } from '@/stores/useWorktreeOrderStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useAllLiveSessions } from '@/sync/sync-context';
@@ -520,6 +524,8 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const worktreeOrderByProject = useWorktreeOrderStore((state) => state.orderByProject);
   const expandedParents = useMobileSessionExpansionStore((state) => state.expandedParents);
   const toggleParent = useMobileSessionExpansionStore((state) => state.toggleParent);
+  const showSubagentSessionsInSidebar = useUIStore((state) => state.showSubagentSessionsInSidebar);
+
   const [query, setQuery] = React.useState('');
   const [editingProjectId, setEditingProjectId] = React.useState<string | null>(null);
   const [confirmingArchiveSessionId, setConfirmingArchiveSessionId] = React.useState<string | null>(null);
@@ -624,8 +630,11 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     for (const session of liveSessions) {
       if (!seenIds.has(session.id)) merged.push(session);
     }
+    if (!showSubagentSessionsInSidebar) {
+      return merged.filter((session) => !getParentId(session));
+    }
     return merged;
-  }, [globalActiveSessions, liveSessions]);
+  }, [globalActiveSessions, liveSessions, showSubagentSessionsInSidebar]);
 
   const normalizedQuery = query.trim().toLowerCase();
 
@@ -739,9 +748,10 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const renderBucketSessions = (node: ProjectNode, bucket: WorktreeBucket, indent: number) => {
     const bucketKey = `${node.project.id}::${bucket.key}`;
 
-    // Group children by parent within this bucket, and treat sessions whose parent
-    // is not in this bucket as top-level so nothing is hidden.
-    const idsInBucket = new Set(bucket.sessions.map((entry) => entry.id));
+    const filteredSessions = showSubagentSessionsInSidebar
+      ? bucket.sessions
+      : bucket.sessions.filter((entry) => !getParentId(entry));
+    const idsInBucket = new Set(filteredSessions.map((entry) => entry.id));
     const childrenByParent = new Map<string, Session[]>();
     for (const candidate of bucket.sessions) {
       const parentId = getParentId(candidate);
@@ -751,13 +761,14 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         childrenByParent.set(parentId, list);
       }
     }
-    const roots = bucket.sessions.filter((entry) => {
+    const roots = filteredSessions.filter((entry) => {
       const parentId = getParentId(entry);
       return !parentId || !idsInBucket.has(parentId);
     });
 
     const visibleCount = visibleCountByBucket.get(bucketKey) ?? SESSIONS_PER_BUCKET;
     const visibleRoots = roots.slice(0, visibleCount);
+
     const remaining = roots.length - visibleRoots.length;
     const canShowFewer = roots.length > SESSIONS_PER_BUCKET && remaining === 0;
 
@@ -842,6 +853,15 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     openNewSessionDraft();
     onOpenChange(false);
   };
+
+  const handleRefreshProject = React.useCallback((project: ProjectMeta) => {
+    const directories = [project.path];
+    for (const wt of project.worktrees) {
+      directories.push(wt.path);
+    }
+    void refreshGlobalSessionsForDirectories(directories);
+    void useSessionFoldersStore.getState().refreshFolders();
+  }, []);
 
   const handleNewWorktree = (projectId: string) => {
     setWorktreeDialogProjectId(projectId);
@@ -1184,6 +1204,21 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                         <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">
                           {node.totalSessions}
                         </span>
+                      </button>
+                      <button
+                        type="button"
+                        className={cn(
+                          'flex size-9 shrink-0 items-center justify-center rounded-full text-[var(--surface-mutedForeground)] transition-colors hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]',
+                        )}
+                        aria-label={t('sessions.sidebar.project.actions.refreshProjectTooltip')}
+                        title={t('sessions.sidebar.project.actions.refreshProjectTooltip')}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRefreshProject(node.project);
+                        }}
+                        style={{ touchAction: 'manipulation' }}
+                      >
+                        <RiRefreshLine className="size-4" />
                       </button>
                       {node.project.isGitRepo ? (
                         <NewWorktreeIconButton

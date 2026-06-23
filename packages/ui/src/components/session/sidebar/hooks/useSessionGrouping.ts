@@ -13,13 +13,16 @@ import { formatDirectoryName, formatPathForDisplay } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 
+
 type Args = {
   homeDirectory: string | null;
   worktreeMetadata: Map<string, WorktreeMetadata>;
   pinnedSessionIds: Set<string>;
   gitBranches: Map<string, string | null>;
   isVSCode: boolean;
+  showSubagentSessionsInSidebar: boolean;
 };
+
 
 const isArchivedSession = (session: Session): boolean => Boolean(session.time?.archived);
 
@@ -107,6 +110,9 @@ export const useSessionGrouping = (args: Args) => {
       };
 
       const buildProjectNode = (session: Session): SessionNode => {
+        if (!args.showSubagentSessionsInSidebar) {
+          return { session, children: [], worktree: getSessionWorktree(session) };
+        }
         const children = childrenMap.get(session.id) ?? [];
         return { session, children: children.map((child) => buildProjectNode(child)), worktree: getSessionWorktree(session) };
       };
@@ -246,7 +252,7 @@ export const useSessionGrouping = (args: Args) => {
 
       return groups;
     },
-    [args.homeDirectory, args.worktreeMetadata, args.pinnedSessionIds, args.gitBranches, args.isVSCode, t],
+    [args.homeDirectory, args.worktreeMetadata, args.pinnedSessionIds, args.gitBranches, args.isVSCode, args.showSubagentSessionsInSidebar, t],
   );
 
   return {

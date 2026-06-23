@@ -28,7 +28,7 @@ import { DraggableSessionRow } from './sessionFolderDnd';
 import { nodeContainsSessionId } from './sessionNodeItemUtils';
 import type { SessionNodeChildRenderExtras, SessionNodeRenderExtras } from './sessionNodeItemUtils';
 import type { SessionNode } from './types';
-import { formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from './utils';
+import { formatSessionCompactDateLabel, formatSessionDateLabel, isSubtaskSession, normalizePath, renderHighlightedText } from './utils';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
@@ -299,9 +299,9 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   // expand the other. Matches the format of menuInstanceKey.
   const expansionKey = menuInstanceKey;
   const isExpanded = hasSessionSearchQuery ? true : expandedParents.has(expansionKey);
-  const isSubtaskSession = Boolean((resolvedSession as Session & { parentID?: string | null }).parentID);
+  const isSubtask = isSubtaskSession(resolvedSession);
   const unseenCount = useSessionUnseenCount(session.id);
-  const needsAttention = unseenCount > 0 && (!isSubtaskSession || notifyOnSubtasks);
+  const needsAttention = unseenCount > 0 && (!isSubtask || notifyOnSubtasks);
   const sessionTimestamp = resolvedSession.time?.updated || resolvedSession.time?.created || Date.now();
   const sessionUpdatedLabel = formatSessionDateLabel(sessionTimestamp);
   const sessionCompactUpdatedLabel = formatSessionCompactDateLabel(sessionTimestamp);

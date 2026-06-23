@@ -1,7 +1,8 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
-import { dedupeSessionsById, isSessionRelatedToProject, normalizePath } from '../utils';
+import { dedupeSessionsById, isSessionRelatedToProject, isSubtaskSession, normalizePath } from '../utils';
+import { useUIStore } from '@/stores/useUIStore';
 
 type WorktreeMeta = { path: string };
 
@@ -32,6 +33,16 @@ export const useProjectSessionLists = (args: Args) => {
     normalizedProjects,
   } = args;
 
+  const showSubagentSessionsInSidebar = useUIStore((state) => state.showSubagentSessionsInSidebar);
+  const filteredSessions = React.useMemo(
+    () => showSubagentSessionsInSidebar ? sessions : sessions.filter((s) => !isSubtaskSession(s)),
+    [sessions, showSubagentSessionsInSidebar],
+  );
+  const filteredArchivedSessions = React.useMemo(
+    () => showSubagentSessionsInSidebar ? archivedSessions : archivedSessions.filter((s) => !isSubtaskSession(s)),
+    [archivedSessions, showSubagentSessionsInSidebar],
+  );
+
   // Precompute the set of directories the sidebar will ever ask about:
   // every project's normalized path plus the path of each registered
   // worktree. Walking this set is O(P + W) per Sidebar render and lets
@@ -57,7 +68,7 @@ export const useProjectSessionLists = (args: Args) => {
 
   const sessionsByDirectory = React.useMemo(() => {
     const next = new Map<string, Session[]>();
-    sessions.forEach((session) => {
+    filteredSessions.forEach((session) => {
       const directory = resolveGlobalSessionDirectory(session);
       if (!directory) {
         return;
@@ -76,7 +87,7 @@ export const useProjectSessionLists = (args: Args) => {
       next.set(directory, collection);
     });
     return next;
-  }, [sessions, allowedDirectories]);
+  }, [filteredSessions, allowedDirectories]);
 
   const getSessionsForProject = React.useCallback(
     (project: { normalizedPath: string }) => {
@@ -110,7 +121,7 @@ export const useProjectSessionLists = (args: Args) => {
   const getArchivedSessionsForProject = React.useCallback(
     (project: { normalizedPath: string }) => {
       if (isVSCode) {
-        const archived = archivedSessions.filter((session) => {
+        const archived = filteredArchivedSessions.filter((session) => {
           const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
           const projectWorktree = normalizePath((session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? null);
 
@@ -121,7 +132,7 @@ export const useProjectSessionLists = (args: Args) => {
           return projectWorktree === project.normalizedPath;
         });
 
-        const unassignedLive = sessions.filter((session) => {
+        const unassignedLive = filteredSessions.filter((session) => {
           if (session.time?.archived) {
             return false;
           }
@@ -148,8 +159,8 @@ export const useProjectSessionLists = (args: Args) => {
         isSessionRelatedToProject(session, project.normalizedPath, validDirectories),
       );
 
-      const archived = collect(archivedSessions);
-      const unassignedLive = sessions.filter((session) => {
+      const archived = collect(filteredArchivedSessions);
+      const unassignedLive = filteredSessions.filter((session) => {
         if (session.time?.archived) {
           return false;
         }
@@ -166,7 +177,7 @@ export const useProjectSessionLists = (args: Args) => {
 
       return dedupeSessionsById([...archived, ...unassignedLive]);
     },
-    [archivedSessions, availableWorktreesByProject, isVSCode, sessions],
+    [filteredArchivedSessions, availableWorktreesByProject, isVSCode, filteredSessions],
   );
 
   return {
