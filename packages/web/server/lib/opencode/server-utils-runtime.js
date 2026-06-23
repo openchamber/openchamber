@@ -210,5 +210,4 @@ export const createServerUtilsRuntime = (dependencies) => {
     fetchProvidersSnapshot,
     fetchModelsSnapshot,
   };
-  };
 };
