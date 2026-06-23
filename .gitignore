@@ -67,3 +67,4 @@ data/
 workspaces/
 *.pid
 .worktrees/
+.omo
