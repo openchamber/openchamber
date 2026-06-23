@@ -39,7 +39,7 @@ import {
   getDirectoryState,
 } from "./sync-refs"
 import { markSessionViewed } from "./notification-store"
-import { setActiveSession } from "./sync-context"
+import { setActiveSession } from "./active-session"
 import {
   createSession as createSessionAction,
   deleteSession as deleteSessionAction,
@@ -238,6 +238,10 @@ export type SessionUIState = {
   // Non-Git mode: dismissed signature hash per session, hides bar until new turn arrives
   pendingChangesBarDismissed: Map<string, string>
   dismissPendingChangesBar: (sessionId: string, signature: string | null) => void
+
+  // Subagent error focus target — drives scroll+highlight to the failed task row
+  subagentErrorFocusTarget: { sessionId: string; messageId: string; partId: string } | null
+  setSubagentErrorFocusTarget: (target: { sessionId: string; messageId: string; partId: string } | null) => void
 
   // Actions — UI state management
   setCurrentSession: (id: string | null, directoryHint?: string | null) => void
@@ -470,6 +474,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   lastLoadedDirectory: null,
   sessionPlanAvailable: new Map(),
   pendingChangesBarDismissed: new Map(),
+  subagentErrorFocusTarget: null,
+  setSubagentErrorFocusTarget: (target) => set({ subagentErrorFocusTarget: target }),
 
   // ---------------------------------------------------------------------------
   // setCurrentSession
@@ -528,7 +534,16 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // skeleton to render and reads messages which can be expensive.
     if (previousSessionId && previousSessionId !== id) {
       const prevId = previousSessionId
-      setTimeout(() => {
+      const newId = id
+      // queueMicrotask runs after the current synchronous call stack (and
+      // before the next macrotask / setTimeout(0) / paint), so the previous
+      // session's anchor is saved before the new session's restoreSnapshot
+      // effect fires. This eliminates the race where save and restore
+      // interleave against the same viewport store entry.
+      queueMicrotask(() => {
+        // Bail if the user already switched again — save is now stale.
+        const current = get().currentSessionId
+        if (current !== newId) return
         const memState = getViewportSessionMemory(prevId)
         if (!memState?.isStreaming) {
           const prevMessages = getSyncMessages(prevId)
@@ -536,7 +551,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
             useViewportStore.getState().updateViewportAnchor(prevId, prevMessages.length - 1)
           }
         }
-      }, 0)
+      })
     }
 
     // Mark session viewed in notification store + update active session ref

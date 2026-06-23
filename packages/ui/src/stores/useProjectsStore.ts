@@ -11,7 +11,11 @@ import { useDirectoryStore } from './useDirectoryStore';
 import { streamDebugEnabled } from '@/stores/utils/streamDebug';
 import { PROJECT_COLORS } from '@/lib/projectMeta';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import {
+  uploadProjectIcon,
+  removeProjectIcon,
+  discoverProjectIcon,
+} from '@/lib/api/projectsApi';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 
 /** Pick a color key that's least used among existing projects */
@@ -709,22 +713,8 @@ export const useProjectsStore = create<ProjectsStore>()(
         const dataUrl = await readFileAsDataUrl(file);
         const normalizedDataUrl = dataUrl.replace(/^data:[^;]+;/i, `data:${mime};`);
 
-        const response = await runtimeFetch(`/api/projects/${encodeURIComponent(id)}/icon`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-          },
-          body: JSON.stringify({ dataUrl: normalizedDataUrl }),
-        });
-
-        if (!response.ok) {
-          const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-          return { ok: false, error: payload?.error || 'Failed to upload project icon' };
-        }
-
-        const payload = (await response.json().catch(() => null)) as { settings?: DesktopSettings } | null;
-        if (payload?.settings) {
+        const payload = await uploadProjectIcon(id, normalizedDataUrl);
+        if (payload.settings) {
           get().synchronizeFromSettings(payload.settings);
         }
         return { ok: true };
@@ -740,20 +730,8 @@ export const useProjectsStore = create<ProjectsStore>()(
       }
 
       try {
-        const response = await runtimeFetch(`/api/projects/${encodeURIComponent(id)}/icon`, {
-          method: 'DELETE',
-          headers: {
-            Accept: 'application/json',
-          },
-        });
-
-        if (!response.ok) {
-          const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-          return { ok: false, error: payload?.error || 'Failed to remove project icon' };
-        }
-
-        const payload = (await response.json().catch(() => null)) as { settings?: DesktopSettings } | null;
-        if (payload?.settings) {
+        const payload = await removeProjectIcon(id);
+        if (payload.settings) {
           get().synchronizeFromSettings(payload.settings);
         }
         return { ok: true };
@@ -769,34 +747,14 @@ export const useProjectsStore = create<ProjectsStore>()(
       }
 
       try {
-        const response = await runtimeFetch(`/api/projects/${encodeURIComponent(id)}/icon/discover`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-          },
-          body: JSON.stringify({ force: options?.force === true }),
-        });
-
-        const payload = (await response.json().catch(() => null)) as {
-          error?: string;
-          skipped?: boolean;
-          reason?: string;
-          settings?: DesktopSettings;
-        } | null;
-
-        if (!response.ok) {
-          return { ok: false, error: payload?.error || 'Failed to discover project icon' };
-        }
-
-        if (payload?.settings) {
+        const payload = await discoverProjectIcon(id, options?.force);
+        if (payload.settings) {
           get().synchronizeFromSettings(payload.settings);
         }
-
         return {
           ok: true,
-          skipped: payload?.skipped === true,
-          reason: typeof payload?.reason === 'string' ? payload.reason : undefined,
+          skipped: payload.skipped === true,
+          reason: typeof payload.reason === 'string' ? payload.reason : undefined,
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

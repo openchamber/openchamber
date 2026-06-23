@@ -6,7 +6,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { useGitAllBranches } from '@/stores/useGitStore';
 import type { SessionNode } from '../types';
-import { compareSessionsByPinnedAndTime, isPathWithinProject } from '../utils';
+import { compareSessionsByPinnedAndTime, getParentSessionId, isPathWithinProject } from '../utils';
 
 export type SwitcherItem = {
   node: SessionNode;
@@ -69,7 +69,7 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
 
     const childrenByParent = new Map<string, Session[]>();
     for (const session of activeSessions) {
-      const parentId = (session as Session & { parentID?: string | null }).parentID;
+      const parentId = getParentSessionId(session);
       if (!parentId) continue;
       if (session.time?.archived) continue;
       const bucket = childrenByParent.get(parentId);
@@ -85,7 +85,7 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
 
     const parents = activeSessions
       .filter((session) => !session.time?.archived)
-      .filter((session) => !(session as Session & { parentID?: string | null }).parentID)
+      .filter((session) => getParentSessionId(session) === null)
       .filter((session) => {
         if (!scopeProjectId) return true;
         const directory = resolveGlobalSessionDirectory(session);

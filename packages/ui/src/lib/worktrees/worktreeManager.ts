@@ -17,6 +17,7 @@ import type {
   GitWorktreeValidationResult,
 } from '@/lib/api/types';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 
 type WorktreeListEntry = {
   path?: string;
@@ -239,7 +240,7 @@ const getWorktreeListGeneration = (projectDirectory: string): number => {
   return _worktreeListGeneration.get(projectDirectory) ?? 0;
 };
 
-const invalidateWorktreeList = (projectDirectory: string): void => {
+export const invalidateWorktreeList = (projectDirectory: string): void => {
   _worktreeListGeneration.set(projectDirectory, getWorktreeListGeneration(projectDirectory) + 1);
   _worktreeListCache.delete(projectDirectory);
 };
@@ -314,6 +315,100 @@ export async function listProjectWorktrees(project: ProjectRef): Promise<Worktre
 
   _worktreeListInflight.set(projectDirectory, promise);
   return promise;
+}
+
+/**
+ * Invalidate the cache and re-fetch worktrees for a single project,
+ * updating the session UI store. Safe to call on dropdown open, window focus,
+ * or any time worktrees may have changed externally.
+ */
+export async function refreshProjectWorktrees(project: ProjectRef): Promise<void> {
+  const projectPath = normalizePath(project.path);
+  if (!projectPath) return;
+
+  invalidateWorktreeList(projectPath);
+
+  try {
+    const worktrees = await listProjectWorktrees({ id: project.id, path: projectPath });
+
+    const currentByProject = new Map(useSessionUIStore.getState().availableWorktreesByProject);
+    if (worktrees.length > 0) {
+      currentByProject.set(projectPath, worktrees);
+    } else {
+      currentByProject.delete(projectPath);
+    }
+
+    const allWorktrees: WorktreeMetadata[] = [];
+    for (const [, wts] of currentByProject) {
+      allWorktrees.push(...wts);
+    }
+
+    useSessionUIStore.setState({
+      availableWorktrees: allWorktrees,
+      availableWorktreesByProject: currentByProject,
+    });
+  } catch {
+    // refresh is best-effort; stale data is acceptable
+  }
+}
+
+let _lastRefreshAllAt = 0;
+const REFRESH_ALL_MIN_INTERVAL = 5000;
+
+/**
+ * Refresh worktrees for every known project. Useful on window focus
+ * to detect externally-created worktrees.
+ *
+ * Uses a single read-modify-write cycle to avoid race conditions
+ * between concurrent per-project fetches, and throttles to at most
+ * once every REFRESH_ALL_MIN_INTERVAL ms.
+ */
+export async function refreshAllProjectWorktrees(): Promise<void> {
+  if (Date.now() - _lastRefreshAllAt < REFRESH_ALL_MIN_INTERVAL) return;
+  _lastRefreshAllAt = Date.now();
+
+  const projects = useProjectsStore.getState().projects;
+  if (projects.length === 0) return;
+
+  const validProjects = projects
+    .filter((p: { path?: string }) => p.path)
+    .map((p) => ({ id: p.id, path: normalizePath(p.path!) }))
+    .filter((p) => p.path);
+
+  if (validProjects.length === 0) return;
+
+  // Fetch all in parallel, but collect results without writing to the store
+  const fetchResults = await Promise.allSettled(
+    validProjects.map(async ({ id, path }) => {
+      invalidateWorktreeList(path);
+      try {
+        return { projectPath: path, worktrees: await listProjectWorktrees({ id, path }) };
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  // Single read-modify-write to avoid interleaving
+  const currentByProject = new Map(useSessionUIStore.getState().availableWorktreesByProject);
+  for (const result of fetchResults) {
+    if (result.status !== 'fulfilled' || !result.value) continue;
+    if (result.value.worktrees.length > 0) {
+      currentByProject.set(result.value.projectPath, result.value.worktrees);
+    } else {
+      currentByProject.delete(result.value.projectPath);
+    }
+  }
+
+  const allWorktrees: WorktreeMetadata[] = [];
+  for (const [, wts] of currentByProject) {
+    allWorktrees.push(...wts);
+  }
+
+  useSessionUIStore.setState({
+    availableWorktrees: allWorktrees,
+    availableWorktreesByProject: currentByProject,
+  });
 }
 
 export type CreateWorktreeArgs = {

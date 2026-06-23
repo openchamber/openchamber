@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import type { Snippet } from '@/types/snippet';
 import { opencodeClient } from '@/lib/opencode/client';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { fetchSnippets, createSnippet as apiCreateSnippet, updateSnippet as apiUpdateSnippet, deleteSnippet as apiDeleteSnippet, expandSnippets } from '@/lib/api/configApi';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 
 export type SnippetScope = 'global' | 'project';
@@ -67,12 +67,7 @@ export const useSnippetsStore = create<SnippetsStore>()(
           set({ isLoading: true });
           try {
             const directory = getRequestDirectory();
-            const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
-            const response = await runtimeFetch(`/api/config/snippets${queryParams}`, {
-              headers: { 'Cache-Control': 'no-cache', ...(directory ? { 'x-opencode-directory': directory } : {}) },
-            });
-            if (!response.ok) throw new Error('Failed to load snippets');
-            const snippets: Snippet[] = await response.json();
+            const snippets = await fetchSnippets(directory);
             set({ snippets, isLoading: false });
             lastLoadedAt = Date.now();
             return true;
@@ -94,18 +89,9 @@ export const useSnippetsStore = create<SnippetsStore>()(
       createSnippet: async (name, content, options = {}) => {
         try {
           const directory = getRequestDirectory();
-          const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
-          const response = await runtimeFetch(`/api/config/snippets/${encodeURIComponent(name)}${queryParams}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...(directory ? { 'x-opencode-directory': directory } : {}) },
-            body: JSON.stringify({ content, aliases: options.aliases, description: options.description, scope: options.scope }),
-          });
-          if (!response.ok) {
-            const payload = await response.json().catch(() => null);
-            if (response.status === 409) {
-              return await get().updateSnippet(name, { content, aliases: options.aliases, description: options.description });
-            }
-            throw new Error(payload?.error || 'Failed to create snippet');
+          const result = await apiCreateSnippet(name, { content, aliases: options.aliases, description: options.description, scope: options.scope }, directory);
+          if (!result.ok) {
+            return await get().updateSnippet(name, { content, aliases: options.aliases, description: options.description });
           }
           lastLoadedAt = 0;
           await get().loadSnippets();
@@ -119,13 +105,8 @@ export const useSnippetsStore = create<SnippetsStore>()(
       updateSnippet: async (name, updates) => {
         try {
           const directory = getRequestDirectory();
-          const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
-          const response = await runtimeFetch(`/api/config/snippets/${encodeURIComponent(name)}${queryParams}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json', ...(directory ? { 'x-opencode-directory': directory } : {}) },
-            body: JSON.stringify(updates),
-          });
-          if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || 'Failed to update snippet');
+          const result = await apiUpdateSnippet(name, updates, directory);
+          if (!result.ok) throw new Error(result.error || 'Failed to update snippet');
           lastLoadedAt = 0;
           await get().loadSnippets();
           return true;
@@ -138,12 +119,8 @@ export const useSnippetsStore = create<SnippetsStore>()(
       deleteSnippet: async (name) => {
         try {
           const directory = getRequestDirectory();
-          const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
-          const response = await runtimeFetch(`/api/config/snippets/${encodeURIComponent(name)}${queryParams}`, {
-            method: 'DELETE',
-            headers: directory ? { 'x-opencode-directory': directory } : undefined,
-          });
-          if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || 'Failed to delete snippet');
+          const result = await apiDeleteSnippet(name, directory);
+          if (!result.ok) throw new Error(result.error || 'Failed to delete snippet');
           if (get().selectedSnippetName === name) set({ selectedSnippetName: null });
           lastLoadedAt = 0;
           await get().loadSnippets();
@@ -157,14 +134,7 @@ export const useSnippetsStore = create<SnippetsStore>()(
       expandText: async (text) => {
         if (!/#[a-z0-9_-]+/i.test(text)) return text;
         const directory = getRequestDirectory();
-        const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
-        const response = await runtimeFetch(`/api/config/snippets/expand${queryParams}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...(directory ? { 'x-opencode-directory': directory } : {}) },
-          body: JSON.stringify({ text }),
-        });
-        if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || 'Failed to expand snippets');
-        return (await response.json()).text ?? text;
+        return await expandSnippets(text, directory);
       },
 
       getSnippetByName: (name) => get().snippets.find((snippet) => snippet.name === name || snippet.aliases.includes(name)),
