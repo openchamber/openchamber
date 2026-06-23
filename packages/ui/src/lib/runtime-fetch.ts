@@ -219,6 +219,29 @@ export const installRuntimeFetchBridge = (): void => {
   };
 
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    // ALWAYS override credentials for cross-origin calls so the browser
+    // doesn't require Access-Control-Allow-Credentials on the preflight.
+    // This applies even on the early-return paths below (SDK calls to
+    // /config, /session, /global/event, etc. which don't match the
+    // shouldResolveFetchInput gate). We send Authorization header explicitly,
+    // so we never need cookies / credentials mode cross-origin.
+    if (typeof window === 'undefined') {
+      return nativeFetch(input, init);
+    }
+    const resolveTargetOrigin = (): string => {
+      try {
+        if (typeof input === 'string') return new URL(input, window.location.href).origin;
+        if (input instanceof URL) return input.origin;
+        if (typeof Request !== 'undefined' && input instanceof Request) return new URL(input.url, window.location.href).origin;
+      } catch {
+        // Non-URL fallback
+      }
+      return '';
+    };
+    const targetOrigin = resolveTargetOrigin();
+    const isCrossOrigin = targetOrigin !== '' && targetOrigin !== window.location.origin;
+    const safeInit = isCrossOrigin ? { ...init, credentials: 'omit' as RequestCredentials } : init;
+
     if (typeof input === 'string') {
       if (!shouldResolveFetchInput(input)) {
         try {
@@ -230,7 +253,7 @@ export const installRuntimeFetchBridge = (): void => {
         } catch {
           // Non-URL fetch inputs should fall through unchanged.
         }
-        return nativeFetch(input, init);
+        return nativeFetch(input, safeInit);
       }
       const target = buildRuntimeFetchUrl(input);
       const headers = await mergeHeaders(undefined, init?.headers);
@@ -244,7 +267,7 @@ export const installRuntimeFetchBridge = (): void => {
           const headers = await mergeHeaders(undefined, init?.headers);
           return nativeFetch(input, { ...mergedInit(input, init), headers });
         }
-        return nativeFetch(input, init);
+        return nativeFetch(input, safeInit);
       }
       const target = buildRuntimeFetchUrl(raw);
       const headers = await mergeHeaders(undefined, init?.headers);
@@ -262,7 +285,7 @@ export const installRuntimeFetchBridge = (): void => {
         } catch {
           // Non-URL request inputs should fall through unchanged.
         }
-        return nativeFetch(input, init);
+        return nativeFetch(input, safeInit);
       }
       const headers = await mergeHeaders(input.headers, init?.headers);
       const target = buildRuntimeFetchUrl(input.url);
@@ -270,6 +293,6 @@ export const installRuntimeFetchBridge = (): void => {
       return nativeFetch(new Request(request, { ...mergedInit(input, init, target), headers }));
     }
 
-    return nativeFetch(input, init);
+    return nativeFetch(input, safeInit);
   };
 };
