@@ -20,6 +20,7 @@ import {
   clearSessionPrefetch,
 } from "./session-prefetch-cache"
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
+import { assertSdkSuccess } from "./sdk-utils"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const INITIAL_MESSAGE_PAGE_SIZE = 50
@@ -54,34 +55,6 @@ type SyncMeta = {
   loading: boolean
 }
 
-type SdkResult<T> = {
-  data?: T
-  error?: unknown
-  response?: {
-    status?: number
-    headers?: { get?: (name: string) => string | null }
-  }
-}
-
-function formatSdkError(error: unknown): string {
-  if (error instanceof Error) return error.message
-  if (typeof error === "string") return error
-  if (error && typeof error === "object") {
-    const message = (error as { message?: unknown }).message
-    if (typeof message === "string" && message.length > 0) return message
-  }
-  try {
-    return JSON.stringify(error)
-  } catch {
-    return String(error)
-  }
-}
-
-function assertSdkSuccess<T>(result: SdkResult<T>, operation: string): void {
-  if (!result.error) return
-  const status = result.response?.status
-  throw new Error(`${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`)
-}
 
 const isConstrainedSessionRuntime = () => isVSCodeRuntime() || isMobileSurfaceRuntime()
 const getConstrainedInitialPageExpansionMax = () => VSCODE_INITIAL_PAGE_EXPANSION_LIMITS[VSCODE_INITIAL_PAGE_EXPANSION_LIMITS.length - 1]
@@ -195,6 +168,7 @@ export function useSync() {
         todo: { ...current.todo },
         permission: { ...current.permission },
         question: { ...current.question },
+        session_error: { ...current.session_error },
       }
       dropSessionCaches(draft, sessionIDs)
       dropCachedSessionMessageRecordsSnapshots(dirStore, sessionIDs)

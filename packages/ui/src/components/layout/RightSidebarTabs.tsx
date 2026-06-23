@@ -13,8 +13,8 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { formatDirectoryName, cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { SidebarFilesTree } from './SidebarFilesTree';
-
-type RightTab = 'git' | 'files' | 'context';
+import { SubagentsPanel } from './SubagentsPanel';
+type RightTab = 'git' | 'files' | 'context' | 'subagents';
 
 const isRightTab = (value: string): value is RightTab =>
   value === 'git' || value === 'files' || value === 'context';
@@ -165,6 +165,11 @@ export const RightSidebarTabs: React.FC = () => {
       label: t('layout.rightSidebar.context'),
       icon: <Icon name="file-list-2" className="h-3.5 w-3.5" />,
     },
+    {
+      id: 'subagents',
+      label: 'Subagents',
+      icon: <Icon name="user-3" className="h-3.5 w-3.5" />,
+    },
   ], [t]);
 
   const visibleTabItems = React.useMemo(
@@ -204,6 +209,9 @@ export const RightSidebarTabs: React.FC = () => {
         </div>
         <div className={cn('h-full', rightSidebarTab !== 'context' && 'hidden')}>
           <ProjectContextPanel />
+        </div>
+        <div className={cn('h-full', rightSidebarTab !== 'subagents' && 'hidden')}>
+          <SubagentsPanel />
         </div>
       </div>
     </div>

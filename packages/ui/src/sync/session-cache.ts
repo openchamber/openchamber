@@ -6,7 +6,7 @@ import type {
   SessionStatus,
   Todo,
 } from "@opencode-ai/sdk/v2/client"
-import type { FileDiff } from "./types"
+import type { FileDiff, SubagentErrorRecord } from "./types"
 
 type SessionCache = {
   session_status: Record<string, SessionStatus | undefined>
@@ -16,6 +16,7 @@ type SessionCache = {
   part: Record<string, Part[] | undefined>
   permission: Record<string, PermissionRequest[] | undefined>
   question: Record<string, QuestionRequest[] | undefined>
+  session_error: Record<string, SubagentErrorRecord | undefined>
 }
 
 export function getProtectedSessionCacheIds(store: SessionCache): Set<string> {
@@ -78,7 +79,7 @@ export function dropSessionCaches(store: SessionCache, sessionIDs: Iterable<stri
     delete store.message[sessionID]
     delete store.todo[sessionID]
     delete store.session_diff[sessionID]
-    delete store.session_status[sessionID]
+    delete store.session_error?.[sessionID]
     delete store.permission[sessionID]
     delete store.question[sessionID]
   }

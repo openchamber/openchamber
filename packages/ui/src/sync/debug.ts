@@ -47,6 +47,10 @@ export const syncDebug = {
     /** Flush batch dispatched. */
     flush: (count: number) =>
       log("pipeline", "flush", `${count} events`),
+
+    /** Team event received and stubbed through. */
+    teamEvent: (type: string, properties?: unknown) =>
+      log("pipeline", "team event stub", type, properties),
   },
 
   reducer: {
