@@ -75,6 +75,28 @@ binding table is created by `migrations/0002_push_tokens.sql` (applied on deploy
 - Residual: trust-on-first-bind (whoever registers a token first owns it) — acceptable, since
   registering already requires possessing the token. Cloudflare rate limiting is defence-in-depth.
 
+## Data confidentiality (what the relay / Apple can see)
+
+The push payload is **not** application-encrypted, so there is no decryption step. The text is
+sent in plaintext, protected only by **TLS in transit** (HTTPS to the relay, TLS from the relay
+to APNs). The request **signature is authentication, not encryption** — the relay *verifies* it
+(valid / invalid), it does not hide anything.
+
+Who can read the alert text:
+
+- **Network hops:** nothing (TLS).
+- **The relay (Cloudflare):** the generic title + body (session name), the device token, and
+  `sessionId`. It stores only `token → serverId` hashes (no text, no payload).
+- **Apple APNs:** the alert text too — APNs always reads the alert payload of an `alert` push.
+- **The device:** displays it.
+
+This is acceptable **because the text is deliberately content-free**: a fixed scenario title +
+the session name only — no model, project, or message content (`runtime.js` →
+`toApnsGenericPayload`). The session name is the single semi-personal field that crosses the
+relay/Apple. To hide even that from Apple would require an end-to-end **encrypted payload**
+(`mutable-content` + a Notification Service Extension that decrypts on-device with a key never
+sent to the relay) — not implemented, and unnecessary for generic text.
+
 ## Android (FCM) note
 
 The Android equivalent is **FCM** (not implemented): the same relay would forward to FCM with a
