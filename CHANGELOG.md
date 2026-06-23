@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 - Chat: selecting a user-installed skill from the slash command menu now invokes the skill and injects its content, instead of inserting the skill name as plain text.
+- UI: typography classes (ui-header, ui-label, meta, micro) now actually shrink on mobile viewports — they previously rendered at the same size as desktop despite the mobile clamp rules.
 ## [1.13.2] - 2026-06-18
 
 - Chat/Performance: long conversations and large session lists now stay smooth and responsive while a response is streaming (thanks to @bashrusakh).
