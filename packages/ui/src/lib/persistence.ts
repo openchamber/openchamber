@@ -2,7 +2,7 @@ import type { DesktopSettings } from '@/lib/desktop';
 import { createProjectIdFromPath } from '@/lib/projectId';
 import { useUIStore } from '@/stores/useUIStore';
 import { isMonoFontOption, isUiFontOption } from '@/lib/fontOptions';
-import { useMessageQueueStore } from '@/stores/messageQueueStore';
+import { isFollowUpBehavior, normalizeFollowUpBehavior, useMessageQueueStore } from '@/stores/messageQueueStore';
 import { setDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { setFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { loadAppearancePreferences, applyAppearancePreferences } from '@/lib/appearancePersistence';
@@ -408,8 +408,13 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
     }
   }
 
-  if (typeof settings.queueModeEnabled === 'boolean' && settings.queueModeEnabled !== queueStore.queueModeEnabled) {
-    queueStore.setQueueMode(settings.queueModeEnabled);
+  const nextFollowUpBehavior = isFollowUpBehavior(settings.followUpBehavior)
+    ? settings.followUpBehavior
+    : typeof settings.queueModeEnabled === 'boolean'
+      ? normalizeFollowUpBehavior(undefined, settings.queueModeEnabled)
+      : null;
+  if (nextFollowUpBehavior && nextFollowUpBehavior !== queueStore.followUpBehavior) {
+    queueStore.setFollowUpBehavior(nextFollowUpBehavior);
   }
 
   if (typeof settings.showDeletionDialog === 'boolean' && settings.showDeletionDialog !== store.showDeletionDialog) {
@@ -776,8 +781,10 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.gitmojiEnabled === 'boolean') {
     result.gitmojiEnabled = candidate.gitmojiEnabled;
   }
-  if (typeof candidate.queueModeEnabled === 'boolean') {
-    result.queueModeEnabled = candidate.queueModeEnabled;
+  if (isFollowUpBehavior(candidate.followUpBehavior)) {
+    result.followUpBehavior = candidate.followUpBehavior;
+  } else if (typeof candidate.queueModeEnabled === 'boolean') {
+    result.followUpBehavior = normalizeFollowUpBehavior(undefined, candidate.queueModeEnabled);
   }
   if (typeof candidate.showDeletionDialog === 'boolean') {
     result.showDeletionDialog = candidate.showDeletionDialog;

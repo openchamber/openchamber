@@ -120,6 +120,7 @@ export type DesktopSettings = {
   defaultGitIdentityId?: string; // ''/undefined = unset, 'global' or profile id
   openInAppId?: string;
   autoCreateWorktree?: boolean;
+  followUpBehavior?: 'steer' | 'queue' | 'immediate';
   queueModeEnabled?: boolean;
   gitmojiEnabled?: boolean;
   defaultFileViewerPreview?: boolean;

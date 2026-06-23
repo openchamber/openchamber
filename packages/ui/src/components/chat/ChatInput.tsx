@@ -1381,7 +1381,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     } | null>(null);
 
     // Message queue
-    const queueModeEnabled = useMessageQueueStore((state) => state.queueModeEnabled);
+    const followUpBehavior = useMessageQueueStore((state) => state.followUpBehavior);
     const queuedMessages = useMessageQueueStore(
         React.useCallback(
             (state) => {
@@ -1653,6 +1653,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     type SubmitOptions = {
         queuedOnly?: boolean;
         queuedMessageId?: string;
+        delivery?: 'steer';
     };
     const handleSubmitRef = React.useRef<(options?: SubmitOptions) => Promise<void>>(async () => {});
 
@@ -1702,7 +1703,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, []);
 
     const handleQueuedMessageSend = React.useCallback((messageId: string) => {
-        void handleSubmitRef.current({ queuedOnly: true, queuedMessageId: messageId });
+        // Force-sending from the queue during a busy session counts as steer
+        void handleSubmitRef.current({ queuedOnly: true, queuedMessageId: messageId, delivery: 'steer' });
     }, []);
 
     const handleOpenAgentPanel = React.useCallback(() => {
@@ -1724,6 +1726,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const handleSubmit = async (options?: SubmitOptions) => {
         const queuedOnly = options?.queuedOnly ?? false;
         const queuedMessageId = options?.queuedMessageId;
+        const delivery = options?.delivery === 'steer' && sessionPhase !== 'idle' ? 'steer' : undefined;
         const inputSnapshot = getCurrentInputSnapshot();
         const queuedMessagesToSend = queuedMessageId
             ? queuedMessages.filter((message) => message.id === queuedMessageId)
@@ -1745,6 +1748,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             console.warn('Cannot send message: provider or model not selected');
             return;
         }
+
+        const sendMessageOptions = delivery ? { delivery } : undefined;
 
         // Build the primary message (first part) and additional parts
         let primaryText = '';
@@ -1954,6 +1959,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         [{ text: instructionsText, synthetic: true }],
                         variantToSend,
                         inputMode,
+                        sendMessageOptions,
                     );
                     scrollToBottom?.();
                 } catch (error) {
@@ -1976,6 +1982,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         [{ text: instructionsText, synthetic: true }],
                         variantToSend,
                         inputMode,
+                        sendMessageOptions,
                     );
                     scrollToBottom?.();
                 } catch (error) {
@@ -2002,6 +2009,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         [{ text: instructionsText, synthetic: true }],
                         variantToSend,
                         inputMode,
+                        sendMessageOptions,
                     );
                     scrollToBottom?.();
                 } catch (error) {
@@ -2024,6 +2032,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         [{ text: instructionsText, synthetic: true }],
                         variantToSend,
                         inputMode,
+                        sendMessageOptions,
                     );
                     scrollToBottom?.();
                 } catch (error) {
@@ -2046,6 +2055,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         [{ text: instructionsText, synthetic: true }],
                         variantToSend,
                         inputMode,
+                        sendMessageOptions,
                     );
                     scrollToBottom?.();
                 } catch (error) {
@@ -2068,6 +2078,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         [{ text: instructionsText, synthetic: true }],
                         variantToSend,
                         inputMode,
+                        sendMessageOptions,
                     );
                     scrollToBottom?.();
                 } catch (error) {
@@ -2090,6 +2101,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         [{ text: instructionsText, synthetic: true }],
                         variantToSend,
                         inputMode,
+                        sendMessageOptions,
                     );
                     scrollToBottom?.();
                 } catch (error) {
@@ -2138,7 +2150,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             agentMentionName,
             additionalParts.length > 0 ? additionalParts : undefined,
             variantToSend,
-            inputMode
+            inputMode,
+            sendMessageOptions,
         );
 
         if (typeof window === 'undefined') {
@@ -2209,16 +2222,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     // Update ref with latest handleSubmit on every render
     handleSubmitRef.current = handleSubmit;
 
-    // Primary action for send button - respects queue mode setting
+    // Primary action for send/queue button — queues in queue mode when busy, sends otherwise
     const handlePrimaryAction = React.useCallback(() => {
         const inputSnapshot = getCurrentInputSnapshot();
         const canQueue = inputMode === 'normal' && inputSnapshot.hasContent && currentSessionId && sessionPhase !== 'idle';
-        if (queueModeEnabled && canQueue) {
+        if (followUpBehavior === 'queue' && canQueue) {
             handleQueueMessage();
         } else {
             void handleSubmitRef.current();
         }
-    }, [inputMode, getCurrentInputSnapshot, currentSessionId, sessionPhase, queueModeEnabled, handleQueueMessage]);
+    }, [inputMode, getCurrentInputSnapshot, currentSessionId, sessionPhase, followUpBehavior, handleQueueMessage]);
 
     // Draft welcome presets: populate the composer and submit immediately.
     // getCurrentInputSnapshot reads textareaRef.current.value first, so setting it
@@ -2456,32 +2469,25 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             return;
         }
 
-        // Handle Enter/Ctrl+Enter based on queue mode
+        // Handle Enter/Ctrl+Enter based on selected follow-up behavior.
         if (e.key === 'Enter' && !e.shiftKey && (!isMobile || e.ctrlKey || e.metaKey)) {
             e.preventDefault();
 
             const isCtrlEnter = e.ctrlKey || e.metaKey;
 
-            // Queue mode: Enter queues, Ctrl+Enter sends
-            // Normal mode: Enter sends, Ctrl+Enter queues
-            // Note: Queueing only works when there's an existing session (currentSessionId)
-            // For new sessions (draft), always send immediately
+            // Queueing only works when there's an existing busy session.
             const canQueue = inputMode === 'normal' && hasContent && currentSessionId && sessionPhase !== 'idle';
 
-            if (queueModeEnabled) {
+            if (followUpBehavior === 'queue') {
                 if (isCtrlEnter || !canQueue) {
-                    // Ctrl+Enter sends, or Enter when can't queue (new session)
                     handleSubmit();
                 } else {
-                    // Enter queues when we have a session
                     handleQueueMessage();
                 }
             } else {
                 if (isCtrlEnter && canQueue) {
-                    // Ctrl+Enter queues when we have a session
                     handleQueueMessage();
                 } else {
-                    // Enter sends
                     handleSubmit();
                 }
             }
