@@ -99,13 +99,19 @@ const shouldAttachRuntimeAuth = (input: string | URL | Request): boolean => {
 // Headers API only accepts ISO-8859-1 (Latin-1) characters. Any value containing
 // characters outside \u0000-\u00FF causes "Failed to construct/set 'Headers':
 // String contains non ISO-8859-1 code point." Encode those values so they round-trip
-// safely through the browser's Headers API.
+// safely through the browser's Headers API. Directory hints are always encoded
+// with an explicit marker header so the server decodes only values produced by
+// this transport and preserves literal percent sequences from direct clients.
 export const isLatin1Safe = (value: string): boolean => {
   for (let i = 0; i < value.length; i += 1) {
     if (value.charCodeAt(i) > 0xFF) return false;
   }
   return true;
 };
+
+const shouldEncodeHeaderValue = (key: string, value: string): boolean => (
+  key.toLowerCase() === 'x-opencode-directory' || !isLatin1Safe(value)
+);
 
 export const sanitizeHeadersForBrowser = (init?: HeadersInit): [string, string][] | undefined => {
   if (!init) return undefined;
@@ -119,13 +125,18 @@ export const sanitizeHeadersForBrowser = (init?: HeadersInit): [string, string][
   if (sourceEntries.length === 0) return undefined;
   const entries: [string, string][] = [];
   let dirty = false;
+  let encodedDirectoryHint = false;
   for (const [key, value] of sourceEntries) {
-    if (isLatin1Safe(value)) {
-      entries.push([key, value]);
-    } else {
+    if (shouldEncodeHeaderValue(key, value)) {
       entries.push([key, encodeURIComponent(value)]);
       dirty = true;
+      if (key.toLowerCase() === 'x-opencode-directory') encodedDirectoryHint = true;
+    } else {
+      entries.push([key, value]);
     }
+  }
+  if (encodedDirectoryHint) {
+    entries.push(['x-opencode-directory-encoding', 'uri']);
   }
   return dirty ? entries : undefined;
 };

@@ -1,8 +1,10 @@
 import { createRealpathCache } from '../path-realpath-cache.js';
 
-// The browser's Headers API only accepts ISO-8859-1 characters, so the client
-// encodes non-ASCII header values with encodeURIComponent. Decode them here.
-const safeDecodeURIComponent = (value) => {
+// Browser transport percent-encodes directory hints and marks them explicitly.
+// Only marked values are decoded so literal percent sequences from direct API
+// clients are preserved.
+const safeDecodeMarkedURIComponent = (value, encoding) => {
+  if (encoding !== 'uri') return value;
   try { return decodeURIComponent(value); } catch { return value; }
 };
 
@@ -57,7 +59,8 @@ export const createProjectDirectoryRuntime = (dependencies) => {
 
   const resolveProjectDirectory = async (req) => {
     const rawHeaderDirectory = typeof req.get === 'function' ? req.get('x-opencode-directory') : null;
-    const headerDirectory = rawHeaderDirectory ? safeDecodeURIComponent(rawHeaderDirectory) : null;
+    const headerEncoding = typeof req.get === 'function' ? req.get('x-opencode-directory-encoding') : null;
+    const headerDirectory = rawHeaderDirectory ? safeDecodeMarkedURIComponent(rawHeaderDirectory, headerEncoding) : null;
     const queryDirectory = Array.isArray(req.query?.directory)
       ? req.query.directory[0]
       : req.query?.directory;
@@ -111,7 +114,8 @@ export const createProjectDirectoryRuntime = (dependencies) => {
 
   const resolveOptionalProjectDirectory = async (req) => {
     const rawHeaderDirectory = typeof req.get === 'function' ? req.get('x-opencode-directory') : null;
-    const headerDirectory = rawHeaderDirectory ? safeDecodeURIComponent(rawHeaderDirectory) : null;
+    const headerEncoding = typeof req.get === 'function' ? req.get('x-opencode-directory-encoding') : null;
+    const headerDirectory = rawHeaderDirectory ? safeDecodeMarkedURIComponent(rawHeaderDirectory, headerEncoding) : null;
     const queryDirectory = Array.isArray(req.query?.directory)
       ? req.query.directory[0]
       : req.query?.directory;

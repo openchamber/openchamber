@@ -394,6 +394,15 @@ describe('runtimeFetch header sanitization', () => {
     expect(result).toBeFalsy();
   });
 
+  test('sanitizeHeadersForBrowser always encodes directory hints with marker', () => {
+    const path = 'C:\\work\\foo%20bar';
+    const result = sanitizeHeadersForBrowser({ 'x-opencode-directory': path });
+    expect(result).toBeTruthy();
+    const encoded = Object.fromEntries(result!);
+    expect(encoded['x-opencode-directory']).toBe(encodeURIComponent(path));
+    expect(encoded['x-opencode-directory-encoding']).toBe('uri');
+  });
+
   test('sanitizeHeadersForBrowser returns undefined for empty/undefined input', () => {
     expect(sanitizeHeadersForBrowser(undefined)).toBeFalsy();
     expect(sanitizeHeadersForBrowser({})).toBeFalsy();
@@ -412,7 +421,7 @@ describe('runtimeFetch header sanitization', () => {
     expect(encoded['x-chinese']).toBe(encodeURIComponent('文件'));
   });
 
-  test('runtimeFetch encodes non-Latin-1 request headers', async () => {
+  test('runtimeFetch encodes directory request headers with marker', async () => {
     const previous = getRuntimeUrlResolver();
     const originalWindow = globalThis.window;
     const calls: Array<{ headers: Headers }> = [];
@@ -438,6 +447,7 @@ describe('runtimeFetch header sanitization', () => {
       expect(encoded).not.toBe('D:\\文件夹');
       // decodeURIComponent round-trips back to original
       expect(decodeURIComponent(encoded!)).toBe('D:\\文件夹');
+      expect(calls[0].headers.get('x-opencode-directory-encoding')).toBe('uri');
     } finally {
       setRuntimeUrlResolver(previous);
       Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow });

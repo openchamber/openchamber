@@ -280,7 +280,7 @@ const normalizeUrl = (input: string | URL) => {
 
 const headersToRecord = (headers: HeadersInit | undefined): Record<string, string> => {
   if (!headers) return {};
-  const normalized = headers instanceof Headers ? headers : new Headers(sanitizeHeadersForBrowser(headers) ?? headers);
+  const normalized = new Headers(sanitizeHeadersForBrowser(headers) ?? headers);
   const result: Record<string, string> = {};
   normalized.forEach((value, key) => {
     result[key] = value;
@@ -298,10 +298,12 @@ const getRequestDirectoryHint = (url: URL, input?: RequestInfo | URL, init?: Req
   const queryDirectory = url.searchParams.get('directory') || undefined;
   if (queryDirectory) return queryDirectory;
   const headers = getRequestHeaders(input, init);
+  const directoryEncoding = Object.entries(headers).find(([key]) => key.toLowerCase() === 'x-opencode-directory-encoding')?.[1];
   for (const [key, value] of Object.entries(headers)) {
     if (key.toLowerCase() === 'x-opencode-directory') {
-      // headersToRecord encodes non-ASCII values via encodeURIComponent
-      // so the browser's Headers API doesn't reject them. Decode here.
+      // headersToRecord marks encoded directory hints so direct/raw percent
+      // sequences from other callers are not decoded accidentally.
+      if (directoryEncoding !== 'uri') return value;
       try { return decodeURIComponent(value); } catch { return value; }
     }
   }
