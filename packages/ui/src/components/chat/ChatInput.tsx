@@ -74,6 +74,7 @@ import { sessionEvents } from '@/lib/sessionEvents';
 import { fetchResponseStyleInstruction } from '@/lib/responseStyle';
 import { wrapSystemReminder } from '@/lib/systemReminder';
 import { getSyncMessages } from '@/sync/sync-refs';
+import { EMPTY_REVERTED_MESSAGE_DOCK_STATE, buildRevertedMessageDockState, type RevertedMessageDockState } from './revertedMessageDockState';
 import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
 import { isSyntheticPart } from '@/lib/messages/synthetic';
 import {
@@ -89,11 +90,10 @@ import {
     buildAttachmentCitationText,
     findAttachmentCitationRanges,
 } from './attachmentCitations';
-import type { Message, Part } from '@opencode-ai/sdk/v2/client';
+import type { Part } from '@opencode-ai/sdk/v2/client';
 
 const MAX_VISIBLE_TEXTAREA_LINES = 8;
 const EMPTY_QUEUE: QueuedMessage[] = [];
-const EMPTY_MESSAGES: Message[] = [];
 const FILE_MENTION_TOKEN = /^@[^\s]+$/;
 // Single-line URL pasted over a selection becomes a markdown link.
 const PASTE_LINK_URL_PATTERN = /^(https?:\/\/|mailto:)\S+$/i;
@@ -363,34 +363,28 @@ const RevertedMessageDock: React.FC<RevertedMessageDockProps> = React.memo(({ se
     const [restoringId, setRestoringId] = React.useState<string | null>(null);
     const [forkingId, setForkingId] = React.useState<string | null>(null);
     const [collapsed, setCollapsed] = React.useState(true);
-    const revertMessageID = useDirectorySync(
+    const revertedStateRef = React.useRef<RevertedMessageDockState>(EMPTY_REVERTED_MESSAGE_DOCK_STATE);
+    const revertedState = useDirectorySync(
         React.useCallback((state) => {
-            if (!sessionId) return undefined;
-            const session = state.session.find((item) => item.id === sessionId);
-            return (session as { revert?: { messageID?: string } } | undefined)?.revert?.messageID;
+            const next = buildRevertedMessageDockState(state, sessionId, revertedStateRef.current);
+            revertedStateRef.current = next;
+            return next;
         }, [sessionId]),
         directory,
     );
-    const sessionMessages = useDirectorySync(
-        React.useCallback((state) => (sessionId ? state.message[sessionId] ?? EMPTY_MESSAGES : EMPTY_MESSAGES), [sessionId]),
-        directory,
-    );
-    const partsByMessage = useDirectorySync(React.useCallback((state) => state.part, []), directory);
-
+    const revertMessageID = revertedState.revertMessageID;
     const userMessages = React.useMemo(
-        () => sessionMessages.filter((message): message is Message & { role: 'user' } => message.role === 'user'),
-        [sessionMessages],
+        () => revertedState.records.map((record) => record.message),
+        [revertedState],
     );
     const noTextContent = t('chat.revertPopover.noTextContent');
     const items = React.useMemo(() => {
         if (!revertMessageID) return [];
-        return userMessages
-            .filter((message) => message.id >= revertMessageID)
-            .map((message) => ({
-                id: message.id,
-                text: getRevertedPreview(partsByMessage[message.id] ?? [], noTextContent),
-            }));
-    }, [noTextContent, partsByMessage, revertMessageID, userMessages]);
+        return revertedState.records.map((record) => ({
+            id: record.message.id,
+            text: getRevertedPreview(record.parts, noTextContent),
+        }));
+    }, [noTextContent, revertMessageID, revertedState]);
     const firstRevertedMessageId = items[0]?.id;
 
     React.useEffect(() => {

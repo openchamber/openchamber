@@ -3,6 +3,12 @@ import { cn } from '@/lib/utils';
 import type { SessionNode } from './types';
 import { useI18n } from '@/lib/i18n';
 import { Icon } from "@/components/icon/Icon";
+import {
+  collectSubtreeContainingId,
+  computeNodeStructureKey,
+  resolveMenuOpenSessionId,
+} from './sessionNodeItemUtils';
+import type { SessionNodeRenderExtras } from './sessionNodeItemUtils';
 
 type ActivityItem = {
   node: SessionNode;
@@ -22,17 +28,34 @@ type ActivitySection = {
 
 type Props = {
   sections: ActivitySection[];
-  renderSessionNode: (node: SessionNode, depth?: number, groupDirectory?: string | null, projectId?: string | null, archivedBucket?: boolean, secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null } | null, renderContext?: 'project' | 'recent') => React.ReactNode;
+  renderSessionNode: (
+    node: SessionNode,
+    depth?: number,
+    groupDirectory?: string | null,
+    projectId?: string | null,
+    archivedBucket?: boolean,
+    secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null } | null,
+    renderContext?: 'project' | 'recent',
+    renderExtras?: SessionNodeRenderExtras,
+  ) => React.ReactNode;
+  currentSessionId: string | null;
+  editingId: string | null;
+  openSidebarMenuKey: string | null;
   variant?: 'section' | 'flat';
   initialVisibleCount?: number;
   batchSize?: number;
 };
+
+type RenderExtras = SessionNodeRenderExtras;
 
 const MAX_VISIBLE_RECENT_SESSIONS = 7;
 
 export function SidebarActivitySections({
   sections,
   renderSessionNode,
+  currentSessionId,
+  editingId,
+  openSidebarMenuKey,
   variant = 'section',
   initialVisibleCount = MAX_VISIBLE_RECENT_SESSIONS,
   batchSize = MAX_VISIBLE_RECENT_SESSIONS,
@@ -77,6 +100,36 @@ export function SidebarActivitySections({
     });
   }, [batchSize]);
 
+  const buildRenderExtras = React.useCallback((nodes: SessionNode[]) => {
+    const subtreeContainsActive = new Set<string>();
+    collectSubtreeContainingId(nodes, currentSessionId, subtreeContainsActive);
+    const subtreeContainsEditing = new Set<string>();
+    collectSubtreeContainingId(nodes, editingId, subtreeContainsEditing);
+    const menuOpenSessionId = resolveMenuOpenSessionId(nodes, openSidebarMenuKey, 'recent', false);
+    const nodeStructureKeyByNode = new WeakMap<SessionNode, string>();
+    const visit = (node: SessionNode): void => {
+      nodeStructureKeyByNode.set(node, computeNodeStructureKey(node));
+      node.children.forEach(visit);
+    };
+    nodes.forEach(visit);
+
+    const childRenderExtrasFor = (child: SessionNode): RenderExtras => ({
+      subtreeContainsActive,
+      subtreeContainsEditing,
+      menuOpenSessionId,
+      nodeStructureKey: nodeStructureKeyByNode.get(child) ?? '',
+      childRenderExtrasFor,
+    });
+
+    return (node: SessionNode): RenderExtras => ({
+      subtreeContainsActive,
+      subtreeContainsEditing,
+      menuOpenSessionId,
+      nodeStructureKey: nodeStructureKeyByNode.get(node) ?? '',
+      childRenderExtrasFor,
+    });
+  }, [currentSessionId, editingId, openSidebarMenuKey]);
+
   const visibleSections = sections.filter((section) => section.items.length > 0);
   if (visibleSections.length === 0) {
     return null;
@@ -93,11 +146,22 @@ export function SidebarActivitySections({
         const visibleItems = section.items.slice(0, visibleLimit);
         const remainingCount = section.items.length - visibleItems.length;
         const canShowFewer = !flatVariant && section.items.length > initialVisibleCount && remainingCount === 0;
+        const getRenderExtras = buildRenderExtras(visibleItems.map((item) => item.node));
+        const renderItem = (item: ActivityItem) => renderSessionNode(
+          item.node,
+          0,
+          item.groupDirectory,
+          item.projectId,
+          false,
+          item.secondaryMeta,
+          'recent',
+          getRenderExtras(item.node),
+        );
 
         if (flatVariant) {
           return (
             <div key={section.key} className="space-y-0.5">
-              {visibleItems.map((item) => renderSessionNode(item.node, 0, item.groupDirectory, item.projectId, false, item.secondaryMeta, 'recent'))}
+              {visibleItems.map(renderItem)}
               {remainingCount > 0 ? (
                 <button
                   type="button"
@@ -126,7 +190,7 @@ export function SidebarActivitySections({
             </button>
             {!isCollapsed ? (
               <div className={cn('space-y-0.5 pl-7')}>
-                {visibleItems.map((item) => renderSessionNode(item.node, 0, item.groupDirectory, item.projectId, false, item.secondaryMeta, 'recent'))}
+                {visibleItems.map(renderItem)}
                 {remainingCount > 0 ? (
                   <button
                     type="button"

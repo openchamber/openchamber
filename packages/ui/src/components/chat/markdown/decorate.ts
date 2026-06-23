@@ -88,7 +88,11 @@ const decorateCodeBlocks = (root: HTMLElement, labels: DecorateLabels): void => 
     // Already wrapped (idempotent across morphdom passes).
     if (parent.closest('[data-component="markdown-code"]')) continue;
 
-    const language = pre.getAttribute('data-md-lang') ?? 'text';
+    // `data-md-lang` is stamped by the async highlight pass; on the synchronous
+    // first paint it isn't set yet, so fall back to the `language-*` class marked
+    // emits — keeps the card header label stable instead of flashing 'text'.
+    const classLang = pre.querySelector('code')?.className.match(/language-([\w+#.-]+)/)?.[1];
+    const language = pre.getAttribute('data-md-lang') ?? classLang ?? 'text';
 
     const wrapper = document.createElement('div');
     wrapper.setAttribute('data-component', 'markdown-code');
