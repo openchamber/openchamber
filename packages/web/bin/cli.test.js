@@ -3,7 +3,7 @@ import path from 'path';
 import { pathToFileURL } from 'url';
 
 import { isModuleCliExecution, normalizeCliEntryPath } from './cli-entry.js';
-import { assertAuthenticatedNetworkExposure, parseArgs } from './cli.js';
+import { assertAuthenticatedNetworkExposure, generateUiPassword, parseArgs } from './cli.js';
 
 describe('cli args', () => {
   it('accepts legacy daemon flags as no-ops', () => {
@@ -51,6 +51,50 @@ describe('cli args', () => {
     expect(parsed.options.apiOnly).toBe(true);
     expect(parsed.options.host).toBe('0.0.0.0');
     expect(parsed.options.uiPassword).toBe('secret');
+  });
+
+  it('auto-generates a UI password when --ui-password is passed without a value', () => {
+    const parsed = parseArgs(['serve', '--ui-password']);
+
+    expect(parsed.options.explicitUiPassword).toBe(true);
+    expect(parsed.options.generatedUiPassword).toBe(true);
+    expect(typeof parsed.options.uiPassword).toBe('string');
+    expect(parsed.options.uiPassword.length).toBeGreaterThan(0);
+    expect(parsed.options.uiPassword).toMatch(/^[A-Za-z0-9_-]+$/);
+  });
+
+  it('auto-generates a UI password when --ui-password appears at the end of args', () => {
+    const parsed = parseArgs(['serve', '--port', '3002', '--ui-password']);
+
+    expect(parsed.options.explicitUiPassword).toBe(true);
+    expect(parsed.options.generatedUiPassword).toBe(true);
+    expect(parsed.options.uiPassword).toBeTruthy();
+    expect(parsed.options.port).toBe(3002);
+  });
+
+  it('treats --ui-password= with an empty inline value as auto-generated', () => {
+    const parsed = parseArgs(['serve', '--ui-password=']);
+
+    expect(parsed.options.explicitUiPassword).toBe(true);
+    expect(parsed.options.generatedUiPassword).toBe(true);
+    expect(parsed.options.uiPassword).toBeTruthy();
+  });
+
+  it('preserves an explicit --ui-password=secret value', () => {
+    const parsed = parseArgs(['serve', '--ui-password=secret']);
+
+    expect(parsed.options.explicitUiPassword).toBe(true);
+    expect(parsed.options.generatedUiPassword).toBe(false);
+    expect(parsed.options.uiPassword).toBe('secret');
+  });
+
+  it('generates a different UI password on each call', () => {
+    const first = generateUiPassword();
+    const second = generateUiPassword();
+
+    expect(first).not.toBe(second);
+    expect(first.length).toBeGreaterThanOrEqual(16);
+    expect(first).toMatch(/^[A-Za-z0-9_-]+$/);
   });
 
   it('maps --lan to wildcard bind host', () => {

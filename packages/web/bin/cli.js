@@ -638,6 +638,10 @@ function hasUiPasswordConfigured(password) {
   return typeof password === 'string' && password.trim().length > 0;
 }
 
+function generateUiPassword() {
+  return crypto.randomBytes(18).toString('base64url');
+}
+
 function assertAuthenticatedNetworkExposure({ host, uiPassword }) {
   const bindHost = resolveConfiguredBindHost(host);
   if (hasUiPasswordConfigured(uiPassword)) {
@@ -749,6 +753,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     quiet: false,
     explicitPort: false,
     explicitUiPassword: false,
+    generatedUiPassword: false,
     envSnapshot: true,
     foreground: false,
     lan: false,
@@ -831,8 +836,13 @@ function parseArgs(argv = process.argv.slice(2)) {
       case 'ui-password': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.uiPassword = typeof value === 'string' ? value : '';
         options.explicitUiPassword = true;
+        if (typeof value === 'string' && value.trim().length > 0) {
+          options.uiPassword = value;
+        } else {
+          options.uiPassword = generateUiPassword();
+          options.generatedUiPassword = true;
+        }
         break;
       }
       case 'provider': {
@@ -1049,7 +1059,7 @@ OPTIONS:
   --hostname              Alias for --host outside tunnel commands
   --lan                   Bind to 0.0.0.0 for LAN access
   --server <url>          Public/server URL for connect-url links
-  --ui-password           Protect browser UI with single password
+  --ui-password [value]   Protect browser UI with single password; auto-generates and prints one when no value is given
   --api-only              Start API routes only, without serving browser UI assets
   --foreground            Run server in foreground (use with systemd/process managers)
   --no-daemon             Alias for --foreground
@@ -1094,7 +1104,7 @@ SUBCOMMANDS:
 OPTIONS:
   -p, --port              Web server port used by startup service
   --host                  Bind address used by startup service
-  --ui-password           Protect browser UI with single password
+  --ui-password [value]   Protect browser UI with single password; auto-generates and prints one when no value is given
   --api-only              Start API routes only, without serving browser UI assets
   --no-env-snapshot       Do not save current environment for startup service
   --json                  Output machine-readable JSON
@@ -1127,7 +1137,7 @@ OPTIONS:
   --server <url>          Public URL saved into the connection link
   --server-url <url>      Alias for --server
   --name <label>          Label saved with the remote client token
-  --ui-password <value>   Protect browser access when UI routes are enabled
+  --ui-password [value]   Protect browser access when UI routes are enabled; auto-generates and prints one when no value is given
   --api-only              Start in headless/API-only mode when starting
   --qr                    Print a QR code for the connection link
   --json                  Output machine-readable JSON
@@ -1162,7 +1172,7 @@ COMMON OPTIONS:
   -p, --port              Target OpenChamber instance port
   --host                  Bind address when auto-starting an instance
   --lan                   Bind to 0.0.0.0 when auto-starting an instance
-  --ui-password           Protect browser UI when auto-starting an instance
+  --ui-password [value]   Protect browser UI when auto-starting an instance; auto-generates and prints one when no value is given
   --api-only              Start API routes only when auto-starting an instance
   --json                  Output machine-readable JSON
   --all                   Apply to all running instances (doctor default, stop)
@@ -3460,6 +3470,13 @@ const commands = {
     const logFd = fs.openSync(initialLogPath, 'a');
 
     const effectiveUiPassword = hasUiPasswordConfigured(options.uiPassword) ? options.uiPassword : undefined;
+    if (options.generatedUiPassword && effectiveUiPassword) {
+      emitNotice({
+        level: 'info',
+        code: 'ui_password_generated',
+        message: `Generated UI password: ${effectiveUiPassword}. Save it now — it is not stored and will not be shown again.`,
+      });
+    }
     assertAuthenticatedNetworkExposure({
       host: options.host,
       uiPassword: effectiveUiPassword,
@@ -5730,6 +5747,7 @@ export {
   parseArgs,
   assertAuthenticatedNetworkExposure,
   hasUiPasswordConfigured,
+  generateUiPassword,
   shouldDisplayTunnelQr,
   isValidTunnelDoctorResponse,
   readDesktopLocalPortFromSettings,
