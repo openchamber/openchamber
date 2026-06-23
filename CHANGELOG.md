@@ -73,6 +73,35 @@ All notable changes to this project will be documented in this file.
 - Files: downloads and file names with non-Latin characters now handle those characters correctly in headers (thanks to @FanFan4204).
 - Mobile: subagent chevrons no longer overlap long session titles, and session grouping now matches the exact workspace directory (thanks to @weixiang1862, @lilyzhaun).
 
+### Proxy-bypass deployment (Option B)
+
+The UI can now talk directly to an external OpenCode server, removing the
+Express proxy that previously fronted `/api/*` requests to a managed
+subprocess. Build with `VITE_OPENCODE_URL=http://<opencode-host>:<port>`
+(or set `__OPENCHAMBER_API_BASE_URL__` at runtime) and run with
+`OPENCODE_SKIP_START=true` to use an OpenCode that lives outside of
+OpenChamber (systemd unit, separate container, etc.).
+
+- UI: the SDK client and the runtimeFetch bridge both honor
+  `VITE_OPENCODE_URL` and `__OPENCHAMBER_API_BASE_URL__`, so a single
+  build can target any OpenCode upstream without code changes.
+- UI: Basic auth credentials persist in `localStorage.openchamber.credentials`
+  and are sent as `Authorization: Basic <base64>` to the OpenCode server.
+  Use `setRuntimeBasicAuthCredential({ username, password })` from the
+  browser console, or wire up a credentials prompt in the future.
+- Server: the Express proxy block in `packages/web/server/index.js` is
+  removed. The Express server now only serves the UI + OpenChamber-specific
+  endpoints (TTS, voice, scheduled tasks, notifications, projects). The
+  subprocess lifecycle in `lifecycle.js` keeps `bootstrapOpenCodeAtStartup`
+  for Electron/VS Code (which manage a local OpenCode) but loses the
+  health-monitoring/restart loop — the SSE event pipeline owns recovery.
+- UI: OpenChamber-internal SSE streams (`/api/openchamber/events`,
+  `/api/notifications/stream`) are anchored to the page origin so they
+  keep working when the SDK is pointed at an external OpenCode.
+- WebSocket auth caveat: browser WebSocket cannot send `Authorization`
+  headers, so `/global/event/ws` (resume) falls back to SSE — the primary
+  event transport works correctly.
+
 ## [1.13.2] - 2026-06-18
 
 - Chat/Performance: long conversations and large session lists now stay smooth and responsive while a response is streaming (thanks to @bashrusakh).
