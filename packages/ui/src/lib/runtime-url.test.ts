@@ -32,9 +32,10 @@ describe('createRuntimeUrlResolver', () => {
   test('builds absolute API URLs when an API base URL is configured', () => {
     const urls = createRuntimeUrlResolver({ apiBaseUrl: 'https://server.example/base/' });
 
-    expect(urls.api('/api/config/settings')).toBe('https://server.example/api/config/settings');
-    expect(urls.auth('/auth/device', { next: '/app' })).toBe('https://server.example/auth/device?next=%2Fapp');
-    expect(urls.health({ probe: true })).toBe('https://server.example/health?probe=true');
+expect(urls.api('/api/config/settings')).toBe('https://server.example/api/config/settings');
+    // /auth/* stays on page origin (OpenChamber-internal), not apiBase
+    expect(urls.auth('/auth/device', { next: '/app' })).toBe('/auth/device?next=%2Fapp');
+    expect(urls.health({ probe: true })).toBe('/health?probe=true');
   });
 
   test('uses realtime base URL for SSE and WebSocket URLs', () => {
@@ -42,13 +43,12 @@ describe('createRuntimeUrlResolver', () => {
       apiBaseUrl: 'https://api.example',
       realtimeBaseUrl: 'https://realtime.example/root',
     });
-
-    expect(urls.sse('/api/openchamber/events')).toBe('https://realtime.example/api/openchamber/events');
+    // OpenChamber-internal paths use page origin even if realtimeBaseUrl is set
+    expect(urls.sse('/api/openchamber/events')).toBe('/api/openchamber/events');
     expect(urls.websocket('/api/global/event/ws', { lastEventId: 'evt-1' })).toBe(
       'wss://realtime.example/api/global/event/ws?lastEventId=evt-1',
     );
   });
-
   test('converts absolute HTTP URLs to WebSocket URLs', () => {
     const urls = createRuntimeUrlResolver({ apiBaseUrl: 'https://api.example' });
 
@@ -105,12 +105,14 @@ describe('createRuntimeUrlResolver', () => {
     try {
       const urls = createRuntimeUrlResolver({ apiBaseUrl: 'https://api.example' });
 
+      // OpenCode upstream paths use the apiBase
       expect(urls.api('/api/config/settings')).toBe('https://api.example/api/config/settings');
+      // OpenChamber-internal paths stay on the page origin (NOT apiBase)
       expect(urls.authenticatedAsset('/api/projects/p1/icon', { v: 123 })).toBe(
-        'https://api.example/api/projects/p1/icon?v=123&oc_url_token=oc_url_secret',
+        '/api/projects/p1/icon?v=123&oc_url_token=oc_url_secret',
       );
       expect(urls.sse('/api/openchamber/events')).toBe(
-        'https://api.example/api/openchamber/events?oc_url_token=oc_url_secret',
+        '/api/openchamber/events?oc_url_token=oc_url_secret',
       );
       expect(urls.websocket('/api/global/event/ws', { lastEventId: 'evt-1' })).toBe(
         'wss://api.example/api/global/event/ws?lastEventId=evt-1&oc_url_token=oc_url_secret',
@@ -124,9 +126,11 @@ describe('createRuntimeUrlResolver', () => {
     setRuntimeBearerToken('oc_client_secret');
     try {
       const urls = createRuntimeUrlResolver({ apiBaseUrl: 'https://api.example' });
-      expect(urls.sse('/api/openchamber/events')).toBe('https://api.example/api/openchamber/events');
+      // OpenChamber-internal paths stay on page origin
+      expect(urls.sse('/api/openchamber/events')).toBe('/api/openchamber/events');
+      // OpenCode upstream paths use apiBase
       expect(urls.websocket('/api/global/event/ws')).toBe('wss://api.example/api/global/event/ws');
-      expect(urls.authenticatedAsset('/api/projects/p1/icon')).toBe('https://api.example/api/projects/p1/icon');
+      expect(urls.authenticatedAsset('/api/projects/p1/icon')).toBe('/api/projects/p1/icon');
     } finally {
       setRuntimeBearerToken(null);
     }
@@ -137,8 +141,9 @@ describe('createRuntimeUrlResolver', () => {
     try {
       process.env.VITE_OPENCODE_URL = 'http://127.0.0.1:4096';
       const urls = createRuntimeUrlResolver({});
-      expect(urls.api('/api/config/settings')).toBe('http://127.0.0.1:4096/api/config/settings');
-      expect(urls.health()).toBe('http://127.0.0.1:4096/health');
+expect(urls.api('/api/config/settings')).toBe('http://127.0.0.1:4096/api/config/settings');
+      // /health is OpenChamber's own health endpoint, stays on page origin
+      expect(urls.health()).toBe('/health');
     } finally {
       if (previous === undefined) {
         delete process.env.VITE_OPENCODE_URL;
