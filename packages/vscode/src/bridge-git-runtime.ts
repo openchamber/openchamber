@@ -531,12 +531,14 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
     }
 
     case 'api:git/identity': {
-      const { directory, method, userName, userEmail, sshKey } = (payload || {}) as {
+      const { directory, method, userName, userEmail, sshKey, signCommits, signingKey } = (payload || {}) as {
         directory?: string;
         method?: string;
         userName?: string;
         userEmail?: string;
         sshKey?: string | null;
+        signCommits?: boolean;
+        signingKey?: string | null;
       };
       const dirError = requireDirectory(id, type, directory);
       if (dirError) return dirError;
@@ -552,7 +554,14 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
         if (!userName || !userEmail) {
           return { id, type, success: false, error: 'userName and userEmail are required' };
         }
-        const result = await gitService.setGitIdentity(directory!, userName, userEmail, sshKey);
+        const result = await gitService.setGitIdentity(
+          directory!,
+          userName,
+          userEmail,
+          sshKey,
+          signCommits === true,
+          signingKey ?? null
+        );
         return { id, type, success: true, data: result };
       }
 

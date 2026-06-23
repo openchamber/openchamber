@@ -548,6 +548,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           toggleParent(expansionKey);
         }
       }}
+      style={{ minWidth: 14, minHeight: 14 }}
       className={cn(
         'inline-flex h-3.5 w-3.5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
         metadataSubsessionChevron

@@ -56,7 +56,7 @@ describe('gitApiHttp index mutations', () => {
       await stageGitFiles('/repo', ['a.ts', 'b.ts']);
 
       expect(calls).toHaveLength(1);
-      expect(String(calls[0].input)).toBe('http://localhost:3000/api/git/stage?directory=%2Frepo');
+      expect(String(calls[0].input)).toBe('/api/git/stage?directory=%2Frepo');
       expect(calls[0].init?.method).toBe('POST');
       expect(JSON.parse(String(calls[0].init?.body))).toEqual({ paths: ['a.ts', 'b.ts'] });
     } finally {
@@ -71,7 +71,7 @@ describe('gitApiHttp index mutations', () => {
       await unstageGitFiles('/repo', ['a.ts', 'b.ts']);
 
       expect(calls).toHaveLength(1);
-      expect(String(calls[0].input)).toBe('http://localhost:3000/api/git/unstage?directory=%2Frepo');
+      expect(String(calls[0].input)).toBe('/api/git/unstage?directory=%2Frepo');
       expect(calls[0].init?.method).toBe('POST');
       expect(JSON.parse(String(calls[0].init?.body))).toEqual({ paths: ['a.ts', 'b.ts'] });
     } finally {

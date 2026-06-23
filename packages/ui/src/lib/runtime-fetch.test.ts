@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
-import { buildRuntimeFetchUrl, runtimeFetch } from './runtime-fetch';
+import { buildRuntimeFetchUrl, isLatin1Safe, runtimeFetch, sanitizeHeadersForBrowser } from './runtime-fetch';
 import { clearRuntimeAuthCredentialProvider, setRuntimeBearerToken } from './runtime-auth';
 import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from './runtime-url';
 
@@ -355,6 +355,102 @@ describe('runtimeFetch read coalescing', () => {
       expect(calls).toBe(2);
     } finally {
       setRuntimeUrlResolver(previous);
+      globalThis.fetch = originalFetch;
+      clearRuntimeAuthCredentialProvider();
+    }
+  });
+});
+
+describe('runtimeFetch header sanitization', () => {
+  test('isLatin1Safe returns true for Latin-1 strings', () => {
+    expect(isLatin1Safe('hello')).toBe(true);
+    expect(isLatin1Safe('/path/to/file.txt')).toBe(true);
+    expect(isLatin1Safe('')).toBe(true);
+    expect(isLatin1Safe('\u00FF')).toBe(true);
+  });
+
+  test('isLatin1Safe returns false for strings with characters above U+00FF', () => {
+    expect(isLatin1Safe('你好')).toBe(false);
+    expect(isLatin1Safe('D:\\文件')).toBe(false);
+    expect(isLatin1Safe('\u0100')).toBe(false);
+  });
+
+  test('sanitizeHeadersForBrowser encodes non-Latin-1 values in object form', () => {
+    const result = sanitizeHeadersForBrowser({ 'x-test': '你好' });
+    expect(result).toBeTruthy();
+    expect(result![0][0]).toBe('x-test');
+    expect(result![0][1]).toBe(encodeURIComponent('你好'));
+  });
+
+  test('sanitizeHeadersForBrowser encodes non-Latin-1 values in array form', () => {
+    const result = sanitizeHeadersForBrowser([['x-test', 'こんにちは']]);
+    expect(result).toBeTruthy();
+    expect(result![0][0]).toBe('x-test');
+    expect(result![0][1]).toBe(encodeURIComponent('こんにちは'));
+  });
+
+  test('sanitizeHeadersForBrowser returns undefined when no encoding needed', () => {
+    const result = sanitizeHeadersForBrowser({ 'x-test': 'hello', accept: 'application/json' });
+    expect(result).toBeFalsy();
+  });
+
+  test('sanitizeHeadersForBrowser always encodes directory hints with marker', () => {
+    const path = 'C:\\work\\foo%20bar';
+    const result = sanitizeHeadersForBrowser({ 'x-opencode-directory': path });
+    expect(result).toBeTruthy();
+    const encoded = Object.fromEntries(result!);
+    expect(encoded['x-opencode-directory']).toBe(encodeURIComponent(path));
+    expect(encoded['x-opencode-directory-encoding']).toBe('uri');
+  });
+
+  test('sanitizeHeadersForBrowser returns undefined for empty/undefined input', () => {
+    expect(sanitizeHeadersForBrowser(undefined)).toBeFalsy();
+    expect(sanitizeHeadersForBrowser({})).toBeFalsy();
+  });
+
+  test('sanitizeHeadersForBrowser only encodes non-Latin-1 values, leaves Latin-1 unchanged', () => {
+    const result = sanitizeHeadersForBrowser({
+      accept: 'application/json',
+      'x-chinese': '文件',
+      'content-type': 'text/plain',
+    });
+    expect(result).toBeTruthy();
+    const encoded = Object.fromEntries(result!);
+    expect(encoded.accept).toBe('application/json');
+    expect(encoded['content-type']).toBe('text/plain');
+    expect(encoded['x-chinese']).toBe(encodeURIComponent('文件'));
+  });
+
+  test('runtimeFetch encodes directory request headers with marker', async () => {
+    const previous = getRuntimeUrlResolver();
+    const originalWindow = globalThis.window;
+    const calls: Array<{ headers: Headers }> = [];
+
+    try {
+      configureRuntimeUrlResolver({ apiBaseUrl: 'https://runtime.example' });
+      Object.defineProperty(globalThis, 'window', {
+        configurable: true,
+        value: { location: { origin: 'https://app.example', href: 'https://app.example/' } },
+      });
+
+      globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        calls.push({ headers: new Headers(init?.headers) });
+        return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+      }) as typeof fetch;
+
+      await runtimeFetch('/api/config/providers', {
+        headers: { 'x-opencode-directory': 'D:\\文件夹' },
+      });
+
+      expect(calls).toHaveLength(1);
+      const encoded = calls[0].headers.get('x-opencode-directory');
+      expect(encoded).not.toBe('D:\\文件夹');
+      // decodeURIComponent round-trips back to original
+      expect(decodeURIComponent(encoded!)).toBe('D:\\文件夹');
+      expect(calls[0].headers.get('x-opencode-directory-encoding')).toBe('uri');
+    } finally {
+      setRuntimeUrlResolver(previous);
+      Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow });
       globalThis.fetch = originalFetch;
       clearRuntimeAuthCredentialProvider();
     }

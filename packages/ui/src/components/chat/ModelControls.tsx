@@ -831,9 +831,14 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             setAgent(latestLoadedUserChoice.agent);
         }
 
-        const applyResult = tryApplyModelSelection(
+        const historicalVariant = latestLoadedUserChoice.variant
+            && getModelVariantOptions(latestLoadedUserChoice.providerID, latestLoadedUserChoice.modelID).includes(latestLoadedUserChoice.variant)
+            ? latestLoadedUserChoice.variant
+            : undefined;
+        const applyResult = applyModelSelectionWithVariant(
             latestLoadedUserChoice.providerID,
             latestLoadedUserChoice.modelID,
+            historicalVariant,
             latestLoadedUserChoice.agent || currentAgentName || undefined,
         );
         if (applyResult !== 'applied') {
@@ -847,7 +852,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 latestLoadedUserChoice.agent,
                 latestLoadedUserChoice.providerID,
                 latestLoadedUserChoice.modelID,
-                latestLoadedUserChoice.variant,
+                historicalVariant,
             );
         }
         saveSessionModelSelection(currentSessionId, latestLoadedUserChoice.providerID, latestLoadedUserChoice.modelID);
@@ -861,7 +866,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         hasRenderableCurrentSessionSnapshot,
         latestLoadedUserChoice,
         setAgent,
-        tryApplyModelSelection,
+        applyModelSelectionWithVariant,
+        getModelVariantOptions,
         saveSessionAgentSelection,
         saveAgentModelVariantForSession,
         saveSessionModelSelection,
@@ -1144,7 +1150,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
         const resolvedSaved = savedVariant && availableVariants.includes(savedVariant)
             ? savedVariant
-            : undefined;
+            : settingsDefaultVariant && availableVariants.includes(settingsDefaultVariant)
+                ? settingsDefaultVariant
+                : undefined;
 
         setCurrentVariant(resolvedSaved);
         manualVariantSelectionRef.current = false;

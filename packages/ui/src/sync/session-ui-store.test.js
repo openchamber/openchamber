@@ -1,9 +1,13 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionWorktreeStore } from './session-worktree-store';
 import { routeMessage, useSessionUIStore } from './session-ui-store';
+import { setActionRefs, setOptimisticRefs } from './session-actions';
+import { useSkillsStore } from '@/stores/useSkillsStore';
+import { useCommandsStore } from '@/stores/useCommandsStore';
+import { useConfigStore } from '@/stores/useConfigStore';
 
 /**
  * Unit tests for session worktree routing through the authoritative store.
@@ -265,5 +269,105 @@ describe('openNewSessionDraft project binding', () => {
 
     expect(draft.open).toBe(true);
     expect(draft.selectedProjectId).toBe(projectB.id);
+  });
+});
+
+describe('routeMessage skill invocation', () => {
+  // OpenCode registers every skill as a command (source: "skill"), so a skill
+  // selected from the slash menu must be dispatched via session.command so its
+  // content is injected — not sent as a plain "/name" text message (issue #1605).
+  const sendCommandCalls = [];
+  const sendMessageCalls = [];
+  let originalSendCommand;
+  let originalSendMessage;
+
+  beforeEach(() => {
+    sendCommandCalls.length = 0;
+    sendMessageCalls.length = 0;
+
+    // Minimal optimistic + connection machinery so routeMessage can dispatch.
+    const childStore = {
+      getState: () => ({ session_status: {} }),
+      setState: () => {},
+    };
+    const childStores = {
+      children: new Map(),
+      ensureChild: () => childStore,
+      getChild: () => childStore,
+    };
+    setActionRefs(opencodeClient, childStores, () => '/skills/project');
+    setOptimisticRefs(() => {}, () => {});
+    useConfigStore.setState({ isConnected: true });
+
+    // The sync command list and the commands store both exclude user skills,
+    // so they start empty here — the skill is only known to the skills store.
+    useCommandsStore.setState({ commands: [] });
+    useSkillsStore.setState({ skills: [] });
+
+    originalSendCommand = opencodeClient.sendCommand;
+    originalSendMessage = opencodeClient.sendMessage;
+    opencodeClient.sendCommand = async (params) => {
+      sendCommandCalls.push(params);
+      return 'msg';
+    };
+    opencodeClient.sendMessage = async (params) => {
+      sendMessageCalls.push(params);
+      return 'msg';
+    };
+  });
+
+  afterEach(() => {
+    opencodeClient.sendCommand = originalSendCommand;
+    opencodeClient.sendMessage = originalSendMessage;
+    useSkillsStore.setState({ skills: [] });
+  });
+
+  test('invokes a user-installed skill as a command', async () => {
+    useSkillsStore.setState({
+      skills: [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }],
+    });
+
+    await routeMessage({
+      sessionId: 'session-skill',
+      directory: '/skills/project',
+      content: '/grill-with-docs',
+      providerID: 'provider-a',
+      modelID: 'model-a',
+    });
+
+    expect(sendCommandCalls).toHaveLength(1);
+    expect(sendCommandCalls[0].command).toBe('grill-with-docs');
+    expect(sendMessageCalls).toHaveLength(0);
+  });
+
+  test('forwards trailing arguments to the skill command', async () => {
+    useSkillsStore.setState({
+      skills: [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }],
+    });
+
+    await routeMessage({
+      sessionId: 'session-skill',
+      directory: '/skills/project',
+      content: '/grill-with-docs focus on auth',
+      providerID: 'provider-a',
+      modelID: 'model-a',
+    });
+
+    expect(sendCommandCalls).toHaveLength(1);
+    expect(sendCommandCalls[0].command).toBe('grill-with-docs');
+    expect(sendCommandCalls[0].arguments).toBe('focus on auth');
+  });
+
+  test('sends an unknown slash token as a plain message', async () => {
+    await routeMessage({
+      sessionId: 'session-skill',
+      directory: '/skills/project',
+      content: '/not-a-real-skill',
+      providerID: 'provider-a',
+      modelID: 'model-a',
+    });
+
+    expect(sendMessageCalls).toHaveLength(1);
+    expect(sendCommandCalls).toHaveLength(0);
   });
 });

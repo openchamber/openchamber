@@ -128,6 +128,58 @@ describe('project directory runtime', () => {
       expect(result).toEqual({ directory: '/real/workspace/project', error: null });
     });
 
+    it('decodes marked x-opencode-directory header values', async () => {
+      const pathWithUnicode = '/home/user/测试项目';
+      let validatedPath = null;
+      const runtime = createTestRuntime({
+        fsPromises: {
+          stat: async (p) => {
+            validatedPath = p;
+            return { isDirectory: () => true };
+          },
+          realpath: async (p) => p,
+        },
+      });
+
+      const req = {
+        get: (header) => {
+          if (header === 'x-opencode-directory') return encodeURIComponent(pathWithUnicode);
+          if (header === 'x-opencode-directory-encoding') return 'uri';
+          return null;
+        },
+        query: {},
+      };
+
+      const result = await runtime.resolveProjectDirectory(req);
+
+      expect(validatedPath).toBe(pathWithUnicode);
+      expect(result).toEqual({ directory: pathWithUnicode, error: null });
+    });
+
+    it('preserves raw percent sequences without directory encoding marker', async () => {
+      const rawPath = '/home/user/foo%20bar';
+      let validatedPath = null;
+      const runtime = createTestRuntime({
+        fsPromises: {
+          stat: async (p) => {
+            validatedPath = p;
+            return { isDirectory: () => true };
+          },
+          realpath: async (p) => p,
+        },
+      });
+
+      const req = {
+        get: (header) => header === 'x-opencode-directory' ? rawPath : null,
+        query: {},
+      };
+
+      const result = await runtime.resolveProjectDirectory(req);
+
+      expect(validatedPath).toBe(rawPath);
+      expect(result).toEqual({ directory: rawPath, error: null });
+    });
+
     it('resolves symlinks in query directory parameter', async () => {
       const runtime = createTestRuntime({
         fsPromises: {
@@ -221,6 +273,30 @@ describe('project directory runtime', () => {
       const result = await runtime.resolveOptionalProjectDirectory(req);
 
       expect(result).toEqual({ directory: '/real/workspace/project', error: null });
+    });
+
+    it('preserves raw percent sequences without directory encoding marker', async () => {
+      const rawPath = '/optional/foo%25bar';
+      let validatedPath = null;
+      const runtime = createTestRuntime({
+        fsPromises: {
+          stat: async (p) => {
+            validatedPath = p;
+            return { isDirectory: () => true };
+          },
+          realpath: async (p) => p,
+        },
+      });
+
+      const req = {
+        get: (header) => header === 'x-opencode-directory' ? rawPath : null,
+        query: {},
+      };
+
+      const result = await runtime.resolveOptionalProjectDirectory(req);
+
+      expect(validatedPath).toBe(rawPath);
+      expect(result).toEqual({ directory: rawPath, error: null });
     });
   });
 });
