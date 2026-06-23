@@ -1,11 +1,23 @@
 import React from 'react';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { isDesktopShell, isWebRuntime } from '@/lib/desktop';
-import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { useUIStore } from '@/stores/useUIStore';
 import type { NotificationPayload } from '@/lib/api/types';
 
 const NOTIFICATION_STREAM_PATH = '/api/notifications/stream';
+
+// /api/notifications/stream is an OpenChamber-internal endpoint always served
+// by the OpenChamber Express server (not the upstream OpenCode). In proxy-bypass
+// mode the runtime-url resolver may point at the external OpenCode origin, but
+// the Express server is still running on the page origin — so we anchor these
+// streams there. Without this, the proxy-bypass deployment would 404 every
+// notification and trip an EventSource reconnect loop.
+const openchamberStreamUrl = (path: string): string => {
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return `${window.location.origin}${path}`;
+  }
+  return path;
+};
 
 const isFocused = () => {
   if (typeof document === 'undefined') return true;
@@ -34,7 +46,7 @@ export const useWebNotificationStream = (options?: { enabled?: boolean }) => {
       return;
     }
 
-    const source = new EventSource(getRuntimeUrlResolver().sse(NOTIFICATION_STREAM_PATH));
+    const source = new EventSource(openchamberStreamUrl(NOTIFICATION_STREAM_PATH));
     source.onmessage = (event) => {
       let data: unknown;
       try {
