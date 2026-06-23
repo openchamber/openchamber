@@ -1,11 +1,23 @@
 import React from 'react';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { isDesktopShell, isWebRuntime } from '@/lib/desktop';
-import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { useUIStore } from '@/stores/useUIStore';
 import type { NotificationPayload } from '@/lib/api/types';
 
 const NOTIFICATION_STREAM_PATH = '/api/notifications/stream';
+
+// /api/notifications/stream is an OpenChamber-internal endpoint always served
+// by the OpenChamber Express server (not the upstream OpenCode). In proxy-bypass
+// mode the runtime-url resolver may point at the external OpenCode origin, but
+// the Express server is still running on the page origin — so we anchor these
+// streams there. Without this, the proxy-bypass deployment would 404 every
+// notification and trip an EventSource reconnect loop.
+const openchamberStreamUrl = (path: string): string => {
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return `${window.location.origin}${path}`;
+  }
+  return path;
+};
 
 const isFocused = () => {
   if (typeof document === 'undefined') return true;
@@ -29,32 +41,12 @@ const toNotificationPayload = (value: unknown): NotificationPayload | null => {
 export const useWebNotificationStream = (options?: { enabled?: boolean }) => {
   const enabled = options?.enabled ?? true;
 
-  // /api/notifications/stream is an OpenChamber-specific endpoint that does not
-// exist on upstream OpenCode. When the runtime points at an external server
-// (VITE_OPENCODE_URL or __OPENCHAMBER_API_BASE_URL__), skip opening the stream
-// to avoid a 404 + EventSource reconnect noise. Notifications are still emitted
-// via the openchamberEvents stream when the proxy is in the picture.
-const isNotificationStreamUnavailable = (): boolean => {
-  if (typeof window === 'undefined') return false;
-  try {
-    const target = getRuntimeUrlResolver().sse(NOTIFICATION_STREAM_PATH);
-    if (!/^[a-z][a-z\d+.-]*:\/\//i.test(target)) return false;
-    const currentOrigin = window.location?.origin;
-    if (currentOrigin && new URL(target).origin !== currentOrigin) return true;
-  } catch {
-    // ignore — fall through and let EventSource try.
-  }
-  return false;
-};
-
-React.useEffect(() => {
+  React.useEffect(() => {
     if (!enabled || isDesktopShell() || !isWebRuntime() || typeof window === 'undefined' || typeof EventSource === 'undefined') {
       return;
     }
-    if (isNotificationStreamUnavailable()) {
-      return;
-    }
-    const source = new EventSource(getRuntimeUrlResolver().sse(NOTIFICATION_STREAM_PATH));
+
+    const source = new EventSource(openchamberStreamUrl(NOTIFICATION_STREAM_PATH));
     source.onmessage = (event) => {
       let data: unknown;
       try {
