@@ -158,7 +158,11 @@ export type DesktopSettings = {
   shortcutOverrides?: Record<string, string>;
 
   favoriteModels?: Array<{ providerID: string; modelID: string }>;
+  hiddenModels?: Array<{ providerID: string; modelID: string }>;
+  collapsedModelProviders?: string[];
   recentModels?: Array<{ providerID: string; modelID: string }>;
+  recentAgents?: string[];
+  recentEfforts?: Record<string, string[]>;
   diffLayoutPreference?: 'dynamic' | 'inline' | 'side-by-side';
   gitChangesViewMode?: 'flat' | 'tree';
   directoryShowHidden?: boolean;

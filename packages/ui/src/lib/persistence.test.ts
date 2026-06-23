@@ -2,11 +2,15 @@ import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 
 import type { RuntimeAPIs, SettingsPayload } from '@/lib/api/types';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
-import { applyPersistedHomeDirectoryToWindow, updateDesktopSettings } from './persistence';
+import { startModelPrefsAutoSave } from '@/lib/modelPrefsAutoSave';
+import { useUIStore } from '@/stores/useUIStore';
+import { applyPersistedHomeDirectoryToWindow, syncDesktopSettings, updateDesktopSettings } from './persistence';
 
 type TestWindow = {
   __OPENCHAMBER_HOME__?: string;
   dispatchEvent: (event: Event) => boolean;
+  setTimeout: typeof setTimeout;
+  clearTimeout: typeof clearTimeout;
 };
 
 let createdWindow = false;
@@ -48,20 +52,40 @@ const getWindow = (): TestWindow => {
   }
   const testWindow = window as unknown as Partial<TestWindow>;
   testWindow.dispatchEvent ??= () => true;
+  testWindow.setTimeout ??= setTimeout;
+  testWindow.clearTimeout ??= clearTimeout;
   ensureLocalStorage();
   return testWindow as TestWindow;
 };
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-const registerSettingsSave = (save: (changes: Partial<SettingsPayload>) => Promise<SettingsPayload>): void => {
+const registerSettingsApi = (
+  save: (changes: Partial<SettingsPayload>) => Promise<SettingsPayload>,
+  load: () => Promise<{ settings: SettingsPayload; source: 'web' | 'vscode' }> = async () => ({ settings: {}, source: 'web' }),
+): void => {
   registerRuntimeAPIs({
     runtime: { platform: 'web', isDesktop: false, isVSCode: false },
     settings: {
-      load: async () => ({ settings: {}, source: 'web' }),
+      load,
       save,
     },
   } as unknown as RuntimeAPIs);
+};
+
+const registerSettingsSave = (save: (changes: Partial<SettingsPayload>) => Promise<SettingsPayload>): void => {
+  registerSettingsApi(save);
+};
+
+const resetModelPrefsState = (): void => {
+  useUIStore.setState({
+    favoriteModels: [],
+    hiddenModels: [],
+    collapsedModelProviders: [],
+    recentModels: [],
+    recentAgents: [],
+    recentEfforts: {},
+  });
 };
 
 afterAll(() => {
@@ -100,6 +124,7 @@ describe('updateDesktopSettings', () => {
   beforeEach(() => {
     getWindow();
     registerRuntimeAPIs(null);
+    resetModelPrefsState();
   });
 
   test('waits for the debounced settings save to finish before resolving', async () => {
@@ -169,5 +194,64 @@ describe('updateDesktopSettings', () => {
     expect(saveCalls).toEqual([{ themeVariant: 'dark', fontSize: 14 }]);
     expect(firstResolved).toBe(true);
     expect(secondResolved).toBe(true);
+  });
+
+  test('applies model selector settings from server settings', async () => {
+    getWindow();
+    const settings = {
+      favoriteModels: [{ providerID: 'anthropic', modelID: 'claude-haiku-4' }],
+      hiddenModels: [{ providerID: 'openai', modelID: 'gpt-5' }],
+      collapsedModelProviders: ['anthropic', 'openai'],
+      recentModels: [{ providerID: 'google', modelID: 'gemini-pro' }],
+      recentAgents: ['build', 'plan'],
+      recentEfforts: { 'anthropic/claude-haiku-4': ['high', 'default'] },
+    } satisfies SettingsPayload;
+    registerSettingsApi(async () => ({}), async () => ({ settings, source: 'web' }));
+
+    await syncDesktopSettings();
+
+    const state = useUIStore.getState();
+    expect(state.favoriteModels).toEqual(settings.favoriteModels);
+    expect(state.hiddenModels).toEqual(settings.hiddenModels);
+    expect(state.collapsedModelProviders).toEqual(settings.collapsedModelProviders);
+    expect(state.recentModels).toEqual(settings.recentModels);
+    expect(state.recentAgents).toEqual(settings.recentAgents);
+    expect(state.recentEfforts).toEqual(settings.recentEfforts);
+  });
+
+  test('autosaves all model selector settings fields', async () => {
+    getWindow();
+    const saveCalls: Array<Partial<SettingsPayload>> = [];
+    registerSettingsSave(async (changes) => {
+      saveCalls.push(changes);
+      return changes as SettingsPayload;
+    });
+    const stop = startModelPrefsAutoSave();
+
+    try {
+      useUIStore.setState({ favoriteModels: [{ providerID: 'anthropic', modelID: 'claude-haiku-4' }] });
+      await delay(20);
+      useUIStore.setState({
+        hiddenModels: [{ providerID: 'openai', modelID: 'gpt-5' }],
+        collapsedModelProviders: ['openai'],
+        recentModels: [{ providerID: 'google', modelID: 'gemini-pro' }],
+        recentAgents: ['build'],
+        recentEfforts: { 'openai/gpt-5': ['low'] },
+      });
+
+      await delay(1500);
+
+      expect(saveCalls).toHaveLength(1);
+      expect(saveCalls[0]).toEqual({
+        favoriteModels: [{ providerID: 'anthropic', modelID: 'claude-haiku-4' }],
+        hiddenModels: [{ providerID: 'openai', modelID: 'gpt-5' }],
+        collapsedModelProviders: ['openai'],
+        recentModels: [{ providerID: 'google', modelID: 'gemini-pro' }],
+        recentAgents: ['build'],
+        recentEfforts: { 'openai/gpt-5': ['low'] },
+      });
+    } finally {
+      stop();
+    }
   });
 });
