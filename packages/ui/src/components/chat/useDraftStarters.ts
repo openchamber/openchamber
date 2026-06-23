@@ -93,6 +93,14 @@ export function useDraftStarters(): UseDraftStartersResult {
         void useSkillsStore.getState().loadSkills?.();
     }, []);
 
+    // Preload commands and skills on mount so that pinned command/skill starters
+    // resolve immediately without requiring the user to open the add dialog first.
+    // Both loaders are TTL-cached and in-flight-deduped, so this is a cheap no-op
+    // if they were already loaded.
+    React.useEffect(() => {
+        ensureLoaded();
+    }, [ensureLoaded]);
+
     const commandNames = React.useMemo(() => new Set(commands.map((c) => c.name)), [commands]);
     const skillNames = React.useMemo(() => new Set(skills.map((s) => s.name)), [skills]);
 

@@ -4,26 +4,70 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Chat: selecting a user-installed skill from the slash command menu now invokes the skill and injects its content, instead of inserting the skill name as plain text.
+## [1.13.2] - 2026-06-18
+
+- Chat/Performance: long conversations and large session lists now stay smooth and responsive while a response is streaming (thanks to @bashrusakh).
+- Chat: the end of a streamed response is no longer occasionally cut off — messages now always settle on their complete text (thanks to @IbrahimKhan12).
+- Chat: paragraphs in assistant messages now have proper spacing instead of collapsing into a single block (thanks to @foundryseven).
+- Files: HTML, image, and PDF previews no longer cycle to "authentication required" every ~50 seconds (thanks to @bashrusakh).
+- Startup: the app starts faster by no longer waiting on default OpenCode config, while your manual and per-directory model selections are preserved.
+
+## [1.13.1] - 2026-06-17
+
+- Chat: inline math delimiters no longer incorrectly treat currency amounts like `$50` as LaTeX math expressions — only `$$...$$` display math and `\(...\)` inline math are recognized.
+- Chat: pinned welcome starters now appear immediately when a new draft session opens, without needing to open the add dialog.
+- Chat: clicking a Mermaid diagram in a chat message now opens a fullscreen pan/zoom preview.
+- Chat: code-block highlighting now runs off the main thread, preventing UI freezes when rendering code-heavy responses.
+- Chat: the context usage indicator now shows as a circular progress ring with the same color thresholds, visible in all workspace headers.
+- Chat/UI: embedded chat views and context panel previews now consistently match the current theme.
+- Chat/Mobile: the session status button now responds more reliably to taps on Android.
+- Scheduled Tasks: the task editor dialog now supports Cron expressions with inline validation, quick-example chips, and a preview of the next four upcoming runs (thanks to @tomzx).
+- Files: syntax highlighting in the file editor, Plan View, and Skills page now uses Shiki for broader language support.
+- Agents: deleting a built-in agent no longer creates a disable override — the agent stays as-is and shows a clear explanation instead of silently disappearing.
+- Agents: deleting an agent now shows an error toast when the definition is missing, instead of failing silently.
+- Startup: providers and agents now load faster by avoiding the full provider catalog on initial load.
+- Right Sidebar: switching between sidebar tabs is less likely to re-render unrelated content (thanks to @bashrusakh).
+- Sessions: the app no longer crashes on startup when there are many sessions in folders.
+- Notifications: desktop notifications no longer show duplicate alerts, and reasoning text is excluded from notification bodies.
+- Security: self-hosted instances now include noindex headers and a robots.txt to block search engine crawlers.
+- CLI/Installer: the installer now requires Node.js 22 and handles version detection failures with clearer guidance.
+- Reliability: session list loading handles Windows paths and concurrent requests more steadily, and duplicate health-check URLs are removed from diagnostics.
+
+## [1.13.0] - 2026-06-15
+
 - Security: LAN and remote browser access now require a UI password before the server will start.
 - Desktop: if LAN access was enabled without a password, the app now starts locally and asks for a password before turning LAN access back on.
 - Chat: file paths inside fenced code blocks are now clickable, including line and column targets (thanks to @robertoberto).
 - Chat: context breakdowns now show message previews and cache hit rates (thanks to @robertoberto, @raz123).
+- Chat/Performance: long conversations now use virtualized rendering to keep large histories responsive.
 - Chat: custom-answer question textareas resize more steadily while typing (thanks to @bigcoder84).
 - Chat/Input: tab-completing a mention no longer changes the selected agent (thanks to @Quat3rnion).
 - Chat/Input: Arrow Up moves the cursor inside multi-line drafts again instead of always opening prompt history.
+- Chat/Mobile: collapsed tool cards now keep their tool icon visible, and reasoning/tool text no longer clips descenders.
 - Files: added dedicated PDF files previews mode.
 - Files: added an optional docked files editor toolbar (thanks to @robertoberto).
+- Files: file operations now use the active workspace directory more consistently (thanks to @tomzx).
 - Sessions: session menus now include a delete action (thanks to @ShogunPanda).
 - Sessions: deleting a parent session no longer brings deleted child sessions back into the sidebar (thanks to @panzeyu2013).
 - Sessions: switching sessions no longer leaves the chat area blank in some cases (thanks to @panzeyu2013).
 - Sessions: selected rows now highlight across the full sidebar gutter.
 - Comments: inline file/diff comment drafts now stay in place when focus changes.
+- Git/Diff: redesigned the Changes diff view with faster multi-file rendering, expandable hunk separators, a full-file loading toggle, compact responsive controls, and a unified changed/staged context panel workflow.
+- Git/Diff: individual diff hunks can now be staged, unstaged, or discarded directly from the Changes view via `git apply`.
+- Git/Diff: added a review flow for starting a review from current changes.
 - GitHub: GitHub settings can now use credentials from the `gh` CLI when available (thanks to @tomzx).
 - Settings/MCP: importing MCP snippets from OpenCode config works again (thanks to @youzini).
-- Usage: added Cursor plan as a usage-tracking provider..
 - Notifications: notification streams now stay connected more reliably behind proxies (thanks to @kostazol).
 - Mobile: the empty Changes view keeps a close control visible (thanks to @lilyzhaun).
 - Security: file previews and downloads now reject paths outside the allowed workspace unless access has been granted.
+- Sessions: fixed a bug where a running session would briefly flicker as idle (in the sidebar, the send/stop button, and the status row) when the app is protected by a password.
+- Desktop: you can now open developer tools from the Help menu.
+- Sessions: new draft sessions now start from the default model and agent instead of inheriting the previous session's selection, and fall back to OpenCode's own `default_agent` (and its model) when no OpenChamber default is set.
+- Startup: cached settings and session state now appear earlier while the live API finishes connecting.
+- Startup: the model and agent now appear faster on the initial draft — config loads under the project key up front (no reload when the draft opens) and the agent list is fetched once instead of per consumer.
+- VSCode: the extension opens faster with cached sessions, models, providers, and projects, then refreshes in the background.
+- VSCode: sessions are now grouped under their workspace, with cleaner session rows and an archived-sessions toggle.
 
 ## [1.12.4] - 2026-06-11
 

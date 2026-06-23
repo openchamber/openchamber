@@ -1,9 +1,9 @@
 import React from 'react';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 
-// Thin lazy wrapper around the heavy MarkdownRenderer implementation.
-// The full implementation (marked, react-markdown, beautiful-mermaid,
-// react-syntax-highlighter, etc.) is loaded on demand, keeping the
+// Thin lazy wrapper around the MarkdownRenderer implementation.
+// The full implementation (marked + Shiki highlighting + KaTeX + morphdom
+// DOM morphing, plus beautiful-mermaid) is loaded on demand, keeping the
 // initial bundle lean.
 
 export type { MarkdownVariant } from './MarkdownRendererImpl';

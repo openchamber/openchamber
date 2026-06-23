@@ -326,6 +326,17 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
         const scopeFolders = current[scopeKey];
         if (!scopeFolders) return;
 
+        const targetFolder = scopeFolders.find((folder) => folder.id === folderId);
+        if (!targetFolder) return;
+
+        const sessionFolderCount = scopeFolders.reduce(
+          (count, folder) => count + (folder.sessionIds.includes(sessionId) ? 1 : 0),
+          0,
+        );
+        if (targetFolder.sessionIds.includes(sessionId) && sessionFolderCount === 1) {
+          return;
+        }
+
         // Remove session from any existing folder first, then add to target
         const nextFolders = scopeFolders.map((folder) => {
           const withoutSession = folder.sessionIds.filter((id) => id !== sessionId);
@@ -355,6 +366,30 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
 
         const idSet = new Set(sessionIds.filter((id) => typeof id === 'string' && id.length > 0));
         if (idSet.size === 0) return;
+
+        const targetFolder = scopeFolders.find((folder) => folder.id === folderId);
+        if (!targetFolder) return;
+
+        let changed = false;
+        for (const folder of scopeFolders) {
+          for (const id of idSet) {
+            if (!folder.sessionIds.includes(id)) continue;
+            if (folder.id !== folderId || !targetFolder.sessionIds.includes(id)) {
+              changed = true;
+              break;
+            }
+          }
+          if (changed) break;
+        }
+        if (!changed) {
+          for (const id of idSet) {
+            if (!targetFolder.sessionIds.includes(id)) {
+              changed = true;
+              break;
+            }
+          }
+        }
+        if (!changed) return;
 
         const nextFolders = scopeFolders.map((folder) => {
           const withoutSessions = folder.sessionIds.filter((id) => !idSet.has(id));

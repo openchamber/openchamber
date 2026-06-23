@@ -1,9 +1,12 @@
 import React, { useMemo, useRef, useCallback, useEffect } from 'react';
 import {
+  areFilesEqual,
+  areOptionsEqual,
   FileDiff as PierreFileDiff,
   VirtualizedFileDiff,
   Virtualizer,
   type FileContents,
+  type FileDiffMetadata,
   type FileDiffOptions,
   type DiffLineAnnotation,
   type SelectedLineRange,
@@ -34,11 +37,13 @@ const LARGE_CONTENT_BYTES = 500_000;
 interface PierreDiffViewerProps {
   original: string;
   modified: string;
+  fileDiff?: FileDiffMetadata;
   language: string;
   fileName?: string;
   renderSideBySide: boolean;
   wrapLines?: boolean;
   layout?: 'fill' | 'inline';
+  enableComments?: boolean;
 }
 
 /**
@@ -77,10 +82,112 @@ export const PIERRE_RUNTIME_BASE_CSS = `
 const WEBKIT_SCROLL_FIX_CSS = `
   ${PIERRE_RUNTIME_BASE_CSS}
 
+  :host {
+    --diffs-bg-separator-override: var(--surface-elevated);
+  }
+
   [data-diff-header],
   [data-diff] {
     [data-separator] {
       height: 24px !important;
+    }
+  }
+
+  [data-separator="line-info-basic"] {
+    height: 24px !important;
+    background: var(--diffs-bg) !important;
+    position: relative;
+  }
+
+  [data-diff-type="single"] [data-gutter],
+  [data-diff-type="split"] [data-deletions] [data-gutter] {
+    [data-separator-wrapper] {
+      position: absolute;
+      left: 100%;
+      display: flex;
+      align-items: center;
+      gap: unset;
+      width: max-content;
+      background: transparent;
+      color: var(--diffs-fg-number);
+      font-family: var(--diffs-header-font-family, var(--font-sans));
+      font-size: 0.75rem;
+      line-height: 1;
+      margin-left: calc(-2ch - 2px);
+    }
+
+    [data-separator-wrapper][data-separator-multi-button] {
+      margin-left: calc(-3ch - 2px);
+    }
+
+    [data-expand-button],
+    [data-separator-content] {
+      display: block;
+      align-self: unset;
+      min-width: unset;
+      min-height: unset;
+      padding: 0;
+      flex-shrink: 0;
+      grid-column: unset;
+      border: none;
+      width: auto;
+      height: auto;
+      background-color: transparent;
+      color: inherit;
+      font: inherit;
+    }
+
+    [data-expand-button]:not([data-expand-all-button]) {
+      &[data-expand-down]::before {
+        content: '\\2191';
+      }
+
+      &[data-expand-up]::before {
+        content: '\\2193';
+      }
+
+      &[data-expand-both]::before {
+        content: '\\2195';
+      }
+
+      svg {
+        display: none;
+      }
+    }
+
+    [data-separator-content] {
+      background: transparent;
+      margin-left: calc(2px + 1ch);
+    }
+
+    [data-expand-all-button] {
+      position: relative;
+      margin-left: 14px;
+      text-transform: lowercase;
+    }
+
+    [data-expand-all-button]::before {
+      content: '';
+      display: block;
+      position: absolute;
+      top: 50%;
+      left: -8px;
+      margin-top: -1px;
+      width: 3px;
+      height: 3px;
+      border-radius: 2px;
+      background-color: var(--diffs-fg-number);
+      pointer-events: none;
+    }
+
+    [data-separator-content]:hover,
+    [data-expand-button]:hover,
+    [data-expand-all-button]:hover {
+      color: var(--diffs-fg);
+    }
+
+    [data-expand-all-button]:hover {
+      text-decoration: underline;
     }
   }
   `;
@@ -105,10 +212,17 @@ function makeContentCacheKey(contents: string): string {
   return `${contents.length}:${fnv1a32(sample)}`;
 }
 
-const extractSelectedCode = (original: string, modified: string, range: SelectedLineRange): string => {
+const extractSelectedCode = (
+  original: string,
+  modified: string,
+  fileDiff: FileDiffMetadata | undefined,
+  range: SelectedLineRange,
+): string => {
   // Default to modified if side is ambiguous, as users mostly comment on new code
   const isOriginal = range.side === 'deletions';
-  const content = isOriginal ? original : modified;
+  const content = fileDiff
+    ? (isOriginal ? fileDiff.deletionLines : fileDiff.additionLines).join('')
+    : (isOriginal ? original : modified);
   const lines = content.split('\n');
 
   // Ensure bounds
@@ -128,8 +242,111 @@ const isSameSelection = (left: SelectedLineRange | null, right: SelectedLineRang
   return left.start === right.start && left.end === right.end && left.side === right.side;
 };
 
+const isScrollable = (value: string): boolean =>
+  value === 'auto' || value === 'scroll' || value === 'overlay';
+
+const findScrollParent = (node: HTMLElement | null): HTMLElement | null => {
+  let current = node?.parentElement ?? null;
+  while (current) {
+    const style = window.getComputedStyle(current);
+    if (isScrollable(style.overflowY)) return current;
+    current = current.parentElement;
+  }
+  return null;
+};
+
+const preserveScrollPosition = (wrapper: HTMLElement | null, container: HTMLElement | null): (() => void) => {
+  if (!wrapper || !container || typeof window === 'undefined') return () => {};
+
+  const scrollParent = findScrollParent(wrapper);
+  if (!scrollParent) return () => {};
+
+  const height = container.getBoundingClientRect().height;
+  if (!height) return () => {};
+
+  const top = wrapper.getBoundingClientRect().top - scrollParent.getBoundingClientRect().top;
+  const previousMinHeight = container.style.minHeight;
+  container.style.minHeight = `${Math.ceil(height)}px`;
+
+  let done = false;
+  return () => {
+    if (done) return;
+    done = true;
+    container.style.minHeight = previousMinHeight;
+
+    const nextTop = wrapper.getBoundingClientRect().top - scrollParent.getBoundingClientRect().top;
+    const delta = nextTop - top;
+    if (delta) {
+      scrollParent.scrollTop += delta;
+    }
+  };
+};
+
+const waitForDiffReady = (
+  container: HTMLElement,
+  onReady: () => void,
+): (() => void) => {
+  if (typeof window === 'undefined') return () => {};
+
+  let frameId: number | null = null;
+  let observer: MutationObserver | null = null;
+  let cancelled = false;
+
+  const finish = () => {
+    if (cancelled) return;
+    observer?.disconnect();
+    observer = null;
+    frameId = window.requestAnimationFrame(() => {
+      frameId = window.requestAnimationFrame(() => {
+        if (!cancelled) onReady();
+      });
+    });
+  };
+
+  const getRoot = (): ShadowRoot | undefined => {
+    const host = container.querySelector('diffs-container');
+    return host?.shadowRoot ?? undefined;
+  };
+
+  const isReady = (root = getRoot()) => {
+    return Boolean(root?.querySelector('[data-line]'));
+  };
+
+  if (isReady()) {
+    finish();
+  } else if (typeof MutationObserver !== 'undefined') {
+    observer = new MutationObserver(() => {
+      const root = getRoot();
+      if (!root) return;
+      if (isReady(root)) {
+        finish();
+        return;
+      }
+      observer?.disconnect();
+      observer = new MutationObserver(() => {
+        if (isReady(root)) {
+          finish();
+        }
+      });
+      observer.observe(root, { childList: true, subtree: true });
+    });
+    observer.observe(container, { childList: true, subtree: true });
+  } else {
+    frameId = window.requestAnimationFrame(finish);
+  }
+
+  return () => {
+    cancelled = true;
+    observer?.disconnect();
+    if (frameId !== null) {
+      window.cancelAnimationFrame(frameId);
+    }
+  };
+};
+
 type SharedVirtualizer = {
   virtualizer: Virtualizer;
+  root: Document | HTMLElement;
   release: () => void;
 };
 
@@ -149,7 +366,7 @@ const virtualizerCache = new WeakMap<Document | HTMLElement, VirtualizerEntry>()
 const VIRTUAL_METRICS: Partial<VirtualFileMetrics> = {
   lineHeight: 24,
   hunkSeparatorHeight: 24,
-  fileGap: 0,
+  spacing: 0,
 };
 
 function resolveVirtualizerTarget(container: HTMLElement): VirtualizerTarget {
@@ -188,6 +405,7 @@ function acquireSharedVirtualizer(container: HTMLElement): SharedVirtualizer | n
 
   return {
     virtualizer: entry.virtualizer,
+    root: target.root,
     release: () => {
       if (released) return;
       released = true;
@@ -204,14 +422,54 @@ function acquireSharedVirtualizer(container: HTMLElement): SharedVirtualizer | n
   };
 }
 
+const wakeVirtualizer = (
+  instance: PierreFileDiff<PierreAnnotationData>,
+  sharedVirtualizer: SharedVirtualizer | null,
+  forceUpdate: () => void,
+): (() => void) => {
+  if (typeof window === 'undefined') return () => {};
+
+  const frameIds: number[] = [];
+  const run = () => {
+    try {
+      instance.rerender();
+    } catch {
+      // ignored
+    }
+
+    const root = sharedVirtualizer?.root;
+    if (root instanceof HTMLElement) {
+      root.dispatchEvent(new Event('scroll', { bubbles: false }));
+    } else {
+      document.dispatchEvent(new Event('scroll', { bubbles: false }));
+    }
+
+    window.dispatchEvent(new Event('resize'));
+    forceUpdate();
+  };
+
+  frameIds.push(window.requestAnimationFrame(run));
+  frameIds.push(window.requestAnimationFrame(() => {
+    frameIds.push(window.requestAnimationFrame(run));
+  }));
+
+  return () => {
+    for (const frameId of frameIds) {
+      window.cancelAnimationFrame(frameId);
+    }
+  };
+};
+
 export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
   original,
   modified,
+  fileDiff,
   language,
   fileName,
   renderSideBySide,
   wrapLines,
   layout = 'fill',
+  enableComments = true,
 }) => {
   const themeContext = useOptionalThemeSystem();
 
@@ -225,7 +483,7 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
     source: 'diff',
     fileLabel: fileName || 'unknown',
     language,
-    getCodeForRange: (range) => extractSelectedCode(original, modified, range),
+    getCodeForRange: (range) => extractSelectedCode(original, modified, fileDiff, range),
     toStoreRange: (range) => ({
       startLine: range.start,
       endLine: range.end,
@@ -272,6 +530,10 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
   }, [commentText]);
 
   const handleSelectionChange = useCallback((range: SelectedLineRange | null) => {
+    if (!enableComments) {
+      return;
+    }
+
     // Ignore callbacks while we're programmatically applying selection
     if (isApplyingSelectionRef.current) {
       return;
@@ -298,7 +560,7 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
         setCommentText('');
       }
     }
-  }, [isMobile, setCommentText, setSelection]);
+  }, [enableComments, isMobile, setCommentText, setSelection]);
 
   const handleCancelComment = useCallback(() => {
     cancel();
@@ -375,12 +637,28 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
 
   const diffThemeKey = `${lightTheme.metadata.id}:${darkTheme.metadata.id}:${isDark ? 'dark' : 'light'}`;
 
+  const isLargeContent = useMemo(() => {
+    if (fileDiff) {
+      const deletionLength = fileDiff.deletionLines.reduce((total, line) => total + line.length, 0);
+      const additionLength = fileDiff.additionLines.reduce((total, line) => total + line.length, 0);
+      return Math.max(deletionLength, additionLength) > LARGE_CONTENT_BYTES;
+    }
+
+    return Math.max(original.length, modified.length) > LARGE_CONTENT_BYTES;
+  }, [fileDiff, modified.length, original.length]);
+
   const diffRootRef = useRef<HTMLDivElement | null>(null);
   const diffContainerRef = useRef<HTMLDivElement | null>(null);
-  const diffInstanceRef = useRef<PierreFileDiff<unknown> | null>(null);
+  const diffInstanceRef = useRef<PierreFileDiff<PierreAnnotationData> | null>(null);
   const sharedVirtualizerRef = useRef<SharedVirtualizer | null>(null);
+  const instanceVirtualizerRef = useRef<Virtualizer | null>(null);
+  const instanceWorkerPoolRef = useRef<unknown>(null);
+  const instanceVirtualHunkSeparatorsRef = useRef<FileDiffOptions<PierreAnnotationData>['hunkSeparators'] | undefined>(undefined);
+  const instanceFileDiffRef = useRef<FileDiffMetadata | undefined>(undefined);
+  const instanceOldFileRef = useRef<FileContents | undefined>(undefined);
+  const instanceNewFileRef = useRef<FileContents | undefined>(undefined);
   const [, forceUpdate] = React.useReducer((x) => x + 1, 0);
-  const workerPool = useWorkerPool(renderSideBySide ? 'split' : 'unified');
+  const workerPool = useWorkerPool(isLargeContent ? 'unified' : (renderSideBySide ? 'split' : 'unified'));
 
   const lightResolvedTheme = useMemo(() => getResolvedShikiTheme(lightTheme), [lightTheme]);
   const darkResolvedTheme = useMemo(() => getResolvedShikiTheme(darkTheme), [darkTheme]);
@@ -460,11 +738,6 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
   }, [darkResolvedTheme, diffThemeKey, isDark, lightResolvedTheme]);
 
 
-  const isLargeContent = useMemo(() =>
-    Math.max(original.length, modified.length) > LARGE_CONTENT_BYTES,
-    [original.length, modified.length],
-  );
-
   const options = useMemo(() => ({
     theme: {
       dark: darkTheme.metadata.id,
@@ -479,24 +752,30 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
     // Perf: degrade tokenization/highlighting for large files (>500KB)
     maxLineDiffLength: isLargeContent ? 0 : 1000,
     maxLineLengthForHighlighting: isLargeContent ? 1 : 1000,
+    tokenizeMaxLineLength: isLargeContent ? 1 : 1000,
+    collapsedContextThreshold: 0,
     expansionLineCount: 20,
     overflow: wrapLines ? ('wrap' as const) : ('scroll' as const),
     disableFileHeader: true,
-    enableLineSelection: true,
+    enableLineSelection: enableComments,
     enableHoverUtility: false,
-    onLineSelected: handleSelectionChange,
+    onLineSelected: enableComments ? handleSelectionChange : undefined,
     unsafeCSS: WEBKIT_SCROLL_FIX_CSS,
-    renderAnnotation,
-  }), [darkTheme.metadata.id, isDark, isLargeContent, lightTheme.metadata.id, renderSideBySide, wrapLines, handleSelectionChange, renderAnnotation]);
+    renderAnnotation: enableComments ? renderAnnotation : undefined,
+  }), [darkTheme.metadata.id, enableComments, isDark, isLargeContent, lightTheme.metadata.id, renderSideBySide, wrapLines, handleSelectionChange, renderAnnotation]);
 
 
   const lineAnnotations = useMemo(() => {
+    if (!enableComments) {
+      return [];
+    }
+
     return buildPierreLineAnnotations({
       drafts: fileDrafts,
       editingDraftId,
       selection,
     });
-  }, [editingDraftId, fileDrafts, selection]);
+  }, [editingDraftId, enableComments, fileDrafts, selection]);
 
   const lineAnnotationsRef = useRef(lineAnnotations);
 
@@ -505,69 +784,135 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
   }, [lineAnnotations]);
 
   useEffect(() => {
+    const container = diffContainerRef.current;
+    return () => {
+      diffInstanceRef.current?.cleanUp();
+      diffInstanceRef.current = null;
+      sharedVirtualizerRef.current?.release();
+      sharedVirtualizerRef.current = null;
+      instanceVirtualizerRef.current = null;
+      instanceWorkerPoolRef.current = null;
+      instanceVirtualHunkSeparatorsRef.current = undefined;
+      instanceFileDiffRef.current = undefined;
+      instanceOldFileRef.current = undefined;
+      instanceNewFileRef.current = undefined;
+      if (container) {
+        container.innerHTML = '';
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     if (typeof window === 'undefined') return;
 
     const container = diffContainerRef.current;
+    const wrapper = diffRootRef.current;
     if (!container) return;
     if (!workerPool) return;
 
-    // Dispose previous instance
-    diffInstanceRef.current?.cleanUp();
-    diffInstanceRef.current = null;
-    sharedVirtualizerRef.current?.release();
-    sharedVirtualizerRef.current = null;
-    container.innerHTML = '';
-
-    const sharedVirtualizer = acquireSharedVirtualizer(container);
+    const preserveDone = preserveScrollPosition(wrapper, container);
+    let sharedVirtualizer = sharedVirtualizerRef.current;
+    if (!sharedVirtualizer) {
+      sharedVirtualizer = acquireSharedVirtualizer(container);
+      sharedVirtualizerRef.current = sharedVirtualizer;
+    }
     sharedVirtualizerRef.current = sharedVirtualizer;
+    const virtualizer = sharedVirtualizer?.virtualizer ?? null;
 
-    const instance = sharedVirtualizer
-      ? new VirtualizedFileDiff(
-          options as unknown as FileDiffOptions<unknown>,
-          sharedVirtualizer.virtualizer,
-          VIRTUAL_METRICS,
-          workerPool,
-        )
-      : new PierreFileDiff(options as unknown as FileDiffOptions<unknown>, workerPool);
-    diffInstanceRef.current = instance;
-    lastAppliedSelectionRef.current = null;
-
-    const oldFile: FileContents = {
+    const oldFile: FileContents | undefined = fileDiff ? undefined : {
       name: fileName || '',
       contents: original,
       lang: language as FileContents['lang'],
       cacheKey: `old:${diffThemeKey}:${fileName}:${makeContentCacheKey(original)}`,
     };
-    const newFile: FileContents = {
+    const newFile: FileContents | undefined = fileDiff ? undefined : {
       name: fileName || '',
       contents: modified,
       lang: language as FileContents['lang'],
       cacheKey: `new:${diffThemeKey}:${fileName}:${makeContentCacheKey(modified)}`,
     };
 
-    instance.render({
-      oldFile,
-      newFile,
-      lineAnnotations: lineAnnotationsRef.current,
-      containerWrapper: container,
-    });
+    const targetChanged = fileDiff
+      ? instanceFileDiffRef.current !== fileDiff
+      : instanceFileDiffRef.current !== undefined
+        || !oldFile
+        || !newFile
+        || !instanceOldFileRef.current
+        || !instanceNewFileRef.current
+        || !areFilesEqual(instanceOldFileRef.current, oldFile)
+        || !areFilesEqual(instanceNewFileRef.current, newFile);
 
-    requestAnimationFrame(() => {
-      forceUpdate();
+    const currentInstance = diffInstanceRef.current;
+    const shouldReset = Boolean(
+      currentInstance
+      && (
+        instanceVirtualizerRef.current !== virtualizer
+        || instanceWorkerPoolRef.current !== workerPool
+        || (virtualizer && (instanceVirtualHunkSeparatorsRef.current !== options.hunkSeparators || targetChanged))
+      )
+    );
+
+    if (shouldReset) {
+      currentInstance?.cleanUp();
+      diffInstanceRef.current = null;
+      container.innerHTML = '';
+    }
+
+    let instance = diffInstanceRef.current;
+    const forceRender = !shouldReset && currentInstance
+      ? !areOptionsEqual(currentInstance.options, options)
+      : false;
+    if (!instance) {
+      instance = sharedVirtualizer
+        ? new VirtualizedFileDiff<PierreAnnotationData>(
+            options as FileDiffOptions<PierreAnnotationData>,
+            sharedVirtualizer.virtualizer,
+            VIRTUAL_METRICS,
+            workerPool,
+          )
+        : new PierreFileDiff(options as FileDiffOptions<PierreAnnotationData>, workerPool);
+      diffInstanceRef.current = instance;
+      lastAppliedSelectionRef.current = null;
+    } else {
+      instance.setOptions(options as FileDiffOptions<PierreAnnotationData>);
+    }
+
+    instanceVirtualizerRef.current = virtualizer;
+    instanceWorkerPoolRef.current = workerPool;
+    instanceVirtualHunkSeparatorsRef.current = virtualizer ? options.hunkSeparators : undefined;
+    instanceFileDiffRef.current = fileDiff;
+    instanceOldFileRef.current = oldFile;
+    instanceNewFileRef.current = newFile;
+
+    if (fileDiff) {
+      instance.render({
+        fileDiff,
+        forceRender,
+        lineAnnotations: lineAnnotationsRef.current,
+        containerWrapper: container,
+      });
+    } else {
+      if (!oldFile || !newFile) return;
+
+      instance.render({
+        oldFile,
+        newFile,
+        forceRender,
+        lineAnnotations: lineAnnotationsRef.current,
+        containerWrapper: container,
+      });
+    }
+
+    const cancelReady = waitForDiffReady(container, () => {
+      preserveDone();
+      wakeVirtualizer(instance, sharedVirtualizer, forceUpdate);
     });
 
     return () => {
-      instance.cleanUp();
-      if (diffInstanceRef.current === instance) {
-        diffInstanceRef.current = null;
-      }
-      sharedVirtualizer?.release();
-      if (sharedVirtualizer && sharedVirtualizerRef.current === sharedVirtualizer) {
-        sharedVirtualizerRef.current = null;
-      }
-      container.innerHTML = '';
+      cancelReady();
+      preserveDone();
     };
-  }, [diffThemeKey, fileName, language, modified, options, original, workerPool]);
+  }, [diffThemeKey, fileDiff, fileName, language, modified, options, original, workerPool]);
 
   useEffect(() => {
     const instance = diffInstanceRef.current;
@@ -623,6 +968,8 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
   }, [selection]);
 
   useEffect(() => {
+    if (!enableComments) return;
+
     const container = diffContainerRef.current;
     if (!container) return;
 
@@ -674,7 +1021,7 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
       }
       cleanup();
     };
-  }, [diffThemeKey, fileName, handleSelectionChange, resolveClickedSide]);
+  }, [diffThemeKey, enableComments, fileName, handleSelectionChange, resolveClickedSide]);
 
   // MutationObserver to trigger re-renders when annotation DOM nodes are added/removed
   useEffect(() => {
@@ -717,7 +1064,7 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
     return null;
   }
 
-  const commentOverlays = (
+  const commentOverlays = enableComments ? (
     <PierreDiffCommentOverlays
       diffRootRef={diffRootRef}
       drafts={fileDrafts}
@@ -738,7 +1085,7 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
       }}
       onDelete={deleteDraft}
     />
-  );
+  ) : null;
 
   if (layout === 'fill') {
     return (
@@ -764,9 +1111,9 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
   return (
     <div className={cn("relative", "w-full")}>
       <div ref={diffRootRef} className="pierre-diff-wrapper w-full overflow-x-auto overflow-y-visible relative">
-        <div ref={diffContainerRef} className="w-full" />
-      </div>
-      {commentOverlays}
+      <div ref={diffContainerRef} className="w-full" />
     </div>
+    {commentOverlays}
+  </div>
   );
 };

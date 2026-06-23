@@ -251,7 +251,9 @@ jobs:
 
   build-desktop-electron-windows:
     needs: create-release
-    runs-on: windows-latest
+    # windows-latest currently resolves to a runner with Visual Studio 18,
+    # which this electron/node-gyp stack does not detect correctly.
+    runs-on: windows-2022
     strategy:
       fail-fast: false
       matrix:

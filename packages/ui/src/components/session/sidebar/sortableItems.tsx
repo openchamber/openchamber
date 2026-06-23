@@ -169,6 +169,8 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                   className={cn('w-full text-left group/project select-none')}
                   style={{ backgroundColor: isDesktopShell && isStuck ? 'transparent' : undefined }}
                   onContextMenu={(event) => {
+                    // VS Code hides project actions entirely (hideDirectoryControls).
+                    if (hideDirectoryControls) return;
                     event.preventDefault();
                     setIsContextMenuOpen(true);
                   }}
@@ -266,6 +268,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                   </Tooltip>
                 ) : null}
 
+                {!hideDirectoryControls ? (
                 <DropdownMenu
                   open={isMenuOpen}
                   onOpenChange={handleMenuOpenChange}
@@ -293,6 +296,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                       {renderProjectMenuItems(DropdownMenuItem)}
                     </DropdownMenuContent>
                   </DropdownMenu>
+                ) : null}
               </div>
 
               {showCreateButtons && onNewSession ? (

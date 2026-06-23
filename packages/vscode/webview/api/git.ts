@@ -41,6 +41,24 @@ import type {
   ResetToCommitResponse,
 } from '@openchamber/ui/lib/api/types';
 
+type GitIdentityStoreState = {
+  profiles: GitIdentityProfile[];
+};
+
+type GitIdentityStoreApi = {
+  getState: () => GitIdentityStoreState;
+  setState: (
+    nextState: GitIdentityStoreState | ((state: GitIdentityStoreState) => GitIdentityStoreState),
+    replace?: boolean
+  ) => void;
+};
+
+const getGitIdentityStore = (): GitIdentityStoreApi | undefined => (
+  window as Window & {
+    __zustand_git_identities_store__?: GitIdentityStoreApi;
+  }
+).__zustand_git_identities_store__;
+
 export const createVSCodeGitAPI = (): GitAPI => ({
   checkIsGitRepository: async (directory: string): Promise<boolean> => {
     return sendBridgeMessage<boolean>('api:git/check', { directory });
@@ -85,6 +103,18 @@ export const createVSCodeGitAPI = (): GitAPI => ({
 
   unstageGitFiles: async (directory: string, filePaths: string[]): Promise<void> => {
     await sendBridgeMessage('api:git/unstage', { directory, paths: filePaths });
+  },
+
+  stageGitHunk: async (directory: string, filePath: string, patch: string): Promise<void> => {
+    await sendBridgeMessage('api:git/apply-hunk', { directory, path: filePath, patch, action: 'stage' });
+  },
+
+  unstageGitHunk: async (directory: string, filePath: string, patch: string): Promise<void> => {
+    await sendBridgeMessage('api:git/apply-hunk', { directory, path: filePath, patch, action: 'unstage' });
+  },
+
+  revertGitHunk: async (directory: string, filePath: string, patch: string): Promise<void> => {
+    await sendBridgeMessage('api:git/apply-hunk', { directory, path: filePath, patch, action: 'discard' });
   },
 
   isLinkedWorktree: async (directory: string): Promise<boolean> => {
@@ -299,31 +329,69 @@ export const createVSCodeGitAPI = (): GitAPI => ({
   },
 
   setGitIdentity: async (directory: string, profileId: string): Promise<{ success: boolean; profile: GitIdentityProfile }> => {
-    // For VS Code, we need to resolve the profile from the store
-    // This is a simplified implementation - the full implementation would need profile lookup
+    const store = (window as Window & {
+      __zustand_git_identities_store__?: {
+        getState: () => {
+          getProfileById: (id: string) => GitIdentityProfile | undefined;
+        };
+      };
+    }).__zustand_git_identities_store__;
+    const profile = store?.getState().getProfileById(profileId);
+    if (!profile) {
+      return {
+        success: false,
+        profile: { id: profileId, name: '', userName: '', userEmail: '' },
+      };
+    }
+
+    const result = await sendBridgeMessage<{ success: boolean }>('api:git/identity', {
+      directory,
+      method: 'POST',
+      userName: profile.userName,
+      userEmail: profile.userEmail,
+      sshKey: profile.sshKey ?? null,
+      signCommits: profile.signCommits === true,
+      signingKey: profile.signingKey ?? null,
+    });
+
     return {
-      success: false,
-      profile: { id: profileId, name: '', userName: '', userEmail: '' },
+      success: result.success === true,
+      profile,
     };
   },
 
-  // Git identity profile management - these are stored in extension settings
-  // For simplicity, return empty arrays/objects as these are managed through the settings UI
+  // Git identity profile management is backed by the webview store in VS Code.
   getGitIdentities: async (): Promise<GitIdentityProfile[]> => {
-    return [];
+    return getGitIdentityStore()?.getState().profiles ?? [];
   },
 
   createGitIdentity: async (profile: GitIdentityProfile): Promise<GitIdentityProfile> => {
+    const store = getGitIdentityStore();
+    if (store) {
+      store.setState((state) => ({
+        profiles: [...state.profiles.filter((existing) => existing.id !== profile.id), profile],
+      }));
+    }
     return profile;
   },
 
   updateGitIdentity: async (id: string, profile: GitIdentityProfile): Promise<GitIdentityProfile> => {
-    void id; // Unused for now
+    const store = getGitIdentityStore();
+    if (store) {
+      store.setState((state) => ({
+        profiles: state.profiles.map((existing) => (existing.id === id ? { ...existing, ...profile, id } : existing)),
+      }));
+    }
     return profile;
   },
 
   deleteGitIdentity: async (id: string): Promise<void> => {
-    void id; // Unused for now
+    const store = getGitIdentityStore();
+    if (store) {
+      store.setState((state) => ({
+        profiles: state.profiles.filter((existing) => existing.id !== id),
+      }));
+    }
   },
 
   getRemotes: async (directory: string): Promise<GitRemote[]> => {

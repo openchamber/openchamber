@@ -326,7 +326,9 @@ export async function handleConfigBridgeMessage(
       }
 
       if (normalizedMethod === 'DELETE') {
-        deleteAgent(agentName, workingDirectory);
+        const scopeValue = body?.scope as string | undefined;
+        const scope: AgentScope | undefined = scopeValue === 'project' ? AGENT_SCOPE.PROJECT : scopeValue === 'user' ? AGENT_SCOPE.USER : undefined;
+        deleteAgent(agentName, workingDirectory, scope);
         await ctx?.manager?.restart();
         return {
           id,

@@ -1,6 +1,28 @@
-## [Unreleased]
+## [1.13.2] - 2026-06-18
 
+- Chat/Performance: long conversations and large session lists now stay smooth and responsive while a response is streaming (thanks to @bashrusakh).
+- Chat: the end of a streamed response is no longer occasionally cut off — messages now always settle on their complete text (thanks to @IbrahimKhan12).
+- Chat: paragraphs in assistant messages now have proper spacing instead of collapsing into a single block (thanks to @foundryseven).
+- Startup: the extension starts faster by no longer waiting on default OpenCode config, while your manual and per-directory model selections are preserved.
+
+## [1.13.1] - 2026-06-17
+
+- Startup: providers and agents now load faster at startup.
+- Chat: pinned welcome starters now appear immediately when a new draft session opens.
+- Chat: inline math delimiters no longer incorrectly treat currency amounts like `$50` as LaTeX math expressions.
+- Chat: code-block highlighting now runs off the main thread, keeping the UI responsive during code-heavy responses.
+- Chat: the context usage indicator now shows as a circular progress ring.
+- Agents: deleting a built-in agent no longer creates a disable override — the agent stays as-is instead of being silently disabled.
+- Agents: deleting an agent now shows an error toast when the definition is missing.
+
+## [1.13.0] - 2026-06-15
+
+- Startup: the extension opens faster — recent sessions, models, providers, and projects appear instantly from cache and refresh in the background, and the loading screen no longer lingers after the interface is ready.
+- Startup: requests made while OpenCode is still starting now wait briefly for it to become ready instead of failing, and if OpenCode fails to start the error now includes what it reported.
+- Sessions: the list now groups sessions under their workspace, so pinning sessions and moving them into folders work as expected.
+- Sessions: session rows now use a cleaner single-line layout, and a new control next to "archive all" toggles archived sessions on or off.
 - Chat: custom-answer question textareas resize more steadily while typing (thanks to @bigcoder84).
+- Chat/Performance: long conversations now use virtualized rendering to keep large histories responsive.
 - Chat/Input: tab-completing a mention no longer changes the selected agent (thanks to @Quat3rnion).
 - Chat/Input: Arrow Up moves the cursor inside multi-line drafts again instead of always opening prompt history.
 - Sessions: session menus now include a delete action (thanks to @ShogunPanda).

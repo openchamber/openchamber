@@ -1,6 +1,5 @@
 
 import React from 'react';
-import type { AnimationPlaybackControls } from 'motion';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { PatchDiff } from '@pierre/diffs/react';
 import { cn } from '@/lib/utils';
@@ -8,16 +7,12 @@ import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
 import { getToolMetadata } from '@/lib/toolHelpers';
 import type { ToolPart as ToolPartType, ToolState as ToolStateUnion } from '@opencode-ai/sdk/v2';
 import { toolDisplayStyles } from '@/lib/typography';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectorySync, useSessionMessageRecords, useEnsureSessionMessages } from '@/sync/sync-context';
-import { getSyncChildStores } from '@/sync/sync-refs';
 import { useUIStore } from '@/stores/useUIStore';
-import { useSessionActivity } from '@/hooks/useSessionActivity';
-import { opencodeClient } from '@/lib/opencode/client';
-import { isVSCodeRuntime } from '@/lib/desktop';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { Button } from '@/components/ui/button';
@@ -50,7 +45,7 @@ import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { useI18n } from '@/lib/i18n';
 import { getDiffPatchEntries, getPatchText } from './toolDiffUtils';
 
-const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-4 sm:!leading-6 tracking-normal';
+const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
 const TOOL_ROW_DESCRIPTION_CLASS = cn('typography-meta', TOOL_ROW_TEXT_CLASS);
 
@@ -60,7 +55,6 @@ interface ToolPartProps {
     part: ToolPartType;
     isExpanded: boolean;
     onToggle: (toolId: string) => void;
-    syntaxTheme: { [key: string]: React.CSSProperties };
     isMobile: boolean;
     alwaysShowActions?: boolean;
     onContentChange?: (reason?: ContentChangeReason) => void;
@@ -166,17 +160,6 @@ const normalizeToolName = (toolName: string | undefined | null): string => {
 };
 
 const MAX_DURATION_MS = 5 * 60 * 1000; // 5 minutes cap
-const TASK_TOOL_POLL_FAST_MS = 1200;
-const TASK_TOOL_POLL_IDLE_MS = 3200;
-const TASK_TOOL_POLL_HIDDEN_MS = 6000;
-const TASK_TOOL_INITIAL_FETCH_LIMIT = 500;
-const TASK_TOOL_ACTIVE_FETCH_LIMIT = 160;
-const TASK_TOOL_IDLE_FETCH_LIMIT = 80;
-const VSCODE_TASK_TOOL_INITIAL_FETCH_LIMIT = 30;
-const VSCODE_TASK_TOOL_ACTIVE_FETCH_LIMIT = 30;
-const VSCODE_TASK_TOOL_IDLE_FETCH_LIMIT = 30;
-const TASK_TOOL_NO_CHANGE_BACKOFF_AFTER_POLLS = 3;
-const TASK_TOOL_SETTLE_GRACE_MS = 2500;
 const TASK_TOOL_FALLBACK_RETRY_MS = 3000;
 const GIT_REFRESH_MUTATING_TOOLS = new Set([
     'bash',
@@ -201,29 +184,59 @@ const LiveDuration: React.FC<{ start: number; end?: number; active: boolean }> =
     return <>{formatDuration(start, end, now)}</>;
 };
 
-const EXPANDED_CONTENT_TRANSITION_MS = 0;
+const deferredToolBodyMounts: Array<{ active: boolean; fn: () => void }> = [];
+let deferredToolBodyFrame: number | undefined;
 
-const useAnimatedExpandedContent = (isExpanded: boolean) => {
-    const [shouldRender, setShouldRender] = React.useState(isExpanded);
+const flushDeferredToolBodyMounts = () => {
+    while (deferredToolBodyMounts.length > 0) {
+        const item = deferredToolBodyMounts.pop();
+        if (!item) {
+            break;
+        }
+        if (item.active) {
+            item.fn();
+            deferredToolBodyFrame = deferredToolBodyMounts.length > 0
+                ? window.requestAnimationFrame(flushDeferredToolBodyMounts)
+                : undefined;
+            return;
+        }
+    }
+
+    deferredToolBodyFrame = undefined;
+};
+
+const scheduleDeferredToolBodyMount = (fn: () => void) => {
+    if (typeof window === 'undefined') {
+        fn();
+        return () => undefined;
+    }
+
+    const item = { active: true, fn };
+    deferredToolBodyMounts.push(item);
+
+    if (deferredToolBodyFrame === undefined) {
+        deferredToolBodyFrame = window.requestAnimationFrame(() => {
+            deferredToolBodyFrame = window.requestAnimationFrame(flushDeferredToolBodyMounts);
+        });
+    }
+
+    return () => {
+        item.active = false;
+    };
+};
+
+const useDeferredExpandedContent = (isExpanded: boolean) => {
+    const [shouldRender, setShouldRender] = React.useState(false);
 
     React.useEffect(() => {
-        if (typeof window === 'undefined') {
-            setShouldRender(isExpanded);
-            return;
-        }
-
-        if (isExpanded) {
-            setShouldRender(true);
-            return;
-        }
-
-        const timer = window.setTimeout(() => {
+        if (!isExpanded) {
             setShouldRender(false);
-        }, EXPANDED_CONTENT_TRANSITION_MS);
+            return;
+        }
 
-        return () => {
-            window.clearTimeout(timer);
-        };
+        return scheduleDeferredToolBodyMount(() => {
+            setShouldRender(true);
+        });
     }, [isExpanded]);
 
     return shouldRender;
@@ -814,8 +827,7 @@ const ToolScrollableTextOutput: React.FC<{
     part: ToolPartType;
     metadata: Record<string, unknown> | undefined;
     input: Record<string, unknown> | undefined;
-    syntaxTheme: { [key: string]: React.CSSProperties };
-}> = ({ output, part, metadata, input, syntaxTheme }) => {
+}> = ({ output, part, metadata, input }) => {
     const { t } = useI18n();
     const renderedOutput = getToolOutputText(output, part, metadata);
     const outputLanguage = getToolOutputLanguage(output, part, metadata, input);
@@ -881,16 +893,13 @@ const ToolScrollableTextOutput: React.FC<{
                     />
                 ) : (
                     <div className="typography-code pr-12 text-muted-foreground/90">
-                        <SyntaxHighlighter
-                            style={syntaxTheme}
+                        <WorkerHighlightedCode
                             language="json"
-                            PreTag="div"
-                            customStyle={TOOL_COLLAPSED_CUSTOM_STYLE}
-                            codeTagProps={CODE_TAG_PROPS}
-                            wrapLongLines
-                        >
-                            {renderedOutput}
-                        </SyntaxHighlighter>
+                            code={renderedOutput}
+                            style={TOOL_COLLAPSED_CUSTOM_STYLE}
+                            codeStyle={CODE_TAG_PROPS.style}
+                            wrap
+                        />
                     </div>
                 )}
             </div>
@@ -899,16 +908,13 @@ const ToolScrollableTextOutput: React.FC<{
 
     return (
         <div className={part.tool === 'bash' ? 'typography-code text-muted-foreground/90' : undefined}>
-            <SyntaxHighlighter
-                style={syntaxTheme}
+            <WorkerHighlightedCode
                 language={outputLanguage}
-                PreTag="div"
-                customStyle={TOOL_COLLAPSED_CUSTOM_STYLE}
-                codeTagProps={CODE_TAG_PROPS}
-                wrapLongLines
-            >
-                {renderedOutput}
-            </SyntaxHighlighter>
+                code={renderedOutput}
+                style={TOOL_COLLAPSED_CUSTOM_STYLE}
+                codeStyle={CODE_TAG_PROPS.style}
+                wrap
+            />
         </div>
     );
 };
@@ -1004,41 +1010,6 @@ const buildTaskSummaryEntriesFromSession = (messages: SessionMessageWithParts[])
     return entries;
 };
 
-const buildTaskSessionMessagesSignature = (messages: SessionMessageWithParts[]): string => {
-    if (!Array.isArray(messages) || messages.length === 0) {
-        return '0';
-    }
-
-    const lastMessage = messages[messages.length - 1];
-    const lastMessageId = typeof lastMessage?.info?.id === 'string' ? lastMessage.info.id : '';
-    const lastMessageUpdated =
-        typeof lastMessage?.info?.time?.completed === 'number'
-            ? lastMessage.info.time.completed
-            : typeof lastMessage?.info?.time?.created === 'number'
-                ? lastMessage.info.time.created
-                : 0;
-    const lastParts = Array.isArray(lastMessage?.parts) ? lastMessage.parts : [];
-    const lastPart = lastParts[lastParts.length - 1] as Record<string, unknown> | undefined;
-    const tailType = typeof lastPart?.type === 'string' ? lastPart.type : '';
-    const tailId = typeof lastPart?.id === 'string' ? lastPart.id : '';
-    const tailTextLength = (() => {
-        const textCandidate = lastPart?.text;
-        if (typeof textCandidate === 'string') {
-            return textCandidate.length;
-        }
-        const stateCandidate = lastPart?.state;
-        if (stateCandidate && typeof stateCandidate === 'object') {
-            const stateStatus = (stateCandidate as Record<string, unknown>).status;
-            if (typeof stateStatus === 'string') {
-                return stateStatus.length;
-            }
-        }
-        return 0;
-    })();
-
-    return `${messages.length}:${lastMessageId}:${lastMessageUpdated}:${lastParts.length}:${tailType}:${tailId}:${tailTextLength}`;
-};
-
 const getTaskSummaryLabel = (entry: TaskToolSummaryEntry): string => {
     const title = entry.state?.title;
     if (typeof title === 'string' && title.trim().length > 0) {
@@ -1095,6 +1066,144 @@ const shouldRenderGitPathLabel = (toolName: string, label: string): boolean => {
 
     return /^[A-Za-z0-9_-]+$/.test(baseName);
 };
+
+const getTaskSummaryEntryRenderSignature = (entry: TaskToolSummaryEntry): string => {
+    const toolName = normalizeToolName(entry.tool);
+    const status = entry.state?.status ?? '';
+    const label = getTaskSummaryLabel(entry);
+    return `${entry.id ?? ''}\u0001${toolName}\u0001${status}\u0001${label}`;
+};
+
+const areTaskSummaryEntriesRenderEqual = (
+    prevEntries: TaskToolSummaryEntry[],
+    nextEntries: TaskToolSummaryEntry[],
+): boolean => {
+    if (prevEntries === nextEntries) return true;
+    if (prevEntries.length !== nextEntries.length) return false;
+    for (let index = 0; index < prevEntries.length; index += 1) {
+        if (getTaskSummaryEntryRenderSignature(prevEntries[index]) !== getTaskSummaryEntryRenderSignature(nextEntries[index])) {
+            return false;
+        }
+    }
+    return true;
+};
+
+const TaskSummaryEntryRow = React.memo(({
+    entry,
+    isMobile,
+    animateTailText,
+    showToolFileIcons,
+}: {
+    entry: TaskToolSummaryEntry;
+    isMobile: boolean;
+    animateTailText: boolean;
+    showToolFileIcons: boolean;
+}) => {
+    const normalizedToolName = normalizeToolName(entry.tool);
+    const toolName = normalizedToolName.length > 0 ? normalizedToolName : 'tool';
+    const label = getTaskSummaryLabel(entry);
+    const hasLabel = label.trim().length > 0;
+    const status = entry.state?.status;
+    const displayName = getToolMetadata(toolName).displayName;
+
+    return (
+        <ToolRevealOnMount animate={animateTailText} wipe>
+            <div className={cn('flex gap-2 min-w-0 w-full', isMobile ? 'items-start' : 'items-center')}>
+                <span className="flex-shrink-0 text-foreground/80">{getToolIcon(toolName)}</span>
+                <span
+                    className="typography-meta text-foreground/80 flex-shrink-0"
+                    style={{ color: 'var(--tools-title)' }}
+                    title={displayName}
+                >
+                    {displayName}
+                </span>
+                {hasLabel ? (
+                    status !== 'error' && shouldRenderGitPathLabel(toolName, label) ? (
+                        renderAnimatedPathWithIcon(label, animateTailText, true, showToolFileIcons)
+                    ) : (
+                        status === 'error' ? (
+                            <span className={cn(
+                                'typography-meta flex-1 min-w-0 text-[var(--status-error)]',
+                                isMobile ? 'whitespace-normal break-words' : 'truncate',
+                            )}>
+                                {label}
+                            </span>
+                        ) : (
+                            <Text
+                                variant={animateTailText ? 'generate-effect' : 'static'}
+                                className={cn(
+                                    'typography-meta flex-1 min-w-0 text-muted-foreground/70',
+                                    isMobile ? 'whitespace-normal break-words' : 'truncate',
+                                )}
+                                style={{ color: 'var(--tools-description)' }}
+                                title={label}
+                            >
+                                {label}
+                            </Text>
+                        )
+                    )
+                ) : null}
+            </div>
+        </ToolRevealOnMount>
+    );
+}, (prev, next) => {
+    return prev.isMobile === next.isMobile
+        && prev.animateTailText === next.animateTailText
+        && prev.showToolFileIcons === next.showToolFileIcons
+        && getTaskSummaryEntryRenderSignature(prev.entry) === getTaskSummaryEntryRenderSignature(next.entry);
+});
+
+TaskSummaryEntryRow.displayName = 'TaskSummaryEntryRow';
+
+const TaskSummaryEntriesList = React.memo(({
+    entries,
+    isExpanded,
+    isMobile,
+    animateTailText,
+    showToolFileIcons,
+}: {
+    entries: TaskToolSummaryEntry[];
+    isExpanded: boolean;
+    isMobile: boolean;
+    animateTailText: boolean;
+    showToolFileIcons: boolean;
+}) => {
+    const visibleEntries = isExpanded ? entries : entries.slice(-6);
+    const hiddenCount = Math.max(0, entries.length - visibleEntries.length);
+    const visibleStartIndex = entries.length - visibleEntries.length;
+
+    return (
+        <ToolScrollableSection maxHeightClass={isExpanded ? 'max-h-[40vh]' : 'max-h-56'} disableHorizontal>
+            <div className="w-full min-w-0 space-y-1">
+                {hiddenCount > 0 ? (
+                    <div className="typography-micro text-muted-foreground/70">+{hiddenCount} more…</div>
+                ) : null}
+
+                {visibleEntries.map((entry, idx) => {
+                    const absoluteIndex = isExpanded ? idx : visibleStartIndex + idx;
+                    const rowKey = entry.id ?? `${getTaskSummaryEntryRenderSignature(entry)}:${absoluteIndex}`;
+                    return (
+                        <TaskSummaryEntryRow
+                            key={rowKey}
+                            entry={entry}
+                            isMobile={isMobile}
+                            animateTailText={animateTailText}
+                            showToolFileIcons={showToolFileIcons}
+                        />
+                    );
+                })}
+            </div>
+        </ToolScrollableSection>
+    );
+}, (prev, next) => {
+    return prev.isExpanded === next.isExpanded
+        && prev.isMobile === next.isMobile
+        && prev.animateTailText === next.animateTailText
+        && prev.showToolFileIcons === next.showToolFileIcons
+        && areTaskSummaryEntriesRenderEqual(prev.entries, next.entries);
+});
+
+TaskSummaryEntriesList.displayName = 'TaskSummaryEntriesList';
 
 const stripTaskMetadataFromOutput = (output: string): string => {
     // Strip only a trailing <task_metadata>...</task_metadata> block.
@@ -1212,7 +1321,6 @@ const TaskToolSummary: React.FC<{
     const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
     const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
     const runtime = React.useContext(RuntimeAPIContext);
-    const displayEntries = entries;
 
     const trimmedOutput = typeof output === 'string'
         ? stripTaskMetadataFromOutput(output)
@@ -1241,7 +1349,7 @@ const TaskToolSummary: React.FC<{
         ? input.subagent_type
         : 'subagent';
 
-    if (displayEntries.length === 0 && !hasOutput && !sessionId) {
+    if (entries.length === 0 && !hasOutput && !sessionId) {
         return (
             <div className="relative pr-2 pb-2 pt-2 space-y-2 pl-[1.4375rem]">
                 <div className="typography-meta text-muted-foreground/70">
@@ -1251,9 +1359,6 @@ const TaskToolSummary: React.FC<{
         );
     }
 
-    const visibleEntries = isExpanded ? displayEntries : displayEntries.slice(-6);
-    const hiddenCount = Math.max(0, displayEntries.length - visibleEntries.length);
-
     return (
         <div
             className={cn(
@@ -1262,65 +1367,14 @@ const TaskToolSummary: React.FC<{
                 'before:top-[-0.25rem] before:bottom-0'
             )}
         >
-            {displayEntries.length > 0 ? (
-                <ToolScrollableSection maxHeightClass={isExpanded ? 'max-h-[40vh]' : 'max-h-56'} disableHorizontal>
-                    <div className="w-full min-w-0 space-y-1">
-                        {hiddenCount > 0 ? (
-                            <div className="typography-micro text-muted-foreground/70">+{hiddenCount} more…</div>
-                        ) : null}
-
-                        {visibleEntries.map((entry, idx) => {
-                            const normalizedToolName = normalizeToolName(entry.tool);
-                            const toolName = normalizedToolName.length > 0 ? normalizedToolName : 'tool';
-                            const label = getTaskSummaryLabel(entry);
-                            const hasLabel = label.trim().length > 0;
-                            const status = entry.state?.status;
-
-                            const displayName = getToolMetadata(toolName).displayName;
-
-                            return (
-                                <ToolRevealOnMount key={entry.id ?? `${toolName}-${idx}`} animate={animateTailText} wipe>
-                                    <div className={cn("flex gap-2 min-w-0 w-full", isMobile ? 'items-start' : 'items-center')}>
-                                        <span className="flex-shrink-0 text-foreground/80">{getToolIcon(toolName)}</span>
-                                        <span
-                                            className="typography-meta text-foreground/80 flex-shrink-0"
-                                            style={{ color: 'var(--tools-title)' }}
-                                            title={displayName}
-                                        >
-                                            {displayName}
-                                        </span>
-                                        {hasLabel ? (
-                                            status !== 'error' && shouldRenderGitPathLabel(toolName, label) ? (
-                                                renderAnimatedPathWithIcon(label, animateTailText, true, showToolFileIcons)
-                                            ) : (
-                                                status === 'error' ? (
-                                                    <span className={cn(
-                                                        'typography-meta flex-1 min-w-0 text-[var(--status-error)]',
-                                                        isMobile ? 'whitespace-normal break-words' : 'truncate'
-                                                    )}>
-                                                        {label}
-                                                    </span>
-                                                ) : (
-                                                    <Text
-                                                        variant={animateTailText ? 'generate-effect' : 'static'}
-                                                        className={cn(
-                                                            'typography-meta flex-1 min-w-0 text-muted-foreground/70',
-                                                            isMobile ? 'whitespace-normal break-words' : 'truncate'
-                                                        )}
-                                                        style={{ color: 'var(--tools-description)' }}
-                                                        title={label}
-                                                    >
-                                                        {label}
-                                                    </Text>
-                                                )
-                                            )
-                                        ) : null}
-                                    </div>
-                                </ToolRevealOnMount>
-                            );
-                        })}
-                    </div>
-                </ToolScrollableSection>
+            {entries.length > 0 ? (
+                <TaskSummaryEntriesList
+                    entries={entries}
+                    isExpanded={isExpanded}
+                    isMobile={isMobile}
+                    animateTailText={animateTailText}
+                    showToolFileIcons={showToolFileIcons}
+                />
             ) : null}
 
             {sessionId && (
@@ -1336,7 +1390,7 @@ const TaskToolSummary: React.FC<{
             )}
 
             {hasOutput ? (
-                <div className={cn('space-y-1', (displayEntries.length > 0 || sessionId) && 'pt-1')}
+                <div className={cn('space-y-1', (entries.length > 0 || sessionId) && 'pt-1')}
                 >
                     <button
                         type="button"
@@ -1388,7 +1442,7 @@ const TOOL_DIFF_METRICS = {
     lineHeight: 24,
     diffHeaderHeight: 44,
     hunkSeparatorHeight: 24,
-    fileGap: 0,
+    spacing: 0,
 };
 
 const TOOL_COLLAPSED_CUSTOM_STYLE: React.CSSProperties = {
@@ -1571,16 +1625,16 @@ DiffPreview.displayName = 'DiffPreview';
 interface ToolExpandedContentProps {
     part: ToolPartType;
     state: ToolStateUnion;
-    syntaxTheme: { [key: string]: React.CSSProperties };
     currentDirectory: string;
+    isExpanded: boolean;
     onShowPopup?: (content: ToolPopupContent) => void;
 }
 
 const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     part,
     state,
-    syntaxTheme,
     currentDirectory,
+    isExpanded,
     onShowPopup,
 }) => {
     const { t } = useI18n();
@@ -1828,7 +1882,6 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                     part={part}
                     metadata={metadata}
                     input={input}
-                    syntaxTheme={syntaxTheme}
                 />,
                 {
                     className: part.tool === 'bash' ? 'p-1 rounded-none' : 'p-1',
@@ -1873,7 +1926,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                                     </blockquote>
                                 ),
                                 {
-                                    maxHeightClass: 'max-h-60',
+                                    maxHeightClass: isWriteLikeTool && writeLikeInputPatch && isExpanded ? 'max-h-[50vh]' : 'max-h-60',
                                     className: part.tool === 'bash' ? 'tool-input-surface p-0 rounded-none' : 'tool-input-surface',
                                 }
                             )}
@@ -1919,9 +1972,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     part,
     isExpanded,
     onToggle,
-    syntaxTheme,
     isMobile,
-    alwaysShowActions = isMobile,
     onContentChange,
     onShowPopup,
     animateTailText = true,
@@ -1979,8 +2030,6 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     const onContentChangeRef = React.useRef(onContentChange);
     onContentChangeRef.current = onContentChange;
     const expandedContentRef = React.useRef<HTMLDivElement>(null);
-    const expandedContentAnimationRef = React.useRef<AnimationPlaybackControls | null>(null);
-    const expandedContentMountedRef = React.useRef(false);
 
     React.useLayoutEffect(() => {
         if (isTaskTool) {
@@ -1992,9 +2041,6 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             return;
         }
 
-        expandedContentMountedRef.current = true;
-        expandedContentAnimationRef.current?.stop();
-        expandedContentAnimationRef.current = null;
         element.style.height = isExpanded ? 'auto' : '0px';
         element.style.overflow = isExpanded ? 'visible' : 'hidden';
 
@@ -2002,13 +2048,6 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             onContentChangeRef.current?.('structural');
         }
     }, [isExpanded, isTaskTool, shouldNotifyStructuralChange]);
-
-    React.useEffect(() => {
-        return () => {
-            expandedContentAnimationRef.current?.stop();
-            expandedContentAnimationRef.current = null;
-        };
-    }, []);
 
     const stateWithData = state as ToolStateWithMetadata;
     const metadata = stateWithData.metadata;
@@ -2141,12 +2180,11 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                 isTaskTool,
                 parentSessionId: currentSessionId ?? undefined,
                 taskStartTime: taskSessionResolutionStart,
-                isTaskFinalized: isFinalized,
                 sessions: storeState.session,
                 sessionStatusMap: storeState.session_status,
                 hasRetried: taskFallbackRetried,
             });
-        }, [explicitTaskSessionId, isTaskTool, currentSessionId, taskSessionResolutionStart, isFinalized, taskFallbackRetried]),
+        }, [explicitTaskSessionId, isTaskTool, currentSessionId, taskSessionResolutionStart, taskFallbackRetried]),
         currentDirectory,
     );
 
@@ -2166,49 +2204,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         return buildTaskSummaryEntriesFromSession(childSessionMessages);
     }, [childSessionMessages, isTaskTool, taskSessionId]);
 
-    const childSessionHasInFlightTools = React.useMemo(() => {
-        if (!isTaskTool || !taskSessionId || !Array.isArray(childSessionMessages) || childSessionMessages.length === 0) {
-            return false;
-        }
-
-        for (const message of childSessionMessages) {
-            if (message?.info?.role !== 'assistant') {
-                continue;
-            }
-            const parts = Array.isArray(message.parts) ? message.parts : [];
-            for (const childPart of parts) {
-                if (childPart?.type !== 'tool') {
-                    continue;
-                }
-                const childStatus =
-                    typeof childPart === 'object' && childPart !== null && 'state' in childPart
-                        ? (childPart.state as { status?: string } | undefined)?.status
-                        : undefined;
-                if (childStatus === 'running' || childStatus === 'pending' || childStatus === 'started') {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }, [childSessionMessages, isTaskTool, taskSessionId]);
-
-    const childSessionActivity = useSessionActivity(taskSessionId, currentDirectory);
-    const [taskChildSeenActive, setTaskChildSeenActive] = React.useState(false);
-    const [taskChildPollingStopped, setTaskChildPollingStopped] = React.useState(false);
-    const [taskPendingFinalFetch, setTaskPendingFinalFetch] = React.useState(false);
-
-    const taskPollNoChangeCountRef = React.useRef(0);
-    const taskPollLastSignatureRef = React.useRef<string>('');
-    const taskFinalFetchDoneRef = React.useRef(false);
-
     React.useEffect(() => {
-        setTaskChildSeenActive(false);
-        setTaskChildPollingStopped(false);
-        setTaskPendingFinalFetch(false);
-        taskPollNoChangeCountRef.current = 0;
-        taskPollLastSignatureRef.current = '';
-        taskFinalFetchDoneRef.current = false;
         setTaskFallbackRetried(false);
     }, [taskSessionId]);
 
@@ -2246,148 +2242,6 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     ]);
 
     React.useEffect(() => {
-        if (hasFinalMetadataTaskSummary || !isTaskTool || !taskSessionId) {
-            return;
-        }
-
-        const childSessionIsActive =
-            childSessionActivity.phase === 'busy'
-            || childSessionActivity.phase === 'retry'
-            || childSessionHasInFlightTools;
-
-        if (childSessionIsActive) {
-            if (!taskChildSeenActive) {
-                setTaskChildSeenActive(true);
-            }
-            if (taskChildPollingStopped) {
-                setTaskChildPollingStopped(false);
-            }
-            if (taskPendingFinalFetch) {
-                setTaskPendingFinalFetch(false);
-            }
-            return;
-        }
-
-        // Always stop polling if already done.
-        if (taskChildPollingStopped && taskFinalFetchDoneRef.current) {
-            return;
-        }
-
-        // Normal settle path: child went idle after we saw it active, and we have entries.
-        // Schedule a grace period before marking polling as stopped.
-        if (taskChildSeenActive && childSessionTaskSummaryEntries.length > 0 && !taskChildPollingStopped) {
-            if (typeof window === 'undefined') {
-                setTaskChildPollingStopped(true);
-                return;
-            }
-
-            const timer = window.setTimeout(() => {
-                setTaskChildPollingStopped(true);
-            }, TASK_TOOL_SETTLE_GRACE_MS);
-
-            return () => {
-                window.clearTimeout(timer);
-            };
-        }
-
-        // Final-fetch path: child went idle before parent saw it active, or we have no
-        // entries yet. First stop polling after the settle grace period. A separate
-        // effect performs the final fetch once polling has fully stopped, avoiding
-        // races with any in-flight polling response.
-        if (!taskChildPollingStopped && !taskFinalFetchDoneRef.current) {
-            if (typeof window === 'undefined') {
-                setTaskPendingFinalFetch(true);
-                setTaskChildPollingStopped(true);
-                return;
-            }
-
-            const timer = window.setTimeout(() => {
-                setTaskPendingFinalFetch(true);
-                setTaskChildPollingStopped(true);
-            }, TASK_TOOL_SETTLE_GRACE_MS);
-
-            return () => {
-                window.clearTimeout(timer);
-            };
-        }
-    }, [
-        childSessionActivity.phase,
-        childSessionHasInFlightTools,
-        childSessionTaskSummaryEntries.length,
-        currentDirectory,
-        hasFinalMetadataTaskSummary,
-        activeLatched,
-        isFinalized,
-        isTaskTool,
-        taskPendingFinalFetch,
-        taskChildPollingStopped,
-        taskChildSeenActive,
-        taskSessionId,
-    ]);
-
-    React.useEffect(() => {
-        if (hasFinalMetadataTaskSummary || !isTaskTool || !taskSessionId || !taskChildPollingStopped || !taskPendingFinalFetch || taskFinalFetchDoneRef.current) {
-            return;
-        }
-
-        let cancelled = false;
-        const capturedSessionId = taskSessionId;
-
-        const runFinalFetch = async () => {
-            try {
-                const scopedClient = opencodeClient.getScopedSdkClient(currentDirectory);
-                const response = await scopedClient.session.messages({
-                    sessionID: capturedSessionId,
-                    limit: isVSCodeRuntime() ? VSCODE_TASK_TOOL_INITIAL_FETCH_LIMIT : TASK_TOOL_INITIAL_FETCH_LIMIT,
-                });
-
-                if (cancelled) {
-                    return;
-                }
-
-                const messages = response.data ?? [];
-                if (Array.isArray(messages) && messages.length > 0) {
-                    const childStores = getSyncChildStores();
-                    childStores.update(currentDirectory, (prev) => {
-                        const records = messages as SessionMessageWithParts[];
-                        const partPatch: Record<string, import('@opencode-ai/sdk/v2').Part[]> = { ...prev.part };
-                        for (const rec of records) {
-                            partPatch[rec.info.id] = rec.parts;
-                        }
-                        return {
-                            message: { ...prev.message, [capturedSessionId]: records.map((r) => r.info) as import('@opencode-ai/sdk/v2').Message[] },
-                            part: partPatch,
-                        };
-                    });
-                }
-
-                taskFinalFetchDoneRef.current = true;
-                setTaskPendingFinalFetch(false);
-            } catch {
-                if (cancelled) {
-                    return;
-                }
-
-                setTaskPendingFinalFetch(false);
-                setTaskChildPollingStopped(false);
-            }
-        };
-
-        void runFinalFetch();
-
-        return () => {
-            cancelled = true;
-        };
-    }, [
-        currentDirectory,
-        hasFinalMetadataTaskSummary,
-        isTaskTool,
-        taskChildPollingStopped,
-        taskPendingFinalFetch,
-        taskSessionId,
-    ]);
-
-    React.useEffect(() => {
         if (typeof time?.end === 'number' || typeof pinnedTime.end === 'number') {
             setLocalFinalizedAt(undefined);
             return;
@@ -2419,147 +2273,25 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         }
         return metadataTaskSummaryEntries;
     }, [childSessionTaskSummaryEntries, metadataTaskSummaryEntries]);
+    const taskSummaryRenderSignature = React.useMemo(() => {
+        return taskSummaryEntries.map(getTaskSummaryEntryRenderSignature).join('\u0000');
+    }, [taskSummaryEntries]);
+    const lastTaskSummaryRenderSignatureRef = React.useRef<string | null>(null);
 
-    React.useEffect(() => {
-        if (!isTaskTool || !taskSessionId) {
-            return;
-        }
-
-        const childSessionActive = childSessionActivity.phase === 'busy' || childSessionActivity.phase === 'retry';
-        if (hasFinalMetadataTaskSummary) {
-            return;
-        }
-
-        const shouldPoll =
-            !taskChildPollingStopped
-            && (childSessionHasInFlightTools || childSessionActive || childSessionTaskSummaryEntries.length === 0);
-        const shouldFetchSnapshot = !taskPendingFinalFetch && (childSessionTaskSummaryEntries.length === 0 || shouldPoll);
-        if (!shouldFetchSnapshot) {
-            return;
-        }
-
-        let cancelled = false;
-        let pollTimer: number | undefined;
-
-        const isVisible = () => {
-            if (typeof document === 'undefined') {
-                return true;
-            }
-            return document.visibilityState === 'visible';
-        };
-
-        const resolveFetchLimit = (isInitialFetch: boolean) => {
-            if (isVSCodeRuntime()) {
-                if (isInitialFetch && childSessionTaskSummaryEntries.length === 0) {
-                    return VSCODE_TASK_TOOL_INITIAL_FETCH_LIMIT;
-                }
-                if (isActive || childSessionHasInFlightTools || childSessionActive) {
-                    return VSCODE_TASK_TOOL_ACTIVE_FETCH_LIMIT;
-                }
-                return VSCODE_TASK_TOOL_IDLE_FETCH_LIMIT;
-            }
-
-            if (isInitialFetch && childSessionTaskSummaryEntries.length === 0) {
-                return TASK_TOOL_INITIAL_FETCH_LIMIT;
-            }
-            if (isActive || childSessionHasInFlightTools || childSessionActive) {
-                return TASK_TOOL_ACTIVE_FETCH_LIMIT;
-            }
-            return TASK_TOOL_IDLE_FETCH_LIMIT;
-        };
-
-        const resolvePollDelay = () => {
-            if (!isVisible()) {
-                return TASK_TOOL_POLL_HIDDEN_MS;
-            }
-            if (taskPollNoChangeCountRef.current >= TASK_TOOL_NO_CHANGE_BACKOFF_AFTER_POLLS) {
-                return TASK_TOOL_POLL_IDLE_MS;
-            }
-            return TASK_TOOL_POLL_FAST_MS;
-        };
-
-        const scheduleNextPoll = () => {
-            if (!shouldPoll || typeof window === 'undefined' || cancelled) {
-                return;
-            }
-            pollTimer = window.setTimeout(() => {
-                pollTimer = undefined;
-                void fetchSessionMessages(false);
-            }, resolvePollDelay());
-        };
-
-        const fetchSessionMessages = async (isInitialFetch: boolean) => {
-            try {
-                const scopedClient = opencodeClient.getScopedSdkClient(currentDirectory);
-                const response = await scopedClient.session.messages({
-                    sessionID: taskSessionId,
-                    limit: resolveFetchLimit(isInitialFetch),
-                });
-                const messages = response.data ?? [];
-                if (cancelled || !Array.isArray(messages) || messages.length === 0) {
-                    return;
-                }
-
-                const nextSignature = buildTaskSessionMessagesSignature(messages as SessionMessageWithParts[]);
-                if (nextSignature === taskPollLastSignatureRef.current) {
-                    taskPollNoChangeCountRef.current += 1;
-                    return;
-                }
-
-                taskPollLastSignatureRef.current = nextSignature;
-                taskPollNoChangeCountRef.current = 0;
-                // Inject fetched subagent messages into sync child store
-                const childStores = getSyncChildStores();
-                childStores.update(currentDirectory, (prev) => {
-                    const records = messages as SessionMessageWithParts[];
-                    const partPatch: Record<string, import('@opencode-ai/sdk/v2').Part[]> = { ...prev.part };
-                    for (const rec of records) {
-                        partPatch[rec.info.id] = rec.parts;
-                    }
-                    return {
-                        message: { ...prev.message, [taskSessionId]: records.map((r) => r.info) as import('@opencode-ai/sdk/v2').Message[] },
-                        part: partPatch,
-                    };
-                });
-            } catch {
-                // Ignore transient subagent fetch errors.
-            } finally {
-                scheduleNextPoll();
-            }
-        };
-
-        void fetchSessionMessages(true);
-
-        return () => {
-            cancelled = true;
-            if (typeof pollTimer === 'number') {
-                window.clearTimeout(pollTimer);
-            }
-        };
-    }, [
-        childSessionActivity.phase,
-        childSessionHasInFlightTools,
-        childSessionTaskSummaryEntries.length,
-        currentDirectory,
-        hasFinalMetadataTaskSummary,
-        isActive,
-        isTaskTool,
-        taskPendingFinalFetch,
-        taskChildPollingStopped,
-        taskSessionId,
-    ]);
-
-    const taskSummaryLenRef = React.useRef<number>(taskSummaryEntries.length);
     React.useEffect(() => {
         if (!isTaskTool) {
+            lastTaskSummaryRenderSignatureRef.current = null;
             return;
         }
-        if (taskSummaryLenRef.current === taskSummaryEntries.length) {
+
+        const previous = lastTaskSummaryRenderSignatureRef.current;
+        lastTaskSummaryRenderSignatureRef.current = taskSummaryRenderSignature;
+        if (previous === null || previous === taskSummaryRenderSignature || taskSummaryEntries.length === 0) {
             return;
         }
-        taskSummaryLenRef.current = taskSummaryEntries.length;
-        onContentChange?.('structural');
-    }, [isTaskTool, onContentChange, taskSummaryEntries.length]);
+
+        onContentChangeRef.current?.('structural');
+    }, [isTaskTool, taskSummaryEntries.length, taskSummaryRenderSignature]);
 
     const diffStats = React.useMemo(() => {
         return (normalizedPartTool === 'edit' || normalizedPartTool === 'multiedit' || normalizedPartTool === 'apply_patch')
@@ -2662,7 +2394,8 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
 
     const iconStyle = !isTaskTool && isError ? TOOL_ERROR_ICON_STYLE : TOOL_NORMAL_ICON_STYLE;
     const titleStyle = !isTaskTool && isError ? TOOL_ERROR_TITLE_STYLE : TOOL_NORMAL_TITLE_STYLE;
-    const shouldRenderExpandedContent = useAnimatedExpandedContent(isExpanded);
+    const shouldRenderTaskSummary = useDeferredExpandedContent(isTaskTool && (taskSummaryEntries.length > 0 || isActive || shouldTreatAsFinalized || !!taskSessionId));
+    const shouldRenderExpandedContent = useDeferredExpandedContent(!isTaskTool && isExpanded);
 
     if (!shouldTreatAsFinalized && !isActive && !isTaskTool) {
         return null;
@@ -2692,7 +2425,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                             className={cn(
                                 'absolute inset-0 transition-opacity',
                                 isExpanded && 'opacity-0',
-                                !isExpanded && (alwaysShowActions ? 'opacity-0' : 'group-hover/tool:opacity-0')
+                                !isExpanded && 'group-hover/tool:opacity-0'
                             )}
                             style={iconStyle}
                         >
@@ -2703,7 +2436,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                             className={cn(
                                 'absolute inset-0 transition-opacity flex items-center justify-center',
                                 isExpanded && 'opacity-100',
-                                !isExpanded && (alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/tool:opacity-100')
+                                !isExpanded && 'opacity-0 group-hover/tool:opacity-100'
                             )}
                         >
                             {isExpanded ? <Icon name="arrow-down-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-right-s" className="h-3.5 w-3.5" />}
@@ -2795,7 +2528,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             </div>
 
             {}
-            {isTaskTool && (taskSummaryEntries.length > 0 || isActive || shouldTreatAsFinalized || taskSessionId) ? (
+            {shouldRenderTaskSummary ? (
                 <TaskToolSummary
                     entries={taskSummaryEntries}
                     isExpanded={isExpanded}
@@ -2822,10 +2555,6 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                     {shouldRenderExpandedContent ? (
                         <div
                             className="relative ml-2 pl-3"
-                            style={{
-                                opacity: isExpanded ? 1 : 0,
-                                transform: isExpanded ? 'translateY(0)' : 'translateY(-4px)',
-                            }}
                         >
                             <span
                                 aria-hidden="true"
@@ -2835,8 +2564,8 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                             <ToolExpandedContent
                                 part={part}
                                 state={state}
-                                syntaxTheme={syntaxTheme}
                                 currentDirectory={currentDirectory}
+                                isExpanded={isExpanded}
                                 onShowPopup={onShowPopup}
                             />
                         </div>
@@ -2916,7 +2645,6 @@ const ToolPart: React.FC<ToolPartProps> = (props) => {
 export default React.memo(ToolPart, (prev, next) => {
     return areRenderRelevantPartsEqual([prev.part], [next.part])
         && prev.isExpanded === next.isExpanded
-        && prev.syntaxTheme === next.syntaxTheme
         && prev.isMobile === next.isMobile
         && prev.alwaysShowActions === next.alwaysShowActions
         && prev.onContentChange === next.onContentChange
