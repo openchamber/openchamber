@@ -1,4 +1,3 @@
-import { registerOpenCodeProxy } from './proxy.js';
 import { pathLooksUserConfigured, mergePathValues } from './path-utils.js';
 
 export const createServerUtilsRuntime = (dependencies) => {
@@ -201,21 +200,6 @@ export const createServerUtilsRuntime = (dependencies) => {
   const fetchProvidersSnapshot = () => fetchArraySnapshot('/provider', 'providers snapshot');
   const fetchModelsSnapshot = () => fetchArraySnapshot('/model', 'models snapshot');
 
-  const setupProxy = (app) => {
-    registerOpenCodeProxy(app, {
-      fs,
-      os,
-      path,
-      OPEN_CODE_READY_GRACE_MS: openCodeReadyGraceMs,
-      LONG_REQUEST_TIMEOUT_MS: longRequestTimeoutMs,
-      getRuntime,
-      getOpenCodeAuthHeaders,
-      buildOpenCodeUrl,
-      ensureOpenCodeApiPrefix,
-      getUiNotificationClients,
-    });
-  };
-
   return {
     setOpenCodePort,
     waitForOpenCodePort,
@@ -225,6 +209,6 @@ export const createServerUtilsRuntime = (dependencies) => {
     fetchAgentsSnapshot,
     fetchProvidersSnapshot,
     fetchModelsSnapshot,
-    setupProxy,
+  };
   };
 };

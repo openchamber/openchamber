@@ -143,9 +143,6 @@ function shouldSkipCompression(req, res) {
   }
 
   const pathname = req.path || req.url || '';
-  if ((pathname === '/api' || pathname.startsWith('/api/')) && shouldSkipApiCompression()) {
-    return true;
-  }
 
   if (pathname.startsWith('/api/terminal/') && pathname.endsWith('/stream')) {
     return true;
@@ -186,12 +183,6 @@ const isEnvFlagDisabled = (value) => {
   return normalized === '0' || normalized === 'false';
 };
 
-const shouldSkipApiCompression = () => {
-  if (isEnvFlagEnabled(process.env.OPENCHAMBER_SKIP_API_COMPRESSION)) return true;
-  if (isEnvFlagEnabled(process.env.OPENCHAMBER_COMPRESS_API)) return false;
-  if (isEnvFlagDisabled(process.env.OPENCHAMBER_COMPRESS_API)) return true;
-  return process.env.OPENCHAMBER_RUNTIME === 'desktop';
-};
 
 const OPENCHAMBER_VERBOSE_REQUEST_LOGS = isEnvFlagEnabled(process.env.OPENCHAMBER_VERBOSE_REQUEST_LOGS);
 
@@ -914,7 +905,6 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   resolveManagedOpenCodeLaunchSpec,
   setOpenCodePort,
   setDetectedOpenCodeApiPrefix,
-  setupProxy: (...args) => setupProxy(...args),
   ensureOpenCodeApiPrefix,
   clearResolvedOpenCodeBinary,
   buildAugmentedPath,
@@ -989,7 +979,6 @@ const waitForPortRelease = (...args) => openCodeLifecycleRuntime.waitForPortRele
 const fetchAgentsSnapshot = (...args) => serverUtilsRuntime.fetchAgentsSnapshot(...args);
 const fetchProvidersSnapshot = (...args) => serverUtilsRuntime.fetchProvidersSnapshot(...args);
 const fetchModelsSnapshot = (...args) => serverUtilsRuntime.fetchModelsSnapshot(...args);
-const setupProxy = (...args) => serverUtilsRuntime.setupProxy(...args);
 const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   process,
   shutdownTimeoutMs: SHUTDOWN_TIMEOUT,
@@ -1276,7 +1265,6 @@ async function main(options = {}) {
     terminalHeartbeatIntervalMs: TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS,
     terminalRebindWindowMs: TERMINAL_INPUT_WS_REBIND_WINDOW_MS,
     terminalMaxRebindsPerWindow: TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW,
-    setupProxy,
     scheduleOpenCodeApiDetection,
     bootstrapOpenCodeAtStartup,
     triggerHealthCheck,
@@ -1352,7 +1340,6 @@ runCliEntryIfMain({
 
 export {
   gracefulShutdown,
-  setupProxy,
   restartOpenCode,
   main as startWebUiServer,
   parseServeCliOptions as parseArgs,
