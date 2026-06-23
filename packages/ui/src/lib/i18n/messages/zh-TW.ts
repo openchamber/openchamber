@@ -1519,8 +1519,6 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.noMatchingBranches': '沒有符合分支',
   'session.newWorktree.localBranches': '本地分支',
   'session.newWorktree.remoteBranches': '遠端分支',
-  'session.newWorktree.otherLocalBranches': '其他本地分支',
-  'session.newWorktree.otherRemoteBranches': '其他遠端分支',
   'session.newWorktree.branchName': '分支名稱',
   'session.newWorktree.branchNamePlaceholder': 'feature/my-awesome-feature',
   'session.newWorktree.actions.change': '變更',

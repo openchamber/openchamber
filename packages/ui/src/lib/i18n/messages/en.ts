@@ -1549,8 +1549,6 @@ export const dict = {
   'session.newWorktree.noMatchingBranches': 'No matching branches',
   'session.newWorktree.localBranches': 'Local branches',
   'session.newWorktree.remoteBranches': 'Remote branches',
-  'session.newWorktree.otherLocalBranches': 'Other local branches',
-  'session.newWorktree.otherRemoteBranches': 'Other remote branches',
   'session.newWorktree.branchName': 'Branch Name',
   'session.newWorktree.branchNamePlaceholder': 'feature/my-awesome-feature',
   'session.newWorktree.actions.change': 'Change',
