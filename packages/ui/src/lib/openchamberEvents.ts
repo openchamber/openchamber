@@ -1,4 +1,3 @@
-import { getRuntimeUrlResolver } from './runtime-url';
 import { subscribeRuntimeEndpointChanged } from './runtime-switch';
 
 export type ScheduledTaskRanEvent = {
@@ -22,6 +21,17 @@ const listeners = new Set<Listener>();
 
 const MAX_RECONNECT_DELAY_MS = 30_000;
 const HEARTBEAT_TIMEOUT_MS = 45_000;
+
+// /api/openchamber/events is an OpenChamber-internal endpoint always served
+// by the OpenChamber Express server (not the upstream OpenCode). Anchor to
+// the page origin so the proxy-bypass deployment still works — see
+// useWebNotificationStream for the same rationale.
+const openchamberStreamUrl = (path: string): string => {
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return `${window.location.origin}${path}`;
+  }
+  return path;
+};
 
 const clearHeartbeatTimer = () => {
   if (!heartbeatTimer) {
@@ -119,35 +129,11 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   }
 };
 
-// /api/openchamber/events is an OpenChamber-specific stream that does not exist
-// in upstream OpenCode. When the runtime is pointed at an external OpenCode
-// server (e.g. VITE_OPENCODE_URL or __OPENCHAMBER_API_BASE_URL__ pointing at
-// :4096), opening this stream would 404 and trip an exponential reconnect
-// loop every MAX_RECONNECT_DELAY_MS. Detect that and short-circuit with a
-// single console.info so the rest of the app keeps running cleanly.
-const isOpenchamberEventsStreamUnavailable = (): boolean => {
-  if (typeof window === 'undefined') return false;
-  try {
-    const resolver = getRuntimeUrlResolver();
-    const target = resolver.sse('/api/openchamber/events');
-    if (!/^[a-z][a-z\d+.-]*:\/\//i.test(target)) return false;
-    const currentOrigin = window.location?.origin;
-    if (currentOrigin && new URL(target).origin !== currentOrigin) return true;
-  } catch {
-    // If the URL can't be constructed, fall through and let EventSource try —
-    // it's no worse than the previous behavior.
-  }
-  return false;
-};
-
 const connect = () => {
   if (typeof window === 'undefined' || listeners.size === 0) {
     return;
   }
   if (typeof EventSource !== 'function') {
-    return;
-  }
-  if (isOpenchamberEventsStreamUnavailable()) {
     return;
   }
 
@@ -157,7 +143,7 @@ const connect = () => {
 
   cleanupSource();
 
-  const source = new EventSource(getRuntimeUrlResolver().sse('/api/openchamber/events'));
+  const source = new EventSource(openchamberStreamUrl('/api/openchamber/events'));
   source.onopen = () => {
     resetHeartbeatTimer();
   };
