@@ -34,9 +34,17 @@ const normalizeBaseUrl = (value: string | null | undefined): string => {
 };
 
 const readInjectedApiBaseUrl = (): string => {
-  if (typeof window === 'undefined') return '';
+if (typeof window === 'undefined') return '';
   const injected = (window as typeof window & { __OPENCHAMBER_API_BASE_URL__?: string }).__OPENCHAMBER_API_BASE_URL__;
+  if (typeof injected === 'string' && injected.trim())
   return normalizeBaseUrl(injected);
+  // Build-time fallback (Vite substitutes this at compile time). In proxy-bypass
+  // mode VITE_OPENCODE_URL points the SDK at an external OpenCode upstream.
+  // Reading it here means the runtime URL resolver returns the right absolute
+  // baseUrl even at module-init time, before any runtime injection has happened.
+  const buildTime = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_OPENCODE_URL;
+  if (typeof buildTime === 'string' && buildTime.trim()) return normalizeBaseUrl(buildTime);
+  return '';
 };
 
 const currentHref = (config: RuntimeUrlConfig): string => {

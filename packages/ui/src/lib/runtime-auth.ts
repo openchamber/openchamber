@@ -255,9 +255,46 @@ export const subscribeRuntimeUrlAuthToken = (listener: () => void): (() => void)
   };
 };
 
+// Read Basic auth credentials from localStorage. In proxy-bypass mode the browser
+// SDK targets an external OpenCode upstream that requires HTTP Basic auth; the
+// password isn't shipped in the bundle, so the server injects it into the HTML
+// via static-routes-runtime and we pick it up here. Cache in module scope to
+// avoid re-parsing on every SDK call.
+interface BasicCredential { username: string; password: string }
+let basicCredentialCache: BasicCredential | null | undefined;
+const readBasicCredential = (): BasicCredential | null => {
+  if (basicCredentialCache !== undefined) return basicCredentialCache;
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage?.getItem('openchamber.credentials');
+    if (!raw) { basicCredentialCache = null; return null; }
+    const parsed = JSON.parse(raw);
+    const username = typeof parsed?.username === 'string' ? parsed.username.trim() : '';
+    const password = typeof parsed?.password === 'string' ? parsed.password : '';
+    if (!username || !password) { basicCredentialCache = null; return null; }
+    basicCredentialCache = { username, password };
+    return basicCredentialCache;
+  } catch {
+    basicCredentialCache = null;
+    return null;
+  }
+};
+
 export const buildRuntimeAuthHeaders = async (headers?: HeadersInit): Promise<Headers> => {
   const next = new Headers(headers);
   if (next.has('Authorization')) {
+    return next;
+  }
+
+  // Basic auth (set via localStorage by static-routes-runtime injection or
+  // by the user) takes priority — it's what the external OpenCode upstream
+  // expects in proxy-bypass mode.
+  const basic = readBasicCredential();
+  if (basic) {
+    const token = typeof btoa === 'function'
+      ? btoa(`${basic.username}:${basic.password}`)
+      : Buffer.from(`${basic.username}:${basic.password}`).toString('base64');
+    next.set('Authorization', `Basic ${token}`);
     return next;
   }
 
