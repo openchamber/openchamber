@@ -4,6 +4,12 @@ import { typography } from '@/lib/typography';
 import { formatToolInput, detectToolOutputLanguage } from '@/lib/toolHelpers';
 import { SimpleMarkdownRenderer } from '../MarkdownRenderer';
 import { Icon } from "@/components/icon/Icon";
+import type { IconName } from "@/components/icon/icons";
+import { useI18n, type I18nKey, type I18nParams } from '@/lib/i18n';
+import { JsonTreeViewer } from '@/components/ui/JsonTreeViewer';
+import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
+
+export type TranslateFn = (key: I18nKey, params?: I18nParams) => string;
 
 const cleanOutput = (output: string) => {
     let cleaned = output.replace(/^<file>\s*\n?/, '').replace(/\n?<\/file>\s*$/, '');
@@ -628,4 +634,735 @@ export const detectLanguageFromOutput = (output: string, toolName: string, input
     return detectToolOutputLanguage(toolName, output, input);
 };
 
+export const renderLspDiagnosticsOutput = (output: string, options?: { unstyled?: boolean }) => {
+    try {
+        const lines = output.trim().split('\n').filter(Boolean);
+        if (lines.length === 0) return null;
+
+        const diagnostics: Array<{ severity: string; file: string; line: number; col: number; code: string; message: string }> = [];
+        lines.forEach((line) => {
+            const match = line.match(/^(error|warning|info|hint)\[([^\]]+)\]\s*\((\d+)\)\s*at\s+([^:]+):(\d+):(\d+):\s*(.+)$/);
+            if (match) {
+                const [, severity, , code, file, lineNum, col, message] = match;
+                diagnostics.push({ severity, file, line: Number(lineNum), col: Number(col), code, message });
+            }
+        });
+
+        const grouped = diagnostics.reduce((acc, d) => {
+            if (!acc[d.severity]) acc[d.severity] = [];
+            acc[d.severity].push(d);
+            return acc;
+        }, {} as Record<string, typeof diagnostics>);
+
+        const severityOrder = ['error', 'warning', 'info', 'hint'];
+        const severityColors = {
+            error: 'var(--status-error)',
+            warning: 'var(--status-warning)',
+            info: 'var(--status-info)',
+            hint: 'var(--muted-foreground)'
+        };
+
+        return (
+            <div className={cn('space-y-3 w-full min-w-0', options?.unstyled ? null : 'p-3 bg-muted/20 rounded-xl border border-border/30')} style={typography.tool.popup}>
+                {severityOrder.filter(s => grouped[s]).map(severity => (
+                    <div key={severity} className="space-y-1.5">
+                        <div className="flex items-center gap-2">
+                            <Icon name={severity === 'error' ? 'close-circle' : severity === 'warning' ? 'error-warning' : 'information'} className="h-3.5 w-3.5" style={{ color: severityColors[severity as keyof typeof severityColors] }} />
+                            <span className="typography-meta font-semibold uppercase tracking-wide" style={{ color: severityColors[severity as keyof typeof severityColors] }}>{severity} ({grouped[severity].length})</span>
+                        </div>
+                        <div className="pl-5 space-y-1">
+                            {grouped[severity].map((d, idx) => (
+                                <div key={idx} className="typography-code text-foreground/90">
+                                    <span className="text-muted-foreground">{d.file}:{d.line}:{d.col}</span> - {d.message}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                ))}
+                {diagnostics.length === 0 && output && (
+                    <div className="space-y-1.5">
+                        <span className="typography-meta text-muted-foreground">{output}</span>
+                    </div>
+                )}
+            </div>
+        );
+    } catch {
+        return null;
+    }
+};
+
+export const renderLspGotoDefinitionOutput = (output: string, options?: { unstyled?: boolean }) => {
+    try {
+        const locations = output.trim().split('\n').filter(Boolean);
+        if (locations.length === 0) return null;
+
+        return (
+            <div className={cn('space-y-1 w-full min-w-0', options?.unstyled ? null : 'p-3 bg-muted/20 rounded-xl border border-border/30')} style={typography.tool.popup}>
+                {locations.map((loc, idx) => {
+                    const match = loc.match(/^(.+):(\d+):(\d+)$/);
+                    if (!match) return null;
+                    const [, file, line, col] = match;
+                    return (
+                        <div key={idx} className="flex items-center gap-2">
+                            <Icon name="file-text" className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                            <span className="typography-code text-foreground font-mono truncate">{file}:{line}:{col}</span>
+                        </div>
+                    );
+                })}
+            </div>
+        );
+    } catch {
+        return null;
+    }
+};
+
+export const renderLspFindReferencesOutput = (output: string, options?: { unstyled?: boolean }, t?: TranslateFn) => {
+    try {
+        const refs = output.trim().split('\n').filter(Boolean);
+        if (refs.length === 0) return null;
+
+        const grouped: Record<string, Array<{ line: number; col: number }>> = {};
+        refs.forEach(ref => {
+            const match = ref.match(/^(.+):(\d+):(\d+)$/);
+            if (match) {
+                const [, file, line, col] = match;
+                if (!grouped[file]) grouped[file] = [];
+                grouped[file].push({ line: Number(line), col: Number(col) });
+            }
+        });
+
+        return (
+            <div className={cn('space-y-2 w-full min-w-0', options?.unstyled ? null : 'p-3 bg-muted/20 rounded-xl border border-border/30')} style={typography.tool.popup}>
+                <div className="typography-meta text-muted-foreground">
+                    {t ? t('chat.toolPart.foundReferences', { count: refs.length }) : `Found ${refs.length} reference${refs.length !== 1 ? 's' : ''}`}
+                </div>
+                {Object.entries(grouped).map(([file, locs]) => (
+                    <div key={file} className="space-y-1">
+                        <div className="typography-code font-medium text-muted-foreground">{file} ({locs.length})</div>
+                        <div className="pl-4 space-y-0.5">
+                            {locs.map((loc, idx) => (
+                                <div key={idx} className="typography-code text-foreground/90">Line {loc.line}:{loc.col}</div>
+                            ))}
+                        </div>
+                    </div>
+                ))}
+            </div>
+        );
+    } catch {
+        return null;
+    }
+};
+
 export { formatInputForDisplay };
+
+export const renderLspSymbolsOutput = (output: string, options?: { unstyled?: boolean }) => {
+    try {
+        const lines = output.trim().split('\n').filter(Boolean);
+        if (lines.length === 0) return null;
+
+        const symbols: Array<{ depth: number; type: string; name: string }> = [];
+        lines.forEach(line => {
+            const spaces = line.match(/^(\s*)/)?.[1].length || 0;
+            const depth = Math.floor(spaces / 2);
+            const text = line.trim();
+            const match = text.match(/^(function|variable|class|method|interface|type)\s+(.+)$/);
+            if (match) {
+                symbols.push({ depth, type: match[1], name: match[2] });
+            }
+        });
+
+        const typeIcons: Record<string, IconName> = {
+            function: 'file-code',
+            variable: 'file-code',
+            class: 'stack',
+            method: 'file-code',
+            interface: 'file-code',
+            type: 'file-code'
+        };
+
+        return (
+            <div className={cn('space-y-0.5 w-full min-w-0 font-mono', options?.unstyled ? null : 'p-3 bg-muted/20 rounded-xl border border-border/30')} style={typography.tool.popup}>
+                {symbols.map((sym, idx) => (
+                    <div key={idx} style={{ paddingLeft: `${sym.depth * 20}px` }} className="flex items-center gap-2">
+                        <Icon name={typeIcons[sym.type] || 'file'} className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                        <span className="typography-code text-foreground">{sym.name}</span>
+                        <span className="typography-micro text-muted-foreground/60">{sym.type}</span>
+                    </div>
+                ))}
+            </div>
+        );
+    } catch {
+        return null;
+    }
+};
+
+export const renderLspRenameOutput = (output: string, options?: { unstyled?: boolean }, t?: TranslateFn) => {
+    try {
+        const match = output.match(/Applied\s+(\d+)\s+edit\(s\)\s+to\s+(\d+)\s+file\(s\):/);
+        if (!match) return null;
+
+        const [, edits, files] = match;
+        const fileLines = output.split('\n').slice(1).filter(l => l.trim().startsWith('-'));
+        const fileList = fileLines.map(l => l.trim().replace(/^-\s*/, ''));
+
+        return (
+            <div className={cn('space-y-2 w-full min-w-0', options?.unstyled ? null : 'p-3 bg-muted/20 rounded-xl border border-border/30')} style={typography.tool.popup}>
+                <div className="flex items-center gap-2">
+                    <Icon name="checkbox-circle" className="h-4 w-4" style={{ color: 'var(--status-success)' }} />
+                    <span className="typography-meta font-medium" style={{ color: 'var(--status-success)' }}>
+                        {t ? t('chat.toolPart.renameCompleted') : 'Rename completed'}
+                    </span>
+                </div>
+                <div className="typography-code text-foreground">Applied {edits} edit(s) to {files} file(s)</div>
+                {fileList.length > 0 && (
+                    <div className="pl-4 space-y-0.5">
+                        {fileList.map((file, idx) => (
+                            <div key={idx} className="typography-code text-muted-foreground">{file}</div>
+                        ))}
+                    </div>
+                )}
+            </div>
+        );
+    } catch {
+        return null;
+    }
+};
+
+export const renderLspPrepareRenameOutput = (output: string, options?: { unstyled?: boolean }, t?: TranslateFn) => {
+    try {
+        const match = output.match(/Rename available at\s+(\d+):(\d+)-(\d+):(\d+)\s+\(current:\s+"([^"]+)"\)/);
+        if (!match) return null;
+
+        const [, startLine, startCol, endLine, endCol, currentName] = match;
+
+        return (
+            <div className={cn('space-y-1 w-full min-w-0', options?.unstyled ? null : 'p-3 bg-muted/20 rounded-xl border border-border/30')} style={typography.tool.popup}>
+                <div className="flex items-center gap-2">
+                    <Icon name="information" className="h-3.5 w-3.5" style={{ color: 'var(--status-info)' }} />
+                    <span className="typography-meta font-medium" style={{ color: 'var(--status-info)' }}>
+                        {t ? t('chat.toolPart.renameAvailable') : 'Rename available'}
+                    </span>
+                </div>
+                <div className="typography-code text-foreground">Current name: <span className="font-semibold">{currentName}</span></div>
+                <div className="typography-code text-muted-foreground">Range: {startLine}:{startCol} - {endLine}:{endCol}</div>
+            </div>
+        );
+    } catch {
+        return null;
+    }
+};
+
+export const renderSessionListOutput = (output: string, options?: { unstyled?: boolean }) => {
+    try {
+        const lines = output.trim().split('\n').filter(Boolean);
+        if (lines.length < 2) return null;
+
+        const rows = lines.slice(1).filter(l => l.startsWith('|') && !l.includes('---'));
+        const sessions = rows.map(row => {
+            const cols = row.split('|').map(c => c.trim()).filter(Boolean);
+            if (cols.length >= 5) {
+                return { id: cols[0], messages: cols[1], first: cols[2], last: cols[3], agents: cols[4] };
+            }
+            return null;
+        }).filter(Boolean);
+
+        return (
+            <div className={cn('w-full min-w-0', options?.unstyled ? null : 'p-3 bg-muted/20 rounded-xl border border-border/30')} style={typography.tool.popup}>
+                <div className="typography-meta text-muted-foreground mb-2">{sessions.length} session{sessions.length !== 1 ? 's' : ''}</div>
+                <div className="space-y-2">
+                    {sessions.map((s, idx) => s && (
+                        <div key={idx} className="p-2 rounded-lg border border-border/20 bg-surface-elevated/50">
+                            <div className="flex items-center gap-2 mb-1">
+                                <Icon name="chat-3" className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                                <span className="typography-code font-semibold text-foreground font-mono">{s.id}</span>
+                            </div>
+                            <div className="typography-micro text-muted-foreground space-y-0.5 pl-5">
+                                <div>{s.messages} messages • {s.first} to {s.last}</div>
+                                <div>Agents: {s.agents}</div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
+    } catch {
+        return null;
+    }
+};
+
+export const renderSessionReadOutput = (output: string, options?: { unstyled?: boolean }) => {
+    try {
+        const lines = output.trim().split('\n');
+        const messages: Array<{ id: string; role: string; timestamp: string; content: string }> = [];
+        
+        let i = 0;
+        while (i < lines.length) {
+            const match = lines[i].match(/^\[Message\s+(\d+)\]\s+(user|assistant)\s+\(([^)]+)\)$/);
+            if (match) {
+                const [, id, role, timestamp] = match;
+                const contentLines: string[] = [];
+                i++;
+                while (i < lines.length && !lines[i].match(/^\[Message\s+\d+\]/)) {
+                    if (lines[i].trim()) contentLines.push(lines[i]);
+                    i++;
+                }
+                messages.push({ id, role, timestamp, content: contentLines.join('\n') });
+            } else {
+                i++;
+            }
+        }
+
+        return (
+            <div className={cn('space-y-3 w-full min-w-0', options?.unstyled ? null : 'p-3 bg-muted/20 rounded-xl border border-border/30')} style={typography.tool.popup}>
+                {messages.map((msg, idx) => (
+                    <div key={idx} className="space-y-1">
+                        <div className="flex items-center gap-2">
+                            <Icon name={msg.role === 'user' ? 'user' : 'robot'} className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                            <span className="typography-meta font-semibold text-foreground">{msg.role}</span>
+                            <span className="typography-micro text-muted-foreground">{msg.timestamp}</span>
+                        </div>
+                        <div className="typography-code text-foreground/90 pl-5 whitespace-pre-wrap">{msg.content}</div>
+                    </div>
+                ))}
+            </div>
+        );
+    } catch {
+        return null;
+    }
+};
+
+export const renderSessionInfoOutput = (output: string, options?: { unstyled?: boolean }) => {
+    try {
+        const lines = output.trim().split('\n').filter(Boolean);
+        const info: Record<string, string> = {};
+        lines.forEach(line => {
+            const match = line.match(/^([^:]+):\s*(.+)$/);
+            if (match) {
+                info[match[1].trim()] = match[2].trim();
+            }
+        });
+
+        return (
+            <div className={cn('space-y-2 w-full min-w-0', options?.unstyled ? null : 'p-3 bg-muted/20 rounded-xl border border-border/30')} style={typography.tool.popup}>
+                {Object.entries(info).map(([key, value]) => (
+                    <div key={key} className="flex gap-2">
+                        <span className="typography-meta font-medium text-muted-foreground min-w-[120px]">{key}:</span>
+                        <span className="typography-code text-foreground flex-1">{value}</span>
+                    </div>
+                ))}
+            </div>
+        );
+    } catch {
+        return null;
+    }
+};
+
+export const renderSessionSearchOutput = (output: string, options?: { unstyled?: boolean }) => {
+    try {
+        const lines = output.trim().split('\n').filter(Boolean);
+        const matches: Array<{ session: string; message: string; role: string; excerpt: string }> = [];
+        
+        lines.forEach(line => {
+            const match = line.match(/^\[([^\]]+)\]\s+Message\s+([^\s]+)\s+\(([^)]+)\)$/);
+            if (match) {
+                const [, session, message, role] = match;
+                matches.push({ session, message, role, excerpt: '' });
+            } else if (matches.length > 0 && line.trim()) {
+                matches[matches.length - 1].excerpt += line + '\n';
+            }
+        });
+
+        return (
+            <div className={cn('space-y-2 w-full min-w-0', options?.unstyled ? null : 'p-3 bg-muted/20 rounded-xl border border-border/30')} style={typography.tool.popup}>
+                <div className="typography-meta text-muted-foreground mb-2">Found {matches.length} match{matches.length !== 1 ? 'es' : ''}</div>
+                {matches.map((m, idx) => (
+                    <div key={idx} className="p-2 rounded-lg border border-border/20 bg-surface-elevated/50 space-y-1">
+                        <div className="flex items-center gap-2">
+                            <Icon name="search" className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                            <span className="typography-code font-mono text-foreground">{m.session}</span>
+                            <span className="typography-micro text-muted-foreground">({m.role})</span>
+                        </div>
+                        <div className="typography-code text-foreground/80 pl-5 whitespace-pre-wrap">{m.excerpt.trim()}</div>
+                    </div>
+                ))}
+            </div>
+        );
+    } catch {
+        return null;
+    }
+};
+
+export const renderBackgroundOutputOutput = (output: string, options?: { unstyled?: boolean }, t?: TranslateFn) => {
+    try {
+        if (output.includes('# Task Status')) {
+            const lines = output.split('\n');
+            const info: Record<string, string> = {};
+            lines.forEach(line => {
+                const match = line.match(/^\|\s*([^|]+)\s*\|\s*([^|]+)\s*\|$/);
+                if (match && !match[1].includes('---')) {
+                    const key = match[1].trim();
+                    const value = match[2].trim().replace(/`/g, '').replace(/\*\*/g, '');
+                    if (key !== 'Field') info[key] = value;
+                }
+            });
+
+            return (
+                <div className={cn('space-y-2 w-full min-w-0', options?.unstyled ? null : 'p-3 bg-muted/20 rounded-xl border border-border/30')} style={typography.tool.popup}>
+                    <div className="flex items-center gap-2 mb-2">
+                        <Icon name="loader-4" className="h-4 w-4 animate-spin" style={{ color: 'var(--status-info)' }} />
+                        <span className="typography-meta font-semibold" style={{ color: 'var(--status-info)' }}>
+                            {t ? t('chat.toolPart.taskRunning') : 'Task Running'}
+                        </span>
+                    </div>
+                    {Object.entries(info).map(([key, value]) => (
+                        <div key={key} className="flex gap-2">
+                            <span className="typography-meta font-medium text-muted-foreground min-w-[100px]">{key}:</span>
+                            <span className="typography-code text-foreground flex-1">{value}</span>
+                        </div>
+                    ))}
+                </div>
+            );
+        }
+
+        if (output.includes('Task Result')) {
+            const lines = output.split('\n');
+            const taskId = lines.find(l => l.startsWith('Task ID:'))?.replace('Task ID:', '').trim();
+            const description = lines.find(l => l.startsWith('Description:'))?.replace('Description:', '').trim();
+            const duration = lines.find(l => l.startsWith('Duration:'))?.replace('Duration:', '').trim();
+            const dividerIdx = lines.findIndex(l => l.trim() === '---');
+            const content = dividerIdx >= 0 ? lines.slice(dividerIdx + 1).join('\n').trim() : '';
+
+            return (
+                <div className={cn('space-y-2 w-full min-w-0', options?.unstyled ? null : 'p-3 bg-muted/20 rounded-xl border border-border/30')} style={typography.tool.popup}>
+                    <div className="flex items-center gap-2">
+                        <Icon name="checkbox-circle" className="h-4 w-4" style={{ color: 'var(--status-success)' }} />
+                        <span className="typography-meta font-semibold" style={{ color: 'var(--status-success)' }}>
+                            {t ? t('chat.toolPart.taskCompleted') : 'Task Completed'}
+                        </span>
+                    </div>
+                    {taskId && <div className="typography-code text-muted-foreground">Task ID: {taskId}</div>}
+                    {description && <div className="typography-code text-foreground">{description}</div>}
+                    {duration && <div className="typography-micro text-muted-foreground">Duration: {duration}</div>}
+                    {content && (
+                        <div className="mt-2 pt-2 border-t border-border/20">
+                            <div className="typography-code text-foreground whitespace-pre-wrap">{content}</div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        return null;
+    } catch {
+        return null;
+    }
+};
+
+export const renderMonitorOutputOutput = (output: string, options?: { unstyled?: boolean }, t?: TranslateFn) => {
+    try {
+        const data = JSON.parse(output);
+        if (!data.lines || !Array.isArray(data.lines)) return null;
+
+        return (
+            <div className={cn('space-y-2 w-full min-w-0', options?.unstyled ? null : 'p-3 bg-muted/20 rounded-xl border border-border/30')} style={typography.tool.popup}>
+                <div className="flex items-center gap-2">
+                    <Icon name="terminal-box" className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="typography-meta font-medium text-foreground">
+                        {t ? t('chat.toolPart.monitorOutput') : 'Monitor Output'}
+                    </span>
+                    {data.counters && (
+                        <span className="typography-micro text-muted-foreground ml-auto">
+                            {data.counters.total_lines} lines
+                            {data.counters.matches > 0 && ` • ${data.counters.matches} matches`}
+                        </span>
+                    )}
+                </div>
+                <div className="font-mono text-sm space-y-0.5 max-h-[40vh] overflow-y-auto">
+                    {data.lines.map((line: string, idx: number) => (
+                        <div key={idx} className="typography-code text-foreground/90">{line}</div>
+                    ))}
+                </div>
+            </div>
+        );
+    } catch {
+        return null;
+    }
+};
+
+export const renderSkillOutput = (output: string, options?: { unstyled?: boolean }) => {
+    try {
+        return (
+            <div className={cn('w-full min-w-0', options?.unstyled ? null : 'p-3 bg-muted/20 rounded-xl border border-border/30')} style={typography.tool.popup}>
+                <SimpleMarkdownRenderer content={output} variant="tool" />
+            </div>
+        );
+    } catch {
+        return null;
+    }
+};
+
+export const renderSkillMcpOutput = (output: string, options?: { unstyled?: boolean }) => {
+    try {
+        const parsed = JSON.parse(output);
+        if (Array.isArray(parsed)) {
+            const textContent = parsed
+                .filter((item) => item.type === 'text' && typeof item.text === 'string')
+                .map((item) => item.text)
+                .join('\n\n');
+            
+            if (textContent) {
+                return (
+                    <div className={cn('w-full min-w-0', options?.unstyled ? null : 'p-3 bg-muted/20 rounded-xl border border-border/30')} style={typography.tool.popup}>
+                        <SimpleMarkdownRenderer content={textContent} variant="tool" />
+                    </div>
+                );
+            }
+        }
+        return null;
+    } catch {
+        return renderSkillOutput(output, options);
+    }
+};
+
+export const renderHashlineEditOutput = (output: string, options?: { unstyled?: boolean }, t?: TranslateFn) => {
+    try {
+        const isError = output.toLowerCase().includes('error:');
+        const icon = isError ? 'close-circle' : 'checkbox-circle';
+        const color = isError ? 'var(--status-error)' : 'var(--status-success)';
+
+        return (
+            <div className={cn('space-y-1 w-full min-w-0', options?.unstyled ? null : 'p-3 bg-muted/20 rounded-xl border border-border/30')} style={typography.tool.popup}>
+                <div className="flex items-center gap-2">
+                    {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                    <Icon name={icon as any} className="h-4 w-4" style={{ color }} />
+                    <span className="typography-meta font-semibold" style={{ color }}>
+                        {isError ? (t ? t('chat.toolPart.editFailed') : 'Edit Failed') : (t ? t('chat.toolPart.editApplied') : 'Edit Applied')}
+                    </span>
+                </div>
+                <div className="typography-code text-foreground whitespace-pre-wrap pl-6">{output}</div>
+            </div>
+        );
+    } catch {
+        return null;
+    }
+};
+
+type ContentType = 'json' | 'html' | 'markdown' | 'text';
+
+const detectContentType = (output: string): ContentType => {
+    const trimmed = output.trim();
+    
+    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+        try {
+            JSON.parse(trimmed);
+            return 'json';
+        } catch {
+            return 'text';
+        }
+    }
+    
+    if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html')) {
+        return 'html';
+    }
+    
+    if (trimmed.includes('##') || trimmed.includes('```') || /^#\s/.test(trimmed)) {
+        return 'markdown';
+    }
+    
+    return 'text';
+};
+
+export const renderWebFetchOutput = (output: string, options?: { unstyled?: boolean }, t?: TranslateFn) => {
+    try {
+        const contentType = detectContentType(output);
+        
+        const container = (children: React.ReactNode) => (
+            <div className={cn('w-full min-w-0', options?.unstyled ? null : 'p-3 bg-muted/20 rounded-xl border border-border/30')} style={typography.tool.popup}>
+                <div className="typography-meta text-muted-foreground mb-2">
+                    {t ? t('chat.toolPart.contentType', { type: contentType }) : `Content type: ${contentType}`}
+                </div>
+                {children}
+            </div>
+        );
+        
+        if (contentType === 'json') {
+            try {
+                const parsed = JSON.parse(output.trim());
+                return container(<JsonTreeViewer data={parsed} maxHeight="60vh" />);
+            } catch {
+                return container(<pre className="typography-code text-foreground whitespace-pre-wrap">{output}</pre>);
+            }
+        }
+        
+        if (contentType === 'markdown') {
+            return container(<SimpleMarkdownRenderer content={output} variant="tool" />);
+        }
+        
+        if (contentType === 'html') {
+            return container(
+                <WorkerHighlightedCode
+                    code={output}
+                    language="html"
+                />
+            );
+        }
+        
+        return container(<pre className="typography-code text-foreground whitespace-pre-wrap">{output}</pre>);
+    } catch {
+        return null;
+    }
+};
+
+export const renderCodeSearchOutput = (output: string, options?: { unstyled?: boolean }, t?: TranslateFn) => {
+    try {
+        const lines = output.trim().split('\n').filter(Boolean);
+        if (lines.length === 0) return null;
+
+        const fileGroups: Record<string, Array<{ lineNum: string; content: string }>> = {};
+        let currentRepo = '';
+
+        lines.forEach((line) => {
+            const repoMatch = line.match(/^\*\*(.+?)\*\*$/);
+            if (repoMatch) {
+                currentRepo = repoMatch[1];
+                return;
+            }
+
+            const match = line.match(/^(.+?):(\d+):(.*)$/) || line.match(/^(.+?):(.*)$/);
+            if (match) {
+                const [, filepath, lineNumOrContent, content] = match;
+                const lineNum = content !== undefined ? lineNumOrContent : '';
+                const actualContent = content !== undefined ? content : lineNumOrContent;
+
+                const fullPath = currentRepo ? `${currentRepo}/${filepath}` : filepath;
+
+                if (!fileGroups[fullPath]) {
+                    fileGroups[fullPath] = [];
+                }
+                fileGroups[fullPath].push({ lineNum, content: actualContent });
+            }
+        });
+
+        if (Object.keys(fileGroups).length === 0) return null;
+
+        const totalMatches = Object.values(fileGroups).reduce((sum, matches) => sum + matches.length, 0);
+
+        return (
+            <div
+                className={cn(
+                    'space-y-2 w-full min-w-0',
+                    options?.unstyled ? null : 'p-3 bg-muted/20 rounded-xl border border-border/30'
+                )}
+                style={typography.tool.popup}
+            >
+                <div className="typography-meta text-muted-foreground mb-2">
+                    {t ? t('chat.toolPart.codesearchResults', { count: totalMatches, files: Object.keys(fileGroups).length }) : `Found ${totalMatches} match${totalMatches !== 1 ? 'es' : ''} in ${Object.keys(fileGroups).length} file${Object.keys(fileGroups).length !== 1 ? 's' : ''}`}
+                </div>
+                {Object.entries(fileGroups).map(([filepath, matches]) => (
+                    <div key={filepath} className="space-y-1">
+                        <div className="flex items-center gap-2 pl-6">
+                            <Icon name="file-code" className="h-3.5 w-3.5 flex-shrink-0" style={{ color: 'var(--primary)' }} />
+                            <span className="typography-code font-medium text-muted-foreground">{filepath}</span>
+                        </div>
+                        <div className="pl-6 space-y-1">
+                            {matches.map((match, idx) => {
+                                if (!match.lineNum && !match.content) {
+                                    return null;
+                                }
+                                return (
+                                    <div key={idx} className="flex items-start gap-2 min-w-0 typography-code">
+                                        <div className="w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1.5" style={{ backgroundColor: 'var(--status-info)', opacity: 0.6 }} />
+                                        <div className="flex gap-2 min-w-0 flex-1">
+                                            {match.lineNum && (
+                                                <span className="text-muted-foreground font-mono whitespace-nowrap">
+                                                    Line {match.lineNum}:
+                                                </span>
+                                            )}
+                                            <span className="text-foreground font-mono break-words flex-1">
+                                                {match.content || '\u00A0'}
+                                            </span>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                ))}
+            </div>
+        );
+
+    } catch {
+        return null;
+    }
+};
+
+const StructuredOutputContent: React.FC<{ output: string; options?: { unstyled?: boolean } }> = ({ output, options }) => {
+    const { t } = useI18n();
+    
+    try {
+        const parsed = JSON.parse(output);
+        if (parsed === null || typeof parsed !== 'object') return null;
+        
+        return (
+            <div className={cn('w-full min-w-0', options?.unstyled ? null : 'p-3 bg-muted/20 rounded-xl border border-border/30')} style={typography.tool.popup}>
+                <div className="typography-meta text-muted-foreground mb-2">
+                    {t('chat.toolPart.structuredData')}
+                </div>
+                <JsonTreeViewer 
+                    data={parsed} 
+                    initiallyExpandedDepth={2}
+                    maxHeight="400px"
+                />
+            </div>
+        );
+    } catch {
+        return null;
+    }
+};
+
+export const renderStructuredOutput = (output: string, options?: { unstyled?: boolean }) => {
+    return <StructuredOutputContent output={output} options={options} />;
+};
+
+const PlanModeContent: React.FC<{ output: string; toolName: string; options?: { unstyled?: boolean } }> = ({ output, toolName, options }) => {
+    const { t } = useI18n();
+    const isEnter = toolName === 'plan_enter';
+    const isError = output.toLowerCase().includes('error');
+    
+    const icon = isError ? 'close-circle' : (isEnter ? 'play' : 'stop');
+    const color = isError ? 'var(--status-error)' : (isEnter ? 'var(--status-success)' : 'var(--status-info)');
+    const label = isEnter ? t('chat.toolPart.enteringPlanMode') : t('chat.toolPart.exitingPlanMode');
+    
+    return (
+        <div className={cn('flex items-center gap-2 w-full min-w-0', options?.unstyled ? null : 'p-3 bg-muted/20 rounded-xl border border-border/30')} style={typography.tool.popup}>
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+            <Icon name={icon as any} className="h-4 w-4 flex-shrink-0" style={{ color }} />
+            <span className="typography-meta font-medium" style={{ color }}>
+                {label}
+            </span>
+            {output !== label && (
+                <span className="typography-meta text-muted-foreground">
+                    {output.replace(label, '').trim()}
+                </span>
+            )}
+        </div>
+    );
+};
+
+export const renderPlanModeOutput = (output: string, toolName: string, options?: { unstyled?: boolean }) => {
+    try {
+        return <PlanModeContent output={output} toolName={toolName} options={options} />;
+    } catch {
+        return null;
+    }
+};
+
+export const renderMarkdownOutput = (output: string, options?: { unstyled?: boolean }) => {
+    if (!output || typeof output !== 'string') return null;
+    
+    return (
+        <div className={cn('w-full min-w-0', options?.unstyled ? null : 'p-3 bg-muted/20 rounded-xl border border-border/30')} style={typography.tool.popup}>
+            <SimpleMarkdownRenderer content={output} variant="tool" />
+        </div>
+    );
+};

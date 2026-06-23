@@ -29,9 +29,32 @@ import {
     formatEditOutput,
     detectLanguageFromOutput,
     formatInputForDisplay,
-    renderTodoOutput,
     tryParseJsonOutput,
     coerceToText,
+    renderLspDiagnosticsOutput,
+    renderLspGotoDefinitionOutput,
+    renderLspFindReferencesOutput,
+    renderLspSymbolsOutput,
+    renderLspRenameOutput,
+    renderLspPrepareRenameOutput,
+    renderSessionListOutput,
+    renderSessionReadOutput,
+    renderSessionInfoOutput,
+    renderSessionSearchOutput,
+    renderBackgroundOutputOutput,
+    renderMonitorOutputOutput,
+    renderSkillMcpOutput,
+    renderHashlineEditOutput,
+    renderCodeSearchOutput,
+    renderWebFetchOutput,
+    renderStructuredOutput,
+    renderPlanModeOutput,
+    renderGrepOutput,
+    renderGlobOutput,
+    renderListOutput,
+    renderTodoOutput,
+    renderWebSearchOutput,
+    renderMarkdownOutput,
 } from '../toolRenderers';
 import { JsonTreeViewer } from '@/components/ui/JsonTreeViewer';
 import { JsonSummaryView } from './JsonSummaryView';
@@ -52,23 +75,11 @@ import {
 } from './taskToolModel';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { useI18n } from '@/lib/i18n';
-import {
-    extractFirstChangedLineFromDiff,
-    getDiffPatchEntries,
-    getFirstChangedLineFromMetadata,
-    getMutatedToolPaths,
-    getPatchText,
-    getPrimaryDiffFromMetadata,
-    getPrimaryToolPath,
-    type DiffPatchEntry,
-} from './toolDiffUtils';
+import { getDiffPatchEntries, getPatchText, type DiffPatchEntry } from './toolDiffUtils';
 import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 import { useStreamingTextThrottle } from '../../hooks/useStreamingTextThrottle';
 import { getStreamingOutputAppend, getToolOutput } from './toolOutput';
-import { toAbsoluteFilePath } from '@/lib/path-utils';
 import { getToolDescriptionFallback } from './toolRenderUtils';
-import { ApplyPatchFileButtons } from './ApplyPatchFileButtons';
-import { openApplyPatchFileInEditor } from './applyPatchEditorAction';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
@@ -86,6 +97,84 @@ interface ToolPartProps {
     onShowPopup?: (content: ToolPopupContent) => void;
     animateTailText?: boolean;
 }
+
+const getMultiFileDescription = (
+    metadata: Record<string, unknown> | undefined,
+    animate = true,
+    showFileIcons = true,
+): React.ReactNode => {
+    const files = Array.isArray(metadata?.files) ? metadata?.files : [];
+    if (files.length <= 1) return null;
+
+    const parseCount = (value: unknown): number | null => {
+        if (typeof value === 'number' && Number.isFinite(value)) {
+            return Math.max(0, Math.trunc(value));
+        }
+        if (typeof value === 'string') {
+            const parsed = Number.parseInt(value, 10);
+            if (Number.isFinite(parsed)) {
+                return Math.max(0, parsed);
+            }
+        }
+        return null;
+    };
+
+    const combineCounts = (base: number | null, incoming: number | null): number | null => {
+        if (base === null) return incoming;
+        if (incoming === null) return base;
+        return base + incoming;
+    };
+
+    const entriesByPath = new Map<string, { path: string; name: string; added: number | null; removed: number | null }>();
+
+    for (const file of files) {
+        const fileObj = file as { relativePath?: string; filePath?: string; additions?: unknown; deletions?: unknown };
+        const filePath = fileObj.relativePath || fileObj.filePath || '';
+        if (!filePath) continue;
+        const fileName = filePath.split('/').pop() || filePath;
+        const added = parseCount(fileObj.additions);
+        const removed = parseCount(fileObj.deletions);
+
+        const existing = entriesByPath.get(filePath);
+        if (existing) {
+            existing.added = combineCounts(existing.added, added);
+            existing.removed = combineCounts(existing.removed, removed);
+            continue;
+        }
+
+        entriesByPath.set(filePath, { path: filePath, name: fileName, added, removed });
+    }
+
+    const entries = Array.from(entriesByPath.values());
+
+    return (
+        <>
+            {entries.map((entry) => {
+                const hasPerFileDiff = entry.added !== null || entry.removed !== null;
+                return (
+                    <span key={entry.path} className={cn('inline-flex min-w-0 max-w-full items-center gap-1', TOOL_ROW_DESCRIPTION_CLASS)} style={{ color: 'var(--tools-description)' }}>
+                        {showFileIcons ? <FileTypeIcon filePath={entry.path} className="h-3.5 w-3.5" /> : null}
+                        <Text
+                            variant={animate ? 'generate-effect' : 'static'}
+                            className={cn('min-w-0 max-w-full truncate', TOOL_ROW_DESCRIPTION_CLASS)}
+                            style={{ color: 'var(--tools-description)' }}
+                            title={entry.path}
+                        >
+                            {entry.name}
+                        </Text>
+                        {hasPerFileDiff ? (
+                            <span className="flex-shrink-0 inline-flex items-center gap-0 typography-meta" style={{ fontSize: '0.8rem', lineHeight: '1' }}>
+                                <span style={{ color: 'var(--status-success)' }}>+{entry.added ?? 0}</span>
+                                <span style={{ color: 'var(--tools-description)' }}>/</span>
+                                <span style={{ color: 'var(--status-error)' }}>-{entry.removed ?? 0}</span>
+                            </span>
+                        ) : null}
+                    </span>
+                );
+            })}
+        </>
+    );
+};
 
 const normalizeToolName = (toolName: string | undefined | null): string => {
     if (typeof toolName !== 'string') {
@@ -112,6 +201,7 @@ const GIT_REFRESH_MUTATING_TOOLS = new Set([
     'write',
     'apply_patch',
     'patch',
+    'task',
 ]);
 
 const formatDuration = (start: number, end?: number, now: number = Date.now()) => {
@@ -237,6 +327,63 @@ const parseWriteLineCount = (input?: Record<string, unknown>): number | null => 
     return lines;
 };
 
+const parseTodoProgress = (input?: Record<string, unknown>): {  total: number; completed: number; inProgress: number; pending: number } | null => {
+    if (!input?.todos || !Array.isArray(input.todos)) return null;
+    const total = input.todos.length;
+    const completed = input.todos.filter((todo): todo is { status: 'completed' } => todo.status === 'completed').length;
+    const pending = input.todos.filter((todo): todo is { status: 'pending' } => todo.status === 'pending').length;
+    const inProgress = input.todos.filter((todo): todo is { status: 'in_progress' } => todo.status === 'in_progress').length;
+    return { total, completed, inProgress, pending };
+};
+
+const extractFirstChangedLineFromDiff = (diffText: string): number | undefined => {
+    if (!diffText || typeof diffText !== 'string') {
+        return undefined;
+    }
+
+    const lines = diffText.split('\n');
+    let currentNewLine: number | undefined;
+    let firstHunkStart: number | undefined;
+
+    for (const rawLine of lines) {
+        const line = rawLine.replace(/\r$/, '');
+        const hunkMatch = line.match(/^@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/);
+        if (hunkMatch) {
+            const parsed = Number.parseInt(hunkMatch[1] ?? '', 10);
+            if (Number.isFinite(parsed)) {
+                currentNewLine = Math.max(1, parsed);
+                if (!Number.isFinite(firstHunkStart)) {
+                    firstHunkStart = currentNewLine;
+                }
+            }
+            continue;
+        }
+
+        if (currentNewLine === undefined || !Number.isFinite(currentNewLine)) {
+            continue;
+        }
+
+        if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('diff ')) {
+            continue;
+        }
+
+        if (line.startsWith('+')) {
+            return currentNewLine;
+        }
+
+        if (line.startsWith(' ')) {
+            currentNewLine += 1;
+            continue;
+        }
+
+        if (line.startsWith('-') || line.startsWith('\\')) {
+            continue;
+        }
+    }
+
+    return firstHunkStart;
+};
+
 const buildWritePreviewPatch = (filePath: string | undefined, content: string): string | undefined => {
     const normalizedContent = content.replace(/\r\n/g, '\n');
     if (!normalizedContent.trim()) {
@@ -261,6 +408,73 @@ const buildWritePreviewPatch = (filePath: string | undefined, content: string): 
         `@@ -0,0 +1,${hunkSize} @@`,
         body,
     ].join('\n');
+};
+
+const getFirstChangedLineFromMetadata = (tool: string, metadata?: Record<string, unknown>): number | undefined => {
+    if (!metadata || (tool !== 'edit' && tool !== 'multiedit' && tool !== 'apply_patch')) {
+        return undefined;
+    }
+
+    const topLevelPatch = getPatchText((metadata as { patch?: unknown }).patch) ?? getPatchText(metadata.diff);
+    if (topLevelPatch) {
+        const line = extractFirstChangedLineFromDiff(topLevelPatch);
+        if (Number.isFinite(line)) {
+            return line;
+        }
+    }
+
+    const files = Array.isArray(metadata.files) ? metadata.files : [];
+    const firstFile = files[0] as { patch?: unknown; diff?: unknown } | undefined;
+    const filePatch = getPatchText(firstFile?.patch) ?? getPatchText(firstFile?.diff);
+    if (filePatch) {
+        const line = extractFirstChangedLineFromDiff(filePatch);
+        if (Number.isFinite(line)) {
+            return line;
+        }
+    }
+
+    return undefined;
+};
+
+const getPrimaryDiffFromMetadata = (
+    tool: string,
+    metadata?: Record<string, unknown>,
+    preferredPath?: string,
+): string | undefined => {
+    if (!metadata || (tool !== 'edit' && tool !== 'multiedit' && tool !== 'apply_patch')) {
+        return undefined;
+    }
+
+    const files = Array.isArray(metadata.files) ? metadata.files : [];
+    if (files.length > 0) {
+        const preferred = typeof preferredPath === 'string' && preferredPath.length > 0
+            ? preferredPath
+            : undefined;
+        const matched = preferred
+            ? files.find((file) => {
+                if (!file || typeof file !== 'object') {
+                    return false;
+                }
+                const candidate = file as { relativePath?: unknown; filePath?: unknown };
+                return candidate.relativePath === preferred || candidate.filePath === preferred;
+            })
+            : files[0];
+
+        if (matched && typeof matched === 'object') {
+            const patch = getPatchText((matched as { patch?: unknown; diff?: unknown }).patch)
+                ?? getPatchText((matched as { patch?: unknown; diff?: unknown }).diff);
+            if (patch) {
+                return patch;
+            }
+        }
+    }
+
+    const topLevelPatch = getPatchText((metadata as { patch?: unknown }).patch) ?? getPatchText(metadata.diff);
+    if (topLevelPatch) {
+        return topLevelPatch;
+    }
+
+    return undefined;
 };
 
 const normalizeDisplayPath = (value: string): string => {
@@ -340,6 +554,58 @@ const normalizeToolDiagnostic = (value: unknown): ToolDiagnostic | null => {
         line: rawLine + 1,
         character: rawCharacter + 1,
     };
+};
+
+const getPrimaryToolPath = (
+    toolName: string,
+    input: Record<string, unknown> | undefined,
+    metadata: Record<string, unknown> | undefined,
+): string | null => {
+    if (toolName === 'apply_patch') {
+        const files = Array.isArray(metadata?.files) ? metadata.files : [];
+        const first = files.find((entry) => {
+            if (!isRecord(entry)) {
+                return false;
+            }
+            return entry.type !== 'delete';
+        });
+        if (!isRecord(first)) {
+            return null;
+        }
+        return typeof first.movePath === 'string'
+            ? first.movePath
+            : typeof first.filePath === 'string'
+                ? first.filePath
+                : typeof first.relativePath === 'string'
+                    ? first.relativePath
+                    : null;
+    }
+
+    if (toolName === 'edit' || toolName === 'multiedit') {
+        const fileDiff = isRecord(metadata?.filediff) ? metadata.filediff : undefined;
+        if (isRecord(fileDiff) && typeof fileDiff.file === 'string') {
+            return fileDiff.file;
+        }
+        return typeof input?.filePath === 'string'
+            ? input.filePath
+            : typeof input?.file_path === 'string'
+                ? input.file_path
+                : typeof input?.path === 'string'
+                    ? input.path
+                    : null;
+    }
+
+    if (toolName === 'write') {
+        return typeof input?.filePath === 'string'
+            ? input.filePath
+            : typeof input?.file_path === 'string'
+                ? input.file_path
+                : typeof input?.path === 'string'
+                    ? input.path
+                    : null;
+    }
+
+    return null;
 };
 
 const getToolDiagnosticSection = (
@@ -803,6 +1069,61 @@ const getTaskSummaryLabel = (entry: TaskToolSummaryEntry): string => {
         if (typeof urlCandidate === 'string' && urlCandidate.trim().length > 0) {
             return urlCandidate.trim();
         }
+
+        const nameCandidate = input.name;
+        if (typeof nameCandidate === 'string' && nameCandidate.trim().length > 0) {
+            return nameCandidate.trim();
+        }
+
+        const commandCandidate = input.command;
+        if (typeof commandCandidate === 'string' && commandCandidate.trim().length > 0) {
+            return commandCandidate.trim();
+        }
+
+        const patternCandidate = input.pattern;
+        if (typeof patternCandidate === 'string' && patternCandidate.trim().length > 0) {
+            return patternCandidate.trim();
+        }
+
+        const queryCandidate = input.query;
+        if (typeof queryCandidate === 'string' && queryCandidate.trim().length > 0) {
+            return queryCandidate.trim();
+        }
+
+        const descriptionCandidate = input.description;
+        if (typeof descriptionCandidate === 'string' && descriptionCandidate.trim().length > 0) {
+            return descriptionCandidate.trim();
+        }
+
+        const goalCandidate = input.goal;
+        if (typeof goalCandidate === 'string' && goalCandidate.trim().length > 0) {
+            return goalCandidate.trim();
+        }
+
+        const mcpNameCandidate = input.mcp_name;
+        if (typeof mcpNameCandidate === 'string' && mcpNameCandidate.trim().length > 0) {
+            return mcpNameCandidate.trim();
+        }
+
+        const toolNameCandidate = input.tool_name;
+        if (typeof toolNameCandidate === 'string' && toolNameCandidate.trim().length > 0) {
+            return toolNameCandidate.trim();
+        }
+
+        const subagentTypeCandidate = input.subagent_type;
+        if (typeof subagentTypeCandidate === 'string' && subagentTypeCandidate.trim().length > 0) {
+            return subagentTypeCandidate.trim();
+        }
+
+        const sessionIdCandidate = input.session_id;
+        if (typeof sessionIdCandidate === 'string' && sessionIdCandidate.trim().length > 0) {
+            return sessionIdCandidate.trim();
+        }
+
+        const taskIdCandidate = input.task_id;
+        if (typeof taskIdCandidate === 'string' && taskIdCandidate.trim().length > 0) {
+            return taskIdCandidate.trim();
+        }
     }
 
     return '';
@@ -1217,6 +1538,7 @@ interface ToolExpandedContentProps {
     state: ToolStateUnion;
     currentDirectory: string;
     isExpanded: boolean;
+    isMobile: boolean;
     onShowPopup?: (content: ToolPopupContent) => void;
 }
 
@@ -1225,6 +1547,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     state,
     currentDirectory,
     isExpanded,
+    isMobile,
     onShowPopup,
 }) => {
     const { t } = useI18n();
@@ -1234,7 +1557,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     const stateWithData = state as ToolStateWithMetadata;
     const metadata = stateWithData.metadata;
     const input = stateWithData.input;
-    const rawOutput = getToolOutput(part.tool, stateWithData.output, metadata?.output, state.status);
+    const rawOutput = getToolOutput(part.tool, stateWithData.output, metadata?.output);
     const hasStringOutput = typeof rawOutput === 'string' && rawOutput.length > 0;
     const rawOutputString = typeof rawOutput === 'string' ? rawOutput : '';
     const isStreamingBash = part.tool === 'bash' && state.status === 'running';
@@ -1324,7 +1647,9 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     );
 
     const renderResultContent = () => {
-        const getEntryAbsolutePath = (entry: DiffPatchEntry) => toAbsoluteFilePath(currentDirectory, entry.filePath ?? entry.title);
+        const getEntryAbsolutePath = (entry: DiffPatchEntry) => (
+            entry.title.startsWith('/') ? entry.title : `${currentDirectory}/${entry.title}`.replace(/\/+/g, '/')
+        );
         const openEntryFile = (entry: DiffPatchEntry, event: React.MouseEvent<HTMLButtonElement>) => {
             event.stopPropagation();
             const line = extractFirstChangedLineFromDiff(entry.patch);
@@ -1531,6 +1856,126 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             return null;
         }
 
+        // LSP Tools
+        if (part.tool === 'lsp_diagnostics' && hasStringOutput) {
+            const rendered = renderLspDiagnosticsOutput(outputString);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if (part.tool === 'lsp_goto_definition' && hasStringOutput) {
+            const rendered = renderLspGotoDefinitionOutput(outputString);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if (part.tool === 'lsp_find_references' && hasStringOutput) {
+            const rendered = renderLspFindReferencesOutput(outputString, undefined, t);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if (part.tool === 'lsp_symbols' && hasStringOutput) {
+            const rendered = renderLspSymbolsOutput(outputString);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if (part.tool === 'lsp_rename' && hasStringOutput) {
+            const rendered = renderLspRenameOutput(outputString, undefined, t);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if (part.tool === 'lsp_prepare_rename' && hasStringOutput) {
+            const rendered = renderLspPrepareRenameOutput(outputString, undefined, t);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        // Session Tools
+        if (part.tool === 'session_list' && hasStringOutput) {
+            const rendered = renderSessionListOutput(outputString);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if (part.tool === 'session_read' && hasStringOutput) {
+            const rendered = renderSessionReadOutput(outputString);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if (part.tool === 'session_info' && hasStringOutput) {
+            const rendered = renderSessionInfoOutput(outputString);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if (part.tool === 'session_search' && hasStringOutput) {
+            const rendered = renderSessionSearchOutput(outputString);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        // Background & Monitor Tools
+        if (part.tool === 'background_output' && hasStringOutput) {
+            const rendered = renderBackgroundOutputOutput(outputString, undefined, t);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if (part.tool === 'monitor_output' && hasStringOutput) {
+            const rendered = renderMonitorOutputOutput(outputString, undefined, t);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        // Other Tools
+        if ((part.tool === 'skill_mcp' || part.tool === 'skill-mcp') && hasStringOutput) {
+            const rendered = renderSkillMcpOutput(outputString);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if (part.tool === 'grep' && hasStringOutput) {
+            const rendered = renderGrepOutput(outputString, isMobile);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if (part.tool === 'glob' && hasStringOutput) {
+            const rendered = renderGlobOutput(outputString, isMobile);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if (part.tool === 'list' && hasStringOutput) {
+            const rendered = renderListOutput(outputString);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if (part.tool === 'websearch_web_search_exa' && hasStringOutput) {
+            const rendered = renderWebSearchOutput(outputString);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if (part.tool === 'hashline_edit' && hasStringOutput) {
+            const rendered = renderHashlineEditOutput(outputString, undefined, t);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        // Code Search & Web Tools
+        if (part.tool === 'codesearch' && hasStringOutput) {
+            const rendered = renderCodeSearchOutput(outputString, undefined, t);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if (part.tool === 'webfetch' && hasStringOutput) {
+            const rendered = renderWebFetchOutput(outputString, undefined, t);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if ((part.tool === 'structuredoutput' || part.tool === 'structured_output') && hasStringOutput) {
+            const rendered = renderStructuredOutput(outputString);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if ((part.tool === 'plan_enter' || part.tool === 'plan_exit') && hasStringOutput) {
+            const rendered = renderPlanModeOutput(outputString, part.tool);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if ((part.tool.startsWith('codegraph_') || part.tool.startsWith('grep_app_') || part.tool.startsWith('context7_')) && hasStringOutput) {
+            const rendered = renderMarkdownOutput(outputString);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
         if (hasStringOutput && outputString.trim()) {
             const output = (
                 <ToolScrollableTextOutput
@@ -1688,9 +2133,6 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
 }) => {
     const { t } = useI18n();
     const state = part.state;
-    const stateWithData = state as ToolStateWithMetadata;
-    const metadata = stateWithData.metadata;
-    const input = stateWithData.input;
     const showToolFileIcons = useUIStore((s) => s.showToolFileIcons);
     const currentDirectory = useEffectiveDirectory() ?? '';
 
@@ -1699,19 +2141,18 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
 
     const status = state?.status as string | undefined;
     const isFinalized = status === 'completed' || status === 'error' || status === 'aborted' || status === 'failed' || status === 'timeout' || status === 'cancelled';
-    const isSuccessfullyFinalized = status === 'completed';
     const isError = status === 'error' || status === 'failed';
 
     const [activeLatched, setActiveLatched] = React.useState<boolean>(!isFinalized);
     const previousPartIdRef = React.useRef<string | undefined>(part.id);
-    const observedActiveGitToolRef = React.useRef(!isFinalized);
+    const lastGitRefreshSignatureRef = React.useRef<string>('');
 
     React.useEffect(() => {
         if (previousPartIdRef.current === part.id) {
             return;
         }
         previousPartIdRef.current = part.id;
-        observedActiveGitToolRef.current = !isFinalized;
+        lastGitRefreshSignatureRef.current = '';
         // Reset latch only when tool identity changes.
         setActiveLatched(!isFinalized);
     }, [isFinalized, part.id]);
@@ -1723,34 +2164,20 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     }, [isFinalized]);
 
     React.useEffect(() => {
-        if (!isFinalized) {
-            observedActiveGitToolRef.current = true;
+        if (!isFinalized || isError || !currentDirectory) {
+            return;
+        }
+        if (!GIT_REFRESH_MUTATING_TOOLS.has(normalizedPartTool)) {
             return;
         }
 
-        // Historical completed tools can remount when the timeline changes.
-        // Refresh only for a tool whose active state this instance observed.
-        const finalizedAfterObservedActive = observedActiveGitToolRef.current;
-        if (!finalizedAfterObservedActive) {
+        const signature = `${part.id}:${status ?? 'unknown'}`;
+        if (lastGitRefreshSignatureRef.current === signature) {
             return;
         }
-
-        if (!isSuccessfullyFinalized || !GIT_REFRESH_MUTATING_TOOLS.has(normalizedPartTool)) {
-            observedActiveGitToolRef.current = false;
-            return;
-        }
-        if (!currentDirectory) {
-            return;
-        }
-
-        observedActiveGitToolRef.current = false;
-        const paths = getMutatedToolPaths(normalizedPartTool, input, metadata)
-            .map((path) => getRelativePath(path, currentDirectory));
-        sessionEvents.requestGitRefresh({
-            directory: currentDirectory,
-            ...(paths.length > 0 ? { paths } : {}),
-        });
-    }, [currentDirectory, input, isFinalized, isSuccessfullyFinalized, metadata, normalizedPartTool]);
+        lastGitRefreshSignatureRef.current = signature;
+        sessionEvents.requestGitRefresh({ directory: currentDirectory });
+    }, [currentDirectory, isError, isFinalized, normalizedPartTool, part.id, status]);
 
     const shouldNotifyStructuralChange = isFinalized || isTaskTool;
 
@@ -1776,7 +2203,10 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         }
     }, [isExpanded, isTaskTool, shouldNotifyStructuralChange]);
 
+    const stateWithData = state as ToolStateWithMetadata;
+    const metadata = stateWithData.metadata;
     const partMetadata = (part as unknown as { metadata?: unknown }).metadata;
+    const input = stateWithData.input;
     const time = stateWithData.time;
 
     const [pinnedTime, setPinnedTime] = React.useState<{ start?: number; end?: number }>(() => ({
@@ -1961,6 +2391,9 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         return normalizedPartTool === 'write' ? parseWriteLineCount(input) : null;
     }, [input, normalizedPartTool]);
     const isMultiFileApplyPatch = normalizedPartTool === 'apply_patch' && Array.isArray(metadata?.files) && (metadata?.files as []).length > 1;
+    const todoProgress = React.useMemo(() => {
+        return normalizedPartTool === 'todowrite' ? parseTodoProgress(input) : null;
+    }, [input, normalizedPartTool]);
     const normalizedPart = normalizedPartTool !== part.tool ? ({ ...part, tool: normalizedPartTool } as ToolPartType) : part;
     const descriptionPath = getToolDescriptionPath(normalizedPart, state, currentDirectory);
     const description = getToolDescription(normalizedPart, state, currentDirectory);
@@ -1985,35 +2418,114 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         }
         const title = (stateWithData as { title?: string }).title;
         if (typeof title === 'string' && title.trim().length > 0) {
+            if (input && typeof input === 'object') {
+                const taskIdCandidate = input.task_id || input.taskId || input.taskID;
+                if (typeof taskIdCandidate === 'string' && taskIdCandidate.trim().length > 0) {
+                    return title.trim() + ' (task: ' + taskIdCandidate.trim() + ')';
+                }
+            }
             return title;
         }
         const inputDesc = input?.description;
         if (typeof inputDesc === 'string' && inputDesc.trim().length > 0) {
+            const subagentTypeCandidate = input.subagent_type;
+            if (typeof subagentTypeCandidate === 'string' && subagentTypeCandidate.trim().length > 0) {
+                return subagentTypeCandidate.trim() + ' - ' + inputDesc.trim();
+            }
             return inputDesc;
         }
+
+        if (input && typeof input === 'object') {
+            const nameCandidate = input.name;
+            if (typeof nameCandidate === 'string' && nameCandidate.trim().length > 0) {
+                return nameCandidate.trim();
+            }
+
+            const commandCandidate = input.command;
+            if (typeof commandCandidate === 'string' && commandCandidate.trim().length > 0) {
+                return commandCandidate.trim();
+            }
+
+            const patternCandidate = input.pattern;
+            if (typeof patternCandidate === 'string' && patternCandidate.trim().length > 0) {
+                return 'pattern: ' + patternCandidate.trim();
+            }
+
+            const queryCandidate = input.query;
+            if (typeof queryCandidate === 'string' && queryCandidate.trim().length > 0) {
+                const repoCandidate = input.repo;
+                if (typeof repoCandidate === 'string' && repoCandidate.trim().length > 0) {
+                    return 'query: ' + queryCandidate.trim() + ' (repo: ' + repoCandidate.trim() + ')';
+                }
+                return 'query: ' + queryCandidate.trim();
+            }
+
+            const goalCandidate = input.goal;
+            if (typeof goalCandidate === 'string' && goalCandidate.trim().length > 0) {
+                return goalCandidate.trim();
+            }
+
+            const mcpNameCandidate = input.mcp_name;
+            if (typeof mcpNameCandidate === 'string' && mcpNameCandidate.trim().length > 0) {
+                const toolNameCandidate = input.tool_name;
+                if (typeof toolNameCandidate === 'string' && toolNameCandidate.trim().length > 0) {
+                    const args = input.arguments as Record<string, unknown> | undefined;
+                    const argCandidate = (typeof args?.url === 'string' ? args.url : undefined) 
+                        || (typeof args?.uri === 'string' ? args.uri : undefined) 
+                        || (typeof args?.time === 'number' ? String(args.time) + 's' : undefined);
+                    if ((toolNameCandidate.trim().toLowerCase() === 'browser_navigate'
+                        || toolNameCandidate.trim().toLowerCase() === 'browser_wait_for')
+                        && argCandidate) {
+                        return mcpNameCandidate.trim() + ' - ' + toolNameCandidate.trim() + ' ' + argCandidate;
+                    }
+                    return mcpNameCandidate.trim() + ' - ' + toolNameCandidate.trim();
+                }
+                return mcpNameCandidate.trim();
+            }
+
+            const toolNameCandidate = input.tool_name;
+            if (typeof toolNameCandidate === 'string' && toolNameCandidate.trim().length > 0) {
+                return toolNameCandidate.trim();
+            }
+
+            const subagentTypeCandidate = input.subagent_type;
+            if (typeof subagentTypeCandidate === 'string' && subagentTypeCandidate.trim().length > 0) {
+                return subagentTypeCandidate.trim();
+            }
+
+            const sessionIdCandidate = input.session_id;
+            if (typeof sessionIdCandidate === 'string' && sessionIdCandidate.trim().length > 0) {
+                return sessionIdCandidate.trim();
+            }
+
+            const taskIdCandidate = input.task_id || input.taskId || input.taskID;
+            if (typeof taskIdCandidate === 'string' && taskIdCandidate.trim().length > 0) {
+                return taskIdCandidate.trim();
+            }
+
+            const projectPathCandidate = input.projectPath || input.project_path || input.project;
+            if (typeof projectPathCandidate === 'string' && projectPathCandidate.trim().length > 0) {
+                const pathCandidate = input.path;
+                if (typeof pathCandidate === 'string' && pathCandidate.trim().length > 0) {
+                    return projectPathCandidate.trim() + '/' + pathCandidate.trim();
+                }
+                return projectPathCandidate.trim();
+            }
+
+            const filePathCandidate = input.filePath || input.file_path || input.path;
+            if (typeof filePathCandidate === 'string' && filePathCandidate.trim().length > 0) {
+                return filePathCandidate.trim();
+            }
+
+            const fileCandidate = input.file || input.filename || input.file_name;
+            if (typeof fileCandidate === 'string' && fileCandidate.trim().length > 0) {
+                return fileCandidate.trim();
+            }
+        }
+
         return null;
     }, [descriptionPath, normalizedPartTool, stateWithData, input]);
     const runtime = React.useContext(RuntimeAPIContext);
-
-    const openApplyPatchFile = (file: Record<string, unknown>, event: React.MouseEvent<HTMLButtonElement>) => {
-        if (!runtime?.editor) {
-            return;
-        }
-
-        event.stopPropagation();
-        const displayPath = typeof file.relativePath === 'string'
-            ? file.relativePath
-            : typeof file.filePath === 'string'
-                ? getRelativePath(file.filePath, currentDirectory)
-                : '';
-        openApplyPatchFileInEditor({
-            currentDirectory,
-            diffLabel: `${displayPath} (changes)`,
-            editor: runtime.editor,
-            file,
-            isVSCode: runtime.runtime.isVSCode,
-        });
-    };
 
     const handleMainClick = (e: { stopPropagation: () => void }) => {
         if (isTaskTool || !runtime?.editor) {
@@ -2024,21 +2536,23 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         let filePath: unknown;
         let targetLine: number | undefined;
         let toolDiff: string | undefined;
-        if (normalizedPartTool === 'edit' || normalizedPartTool === 'multiedit') {
+        if (part.tool === 'edit' || part.tool === 'multiedit') {
             filePath = input?.filePath || input?.file_path || input?.path || metadata?.filePath || metadata?.file_path || metadata?.path;
+            targetLine = getFirstChangedLineFromMetadata(part.tool, metadata);
             if (typeof filePath === 'string') {
-                toolDiff = getPrimaryDiffFromMetadata(normalizedPartTool, metadata, filePath);
-                targetLine = getFirstChangedLineFromMetadata(normalizedPartTool, metadata, filePath);
+                toolDiff = getPrimaryDiffFromMetadata(part.tool, metadata, filePath);
             }
-        } else if (normalizedPartTool === 'apply_patch') {
-            filePath = getPrimaryToolPath(normalizedPartTool, input, metadata);
+        } else if (part.tool === 'apply_patch') {
+            const files = Array.isArray(metadata?.files) ? metadata?.files : [];
+            const firstFile = files[0] as { relativePath?: string; filePath?: string } | undefined;
+            filePath = firstFile?.relativePath || firstFile?.filePath;
+            targetLine = getFirstChangedLineFromMetadata(part.tool, metadata);
             if (typeof filePath === 'string') {
-                toolDiff = getPrimaryDiffFromMetadata(normalizedPartTool, metadata, filePath);
-                targetLine = getFirstChangedLineFromMetadata(normalizedPartTool, metadata, filePath);
+                toolDiff = getPrimaryDiffFromMetadata(part.tool, metadata, filePath);
             }
-        } else if (['write', 'create', 'file_write'].includes(normalizedPartTool)) {
+        } else if (['write', 'create', 'file_write'].includes(part.tool)) {
             filePath = input?.filePath || input?.file_path || input?.path || metadata?.filePath || metadata?.file_path || metadata?.path;
-        } else if (normalizedPartTool === 'lsp') {
+        } else if (part.tool === 'lsp') {
             filePath = input?.filePath || input?.file_path || input?.path;
             const line = input?.line;
             targetLine = typeof line === 'number' && Number.isFinite(line) ? Math.trunc(line) : undefined;
@@ -2046,8 +2560,11 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
 
         if (typeof filePath === 'string') {
             e.stopPropagation();
-            const absolutePath = toAbsoluteFilePath(currentDirectory, filePath);
-            if (runtime.runtime.isVSCode && toolDiff && (normalizedPartTool === 'edit' || normalizedPartTool === 'multiedit' || normalizedPartTool === 'apply_patch')) {
+            let absolutePath = filePath;
+            if (!filePath.startsWith('/')) {
+                absolutePath = currentDirectory.endsWith('/') ? currentDirectory + filePath : currentDirectory + '/' + filePath;
+            }
+            if (runtime.runtime.isVSCode && toolDiff && (part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch')) {
                 const label = `${getRelativePath(absolutePath, currentDirectory)} (changes)`;
                 void runtime.editor.openDiff('', absolutePath, label, { line: targetLine, patch: toolDiff });
                 return;
@@ -2080,85 +2597,60 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             {}
             <div
                 className={cn(
-                    'group/tool flex gap-1.5 pr-2 pl-px py-1.5 rounded-xl',
-                    isMultiFileApplyPatch ? 'flex-wrap items-start cursor-pointer' : 'items-center cursor-pointer',
-                )}
-                onClick={isMultiFileApplyPatch ? () => onToggle(part.id) : handleMainClick}
-                onKeyDown={isMultiFileApplyPatch ? (event) => {
-                    if (event.target !== event.currentTarget) return;
-                    if (event.key !== 'Enter' && event.key !== ' ') return;
-                    event.preventDefault();
-                    onToggle(part.id);
-                } : handleMainKeyDown}
+                'group/tool flex gap-1.5 pr-2 pl-px py-1.5 rounded-xl cursor-pointer',
+                isMultiFileApplyPatch ? 'flex-wrap items-start' : 'items-center'
+            )}
+                onClick={handleMainClick}
+                onKeyDown={handleMainKeyDown}
                 role="button"
                 tabIndex={0}
             >
                 <div className={cn('flex gap-1.5', isMultiFileApplyPatch ? 'w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5' : 'items-center flex-shrink-0')}>
+                    {}
+                    <div
+                        // h-5 matches StaticToolRow's icon column, so expandable
+                        // and static rows come out the same height (the 14px
+                        // icon alone left these rows ~2px shorter).
+                        className="relative h-5 w-3.5 flex-shrink-0 cursor-pointer"
+                        onClick={(event) => { event.stopPropagation(); onToggle(part.id); }}
+                    >
+                        {}
+                        <div
+                            className={cn(
+                                'absolute inset-0 flex items-center justify-center transition-opacity',
+                                isExpanded && 'opacity-0',
+                                !isExpanded && 'group-hover/tool:opacity-0'
+                            )}
+                            style={iconStyle}
+                        >
+                            {getToolIcon(normalizedPartTool || part.tool)}
+                        </div>
+                        {}
+                        <div
+                            className={cn(
+                                'absolute inset-0 transition-opacity flex items-center justify-center',
+                                isExpanded && 'opacity-100',
+                                !isExpanded && 'opacity-0 group-hover/tool:opacity-100'
+                            )}
+                        >
+                            {isExpanded ? <Icon name="arrow-down-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-right-s" className="h-3.5 w-3.5" />}
+                        </div>
+                    </div>
                     {isMultiFileApplyPatch ? (
                         <>
-                            <div className="flex h-5 flex-shrink-0 items-center gap-1.5">
-                                <span className="relative h-3.5 w-3.5 flex-shrink-0">
-                                    <span className={cn(
-                                        'absolute inset-0 flex items-center justify-center transition-opacity',
-                                        isExpanded ? 'opacity-0' : 'group-hover/tool:opacity-0',
-                                    )} style={iconStyle}>
-                                        {getToolIcon(normalizedPartTool || part.tool)}
-                                    </span>
-                                    <Icon
-                                        name={isExpanded ? 'arrow-down-s' : 'arrow-right-s'}
-                                        className={cn(
-                                            'absolute inset-0 h-3.5 w-3.5 transition-opacity',
-                                            isExpanded ? 'opacity-100' : 'opacity-0 group-hover/tool:opacity-100',
-                                        )}
-                                    />
-                                </span>
-                                <MinDurationShineText
-                                    active={Boolean(isActive && !isError)}
-                                    minDurationMs={300}
-                                    className={cn(TOOL_ROW_TITLE_CLASS, 'flex-shrink-0')}
-                                    style={titleStyle}
-                                >
-                                    {displayName}
-                                </MinDurationShineText>
-                            </div>
-                            <ApplyPatchFileButtons
-                                metadata={metadata}
-                                animate={animateTailText}
-                                showFileIcons={showToolFileIcons}
-                                textClassName={TOOL_ROW_DESCRIPTION_CLASS}
-                                openDiffLabel={t('chat.toolPart.openFileDiff')}
-                                onFileClick={runtime?.editor ? openApplyPatchFile : undefined}
-                            />
+                            <MinDurationShineText
+                                active={Boolean(isActive && !isError)}
+                                minDurationMs={300}
+                                className={cn(TOOL_ROW_TITLE_CLASS, 'flex-shrink-0')}
+                                style={titleStyle}
+                                title={displayName}
+                            >
+                                {displayName}
+                            </MinDurationShineText>
+                            {getMultiFileDescription(metadata, animateTailText, showToolFileIcons)}
                         </>
                     ) : (
                         <>
-                            <div
-                                // h-5 matches StaticToolRow's icon column, so expandable
-                                // and static rows come out the same height (the 14px
-                                // icon alone left these rows ~2px shorter).
-                                className="relative h-5 w-3.5 flex-shrink-0 cursor-pointer"
-                                onClick={(event) => { event.stopPropagation(); onToggle(part.id); }}
-                            >
-                                <div
-                                    className={cn(
-                                        'absolute inset-0 flex items-center justify-center transition-opacity',
-                                        isExpanded && 'opacity-0',
-                                        !isExpanded && 'group-hover/tool:opacity-0'
-                                    )}
-                                    style={iconStyle}
-                                >
-                                    {getToolIcon(normalizedPartTool || part.tool)}
-                                </div>
-                                <div
-                                    className={cn(
-                                        'absolute inset-0 transition-opacity flex items-center justify-center',
-                                        isExpanded && 'opacity-100',
-                                        !isExpanded && 'opacity-0 group-hover/tool:opacity-100'
-                                    )}
-                                >
-                                    {isExpanded ? <Icon name="arrow-down-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-right-s" className="h-3.5 w-3.5" />}
-                                </div>
-                            </div>
                             <div className="flex items-center gap-2 min-w-0 flex-1">
                                 <MinDurationShineText
                                     active={Boolean(isActive && !isError)}
@@ -2224,6 +2716,14 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                                     <span style={{ color: 'var(--status-success)' }}>+{writeLineCount}</span>
                                 </span>
                             )}
+                            {todoProgress && (todoProgress.inProgress !== 0 || todoProgress.pending !== 0 || todoProgress.completed !== 0) && (
+                                <span className="flex-shrink-0 inline-flex items-center gap-0 typography-meta" style={{ fontSize: '0.8rem', lineHeight: '1' }}>(
+                                    {todoProgress.inProgress != 0 && (<span className={cn('font-medium', (todoProgress.pending !== 0 || todoProgress.completed !== 0) && 'me-2')} style={{ color: 'var(--foreground)' }}>{t('chat.todo.inProgress')}: {todoProgress.inProgress}</span>)}
+                                    {todoProgress.pending != 0 && (<span className={cn('font-medium', todoProgress.completed !== 0 && 'me-2')} style={{ color: 'var(--muted-foreground)' }}>{t('chat.todo.pending')}: {todoProgress.pending}</span>)}
+                                    {todoProgress.completed != 0 && (<span className="font-medium" style={{ color: 'var(--status-success)' }}>{t('chat.todo.completed')}: {todoProgress.completed}</span>)}
+                                )
+                                </span>
+                            )}
                         </div>
                     </div>
                 )}
@@ -2268,6 +2768,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                                 state={state}
                                 currentDirectory={currentDirectory}
                                 isExpanded={isExpanded}
+                                isMobile={isMobile}
                                 onShowPopup={onShowPopup}
                             />
                         </div>
