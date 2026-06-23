@@ -216,6 +216,8 @@ mock.module('@/lib/configSync', () => ({
 
 const { useConfigStore } = await import('./useConfigStore');
 const { emitSyncConfigChanged, setSyncRefs } = await import('@/sync/sync-refs');
+const { useSelectionStore } = await import('@/sync/selection-store');
+const { useSessionUIStore } = await import('@/sync/session-ui-store');
 
 describe('useConfigStore provider persistence', () => {
   beforeEach(() => {
@@ -235,6 +237,13 @@ describe('useConfigStore provider persistence', () => {
     withDirectoryCalls = [];
     currentFetchDirectory = DIRECTORY;
     setSyncRefs({} as never, { children: new Map(), getState: () => undefined } as never, DIRECTORY);
+    useSelectionStore.setState({
+      sessionModelSelections: new Map(),
+      sessionAgentSelections: new Map(),
+      sessionAgentModelSelections: new Map(),
+      lastUsedProvider: null,
+    });
+    useSessionUIStore.setState({ currentSessionId: null });
     useConfigStore.setState({
       activeDirectoryKey: DIRECTORY,
       directoryScoped: {},
@@ -378,6 +387,79 @@ describe('useConfigStore provider persistence', () => {
     expect(state.currentProviderId).toBe('live');
     expect(state.currentModelId).toBe('live-model');
     expect(state.currentVariant).toBe('fast');
+  });
+
+  test('setAgent applies settings default variant for an agent configured model', () => {
+    useSessionUIStore.setState({ currentSessionId: 'ses_agent_default_variant' });
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5', { low: {}, high: {} })],
+      agents: [testAgent('plan', { model: { providerID: 'openai', modelID: 'gpt-5.5' } })],
+      settingsDefaultVariant: 'high',
+      currentProviderId: 'openai',
+      currentModelId: 'gpt-5.5',
+      currentVariant: undefined,
+      directoryScoped: {},
+    });
+
+    useConfigStore.getState().setAgent('plan');
+
+    const state = useConfigStore.getState();
+    expect(state.currentProviderId).toBe('openai');
+    expect(state.currentModelId).toBe('gpt-5.5');
+    expect(state.currentVariant).toBe('high');
+    expect(state.directoryScoped[DIRECTORY]?.currentVariant).toBe('high');
+  });
+
+  test('setAgent prefers saved and agent variants before settings default', () => {
+    const sessionId = 'ses_agent_saved_variant';
+    useSessionUIStore.setState({ currentSessionId: sessionId });
+    useSelectionStore.getState().saveAgentModelVariantForSession(sessionId, 'plan', 'openai', 'gpt-5.5', 'low');
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5', { low: {}, medium: {}, high: {} })],
+      agents: [testAgent('plan', {
+        model: { providerID: 'openai', modelID: 'gpt-5.5' },
+        variant: 'medium',
+      })],
+      settingsDefaultVariant: 'high',
+      currentProviderId: 'openai',
+      currentModelId: 'gpt-5.5',
+      currentVariant: undefined,
+      directoryScoped: {},
+    });
+
+    useConfigStore.getState().setAgent('plan');
+    expect(useConfigStore.getState().currentVariant).toBe('low');
+
+    useSelectionStore.getState().saveAgentModelVariantForSession(sessionId, 'plan', 'openai', 'gpt-5.5', undefined);
+    useConfigStore.setState({ currentVariant: undefined, directoryScoped: {} });
+
+    useConfigStore.getState().setAgent('plan');
+    expect(useConfigStore.getState().currentVariant).toBe('medium');
+  });
+
+  test('setAgent applies settings default variant for a saved session agent model', () => {
+    const sessionId = 'ses_existing_agent_model_default_variant';
+    useSessionUIStore.setState({ currentSessionId: sessionId });
+    useSelectionStore.getState().saveAgentModelForSession(sessionId, 'plan', 'openai', 'gpt-5.5');
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5', { low: {}, high: {} })],
+      agents: [testAgent('plan')],
+      settingsDefaultVariant: 'high',
+      currentProviderId: 'other',
+      currentModelId: 'other-model',
+      currentVariant: undefined,
+      directoryScoped: {},
+    });
+
+    useConfigStore.getState().setAgent('plan');
+
+    const state = useConfigStore.getState();
+    expect(state.currentProviderId).toBe('openai');
+    expect(state.currentModelId).toBe('gpt-5.5');
+    expect(state.currentVariant).toBe('high');
   });
 
   test('loadAgents does not fetch OpenCode config directly', async () => {
