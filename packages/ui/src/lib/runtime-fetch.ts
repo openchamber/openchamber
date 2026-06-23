@@ -83,17 +83,32 @@ export const buildRuntimeFetchUrl = (input: string, query?: RuntimeUrlQuery): st
   return input;
 };
 
+// In proxy-bypass mode the SDK talks to OpenCode upstream via absolute
+// URLs (e.g. http://127.0.0.1:4096/config, /session, /project). Those
+// paths DON'T start with /api/ — `shouldResolveApiPath('/config')` is false.
+// But the runtime-url resolver still considers them "active runtime service"
+// because they target the OpenCode upstream base. We need to attach auth to
+// ANY URL going to the OpenCode base, not just /api/* paths — otherwise the
+// SDK calls fail with 401 and the UI shows empty lists.
+const isRuntimeUpstreamUrl = (raw: string): boolean => {
+  if (!isAbsoluteUrl(raw)) return false;
+  try {
+    const apiBase = getRuntimeUrlResolver().api('/api');
+    if (!/^[a-z][a-z\d+.-]*:\/\//i.test(apiBase)) return false;
+    const base = new URL(apiBase);
+    return new URL(raw).origin === base.origin;
+  } catch {
+    return false;
+  }
+};
+
 const shouldAttachRuntimeAuth = (input: string | URL | Request): boolean => {
   const raw = input instanceof Request ? input.url : input.toString();
   if (!isAbsoluteUrl(raw)) {
     return shouldResolveApiPath(raw);
   }
-
-  try {
-    return isActiveRuntimeServiceUrl(new URL(raw));
-  } catch {
-    return false;
-  }
+  // Absolute URL: any path targeting the OpenCode upstream origin gets auth.
+  return isRuntimeUpstreamUrl(raw);
 };
 
 const mergeHeaders = async (inputHeaders?: HeadersInit, initHeaders?: HeadersInit, attachAuth = true): Promise<Headers> => {
