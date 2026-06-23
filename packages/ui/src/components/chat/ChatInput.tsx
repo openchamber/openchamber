@@ -2222,12 +2222,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     // Update ref with latest handleSubmit on every render
     handleSubmitRef.current = handleSubmit;
 
-    // Primary action for send/queue button — queues in queue mode when busy, sends otherwise
+    // Primary action for send/queue button — respects selected follow-up behavior
     const handlePrimaryAction = React.useCallback(() => {
         const inputSnapshot = getCurrentInputSnapshot();
         const canQueue = inputMode === 'normal' && inputSnapshot.hasContent && currentSessionId && sessionPhase !== 'idle';
         if (followUpBehavior === 'queue' && canQueue) {
             handleQueueMessage();
+        } else if (followUpBehavior === 'steer' && canQueue) {
+            void handleSubmitRef.current({ delivery: 'steer' });
         } else {
             void handleSubmitRef.current();
         }
@@ -2475,7 +2477,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
             const isCtrlEnter = e.ctrlKey || e.metaKey;
 
-            // Queueing only works when there's an existing busy session.
+            // Queueing / steering only works when there's an existing busy session.
             const canQueue = inputMode === 'normal' && hasContent && currentSessionId && sessionPhase !== 'idle';
 
             if (followUpBehavior === 'queue') {
@@ -2483,6 +2485,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     handleSubmit();
                 } else {
                     handleQueueMessage();
+                }
+            } else if (followUpBehavior === 'steer') {
+                if (isCtrlEnter || !canQueue) {
+                    handleSubmit();
+                } else {
+                    handleSubmit({ delivery: 'steer' });
                 }
             } else {
                 if (isCtrlEnter && canQueue) {

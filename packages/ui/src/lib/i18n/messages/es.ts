@@ -1773,7 +1773,6 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.actions.modelAgentSettings": "Configuración del modelo y agente",
   "chat.chatInput.actions.sendMessageAria": "Enviar mensaje",
   "chat.chatInput.actions.queueMessageAria": "Poner mensaje en cola",
-  "chat.chatInput.actions.queue": "En cola",
   "chat.chatInput.actions.stopGeneratingAria": "Detener generación",
   "chat.chatInput.focusMode.toggleAria": "Activar o desactivar modo de enfoque",
   "chat.chatInput.focusMode.label": "Modo de enfoque",

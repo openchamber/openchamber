@@ -1641,7 +1641,6 @@ export const dict = {
   'chat.chatInput.actions.modelAgentSettings': 'Paramètres du modèle et de l\'agent',
   'chat.chatInput.actions.sendMessageAria': 'Envoyer un message',
   'chat.chatInput.actions.queueMessageAria': 'Message de file d\'attente',
-  'chat.chatInput.actions.queue': 'Mettre en file',
   'chat.chatInput.actions.stopGeneratingAria': 'Arrêter de générer',
   'chat.chatInput.focusMode.toggleAria': 'Basculer le mode de mise au point',
   'chat.chatInput.focusMode.label': 'Mode de mise au point',
