@@ -1082,6 +1082,25 @@ async function main(options = {}) {
     notificationTriggerRuntime.setGetIsWindowFocused(options.getIsWindowFocused);
   }
 
+  // Phase E: Log installed SDK version so wire-protocol drift is visible at startup.
+  // (fs and path are already imported at the top of this module.)
+  try {
+    let dir = __dirname;
+    let sdkPkgPath = null;
+    while (dir !== path.dirname(dir)) {
+      const candidate = path.join(dir, 'node_modules', '@opencode-ai', 'sdk', 'package.json');
+      if (fs.existsSync(candidate)) { sdkPkgPath = candidate; break; }
+      dir = path.dirname(dir);
+    }
+    if (sdkPkgPath) {
+      const sdkPkg = JSON.parse(fs.readFileSync(sdkPkgPath, 'utf8'));
+      console.log(`[openchamber] SDK version: ${sdkPkg.version} (see .omo/plans/sdk-server-wire-protocol.json for wire-protocol compat)`);
+    } else {
+      console.log('[openchamber] SDK version: unknown (could not locate @opencode-ai/sdk/package.json)');
+    }
+  } catch (e) {
+    console.log('[openchamber] SDK version: unknown (' + (e.message || 'read error') + ')');
+  }
   console.log(`Starting OpenChamber on port ${port === 0 ? 'auto' : port}`);
 
   const sayTTSCapability = await detectSayTtsCapability(process);
