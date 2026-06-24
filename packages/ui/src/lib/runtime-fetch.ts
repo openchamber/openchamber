@@ -432,12 +432,29 @@ const _wrappedNativeFetch = (input: RequestInfo | URL, init?: RequestInit): Prom
     // Rewrite the SDK's expected paths to the server's actual paths.
     const rewriteSDKPath = (s: string): string => {
       // Protocol-relative URLs (e.g. //fs/home from openchamberConfig.ts) need
-      // the page origin prepended, otherwise the browser resolves them against
-      // the current page (localhost:9090) with a double-slash path that
-      // Express serves as SPA HTML instead of JSON.
-      let r = s.startsWith('//') && typeof window !== 'undefined'
-        ? window.location.origin + s
-        : s;
+      // the page origin prepended AND /api/ inserted before OpenChamber-internal
+      // paths. Without the /api/ prefix, the browser resolves //fs/home against
+      // localhost:9090/fs/home which Express doesn't serve (SPA HTML).
+      let r = s;
+      if (s.startsWith('//') && typeof window !== 'undefined') {
+        let pathPart = s.slice(2); // strip leading //
+        // If the path is OpenChamber-internal (e.g. /fs/home, /git/identities)
+        // and doesn't already start with /api/, add the /api/ prefix.
+        if (!pathPart.startsWith('/api/') && !pathPart.startsWith('/auth') && !pathPart.startsWith('/health')
+            && (pathPart.startsWith('/fs/') || pathPart.startsWith('/git/')
+                || pathPart.startsWith('/session-folders') || pathPart.startsWith('/projects/')
+                || pathPart.startsWith('/config/themes') || pathPart.startsWith('/config/commands')
+                || pathPart.startsWith('/opencode/') || pathPart.startsWith('/notifications/')
+                || pathPart.startsWith('/chamber/') || pathPart.startsWith('/github/')
+                || pathPart.startsWith('/skills/') || pathPart.startsWith('/preview/')
+                || pathPart.startsWith('/remote-clients/') || pathPart.startsWith('/worktree/')
+                || pathPart.startsWith('/files/') || pathPart.startsWith('/sessions/')
+                || pathPart.startsWith('/desktop/') || pathPart.startsWith('/mobile/')
+                || pathPart.startsWith('/mini-chat/'))) {
+          pathPart = '/api' + pathPart;
+        }
+        r = window.location.origin + pathPart;
+      }
       r = r.replace(/^((?:https?:)?\/\/[^/]+)\/api\/config\/skills(\/|\?|$)/, '$1/api/skill$2');
       r = r.replace(/^((?:https?:)?\/\/[^/]+)\/api\/config\/mcp(\/|\?|$)/, '$1/api/mcp$2');
       r = r.replace(/^((?:https?:)?\/\/[^/]+)\/api\/skills(\/|\?|$)/, '$1/api/skill$2');
