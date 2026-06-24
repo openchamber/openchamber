@@ -28,28 +28,52 @@ export const createStaticRoutesRuntime = (dependencies) => {
 
     if (fs.existsSync(distPath)) {
       console.log(`Serving static files from ${distPath}`);
-      app.use(express.static(distPath, {
-        setHeaders(res, filePath) {
-          // Service workers should never be long-cached; iOS is especially sensitive.
-          if (typeof filePath === 'string' && filePath.endsWith(`${path.sep}sw.js`)) {
-            res.setHeader('Cache-Control', 'no-store');
-          }
-        },
-      }));
 
-      registerPwaManifestRoute(app, {
-        process,
-        resolveProjectDirectory,
-        buildOpenCodeUrl,
-        getOpenCodeAuthHeaders,
-        readSettingsFromDiskMigrated,
-        normalizePwaAppName,
-        normalizePwaOrientation,
+    // Inject Basic credentials into index.html for the proxy-bypass path.
+    // MUST be registered BEFORE express.static so it intercepts `/` requests
+    // (express.static would otherwise serve index.html directly without injection).
+    app.get(/^(?!\/api|.*\.(js|css|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map)).*$/, (_req, res) => {
+      const indexPath = path.join(distPath, 'index.html');
+      const ocPassword = typeof process.env.OPENCODE_SERVER_PASSWORD === 'string'
+        ? process.env.OPENCODE_SERVER_PASSWORD.trim()
+        : '';
+      if (!ocPassword) {
+        res.sendFile(indexPath);
+        return;
+      }
+      fs.readFile(indexPath, 'utf8', (readErr, html) => {
+        if (readErr) {
+          res.sendFile(indexPath);
+          return;
+        }
+        // JSON.stringify handles all JS string escaping (quotes, backslashes, unicode).
+        const seedScript = `<script>(function(){try{var k='openchamber.credentials';if(localStorage.getItem(k))return;var p=${JSON.stringify(ocPassword)};localStorage.setItem(k,JSON.stringify({username:'opencode',password:p}));}catch(e){}})();</script>`;
+        const injected = html.includes('</head>')
+          ? html.replace('</head>', seedScript + '</head>')
+          : (html.includes('<body>') ? html.replace('<body>', seedScript + '<body>') : seedScript + html);
+        res.type('html').send(injected);
       });
+    });
 
-      app.get(/^(?!\/api|.*\.(js|css|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map)).*$/, (_req, res) => {
-        res.sendFile(path.join(distPath, 'index.html'));
-      });
+    app.use(express.static(distPath, {
+      setHeaders(res, filePath) {
+        // Service workers should never be long-cached; iOS is especially sensitive.
+        if (typeof filePath === 'string' && filePath.endsWith(`${path.sep}sw.js`)) {
+          res.setHeader('Cache-Control', 'no-store');
+        }
+      },
+    }));
+
+    registerPwaManifestRoute(app, {
+      process,
+      resolveProjectDirectory,
+      buildOpenCodeUrl,
+      getOpenCodeAuthHeaders,
+      readSettingsFromDiskMigrated,
+      normalizePwaAppName,
+      normalizePwaOrientation,
+    });
+    return;
       return;
     }
 
