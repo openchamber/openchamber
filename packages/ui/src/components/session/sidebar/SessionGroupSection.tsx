@@ -664,12 +664,13 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
     return collected;
   }, []);
 
-  // The "delete all in group" handler closes over the full list of
-  // sessions in this group. Memoize so the recursive flatten only runs
-  // when the underlying source group nodes change, not on every render.
+  // Flat list of all sessions in this group (including nested children).
+  // Used by both the "delete all archived" button and the "delete worktree"
+  // button. Memoize so the recursive flatten only runs when the underlying
+  // source group nodes change, not on every render.
   const allGroupSessions = React.useMemo(
-    () => (group.isArchivedBucket ? collectGroupSessions(sourceGroupNodes) : []),
-    [collectGroupSessions, sourceGroupNodes, group.isArchivedBucket],
+    () => collectGroupSessions(sourceGroupNodes),
+    [collectGroupSessions, sourceGroupNodes],
   );
 
   // Precompute the per-folder "delete all sessions in folder" list once
