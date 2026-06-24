@@ -3,6 +3,24 @@ import { DateTime } from 'luxon';
 import parser from 'cron-parser';
 import { expandSnippets } from '../opencode/snippets.js';
 
+const SCHEDULED_PLACEHOLDER_PATTERN = /\{\{\s*scheduled_time(?::\s*([^}]*?))?\s*\}\}/gi;
+
+export const expandScheduledTaskPlaceholders = (text, scheduledTimeMs, zone) => {
+  if (typeof text !== 'string' || !Number.isFinite(scheduledTimeMs)) {
+    return text;
+  }
+  return text.replace(SCHEDULED_PLACEHOLDER_PATTERN, (_match, formatToken) => {
+    const dt = DateTime.fromMillis(scheduledTimeMs, { zone });
+    if (!dt.isValid) {
+      return '';
+    }
+    if (typeof formatToken === 'string' && formatToken.trim().length > 0) {
+      return dt.toFormat(formatToken.trim());
+    }
+    return dt.toISO();
+  });
+};
+
 const DEFAULT_GLOBAL_CONCURRENCY = 4;
 const DEFAULT_PROJECT_CONCURRENCY = 2;
 const DEFAULT_MAX_RUN_MS = 30 * 60 * 1000;
@@ -406,7 +424,24 @@ export const createScheduledTasksRuntime = (deps) => {
     return projectRunning < maxProjectConcurrency;
   };
 
-  const buildPromptAsyncPayload = (task, projectPath) => ({
+  const resolveScheduledTimeMs = (task, reason) => {
+    if (reason === 'scheduled' && Number.isFinite(task?.state?.nextRunAt)) {
+      return task.state.nextRunAt;
+    }
+    return Date.now();
+  };
+
+  const resolveTaskTimezone = (task) => {
+    const tz = task?.schedule?.timezone;
+    return typeof tz === 'string' && tz.trim().length > 0 ? tz.trim() : DateTime.local().zoneName;
+  };
+
+  const expandPromptText = (prompt, projectPath, scheduledTimeMs, zone) => {
+    const withSnippets = expandSnippets(prompt, projectPath);
+    return expandScheduledTaskPlaceholders(withSnippets, scheduledTimeMs, zone);
+  };
+
+  const buildPromptAsyncPayload = (task, projectPath, scheduledTimeMs, zone) => ({
     model: {
       providerID: task.execution.providerID,
       modelID: task.execution.modelID,
@@ -416,12 +451,12 @@ export const createScheduledTasksRuntime = (deps) => {
     parts: [
       {
         type: 'text',
-        text: expandSnippets(task.execution.prompt, projectPath),
+        text: expandPromptText(task.execution.prompt, projectPath, scheduledTimeMs, zone),
       },
     ],
   });
 
-  const runPromptAsync = async ({ baseUrl, authHeaders, sessionID, projectPath, task }) => {
+  const runPromptAsync = async ({ baseUrl, authHeaders, sessionID, projectPath, task, scheduledTimeMs, zone }) => {
     const promptUrl = new URL(`${baseUrl}/session/${encodeURIComponent(sessionID)}/prompt_async`);
     promptUrl.searchParams.set('directory', projectPath);
     const response = await fetch(promptUrl.toString(), {
@@ -431,7 +466,7 @@ export const createScheduledTasksRuntime = (deps) => {
         'content-type': 'application/json',
         accept: 'application/json',
       },
-      body: JSON.stringify(buildPromptAsyncPayload(task, projectPath)),
+      body: JSON.stringify(buildPromptAsyncPayload(task, projectPath, scheduledTimeMs, zone)),
     });
 
     if (!response.ok) {
@@ -440,7 +475,7 @@ export const createScheduledTasksRuntime = (deps) => {
     }
   };
 
-  const runScheduledCommandIfApplicable = async ({ client, projectPath, sessionID, task }) => {
+  const runScheduledCommandIfApplicable = async ({ client, projectPath, sessionID, task, scheduledTimeMs, zone }) => {
     const parsed = parseScheduledCommandPrompt(task?.execution?.prompt);
     if (!parsed) {
       return false;
@@ -459,11 +494,13 @@ export const createScheduledTasksRuntime = (deps) => {
       return false;
     }
 
+    const expandedArgs = expandScheduledTaskPlaceholders(parsed.arguments, scheduledTimeMs, zone);
+
     await client.session.command({
       sessionID,
       directory: projectPath,
       command: parsed.command,
-      arguments: parsed.arguments,
+      arguments: expandedArgs,
       ...(task.execution.agent ? { agent: task.execution.agent } : {}),
       model: `${task.execution.providerID}/${task.execution.modelID}`,
       ...(task.execution.variant ? { variant: task.execution.variant } : {}),
@@ -479,6 +516,9 @@ export const createScheduledTasksRuntime = (deps) => {
     if (!projectPath) {
       throw new Error('project path is unavailable');
     }
+
+    const scheduledTimeMs = resolveScheduledTimeMs(task, reason);
+    const zone = resolveTaskTimezone(task);
 
     if (typeof waitForOpenCodeReady === 'function') {
       await waitForOpenCodeReady(10_000, 250);
@@ -516,6 +556,8 @@ export const createScheduledTasksRuntime = (deps) => {
       projectPath,
       sessionID,
       task,
+      scheduledTimeMs,
+      zone,
     });
     if (!executedAsCommand) {
       await runPromptAsync({
@@ -524,6 +566,8 @@ export const createScheduledTasksRuntime = (deps) => {
         sessionID,
         projectPath,
         task,
+        scheduledTimeMs,
+        zone,
       });
     }
 
