@@ -1959,9 +1959,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
             else if (commandName === 'compact' && currentSessionId) {
                 try {
-                    await sessionActions.waitForConnectionOrThrow();
                     const compactDirectory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory || undefined;
-                    await opencodeClient.summarizeSession(currentSessionId, currentProviderId, currentModelId, compactDirectory);
+                    await sessionActions.compactSession({
+                        sessionId: currentSessionId,
+                        providerID: currentProviderId,
+                        modelID: currentModelId,
+                        directory: compactDirectory,
+                    });
                 } catch (error) {
                     toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.compactFailed'));
                 }

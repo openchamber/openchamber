@@ -10,6 +10,17 @@ let sessionRevertResult: { data?: unknown; error?: unknown; response?: { status?
 let questionReplyError: unknown | null = null
 let sessionShareResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
 const globalUpsertedSessions: unknown[] = []
+const summarizeSessionCalls: Array<{
+  sessionId: string
+  providerID: string
+  modelID: string
+  directory?: string | null
+  statusDuringCall?: string
+}> = []
+let summarizeSessionResult: boolean = true
+let summarizeSessionError: unknown | null = null
+// Lets the summarizeSession mock observe the directory store status at call time
+let compactStoreRef: (() => { session_status: Record<string, { type: string }> }) | null = null
 
 const mockScopedClient = {
   permission: {
@@ -103,6 +114,12 @@ mock.module("@/lib/opencode/client", () => ({
         throw new Error(`session.revert failed${status ? ` (${status})` : ""}: rejected`)
       }
       return Promise.resolve(sessionRevertResult.data)
+    }),
+    summarizeSession: mock((sessionId: string, providerID: string, modelID: string, directory?: string | null) => {
+      const statusDuringCall = compactStoreRef?.().session_status[sessionId]?.type
+      summarizeSessionCalls.push({ sessionId, providerID, modelID, directory, statusDuringCall })
+      if (summarizeSessionError) return Promise.reject(summarizeSessionError)
+      return Promise.resolve(summarizeSessionResult)
     }),
   },
 }))
@@ -597,5 +614,77 @@ describe("rejectQuestion passes directory", () => {
     expect(replyCalls.length).toBe(1)
     expect(replyCalls[0].params.requestID).toBe("q-2")
     expect(replyCalls[0].params.directory).toBe("/test/project")
+  })
+})
+
+describe("compactSession", () => {
+  beforeEach(() => {
+    summarizeSessionCalls.length = 0
+    summarizeSessionResult = true
+    summarizeSessionError = null
+    compactStoreRef = null
+  })
+
+  test("marks the session busy during compaction and restores idle on completion", async () => {
+    const store = createStore({}, { session_status: { "session-a": { type: "idle" } } })
+    const childStores = createChildStores([["/test/project", store]])
+    compactStoreRef = () => store.getState()
+
+    const { setActionRefs, compactSession } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    await compactSession({
+      sessionId: "session-a",
+      providerID: "anthropic",
+      modelID: "claude-3",
+      directory: "/test/project",
+    })
+
+    // summarizeSession was called once, with the session marked busy at call time
+    expect(summarizeSessionCalls).toHaveLength(1)
+    const call = summarizeSessionCalls[0]!
+    expect(call.sessionId).toBe("session-a")
+    expect(call.providerID).toBe("anthropic")
+    expect(call.modelID).toBe("claude-3")
+    expect(call.directory).toBe("/test/project")
+    expect(call.statusDuringCall).toBe("busy")
+    // Status restored to idle after compaction
+    expect(store.getState().session_status["session-a"]).toEqual({ type: "idle" })
+  })
+
+  test("restores idle even when summarizeSession rejects", async () => {
+    const store = createStore({}, { session_status: { "session-a": { type: "idle" } } })
+    const childStores = createChildStores([["/test/project", store]])
+    compactStoreRef = () => store.getState()
+    summarizeSessionError = new Error("summarize blew up")
+
+    const { setActionRefs, compactSession } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    let thrown: unknown
+    try {
+      await compactSession({ sessionId: "session-a", providerID: "p", modelID: "m", directory: "/test/project" })
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(thrown).toBeInstanceOf(Error)
+    expect((thrown as Error).message).toBe("summarize blew up")
+    expect(summarizeSessionCalls[0]?.statusDuringCall).toBe("busy")
+    expect(store.getState().session_status["session-a"]).toEqual({ type: "idle" })
+  })
+
+  test("falls back to the current directory when none is provided", async () => {
+    const store = createStore({}, { session_status: { "session-a": { type: "idle" } } })
+    const childStores = createChildStores([["/current/project", store]])
+    compactStoreRef = () => store.getState()
+
+    const { setActionRefs, compactSession } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/current/project")
+
+    await compactSession({ sessionId: "session-a", providerID: "p", modelID: "m" })
+
+    expect(summarizeSessionCalls[0]?.directory).toBe("/current/project")
+    expect(store.getState().session_status["session-a"]).toEqual({ type: "idle" })
   })
 })
