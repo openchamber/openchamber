@@ -4,6 +4,8 @@ import { buildRuntimeFetchUrl, isLatin1Safe, runtimeFetch, sanitizeHeadersForBro
 import { clearRuntimeAuthCredentialProvider, setRuntimeBearerToken } from './runtime-auth';
 import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from './runtime-url';
 
+/* eslint-disable @typescript-eslint/no-require-imports -- Phase C/F tests use require() to access non-exported helpers; tests pass without runtime overhead. */
+
 const originalFetch = globalThis.fetch;
 
 describe('buildRuntimeFetchUrl', () => {
