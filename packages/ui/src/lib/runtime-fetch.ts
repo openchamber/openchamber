@@ -143,7 +143,7 @@ const rewriteOpenChamberInternalUrl = (input: string | URL | Request): string | 
   try {
     const url = new URL(raw);
     if (url.origin === window.location.origin) return input;
-    if (!isOpenChamberInternalPath(url.pathname + url.search)) return input;
+    if (!isOpenChamberInternalPath(url.pathname + url.search) && !isOpenChamberInternalPath('/api' + url.pathname)) return input;
     // OpenChamber Express serves the /api/* form. If the URL doesn't
     // already start with /api/, insert it before the pathname.
     const apiPrefix = url.pathname.startsWith('/api/') || url.pathname === '/api' ? '' : '/api';
@@ -415,7 +415,13 @@ const _wrappedNativeFetch = (input: RequestInfo | URL, init?: RequestInit): Prom
     // SDK 1.17.7 calls paths that don't exist on server 1.17.9 (returns SPA HTML).
     // Rewrite the SDK's expected paths to the server's actual paths.
     const rewriteSDKPath = (s: string): string => {
-      let r = s;
+      // Protocol-relative URLs (e.g. //fs/home from openchamberConfig.ts) need
+      // the page origin prepended, otherwise the browser resolves them against
+      // the current page (localhost:9090) with a double-slash path that
+      // Express serves as SPA HTML instead of JSON.
+      let r = s.startsWith('//') && typeof window !== 'undefined'
+        ? window.location.origin + s
+        : s;
       r = r.replace(/^((?:https?:)?\/\/[^/]+)\/api\/config\/skills(\/|\?|$)/, '$1/api/skill$2');
       r = r.replace(/^((?:https?:)?\/\/[^/]+)\/api\/config\/mcp(\/|\?|$)/, '$1/api/mcp$2');
       r = r.replace(/^((?:https?:)?\/\/[^/]+)\/api\/skills(\/|\?|$)/, '$1/api/skill$2');
