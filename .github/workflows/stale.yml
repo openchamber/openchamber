@@ -11,6 +11,7 @@ permissions:
 
 jobs:
   stale:
+    if: ${{ github.repository == 'openchamber/openchamber' }}
     runs-on: ubuntu-latest
     steps:
       - name: Generate bot app token

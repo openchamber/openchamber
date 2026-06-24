@@ -104,6 +104,7 @@ export interface AgentConfig {
   name: string;
   description?: string;
   model?: string | null;
+  variant?: string | null;
   temperature?: number | null;
   top_p?: number | null;
   prompt?: string | null;
@@ -170,6 +171,7 @@ export interface AgentDraft {
   scope: AgentScope;
   description?: string;
   model?: string | null;
+  variant?: string;
   temperature?: number | null;
   top_p?: number | null;
   prompt?: string;
@@ -331,6 +333,7 @@ export const useAgentsStore = create<AgentsStore>()(
 
             if (config.description) agentConfig.description = config.description;
             if (config.model) agentConfig.model = config.model;
+            if (config.variant) agentConfig.variant = config.variant;
             if (config.temperature !== undefined) agentConfig.temperature = config.temperature ?? null;
             if (config.top_p !== undefined) agentConfig.top_p = config.top_p ?? null;
             if (config.prompt) agentConfig.prompt = config.prompt;
@@ -395,6 +398,7 @@ export const useAgentsStore = create<AgentsStore>()(
             if (config.mode !== undefined) agentConfig.mode = config.mode;
             if (config.description !== undefined) agentConfig.description = config.description;
             if (config.model !== undefined) agentConfig.model = config.model;
+            if ('variant' in config) agentConfig.variant = config.variant ?? null;
             if ('temperature' in config) agentConfig.temperature = config.temperature ?? null;
             if ('top_p' in config) agentConfig.top_p = config.top_p ?? null;
             if (config.prompt !== undefined) agentConfig.prompt = config.prompt;

@@ -100,6 +100,17 @@ export const mergeSessionDirectoryMetadata = (incoming: Session, existing?: Sess
   return changed ? next : incoming;
 };
 
+export const mergeLiveSessionWithGlobalSession = (
+  liveSession: Session,
+  globalSession: Session,
+): Session => {
+  const merged = mergeSessionDirectoryMetadata(liveSession, globalSession);
+  if (merged.share !== globalSession.share) {
+    return { ...merged, share: globalSession.share };
+  }
+  return merged;
+};
+
 const buildSessionsByDirectory = (sessions: Session[]): Map<string, Session[]> => {
   const next = new Map<string, Session[]>();
   for (const session of sessions) {
