@@ -704,6 +704,50 @@ export async function optimisticSend(input: {
 }
 
 // ---------------------------------------------------------------------------
+// Compaction
+// ---------------------------------------------------------------------------
+
+export async function compactSession(input: {
+  sessionId: string
+  providerID: string
+  modelID: string
+  directory?: string | null
+}): Promise<void> {
+  await waitForConnectionOrThrow()
+
+  const targetDirectory = input.directory ?? dir()
+  const store = targetDirectory ? dirStoreForDirectory(targetDirectory) : dirStore()
+
+  // Mark the session busy so lifecycle observers (e.g. queued-message auto-send)
+  // treat compaction as live activity and react to its completion.
+  store.setState({
+    session_status: {
+      ...store.getState().session_status,
+      [input.sessionId]: { type: "busy" as const },
+    },
+  })
+
+  try {
+    await opencodeClient.summarizeSession(
+      input.sessionId,
+      input.providerID,
+      input.modelID,
+      targetDirectory,
+    )
+  } finally {
+    // Compaction bypasses the normal prompt lifecycle, so the server may not
+    // emit a session.idle event. Restore idle deterministically so observers
+    // see the busy-to-idle transition and queued messages can dispatch.
+    store.setState({
+      session_status: {
+        ...store.getState().session_status,
+        [input.sessionId]: { type: "idle" as const },
+      },
+    })
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Abort
 // ---------------------------------------------------------------------------
 
