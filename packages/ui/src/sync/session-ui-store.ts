@@ -676,8 +676,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // came from a worktree session, `directory` is the worktree path, whose provider list does
     // not include project/global-scoped providers (e.g. the default agent's non-opencode model)
     // — resolving defaults against it would wrongly fall back to opencode/big-pickle. Activate
-    // the project's config instead so the default cascade matches app startup, then re-apply it
-    // (a fresh draft must start from defaults, not inherit the previous session's selection).
+    // the project's config instead so the default cascade matches app startup, then re-apply it.
+    // The user's manual selection (if any) is preserved by the manual guard inside
+    // applyDefaultModelAgentSelection.
     const configDirectory = normalizePath(selectedProject?.path ?? null) ?? directory
     void activateConfigForDirectory(configDirectory).then(() => {
       useConfigStore.getState().applyDefaultModelAgentSelection()
