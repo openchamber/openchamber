@@ -143,6 +143,7 @@ export const dict: Record<I18nKey, string> = {
   'layout.rightSidebar.context': '上下文',
   'layout.services.instance': '实例',
   'layout.services.usage': '用量',
+  'layout.services.pluginStatus': 'Plugin Status',
   'sessions.sidebar.header.actions.closeSessions': '关闭会话',
   'sessions.sidebar.header.actions.addProject': '添加项目',
   'sessions.sidebar.header.actions.newSession': '新建会话',

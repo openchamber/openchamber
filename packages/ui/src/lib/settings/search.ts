@@ -522,30 +522,6 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['oauth', 'headers', 'timeout'],
   },
   {
-    id: 'plugins.create',
-    page: 'plugins',
-    titleKey: 'settings.plugins.sidebar.actions.addTitle',
-    keywords: ['add', 'plugin', 'npm', 'path', 'file'],
-  },
-  {
-    id: 'plugins.spec',
-    page: 'plugins',
-    titleKey: 'settings.plugins.page.field.spec',
-    keywords: ['npm', 'package', 'path'],
-  },
-  {
-    id: 'plugins.options',
-    page: 'plugins',
-    titleKey: 'settings.plugins.page.field.options',
-    keywords: ['json', 'configuration'],
-  },
-  {
-    id: 'plugins.content',
-    page: 'plugins',
-    titleKey: 'settings.plugins.page.field.content',
-    keywords: ['file', 'code'],
-  },
-  {
     id: 'snippets.create',
     page: 'snippets',
     titleKey: 'settings.snippets.sidebar.actions.create',
