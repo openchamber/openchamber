@@ -314,17 +314,17 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
 // Server 1.17.9 wraps list endpoints in {location, data: T[]} but the SDK
 // expects flat T[]. Unwrap the wrapper for known endpoints so the SDK
 // receives the shape it expects without consumer changes.
-const SDK_SHAPE_UNWRAP_PATTERNS: ReadonlyArray<RegExp> = [
+export const SDK_SHAPE_UNWRAP_PATTERNS: ReadonlyArray<RegExp> = [
   /\/api\/agent(?:\/|\?|$)/,
   /\/api\/command(?:\/|\?|$)/,
   /\/api\/skill(?:\/|\?|$)/,
   /\/api\/provider(?:\/|\?|$)/,
 ];
 
-const shouldUnwrapSdkData = (url: string): boolean =>
+export const shouldUnwrapSdkData = (url: string): boolean =>
   SDK_SHAPE_UNWRAP_PATTERNS.some((p) => p.test(url));
 
-const unwrapSdkDataResponse = async (response: Response, url: string): Promise<Response> => {
+export const unwrapSdkDataResponse = async (response: Response, url: string): Promise<Response> => {
   if (!shouldUnwrapSdkData(url)) return response;
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.includes('json')) return response;
