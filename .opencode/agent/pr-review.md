@@ -67,6 +67,18 @@ Prioritize these risks:
 - Missing targeted tests for risky logic.
 - Claims in the PR description that are not actually true in the implementation.
 
+## User-facing behavior contract
+
+For every user-facing change, first infer the behavioral contract before judging the implementation:
+
+- What is the user trying to accomplish, and what are the natural inputs, choices, and recovery paths for that task?
+- What existing product patterns should this reuse, and what state must be preserved if the user edits an unrelated field?
+- Does the UI expose a guided interaction when the value has known choices, rather than exposing raw internal/schema values by default?
+- Is any raw/manual input intentionally requested, or should it be an advanced/fallback path only?
+- Does the implementation preserve persisted/custom/unknown values instead of normalizing them away or clearing them silently?
+
+Do not map schema/API types directly to UI/API behavior. A config field typed as `string` does not automatically justify a plain text input, and a backend nullable field does not automatically define the user interaction. Review for mismatches between the requested behavior and the implemented UX, not just type correctness, null handling, and i18n coverage.
+
 ## Security and supply-chain focus
 
 Pay extra attention to:

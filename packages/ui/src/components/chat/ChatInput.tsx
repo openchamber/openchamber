@@ -2397,11 +2397,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
 
         // Handle ArrowUp/ArrowDown for message history navigation
-        // ArrowUp: only when input is empty (so pressing Up at start of text just moves cursor)
+        // ArrowUp: only when cursor at start (position 0) or input is empty
         // ArrowDown: also works when cursor at end (to cycle forward through history)
         const isAnyAutocompleteOpen = showCommandAutocomplete || showSkillAutocomplete || showSnippetAutocomplete || showFileMention;
+        const cursorAtStart = textareaRef.current?.selectionStart === 0 && textareaRef.current?.selectionEnd === 0;
         const cursorAtEnd = textareaRef.current?.selectionStart === message.length && textareaRef.current?.selectionEnd === message.length;
-        const canNavigateHistoryUp = !isAnyAutocompleteOpen && message.length === 0;
+        const canNavigateHistoryUp = !isAnyAutocompleteOpen && (message.length === 0 || cursorAtStart);
         const canNavigateHistoryDown = !isAnyAutocompleteOpen && (message.length === 0 || cursorAtEnd);
 
         // Markdown-aware auto-pairing (source mode), normal input only.

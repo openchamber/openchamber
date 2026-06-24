@@ -16,6 +16,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useI18n } from '@/lib/i18n';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
+import { useConfigStore } from '@/stores/useConfigStore';
 import {
   Select,
   SelectContent,
@@ -23,7 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Icon } from "@/components/icon/Icon";
+import { Icon } from '@/components/icon/Icon';
 
 type PermissionAction = 'allow' | 'ask' | 'deny';
 type PermissionRule = { permission: string; pattern: string; action: PermissionAction };
@@ -192,9 +193,31 @@ const buildPermissionConfigWithGlobal = (
   return result as AgentConfig['permission'];
 };
 
+type AgentVariantProvider = {
+  id: string;
+  models?: Array<{
+    id?: string;
+    variants?: Record<string, unknown>;
+  }>;
+};
+
+const getVariantOptionsForModel = (
+  providers: AgentVariantProvider[],
+  modelValue: string,
+): string[] => {
+  const parsedModel = parseModelIdentifier(modelValue);
+  if (!parsedModel) {
+    return [];
+  }
+
+  const provider = providers.find((item) => item.id === parsedModel.providerId);
+  const model = provider?.models?.find((item) => item.id === parsedModel.modelId);
+  return model?.variants ? Object.keys(model.variants) : [];
+};
 export const AgentsPage: React.FC = () => {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
+  const providers = useConfigStore((state) => state.providers) as AgentVariantProvider[];
   const {
     selectedAgentName,
     getAgentByName,
@@ -221,6 +244,7 @@ export const AgentsPage: React.FC = () => {
   const [description, setDescription] = React.useState('');
   const [mode, setMode] = React.useState<'primary' | 'subagent' | 'all'>('subagent');
   const [model, setModel] = React.useState('');
+  const [variant, setVariant] = React.useState('');
   const [temperature, setTemperature] = React.useState<number | undefined>(undefined);
   const [topP, setTopP] = React.useState<number | undefined>(undefined);
   const [prompt, setPrompt] = React.useState('');
@@ -237,6 +261,7 @@ export const AgentsPage: React.FC = () => {
     description: string;
     mode: 'primary' | 'subagent' | 'all';
     model: string;
+    variant: string;
     temperature: number | undefined;
     topP: number | undefined;
     prompt: string;
@@ -246,6 +271,15 @@ export const AgentsPage: React.FC = () => {
 
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory ?? null);
   const [toolIds, setToolIds] = React.useState<string[]>([]);
+  const variantOptions = React.useMemo(() => getVariantOptionsForModel(providers, model), [model, providers]);
+  const hasVariantOptions = variantOptions.length > 0;
+  const selectedVariantValue = React.useMemo(() => {
+    if (!variant || !variantOptions.includes(variant)) {
+      return '__default';
+    }
+    return variant;
+  }, [variant, variantOptions]);
+  const shouldUseVariantSelect = hasVariantOptions && (!variant || variantOptions.includes(variant));
 
   const permissionsBySession = useDirectorySync((state) => state.permission);
 
@@ -469,6 +503,7 @@ export const AgentsPage: React.FC = () => {
       const descriptionValue = agentDraft.description || '';
       const modeValue = agentDraft.mode || 'subagent';
       const modelValue = agentDraft.model || '';
+      const variantValue = agentDraft.variant || '';
       const temperatureValue = agentDraft.temperature;
       const topPValue = agentDraft.top_p;
       const promptValue = agentDraft.prompt || '';
@@ -478,6 +513,7 @@ export const AgentsPage: React.FC = () => {
       setDescription(descriptionValue);
       setMode(modeValue);
       setModel(modelValue);
+      setVariant(variantValue);
       setTemperature(temperatureValue);
       setTopP(topPValue);
       setPrompt(promptValue);
@@ -491,6 +527,7 @@ export const AgentsPage: React.FC = () => {
         description: descriptionValue,
         mode: modeValue,
         model: modelValue,
+        variant: variantValue,
         temperature: temperatureValue,
         topP: topPValue,
         prompt: promptValue,
@@ -506,6 +543,7 @@ export const AgentsPage: React.FC = () => {
       const modelValue = selectedAgent.model?.providerID && selectedAgent.model?.modelID
         ? `${selectedAgent.model.providerID}/${selectedAgent.model.modelID}`
         : '';
+      const variantValue = selectedAgent.variant || '';
       const temperatureValue = selectedAgent.temperature;
       const topPValue = selectedAgent.topP;
       const promptValue = selectedAgent.prompt || '';
@@ -514,6 +552,7 @@ export const AgentsPage: React.FC = () => {
       setMode(modeValue);
 
       setModel(modelValue);
+      setVariant(variantValue);
       setTemperature(temperatureValue);
       setTopP(topPValue);
       setPrompt(promptValue);
@@ -528,6 +567,7 @@ export const AgentsPage: React.FC = () => {
         description: descriptionValue,
         mode: modeValue,
         model: modelValue,
+        variant: variantValue,
         temperature: temperatureValue,
         topP: topPValue,
         prompt: promptValue,
@@ -551,6 +591,7 @@ export const AgentsPage: React.FC = () => {
     if (description !== initial.description) return true;
     if (mode !== initial.mode) return true;
     if (model !== initial.model) return true;
+    if (variant !== initial.variant) return true;
     if (temperature !== initial.temperature) return true;
     if (topP !== initial.topP) return true;
     if (prompt !== initial.prompt) return true;
@@ -558,7 +599,7 @@ export const AgentsPage: React.FC = () => {
     if (!areRulesEqual(permissionRules, initial.permissionRules)) return true;
 
     return false;
-  }, [description, draftName, draftScope, globalPermission, isNewAgent, mode, model, permissionRules, prompt, temperature, topP]);
+  }, [description, draftName, draftScope, globalPermission, isNewAgent, mode, model, permissionRules, prompt, temperature, topP, variant]);
 
   const handleSave = async () => {
     const agentName = isNewAgent ? draftName.trim().replace(/\s+/g, '-') : selectedAgentName?.trim();
@@ -578,6 +619,7 @@ export const AgentsPage: React.FC = () => {
 
     try {
       const trimmedModel = model.trim();
+      const trimmedVariant = variant.trim();
       const trimmedPrompt = prompt.trim();
       const permissionConfig = buildPermissionConfigWithGlobal(globalPermission, permissionRules);
       const config: AgentConfig = {
@@ -585,6 +627,7 @@ export const AgentsPage: React.FC = () => {
         description: description.trim() || undefined,
         mode,
         model: trimmedModel === '' ? null : trimmedModel,
+        variant: trimmedVariant === '' ? null : trimmedVariant || undefined,
         temperature,
         top_p: topP,
         prompt: trimmedPrompt || (isNewAgent ? undefined : null),
@@ -777,8 +820,69 @@ export const AgentsPage: React.FC = () => {
                     } else {
                       setModel('');
                     }
+                    setVariant('');
                   }}
                 />
+              </div>
+            </div>
+
+            <div data-settings-item="agents.variant" className={cn("py-1.5", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
+              <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "sm:w-56 shrink-0")}>
+                <div className="flex items-center gap-1.5">
+                  <span className="typography-ui-label text-foreground">{t('settings.agents.page.field.variant')}</span>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                    </TooltipTrigger>
+                    <TooltipContent sideOffset={8} className="max-w-xs">
+                      {t('settings.agents.page.field.variantTooltip')}
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+                <span className="typography-meta text-muted-foreground">{t('settings.agents.page.field.variantHint')}</span>
+              </div>
+              <div className={cn('flex items-center gap-2', isMobile ? 'w-full' : 'w-fit')}>
+                {shouldUseVariantSelect ? (
+                  <Select
+                    value={selectedVariantValue}
+                    onValueChange={(value) => setVariant(value === '__default' ? '' : value)}
+                  >
+                    <SelectTrigger className={cn('max-w-full', isMobile ? 'w-full' : 'w-fit min-w-[10rem]')}>
+                      <SelectValue placeholder={t('settings.agents.page.field.variantPlaceholder')}>
+                        {(value) => value === '__default' ? t('chat.modelControls.default') : value}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__default">{t('chat.modelControls.default')}</SelectItem>
+                      {variantOptions.map((variantOption) => (
+                        <SelectItem key={variantOption} value={variantOption}>{variantOption}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <>
+                    <Input
+                      value={variant}
+                      onChange={(event) => setVariant(event.target.value)}
+                      placeholder={t('settings.agents.page.field.variantPlaceholder')}
+                      disabled={!model && !variant}
+                      className={cn('h-7 w-40', isMobile && 'w-full')}
+                    />
+                    {variant && (
+                      <Button
+                        size="sm"
+                        type="button"
+                        variant="ghost"
+                        onClick={() => setVariant('')}
+                        className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
+                        aria-label={t('settings.common.actions.clear')}
+                        title={t('settings.common.actions.clear')}
+                      >
+                        <Icon name="close" className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                  </>
+                )}
               </div>
             </div>
 

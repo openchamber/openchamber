@@ -96,10 +96,53 @@ const shouldAttachRuntimeAuth = (input: string | URL | Request): boolean => {
   }
 };
 
+// Headers API only accepts ISO-8859-1 (Latin-1) characters. Any value containing
+// characters outside \u0000-\u00FF causes "Failed to construct/set 'Headers':
+// String contains non ISO-8859-1 code point." Encode those values so they round-trip
+// safely through the browser's Headers API. Directory hints get an explicit marker
+// only when encoded, so plain ASCII paths remain compatible with routes that read
+// the header directly.
+export const isLatin1Safe = (value: string): boolean => {
+  for (let i = 0; i < value.length; i += 1) {
+    if (value.charCodeAt(i) > 0xFF) return false;
+  }
+  return true;
+};
+
+const shouldEncodeHeaderValue = (_key: string, value: string): boolean => !isLatin1Safe(value);
+
+export const sanitizeHeadersForBrowser = (init?: HeadersInit): [string, string][] | undefined => {
+  if (!init) return undefined;
+  // Normalize any HeadersInit shape into a plain array of entries so we can
+  // safely inspect and re-encode non-Latin-1 values.
+  const sourceEntries: [string, string][] = init instanceof Headers
+    ? Array.from(init.entries())
+    : Array.isArray(init)
+      ? init
+      : Object.entries(init);
+  if (sourceEntries.length === 0) return undefined;
+  const entries: [string, string][] = [];
+  let dirty = false;
+  let encodedDirectoryHint = false;
+  for (const [key, value] of sourceEntries) {
+    if (shouldEncodeHeaderValue(key, value)) {
+      entries.push([key, encodeURIComponent(value)]);
+      dirty = true;
+      if (key.toLowerCase() === 'x-opencode-directory') encodedDirectoryHint = true;
+    } else {
+      entries.push([key, value]);
+    }
+  }
+  if (encodedDirectoryHint) {
+    entries.push(['x-opencode-directory-encoding', 'uri']);
+  }
+  return dirty ? entries : undefined;
+};
+
 const mergeHeaders = async (inputHeaders?: HeadersInit, initHeaders?: HeadersInit, attachAuth = true): Promise<Headers> => {
-  const headers = new Headers(inputHeaders);
+  const headers = new Headers(sanitizeHeadersForBrowser(inputHeaders) ?? inputHeaders);
   if (initHeaders) {
-    new Headers(initHeaders).forEach((value, key) => headers.set(key, value));
+    new Headers(sanitizeHeadersForBrowser(initHeaders) ?? initHeaders).forEach((value, key) => headers.set(key, value));
   }
   if (!attachAuth) {
     return headers;

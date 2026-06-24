@@ -7,6 +7,7 @@ import { scopeMatches, subscribeToConfigChanges } from "@/lib/configSync";
 import type { ModelMetadata } from "@/types";
 import { getSafeStorage } from "./utils/safeStorage";
 import { filterVisibleAgents } from "./useAgentsStore";
+import { isPrimaryMode } from "@/components/chat/mobileControlsUtils";
 import { useSessionUIStore } from "@/sync/session-ui-store";
 import { useSelectionStore } from "@/sync/selection-store";
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry";
@@ -178,8 +179,6 @@ const parseModelString = (modelString: string): { providerId: string; modelId: s
 };
 
 const normalizeProviderId = (value: string) => value?.toLowerCase?.() ?? '';
-
-const isPrimaryMode = (mode?: string) => mode === "primary" || mode === "all" || mode === undefined || mode === null;
 
 type ProviderModel = Provider["models"][string];
 type ProviderWithModelList = Omit<Provider, "models"> & { models: ProviderModel[] };

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import type { Session } from '@opencode-ai/sdk/v2';
 
-import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from './useGlobalSessionsStore';
+import { resolveGlobalSessionDirectory, mergeLiveSessionWithGlobalSession, useGlobalSessionsStore } from './useGlobalSessionsStore';
 
 type SessionExtra = Partial<Session> & {
   directory?: string | null;
@@ -77,5 +77,32 @@ describe('useGlobalSessionsStore', () => {
 
     expect(useGlobalSessionsStore.getState().activeSessions).toEqual([]);
     expect(resolveGlobalSessionDirectory(useGlobalSessionsStore.getState().archivedSessions[0])).toBe('/repo/app');
+  });
+});
+
+describe('mergeLiveSessionWithGlobalSession', () => {
+  test('preserves global share over live share', () => {
+    const live = buildSession('https://live.example/s', { time: { created: 1, updated: 5 } });
+    const global = buildSession('https://global.example/s', { time: { created: 1, updated: 3 } });
+
+    const merged = mergeLiveSessionWithGlobalSession(live, global);
+    expect(merged.share?.url).toBe('https://global.example/s');
+    expect(merged.time?.updated).toBe(5);
+  });
+
+  test('preserves directory from global when live omits it', () => {
+    const live = buildSession('https://live.example/s', { time: { created: 1, updated: 5 } });
+    const global = buildSession('https://global.example/s', { directory: '/repo/app' });
+
+    const merged = mergeLiveSessionWithGlobalSession(live, global);
+    expect(resolveGlobalSessionDirectory(merged)).toBe('/repo/app');
+  });
+
+  test('live directory takes precedence over global when present', () => {
+    const live = buildSession('https://live.example/s', { directory: '/repo/worktree' });
+    const global = buildSession('https://global.example/s', { directory: '/repo/app' });
+
+    const merged = mergeLiveSessionWithGlobalSession(live, global);
+    expect(resolveGlobalSessionDirectory(merged)).toBe('/repo/worktree');
   });
 });

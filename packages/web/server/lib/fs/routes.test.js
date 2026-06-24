@@ -596,3 +596,42 @@ describe('fs exec git-read cache', () => {
     expect(calls.length).toBe(afterFill + 2);
   });
 });
+
+describe('fs raw download Content-Disposition', () => {
+  it('uses RFC 5987 filename*= encoding for non-ASCII filenames on download', async () => {
+    const fsPromises = {
+      realpath: vi.fn(async (targetPath) => targetPath),
+      stat: vi.fn(async () => ({ isFile: () => true, size: 6 })),
+      readFile: vi.fn(async () => Buffer.from('content')),
+    };
+    const handler = registerRaw(fsPromises);
+
+    const res = await callRaw(handler, {
+      path: '/repo/文件.txt',
+      download: 'true',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const cd = res.getHeader('content-disposition');
+    expect(cd).toContain("filename*=UTF-8''");
+    expect(cd).toContain(encodeURIComponent('文件.txt'));
+    // ASCII fallback strips non-ASCII chars, leaving extension
+    expect(cd).toContain('filename=".txt"');
+  });
+
+  it('uses plain filename for ASCII-only filenames on download', async () => {
+    const fsPromises = {
+      realpath: vi.fn(async (targetPath) => targetPath),
+      stat: vi.fn(async () => ({ isFile: () => true, size: 6 })),
+      readFile: vi.fn(async () => Buffer.from('content')),
+    };
+    const handler = registerRaw(fsPromises);
+
+    const res = await callRaw(handler, { path: '/repo/readme.txt', download: 'true' });
+
+    expect(res.statusCode).toBe(200);
+    const cd = res.getHeader('content-disposition');
+    expect(cd).toContain('filename="readme.txt"');
+    expect(cd).toContain("filename*=UTF-8''readme.txt");
+  });
+});
