@@ -466,19 +466,21 @@ describe('runtimeFetch header sanitization', () => {
 describe('SDK shape unwrapping (Phase C)', () => {
   test('shouldUnwrapSdkData matches all 4 shape-mismatch endpoints', () => {
     const { shouldUnwrapSdkData, SDK_SHAPE_UNWRAP_PATTERNS } = require('./runtime-fetch');
-    expect(SDK_SHAPE_UNWRAP_PATTERNS).toHaveLength(4);
+    expect(SDK_SHAPE_UNWRAP_PATTERNS).toHaveLength(5);
     expect(shouldUnwrapSdkData('http://127.0.0.1:4096/api/agent')).toBe(true);
     expect(shouldUnwrapSdkData('http://127.0.0.1:4096/api/command')).toBe(true);
     expect(shouldUnwrapSdkData('http://127.0.0.1:4096/api/skill')).toBe(true);
     expect(shouldUnwrapSdkData('http://127.0.0.1:4096/api/provider')).toBe(true);
     expect(shouldUnwrapSdkData('http://127.0.0.1:4096/api/agent?directory=/home')).toBe(true);
+    expect(shouldUnwrapSdkData('http://127.0.0.1:4096/api/mcp')).toBe(true);
+    expect(shouldUnwrapSdkData('http://127.0.0.1:4096/mcp')).toBe(true);
+    expect(shouldUnwrapSdkData('http://127.0.0.1:4096/mcp/status')).toBe(true);
   });
 
   test('shouldUnwrapSdkData does NOT match unrelated paths', () => {
     const { shouldUnwrapSdkData } = require('./runtime-fetch');
     expect(shouldUnwrapSdkData('http://127.0.0.1:4096/api/config')).toBe(false);
     expect(shouldUnwrapSdkData('http://127.0.0.1:4096/api/config/skills')).toBe(false);
-    expect(shouldUnwrapSdkData('http://127.0.0.1:4096/api/mcp')).toBe(false);
     expect(shouldUnwrapSdkData('http://127.0.0.1:4096/config')).toBe(false);
     expect(shouldUnwrapSdkData('http://127.0.0.1:4096/global/event')).toBe(false);
     expect(shouldUnwrapSdkData('http://127.0.0.1:4096/skill/test123')).toBe(false);
