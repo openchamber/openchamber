@@ -57,7 +57,30 @@ const FR_MESSAGES: BootstrapMessages = {
   loadingData: (providersText, agentsText) => `Chargement des données (${providersText}, ${agentsText})…`,
 };
 
-export const getBootstrapMessages = (locale: Locale): BootstrapMessages => (locale === 'fr' ? FR_MESSAGES : EN_MESSAGES);
+const JA_MESSAGES: BootstrapMessages = {
+  startingApi: 'OpenCode API を起動中…',
+  initializing: '初期化中…',
+  connecting: '接続中…',
+  connected: '接続完了！',
+  connectionError: '接続エラー',
+  disconnected: '切断されました',
+  reconnecting: '再接続中…',
+  initialDataLoadFailed: 'OpenCode に接続しましたが、初期データの読み込みに失敗しました。',
+  cliNotFound: 'OpenCode CLI が見つかりません。先にインストールしてください。',
+  providersReady: '✓ プロバイダ',
+  providersLoading: '… プロバイダ',
+  agentsReady: '✓ エージェント',
+  agentsLoading: '… エージェント',
+  startingDevServer: (hostLabel) => `Webview 開発サーバーを起動中 (${hostLabel})...`,
+  waitingDevServer: (hostLabel, attempt) => `Webview 開発サーバーを待機中 (${hostLabel})... 試行 ${attempt}`,
+  loadingData: (providersText, agentsText) => `データを読み込み中 (${providersText}, ${agentsText})…`,
+};
+
+export const getBootstrapMessages = (locale: Locale): BootstrapMessages => {
+  if (locale === 'fr') return FR_MESSAGES;
+  if (locale === 'ja') return JA_MESSAGES;
+  return EN_MESSAGES;
+};
 
 export const readStoredLocaleForBootstrap = (): Locale => {
   if (typeof window === 'undefined') {
