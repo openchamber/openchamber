@@ -255,7 +255,27 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
   // strips /api/ when calling internal endpoints but the Express routes require
   // it, so we re-insert it in the rewrite.
   const rewrittenInput = rewriteOpenChamberInternalUrl(input);
-  const resolvedInput = resolveRuntimeFetchInput(rewrittenInput, query);
+  // SDK 1.17.7 calls paths that don't exist on server 1.17.9 (returns SPA HTML).
+  // Rewrite the SDK's expected paths to the server's actual paths.
+  const sdkRewrittenInput = (() => {
+    const raw = typeof rewrittenInput === 'string'
+      ? rewrittenInput
+      : rewrittenInput instanceof URL
+        ? rewrittenInput.toString()
+        : rewrittenInput.url;
+    let r = raw;
+    r = r.replace(/^((?:https?:)?\/\/[^/]+)\/api\/config\/skills(\/|\?|$)/, '$1/api/skill$2');
+    r = r.replace(/^((?:https?:)?\/\/[^/]+)\/api\/config\/mcp(\/|\?|$)/, '$1/api/mcp$2');
+    r = r.replace(/^((?:https?:)?\/\/[^/]+)\/api\/skills(\/|\?|$)/, '$1/api/skill$2');
+    r = r.replace(/^((?:https?:)?\/\/[^/]+)\/api\/commands(\/|\?|$)/, '$1/api/command$2');
+    r = r.replace(/^((?:https?:)?\/\/[^/]+)\/api\/agents(\/|\?|$)/, '$1/api/agent$2');
+    r = r.replace(/^((?:https?:)?\/\/[^/]+)\/api\/providers(\/|\?|$)/, '$1/api/config/providers$2');
+    if (r === raw) return rewrittenInput;
+    if (typeof rewrittenInput === 'string') return r;
+    if (rewrittenInput instanceof URL) return new URL(r);
+    return new Request(r, rewrittenInput);
+  })();
+  const resolvedInput = resolveRuntimeFetchInput(sdkRewrittenInput, query);
   const inputHeaders = resolvedInput instanceof Request ? resolvedInput.headers : undefined;
   const headers = await mergeHeaders(inputHeaders, requestInit.headers, shouldAttachRuntimeAuth(resolvedInput));
   const doFetch = (): Promise<Response> =>
@@ -346,6 +366,28 @@ export const installRuntimeFetchBridge = (): void => {
     const targetOrigin = resolveTargetOrigin();
     const isCrossOrigin = targetOrigin !== '' && targetOrigin !== window.location.origin;
     const safeInit = isCrossOrigin ? { ...init, credentials: 'omit' as RequestCredentials } : init;
+
+    // SDK 1.17.7 calls paths that don't exist on server 1.17.9 (returns SPA HTML).
+    // Rewrite the SDK's expected paths to the server's actual paths.
+    const rewriteSDKPath = (s: string): string => {
+      let r = s;
+      r = r.replace(/^((?:https?:)?\/\/[^/]+)\/api\/config\/skills(\/|\?|$)/, '$1/api/skill$2');
+      r = r.replace(/^((?:https?:)?\/\/[^/]+)\/api\/config\/mcp(\/|\?|$)/, '$1/api/mcp$2');
+      r = r.replace(/^((?:https?:)?\/\/[^/]+)\/api\/skills(\/|\?|$)/, '$1/api/skill$2');
+      r = r.replace(/^((?:https?:)?\/\/[^/]+)\/api\/commands(\/|\?|$)/, '$1/api/command$2');
+      r = r.replace(/^((?:https?:)?\/\/[^/]+)\/api\/agents(\/|\?|$)/, '$1/api/agent$2');
+      r = r.replace(/^((?:https?:)?\/\/[^/]+)\/api\/providers(\/|\?|$)/, '$1/api/config/providers$2');
+      return r;
+    };
+    if (typeof input === 'string') {
+      input = rewriteSDKPath(input);
+    } else if (input instanceof URL) {
+      const rewritten = rewriteSDKPath(input.toString());
+      if (rewritten !== input.toString()) input = new URL(rewritten);
+    } else if (typeof Request !== 'undefined' && input instanceof Request) {
+      const rewritten = rewriteSDKPath(input.url);
+      if (rewritten !== input.url) input = new Request(rewritten, input);
+    }
 
     if (typeof input === 'string') {
       if (!shouldResolveFetchInput(input)) {

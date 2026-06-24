@@ -119,6 +119,7 @@ const OPENCHAMBER_INTERNAL_PREFIXES = [
   '/api/git/',
   '/api/files/',
   '/api/sessions/',
+  '/api/session-folders',
   '/api/desktop/',
   '/api/mobile/',
   '/api/mini-chat/',
