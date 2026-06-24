@@ -103,6 +103,7 @@ const OPENCHAMBER_INTERNAL_PREFIXES = [
   '/health',
   '/api/opencode/',
   '/api/config/themes',
+  '/api/config/commands',
   '/api/notifications/',
   '/api/openchamber/',
   '/api/tts/',
