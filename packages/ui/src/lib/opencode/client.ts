@@ -149,9 +149,14 @@ const ensureAbsoluteBaseUrl = (candidate: string): string => {
   }
 };
 
+// Return the bare origin (e.g. http://127.0.0.1:4096) NOT the /api path.
+// SDK v2 does string concatenation: baseUrl + pathUrl. If baseUrl
+// already includes /api, paths like /api/agent become /api/api/agent
+// (double prefix, server returns HTML SPA fallback). Using '/' here
+// returns just the origin; the SDK appends the path verbatim.
 const resolveRuntimeBaseUrl = (): string | null => {
   try {
-    return getRuntimeUrlResolver().api('/api');
+    return getRuntimeUrlResolver().api('/');
   } catch {
     return null;
   }
