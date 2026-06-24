@@ -116,5 +116,17 @@ export const getToolIcon = (toolName: string) => {
     if (tool.startsWith('git')) {
         return <Icon name="git-branch" className={iconClass} />;
     }
+    if (tool.startsWith('codegraph_')) {
+        return <Icon name="node-tree" className={iconClass} />;
+    }
+    if (tool.startsWith('ast_grep_')) {
+        return <Icon name="search" className={iconClass} />;
+    }
+    if (tool.startsWith('grep_app_')) {
+        return <Icon name="scan-2" className={iconClass} />;
+    }
+    if (tool.startsWith('context7_')) {
+        return <Icon name="file-text" className={iconClass} />;
+    }
     return <Icon name="tools" className={iconClass} />;
 };

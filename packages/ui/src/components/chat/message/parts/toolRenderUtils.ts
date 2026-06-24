@@ -6,15 +6,22 @@ const EXPANDABLE_TOOL_NAMES = new Set<string>([
     'skill_mcp', 'skill-mcp', 'skill',
     'grep', 'glob', 'list', 'search', 'find', 'ripgrep',
     'todowrite', 'todoread',
-    'websearch_web_search_exa', 'webfetch', 'codesearch',
-    'lsp_diagnostics', 'lsp_goto_definition', 'lsp_find_references', 'lsp_symbols', 'lsp_rename', 'lsp_prepare_rename',
-    'session_list', 'session_read', 'session_info', 'session_search',
-    'background_output', 'monitor_output', 'background_cancel',
+    'websearch_web_search_exa', 'webfetch', 'codesearch', 'monitor_output', 
     'hashline_edit', 'structuredoutput', 'structured_output',
     'plan_enter', 'plan_exit',
-    'ast_grep_search', 'ast_grep_find', 'ast_grep_replace', 'ast_grep_replace_all', 'ast_grep_list', 'ast_grep_list_all', 'look_at',
-    'call_omo_agent'
+    'look_at', 'call_omo_agent'
 ]);
+
+const EXPANDABLE_TOOL_PATTERNS = [
+    /^codegraph_/,
+    /^ast_grep_/,
+    /^lsp_/,
+    /^session_/,
+    /^background_/,
+    /^plan_/,
+    /^grep_app_/,
+    /^context7_/
+];
 
 const STANDALONE_TOOL_NAMES = new Set<string>(['task']);
 
@@ -34,7 +41,9 @@ const normalizeToolName = (toolName: unknown): string => {
 };
 
 export const isExpandableTool = (toolName: unknown): boolean => {
-    return EXPANDABLE_TOOL_NAMES.has(normalizeToolName(toolName));
+    const normalized = normalizeToolName(toolName);
+    return EXPANDABLE_TOOL_NAMES.has(normalized) || 
+           EXPANDABLE_TOOL_PATTERNS.some(pattern => pattern.test(normalized));
 };
 
 export const isStandaloneTool = (toolName: unknown): boolean => {

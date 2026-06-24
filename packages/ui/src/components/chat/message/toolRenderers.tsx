@@ -1544,3 +1544,13 @@ export const renderPlanModeOutput = (output: string, toolName: string, options?:
         return null;
     }
 };
+
+export const renderMarkdownOutput = (output: string, options?: { unstyled?: boolean }) => {
+    if (!output || typeof output !== 'string') return null;
+    
+    return (
+        <div className={cn('w-full min-w-0', options?.unstyled ? null : 'p-3 bg-muted/20 rounded-xl border border-border/30')} style={typography.tool.popup}>
+            <SimpleMarkdownRenderer content={output} variant="tool" />
+        </div>
+    );
+};

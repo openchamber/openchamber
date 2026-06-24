@@ -55,6 +55,7 @@ import {
     renderListOutput,
     renderTodoOutput,
     renderWebSearchOutput,
+    renderMarkdownOutput,
 } from '../toolRenderers';
 import { JsonTreeViewer } from '@/components/ui/JsonTreeViewer';
 import { Icon } from "@/components/icon/Icon";
@@ -2096,6 +2097,11 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
         }
 
+        if ((part.tool.startsWith('codegraph_') || part.tool.startsWith('grep_app_') || part.tool.startsWith('context7_')) && hasStringOutput) {
+            const rendered = renderMarkdownOutput(outputString);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
         if (hasStringOutput && outputString.trim()) {
             return renderScrollableBlock(
                 <ToolScrollableTextOutput
@@ -2589,6 +2595,10 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
 
             const queryCandidate = input.query;
             if (typeof queryCandidate === 'string' && queryCandidate.trim().length > 0) {
+                const repoCandidate = input.repo;
+                if (typeof repoCandidate === 'string' && repoCandidate.trim().length > 0) {
+                    return 'query: ' + queryCandidate.trim() + ' (repo: ' + repoCandidate.trim() + ')';
+                }
                 return 'query: ' + queryCandidate.trim();
             }
 
@@ -2633,6 +2643,25 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             const taskIdCandidate = input.task_id || input.taskId || input.taskID;
             if (typeof taskIdCandidate === 'string' && taskIdCandidate.trim().length > 0) {
                 return taskIdCandidate.trim();
+            }
+
+            const projectPathCandidate = input.projectPath || input.project_path || input.project;
+            if (typeof projectPathCandidate === 'string' && projectPathCandidate.trim().length > 0) {
+                const pathCandidate = input.path;
+                if (typeof pathCandidate === 'string' && pathCandidate.trim().length > 0) {
+                    return projectPathCandidate.trim() + '/' + pathCandidate.trim();
+                }
+                return projectPathCandidate.trim();
+            }
+
+            const filePathCandidate = input.filePath || input.file_path || input.path;
+            if (typeof filePathCandidate === 'string' && filePathCandidate.trim().length > 0) {
+                return filePathCandidate.trim();
+            }
+
+            const fileCandidate = input.file || input.filename || input.file_name;
+            if (typeof fileCandidate === 'string' && fileCandidate.trim().length > 0) {
+                return fileCandidate.trim();
             }
         }
 
