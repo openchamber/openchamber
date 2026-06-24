@@ -42,7 +42,9 @@ if (typeof window === 'undefined') return '';
   // mode VITE_OPENCODE_URL points the SDK at an external OpenCode upstream.
   // Reading it here means the runtime URL resolver returns the right absolute
   // baseUrl even at module-init time, before any runtime injection has happened.
-  const buildTime = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_OPENCODE_URL;
+  // MUST use direct import.meta.env.VITE_* access — Vite's static replacement
+  // only matches that exact pattern, not typecasted/optional-chained variants.
+  const buildTime = import.meta.env.VITE_OPENCODE_URL;
   if (typeof buildTime === 'string' && buildTime.trim()) return normalizeBaseUrl(buildTime);
   return '';
 };
