@@ -81,6 +81,7 @@ export function routeMessage(params: {
   inputMode?: "normal" | "shell"
   files?: Array<{ type: "file"; mime: string; url: string; filename: string }>
   additionalParts?: Array<{ text: string; synthetic?: boolean; files?: Array<{ type: "file"; mime: string; url: string; filename: string }> }>
+  delivery?: 'steer'
 }): Promise<void> {
   const requestDirectory = params.directory ?? undefined
   if (params.inputMode === "shell") {
@@ -155,6 +156,7 @@ export function routeMessage(params: {
       variant: params.variant,
       files: params.files,
       additionalParts: params.additionalParts,
+      delivery: params.delivery,
       messageId: messageID,
       directory: requestDirectory,
     }).then(() => {}),
@@ -163,6 +165,7 @@ export function routeMessage(params: {
 
 type SendMessageOptions = {
   sessionId?: string
+  delivery?: 'steer'
 }
 
 type AssistantMessageSessionExecution = {
@@ -991,6 +994,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         variant,
         inputMode,
         files,
+        delivery: options?.delivery,
         additionalParts: mergedAdditionalParts?.map((p) => ({
           text: p.text,
           synthetic: p.synthetic,
@@ -1069,6 +1073,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       variant,
       inputMode,
       files,
+      delivery: options?.delivery,
       additionalParts: additionalParts?.map((p) => ({
         text: p.text,
         synthetic: p.synthetic,

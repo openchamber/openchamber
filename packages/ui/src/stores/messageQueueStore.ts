@@ -4,6 +4,33 @@ import { getSafeStorage } from './utils/safeStorage';
 import type { AttachedFile } from './types/sessionTypes';
 import { updateDesktopSettings } from '@/lib/persistence';
 
+export type FollowUpBehavior = 'steer' | 'queue' | 'immediate';
+
+export const DEFAULT_FOLLOW_UP_BEHAVIOR: FollowUpBehavior = 'queue';
+
+export const isFollowUpBehavior = (value: unknown): value is FollowUpBehavior => (
+    value === 'steer' || value === 'queue' || value === 'immediate'
+);
+
+export const normalizeFollowUpBehavior = (
+    value: unknown,
+    legacyQueueModeEnabled?: boolean | null,
+): FollowUpBehavior => {
+    if (isFollowUpBehavior(value)) {
+        return value;
+    }
+
+    if (legacyQueueModeEnabled === false) {
+        return 'immediate';
+    }
+
+    if (legacyQueueModeEnabled === true) {
+        return 'queue';
+    }
+
+    return DEFAULT_FOLLOW_UP_BEHAVIOR;
+};
+
 export interface QueuedMessage {
     id: string;
     content: string;
@@ -20,7 +47,7 @@ export interface QueuedMessage {
 
 interface MessageQueueState {
     queuedMessages: Record<string, QueuedMessage[]>; // sessionId → queue
-    queueModeEnabled: boolean; // global toggle
+    followUpBehavior: FollowUpBehavior;
 }
 
 interface MessageQueueActions {
@@ -29,18 +56,24 @@ interface MessageQueueActions {
     popToInput: (sessionId: string, messageId: string) => QueuedMessage | null;
     clearQueue: (sessionId: string) => void;
     clearAllQueues: () => void;
-    setQueueMode: (enabled: boolean) => void;
+    setFollowUpBehavior: (behavior: FollowUpBehavior) => void;
     getQueueForSession: (sessionId: string) => QueuedMessage[];
 }
 
 type MessageQueueStore = MessageQueueState & MessageQueueActions;
+
+type PersistedMessageQueueState = {
+    queuedMessages?: Record<string, QueuedMessage[]>;
+    followUpBehavior?: FollowUpBehavior;
+    queueModeEnabled?: boolean;
+};
 
 export const useMessageQueueStore = create<MessageQueueStore>()(
     devtools(
         persist(
             (set, get) => ({
                 queuedMessages: {},
-                queueModeEnabled: true,
+                followUpBehavior: DEFAULT_FOLLOW_UP_BEHAVIOR,
 
                 addToQueue: (sessionId, message) => {
                     const id = `queued-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
@@ -126,10 +159,9 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                     set({ queuedMessages: {} });
                 },
 
-                setQueueMode: (enabled) => {
-                    set({ queueModeEnabled: enabled });
-                    // Persist to settings.json (async, fire-and-forget)
-                    void updateDesktopSettings({ queueModeEnabled: enabled });
+                setFollowUpBehavior: (behavior) => {
+                    set({ followUpBehavior: behavior });
+                    void updateDesktopSettings({ followUpBehavior: behavior });
                 },
 
                 getQueueForSession: (sessionId) => {
@@ -138,11 +170,19 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
             }),
             {
                 name: 'message-queue-store',
+                version: 1,
                 storage: createJSONStorage(() => getSafeStorage()),
                 partialize: (state) => ({
                     queuedMessages: state.queuedMessages,
-                    queueModeEnabled: state.queueModeEnabled,
+                    followUpBehavior: state.followUpBehavior,
                 }),
+                migrate: (persistedState) => {
+                    const state = (persistedState ?? {}) as PersistedMessageQueueState;
+                    return {
+                        queuedMessages: state.queuedMessages ?? {},
+                        followUpBehavior: normalizeFollowUpBehavior(state.followUpBehavior, state.queueModeEnabled ?? null),
+                    };
+                },
             }
         ),
         {

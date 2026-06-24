@@ -1793,4 +1793,11 @@ export const settingsDict = {
   "settings.promptTemplates.page.toast.created": "Plantilla creada",
   "settings.promptTemplates.page.toast.createFailed": "Error al crear la plantilla",
   "settings.promptTemplates.page.toast.saveUnexpectedError": "Ocurrió un error inesperado al guardar",
+  "settings.openchamber.visual.section.followUpBehavior": "Follow-up behavior",
+  "settings.openchamber.visual.section.followUpBehaviorAria": "Follow-up behavior",
+  "settings.openchamber.visual.field.followUpBehaviorAria": "Follow-up behavior: {option}",
+  "settings.openchamber.visual.field.followUpBehaviorDescription": "Choose what happens when you press Enter on a follow-up message while the agent is still responding.",
+  "settings.openchamber.visual.option.followUpBehavior.steer.label": "Steer (insert into the running turn)",
+  "settings.openchamber.visual.option.followUpBehavior.queue.label": "Queue (deliver after the current turn)",
+  "settings.openchamber.visual.option.followUpBehavior.immediate.label": "Send immediately",
 } as const;
