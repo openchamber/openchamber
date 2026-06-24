@@ -21,7 +21,30 @@ You can choose which providers appear, and the same summary is available from a 
 
 Usage works for the providers that publish a quota, including Claude, Codex, GitHub Copilot, Google, OpenRouter, Kimi, NanoGPT, z.ai, Zhipu, MiniMax, Ollama Cloud, and Wafer.
 
-A provider only shows usage once you've signed in to it on the [Providers](/providers/) page. A few providers need an extra step — for example, Ollama Cloud reads a session file you set up separately. If a provider shows no data, it usually means that extra credential is missing.
+A provider only shows usage once you've signed in to it on the [Providers](/providers/) page. A few providers need additional setup (see below for details). If a provider shows no data, it usually means that extra credential is missing.
+
+### Additional setup for Ollama Cloud
+
+**Ollama Cloud** requires a session cookie to fetch usage data. Ollama doesn't publish a dedicated usage API, so OpenChamber reads your authenticated session from ollama.com's settings page.
+
+**Setup steps:**
+
+1. Log in to [ollama.com](https://ollama.com).
+2. Open your browser's developer tools → **Network** tab.
+3. Navigate to your [Settings page](https://ollama.com/settings) on ollama.com.
+4. Find any request to `/settings` and copy the full `Cookie:` request header value (without the `Cookie: ` prefix)
+5. Create the following file with that value:
+
+```bash
+mkdir -p ~/.config/ollama-quota
+echo "your-cookie-string-here" > ~/.config/ollama-quota/cookie
+```
+
+**What OpenChamber reads:** `~/.config/ollama-quota/cookie` — a plain text file containing the raw session cookie string
+
+**What OpenChamber shows:** After setup, the Usage page will display your Session, Weekly, and Premium usage windows from Ollama Cloud.
+
+**Note:** The cookie may expire over time. If usage tracking stops working, repeat the steps to refresh the cookie.
 
 ## Related
 
