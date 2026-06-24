@@ -39,7 +39,7 @@ import {
   getDirectoryState,
 } from "./sync-refs"
 import { markSessionViewed } from "./notification-store"
-import { setActiveSession } from "./sync-context"
+import { setActiveSession } from "./active-session"
 import {
   createSession as createSessionAction,
   deleteSession as deleteSessionAction,
@@ -238,6 +238,10 @@ export type SessionUIState = {
   // Non-Git mode: dismissed signature hash per session, hides bar until new turn arrives
   pendingChangesBarDismissed: Map<string, string>
   dismissPendingChangesBar: (sessionId: string, signature: string | null) => void
+
+  // Subagent error focus target — drives scroll+highlight to the failed task row
+  subagentErrorFocusTarget: { sessionId: string; messageId: string; partId: string } | null
+  setSubagentErrorFocusTarget: (target: { sessionId: string; messageId: string; partId: string } | null) => void
 
   // Actions — UI state management
   setCurrentSession: (id: string | null, directoryHint?: string | null) => void
@@ -470,6 +474,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   lastLoadedDirectory: null,
   sessionPlanAvailable: new Map(),
   pendingChangesBarDismissed: new Map(),
+  subagentErrorFocusTarget: null,
+  setSubagentErrorFocusTarget: (target) => set({ subagentErrorFocusTarget: target }),
 
   // ---------------------------------------------------------------------------
   // setCurrentSession

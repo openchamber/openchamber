@@ -16,6 +16,7 @@ type SessionCache = {
   part: Record<string, Part[] | undefined>
   permission: Record<string, PermissionRequest[] | undefined>
   question: Record<string, QuestionRequest[] | undefined>
+  session_error: Record<string, { error: { message?: string; code?: string } } | undefined>
 }
 
 export function getProtectedSessionCacheIds(store: SessionCache): Set<string> {
@@ -79,6 +80,7 @@ export function dropSessionCaches(store: SessionCache, sessionIDs: Iterable<stri
     delete store.todo[sessionID]
     delete store.session_diff[sessionID]
     delete store.session_status[sessionID]
+    delete store.session_error?.[sessionID]
     delete store.permission[sessionID]
     delete store.question[sessionID]
   }

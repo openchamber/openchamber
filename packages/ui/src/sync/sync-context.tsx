@@ -47,9 +47,11 @@ import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry"
 import { setSessionPrefetch } from "./session-prefetch-cache"
 import { listGlobalSessionPages } from "@/stores/globalSessions"
 import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import { assertSdkSuccess } from "./sdk-utils"
+import { isActiveSession, getActiveSession } from "./active-session"
+import { useSessionUIStore } from "./session-ui-store"
 import { areRequestArraysReferentiallyEqual, collectScopedBlockingRequests } from "./scoped-blocking-requests"
 import { EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT, buildUserMessageHistorySnapshot, type UserMessageHistorySnapshot } from "./user-message-history"
-
 // ---------------------------------------------------------------------------
 // Context
 // ---------------------------------------------------------------------------
@@ -69,33 +71,6 @@ const syncGlobal = globalThis as SyncGlobal
 const SyncContext = syncGlobal[SYNC_CONTEXT_GLOBAL_KEY] ?? createContext<SyncSystem | null>(null)
 syncGlobal[SYNC_CONTEXT_GLOBAL_KEY] = SyncContext
 
-type SdkResult<T> = {
-  data?: T
-  error?: unknown
-  response?: {
-    status?: number
-    headers?: { get?: (name: string) => string | null }
-  }
-}
-
-function formatSdkError(error: unknown): string {
-  if (error instanceof Error) return error.message
-  if (typeof error === "string") return error
-  if (error && typeof error === "object" && "message" in error && typeof (error as { message?: unknown }).message === "string") {
-    return (error as { message: string }).message
-  }
-  try {
-    return JSON.stringify(error)
-  } catch {
-    return String(error)
-  }
-}
-
-function assertSdkSuccess<T>(result: SdkResult<T>, operation: string): T | undefined {
-  if (!result.error) return result.data
-  const status = result.response?.status
-  throw new Error(`${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`)
-}
 
 function useSyncSystem() {
   const ctx = useContext(SyncContext)
@@ -299,8 +274,6 @@ async function materializeSessionFromServer(
 
 // Module-level refs for notification viewed check.
 // Used to determine if user is currently viewing the session when a notification arrives.
-let _activeDirectory = ""
-let _activeSession = ""
 const externallyViewedSessions = new Map<string, number>()
 const EXTERNAL_VIEW_TTL_MS = 15_000
 
@@ -379,10 +352,6 @@ const handleUiNotificationEvent = (payload: Event, fallbackDirectory: string): b
   return true
 }
 
-export function setActiveSession(directory: string, sessionId: string) {
-  _activeDirectory = directory
-  _activeSession = sessionId
-}
 
 export function setExternallyViewedSession(directory: string, sessionId: string, viewed: boolean) {
   if (!directory || !sessionId) return
@@ -404,11 +373,7 @@ function isWindowFocused(): boolean {
 
 function isViewedInCurrentSession(directory: string, sessionId?: string): boolean {
   if (!sessionId) return false
-  if (
-    _activeDirectory && _activeSession
-    && directory === _activeDirectory && sessionId === _activeSession
-    && isWindowFocused()
-  ) return true
+  if (isActiveSession(directory, sessionId) && isWindowFocused()) return true
   pruneExternallyViewedSessions()
   return externallyViewedSessions.has(viewedSessionKey(directory, sessionId))
 }
@@ -417,13 +382,39 @@ function isRecentBoot() {
   return bootingRoot || Date.now() - bootedAt < BOOT_DEBOUNCE_MS
 }
 
-function getViewedSessionMaterializationTarget(directory: string) {
-  if (!_activeDirectory || !_activeSession) return null
-  if (directory !== _activeDirectory) return null
-  return {
-    directory: _activeDirectory,
-    sessionId: _activeSession,
+
+function findParentToolPartForSubagent(
+  subagentSessionID: string,
+  state: State,
+): { parentSessionID: string; parentMessageID: string; parentPartID: string } | null {
+  const subagent = state.session.find((s) => s.id === subagentSessionID)
+  const parentID = (subagent as Session & { parentID?: string | null })?.parentID
+  if (!parentID) return null
+
+  const parentMessages = state.message[parentID]
+  if (!Array.isArray(parentMessages)) return null
+
+  for (const message of parentMessages) {
+    const parts = state.part[message.id]
+    if (!Array.isArray(parts)) continue
+    for (const part of parts) {
+      if (part.type !== "tool") continue
+      const toolPart = part as Part & { tool?: string; output?: unknown }
+      if (toolPart.tool !== "task") continue
+      const output = typeof toolPart.output === "string" ? toolPart.output : ""
+      if (output.includes(`<task id="${subagentSessionID}">`) || output.includes(`<task id='${subagentSessionID}'>`)) {
+        return { parentSessionID: parentID, parentMessageID: message.id, parentPartID: part.id }
+      }
+    }
   }
+
+  return null
+}
+
+function getViewedSessionMaterializationTarget(directory: string) {
+  const active = getActiveSession()
+  if (!active || directory !== active.directory) return null
+  return active
 }
 
 function toSessionStatus(status: Awaited<ReturnType<typeof opencodeClient.getSessionStatus>>[string] | undefined): SessionStatus | undefined {
@@ -601,6 +592,8 @@ const getSessionIdFromPayload = (event: Event): string | null => {
   if (
     event.type === "message.removed"
     || event.type === "session.status"
+    || event.type === "session.idle"
+    || event.type === "session.error"
     || event.type === "todo.updated"
     || event.type === "permission.asked"
     || event.type === "permission.replied"
@@ -1448,35 +1441,67 @@ function handleEvent(
   if (payload.type === "session.idle" || payload.type === "session.error") {
     const props = payload.properties as { sessionID?: string; error?: { message?: string; code?: string } }
     const sessionID = props.sessionID
-    // Skip subtask sessions — only top-level sessions generate notifications
     const storeState = store.getState()
-    const session = storeState.session.find((s) => s.id === sessionID)
-    if (session && (session as { parentID?: string }).parentID) {
-      // subtask — skip notification
-    } else if (sessionID) {
+    const session = sessionID ? storeState.session.find((s) => s.id === sessionID) : undefined
+    const isSubtask = Boolean(session && (session as { parentID?: string }).parentID)
+
+    // For subtask turn-complete: skip — only surface the parent.
+    // For subtask error: always surface — a subagent failure is critical context
+    // the user needs even when the parent is the active session.
+    if (sessionID && (!isSubtask || payload.type === "session.error")) {
+      let parentRefs:
+        | { parentSessionID: string; parentMessageID: string; parentPartID: string }
+        | null = null
+
+      // For subagent errors, locate the parent tool row so the toast can navigate
+      // back to the failed task in the parent session.
+      if (isSubtask && payload.type === "session.error") {
+        parentRefs = findParentToolPartForSubagent(sessionID, storeState)
+      }
+
       appendNotification({
         directory: resolvedDirectory,
         session: sessionID,
         time: Date.now(),
         viewed: isViewedInCurrentSession(resolvedDirectory, sessionID),
         ...(payload.type === "session.error"
-          ? { type: "error" as const, error: props.error }
+          ? { type: "error" as const, error: props.error, ...parentRefs }
           : { type: "turn-complete" as const }),
       })
+
+      // Surface subagent failures as a clickable toast that jumps to the parent row.
+      if (isSubtask && payload.type === "session.error" && parentRefs) {
+        const errorMessage = props.error?.message ?? "Subagent failed"
+        toast.error(`Subagent error: ${errorMessage}`, {
+          description: "Click to open the parent session and highlight the failed task.",
+          duration: 10000,
+          action: {
+            label: "Show",
+            onClick: () => {
+              openSessionFromToast(parentRefs.parentSessionID, resolvedDirectory)
+              useSessionUIStore.getState().setSubagentErrorFocusTarget({
+                sessionId: parentRefs.parentSessionID,
+                messageId: parentRefs.parentMessageID,
+                partId: parentRefs.parentPartID,
+              })
+            },
+          },
+        })
+      }
     }
   }
 
-  // Sync-layer parent resync: when a child session goes idle, recover
-  // the parent session snapshot. This ensures the
-  // parent's task tool part reflects the child's completion even when
-  // no ToolPart component is mounted.
-  if (payload.type === "session.idle") {
-    const idleSessionId = getSessionIdFromPayload(payload)
-    if (idleSessionId && resolvedDirectory && resolvedDirectory !== "global") {
+  // Sync-layer parent resync: when a child session goes idle or errors,
+  // recover the parent session snapshot. This ensures the parent's task tool
+  // part reflects the child's completion (or failure) even when no ToolPart
+  // component is mounted.
+  if (payload.type === "session.idle" || payload.type === "session.error") {
+    const changedSessionId = getSessionIdFromPayload(payload)
+    if (changedSessionId && resolvedDirectory && resolvedDirectory !== "global") {
       const sessionState = store.getState()
-      const idleSession = sessionState.session.find((s) => s.id === idleSessionId)
-      const parentID = idleSession
-        ? (idleSession as Session & { parentID?: string | null }).parentID
+      const changedSession = sessionState.session.find((s) => s.id === changedSessionId)
+      const parentID = changedSession
+        ? (changedSession as Session & { parentID?: string | null }).parentID
         : null
       if (parentID) {
         enqueueSessionMaterialization(resolvedDirectory, parentID, childStores)
@@ -1504,8 +1529,11 @@ function handleEvent(
       break
     case "session.status":
     case "session.idle":
+      draft.session_status = { ...(current.session_status ?? {}) }
+      break
     case "session.error":
       draft.session_status = { ...(current.session_status ?? {}) }
+      draft.session_error = { ...(current.session_error ?? {}) }
       break
     case "todo.updated":
       draft.todo = { ...current.todo }

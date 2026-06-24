@@ -9,6 +9,7 @@ import type {
   SessionStatus,
   Todo,
 } from "@opencode-ai/sdk/v2/client"
+import type { SubagentErrorRecord } from "./types"
 import { Binary } from "./binary"
 import type { FileDiff, GlobalState, State } from "./types"
 import { dropSessionCaches } from "./session-cache"
@@ -90,14 +91,18 @@ function shouldPreserveExistingPart(previous: Part, next: Part): boolean {
   return false
 }
 
-function areSessionStatusesEqual(left: SessionStatus | undefined, right: SessionStatus): boolean {
+function areSessionStatusesEqual(
+  left: SessionStatus | undefined,
+  right: SessionStatus,
+): boolean {
   if (left === right) return true
   if (!left || left.type !== right.type) return false
-  if (left.type === "retry") {
-    return right.type === "retry"
-      && left.attempt === right.attempt
-      && left.message === right.message
-      && left.next === right.next
+  if (left.type === "retry" && right.type === "retry") {
+    return (
+      left.attempt === right.attempt &&
+      left.message === right.message &&
+      left.next === right.next
+    )
   }
   return true
 }
@@ -287,12 +292,31 @@ export function applyDirectoryEvent(
     }
 
     case "session.error": {
-      const props = event.properties as { sessionID: string }
-      const status = { type: "idle" } as const
-      if (areSessionStatusesEqual(draft.session_status[props.sessionID], status)) {
-        return false
+      const props = event.properties as {
+        sessionID: string
+        error?: { message?: string; code?: string }
       }
-      draft.session_status[props.sessionID] = status
+      const session = draft.session.find((s) => s.id === props.sessionID)
+      const record: SubagentErrorRecord = {
+        sessionID: props.sessionID,
+        parentSessionID: session ? (session as { parentID?: string }).parentID : undefined,
+        error: props.error || {},
+        timestamp: Date.now(),
+      }
+      const existing = draft.session_error[props.sessionID]
+      const status = { type: "idle" } as const
+      const statusChanged = !areSessionStatusesEqual(draft.session_status[props.sessionID], status)
+      if (
+        existing &&
+        existing.timestamp === record.timestamp &&
+        existing.error?.message === record.error?.message
+      ) {
+        return statusChanged
+      }
+      draft.session_error[props.sessionID] = record
+      if (statusChanged) {
+        draft.session_status[props.sessionID] = status
+      }
       return true
     }
 
