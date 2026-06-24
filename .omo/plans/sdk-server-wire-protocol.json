@@ -1,150 +1,113 @@
 {
-  "$schema": "SDK 1.17.9 wire-protocol mismatches against server 1.17.9",
+  "$schema": "SDK 1.17.9 wire-protocol mismatches against server 1.17.9 (CORRECTED after Oracle FAIL)",
   "sdk_version": "1.17.9",
   "server_version": "1.17.9",
   "captured_at": "2026-06-24",
-  "baseUrl": "http://127.0.0.1:4096/api (includes /api prefix)",
+  "sdk_catalog_source": "node_modules/@opencode-ai/sdk/dist/v2/gen/sdk.gen.js (151 unique URLs)",
+  "correction_note": "Phase A v1 used dist/gen/sdk.gen.js (67 URLs — wrong file). Phase A v2 uses dist/v2/gen/sdk.gen.js (151 URLs — correct v2 SDK used by OpenChamber).",
+  "root_cause": "SDK baseUrl = http://127.0.0.1:4096/api (includes /api). SDK paths from OpenAPI spec include some with /api/ prefix (e.g., /api/agent) and some without (e.g., /agent). When SDK path starts with /api/, the effective URL becomes /api/api/X (double prefix), which server doesn't have.",
+  "fix_root_strategy": "Change SDK baseUrl to http://127.0.0.1:4096 (no /api) so SDK paths map directly to server paths. This is a 1-line change in the opencodeClient constructor.",
   "summary": {
-    "total_sdk_endpoints": 67,
-    "server_endpoints_probed": 110,
-    "json_ok": 40,
-    "html_spa_fallback": 28,
-    "shape_mismatch_needs_transform": 4,
-    "path_mismatch_needs_rewrite": 9,
-    "missing_unfixable": 2
+    "total_sdk_endpoints": 151,
+    "both_work": 13,
+    "needs_path_rewrite": 67,
+    "needs_response_transform": 4,
+    "not_found_404": 71,
+    "browser_limitation": 2
   },
-  "mismatches": [
-    {
-      "sdk_path": "/api/agent",
-      "server_path": "/api/agent",
-      "status": 200,
-      "shape_delta": "Server returns {location, data: Agent[]} but SDK expects Agent[]",
-      "fix_type": "response_transform",
-      "transform": "unwrap .data field"
+  "mismatches_by_fix_type": {
+    "baseurl_change": {
+      "description": "Remove /api/ from baseUrl so SDK paths map directly to server paths",
+      "change_location": "packages/ui/src/lib/opencode/client.ts (constructor: this.baseUrl)",
+      "sdk_path_prefix_must_be_stripped": "/api/",
+      "expected_result": "SDK path /api/agent → effective URL /api/agent (200, 12KB). SDK path /agent → effective URL /agent (200, 488KB)."
     },
-    {
-      "sdk_path": "/api/command",
-      "server_path": "/api/command",
-      "status": 200,
-      "shape_delta": "Server returns {location, data: Command[]} but SDK expects Command[]",
-      "fix_type": "response_transform",
-      "transform": "unwrap .data field"
-    },
-    {
-      "sdk_path": "/api/skill",
-      "server_path": "/api/skill",
-      "status": 200,
-      "shape_delta": "Server returns {location, data: Skill[]} but SDK expects Skill[]",
-      "fix_type": "response_transform",
-      "transform": "unwrap .data field"
-    },
-    {
-      "sdk_path": "/api/mcp",
-      "server_path": "/api/mcp",
-      "status": 200,
-      "shape_delta": "Server returns {location, data: {...}} but SDK expects flat object",
-      "fix_type": "response_transform",
-      "transform": "unwrap .data field"
-    },
-    {
-      "sdk_path": "/api/global/event",
-      "server_path": "/global/event",
-      "status": 200,
-      "shape_delta": "Server has /global/event (SSE) not /api/global/event",
-      "fix_type": "path_rewrite",
-      "transform": "/api/global/event → /global/event (strip /api/)"
-    },
-    {
-      "sdk_path": "/api/global/health",
-      "server_path": "/global/health",
-      "status": 200,
-      "shape_delta": "Server has /global/health not /api/global/health",
-      "fix_type": "path_rewrite",
-      "transform": "/api/global/health → /global/health (strip /api/)"
-    },
-    {
-      "sdk_path": "/api/global/config",
-      "server_path": "/api/global/config",
-      "status": 200,
-      "shape_delta": "none",
-      "fix_type": "none"
-    },
-    {
-      "sdk_path": "/api/session-folders",
-      "server_path": "OpenChamber Express (not OpenCode)",
-      "status": 200,
-      "shape_delta": "OpenChamber-internal endpoint, not OpenCode",
-      "fix_type": "path_rewrite",
-      "transform": "/api/session-folders → page origin /api/session-folders"
-    },
-    {
-      "sdk_path": "/api/config/skills",
-      "server_path": "/api/skill",
-      "status": 200,
-      "shape_delta": "Server renamed config/skills to skill",
-      "fix_type": "path_rewrite",
-      "transform": "/api/config/skills → /api/skill"
-    },
-    {
-      "sdk_path": "/api/config/mcp",
-      "server_path": "/api/mcp",
-      "status": 200,
-      "shape_delta": "Server renamed config/mcp to mcp",
-      "fix_type": "path_rewrite",
-      "transform": "/api/config/mcp → /api/mcp"
-    },
-    {
-      "sdk_path": "/api/skills",
-      "server_path": "/api/skill",
-      "status": 200,
-      "shape_delta": "Server uses singular /skill",
-      "fix_type": "path_rewrite",
-      "transform": "/api/skills → /api/skill"
-    },
-    {
-      "sdk_path": "/api/commands",
-      "server_path": "/api/command",
-      "status": 200,
-      "shape_delta": "Server uses singular /command",
-      "fix_type": "path_rewrite",
-      "transform": "/api/commands → /api/command"
-    },
-    {
-      "sdk_path": "/api/agents",
-      "server_path": "/api/agent",
-      "status": 200,
-      "shape_delta": "Server uses singular /agent",
-      "fix_type": "path_rewrite",
-      "transform": "/api/agents → /api/agent"
-    },
-    {
-      "sdk_path": "/api/providers",
-      "server_path": "/api/config/providers",
-      "status": 200,
-      "shape_delta": "Server needs /config/ prefix",
-      "fix_type": "path_rewrite",
-      "transform": "/api/providers → /api/config/providers"
-    },
-    {
-      "sdk_path": "/api/push/visibility",
-      "server_path": "/api/push/visibility",
-      "status": 0,
-      "shape_delta": "CORS preflight fails (expected — browser push API limitation)",
-      "fix_type": "known_limitation",
-      "transform": "no fix — CORS preflight is browser limitation"
-    },
-    {
-      "sdk_path": "/api/global/event/ws",
-      "server_path": "/api/global/event/ws",
-      "status": 0,
-      "shape_delta": "WebSocket auth fails (expected — browser can't send Authorization on WS)",
-      "fix_type": "known_limitation",
-      "transform": "no fix — use SSE /global/event as primary live channel"
-    }
-  ],
+    "path_rewrites_still_needed": [
+      {"from": "/api/session-folders", "to": "page origin /api/session-folders (OpenChamber-internal)"},
+      {"from": "/api/push/visibility", "to": "page origin (browser push API CORS limitation)"}
+    ],
+    "response_transforms": [
+      {"sdk_path": "/api/agent (if baseUrl changed) or /agent (current)", "server_returns": "{location, data: Agent[]}", "sdk_expects": "Agent[]"},
+      {"sdk_path": "/api/command", "server_returns": "{location, data: Command[]}", "sdk_expects": "Command[]"},
+      {"sdk_path": "/api/skill", "server_returns": "{location, data: Skill[]}", "sdk_expects": "Skill[]"},
+      {"sdk_path": "/api/mcp", "server_returns": "{location, data: {...}}", "sdk_expects": "flat object"}
+    ],
+    "browser_limitations": [
+      {"path": "/api/push/visibility", "issue": "CORS preflight fails (browser push API limitation)"},
+      {"path": "/api/global/event/ws", "issue": "WS auth fails (browser can't send Authorization on WS)"}
+    ]
+  },
+  "complete_path_table": {
+    "both_/api_and_/_work": [
+      "/agent", "/api/agent", "/api/command", "/api/event", "/api/fs/find",
+      "/api/fs/list", "/api/fs/read/*", "/api/health", "/api/integration",
+      "/api/location", "/api/model", "/api/permission/request",
+      "/api/provider", "/api/pty", "/api/question/request",
+      "/api/reference", "/api/session", "/api/skill",
+      "/experimental/capabilities", "/experimental/tool/ids",
+      "/file/status", "/formatter", "/lsp", "/vcs/status"
+    ],
+    "needs_strip_api_/": [
+      "/api/agent → /agent",
+      "/api/command → /command",
+      "/api/credential/{id} → /credential/{id}",
+      "/api/event → /event",
+      "/api/fs/* → /fs/* (fs is OpenChamber-internal, not OpenCode)",
+      "/api/health → /health (page origin)",
+      "/api/integration → /integration (not on server)",
+      "/api/location → /location",
+      "/api/model → /model (not on server)",
+      "/api/permission/* → /permission/*",
+      "/api/provider → /provider",
+      "/api/pty → /pty",
+      "/api/question/* → /question/*",
+      "/api/reference → /reference",
+      "/api/session → /session",
+      "/api/session/{id} → /session/{id}",
+      "/api/session/{id}/* → /session/{id}/*",
+      "/api/skill → /skill",
+      "/config → /config",
+      "/config/providers → /config/providers",
+      "/experimental/* → /experimental/*",
+      "/file → /file",
+      "/file/content → /file/content",
+      "/find/* → /find/*",
+      "/global/* → /global/*",
+      "/mcp → /mcp",
+      "/path → /path",
+      "/permission → /permission",
+      "/project → /project",
+      "/project/current → /project/current",
+      "/provider/auth → /provider/auth",
+      "/question → /question",
+      "/session/{id}/* → /session/{id}/*",
+      "/vcs → /vcs",
+      "/vcs/diff → /vcs/diff",
+      "/vcs/diff/raw → /vcs/diff/raw"
+    ],
+    "not_found_or_404": [
+      "/api/credential/{id}", "/api/integration/*", "/api/model",
+      "/api/permission/saved", "/api/provider/{id}", "/api/question/{id}",
+      "/api/question/{id}/reply", "/api/question/{id}/reject",
+      "/auth/{id}", "/experimental/console/*", "/experimental/control-plane/*",
+      "/experimental/resource", "/experimental/sync/*", "/experimental/workspace/*",
+      "/experimental/worktree/*", "/file/* (some)", "/formater (typo in catalog)",
+      "/global/dispose", "/global/upgrade", "/instance/dispose",
+      "/log", "/mcp/{name}/auth/*", "/permission/{id}/reply",
+      "/project/{id}", "/project/{id}/directories", "/project/git/init",
+      "/provider/{id}/oauth/*", "/pty/{id}/connect-token", "/pty/shells",
+      "/session/{id}/abort", "/session/{id}/fork", "/session/{id}/init",
+      "/session/{id}/message", "/session/{id}/message/{id}",
+      "/session/{id}/message/{id}/part/{id}", "/session/{id}/permissions/{id}",
+      "/session/{id}/prompt_async", "/session/{id}/revert", "/session/{id}/share",
+      "/session/{id}/shell", "/session/{id}/summarize", "/session/{id}/unrevert",
+      "/tui/* (all)", "/vcs/apply"
+    ]
+  },
   "fixes_summary": {
-    "path_rewrites_needed": 9,
+    "baseurl_change": "1 line change in client.ts constructor",
+    "path_rewrites_still_needed_after_baseurl_fix": 2,
     "response_transforms_needed": 4,
-    "known_limitations": 2
+    "browser_limitations": 2
   }
 }
