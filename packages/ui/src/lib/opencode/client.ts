@@ -1581,7 +1581,7 @@ class OpencodeService {
       ...(options?.allowOutsideWorkspace ? { allowOutsideWorkspace: true } : {}),
     };
 
-    const response = await runtimeFetch(`${this.baseUrl}/fs/mkdir`, {
+    const response = await runtimeFetch('/api/fs/mkdir', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1599,7 +1599,7 @@ class OpencodeService {
   }
 
   async cloneRepository(input: { remoteUrl: string; destinationPath: string; gitIdentityId?: string | null }): Promise<{ success: boolean; path: string; output?: string }> {
-    const response = await runtimeFetch(`${this.baseUrl}/fs/clone`, {
+    const response = await runtimeFetch('/api/fs/clone', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1665,7 +1665,7 @@ class OpencodeService {
         params.set('respectGitignore', 'true');
       }
       const query = params.toString();
-      const response = await runtimeFetch(`${this.baseUrl}/fs/list${query ? `?${query}` : ''}`);
+      const response = await runtimeFetch(`/api/fs/list${query ? `?${query}` : ''}`);
       if (!response.ok) {
         const error = await response.json().catch(() => ({}));
         const message = typeof error.error === 'string' ? error.error : 'Failed to list directory';
@@ -1757,8 +1757,12 @@ class OpencodeService {
       }
     }
 
+      // Use /api/fs/home (relative) instead of ${this.baseUrl}/fs/home.
+      // this.baseUrl points to OpenCode upstream (:4096) but /fs/home is an
+      // OpenChamber Express endpoint served at :9090/api/fs/home. The
+      // runtimeFetch bridge routes /api/fs/* to the page origin automatically.
     try {
-      const response = await runtimeFetch(`${this.baseUrl}/fs/home`, {
+      const response = await runtimeFetch('/api/fs/home', {
         method: 'GET',
         headers: {
           Accept: 'application/json'
