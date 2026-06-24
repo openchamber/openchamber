@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Chat: the `/` command menu no longer lists a skill twice when a command shares its name (e.g. after installing a plugin that ships skills).
 - Chat: selecting a user-installed skill from the slash command menu now invokes the skill and injects its content, instead of inserting the skill name as plain text.
 ## [1.13.2] - 2026-06-18
 

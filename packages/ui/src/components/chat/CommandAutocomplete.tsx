@@ -9,6 +9,7 @@ import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { mergeCommandsWithSkills } from './commandAutocompleteItems';
 
 type CommandSource = 'openchamber' | 'opencode' | 'skill';
 
@@ -181,7 +182,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
             : []
           ),
         ];
-        const allCommands = [...builtInCommands, ...customCommands, ...skillCommands];
+        const allCommands = [...builtInCommands, ...mergeCommandsWithSkills(customCommands, skillCommands)];
 
         const allowInitCommand = !hasMessagesInCurrentSession;
         const filtered = (searchQuery
