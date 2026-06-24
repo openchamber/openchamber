@@ -319,7 +319,10 @@ export const SDK_SHAPE_UNWRAP_PATTERNS: ReadonlyArray<RegExp> = [
   /\/api\/command(?:\/|\?|$)/,
   /\/api\/skill(?:\/|\?|$)/,
   /\/api\/provider(?:\/|\?|$)/,
+  /\/mcp(?:\/|\?|$)/,
 ];
+
+const MCP_DICT_TO_ARRAY_PATTERN = /\/mcp(?:\/|\?|$)/;
 
 export const shouldUnwrapSdkData = (url: string): boolean =>
   SDK_SHAPE_UNWRAP_PATTERNS.some((p) => p.test(url));
@@ -331,9 +334,22 @@ export const unwrapSdkDataResponse = async (response: Response, url: string): Pr
   try {
     const text = await response.clone().text();
     const body = JSON.parse(text);
+    // {location, data: T[]} → T[]
     if (body && typeof body === 'object' && 'data' in body && !Array.isArray(body)) {
       const unwrapped = JSON.stringify(body.data);
       return new Response(unwrapped, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
+    }
+    // {name: {status: ...}, ...} → [{name, ...status}, ...]
+    if (body && typeof body === 'object' && !Array.isArray(body) && MCP_DICT_TO_ARRAY_PATTERN.test(url)) {
+      const arr = Object.entries(body).map(([name, status]) => ({
+        name,
+        ...(typeof status === 'object' && status !== null ? status : { status: 'unknown' }),
+      }));
+      return new Response(JSON.stringify(arr), {
         status: response.status,
         statusText: response.statusText,
         headers: response.headers,
