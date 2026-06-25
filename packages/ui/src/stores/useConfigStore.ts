@@ -30,6 +30,9 @@ const STT_SILENCE_HOLD_MS_MAX = 10000;
 
 const FALLBACK_PROVIDER_ID = "opencode";
 const FALLBACK_MODEL_ID = "big-pickle";
+// Sentinel selectedProviderId used by the providers UI while the "Add provider"
+// form is open. It is intentionally not a real provider id.
+const ADD_PROVIDER_SENTINEL = "__add_provider__";
 const GIT_UTILITY_PROVIDER_ID = "zen";
 const GIT_UTILITY_PREFERRED_MODEL_ID = "big-pickle";
 const PROVIDER_CONFIG_REFRESH_CONCURRENCY = 4;
@@ -1573,7 +1576,10 @@ export const useConfigStore = create<ConfigStore>()(
                                 const currentSelectedProviderId = state.activeDirectoryKey === directoryKey
                                     ? state.selectedProviderId
                                     : baseSnapshot.selectedProviderId;
-                                const selectedProviderId = processedProviders.some((provider) => provider.id === currentSelectedProviderId)
+                                // Preserve the add-provider sentinel so a background refresh does not
+                                // navigate the user out of the in-progress add-provider form (issue #1765).
+                                const selectedProviderId = currentSelectedProviderId === ADD_PROVIDER_SENTINEL
+                                    || processedProviders.some((provider) => provider.id === currentSelectedProviderId)
                                     ? currentSelectedProviderId
                                     : (resolvedModel?.providerId ?? processedProviders[0]?.id ?? "");
 
