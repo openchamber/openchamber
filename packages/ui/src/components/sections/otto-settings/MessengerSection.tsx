@@ -29,6 +29,8 @@ import {
 } from '@/stores/useMessengerStore';
 import { useOttoEventsStore, type OttoUiRealtimeEvent } from '@/stores/useOttoEventsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Collapsible, CollapsibleContent } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
 
 interface MessengerMeta {
@@ -750,16 +752,12 @@ function DiscordSyncResults({
   );
 }
 
-function ConnectionCard({ conn }: { conn: MessengerConnection }) {
+function DiscordAdvancedSettings({ conn }: { conn: MessengerConnection }) {
+  const [open, setOpen] = useState(false);
+
   const updateConnection = useMessengerStore((s) => s.updateConnection);
-  const testConnection = useMessengerStore((s) => s.testConnection);
-  const removeConnection = useMessengerStore((s) => s.removeConnection);
+  const saveDiscordConfig = useMessengerStore((s) => s.saveDiscordConfig);
   const resolveDiscordChannel = useMessengerStore((s) => s.resolveDiscordChannel);
-  const resolveDiscordGuild = useMessengerStore((s) => s.resolveDiscordGuild);
-  const syncDiscordGuildProjects = useMessengerStore((s) => s.syncDiscordGuildProjects);
-  const fetchDiscordInviteUrl = useMessengerStore((s) => s.fetchDiscordInviteUrl);
-  const sendTestMessage = useMessengerStore((s) => s.sendTestMessage);
-  const sendSyncSummary = useMessengerStore((s) => s.sendSyncSummary);
   const diagnoseDiscord = useMessengerStore((s) => s.diagnoseDiscord);
   const discordDiagnosis = useMessengerStore((s) => s.discordDiagnosis);
   const discordDiagnosisRunning = useMessengerStore((s) => s.discordDiagnosisRunning);
@@ -772,10 +770,238 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
   const discordInbound = useMessengerStore((s) => s.discordInbound);
   const discordHistory = useMessengerStore((s) => s.discordHistory);
   const loadDiscordHistory = useMessengerStore((s) => s.loadDiscordHistory);
-  const saveDiscordConfig = useMessengerStore((s) => s.saveDiscordConfig);
   const projects = useProjectsStore((s) => s.projects);
   const projectMappings = useMessengerStore((s) => s.projectMappings);
   const setProjectMapping = useMessengerStore((s) => s.setProjectMapping);
+
+  const inputClass =
+    'w-full rounded-md border border-border bg-background px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring';
+
+  const meta = MESSENGER_META[conn.type];
+  const target = conn.defaultChannelId;
+  const hasTarget = Boolean(target);
+
+  const [targetInput, setTargetInput] = useState('');
+
+  const handleSaveTarget = async () => {
+    const value = targetInput.trim();
+    if (!value) return;
+    updateConnection('discord', { defaultChannelId: value });
+    // Persist to server-side settings.json so auto-start works on reboot
+    setTimeout(() => saveDiscordConfig(), 0);
+    setTimeout(() => {
+      resolveDiscordChannel();
+    }, 0);
+    setTargetInput('');
+  };
+
+  return (
+    <Collapsible
+      open={open}
+      onOpenChange={setOpen}
+      className="border-t border-border/60 pt-3"
+    >
+      <label className="flex cursor-pointer select-none items-center gap-2">
+        <Checkbox checked={open} onChange={setOpen} ariaLabel="Show advanced settings" />
+        <span className="text-xs font-medium text-foreground">Advanced settings</span>
+        <span className="text-[10px] font-normal text-muted-foreground">
+          single channel ID, listener, OpenCode bridge &amp; diagnostics
+        </span>
+      </label>
+      <CollapsibleContent className="space-y-4 pt-3">
+        {/* Single Channel ID — the fallback "post to one channel" destination.
+            Advanced because the primary flow is server-wide (Guild) sync. */}
+        <div className="space-y-2">
+          <div className="text-xs font-medium text-foreground flex items-center gap-2">
+            {meta.targetLabel}
+            {hasTarget && <RiCheckLine className="size-3 text-green-500" />}
+          </div>
+          {!hasTarget ? (
+            <>
+              <div className="text-[11px] text-muted-foreground leading-snug">
+                {meta.targetHelp}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={targetInput}
+                  onChange={(e) => setTargetInput(e.target.value)}
+                  placeholder={meta.targetPlaceholder}
+                  className={inputClass}
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveTarget}
+                  disabled={!targetInput.trim()}
+                  className="shrink-0 rounded bg-primary px-3 py-1.5 text-xs text-primary-foreground disabled:opacity-50"
+                >
+                  Save
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="flex items-center gap-2 text-xs flex-wrap">
+              <code className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-foreground">
+                {target}
+              </code>
+              {conn.discordChannelName && (
+                <span className="text-muted-foreground">
+                  #{conn.discordChannelName}
+                  {conn.guildName ? ` · ${conn.guildName}` : ''}
+                  {conn.discordChannelTypeLabel ? ` · ${conn.discordChannelTypeLabel}` : ''}
+                </span>
+              )}
+              {conn.botToken && conn.defaultChannelId && !conn.discordChannelName && (
+                <button
+                  type="button"
+                  onClick={() => resolveDiscordChannel()}
+                  className="text-primary text-[10px] hover:underline"
+                  title="Look up channel info via Discord API"
+                >
+                  Look up
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  updateConnection('discord', {
+                    defaultChannelId: undefined,
+                    discordChannelName: undefined,
+                    discordChannelType: undefined,
+                    discordChannelTypeLabel: undefined,
+                  });
+                  // Persist to server-side settings.json so auto-start works on reboot
+                  setTimeout(() => saveDiscordConfig(), 0);
+                }}
+                className="text-primary text-[10px] hover:underline"
+              >
+                Change
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Optional: Discord owner user ID — auto-joins web-created threads so
+            they appear under the channel for you (a bot-only thread stays hidden). */}
+        <div className="space-y-2">
+          <div className="text-xs font-medium text-foreground">Your Discord user ID (optional)</div>
+          <div className="text-[11px] text-muted-foreground leading-snug">
+            Auto-joins web-created threads so they show up for you. Right-click your name → Copy User ID.
+          </div>
+          <input
+            type="text"
+            value={conn.defaultUserId ?? ''}
+            onChange={(e) => updateConnection('discord', { defaultUserId: e.target.value.trim() })}
+            onBlur={() => setTimeout(() => saveDiscordConfig(), 0)}
+            placeholder="e.g. 123456789012345678"
+            className={inputClass}
+          />
+        </div>
+
+        {/* OpenCode bridge — when on, the listeners route inbound messages
+            through OpenCode and stream the response back. This is what turns
+            the messenger into a real OpenChamber chat surface, instead of the
+            legacy "Otto received: ..." ping echo. */}
+        {(hasTarget || conn.discordGuildId) && (
+          <BridgePanel
+            conn={conn}
+            type={conn.type}
+            bridgeStatus={bridgeStatus}
+            refreshBridgeStatus={refreshBridgeStatus}
+            onToggle={(v) => {
+              updateConnection(conn.type, { bridgeEnabled: v });
+              // Persist to server-side settings.json when toggling the bridge
+              setTimeout(() => saveDiscordConfig(), 0);
+            }}
+          />
+        )}
+
+        {/* Discord Gateway listener + history */}
+        {(conn.discordGuildId || conn.defaultChannelId) && (
+          <DiscordListenerPanel
+            conn={conn}
+            inbound={discordInbound}
+            history={discordHistory}
+            startListener={startDiscordListener}
+            stopListener={stopDiscordListener}
+            refreshStatus={refreshDiscordListenerStatus}
+            loadRecent={loadRecentDiscordMessages}
+            loadHistory={loadDiscordHistory}
+            onToggleAutoReply={(v) =>
+              updateConnection('discord', { discordListenerAutoReply: v })
+            }
+          />
+        )}
+
+        {/* Discord diagnose */}
+        <DiscordDiagnosePanel
+          conn={conn}
+          diagnosis={discordDiagnosis}
+          running={discordDiagnosisRunning}
+          runDiagnose={diagnoseDiscord}
+        />
+
+        {conn.lastSyncChannels && conn.lastSyncChannels.length > 0 && (
+          <DiscordSyncResults channels={conn.lastSyncChannels} guildName={conn.guildName} />
+        )}
+
+        {/* Project ↔ Channel mappings */}
+        {conn.syncProjects && projects.length > 0 && (
+          <details className="group">
+            <summary className="cursor-pointer text-xs font-medium text-foreground select-none">
+              Project → Channel Mapping{' '}
+              <span className="text-[10px] text-muted-foreground font-normal">(optional)</span>
+            </summary>
+            <div className="mt-2 space-y-2">
+              {projects.slice(0, 10).map((project) => {
+                const mapping = projectMappings.find((m) => m.projectId === project.id);
+                const channelName = mapping?.discord?.channelName;
+                return (
+                  <div key={project.id} className="flex items-center gap-2 text-xs">
+                    <span className="text-foreground min-w-0 truncate flex-1">
+                      {project.label || project.path.split('/').pop()}
+                    </span>
+                    <span className="text-muted-foreground">→</span>
+                    <input
+                      type="text"
+                      value={channelName ?? ''}
+                      onChange={(e) => {
+                        const name = e.target.value;
+                        const update = {
+                          projectId: project.id,
+                          projectLabel:
+                            project.label || project.path.split('/').pop() || project.path,
+                          discord: { channelId: project.id, channelName: name },
+                        };
+                        setProjectMapping(update);
+                      }}
+                      placeholder={`#${(project.label || project.path.split('/').pop() || '')
+                        .toLowerCase()
+                        .replace(/\s+/g, '-')}`}
+                      className="w-32 rounded border border-border bg-background px-2 py-0.5 text-xs text-foreground"
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </details>
+        )}
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function ConnectionCard({ conn }: { conn: MessengerConnection }) {
+  const updateConnection = useMessengerStore((s) => s.updateConnection);
+  const testConnection = useMessengerStore((s) => s.testConnection);
+  const removeConnection = useMessengerStore((s) => s.removeConnection);
+  const resolveDiscordGuild = useMessengerStore((s) => s.resolveDiscordGuild);
+  const syncDiscordGuildProjects = useMessengerStore((s) => s.syncDiscordGuildProjects);
+  const fetchDiscordInviteUrl = useMessengerStore((s) => s.fetchDiscordInviteUrl);
+  const sendTestMessage = useMessengerStore((s) => s.sendTestMessage);
+  const sendSyncSummary = useMessengerStore((s) => s.sendSyncSummary);
+  const saveDiscordConfig = useMessengerStore((s) => s.saveDiscordConfig);
+  const projects = useProjectsStore((s) => s.projects);
 
   const meta = MESSENGER_META[conn.type];
   const Icon = meta.icon;
@@ -783,7 +1009,6 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
   const [showToken, setShowToken] = useState(false);
   const [tokenInput, setTokenInput] = useState('');
   const [showTokenPlain, setShowTokenPlain] = useState(false);
-  const [targetInput, setTargetInput] = useState('');
   const [guildInput, setGuildInput] = useState('');
 
   const token = conn.botToken;
@@ -819,18 +1044,6 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
     setTokenInput('');
     setShowToken(false);
     setShowTokenPlain(false);
-  };
-
-  const handleSaveTarget = async () => {
-    const value = targetInput.trim();
-    if (!value) return;
-    updateConnection('discord', { defaultChannelId: value });
-    // Persist to server-side settings.json so auto-start works on reboot
-    setTimeout(() => saveDiscordConfig(), 0);
-    setTimeout(() => {
-      resolveDiscordChannel();
-    }, 0);
-    setTargetInput('');
   };
 
   const inputClass =
@@ -1257,98 +1470,6 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
         </div>
       )}
 
-      {/* Step 2: Chat / Channel ID */}
-      {token && (
-        <div className="space-y-2">
-          <div className="text-xs font-medium text-foreground flex items-center gap-2">
-            {meta.targetLabel}
-            {hasTarget && <RiCheckLine className="size-3 text-green-500" />}
-          </div>
-          {!hasTarget ? (
-            <>
-              <div className="text-[11px] text-muted-foreground leading-snug">
-                {meta.targetHelp}
-              </div>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={targetInput}
-                  onChange={(e) => setTargetInput(e.target.value)}
-                  placeholder={meta.targetPlaceholder}
-                  className={inputClass}
-                />
-                <button
-                  type="button"
-                  onClick={handleSaveTarget}
-                  disabled={!targetInput.trim()}
-                  className="shrink-0 rounded bg-primary px-3 py-1.5 text-xs text-primary-foreground disabled:opacity-50"
-                >
-                  Save
-                </button>
-              </div>
-            </>
-          ) : (
-            <div className="flex items-center gap-2 text-xs flex-wrap">
-              <code className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-foreground">
-                {target}
-              </code>
-              {conn.discordChannelName && (
-                <span className="text-muted-foreground">
-                  #{conn.discordChannelName}
-                  {conn.guildName ? ` · ${conn.guildName}` : ''}
-                  {conn.discordChannelTypeLabel ? ` · ${conn.discordChannelTypeLabel}` : ''}
-                </span>
-              )}
-              {conn.botToken && conn.defaultChannelId && !conn.discordChannelName && (
-                <button
-                  type="button"
-                  onClick={() => resolveDiscordChannel()}
-                  className="text-primary text-[10px] hover:underline"
-                  title="Look up channel info via Discord API"
-                >
-                  Look up
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => {
-                  updateConnection('discord', {
-                    defaultChannelId: undefined,
-                    discordChannelName: undefined,
-                    discordChannelType: undefined,
-                    discordChannelTypeLabel: undefined,
-                  });
-                  // Persist to server-side settings.json so auto-start works on reboot
-                  setTimeout(() => saveDiscordConfig(), 0);
-                }}
-                className="text-primary text-[10px] hover:underline"
-              >
-                Change
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Optional: Discord owner user ID — auto-joins web-created threads so
-          they appear under the channel for you (a bot-only thread stays hidden). */}
-      {token && (
-        <div className="space-y-2">
-          <div className="text-xs font-medium text-foreground">Your Discord user ID (optional)</div>
-          <div className="text-[11px] text-muted-foreground leading-snug">
-            Auto-joins web-created threads so they show up for you. Right-click your name → Copy User ID.
-          </div>
-          <input
-            type="text"
-            value={conn.defaultUserId ?? ''}
-            onChange={(e) => updateConnection('discord', { defaultUserId: e.target.value.trim() })}
-            onBlur={() => setTimeout(() => saveDiscordConfig(), 0)}
-            placeholder="e.g. 123456789012345678"
-            className={inputClass}
-          />
-        </div>
-      )}
-
       {/* Step 3: Action buttons - the visible "what next" call to action.
           For Discord, server-id alone also unlocks the CTA (Sync now works with just guildId). */}
       {hasToken && (hasTarget || conn.discordGuildId) && (
@@ -1406,96 +1527,11 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
         </div>
       )}
 
-      {/* OpenCode bridge — when on, the listeners route inbound messages
-          through OpenCode and stream the response back. This is what turns
-          the messenger into a real OpenChamber chat surface, instead of the
-          legacy "Otto received: ..." ping echo. */}
-      {hasToken && (hasTarget || conn.discordGuildId) && (
-        <BridgePanel
-          conn={conn}
-          type={conn.type}
-          bridgeStatus={bridgeStatus}
-          refreshBridgeStatus={refreshBridgeStatus}
-          onToggle={(v) => {
-            updateConnection(conn.type, { bridgeEnabled: v });
-            // Persist to server-side settings.json when toggling the bridge
-            setTimeout(() => saveDiscordConfig(), 0);
-          }}
-        />
-      )}
-
-      {/* Discord Gateway listener + history */}
-      {hasToken && (conn.discordGuildId || conn.defaultChannelId) && (
-        <DiscordListenerPanel
-          conn={conn}
-          inbound={discordInbound}
-          history={discordHistory}
-          startListener={startDiscordListener}
-          stopListener={stopDiscordListener}
-          refreshStatus={refreshDiscordListenerStatus}
-          loadRecent={loadRecentDiscordMessages}
-          loadHistory={loadDiscordHistory}
-          onToggleAutoReply={(v) =>
-            updateConnection('discord', { discordListenerAutoReply: v })
-          }
-        />
-      )}
-
-      {/* Discord diagnose */}
-      {hasToken && (
-        <DiscordDiagnosePanel
-          conn={conn}
-          diagnosis={discordDiagnosis}
-          running={discordDiagnosisRunning}
-          runDiagnose={diagnoseDiscord}
-        />
-      )}
-
-      {conn.lastSyncChannels && conn.lastSyncChannels.length > 0 && (
-        <DiscordSyncResults channels={conn.lastSyncChannels} guildName={conn.guildName} />
-      )}
-
-      {/* Project ↔ Channel mappings (advanced) */}
-      {conn.syncProjects && projects.length > 0 && (
-        <details className="group">
-          <summary className="cursor-pointer text-xs font-medium text-foreground select-none">
-            Project → Channel Mapping{' '}
-            <span className="text-[10px] text-muted-foreground font-normal">(optional)</span>
-          </summary>
-          <div className="mt-2 space-y-2">
-            {projects.slice(0, 10).map((project) => {
-              const mapping = projectMappings.find((m) => m.projectId === project.id);
-              const channelName = mapping?.discord?.channelName;
-              return (
-                <div key={project.id} className="flex items-center gap-2 text-xs">
-                  <span className="text-foreground min-w-0 truncate flex-1">
-                    {project.label || project.path.split('/').pop()}
-                  </span>
-                  <span className="text-muted-foreground">→</span>
-                  <input
-                    type="text"
-                    value={channelName ?? ''}
-                    onChange={(e) => {
-                      const name = e.target.value;
-                      const update = {
-                        projectId: project.id,
-                        projectLabel:
-                          project.label || project.path.split('/').pop() || project.path,
-                        discord: { channelId: project.id, channelName: name },
-                      };
-                      setProjectMapping(update);
-                    }}
-                    placeholder={`#${(project.label || project.path.split('/').pop() || '')
-                      .toLowerCase()
-                      .replace(/\s+/g, '-')}`}
-                    className="w-32 rounded border border-border bg-background px-2 py-0.5 text-xs text-foreground"
-                  />
-                </div>
-              );
-            })}
-          </div>
-        </details>
-      )}
+      {/* Advanced — listener, OpenCode bridge, diagnostics, sync results and
+          project mappings. Hidden by default behind a checkbox to keep the
+          main setup flow simple; the listener/bridge still auto-start in the
+          background regardless of whether this section is expanded. */}
+      {hasToken && <DiscordAdvancedSettings conn={conn} />}
     </div>
   );
 }
