@@ -103,7 +103,7 @@ const randomBase62 = (length: number): string => {
   return result;
 };
 
-const ascendingId = (prefix: "msg"): string => {
+const ascendingId = (prefix: "msg" | "prt"): string => {
   const timestamp = Date.now();
   if (timestamp !== lastIdTimestamp) {
     lastIdTimestamp = timestamp;
@@ -732,6 +732,7 @@ class OpencodeService {
     additionalParts?: Array<{
       text: string;
       synthetic?: boolean;
+      metadata?: Record<string, unknown>;
       files?: Array<FileInputLite>;
     }>;
     messageId?: string;
@@ -779,10 +780,15 @@ class OpencodeService {
     if (params.additionalParts && params.additionalParts.length > 0) {
       for (const additional of params.additionalParts) {
         if (additional.text && additional.text.trim()) {
+          // Parts carrying metadata (inline comments) need an explicit "prt"-prefixed
+          // id to persist server-side; without it the server treats them as ephemeral
+          // prompt context, and other id prefixes are rejected with a 400.
           parts.push({
+            ...(additional.metadata ? { id: ascendingId('prt') } : {}),
             type: 'text',
             text: additional.text,
             ...(additional.synthetic ? { synthetic: true } : {}),
+            ...(additional.metadata ? { metadata: additional.metadata } : {}),
           });
         }
         if (additional.files && additional.files.length > 0) {

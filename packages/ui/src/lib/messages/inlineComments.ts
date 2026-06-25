@@ -1,4 +1,19 @@
 import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
+import { formatCommentNote } from './commentNote';
+
+export type InlineCommentPartPayload = {
+  text: string
+  synthetic: true
+  metadata?: {
+    opencodeComment: {
+      path: string
+      selection: { startLine: number; endLine: number; startChar: number; endChar: number }
+      comment: string
+      preview: string
+      origin: 'file' | 'review'
+    }
+  }
+}
 
 /**
  * Format a single inline comment draft into the standard message format
@@ -25,46 +40,42 @@ export function formatInlineCommentDraft(draft: InlineCommentDraft): string {
 }
 
 /**
- * Format multiple inline comment drafts into a single string
- * with each comment separated by a blank line
+ * Convert inline comment drafts to synthetic message parts.
+ *
+ * Real inline comments (file/diff/plan) are emitted in OpenCode Desktop's text
+ * format with `opencodeComment` metadata, so both apps render them as comment
+ * cards. Preview-context drafts (dev server console/annotations) are a different
+ * feature and are emitted as plain synthetic context, without comment metadata.
  */
-export function formatInlineCommentDrafts(drafts: InlineCommentDraft[]): string {
-  if (drafts.length === 0) return '';
+export function buildInlineCommentParts(drafts: InlineCommentDraft[]): InlineCommentPartPayload[] {
+  return drafts.map(draft => {
+    if (draft.source === 'preview-console' || draft.source === 'preview-annotation') {
+      return { text: formatInlineCommentDraft(draft), synthetic: true as const };
+    }
 
-  if (drafts.every((draft) => draft.source === 'preview-annotation')) {
-    return drafts.map(formatInlineCommentDraft).join('\n\n---\n\n');
-  }
-   
-  return drafts.map(formatInlineCommentDraft).join('\n\n');
-}
-
-/**
- * Append inline comment drafts to an existing message text
- * If the text is empty, returns just the formatted comments
- * Otherwise, appends comments after a blank line separator
- */
-export function appendInlineComments(text: string, drafts: InlineCommentDraft[]): string {
-  if (drafts.length === 0) return text;
-  
-  const formattedComments = formatInlineCommentDrafts(drafts);
-  
-  if (!text.trim()) {
-    return formattedComments;
-  }
-  
-  return `${text}\n\n${formattedComments}`;
-}
-
-/**
- * Check if a message text contains inline comments (for validation purposes)
- */
-export function hasInlineComments(text: string): boolean {
-  return text.includes('Comment on `') && text.includes('```');
-}
-
-/**
- * Extract the file label from a draft for display purposes
- */
-export function getDraftDisplayLabel(draft: InlineCommentDraft): string {
-  return `${draft.fileLabel}:${draft.startLine}-${draft.endLine}`;
+    const path = draft.fileLabel.replace(/:\d+(-\d+)?$/, '');
+    return {
+      text: formatCommentNote({
+        path,
+        startLine: draft.startLine,
+        endLine: draft.endLine,
+        comment: draft.text,
+      }),
+      synthetic: true as const,
+      metadata: {
+        opencodeComment: {
+          path,
+          selection: {
+            startLine: draft.startLine,
+            endLine: draft.endLine,
+            startChar: 0,
+            endChar: 0,
+          },
+          comment: draft.text,
+          preview: draft.code,
+          origin: (draft.source === 'diff' ? 'review' : 'file') as 'file' | 'review',
+        },
+      },
+    };
+  });
 }

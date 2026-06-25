@@ -12,8 +12,9 @@ import type { AttachedFile } from '@/stores/types/sessionTypes';
 import * as sessionActions from '@/sync/session-actions';
 import { useDirectorySync, useUserMessageHistory } from '@/sync/sync-context';
 import { useInlineCommentDraftStore, type InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
-import { appendInlineComments } from '@/lib/messages/inlineComments';
+import { buildInlineCommentParts } from '@/lib/messages/inlineComments';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { startReviewFlow } from '@/lib/reviewFlow';
 import { ReviewFlowDialog, type ReviewFlowExecution } from '@/components/session/ReviewFlowDialog';
@@ -21,6 +22,7 @@ import { AttachedFilesList, AttachedVSCodeFileChips, ActiveEditorFileSuggestion 
 import ToolOutputDialog from './message/ToolOutputDialog';
 import type { ToolPopupContent } from './message/types';
 import { QueuedMessageChips } from './QueuedMessageChips';
+import { InlineCommentChip } from './InlineCommentChip';
 import { FileMentionAutocomplete, type FileMentionHandle } from './FileMentionAutocomplete';
 import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from './CommandAutocomplete';
 import { SkillAutocomplete, type SkillAutocompleteHandle } from './SkillAutocomplete';
@@ -1462,7 +1464,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const consumeDrafts = useInlineCommentDraftStore((state) => state.consumeDrafts);
     const removeInlineCommentDraft = useInlineCommentDraftStore((state) => state.removeDraft);
     const hasDrafts = draftCount > 0;
-    const [previewConsoleCount, previewAnnotationCount, reviewCount] = draftSourceKey.split(':').map((entry) => Number(entry) || 0);
+    const [previewConsoleCount, previewAnnotationCount] = draftSourceKey.split(':').map((entry) => Number(entry) || 0);
+    const commentDrafts = useInlineCommentDraftStore(
+        useShallow((state) => {
+            const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
+            if (!sessionKey) return [] as InlineCommentDraft[];
+            return (state.drafts[sessionKey] ?? []).filter(
+                (d) => d.source !== 'preview-console' && d.source !== 'preview-annotation'
+            );
+        })
+    );
     const removePreviewDrafts = React.useCallback((source: 'preview-console' | 'preview-annotation') => {
         const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : '');
         if (!sessionKey) return;
@@ -1473,18 +1484,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
         }
     }, [currentSessionId, newSessionDraftOpen, removeInlineCommentDraft]);
-    // Review comments are the inline-comment drafts that aren't preview sources.
-    const removeReviewDrafts = React.useCallback(() => {
-        const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : '');
-        if (!sessionKey) return;
-        const drafts = useInlineCommentDraftStore.getState().drafts[sessionKey] ?? [];
-        for (const draft of drafts) {
-            if (draft.source !== 'preview-console' && draft.source !== 'preview-annotation') {
-                removeInlineCommentDraft(sessionKey, draft.id);
-            }
-        }
-    }, [currentSessionId, newSessionDraftOpen, removeInlineCommentDraft]);
-
     // User message history for up/down arrow navigation.
     // Keep this on a narrow hook instead of full session message records.
     const userMessageHistory = useUserMessageHistory(currentSessionId ?? "");
@@ -1697,16 +1696,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!inputSnapshot.hasContent || !currentSessionId) return;
 
         const drafts = consumeDrafts(currentSessionId);
+        const commentParts = buildInlineCommentParts(drafts);
 
-        let messageToQueue = inputSnapshot.message.replace(/^\n+|\n+$/g, '');
-        if (drafts.length > 0) {
-            messageToQueue = appendInlineComments(messageToQueue, drafts);
-        }
+        const messageToQueue = inputSnapshot.message.replace(/^\n+|\n+$/g, '');
         const attachmentsToQueue = sanitizeAttachmentsForSend(sendableAttachedFiles);
 
         addToQueue(currentSessionId, {
             content: messageToQueue,
             attachments: attachmentsToQueue.length > 0 ? attachmentsToQueue : undefined,
+            inlineCommentParts: commentParts.length > 0 ? commentParts : undefined,
             sendConfig: currentProviderId && currentModelId ? {
                 providerID: currentProviderId,
                 modelID: currentModelId,
@@ -1802,7 +1800,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         let primaryText = '';
         let primaryAttachments: AttachedFile[] = [];
         let agentMentionName: string | undefined;
-        const additionalParts: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }> = [];
+        const additionalParts: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: Record<string, unknown> }> = [];
         const availableSkillNames = new Set(useSkillsStore.getState().skills.map((skill) => skill.name));
         const mentionedSkillNames: string[] = [];
         const addMentionedSkills = (text: string) => {
@@ -1841,6 +1839,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     attachments: [...queuedAttachments, ...mentionAttachments],
                 });
             }
+            // Inline comments are sent as synthetic parts with opencodeComment metadata
+            // so both OpenChamber and OpenCode Desktop render them as comment cards.
+            if (queuedMsg.inlineCommentParts && queuedMsg.inlineCommentParts.length > 0) {
+                for (const cp of queuedMsg.inlineCommentParts) {
+                    additionalParts.push({ text: cp.text, synthetic: true, metadata: cp.metadata });
+                }
+            }
         }
 
         // Add current input (skip for queued-only auto-send)
@@ -1873,15 +1878,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!queuedOnly && sessionKey) {
             drafts = consumeDrafts(sessionKey);
         }
-
         if (drafts.length > 0) {
-            if (queuedMessagesToSend.length === 0) {
-                primaryText = appendInlineComments(primaryText, drafts);
-            } else if (additionalParts.length > 0) {
-                const lastPart = additionalParts[additionalParts.length - 1];
-                lastPart.text = appendInlineComments(lastPart.text, drafts);
-            } else {
-                primaryText = appendInlineComments(primaryText, drafts);
+            const commentParts = buildInlineCommentParts(drafts);
+            for (const cp of commentParts) {
+                additionalParts.push({ text: cp.text, synthetic: true, metadata: cp.metadata });
             }
         }
 
@@ -4012,28 +4012,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 />
                 {hasDrafts && (
                     <div className="flex flex-wrap items-center gap-2 pb-2">
-                        {reviewCount > 0 ? (
-                            <div
-                                className="inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1"
-                                style={{
-                                    backgroundColor: currentTheme?.colors?.surface?.elevated,
-                                    borderColor: currentTheme?.colors?.interactive?.border,
-                                }}
-                            >
-                                <span className="text-xs font-medium text-muted-foreground">{t('chat.chatInput.reviewComments')}</span>
-                                <span className="text-xs font-semibold" style={{ color: currentTheme?.colors?.status?.info }}>{reviewCount}</span>
-                                <button
-                                    type="button"
-                                    className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
-                                    style={{ minHeight: 0, minWidth: 0 }}
-                                    onClick={removeReviewDrafts}
-                                    aria-label={t('chat.chatInput.reviewCommentsRemove')}
-                                    title={t('chat.chatInput.reviewCommentsRemove')}
-                                >
-                                    <Icon name="close" className="h-3 w-3" />
-                                </button>
-                            </div>
-                        ) : null}
+                        {commentDrafts.map((draft) => {
+                            const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : '');
+                            return (
+                                <InlineCommentChip
+                                    key={draft.id}
+                                    draft={draft}
+                                    sessionKey={sessionKey}
+                                />
+                            );
+                        })}
                         {previewConsoleCount > 0 ? (
                             <div
                                 className="inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1"
