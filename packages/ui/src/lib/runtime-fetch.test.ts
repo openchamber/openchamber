@@ -466,17 +466,20 @@ describe('runtimeFetch header sanitization', () => {
 });
 
 describe('SDK shape unwrapping (Phase C)', () => {
-  test('shouldUnwrapSdkData matches all 4 shape-mismatch endpoints', () => {
+  test('shouldUnwrapSdkData matches shape-mismatch list endpoints', () => {
     const { shouldUnwrapSdkData, SDK_SHAPE_UNWRAP_PATTERNS } = require('./runtime-fetch');
-    expect(SDK_SHAPE_UNWRAP_PATTERNS).toHaveLength(5);
+    expect(SDK_SHAPE_UNWRAP_PATTERNS).toHaveLength(4);
     expect(shouldUnwrapSdkData('http://127.0.0.1:4096/api/agent')).toBe(true);
     expect(shouldUnwrapSdkData('http://127.0.0.1:4096/api/command')).toBe(true);
     expect(shouldUnwrapSdkData('http://127.0.0.1:4096/api/skill')).toBe(true);
     expect(shouldUnwrapSdkData('http://127.0.0.1:4096/api/provider')).toBe(true);
     expect(shouldUnwrapSdkData('http://127.0.0.1:4096/api/agent?directory=/home')).toBe(true);
-    expect(shouldUnwrapSdkData('http://127.0.0.1:4096/api/mcp')).toBe(true);
-    expect(shouldUnwrapSdkData('http://127.0.0.1:4096/mcp')).toBe(true);
-    expect(shouldUnwrapSdkData('http://127.0.0.1:4096/mcp/status')).toBe(true);
+    expect(shouldUnwrapSdkData('http://127.0.0.1:4096/agent?directory=/home')).toBe(true);
+    expect(shouldUnwrapSdkData('http://127.0.0.1:4096/command')).toBe(true);
+    // MCP is NOT in the unwrap patterns — /mcp returns a dict that useMcpStore consumes directly.
+    expect(shouldUnwrapSdkData('http://127.0.0.1:4096/api/mcp')).toBe(false);
+    expect(shouldUnwrapSdkData('http://127.0.0.1:4096/mcp')).toBe(false);
+    expect(shouldUnwrapSdkData('http://127.0.0.1:4096/mcp/status')).toBe(false);
   });
 
   test('shouldUnwrapSdkData does NOT match unrelated paths', () => {

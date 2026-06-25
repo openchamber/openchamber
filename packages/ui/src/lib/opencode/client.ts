@@ -1542,9 +1542,14 @@ class OpencodeService {
   async checkHealth(): Promise<boolean> {
     try {
       const normalizedBase = this.baseUrl.endsWith('/') ? this.baseUrl.replace(/\/+$/, '') : this.baseUrl;
-      const healthUrl = normalizedBase === '/api' || normalizedBase.endsWith('/api')
-        ? '/api/opencode/health'
-        : `${normalizedBase}/opencode/health`;
+      // Proxy-bypass mode: baseUrl is absolute (OpenCode upstream).
+      // Use OpenCode's own /global/health endpoint.
+      const isAbsoluteUrl = normalizedBase.startsWith('http://') || normalizedBase.startsWith('https://');
+      const healthUrl = isAbsoluteUrl
+        ? `${normalizedBase}/global/health`
+        : normalizedBase === '/api' || normalizedBase.endsWith('/api')
+          ? '/api/opencode/health'
+          : `${normalizedBase}/opencode/health`;
       markStartupTrace('opencodeClient.checkHealth:url', { baseUrl: this.baseUrl, healthUrl });
       const response = await runtimeFetch(healthUrl);
       markStartupTrace('opencodeClient.checkHealth:response', { status: response.status });
