@@ -782,6 +782,10 @@ export const ProvidersPage: React.FC = () => {
     return name.toLowerCase().includes(query) || id.toLowerCase().includes(query);
   });
 
+  const visibleModelIds = filteredModels
+    .map((model) => (typeof model?.id === 'string' ? model.id : ''))
+    .filter((id) => id.length > 0);
+
   return (
     <ScrollableOverlay outerClassName="h-full" className="w-full">
       <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8">
@@ -999,12 +1003,7 @@ export const ProvidersPage: React.FC = () => {
                 variant="outline"
                 size="xs"
                 className="!font-normal"
-                onClick={() => {
-                  const allIds = providerModels
-                    .map((model) => (typeof model?.id === 'string' ? model.id : ''))
-                    .filter((id) => id.length > 0);
-                  hideAllModels(selectedProvider.id, allIds);
-                }}
+                onClick={() => hideAllModels(selectedProvider.id, visibleModelIds)}
               >
                 {t('settings.providers.page.actions.hideAll')}
               </Button>
@@ -1012,7 +1011,7 @@ export const ProvidersPage: React.FC = () => {
                 variant="outline"
                 size="xs"
                 className="!font-normal"
-                onClick={() => showAllModels(selectedProvider.id)}
+                onClick={() => showAllModels(selectedProvider.id, visibleModelIds)}
               >
                 {t('settings.providers.page.actions.showAll')}
               </Button>
