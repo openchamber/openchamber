@@ -399,6 +399,7 @@ export async function handleFsBridgeMessage(
             const { stdout, stderr } = await execAsync(`${shell} ${shellFlag} "${cmd.replace(/"/g, '\\"')}"`, {
               cwd: resolvedCwd,
               env: augmentedEnv,
+              windowsHide: true,
               timeout: 300000,
             });
             return {

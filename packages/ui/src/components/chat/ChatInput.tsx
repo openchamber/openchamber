@@ -16,6 +16,7 @@ import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { startReviewFlow } from '@/lib/reviewFlow';
+import { ReviewFlowDialog, type ReviewFlowExecution } from '@/components/session/ReviewFlowDialog';
 import { AttachedFilesList, AttachedVSCodeFileChips, ActiveEditorFileSuggestion } from './FileAttachment';
 import ToolOutputDialog from './message/ToolOutputDialog';
 import type { ToolPopupContent } from './message/types';
@@ -63,15 +64,18 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { createWorktreeDraft } from '@/lib/worktreeSessionCreator';
 import { refreshProjectWorktrees } from '@/lib/worktrees/worktreeManager';
 import { buildSessionTargetOptions } from '@/sync/session-worktree-contract';
 import { usePermissionStore } from '@/stores/permissionStore';
 import { extractGitChangedFiles } from './changedFiles';
 import { useI18n } from '@/lib/i18n';
+import { sessionEvents } from '@/lib/sessionEvents';
 import { fetchResponseStyleInstruction } from '@/lib/responseStyle';
 import { wrapSystemReminder } from '@/lib/systemReminder';
 import { getSyncMessages } from '@/sync/sync-refs';
+import { EMPTY_REVERTED_MESSAGE_DOCK_STATE, buildRevertedMessageDockState, type RevertedMessageDockState } from './revertedMessageDockState';
 import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
 import { isSyntheticPart } from '@/lib/messages/synthetic';
 import {
@@ -87,11 +91,11 @@ import {
     buildAttachmentCitationText,
     findAttachmentCitationRanges,
 } from './attachmentCitations';
-import type { Message, Part } from '@opencode-ai/sdk/v2/client';
+import { getFileMentionAutocompleteQuery, type FileMentionAutocompleteInputSource } from './fileMentionAutocompleteState';
+import type { Part } from '@opencode-ai/sdk/v2/client';
 
 const MAX_VISIBLE_TEXTAREA_LINES = 8;
 const EMPTY_QUEUE: QueuedMessage[] = [];
-const EMPTY_MESSAGES: Message[] = [];
 const FILE_MENTION_TOKEN = /^@[^\s]+$/;
 // Single-line URL pasted over a selection becomes a markdown link.
 const PASTE_LINK_URL_PATTERN = /^(https?:\/\/|mailto:)\S+$/i;
@@ -125,6 +129,38 @@ const buildImagePasteInsertion = (pastedText: string, citationText: string): str
     }
     return `${text}${/\s$/.test(text) ? '' : ' '}${citationText}`;
 };
+
+const getInsertedTextFromChange = (previousValue: string, nextValue: string): string => {
+    if (previousValue === nextValue) {
+        return '';
+    }
+
+    let prefixLength = 0;
+    while (
+        prefixLength < previousValue.length
+        && prefixLength < nextValue.length
+        && previousValue[prefixLength] === nextValue[prefixLength]
+    ) {
+        prefixLength += 1;
+    }
+
+    let previousSuffix = previousValue.length;
+    let nextSuffix = nextValue.length;
+    while (
+        previousSuffix > prefixLength
+        && nextSuffix > prefixLength
+        && previousValue[previousSuffix - 1] === nextValue[nextSuffix - 1]
+    ) {
+        previousSuffix -= 1;
+        nextSuffix -= 1;
+    }
+
+    return nextValue.slice(prefixLength, nextSuffix);
+};
+
+const getFileMentionInputSourceForInsertedText = (insertedText: string): FileMentionAutocompleteInputSource => (
+    insertedText.includes('@') ? 'paste' : 'manual'
+);
 
 const withInlineInsertionBoundaries = (content: string, before: string, after: string): string => {
     if (!content) {
@@ -361,34 +397,28 @@ const RevertedMessageDock: React.FC<RevertedMessageDockProps> = React.memo(({ se
     const [restoringId, setRestoringId] = React.useState<string | null>(null);
     const [forkingId, setForkingId] = React.useState<string | null>(null);
     const [collapsed, setCollapsed] = React.useState(true);
-    const revertMessageID = useDirectorySync(
+    const revertedStateRef = React.useRef<RevertedMessageDockState>(EMPTY_REVERTED_MESSAGE_DOCK_STATE);
+    const revertedState = useDirectorySync(
         React.useCallback((state) => {
-            if (!sessionId) return undefined;
-            const session = state.session.find((item) => item.id === sessionId);
-            return (session as { revert?: { messageID?: string } } | undefined)?.revert?.messageID;
+            const next = buildRevertedMessageDockState(state, sessionId, revertedStateRef.current);
+            revertedStateRef.current = next;
+            return next;
         }, [sessionId]),
         directory,
     );
-    const sessionMessages = useDirectorySync(
-        React.useCallback((state) => (sessionId ? state.message[sessionId] ?? EMPTY_MESSAGES : EMPTY_MESSAGES), [sessionId]),
-        directory,
-    );
-    const partsByMessage = useDirectorySync(React.useCallback((state) => state.part, []), directory);
-
+    const revertMessageID = revertedState.revertMessageID;
     const userMessages = React.useMemo(
-        () => sessionMessages.filter((message): message is Message & { role: 'user' } => message.role === 'user'),
-        [sessionMessages],
+        () => revertedState.records.map((record) => record.message),
+        [revertedState],
     );
     const noTextContent = t('chat.revertPopover.noTextContent');
     const items = React.useMemo(() => {
         if (!revertMessageID) return [];
-        return userMessages
-            .filter((message) => message.id >= revertMessageID)
-            .map((message) => ({
-                id: message.id,
-                text: getRevertedPreview(partsByMessage[message.id] ?? [], noTextContent),
-            }));
-    }, [noTextContent, partsByMessage, revertMessageID, userMessages]);
+        return revertedState.records.map((record) => ({
+            id: record.message.id,
+            text: getRevertedPreview(record.parts, noTextContent),
+        }));
+    }, [noTextContent, revertMessageID, revertedState]);
     const firstRevertedMessageId = items[0]?.id;
 
     React.useEffect(() => {
@@ -967,6 +997,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const dragEnterCountRef = React.useRef(0);
     const suppressNextFileDropTextInsertRef = React.useRef(false);
     const suppressNextFileDropTextInsertTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    const suppressNextFileMentionPasteRef = React.useRef(false);
+    const suppressNextFileMentionPasteTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const pendingDroppedAbsolutePathsRef = React.useRef<string[]>([]);
     const canAcceptDropRef = React.useRef(false);
     const mentionRef = React.useRef<FileMentionHandle>(null);
@@ -987,7 +1019,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         Promise.resolve((useSessionUIStore.getState().sendMessage as (...a: unknown[]) => unknown)(...args)),
     ).current;
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
-    const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
+    const fallbackDirectory = useDirectoryStore((s) => s.currentDirectory);
+    const currentDirectory = useEffectiveDirectory() ?? fallbackDirectory;
     const currentSessionDirectoryForSync = useSessionUIStore(
         React.useCallback((s) => currentSessionId ? s.getDirectoryForSession(currentSessionId) : null, [currentSessionId]),
     );
@@ -1015,6 +1048,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const projects = useProjectsStore((state) => state.projects);
     const activeProjectId = useProjectsStore((state) => state.activeProjectId);
     const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
+    const [reviewDialogOpen, setReviewDialogOpen] = React.useState(false);
+    const [reviewFlowSubmitting, setReviewFlowSubmitting] = React.useState(false);
 
     const currentProviderId = useConfigStore((state) => state.currentProviderId);
     const currentModelId = useConfigStore((state) => state.currentModelId);
@@ -1042,6 +1077,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const currentGitStatus = useGitStore((state) =>
         currentDirectory ? state.directories.get(currentDirectory)?.status ?? null : null,
     );
+    const ensureGitStatus = useGitStore((state) => state.ensureStatus);
+    const fetchGitStatus = useGitStore((state) => state.fetchStatus);
     const [showAbortStatus, setShowAbortStatus] = React.useState(false);
     const setSessionAutoAccept = usePermissionStore((state) => state.setSessionAutoAccept);
     const composerHighlightRef = React.useRef<HTMLDivElement | null>(null);
@@ -1062,6 +1099,48 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         setAttachmentPreview((prev) => ({ ...prev, open }));
         setImagePreviewOpen(open);
     }, [setImagePreviewOpen]);
+
+    React.useEffect(() => {
+        if (!currentDirectory || !runtimeGit) return;
+        void ensureGitStatus(currentDirectory, runtimeGit);
+    }, [currentDirectory, runtimeGit, ensureGitStatus]);
+
+    React.useEffect(() => {
+        if (!currentDirectory || !runtimeGit) return;
+        return sessionEvents.onGitRefreshHint((hint) => {
+            if (normalizePath(hint.directory) !== normalizePath(currentDirectory)) return;
+            void fetchGitStatus(currentDirectory, runtimeGit);
+        });
+    }, [currentDirectory, runtimeGit, fetchGitStatus]);
+
+    const handleStartReviewFlow = React.useCallback(async (execution: ReviewFlowExecution) => {
+        if (!currentSessionId) return;
+        const directory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory || '';
+        if (!directory) {
+            toast.error(t('diffView.reviewDialog.toast.noSessionDirectory'));
+            return;
+        }
+
+        setReviewFlowSubmitting(true);
+        try {
+            await startReviewFlow({
+                originalSessionID: currentSessionId,
+                directory,
+                providerID: execution.providerID,
+                modelID: execution.modelID,
+                agent: execution.agent || undefined,
+                variant: execution.variant || undefined,
+                generateHandoff: execution.generateHandoff,
+                returnAfterHandoffRequest: execution.generateHandoff,
+            });
+            setReviewDialogOpen(false);
+        } catch (error) {
+            console.error('[review-flow] failed to start review flow', error);
+            toast.error(error instanceof Error ? error.message : t('diffView.reviewDialog.toast.startFailed'));
+        } finally {
+            setReviewFlowSubmitting(false);
+        }
+    }, [currentSessionId, currentDirectory, t]);
 
     const isDesktopExpanded = isExpandedInput && !isMobile;
     const chatInputRadius = 'var(--radius-xl)';
@@ -1941,24 +2020,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 return;
             }
             else if (commandName === 'handoff-review' && currentSessionId && !isMobile && !isVSCodeRuntime()) {
-                try {
-                    const directory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory || '';
-                    if (!directory) {
-                        throw new Error('Session directory is unavailable');
-                    }
-                    await startReviewFlow({
-                        originalSessionID: currentSessionId,
-                        directory,
-                        providerID: providerIdToSend,
-                        modelID: modelIdToSend,
-                        agent: agentNameToSend,
-                        variant: variantToSend,
-                        agentMentionName,
-                    });
-                    scrollToBottom?.();
-                } catch (error) {
-                    console.error('[review-flow] failed to start review flow', error);
-                }
+                setReviewDialogOpen(true);
                 return;
             }
             else if (commandName === 'plan-feature' && (currentSessionId || newSessionDraftOpen)) {
@@ -2280,6 +2342,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (showCommandAutocomplete && commandRef.current) {
             if (e.key === 'Enter' || e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Escape' || e.key === 'Tab') {
                 e.preventDefault();
+                e.stopPropagation();
                 commandRef.current.handleKeyDown(e.key);
                 return;
             }
@@ -2288,6 +2351,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (showSkillAutocomplete && skillRef.current) {
             if (e.key === 'Enter' || e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Escape' || e.key === 'Tab') {
                 e.preventDefault();
+                e.stopPropagation();
                 skillRef.current.handleKeyDown(e.key);
                 return;
             }
@@ -2296,6 +2360,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (showSnippetAutocomplete && snippetRef.current) {
             if (e.key === 'Enter' || e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Escape' || e.key === 'Tab') {
                 e.preventDefault();
+                e.stopPropagation();
                 snippetRef.current.handleKeyDown(e.key);
                 return;
             }
@@ -2304,6 +2369,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (showFileMention && mentionRef.current) {
             if (e.key === 'Enter' || e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Escape' || e.key === 'Tab') {
                 e.preventDefault();
+                e.stopPropagation();
                 mentionRef.current.handleKeyDown(e.key);
                 return;
             }
@@ -2671,7 +2737,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         adjustTextareaHeight({ allowShrink });
     }, [adjustTextareaHeight, message, isMobile]);
 
-    const updateAutocompleteState = React.useCallback((value: string, cursorPosition: number) => {
+    const updateAutocompleteState = React.useCallback((
+        value: string,
+        cursorPosition: number,
+        inputSource: FileMentionAutocompleteInputSource = 'manual',
+        insertedText?: string,
+    ) => {
         if (inputMode === 'shell') {
             setShowCommandAutocomplete(false);
             setShowFileMention(false);
@@ -2736,19 +2807,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         setShowSnippetAutocomplete(false);
 
-        const lastAtSymbol = textBeforeCursor.lastIndexOf('@');
-        if (lastAtSymbol !== -1) {
-            const charBefore = lastAtSymbol > 0 ? textBeforeCursor[lastAtSymbol - 1] : null;
-            const textAfterAt = textBeforeCursor.substring(lastAtSymbol + 1);
-            const isWordBoundary = !charBefore || /\s/.test(charBefore);
-            if (isWordBoundary && !textAfterAt.includes(' ') && !textAfterAt.includes('\n')) {
-                setMentionQuery(textAfterAt);
-                setShowFileMention(true);
-            } else {
-                setShowFileMention(false);
-            }
-        } else {
+        const nextMentionQuery = getFileMentionAutocompleteQuery({ value, cursorPosition, inputSource, insertedText });
+        if (nextMentionQuery === null) {
             setShowFileMention(false);
+        } else {
+            setMentionQuery(nextMentionQuery);
+            setShowFileMention(true);
         }
     }, [
         inputMode,
@@ -2762,7 +2826,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         setSnippetQuery,
     ]);
 
-    const insertTextAtSelection = React.useCallback((text: string) => {
+    const insertTextAtSelection = React.useCallback((
+        text: string,
+        inputSource: FileMentionAutocompleteInputSource = 'manual',
+    ) => {
         if (!text) {
             return;
         }
@@ -2771,7 +2838,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!textarea) {
             const nextValue = message + text;
             setMessage(nextValue);
-            updateAutocompleteState(nextValue, nextValue.length);
+            updateAutocompleteState(nextValue, nextValue.length, inputSource, text);
             requestAnimationFrame(() => adjustTextareaHeight());
             return;
         }
@@ -2791,7 +2858,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             adjustTextareaHeight();
         });
 
-        updateAutocompleteState(nextValue, cursorPosition);
+        updateAutocompleteState(nextValue, cursorPosition, inputSource, text);
     }, [adjustTextareaHeight, message, updateAutocompleteState]);
 
     const clearDropTextSuppression = React.useCallback(() => {
@@ -2811,6 +2878,25 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             clearDropTextSuppression();
         }, 700);
     }, [clearDropTextSuppression]);
+
+    const clearFileMentionPasteSuppression = React.useCallback(() => {
+        suppressNextFileMentionPasteRef.current = false;
+        if (suppressNextFileMentionPasteTimeoutRef.current) {
+            clearTimeout(suppressNextFileMentionPasteTimeoutRef.current);
+            suppressNextFileMentionPasteTimeoutRef.current = null;
+        }
+    }, []);
+
+    const markFileMentionPasteSuppression = React.useCallback(() => {
+        suppressNextFileMentionPasteRef.current = true;
+        if (suppressNextFileMentionPasteTimeoutRef.current) {
+            clearTimeout(suppressNextFileMentionPasteTimeoutRef.current);
+        }
+        suppressNextFileMentionPasteTimeoutRef.current = setTimeout(() => {
+            suppressNextFileMentionPasteRef.current = false;
+            suppressNextFileMentionPasteTimeoutRef.current = null;
+        }, 700);
+    }, []);
 
     const handleBeforeInput = React.useCallback((e: React.FormEvent<HTMLTextAreaElement>) => {
         if (!isVSCodeRuntime() || !suppressNextFileDropTextInsertRef.current) {
@@ -2839,6 +2925,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         const value = e.target.value;
         const cursorPosition = e.target.selectionStart ?? value.length;
+        const pastedInsertedText = nativeInputEvent?.inputType?.startsWith('insertFromPaste')
+            ? getInsertedTextFromChange(messageRef.current, value)
+            : '';
+        const isPasteInput = pastedInsertedText.includes('@') || suppressNextFileMentionPasteRef.current;
+        if (suppressNextFileMentionPasteRef.current) {
+            clearFileMentionPasteSuppression();
+        }
+        const inputSource: FileMentionAutocompleteInputSource = isPasteInput
+            ? 'paste'
+            : 'manual';
 
         if (inputMode === 'normal' && value.startsWith('!')) {
             const shellCommand = value.slice(1);
@@ -2860,14 +2956,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         setMessage(value);
         adjustTextareaHeight();
-        updateAutocompleteState(value, cursorPosition);
+        updateAutocompleteState(value, cursorPosition, inputSource, pastedInsertedText);
     };
 
     React.useEffect(() => {
         return () => {
             clearDropTextSuppression();
+            clearFileMentionPasteSuppression();
         };
-    }, [clearDropTextSuppression]);
+    }, [clearDropTextSuppression, clearFileMentionPasteSuppression]);
 
     const handlePaste = React.useCallback(async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
         // Pasting a URL over a selection wraps it as a markdown link:
@@ -2898,7 +2995,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         }
                         adjustTextareaHeight();
                     });
-                    updateAutocompleteState(next, caret);
+                    updateAutocompleteState(next, caret, getFileMentionInputSourceForInsertedText(url), url);
                     return;
                 }
             }
@@ -2922,17 +3019,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         });
 
         const imageFiles = Array.from(fileMap.values());
+        const pastedText = e.clipboardData.getData('text');
         if (imageFiles.length === 0) {
+            if (pastedText.includes('@')) {
+                markFileMentionPasteSuppression();
+            }
             return;
         }
 
         if (!currentSessionId && !newSessionDraftOpen) {
+            if (pastedText.includes('@')) {
+                markFileMentionPasteSuppression();
+            }
             return;
         }
 
         e.preventDefault();
 
-        const pastedText = e.clipboardData.getData('text');
         const assignedFilenames = assignImageAttachmentFilenames(
             imageFiles,
             [
@@ -2950,7 +3053,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             message.slice(selectionEnd),
         );
 
-        insertTextAtSelection(insertionText);
+        insertTextAtSelection(insertionText, getFileMentionInputSourceForInsertedText(insertionText));
 
         for (let index = 0; index < imageFiles.length; index += 1) {
             const filename = assignedFilenames[index];
@@ -2965,7 +3068,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 pendingPastedAttachmentFilenamesRef.current.delete(filename);
             }
         }
-    }, [addAttachedFile, attachedFiles, adjustTextareaHeight, currentSessionId, inputMode, message, newSessionDraftOpen, insertTextAtSelection, setMessage, t, updateAutocompleteState]);
+    }, [addAttachedFile, attachedFiles, adjustTextareaHeight, currentSessionId, inputMode, markFileMentionPasteSuppression, message, newSessionDraftOpen, insertTextAtSelection, setMessage, t, updateAutocompleteState]);
 
     const handleFileSelect = (file: { name: string; path: string; relativePath?: string }) => {
 
@@ -3534,8 +3637,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const draftProjectLabel = selectedDraftProject ? getProjectDisplayLabel(selectedDraftProject) : null;
 
     const selectedDraftProjectBranches = useGitBranches(selectedDraftProjectPath);
+    const selectedDraftProjectBranchesFetchedAt = useGitStore(
+        (s) => (selectedDraftProjectPath ? s.directories.get(selectedDraftProjectPath)?.lastBranchesFetch ?? 0 : 0),
+    );
     const selectedDraftProjectIsGitRepo = useIsGitRepo(selectedDraftProjectPath);
-    const fetchGitStatus = useGitStore((state) => state.fetchStatus);
+    const hasDraftBranchList = Boolean(selectedDraftProjectBranches?.all);
     const fetchBranches = useGitStore((state) => state.fetchBranches);
     const [isDiscoveringDraftBranches, setIsDiscoveringDraftBranches] = React.useState(false);
 
@@ -3553,13 +3659,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             return;
         }
 
-        if (selectedDraftProjectBranches?.all) {
+        // Stale-while-revalidate: branches seeded from the persisted cache show
+        // instantly. Refresh based on staleness (not mere presence) so a cached
+        // list can't go stale, while only showing the discovering spinner when
+        // there is nothing to display yet.
+        const DRAFT_BRANCHES_SWR_TTL_MS = 30_000;
+        const isStale =
+            !selectedDraftProjectBranchesFetchedAt ||
+            Date.now() - selectedDraftProjectBranchesFetchedAt > DRAFT_BRANCHES_SWR_TTL_MS;
+
+        if (hasDraftBranchList && !isStale) {
             setIsDiscoveringDraftBranches(false);
             return;
         }
 
         let cancelled = false;
-        setIsDiscoveringDraftBranches(true);
+        setIsDiscoveringDraftBranches(!hasDraftBranchList);
 
         void fetchBranches(selectedDraftProjectPath, runtimeGit)
             .finally(() => {
@@ -3571,7 +3686,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         return () => {
             cancelled = true;
         };
-    }, [fetchBranches, runtimeGit, selectedDraftProject, selectedDraftProjectBranches?.all, selectedDraftProjectIsGitRepo, selectedDraftProjectPath, showDraftTargetSelectors]);
+    }, [fetchBranches, runtimeGit, selectedDraftProject, selectedDraftProjectBranchesFetchedAt, hasDraftBranchList, selectedDraftProjectIsGitRepo, selectedDraftProjectPath, showDraftTargetSelectors]);
 
     const selectedDraftProjectCurrentBranch = selectedDraftProjectBranches?.current?.trim() ?? '';
 
@@ -4508,10 +4623,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 setLinkedIssue(null);
             }}
         />
+        <ReviewFlowDialog
+            open={reviewDialogOpen}
+            onOpenChange={setReviewDialogOpen}
+            projectDirectory={currentSessionDirectoryForSync ?? currentDirectory ?? null}
+            submitting={reviewFlowSubmitting}
+            onConfirm={handleStartReviewFlow}
+        />
         <ToolOutputDialog
             popup={attachmentPreview}
             onOpenChange={handleAttachmentPreviewOpenChange}
-            syntaxTheme={{}}
             isMobile={isMobile}
         />
         </>

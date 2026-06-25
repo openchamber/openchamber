@@ -2,7 +2,7 @@ import { EventEmitter } from 'events';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { registerFsRoutes } from './routes.js';
+import { mintOutsideFileGrant, registerFsRoutes } from './routes.js';
 
 const createRouteRegistry = () => {
   const routes = new Map();
@@ -24,6 +24,7 @@ const createRouteRegistry = () => {
 const createMockResponse = () => {
   let statusCode = 200;
   let body = null;
+  const headers = new Map();
   return {
     status(code) {
       statusCode = code;
@@ -39,6 +40,13 @@ const createMockResponse = () => {
     send(payload) {
       body = payload;
       return this;
+    },
+    setHeader(name, value) {
+      headers.set(name.toLowerCase(), value);
+      return this;
+    },
+    getHeader(name) {
+      return headers.get(name.toLowerCase());
     },
     get statusCode() {
       return statusCode;
@@ -152,6 +160,46 @@ const registerRead = (fsPromises) => {
   return getRoute('GET', '/api/fs/read');
 };
 
+const registerRaw = (fsPromises) => {
+  const { app, getRoute } = createRouteRegistry();
+  registerFsRoutes(app, {
+    os: { homedir: () => '/home/user' },
+    path: path.posix,
+    fsPromises: {
+      realpath: async (targetPath) => targetPath,
+      ...fsPromises,
+    },
+    spawn: vi.fn(),
+    crypto: { randomUUID: () => 'job-0' },
+    normalizeDirectoryPath: (p) => p,
+    resolveProjectDirectory: async () => ({ directory: '/repo' }),
+    buildAugmentedPath: () => '/usr/bin',
+    resolveGitBinaryForSpawn: () => 'git',
+    openchamberUserConfigRoot: '/home/user/.config',
+  });
+  return getRoute('GET', '/api/fs/raw');
+};
+
+const registerMkdir = (fsPromises) => {
+  const { app, getRoute } = createRouteRegistry();
+  registerFsRoutes(app, {
+    os: { homedir: () => '/home/user' },
+    path: path.posix,
+    fsPromises: {
+      realpath: async (targetPath) => targetPath,
+      ...fsPromises,
+    },
+    spawn: vi.fn(),
+    crypto: { randomUUID: () => 'job-0' },
+    normalizeDirectoryPath: (p) => p,
+    resolveProjectDirectory: async () => ({ directory: '/repo' }),
+    buildAugmentedPath: () => '/usr/bin',
+    resolveGitBinaryForSpawn: () => 'git',
+    openchamberUserConfigRoot: '/home/user/.config',
+  });
+  return getRoute('POST', '/api/fs/mkdir');
+};
+
 const callExec = async (handler, body) => {
   const res = createMockResponse();
   await handler({ body }, res);
@@ -167,6 +215,18 @@ const callWrite = async (handler, body) => {
 const callRead = async (handler, query) => {
   const res = createMockResponse();
   await handler({ query }, res);
+  return res;
+};
+
+const callRaw = async (handler, query) => {
+  const res = createMockResponse();
+  await handler({ query }, res);
+  return res;
+};
+
+const callMkdir = async (handler, body) => {
+  const res = createMockResponse();
+  await handler({ body }, res);
   return res;
 };
 
@@ -254,6 +314,106 @@ describe('fs write', () => {
 });
 
 describe('fs read', () => {
+  it('rejects outside workspace reads without a grant', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fsPromises = {
+      stat: vi.fn(async () => ({ isFile: () => true, size: 3 })),
+      readFile: vi.fn(async () => 'secret'),
+    };
+    const handler = registerRead(fsPromises);
+
+    const res = await callRead(handler, { path: '/etc/passwd', allowOutsideWorkspace: 'true' });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: 'Outside workspace file access requires a grant' });
+    expect(fsPromises.readFile).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('allows outside workspace reads with an exact-path grant', async () => {
+    const fsPromises = {
+      realpath: vi.fn(async (targetPath) => targetPath),
+      stat: vi.fn(async () => ({ isFile: () => true, size: 6 })),
+      readFile: vi.fn(async () => 'secret'),
+    };
+    const grant = await mintOutsideFileGrant('/outside/plan.txt', {
+      fsPromises,
+      path: path.posix,
+      crypto: { randomUUID: () => 'grant-read' },
+    });
+    const handler = registerRead(fsPromises);
+
+    const res = await callRead(handler, {
+      path: '/outside/plan.txt',
+      allowOutsideWorkspace: 'true',
+      outsideFileGrant: grant.outsideFileGrant,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe('secret');
+  });
+
+  it('rejects outside workspace grants for a different canonical path', async () => {
+    const fsPromises = {
+      realpath: vi.fn(async (targetPath) => targetPath),
+      stat: vi.fn(async () => ({ isFile: () => true, size: 6 })),
+      readFile: vi.fn(async () => 'secret'),
+    };
+    const grant = await mintOutsideFileGrant('/outside/a.txt', {
+      fsPromises,
+      path: path.posix,
+      crypto: { randomUUID: () => 'grant-mismatch' },
+    });
+    const handler = registerRead(fsPromises);
+
+    const res = await callRead(handler, {
+      path: '/outside/b.txt',
+      allowOutsideWorkspace: 'true',
+      outsideFileGrant: grant.outsideFileGrant,
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: 'Outside workspace file grant does not match requested path' });
+    expect(fsPromises.readFile).not.toHaveBeenCalled();
+  });
+
+  it('sets no-referrer on raw responses served through outside file grants', async () => {
+    const fsPromises = {
+      realpath: vi.fn(async (targetPath) => targetPath),
+      stat: vi.fn(async () => ({ isFile: () => true, size: 6 })),
+      readFile: vi.fn(async () => Buffer.from('secret')),
+    };
+    const grant = await mintOutsideFileGrant('/outside/image.png', {
+      scopes: ['raw'],
+      fsPromises,
+      path: path.posix,
+      crypto: { randomUUID: () => 'grant-raw' },
+    });
+    const handler = registerRaw(fsPromises);
+
+    const res = await callRaw(handler, {
+      path: '/outside/image.png',
+      allowOutsideWorkspace: 'true',
+      outsideFileGrant: grant.outsideFileGrant,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.getHeader('referrer-policy')).toBe('no-referrer');
+  });
+
+  it('rejects outside workspace mkdir without a trusted directory grant', async () => {
+    const fsPromises = {
+      mkdir: vi.fn(async () => undefined),
+    };
+    const handler = registerMkdir(fsPromises);
+
+    const res = await callMkdir(handler, { path: '/tmp/staging', allowOutsideWorkspace: true });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual({ error: 'Outside workspace directory creation requires a grant' });
+    expect(fsPromises.mkdir).not.toHaveBeenCalled();
+  });
+
   it('logs when empty-read retries are exhausted after non-empty stat', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const fsPromises = {
@@ -278,6 +438,30 @@ describe('fs exec git-read cache', () => {
 
   afterEach(() => {
     delete process.env.OPENCHAMBER_GIT_READ_CACHE_TTL_MS;
+  });
+
+  it('rejects background command execution', async () => {
+    const { spawn } = createSpawn();
+    const handler = registerExec({ spawn });
+
+    const res = await callExec(handler, { commands: ['id'], cwd: '/repo', background: true });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: 'Background command execution is not allowed' });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('rejects command execution outside the workspace', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { spawn } = createSpawn();
+    const handler = registerExec({ spawn });
+
+    const res = await callExec(handler, { commands: ['id'], cwd: '/' });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual({ error: 'Path is outside of active workspace' });
+    expect(spawn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it('caches an allowlisted git rev-parse across identical requests', async () => {
@@ -333,8 +517,8 @@ describe('fs exec git-read cache', () => {
     const { spawn, calls } = createSpawn({ stdoutByCommand: { [command]: '/x/.git\n' } });
     const handler = registerExec({ spawn });
 
-    await callExec(handler, { commands: [command], cwd: '/repo-a' });
-    await callExec(handler, { commands: [command], cwd: '/repo-b' });
+    await callExec(handler, { commands: [command], cwd: '/repo/a' });
+    await callExec(handler, { commands: [command], cwd: '/repo/b' });
 
     expect(calls.length).toBe(2);
   });
@@ -355,8 +539,8 @@ describe('fs exec git-read cache', () => {
     const { spawn, calls } = createSpawn({ stdoutByCommand: {}, exitCode: 128 });
     const handler = registerExec({ spawn });
 
-    await callExec(handler, { commands: [command], cwd: '/not-a-repo' });
-    await callExec(handler, { commands: [command], cwd: '/not-a-repo' });
+    await callExec(handler, { commands: [command], cwd: '/repo/not-a-repo' });
+    await callExec(handler, { commands: [command], cwd: '/repo/not-a-repo' });
 
     expect(calls.length).toBe(2);
   });
@@ -398,17 +582,56 @@ describe('fs exec git-read cache', () => {
 
     // Fill to the 500-entry ceiling with distinct working directories.
     for (let i = 0; i < 500; i += 1) {
-      await callExec(handler, { commands: [command], cwd: `/repo-${i}` });
+      await callExec(handler, { commands: [command], cwd: `/repo/worktree-${i}` });
     }
     const afterFill = calls.length;
     expect(afterFill).toBe(500);
 
-    // One more distinct dir evicts the oldest entry (/repo-0).
-    await callExec(handler, { commands: [command], cwd: '/repo-overflow' });
+    // One more distinct dir evicts the oldest entry (/repo/worktree-0).
+    await callExec(handler, { commands: [command], cwd: '/repo/worktree-overflow' });
     // Evicted entry must re-run; a surviving entry must still be served.
-    await callExec(handler, { commands: [command], cwd: '/repo-0' });   // evicted -> spawns
-    await callExec(handler, { commands: [command], cwd: '/repo-499' }); // cached  -> no spawn
+    await callExec(handler, { commands: [command], cwd: '/repo/worktree-0' });   // evicted -> spawns
+    await callExec(handler, { commands: [command], cwd: '/repo/worktree-499' }); // cached  -> no spawn
 
     expect(calls.length).toBe(afterFill + 2);
+  });
+});
+
+describe('fs raw download Content-Disposition', () => {
+  it('uses RFC 5987 filename*= encoding for non-ASCII filenames on download', async () => {
+    const fsPromises = {
+      realpath: vi.fn(async (targetPath) => targetPath),
+      stat: vi.fn(async () => ({ isFile: () => true, size: 6 })),
+      readFile: vi.fn(async () => Buffer.from('content')),
+    };
+    const handler = registerRaw(fsPromises);
+
+    const res = await callRaw(handler, {
+      path: '/repo/文件.txt',
+      download: 'true',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const cd = res.getHeader('content-disposition');
+    expect(cd).toContain("filename*=UTF-8''");
+    expect(cd).toContain(encodeURIComponent('文件.txt'));
+    // ASCII fallback strips non-ASCII chars, leaving extension
+    expect(cd).toContain('filename=".txt"');
+  });
+
+  it('uses plain filename for ASCII-only filenames on download', async () => {
+    const fsPromises = {
+      realpath: vi.fn(async (targetPath) => targetPath),
+      stat: vi.fn(async () => ({ isFile: () => true, size: 6 })),
+      readFile: vi.fn(async () => Buffer.from('content')),
+    };
+    const handler = registerRaw(fsPromises);
+
+    const res = await callRaw(handler, { path: '/repo/readme.txt', download: 'true' });
+
+    expect(res.statusCode).toBe(200);
+    const cd = res.getHeader('content-disposition');
+    expect(cd).toContain('filename="readme.txt"');
+    expect(cd).toContain("filename*=UTF-8''readme.txt");
   });
 });

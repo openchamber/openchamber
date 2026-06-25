@@ -4,6 +4,7 @@ const originalFetch = globalThis.fetch;
 const { openSseProxy } = await import('./sseProxy');
 
 const createManager = () => ({
+  getStatus: () => 'connected',
   getApiUrl: () => 'http://127.0.0.1:4096/',
   getWorkingDirectory: () => '/repo',
   getOpenCodeAuthHeaders: () => ({ Authorization: 'Bearer test-token' }),

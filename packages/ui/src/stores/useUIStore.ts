@@ -111,7 +111,8 @@ const CONTEXT_PANEL_MAX_WIDTH = 1400;
 const CONTEXT_PANEL_MAX_TABS = 12;
 const CONTEXT_PANEL_MAX_LABEL_LENGTH = 120;
 const LEFT_SIDEBAR_MIN_WIDTH = 280;
-const RIGHT_SIDEBAR_MIN_WIDTH = 360;
+export const RIGHT_SIDEBAR_MIN_WIDTH = 360;
+export const RIGHT_SIDEBAR_MAX_WIDTH = 860;
 const activeMainTabByRuntime = new Map<string, MainTab>();
 
 const runtimeMemoryKey = (value?: string | null): string => {
@@ -191,6 +192,10 @@ const normalizeContextPanelTabDedupeKey = (
   targetPath: string | null,
   dedupeKey: string | null | undefined,
 ): string => {
+  if (mode === 'diff') {
+    return mode;
+  }
+
   if (typeof dedupeKey === 'string') {
     const trimmed = dedupeKey.trim();
     if (trimmed) {
@@ -346,6 +351,7 @@ const upsertContextPanelTab = (
           dedupeKey: nextTab.dedupeKey,
           label: nextTab.label,
           stagedDiff: nextTab.stagedDiff,
+          readOnly: nextTab.readOnly,
           touchedAt: Date.now(),
         }
       : tab));
@@ -536,6 +542,7 @@ interface UIStore {
   isSessionCreateDialogOpen: boolean;
   isScheduledTasksDialogOpen: boolean;
   isSettingsDialogOpen: boolean;
+  isNewWorktreeDialogOpen: boolean;
   isModelSelectorOpen: boolean;
   sidebarSection: SidebarSection;
 
@@ -578,7 +585,6 @@ interface UIStore {
   diffLayoutPreference: 'dynamic' | 'inline' | 'side-by-side';
   diffFileLayout: Record<string, 'inline' | 'side-by-side'>;
   diffWrapLines: boolean;
-  diffViewMode: 'single' | 'stacked';
   gitChangesViewMode: 'flat' | 'tree';
   isTimelineDialogOpen: boolean;
   isImagePreviewOpen: boolean;
@@ -620,6 +626,7 @@ interface UIStore {
   userMessageRenderingMode: UserMessageRenderingMode;
   collapsibleUserMessages: boolean;
   stickyUserHeader: boolean;
+  expandedEditorToolbar: boolean;
   showSplitAssistantMessageActions: boolean;
   isMobileSessionStatusBarCollapsed: boolean;
   mobileSessionPanelOpen: boolean;
@@ -683,6 +690,7 @@ interface UIStore {
   setSessionCreateDialogOpen: (open: boolean) => void;
   setScheduledTasksDialogOpen: (open: boolean) => void;
   setSettingsDialogOpen: (open: boolean) => void;
+  setNewWorktreeDialogOpen: (open: boolean) => void;
   setModelSelectorOpen: (open: boolean) => void;
   applyTheme: () => void;
   setSidebarSection: (section: SidebarSection) => void;
@@ -732,7 +740,6 @@ interface UIStore {
   setDiffLayoutPreference: (mode: 'dynamic' | 'inline' | 'side-by-side') => void;
   setDiffFileLayout: (filePath: string, mode: 'inline' | 'side-by-side') => void;
   setDiffWrapLines: (wrap: boolean) => void;
-  setDiffViewMode: (mode: 'single' | 'stacked') => void;
   setGitChangesViewMode: (mode: 'flat' | 'tree') => void;
   setMultiRunLauncherOpen: (open: boolean) => void;
   setTimelineDialogOpen: (open: boolean) => void;
@@ -763,6 +770,7 @@ interface UIStore {
   setUserMessageRenderingMode: (value: UserMessageRenderingMode) => void;
   setCollapsibleUserMessages: (value: boolean) => void;
   setStickyUserHeader: (value: boolean) => void;
+  setExpandedEditorToolbar: (value: boolean) => void;
   setShowSplitAssistantMessageActions: (value: boolean) => void;
   setIsMobileSessionStatusBarCollapsed: (value: boolean) => void;
   setMobileSessionPanelOpen: (value: boolean) => void;
@@ -822,6 +830,7 @@ export const useUIStore = create<UIStore>()(
         isSessionCreateDialogOpen: false,
         isScheduledTasksDialogOpen: false,
         isSettingsDialogOpen: false,
+        isNewWorktreeDialogOpen: false,
         isModelSelectorOpen: false,
         sidebarSection: 'sessions',
         settingsPage: 'home',
@@ -859,7 +868,6 @@ export const useUIStore = create<UIStore>()(
         diffLayoutPreference: 'inline',
         diffFileLayout: {},
         diffWrapLines: false,
-        diffViewMode: 'stacked',
         gitChangesViewMode: 'flat',
         isTimelineDialogOpen: false,
         isImagePreviewOpen: false,
@@ -899,6 +907,7 @@ export const useUIStore = create<UIStore>()(
         userMessageRenderingMode: 'markdown',
         collapsibleUserMessages: true,
         stickyUserHeader: false,
+        expandedEditorToolbar: false,
         showSplitAssistantMessageActions: false,
         isMobileSessionStatusBarCollapsed: false,
         mobileSessionPanelOpen: false,
@@ -972,29 +981,24 @@ export const useUIStore = create<UIStore>()(
         setRightSidebarOpen: (open) => {
           set((state) => {
             if (state.isRightSidebarOpen === open) {
-              if (!open) {
-                return state;
-              }
-              if (!state.hasManuallyResizedRightSidebar && state.rightSidebarWidth !== RIGHT_SIDEBAR_MIN_WIDTH) {
-                return {
-                  isRightSidebarOpen: open,
-                  rightSidebarWidth: RIGHT_SIDEBAR_MIN_WIDTH,
-                };
-              }
               return state;
             }
-            if (open && !state.hasManuallyResizedRightSidebar) {
-              return {
-                isRightSidebarOpen: open,
-                rightSidebarWidth: RIGHT_SIDEBAR_MIN_WIDTH,
-              };
-            }
-            return { isRightSidebarOpen: open };
+            const shouldResetWidth = open
+              && !state.hasManuallyResizedRightSidebar
+              && state.rightSidebarWidth !== RIGHT_SIDEBAR_MIN_WIDTH;
+            return {
+              isRightSidebarOpen: open,
+              rightSidebarWidth: shouldResetWidth ? RIGHT_SIDEBAR_MIN_WIDTH : state.rightSidebarWidth,
+            };
           });
         },
 
         setRightSidebarWidth: (width) => {
-          set({ rightSidebarWidth: width, hasManuallyResizedRightSidebar: true });
+          const clamped = Math.min(
+            RIGHT_SIDEBAR_MAX_WIDTH,
+            Math.max(RIGHT_SIDEBAR_MIN_WIDTH, width)
+          );
+          set({ rightSidebarWidth: clamped, hasManuallyResizedRightSidebar: true });
         },
 
         setRightSidebarTab: (tab) => {
@@ -1029,7 +1033,6 @@ export const useUIStore = create<UIStore>()(
           get().openContextPanelTab(normalizedDirectory, {
             mode: 'diff',
             targetPath: normalizedFilePath,
-            dedupeKey: staged ? 'staged' : null,
             stagedDiff: staged,
           });
         },
@@ -1492,6 +1495,10 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
+        setNewWorktreeDialogOpen: (open) => {
+          set({ isNewWorktreeDialogOpen: open });
+        },
+
         setModelSelectorOpen: (open) => {
           set({ isModelSelectorOpen: open });
         },
@@ -1669,10 +1676,6 @@ export const useUIStore = create<UIStore>()(
 
         setDiffWrapLines: (wrap) => {
           set({ diffWrapLines: wrap });
-        },
-
-        setDiffViewMode: (mode) => {
-          set({ diffViewMode: mode });
         },
 
         setGitChangesViewMode: (mode) => {
@@ -2010,6 +2013,9 @@ export const useUIStore = create<UIStore>()(
         setStickyUserHeader: (value) => {
           set({ stickyUserHeader: value });
         },
+        setExpandedEditorToolbar: (value: boolean) => {
+          set({ expandedEditorToolbar: value });
+        },
         setShowSplitAssistantMessageActions: (value) => {
           set({ showSplitAssistantMessageActions: value });
         },
@@ -2073,12 +2079,17 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createJSONStorage(() => getSafeStorage()),
-        version: 9,
+        version: 10,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
           }
           const state = persistedState as Record<string, unknown>;
+
+          // v9 -> v10: remove obsolete single-file diff view mode setting
+          if (version < 10) {
+            delete state.diffViewMode;
+          }
 
           // v8 -> v9: initialize notes/todo panel height fields
           if (version < 9) {
@@ -2212,7 +2223,6 @@ export const useUIStore = create<UIStore>()(
           recentEfforts: state.recentEfforts,
           diffLayoutPreference: state.diffLayoutPreference,
           diffWrapLines: state.diffWrapLines,
-          diffViewMode: state.diffViewMode,
           gitChangesViewMode: state.gitChangesViewMode,
           nativeNotificationsEnabled: state.nativeNotificationsEnabled,
           notificationMode: state.notificationMode,
@@ -2240,6 +2250,7 @@ export const useUIStore = create<UIStore>()(
           userMessageRenderingMode: state.userMessageRenderingMode,
           collapsibleUserMessages: state.collapsibleUserMessages,
           stickyUserHeader: state.stickyUserHeader,
+          expandedEditorToolbar: state.expandedEditorToolbar,
           showSplitAssistantMessageActions: state.showSplitAssistantMessageActions,
           isMobileSessionStatusBarCollapsed: state.isMobileSessionStatusBarCollapsed,
           mobileSessionFilterProjectId: state.mobileSessionFilterProjectId,

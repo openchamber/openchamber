@@ -26,6 +26,9 @@ export const createSettingsHelpers = (dependencies) => {
   const SHORTCUT_OVERRIDE_VALUE_MAX_LENGTH = 128;
   const PWA_ORIENTATION_VALUES = new Set(['system', 'portrait', 'landscape']);
   const MOBILE_KEYBOARD_MODE_VALUES = new Set(['native', 'resize-content']);
+  const HIDDEN_MODELS_MAX = 1024;
+  const RECENT_EFFORTS_MAX_KEYS = 128;
+  const RECENT_EFFORTS_MAX_VARIANTS_PER_KEY = 5;
 
   const sanitizeShortcutOverrides = (value) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -39,6 +42,35 @@ export const createSettingsHelpers = (dependencies) => {
       result[key.slice(0, SHORTCUT_OVERRIDE_KEY_MAX_LENGTH)] = combo.slice(0, SHORTCUT_OVERRIDE_VALUE_MAX_LENGTH);
     }
     return result;
+  };
+
+  const sanitizeRecentEfforts = (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null;
+    }
+    const result = {};
+    const seenKeys = new Set();
+    let count = 0;
+    for (const [rawKey, rawVariants] of Object.entries(value)) {
+      const key = typeof rawKey === 'string' ? rawKey.trim() : '';
+      if (!key || seenKeys.has(key)) continue;
+      if (!Array.isArray(rawVariants)) continue;
+      const variants = [];
+      const seenVariants = new Set();
+      for (const rawVariant of rawVariants) {
+        const variant = typeof rawVariant === 'string' ? rawVariant.trim() : '';
+        if (!variant || seenVariants.has(variant)) continue;
+        seenVariants.add(variant);
+        variants.push(variant);
+        if (variants.length >= RECENT_EFFORTS_MAX_VARIANTS_PER_KEY) break;
+      }
+      if (variants.length === 0) continue;
+      seenKeys.add(key);
+      result[key] = variants;
+      count += 1;
+      if (count >= RECENT_EFFORTS_MAX_KEYS) break;
+    }
+    return count > 0 ? result : null;
   };
 
   const normalizePwaAppName = (value, fallback = '') => {
@@ -438,6 +470,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.stickyUserHeader === 'boolean') {
       result.stickyUserHeader = candidate.stickyUserHeader;
     }
+    if (typeof candidate.expandedEditorToolbar === 'boolean') {
+      result.expandedEditorToolbar = candidate.expandedEditorToolbar;
+    }
     if (typeof candidate.showSplitAssistantMessageActions === 'boolean') {
       result.showSplitAssistantMessageActions = candidate.showSplitAssistantMessageActions;
     }
@@ -471,16 +506,32 @@ export const createSettingsHelpers = (dependencies) => {
     if (recentModels) {
       result.recentModels = recentModels;
     }
+
+    // Cap at 1024: users with several providers (anthropic, openai, google,
+    // bedrock, azure, etc.) each exposing dozens-to-hundreds of models can
+    // exceed 256 hidden entries quickly. 1024 covers dense multi-provider
+    // setups while still bounding persistence/memory.
+    const hiddenModels = sanitizeModelRefs(candidate.hiddenModels, HIDDEN_MODELS_MAX);
+    if (hiddenModels) {
+      result.hiddenModels = hiddenModels;
+    }
+
+    if (Array.isArray(candidate.collapsedModelProviders)) {
+      result.collapsedModelProviders = normalizeStringArray(candidate.collapsedModelProviders);
+    }
+
+    if (Array.isArray(candidate.recentAgents)) {
+      result.recentAgents = normalizeStringArray(candidate.recentAgents);
+    }
+
+    const recentEfforts = sanitizeRecentEfforts(candidate.recentEfforts);
+    if (recentEfforts) {
+      result.recentEfforts = recentEfforts;
+    }
     if (typeof candidate.diffLayoutPreference === 'string') {
       const mode = candidate.diffLayoutPreference.trim();
       if (mode === 'dynamic' || mode === 'inline' || mode === 'side-by-side') {
         result.diffLayoutPreference = mode;
-      }
-    }
-    if (typeof candidate.diffViewMode === 'string') {
-      const mode = candidate.diffViewMode.trim();
-      if (mode === 'single' || mode === 'stacked') {
-        result.diffViewMode = mode;
       }
     }
     if (typeof candidate.gitChangesViewMode === 'string') {
@@ -740,6 +791,15 @@ export const createSettingsHelpers = (dependencies) => {
       securityScopedBookmarks: bookmarks,
       pinnedDirectories: normalizeStringArray(settings.pinnedDirectories),
       typographySizes: sanitizeTypographySizesPartial(settings.typographySizes),
+      ...(process.env.OPENCHAMBER_RUNTIME === 'desktop'
+        ? {
+            desktopLanAccessActive: process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_ACTIVE === 'true',
+            desktopLanAccessBlockedReason:
+              process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_BLOCKED_REASON === 'missing-password'
+                ? 'missing-password'
+                : null,
+          }
+        : {}),
       showReasoningTraces:
         typeof settings.showReasoningTraces === 'boolean'
           ? settings.showReasoningTraces

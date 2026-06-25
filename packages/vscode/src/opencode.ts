@@ -9,6 +9,7 @@ import { spawn } from 'child_process';
 import { randomBytes } from 'crypto';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 import { resolveWorkingDirectoryChange } from './workingDirectoryChange';
+import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } from './opencodeProcessRegistry';
 
 const t = vscode.l10n.t;
 
@@ -73,7 +74,8 @@ function generateSecureOpenCodePassword(): string {
 }
 
 function buildOpenCodeAuthHeader(password: string): string {
-  return `Basic ${Buffer.from(`opencode:${password}`, 'utf8').toString('base64')}`;
+  const username = process.env.OPENCODE_SERVER_USERNAME?.trim() || 'opencode';
+  return `Basic ${Buffer.from(`${username}:${password}`, 'utf8').toString('base64')}`;
 }
 
 function isValidOpenCodePassword(password: string): boolean {
@@ -673,7 +675,12 @@ async function spawnManagedOpenCodeServer(
 
     const timer = setTimeout(() => {
       cleanup();
-      reject(new Error(`Timeout waiting for server to start after ${timeoutMs}ms`));
+      // Surface whatever OpenCode printed while we waited — otherwise a hung or
+      // misconfigured start is indistinguishable from a slow one in the status
+      // report, leaving no thread to pull on.
+      const trimmedOutput = output.trim();
+      const outputHint = trimmedOutput ? ` Output: ${trimmedOutput}` : ' Output: (none — process printed nothing)';
+      reject(new Error(`Timeout waiting for server to start after ${timeoutMs}ms.${outputHint}`));
     }, timeoutMs);
 
     child.stdout?.on('data', onStdout);
@@ -681,6 +688,9 @@ async function spawnManagedOpenCodeServer(
     child.on('exit', onExit);
     child.on('error', onError);
   });
+
+  // Record this child so a future run can reap it if we crash before teardown.
+  registerManagedProcess({ pid: child.pid, ownerPid: process.pid, port, binary, runtime: 'vscode' });
 
   return {
     url,
@@ -690,6 +700,7 @@ async function spawnManagedOpenCodeServer(
       } catch {
         // ignore
       }
+      unregisterManagedProcess(child.pid);
     },
   };
 }
@@ -720,6 +731,7 @@ async function allocateManagedOpenCodePort(): Promise<number> {
 
 export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCodeManager {
   let server: { url: string; close: () => void } | null = null;
+  let reapedOrphansOnce = false;
   let managedApiUrlOverride: string | null = null;
   let managedPassword: string | null = null;
   let managedPasswordSource: 'user-env' | 'generated' | 'rotated' | null = null;
@@ -858,6 +870,19 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
         setStatus('connected');
       }
       return;
+    }
+
+    // Before spawning our own server, reap any OpenCode process WE spawned in a
+    // prior run that was orphaned by a crash/host-kill. Verified + scoped to our
+    // own pids, so it never touches a live instance's or the user's own server.
+    if (!reapedOrphansOnce) {
+      reapedOrphansOnce = true;
+      try {
+        const { reaped } = await reapOrphanedProcesses({ log: (msg) => console.log(msg) });
+        if (reaped > 0) console.log(`[opencode] startup reaped ${reaped} orphaned process(es)`);
+      } catch (error) {
+        console.warn('[opencode] orphan reap failed:', error instanceof Error ? error.message : error);
+      }
     }
 
     setStatus('connecting');

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createDirectoryQueryCanonicalizer } from './proxy.js';
+import { createDirectoryQueryCanonicalizer, normalizeForwardedDirectoryHeaders } from './proxy.js';
 
 describe('createDirectoryQueryCanonicalizer', () => {
   it('canonicalizes directory query params and preserves other params', async () => {
@@ -68,5 +68,28 @@ describe('createDirectoryQueryCanonicalizer', () => {
     });
 
     await expect(canonicalize('/session?foo=1')).resolves.toBe('/session?foo=1');
+  });
+});
+
+describe('normalizeForwardedDirectoryHeaders', () => {
+  it('decodes marked directory headers before forwarding to OpenCode', () => {
+    const headers = normalizeForwardedDirectoryHeaders({
+      'x-opencode-directory': encodeURIComponent('/Users/example/project'),
+      'x-opencode-directory-encoding': 'uri',
+    });
+
+    expect(headers).toEqual({
+      'x-opencode-directory': '/Users/example/project',
+    });
+  });
+
+  it('preserves unmarked percent sequences from direct clients', () => {
+    const headers = normalizeForwardedDirectoryHeaders({
+      'x-opencode-directory': '/Users/example/project%20literal',
+    });
+
+    expect(headers).toEqual({
+      'x-opencode-directory': '/Users/example/project%20literal',
+    });
   });
 });

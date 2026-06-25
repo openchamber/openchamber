@@ -116,6 +116,12 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['input', 'home bar', 'offset'],
   },
   {
+    id: 'appearance.expanded-editor-toolbar',
+    page: 'appearance',
+    titleKey: 'settings.openchamber.visual.field.expandedEditorToolbar',
+    keywords: ['editor', 'toolbar', 'tabs', 'docked', 'files'],
+  },
+  {
     id: 'appearance.file-editor-keymap',
     page: 'appearance',
     titleKey: 'settings.openchamber.visual.field.fileEditorKeymap',
@@ -310,7 +316,7 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'git',
     titleKey: 'settings.gitIdentities.page.section.title',
     descriptionKey: 'settings.gitIdentities.page.empty.description',
-    keywords: ['identity', 'profile', 'author', 'email', 'credentials'],
+    keywords: ['identity', 'profile', 'author', 'email', 'credentials', 'signing', 'commit signing', 'ssh signing', 'gpg'],
   },
   {
     id: 'git.changes-view',
@@ -421,6 +427,13 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'agents',
     titleKey: 'settings.agents.page.field.overrideModel',
     keywords: ['model', 'provider'],
+  },
+  {
+    id: 'agents.variant',
+    page: 'agents',
+    titleKey: 'settings.agents.page.field.variant',
+    descriptionKey: 'settings.agents.page.field.variantTooltip',
+    keywords: ['thinking', 'reasoning', 'variant', 'depth'],
   },
   {
     id: 'agents.temperature',

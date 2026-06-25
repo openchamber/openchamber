@@ -15,7 +15,7 @@ export interface RuntimeUrlResolver {
   authenticatedAsset(path: string, query?: RuntimeUrlQuery): string;
   auth(path: string, query?: RuntimeUrlQuery): string;
   health(query?: RuntimeUrlQuery): string;
-  rawFile(path: string, options?: { download?: boolean }): string;
+  rawFile(path: string, options?: { download?: boolean; allowOutsideWorkspace?: boolean; outsideFileGrant?: string }): string;
   sse(path: string, query?: RuntimeUrlQuery): string;
   websocket(path: string, query?: RuntimeUrlQuery): string;
 }
@@ -31,6 +31,12 @@ const normalizePath = (path: string): string => {
 const normalizeBaseUrl = (value: string | null | undefined): string => {
   if (typeof value !== 'string') return '';
   return value.trim().replace(/\/+$/, '');
+};
+
+const readInjectedApiBaseUrl = (): string => {
+  if (typeof window === 'undefined') return '';
+  const injected = (window as typeof window & { __OPENCHAMBER_API_BASE_URL__?: string }).__OPENCHAMBER_API_BASE_URL__;
+  return normalizeBaseUrl(injected);
 };
 
 const currentHref = (config: RuntimeUrlConfig): string => {
@@ -107,18 +113,26 @@ const toWebSocketUrl = (candidate: string, config: RuntimeUrlConfig): string => 
 };
 
 export const createRuntimeUrlResolver = (config: RuntimeUrlConfig = {}): RuntimeUrlResolver => {
-  const apiBaseUrl = normalizeBaseUrl(config.apiBaseUrl);
-  const realtimeBaseUrl = normalizeBaseUrl(config.realtimeBaseUrl) || apiBaseUrl;
+  const configuredApiBaseUrl = normalizeBaseUrl(config.apiBaseUrl);
+  const configuredRealtimeBaseUrl = normalizeBaseUrl(config.realtimeBaseUrl);
 
-  const http = (path: string, query?: RuntimeUrlQuery): string => buildHttpUrl(apiBaseUrl, path, query);
-  const realtime = (path: string, query?: RuntimeUrlQuery): string => buildHttpUrl(realtimeBaseUrl, path, query);
+  const apiBaseUrl = (): string => configuredApiBaseUrl || readInjectedApiBaseUrl();
+  const realtimeBaseUrl = (): string => configuredRealtimeBaseUrl || apiBaseUrl();
+
+  const http = (path: string, query?: RuntimeUrlQuery): string => buildHttpUrl(apiBaseUrl(), path, query);
+  const realtime = (path: string, query?: RuntimeUrlQuery): string => buildHttpUrl(realtimeBaseUrl(), path, query);
 
   return {
     api: http,
     authenticatedAsset: (path, query) => withUrlAuth(http(path, query)),
     auth: http,
     health: (query) => http('/health', query),
-    rawFile: (path, options) => http('/api/fs/raw', { path, download: options?.download === true ? true : undefined }),
+    rawFile: (path, options) => http('/api/fs/raw', {
+      path,
+      download: options?.download === true ? true : undefined,
+      allowOutsideWorkspace: options?.allowOutsideWorkspace === true ? true : undefined,
+      outsideFileGrant: options?.outsideFileGrant,
+    }),
     sse: (path, query) => withUrlAuth(realtime(path, query)),
     websocket: (path, query) => toWebSocketUrl(withUrlAuth(realtime(path, query)), config),
   };

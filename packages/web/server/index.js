@@ -17,6 +17,11 @@ import { createCloudflareTunnelProvider } from './lib/tunnels/providers/cloudfla
 import { createNgrokTunnelProvider } from './lib/tunnels/providers/ngrok.js';
 import { createRequestSecurityRuntime } from './lib/security/request-security.js';
 import {
+  getUnauthenticatedLanErrorMessage,
+  isNetworkExposedBindHost,
+  isUnsafeUnauthenticatedLanAllowed,
+} from './lib/security/bind-host.js';
+import {
   TUNNEL_MODE_MANAGED_LOCAL,
   TUNNEL_MODE_MANAGED_REMOTE,
   TUNNEL_MODE_QUICK,
@@ -1032,6 +1037,20 @@ const gracefulShutdown = (...args) => gracefulShutdownRuntime.gracefulShutdown(.
 async function main(options = {}) {
   const port = Number.isFinite(options.port) && options.port >= 0 ? Math.trunc(options.port) : DEFAULT_PORT;
   const host = typeof options.host === 'string' && options.host.length > 0 ? options.host : undefined;
+  const effectiveBindHost = host
+    || (typeof process.env.OPENCHAMBER_HOST === 'string' && process.env.OPENCHAMBER_HOST.trim().length > 0
+      ? process.env.OPENCHAMBER_HOST.trim()
+      : '127.0.0.1');
+  const uiPassword = typeof options.uiPassword === 'string'
+    ? options.uiPassword
+    : (typeof process.env.OPENCHAMBER_UI_PASSWORD === 'string' ? process.env.OPENCHAMBER_UI_PASSWORD : null);
+  if (
+    isNetworkExposedBindHost(effectiveBindHost)
+    && !(typeof uiPassword === 'string' && uiPassword.trim().length > 0)
+    && !isUnsafeUnauthenticatedLanAllowed(process.env)
+  ) {
+    throw new Error(getUnauthenticatedLanErrorMessage(effectiveBindHost));
+  }
   const tryCfTunnel = options.tryCfTunnel === true;
   const apiOnly = options.apiOnly === true || isEnvFlagEnabled(process.env.OPENCHAMBER_API_ONLY);
   const shouldUseCanonicalTunnelConfig = typeof options.tunnelMode === 'string'
@@ -1077,6 +1096,17 @@ async function main(options = {}) {
   const serverStartedAt = new Date().toISOString();
   const packagedClientOrigins = new Set(['openchamber-ui://app']);
   app.set('trust proxy', true);
+  // Keep self-hosted instances out of search engines. The app shell is served
+  // publicly (it loads before prompting for the UI password), so without this
+  // even a password-protected instance gets crawled and indexed. Applies to
+  // every response; the robots.txt route makes the intent explicit for crawlers.
+  app.use((_req, res, next) => {
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+    next();
+  });
+  app.get('/robots.txt', (_req, res) => {
+    res.type('text/plain').send('User-agent: *\nDisallow: /\n');
+  });
   app.use((req, res, next) => {
     const origin = typeof req.headers.origin === 'string' ? req.headers.origin : '';
     if (packagedClientOrigins.has(origin)) {
@@ -1103,7 +1133,6 @@ async function main(options = {}) {
   expressApp = app;
   server = http.createServer(app);
 
-  const uiPassword = typeof options.uiPassword === 'string' ? options.uiPassword : null;
   const bootstrapResult = bootstrapRuntime.setupBaseRoutes(app, {
     process,
     openchamberVersion: OPENCHAMBER_VERSION,

@@ -270,14 +270,19 @@ const getUrlAuthTokenFromRequest = (req) => {
 };
 
 const getRequestPathname = (req) => {
-  if (typeof req?.path === 'string' && req.path) return req.path;
   const rawUrl = req?.originalUrl || req?.url;
-  if (typeof rawUrl !== 'string' || !rawUrl) return '';
-  try {
-    return new URL(rawUrl, 'http://localhost').pathname;
-  } catch {
-    return '';
+  if (typeof rawUrl === 'string' && rawUrl) {
+    try {
+      return new URL(rawUrl, 'http://localhost').pathname;
+    } catch {
+      // Fall through to Express' derived path fields.
+    }
   }
+  if (typeof req?.baseUrl === 'string' && req.baseUrl && typeof req?.path === 'string' && req.path) {
+    return `${req.baseUrl}${req.path}`.replace(/\/+/g, '/');
+  }
+  if (typeof req?.path === 'string' && req.path) return req.path;
+  return '';
 };
 
 const isWebSocketUpgrade = (req) => {
@@ -292,6 +297,8 @@ const isUrlAuthReadableHttpPath = (pathname) => {
     || pathname === '/api/openchamber/events'
     || pathname === '/api/notifications/stream'
     || pathname === '/api/fs/raw'
+    || pathname === '/api/fs/serve'
+    || pathname.startsWith('/api/fs/serve/')
     || pathname.startsWith('/api/preview/proxy/')
     || /^\/api\/terminal\/[^/]+\/stream$/.test(pathname)
     || /^\/api\/projects\/[^/]+\/icon$/.test(pathname);

@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import path from 'path';
+import { spawn } from 'child_process';
 import { pathToFileURL } from 'url';
 
 import { isModuleCliExecution, normalizeCliEntryPath } from './cli-entry.js';
-import { parseArgs } from './cli.js';
+import {
+  assertAuthenticatedNetworkExposure,
+  isOpenchamberCmdline,
+  isOpenchamberProcessRunning,
+  parseArgs,
+} from './cli.js';
 
 describe('cli args', () => {
   it('accepts legacy daemon flags as no-ops', () => {
@@ -74,6 +80,37 @@ describe('cli args', () => {
   });
 });
 
+describe('network-exposed auth validation', () => {
+  it('allows loopback without a UI password', () => {
+    expect(() => assertAuthenticatedNetworkExposure({ host: '127.0.0.1' })).not.toThrow();
+    expect(() => assertAuthenticatedNetworkExposure({ host: 'localhost' })).not.toThrow();
+    expect(() => assertAuthenticatedNetworkExposure({ host: '::1' })).not.toThrow();
+  });
+
+  it('requires a UI password for LAN and wildcard bind hosts', () => {
+    expect(() => assertAuthenticatedNetworkExposure({ host: '0.0.0.0' })).toThrow(/refuses to bind/);
+    expect(() => assertAuthenticatedNetworkExposure({ host: '192.168.1.10' })).toThrow(/refuses to bind/);
+  });
+
+  it('allows network-exposed bind hosts with a UI password', () => {
+    expect(() => assertAuthenticatedNetworkExposure({ host: '0.0.0.0', uiPassword: 'secret' })).not.toThrow();
+  });
+
+  it('allows explicit unsafe LAN override from process env only', () => {
+    const previous = process.env.OPENCHAMBER_ALLOW_UNAUTHENTICATED_LAN;
+    process.env.OPENCHAMBER_ALLOW_UNAUTHENTICATED_LAN = 'true';
+    try {
+      expect(() => assertAuthenticatedNetworkExposure({ host: '0.0.0.0' })).not.toThrow();
+    } finally {
+      if (typeof previous === 'string') {
+        process.env.OPENCHAMBER_ALLOW_UNAUTHENTICATED_LAN = previous;
+      } else {
+        delete process.env.OPENCHAMBER_ALLOW_UNAUTHENTICATED_LAN;
+      }
+    }
+  });
+});
+
 describe('cli entry detection', () => {
   const modulePath = '/tmp/openchamber/bin/cli.js';
   const moduleUrl = pathToFileURL(modulePath).href;
@@ -123,4 +160,41 @@ describe('cli entry detection', () => {
 
     expect(normalizeCliEntryPath(unresolvedPath, realpath)).toBe(path.resolve(unresolvedPath));
   });
+});
+
+describe('isOpenchamberCmdline', () => {
+  it('accepts OpenChamber CLI and daemon cmdlines', () => {
+    expect(isOpenchamberCmdline('node /x/@openchamber/web/bin/cli.js serve')).toBe(true);
+    expect(isOpenchamberCmdline('node /x/@openchamber/web/server/index.js --port 9090')).toBe(true);
+    expect(isOpenchamberCmdline('bun /home/u/projects/openchamber/packages/web/server/index.js --port 3001')).toBe(true);
+  });
+
+  it('rejects recycled and unrelated processes (issue #1721)', () => {
+    expect(isOpenchamberCmdline('node /home/herjarsa/npm-global/bin/agentmemory')).toBe(false);
+    expect(isOpenchamberCmdline('node /usr/lib/node_modules/npm/bin/npm-cli.js install')).toBe(false);
+    expect(isOpenchamberCmdline('')).toBe(false);
+    expect(isOpenchamberCmdline(null)).toBe(false);
+  });
+});
+
+describe('isOpenchamberProcessRunning', () => {
+  it('returns false for a dead PID', () => {
+    expect(isOpenchamberProcessRunning(2147483646)).toBe(false);
+  });
+
+  // Identity verification is available on Linux (/proc) and macOS (ps); on those
+  // platforms a live but unrelated process (a recycled stale PID) must read as
+  // not-running so it can't trip the "already running" guard (issue #1721).
+  it.skipIf(process.platform !== 'linux' && process.platform !== 'darwin')(
+    'returns false for a live non-OpenChamber PID',
+    async () => {
+      const child = spawn('sleep', ['30'], { stdio: 'ignore' });
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        expect(isOpenchamberProcessRunning(child.pid)).toBe(false);
+      } finally {
+        child.kill('SIGKILL');
+      }
+    }
+  );
 });

@@ -67,6 +67,8 @@ export const registerServerStatusRoutes = (app, dependencies) => {
     serverStartedAt,
     gracefulShutdown,
     getHealthSnapshot,
+    tunnelAuthController = null,
+    uiAuthController = null,
   } = dependencies;
 
   const allocateLoopbackPort = async () => {
@@ -232,11 +234,33 @@ export const registerServerStatusRoutes = (app, dependencies) => {
     });
   });
 
-  app.post('/api/system/shutdown', (_req, res) => {
-    res.json({ ok: true });
-    gracefulShutdown({ exitProcess: true }).catch((error) => {
-      console.error('Shutdown request failed:', error?.message || error);
-    });
+  const requireShutdownAuth = async (req, res, next) => {
+    if (!uiAuthController || typeof uiAuthController.requireAuth !== 'function') {
+      return next();
+    }
+    const requestScope = typeof tunnelAuthController?.classifyRequestScope === 'function'
+      ? tunnelAuthController.classifyRequestScope(req)
+      : 'local';
+    if (
+      (requestScope === 'tunnel' || requestScope === 'unknown-public')
+      && typeof tunnelAuthController?.requireTunnelSession === 'function'
+    ) {
+      return tunnelAuthController.requireTunnelSession(req, res, next);
+    }
+    return uiAuthController.requireAuth(req, res, next);
+  };
+
+  app.post('/api/system/shutdown', async (req, res, next) => {
+    try {
+      await requireShutdownAuth(req, res, () => {
+        res.json({ ok: true });
+        gracefulShutdown({ exitProcess: true }).catch((error) => {
+          console.error('Shutdown request failed:', error?.message || error);
+        });
+      });
+    } catch (error) {
+      next(error);
+    }
   });
 
   app.post('/api/system/dev-shutdown', express.json({ limit: '64kb' }), async (req, res) => {

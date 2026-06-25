@@ -51,18 +51,6 @@ export const createBootstrapRuntime = (dependencies) => {
       setAutoAcceptSession,
     } = options;
 
-    registerServerStatusRoutes(app, {
-      express,
-      process,
-      openchamberVersion,
-      runtimeName,
-      serverStartedAt,
-      gracefulShutdown,
-      getHealthSnapshot,
-    });
-
-    registerCommonRequestMiddleware(app, { express, verboseRequestLogs });
-
     const uiAuthController = createUiAuth({
       password: uiPassword,
       readSettingsFromDiskMigrated,
@@ -71,6 +59,20 @@ export const createBootstrapRuntime = (dependencies) => {
     if (uiAuthController.enabled) {
       console.log('UI password protection enabled for browser sessions');
     }
+
+    registerServerStatusRoutes(app, {
+      express,
+      process,
+      openchamberVersion,
+      runtimeName,
+      serverStartedAt,
+      gracefulShutdown,
+      getHealthSnapshot,
+      tunnelAuthController,
+      uiAuthController,
+    });
+
+    registerCommonRequestMiddleware(app, { express, verboseRequestLogs });
 
     registerAuthAndAccessRoutes(app, {
       express,

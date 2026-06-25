@@ -104,8 +104,9 @@ export interface AgentConfig {
   name: string;
   description?: string;
   model?: string | null;
-  temperature?: number;
-  top_p?: number;
+  variant?: string | null;
+  temperature?: number | null;
+  top_p?: number | null;
   prompt?: string | null;
   mode?: "primary" | "subagent" | "all";
   permission?: PermissionConfig | null;
@@ -170,8 +171,9 @@ export interface AgentDraft {
   scope: AgentScope;
   description?: string;
   model?: string | null;
-  temperature?: number;
-  top_p?: number;
+  variant?: string;
+  temperature?: number | null;
+  top_p?: number | null;
   prompt?: string;
   mode?: "primary" | "subagent" | "all";
   permission?: PermissionConfig;
@@ -190,7 +192,7 @@ interface AgentsStore {
   loadAgents: () => Promise<boolean>;
   createAgent: (config: AgentConfig) => Promise<boolean>;
   updateAgent: (name: string, config: Partial<AgentConfig>) => Promise<boolean>;
-  deleteAgent: (name: string) => Promise<boolean>;
+  deleteAgent: (name: string, scope?: AgentScope) => Promise<boolean>;
   getAgentByName: (name: string) => Agent | undefined;
   // Returns only visible agents (excludes hidden internal agents)
   getVisibleAgents: () => Agent[];
@@ -245,8 +247,10 @@ export const useAgentsStore = create<AgentsStore>()(
               try {
                 const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
 
-                // Ensure we list agents using the correct project context
-                const agents = await opencodeClient.withDirectory(configDirectory, () => opencodeClient.listAgents());
+                // Ensure we list agents using the correct project context. Pass the
+                // directory directly so this shares the in-flight request with the config
+                // store instead of issuing a duplicate agents fetch at startup.
+                const agents = await opencodeClient.listAgents(configDirectory);
 
                 const agentsWithScope = await Promise.all(
                   agents.map(async (agent) => {
@@ -329,8 +333,9 @@ export const useAgentsStore = create<AgentsStore>()(
 
             if (config.description) agentConfig.description = config.description;
             if (config.model) agentConfig.model = config.model;
-            if (config.temperature !== undefined) agentConfig.temperature = config.temperature;
-            if (config.top_p !== undefined) agentConfig.top_p = config.top_p;
+            if (config.variant) agentConfig.variant = config.variant;
+            if (config.temperature !== undefined) agentConfig.temperature = config.temperature ?? null;
+            if (config.top_p !== undefined) agentConfig.top_p = config.top_p ?? null;
             if (config.prompt) agentConfig.prompt = config.prompt;
             if (config.permission) agentConfig.permission = config.permission;
             if (config.disable !== undefined) agentConfig.disable = config.disable;
@@ -393,8 +398,9 @@ export const useAgentsStore = create<AgentsStore>()(
             if (config.mode !== undefined) agentConfig.mode = config.mode;
             if (config.description !== undefined) agentConfig.description = config.description;
             if (config.model !== undefined) agentConfig.model = config.model;
-            if (config.temperature !== undefined) agentConfig.temperature = config.temperature;
-            if (config.top_p !== undefined) agentConfig.top_p = config.top_p;
+            if ('variant' in config) agentConfig.variant = config.variant ?? null;
+            if ('temperature' in config) agentConfig.temperature = config.temperature ?? null;
+            if ('top_p' in config) agentConfig.top_p = config.top_p ?? null;
             if (config.prompt !== undefined) agentConfig.prompt = config.prompt;
             if (config.permission !== undefined) agentConfig.permission = config.permission;
             if (config.disable !== undefined) agentConfig.disable = config.disable;
@@ -446,7 +452,7 @@ export const useAgentsStore = create<AgentsStore>()(
           }
         },
 
-        deleteAgent: async (name: string) => {
+        deleteAgent: async (name: string, scope?: AgentScope) => {
           startConfigUpdate("Deleting agent configuration…");
           let requiresReload = false;
           try {
@@ -456,7 +462,11 @@ export const useAgentsStore = create<AgentsStore>()(
 
             const response = await runtimeFetch(`/api/config/agents/${encodeURIComponent(name)}${queryParams}`, {
               method: 'DELETE',
-              headers: configDirectory ? { 'x-opencode-directory': configDirectory } : undefined,
+              headers: {
+                'Content-Type': 'application/json',
+                ...(configDirectory ? { 'x-opencode-directory': configDirectory } : {}),
+              },
+              body: JSON.stringify({ scope }),
             });
 
             const payload = await response.json().catch(() => null);
@@ -487,8 +497,9 @@ export const useAgentsStore = create<AgentsStore>()(
               set({ selectedAgentName: null });
             }
             return loaded;
-          } catch {
-            return false;
+          } catch (error) {
+            console.error('Failed to delete agent:', error);
+            throw error;
           } finally {
             if (!requiresReload) {
               finishConfigUpdate();

@@ -82,6 +82,68 @@ describe('OpenCode proxy SSE forwarding', () => {
     expect(seenAuthorization).toBe('Bearer test-token');
   });
 
+  it('holds a request through OpenCode warmup and succeeds once ready (no 503/backoff)', async () => {
+    const upstream = express();
+    upstream.get('/config/providers', (_req, res) => {
+      res.json({ ok: true });
+    });
+    upstreamServer = await listen(upstream);
+    const upstreamPort = upstreamServer.address().port;
+
+    const runtime = {
+      openCodePort: upstreamPort,
+      isOpenCodeReady: false,
+      openCodeNotReadySince: 0,
+      isRestartingOpenCode: false,
+    };
+    // OpenCode becomes ready shortly after the request arrives.
+    setTimeout(() => { runtime.isOpenCodeReady = true; }, 200);
+
+    const app = express();
+    registerOpenCodeProxy(app, {
+      fs: {},
+      os: {},
+      path,
+      OPEN_CODE_READY_GRACE_MS: 5000,
+      getRuntime: () => runtime,
+      getOpenCodeAuthHeaders: () => ({ Authorization: 'Bearer test-token' }),
+      buildOpenCodeUrl: (requestPath) => `http://127.0.0.1:${upstreamPort}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+    });
+    proxyServer = await listen(app);
+    const proxyPort = proxyServer.address().port;
+
+    const response = await fetch(`http://127.0.0.1:${proxyPort}/api/config/providers`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+  });
+
+  it('returns 503 fast when OpenCode never becomes ready', async () => {
+    const app = express();
+    registerOpenCodeProxy(app, {
+      fs: {},
+      os: {},
+      path,
+      // Zero grace → hold window collapses to nothing → fail fast.
+      OPEN_CODE_READY_GRACE_MS: 0,
+      getRuntime: () => ({
+        openCodePort: 0,
+        isOpenCodeReady: false,
+        openCodeNotReadySince: 0,
+        isRestartingOpenCode: false,
+      }),
+      getOpenCodeAuthHeaders: () => ({}),
+      buildOpenCodeUrl: (requestPath) => `http://127.0.0.1:1${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+    });
+    proxyServer = await listen(app);
+    const proxyPort = proxyServer.address().port;
+
+    const response = await fetch(`http://127.0.0.1:${proxyPort}/api/config/providers`);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ restarting: true });
+  });
+
   it('waits for drain when writing to a slow SSE response', async () => {
     const writes = [];
     const res = new EventEmitter();

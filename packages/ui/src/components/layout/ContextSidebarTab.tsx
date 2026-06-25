@@ -1,19 +1,25 @@
 import React from 'react';
 import type { Message, Part } from '@opencode-ai/sdk/v2';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
 
 import { deriveMessageRole } from '@/components/chat/message/messageRole';
 import { Icon } from "@/components/icon/Icon";
-import { useThemeSystem } from '@/contexts/useThemeSystem';
-import { generateSyntaxTheme } from '@/lib/theme/syntaxThemeGenerator';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { computeCacheHitRate } from '@/stores/utils/tokenUtils';
 import { useSessions, useSessionMessageRecords } from '@/sync/sync-context';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
+import {
+  derivePartsLabel,
+  deriveUserSnippet,
+  formatAssistantTokens,
+  formatMessagePreviewTime,
+  truncateMessageId,
+} from './rawMessagePreview';
+import type { TimeFormatPreference } from '@/stores/useUIStore';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
-import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 
 type SessionMessage = { info: Message; parts: Part[] };
 
@@ -247,21 +253,6 @@ const formatDateTime = (timestamp: number | null, timeFormatPreference: TimeForm
   });
 };
 
-const formatMessageDateMeta = (timestamp: number | null, timeFormatPreference: TimeFormatPreference): string => {
-  if (!timestamp || !Number.isFinite(timestamp)) return '-';
-  return formatDateTimeForPreference(timestamp, timeFormatPreference, {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
-};
-
-const capitalizeRole = (role: string): string => {
-  if (!role) return role;
-  return `${role[0].toUpperCase()}${role.slice(1)}`;
-};
-
 const resolveProviderAndModel = (
   providers: ProviderLike[],
   providerID: string,
@@ -279,9 +270,7 @@ const resolveProviderAndModel = (
 
 export const ContextPanelContent: React.FC = () => {
   const { t } = useI18n();
-  const { currentTheme } = useThemeSystem();
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
-  const syntaxTheme = React.useMemo(() => generateSyntaxTheme(currentTheme), [currentTheme]);
   const [expandedRawMessages, setExpandedRawMessages] = React.useState<Record<string, boolean>>({});
   const [copiedRawMessageId, setCopiedRawMessageId] = React.useState<string | null>(null);
   const copyResetTimeoutRef = React.useRef<number | null>(null);
@@ -545,10 +534,33 @@ export const ContextPanelContent: React.FC = () => {
           <div className="typography-micro text-muted-foreground">{t('contextSidebar.section.rawMessages')}</div>
           <div className="mt-2.5 space-y-1">
             {[...sessionMessages].reverse().map((message) => {
-              const role = deriveMessageRole(message.info).role;
+              const roleInfo = deriveMessageRole(message.info);
+              const role = roleInfo.role;
+              const isAssistant = role === 'assistant';
+              const isUser = role === 'user';
               const isExpanded = expandedRawMessages[message.info.id] === true;
               const isCopied = copiedRawMessageId === message.info.id;
               const messageCreatedAt = (message.info.time?.created ?? null) as number | null;
+              const partsLabel = derivePartsLabel(message.parts);
+              const tokens = isAssistant ? extractTokenBreakdown({ info: message.info, parts: message.parts }) : null;
+              const userSnippet = isUser ? deriveUserSnippet(message.parts) : '';
+              const shortId = truncateMessageId(message.info.id);
+              const previewTime = formatMessagePreviewTime(messageCreatedAt, timeFormatPreference);
+              // User rows merge the first two columns into a single inline
+              // block: `**user:** <snippet>`. The bold prefix anchors the eye
+              // to the start of the block; the snippet flows inline until the
+              // truncation point chosen by CSS.
+              //
+              // Assistant rows keep two cells: parts label on the left, I/O
+              // tokens right-aligned in a fixed middle column. Other roles
+              // (tool/system) reuse the assistant layout with an empty tokens
+              // cell so columns still align across rows.
+              const assistantLeft = partsLabel || '\u2014';
+              const assistantMiddle = tokens
+                ? formatAssistantTokens(tokens.input, tokens.output, formatNumber)
+                : '';
+              const otherLeft = role || 'unknown';
+              const otherMiddle = partsLabel;
 
               const jsonValue = isExpanded
                 ? JSON.stringify({ info: message.info, parts: message.parts }, null, 2)
@@ -570,12 +582,49 @@ export const ContextPanelContent: React.FC = () => {
                       }));
                     }}
                   >
-                    <div className="flex items-center justify-between gap-2 whitespace-nowrap overflow-hidden">
-                      <span className="min-w-0 inline-flex items-center gap-1.5">
-                        <span className="typography-ui-label text-foreground shrink-0">{capitalizeRole(role)}</span>
-                        <span className="min-w-0 truncate typography-micro text-muted-foreground">{message.info.id}</span>
-                      </span>
-                      <span className="typography-micro text-muted-foreground shrink-0">{formatMessageDateMeta(messageCreatedAt, timeFormatPreference)}</span>
+                    {/*
+                      4-column grid: cols 1-2 = role+content area, col 3 = id,
+                      col 4 = time. User rows fuse cols 1-2 into a single
+                      inline `**user:** <snippet>` block via grid-column:
+                      span 2; assistant/other rows keep them split (label |
+                      value) so the I/O tokens line up vertically across rows.
+                    */}
+                    <div
+                      className="grid items-center gap-x-2 whitespace-nowrap typography-micro"
+                      style={{ gridTemplateColumns: 'auto minmax(0, 1fr) 5rem 4.5rem' }}
+                    >
+                      {isUser ? (
+                        <span
+                          className="min-w-0 truncate text-muted-foreground"
+                          style={{ gridColumn: 'span 2' }}
+                        >
+                          <span className="typography-ui-label text-foreground">user:</span>{' '}
+                          {userSnippet}
+                        </span>
+                      ) : (
+                        <>
+                          <span
+                            className={
+                              isAssistant
+                                ? 'min-w-0 truncate text-muted-foreground'
+                                : 'typography-ui-label text-foreground'
+                            }
+                          >
+                            {isAssistant ? assistantLeft : otherLeft}
+                          </span>
+                          <span
+                            className={
+                              isAssistant
+                                ? 'text-right text-muted-foreground tabular-nums'
+                                : 'min-w-0 truncate text-muted-foreground'
+                            }
+                          >
+                            {isAssistant ? assistantMiddle : otherMiddle}
+                          </span>
+                        </>
+                      )}
+                      <span className="text-right font-mono text-muted-foreground">{shortId}</span>
+                      <span className="text-right text-muted-foreground">{previewTime}</span>
                     </div>
                   </button>
 
@@ -596,28 +645,18 @@ export const ContextPanelContent: React.FC = () => {
                             {isCopied ? <Icon name="check" className="size-3.5" /> : <Icon name="file-copy" className="size-3.5" />}
                           </button>
                         </div>
-                        <SyntaxHighlighter
+                        <WorkerHighlightedCode
                           language="json"
-                          style={syntaxTheme}
-                          PreTag="div"
-                          customStyle={{
+                          code={jsonValue}
+                          style={{
                             margin: 0,
                             padding: '0.75rem',
                             background: 'transparent',
                             fontSize: 'var(--text-micro)',
                             lineHeight: '1.35',
                           }}
-                          codeTagProps={{
-                            style: {
-                              whiteSpace: 'pre-wrap',
-                              wordBreak: 'break-word',
-                              overflowWrap: 'break-word',
-                            },
-                          }}
-                          wrapLongLines
-                        >
-                          {jsonValue}
-                        </SyntaxHighlighter>
+                          wrap
+                        />
                       </div>
                     </div>
                   )}

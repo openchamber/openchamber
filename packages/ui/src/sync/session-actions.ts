@@ -13,7 +13,10 @@ import { mergeSessionDirectoryMetadata, useGlobalSessionsStore } from "@/stores/
 import { useConfigStore } from "@/stores/useConfigStore"
 import { registerSessionDirectory } from "./sync-refs"
 import { isSyntheticPart } from "@/lib/messages/synthetic"
-import { materializeSessionSnapshots } from "./materialization"
+import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
+import { retry } from "./retry"
+import { isVSCodeRuntime } from "@/lib/desktop"
+import { isMobileSurfaceRuntime } from "@/lib/runtimeSurface"
 import { stripMessageDiffSnapshots, stripSessionDiffSnapshots } from "./sanitize"
 import { sessionEvents } from "@/lib/sessionEvents"
 import {
@@ -24,7 +27,7 @@ import {
   type SessionMetadataRecord,
 } from "@/lib/sessionReviewMetadata"
 
-const MESSAGE_REFETCH_LIMIT = 200
+const MESSAGE_REFETCH_LIMIT = 100
 const MESSAGE_REFETCH_SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const UNREVERT_REFETCH_ATTEMPTS = 3
 const UNREVERT_REFETCH_RETRY_MS = 150
@@ -483,6 +486,12 @@ export async function deleteSession(sessionId: string, _options?: Record<string,
     return true
   } catch (error) {
     console.error("[session-actions] deleteSession failed", error)
+    // The server cascade-deletes child sessions when the parent is removed.
+    // Subsequent delete attempts for those children return 404; treat as
+    // success since the session was already deleted by the cascade.
+    if ((error as { status?: number })?.status === 404) {
+      return true
+    }
     restoreSessionListSnapshots(snapshots)
     restoreGlobalSessionSnapshot(globalSnapshot)
     return false
@@ -507,6 +516,9 @@ export async function deleteSessionInDirectory(sessionId: string, directory: str
     return true
   } catch (error) {
     console.error("[session-actions] deleteSessionInDirectory failed", error)
+    if ((error as { status?: number })?.status === 404) {
+      return true
+    }
     restoreSessionListSnapshots(snapshots)
     restoreGlobalSessionSnapshot(globalSnapshot)
     return false
@@ -1027,4 +1039,72 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
   }
   // Clear existing attachments and restore file parts from the forked message.
   restoreFilePartsToInput(fileParts)
+}
+
+// ---------------------------------------------------------------------------
+// Imperative fetch path — starts message loading on the same tick as
+// setCurrentSession, before the React commit cycle fires useEffect.
+// ---------------------------------------------------------------------------
+
+const FETCH_MESSAGES_LOADING = new Set<string>()
+const DESKTOP_INITIAL_PAGE_SIZE = 50
+const CONSTRAINED_INITIAL_PAGE_SIZE = 30
+
+const getFetchPageSize = () => {
+  if (isVSCodeRuntime() || isMobileSurfaceRuntime()) return CONSTRAINED_INITIAL_PAGE_SIZE
+  return DESKTOP_INITIAL_PAGE_SIZE
+}
+
+export async function fetchMessagesForSession(sessionID: string, directory?: string | null): Promise<void> {
+  const resolvedDir = directory ?? dir()
+  if (!resolvedDir) return
+
+  const s = sdk()
+  const store = directory
+    ? dirStoreForDirectory(directory)
+    : dirStore()
+
+  if (getSessionMaterializationStatus(store.getState(), sessionID).renderable) return
+
+  const loadingKey = `${resolvedDir}:${sessionID}`
+  if (FETCH_MESSAGES_LOADING.has(loadingKey)) return
+
+  FETCH_MESSAGES_LOADING.add(loadingKey)
+
+  try {
+    const result = await retry(async () => {
+      const response = await s.session.messages({
+        sessionID,
+        directory: resolvedDir,
+        limit: getFetchPageSize(),
+      })
+      return response
+    })
+
+    const records = (assertSdkSuccess(result, "session.messages") ?? [])
+      .filter((record: { info?: { id?: string } }) => !!record?.info?.id)
+    if (records.length === 0) return
+
+    // Staleness guard: a rapid session switch may have moved the user off this
+    // session while the fetch was in flight. Skip the write so a slow fetch
+    // can't repopulate (and un-evict) a session already navigated away from.
+    if (useSessionUIStore.getState().currentSessionId !== sessionID) return
+
+    store.setState((state) => {
+      const materialized = materializeSessionSnapshots(
+        state,
+        sessionID,
+        records.map((record: { info: Message; parts?: Part[] }) => ({
+          info: stripMessageDiffSnapshots(record.info),
+          parts: record.parts ?? [],
+        })),
+        { skipPartTypes: MESSAGE_REFETCH_SKIP_PARTS },
+      )
+      return { message: materialized.message, part: materialized.part }
+    })
+  } catch {
+    // Transient failure — the reactive path in ChatContainer will retry
+  } finally {
+    FETCH_MESSAGES_LOADING.delete(loadingKey)
+  }
 }

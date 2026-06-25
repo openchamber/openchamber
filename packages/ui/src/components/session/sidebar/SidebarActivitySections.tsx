@@ -3,6 +3,12 @@ import { cn } from '@/lib/utils';
 import type { SessionNode } from './types';
 import { useI18n } from '@/lib/i18n';
 import { Icon } from "@/components/icon/Icon";
+import {
+  collectSubtreeContainingId,
+  computeNodeStructureKey,
+  resolveMenuOpenSessionId,
+} from './sessionNodeItemUtils';
+import type { SessionNodeRenderExtras } from './sessionNodeItemUtils';
 
 type ActivityItem = {
   node: SessionNode;
@@ -22,17 +28,34 @@ type ActivitySection = {
 
 type Props = {
   sections: ActivitySection[];
-  renderSessionNode: (node: SessionNode, depth?: number, groupDirectory?: string | null, projectId?: string | null, archivedBucket?: boolean, secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null } | null, renderContext?: 'project' | 'recent') => React.ReactNode;
+  renderSessionNode: (
+    node: SessionNode,
+    depth?: number,
+    groupDirectory?: string | null,
+    projectId?: string | null,
+    archivedBucket?: boolean,
+    secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null } | null,
+    renderContext?: 'project' | 'recent',
+    renderExtras?: SessionNodeRenderExtras,
+  ) => React.ReactNode;
+  currentSessionId: string | null;
+  editingId: string | null;
+  openSidebarMenuKey: string | null;
   variant?: 'section' | 'flat';
   initialVisibleCount?: number;
   batchSize?: number;
 };
+
+type RenderExtras = SessionNodeRenderExtras;
 
 const MAX_VISIBLE_RECENT_SESSIONS = 7;
 
 export function SidebarActivitySections({
   sections,
   renderSessionNode,
+  currentSessionId,
+  editingId,
+  openSidebarMenuKey,
   variant = 'section',
   initialVisibleCount = MAX_VISIBLE_RECENT_SESSIONS,
   batchSize = MAX_VISIBLE_RECENT_SESSIONS,
@@ -41,29 +64,6 @@ export function SidebarActivitySections({
   const [collapsed, setCollapsed] = React.useState<Set<string>>(new Set());
   const [visibleCountBySection, setVisibleCountBySection] = React.useState<Map<string, number>>(new Map());
   const flatVariant = variant === 'flat';
-
-  const toggleSection = React.useCallback((key: string) => {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
-        next.add(key);
-      }
-      return next;
-    });
-  }, []);
-
-  const showMoreSessions = React.useCallback((key: string, currentVisibleCount: number, totalCount: number) => {
-    setVisibleCountBySection((prev) => {
-      const nextVisibleCount = flatVariant
-        ? Math.min(totalCount, currentVisibleCount + batchSize)
-        : totalCount;
-      const next = new Map(prev);
-      next.set(key, nextVisibleCount);
-      return next;
-    });
-  }, [batchSize, flatVariant]);
 
   const resetSectionLimit = React.useCallback((key: string) => {
     setVisibleCountBySection((prev) => {
@@ -75,6 +75,60 @@ export function SidebarActivitySections({
       return next;
     });
   }, []);
+
+  const toggleSection = React.useCallback((key: string) => {
+    // Collapsing/expanding resets any "show more" batches, matching the
+    // worktree/project group behavior.
+    resetSectionLimit(key);
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, [resetSectionLimit]);
+
+  const showMoreSessions = React.useCallback((key: string, currentVisibleCount: number, totalCount: number) => {
+    setVisibleCountBySection((prev) => {
+      const nextVisibleCount = Math.min(totalCount, currentVisibleCount + batchSize);
+      const next = new Map(prev);
+      next.set(key, nextVisibleCount);
+      return next;
+    });
+  }, [batchSize]);
+
+  const buildRenderExtras = React.useCallback((nodes: SessionNode[]) => {
+    const subtreeContainsActive = new Set<string>();
+    collectSubtreeContainingId(nodes, currentSessionId, subtreeContainsActive);
+    const subtreeContainsEditing = new Set<string>();
+    collectSubtreeContainingId(nodes, editingId, subtreeContainsEditing);
+    const menuOpenSessionId = resolveMenuOpenSessionId(nodes, openSidebarMenuKey, 'recent', false);
+    const nodeStructureKeyByNode = new WeakMap<SessionNode, string>();
+    const visit = (node: SessionNode): void => {
+      nodeStructureKeyByNode.set(node, computeNodeStructureKey(node));
+      node.children.forEach(visit);
+    };
+    nodes.forEach(visit);
+
+    const childRenderExtrasFor = (child: SessionNode): RenderExtras => ({
+      subtreeContainsActive,
+      subtreeContainsEditing,
+      menuOpenSessionId,
+      nodeStructureKey: nodeStructureKeyByNode.get(child) ?? '',
+      childRenderExtrasFor,
+    });
+
+    return (node: SessionNode): RenderExtras => ({
+      subtreeContainsActive,
+      subtreeContainsEditing,
+      menuOpenSessionId,
+      nodeStructureKey: nodeStructureKeyByNode.get(node) ?? '',
+      childRenderExtrasFor,
+    });
+  }, [currentSessionId, editingId, openSidebarMenuKey]);
 
   const visibleSections = sections.filter((section) => section.items.length > 0);
   if (visibleSections.length === 0) {
@@ -92,11 +146,22 @@ export function SidebarActivitySections({
         const visibleItems = section.items.slice(0, visibleLimit);
         const remainingCount = section.items.length - visibleItems.length;
         const canShowFewer = !flatVariant && section.items.length > initialVisibleCount && remainingCount === 0;
+        const getRenderExtras = buildRenderExtras(visibleItems.map((item) => item.node));
+        const renderItem = (item: ActivityItem) => renderSessionNode(
+          item.node,
+          0,
+          item.groupDirectory,
+          item.projectId,
+          false,
+          item.secondaryMeta,
+          'recent',
+          getRenderExtras(item.node),
+        );
 
         if (flatVariant) {
           return (
             <div key={section.key} className="space-y-0.5">
-              {visibleItems.map((item) => renderSessionNode(item.node, 0, item.groupDirectory, item.projectId, false, item.secondaryMeta, 'recent'))}
+              {visibleItems.map(renderItem)}
               {remainingCount > 0 ? (
                 <button
                   type="button"
@@ -125,16 +190,14 @@ export function SidebarActivitySections({
             </button>
             {!isCollapsed ? (
               <div className={cn('space-y-0.5 pl-7')}>
-                {visibleItems.map((item) => renderSessionNode(item.node, 0, item.groupDirectory, item.projectId, false, item.secondaryMeta, 'recent'))}
+                {visibleItems.map(renderItem)}
                 {remainingCount > 0 ? (
                   <button
                     type="button"
                     onClick={() => showMoreSessions(section.key, visibleItems.length, section.items.length)}
                     className="mt-0.5 flex items-center justify-start rounded-md px-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline"
                   >
-                    {remainingCount === 1
-                      ? t('sessions.sidebar.group.showMoreSingle', { count: remainingCount })
-                      : t('sessions.sidebar.group.showMorePlural', { count: remainingCount })}
+                    {t('sessions.sidebar.group.showMore')}
                   </button>
                 ) : null}
                 {canShowFewer ? (

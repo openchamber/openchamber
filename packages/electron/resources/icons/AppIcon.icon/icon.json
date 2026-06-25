@@ -12,7 +12,19 @@
     {
       "layers" : [
         {
-          "glass" : false,
+          "glass-specializations" : [
+            {
+              "value" : false
+            },
+            {
+              "appearance" : "dark",
+              "value" : true
+            },
+            {
+              "appearance" : "tinted",
+              "value" : true
+            }
+          ],
           "image-name" : "app-icon-glyph-dark 4.png",
           "name" : "app-icon-glyph-dark 4",
           "opacity-specializations" : [
@@ -53,7 +65,19 @@
               "value" : "automatic"
             }
           ],
-          "glass" : false,
+          "glass-specializations" : [
+            {
+              "value" : true
+            },
+            {
+              "appearance" : "dark",
+              "value" : false
+            },
+            {
+              "appearance" : "tinted",
+              "value" : false
+            }
+          ],
           "hidden-specializations" : [
             {
               "idiom" : "square",

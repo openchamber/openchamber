@@ -1,7 +1,7 @@
 import React from 'react';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useAllSessionStatuses, useAllLiveSessions } from '@/sync/sync-context';
-import { mergeSessionDirectoryMetadata, useGlobalSessionsStore, ensureGlobalSessionsLoaded, refreshGlobalSessions } from '@/stores/useGlobalSessionsStore';
+import { mergeLiveSessionWithGlobalSession, useGlobalSessionsStore, ensureGlobalSessionsLoaded, refreshGlobalSessions } from '@/stores/useGlobalSessionsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import type { Session } from '@opencode-ai/sdk/v2';
@@ -37,7 +37,7 @@ function useAllProjectSessions(): Session[] {
     const liveById = new Map(liveSessions.map((session) => [session.id, session]));
     const merged = globalActiveSessions.map((session) => {
       const liveSession = liveById.get(session.id);
-      return liveSession ? mergeSessionDirectoryMetadata(liveSession, session) : session;
+      return liveSession ? mergeLiveSessionWithGlobalSession(liveSession, session) : session;
     });
     const seen = new Set(merged.map((session) => session.id));
     for (const session of liveSessions) {
@@ -418,7 +418,6 @@ export const MobileSessionPanelTrigger: React.FC<MobileSessionPanelTriggerProps>
   const isMobile = useUIStore((state) => state.isMobile);
   const open = useUIStore((state) => state.mobileSessionPanelOpen);
   const setOpen = useUIStore((state) => state.setMobileSessionPanelOpen);
-  const handledTouchRef = React.useRef(false);
 
   // Ensure the cross-project session list is loaded once, so the panel reflects
   // every project, not just the active directory.
@@ -440,21 +439,8 @@ export const MobileSessionPanelTrigger: React.FC<MobileSessionPanelTriggerProps>
         'rounded-md relative hover:bg-[var(--interactive-hover)]',
         open && 'text-[var(--primary-base)]'
       )}
-      onPointerDownCapture={(event) => {
-        if (event.pointerType === 'touch') {
-          event.preventDefault();
-          event.stopPropagation();
-          handledTouchRef.current = true;
-          setOpen(!open);
-        }
-      }}
-      onClick={() => {
-        if (handledTouchRef.current) {
-          handledTouchRef.current = false;
-          return;
-        }
-        setOpen(!open);
-      }}
+      style={{ touchAction: 'manipulation' }}
+      onClick={() => setOpen(!open)}
       title={t('mobile.sessions.search.section.sessions')}
       aria-label={t('mobile.sessions.search.section.sessions')}
       aria-expanded={open}

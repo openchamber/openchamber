@@ -21,6 +21,9 @@ import {
 import { ThemeSystemContext, type ThemeContextValue } from './theme-system-context';
 import type { VSCodeThemePayload } from '@/lib/theme/vscode/adapter';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { getInitialSystemPreference, readEmbeddedThemeSearchParams } from './theme-embedded-bootstrap';
+import { isValidTheme } from './theme-validation';
+import { getSyncedThemeFromPayload, getSyncedThemeVariant } from './theme-sync-payload';
 
 type ThemePreferences = {
   themeMode: ThemeMode;
@@ -32,16 +35,24 @@ type ThemeSyncPayload = {
   themeMode?: unknown;
   lightThemeId?: unknown;
   darkThemeId?: unknown;
+  currentTheme?: unknown;
 };
 
 const DEFAULT_LIGHT_ID = DEFAULT_LIGHT_THEME_ID;
 const DEFAULT_DARK_ID = DEFAULT_DARK_THEME_ID;
 
-const getSystemPreference = (): boolean => {
-  if (typeof window === 'undefined') {
-    return true;
+const readEmbeddedCurrentTheme = (): Theme | null => {
+  const raw = readEmbeddedThemeSearchParams()?.get('currentTheme');
+  if (!raw) {
+    return null;
   }
-  return window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+  try {
+    const parsed = JSON.parse(raw);
+    return isValidTheme(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
 };
 
 const fallbackThemeForVariant = (variant: 'light' | 'dark'): Theme =>
@@ -69,82 +80,16 @@ const suppressTransitionsForThemeSwitch = () => {
   };
 };
 
-const isNonEmptyString = (value: unknown): value is string =>
-  typeof value === 'string' && value.trim().length > 0;
-
-const getNested = (value: unknown, path: string[]): unknown =>
-  path.reduce<unknown>((acc, key) => (acc && typeof acc === 'object' ? (acc as Record<string, unknown>)[key] : undefined), value);
-
-const isValidCustomTheme = (value: unknown): value is Theme => {
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-
-  const requiredPaths = [
-    ['metadata', 'id'],
-    ['metadata', 'name'],
-    ['metadata', 'variant'],
-    ['colors', 'primary', 'base'],
-    ['colors', 'primary', 'foreground'],
-    ['colors', 'surface', 'background'],
-    ['colors', 'surface', 'foreground'],
-    ['colors', 'surface', 'muted'],
-    ['colors', 'surface', 'mutedForeground'],
-    ['colors', 'surface', 'elevated'],
-    ['colors', 'surface', 'elevatedForeground'],
-    ['colors', 'surface', 'subtle'],
-    ['colors', 'interactive', 'border'],
-    ['colors', 'interactive', 'selection'],
-    ['colors', 'interactive', 'selectionForeground'],
-    ['colors', 'interactive', 'focusRing'],
-    ['colors', 'interactive', 'hover'],
-    ['colors', 'status', 'error'],
-    ['colors', 'status', 'errorForeground'],
-    ['colors', 'status', 'errorBackground'],
-    ['colors', 'status', 'errorBorder'],
-    ['colors', 'status', 'warning'],
-    ['colors', 'status', 'warningForeground'],
-    ['colors', 'status', 'warningBackground'],
-    ['colors', 'status', 'warningBorder'],
-    ['colors', 'status', 'success'],
-    ['colors', 'status', 'successForeground'],
-    ['colors', 'status', 'successBackground'],
-    ['colors', 'status', 'successBorder'],
-    ['colors', 'status', 'info'],
-    ['colors', 'status', 'infoForeground'],
-    ['colors', 'status', 'infoBackground'],
-    ['colors', 'status', 'infoBorder'],
-    ['colors', 'syntax', 'base', 'background'],
-    ['colors', 'syntax', 'base', 'foreground'],
-    ['colors', 'syntax', 'base', 'keyword'],
-    ['colors', 'syntax', 'base', 'string'],
-    ['colors', 'syntax', 'base', 'number'],
-    ['colors', 'syntax', 'base', 'function'],
-    ['colors', 'syntax', 'base', 'variable'],
-    ['colors', 'syntax', 'base', 'type'],
-    ['colors', 'syntax', 'base', 'comment'],
-    ['colors', 'syntax', 'base', 'operator'],
-    ['colors', 'syntax', 'highlights', 'diffAdded'],
-    ['colors', 'syntax', 'highlights', 'diffRemoved'],
-    ['colors', 'syntax', 'highlights', 'lineNumber'],
-  ];
-
-  for (const path of requiredPaths) {
-    if (!isNonEmptyString(getNested(value, path))) {
-      return false;
-    }
-  }
-
-  const variant = getNested(value, ['metadata', 'variant']);
-  return variant === 'light' || variant === 'dark';
-};
-
 const buildInitialPreferences = (defaultThemeId?: string): ThemePreferences => {
   let lightThemeId: string = DEFAULT_LIGHT_ID;
   let darkThemeId: string = DEFAULT_DARK_ID;
   let themeMode: ThemeMode = 'system';
 
   if (typeof window !== 'undefined') {
+    const embeddedParams = readEmbeddedThemeSearchParams();
+    const embeddedMode = embeddedParams?.get('themeMode');
+    const embeddedLightId = embeddedParams?.get('lightThemeId');
+    const embeddedDarkId = embeddedParams?.get('darkThemeId');
     const storedMode = localStorage.getItem('themeMode');
     const storedLightId = localStorage.getItem('lightThemeId');
     const storedDarkId = localStorage.getItem('darkThemeId');
@@ -152,7 +97,9 @@ const buildInitialPreferences = (defaultThemeId?: string): ThemePreferences => {
     const legacyThemeId = localStorage.getItem('selectedThemeId');
     const legacyVariant = localStorage.getItem('selectedThemeVariant');
 
-    if (storedMode === 'light' || storedMode === 'dark' || storedMode === 'system') {
+    if (embeddedMode === 'light' || embeddedMode === 'dark' || embeddedMode === 'system') {
+      themeMode = embeddedMode;
+    } else if (storedMode === 'light' || storedMode === 'dark' || storedMode === 'system') {
       themeMode = storedMode;
     } else if (legacyUseSystem !== null) {
       const useSystem = legacyUseSystem === 'true';
@@ -173,11 +120,15 @@ const buildInitialPreferences = (defaultThemeId?: string): ThemePreferences => {
       themeMode = legacyVariant;
     }
 
-    if (typeof storedLightId === 'string' && storedLightId.trim().length > 0) {
+    if (typeof embeddedLightId === 'string' && embeddedLightId.trim().length > 0) {
+      lightThemeId = embeddedLightId.trim();
+    } else if (typeof storedLightId === 'string' && storedLightId.trim().length > 0) {
       lightThemeId = storedLightId.trim();
     }
 
-    if (typeof storedDarkId === 'string' && storedDarkId.trim().length > 0) {
+    if (typeof embeddedDarkId === 'string' && embeddedDarkId.trim().length > 0) {
+      darkThemeId = embeddedDarkId.trim();
+    } else if (typeof storedDarkId === 'string' && storedDarkId.trim().length > 0) {
       darkThemeId = storedDarkId.trim();
     }
   }
@@ -208,8 +159,10 @@ interface ThemeSystemProviderProps {
 export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemProviderProps) {
   const cssGenerator = useMemo(() => new CSSVariableGenerator(), []);
   const [preferences, setPreferences] = useState<ThemePreferences>(() => buildInitialPreferences(defaultThemeId));
-  const [systemPrefersDark, setSystemPrefersDark] = useState<boolean>(() => getSystemPreference());
+  const [systemPrefersDark, setSystemPrefersDark] = useState<boolean>(() => getInitialSystemPreference());
   const [customThemes, setCustomThemes] = useState<Theme[]>([]);
+  const [embeddedBootstrapTheme] = useState<Theme | null>(() => readEmbeddedCurrentTheme());
+  const [embeddedSyncedTheme, setEmbeddedSyncedTheme] = useState<Theme | null>(null);
   const [customThemesLoading, setCustomThemesLoading] = useState(false);
   const [vscodeTheme, setVSCodeTheme] = useState<Theme | null>(() => {
     if (typeof window === 'undefined' || !isVSCodeRuntime()) {
@@ -221,6 +174,12 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
   const isVSCode = useMemo(() => isVSCodeRuntime(), []);
   const isLocalDesktopOrigin = useMemo(() => isDesktopLocalOriginActive(), []);
   const isDesktopShell = useMemo(() => detectDesktopShell(), []);
+  const receivesParentThemeSync = useMemo(() => {
+    if (typeof window === 'undefined') {
+      return false;
+    }
+    return readEmbeddedThemeSearchParams() !== null;
+  }, []);
 
   const availableThemes = useMemo(() => {
     const merged: Theme[] = [];
@@ -237,12 +196,20 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       add(vscodeTheme);
     }
 
+    if (embeddedSyncedTheme) {
+      add(embeddedSyncedTheme);
+    }
+
+    if (embeddedBootstrapTheme) {
+      add(embeddedBootstrapTheme);
+    }
+
     // Custom themes first so they can override built-ins with the same id.
     customThemes.forEach(add);
     themes.forEach(add);
 
     return merged;
-  }, [customThemes, isVSCode, vscodeTheme]);
+  }, [customThemes, embeddedBootstrapTheme, embeddedSyncedTheme, isVSCode, vscodeTheme]);
 
   const getThemeByIdFromAvailable = useCallback(
     (themeId: string): Theme | undefined => availableThemes.find((theme) => theme.metadata.id === themeId),
@@ -303,7 +270,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
 
       const payload = await res.json();
       const incoming = Array.isArray(payload?.themes) ? payload.themes : [];
-      const normalized = incoming.filter(isValidCustomTheme);
+      const normalized = incoming.filter(isValidTheme);
       setCustomThemes(normalized);
     } catch {
       // ignore
@@ -403,6 +370,10 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       return;
     }
 
+    if (receivesParentThemeSync) {
+      return;
+    }
+
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     const handleChange = (event: MediaQueryListEvent) => {
       setSystemPrefersDark(event.matches);
@@ -411,10 +382,10 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     setSystemPrefersDark(mediaQuery.matches);
     mediaQuery.addEventListener('change', handleChange);
     return () => mediaQuery.removeEventListener('change', handleChange);
-  }, [preferences.themeMode]);
+  }, [preferences.themeMode, receivesParentThemeSync]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
+    if (receivesParentThemeSync || typeof window === 'undefined') {
       return;
     }
 
@@ -437,10 +408,14 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     localStorage.setItem('splashFgLight', lightTheme.colors.surface.foreground);
     localStorage.setItem('splashBgDark', darkTheme.colors.surface.background);
     localStorage.setItem('splashFgDark', darkTheme.colors.surface.foreground);
-  }, [preferences, currentTheme, ensureThemeById]);
+  }, [preferences, currentTheme, ensureThemeById, receivesParentThemeSync]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
+      return;
+    }
+
+    if (receivesParentThemeSync) {
       return;
     }
 
@@ -484,12 +459,14 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
 
     window.addEventListener('storage', handleStorage);
     return () => window.removeEventListener('storage', handleStorage);
-  }, []);
+  }, [receivesParentThemeSync]);
 
   const applyIncomingThemeSync = useCallback((payload: ThemeSyncPayload) => {
     const mode = payload.themeMode;
     const light = payload.lightThemeId;
     const dark = payload.darkThemeId;
+    const syncedVariant = getSyncedThemeVariant(payload);
+    const syncedTheme = getSyncedThemeFromPayload(payload);
 
     if ((mode !== 'light' && mode !== 'dark' && mode !== 'system') || typeof light !== 'string' || typeof dark !== 'string') {
       return;
@@ -503,6 +480,14 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
 
     suppressTransitionsForThemeSwitch();
     flushSync(() => {
+      if (receivesParentThemeSync && syncedTheme) {
+        setEmbeddedSyncedTheme(syncedTheme);
+      }
+
+      if (mode === 'system' && syncedVariant) {
+        setSystemPrefersDark(syncedVariant === 'dark');
+      }
+
       setPreferences((prev) => {
         if (prev.themeMode === mode && prev.lightThemeId === normalizedLight && prev.darkThemeId === normalizedDark) {
           return prev;
@@ -515,7 +500,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
         };
       });
     });
-  }, []);
+  }, [receivesParentThemeSync]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -562,6 +547,10 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
   }, [applyIncomingThemeSync]);
 
   useEffect(() => {
+    if (receivesParentThemeSync) {
+      return;
+    }
+
     const lightTheme = ensureThemeById(preferences.lightThemeId, 'light');
     const darkTheme = ensureThemeById(preferences.darkThemeId, 'dark');
 
@@ -576,17 +565,17 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       splashBgDark: darkTheme.colors.surface.background,
       splashFgDark: darkTheme.colors.surface.foreground,
     });
-  }, [currentTheme.metadata.id, currentTheme.metadata.variant, ensureThemeById, preferences.themeMode, preferences.lightThemeId, preferences.darkThemeId]);
+  }, [currentTheme.metadata.id, currentTheme.metadata.variant, ensureThemeById, preferences.themeMode, preferences.lightThemeId, preferences.darkThemeId, receivesParentThemeSync]);
 
   useEffect(() => {
-    if (!isDesktopShell) {
+    if (receivesParentThemeSync || !isDesktopShell) {
       return;
     }
 
     void (async () => {
       await setDesktopWindowTheme(preferences.themeMode, currentTheme.metadata.variant);
     })();
-  }, [currentTheme.metadata.variant, isDesktopShell, preferences.themeMode]);
+  }, [currentTheme.metadata.variant, isDesktopShell, preferences.themeMode, receivesParentThemeSync]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {

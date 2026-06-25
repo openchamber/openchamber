@@ -73,19 +73,6 @@ const DIFF_LAYOUT_OPTIONS: Option<'dynamic' | 'inline' | 'side-by-side'>[] = [
     },
 ];
 
-const DIFF_VIEW_MODE_OPTIONS: Option<'single' | 'stacked'>[] = [
-    {
-        id: 'single',
-        labelKey: 'settings.openchamber.visual.option.diffViewMode.single.label',
-        descriptionKey: 'settings.openchamber.visual.option.diffViewMode.single.description',
-    },
-    {
-        id: 'stacked',
-        labelKey: 'settings.openchamber.visual.option.diffViewMode.stacked.label',
-        descriptionKey: 'settings.openchamber.visual.option.diffViewMode.stacked.description',
-    },
-];
-
 const MERMAID_RENDERING_OPTIONS: Option<'svg' | 'ascii'>[] = [
     {
         id: 'svg',
@@ -247,7 +234,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-export type VisibleSetting = 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage';
+export type VisibleSetting = 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -273,6 +260,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setCollapsibleUserMessages = useUIStore(state => state.setCollapsibleUserMessages);
     const stickyUserHeader = useUIStore(state => state.stickyUserHeader);
     const setStickyUserHeader = useUIStore(state => state.setStickyUserHeader);
+    const expandedEditorToolbar = useUIStore(state => state.expandedEditorToolbar);
+    const setExpandedEditorToolbar = useUIStore(state => state.setExpandedEditorToolbar);
     const wideChatLayoutEnabled = useUIStore(state => state.wideChatLayoutEnabled);
     const setWideChatLayoutEnabled = useUIStore(state => state.setWideChatLayoutEnabled);
     const chatRenderMode = useUIStore(state => state.chatRenderMode);
@@ -295,8 +284,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setMobileKeyboardMode = useUIStore(state => state.setMobileKeyboardMode);
     const diffLayoutPreference = useUIStore(state => state.diffLayoutPreference);
     const setDiffLayoutPreference = useUIStore(state => state.setDiffLayoutPreference);
-    const diffViewMode = useUIStore(state => state.diffViewMode);
-    const setDiffViewMode = useUIStore(state => state.setDiffViewMode);
     const showTerminalQuickKeysOnDesktop = useUIStore(state => state.showTerminalQuickKeysOnDesktop);
     const setShowTerminalQuickKeysOnDesktop = useUIStore(state => state.setShowTerminalQuickKeysOnDesktop);
     const fileEditorKeymap = useUIStore(state => state.fileEditorKeymap);
@@ -414,6 +401,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         setStickyUserHeader(enabled);
         void updateDesktopSettings({ stickyUserHeader: enabled });
     }, [setStickyUserHeader]);
+
+    const handleExpandedEditorToolbarChange = React.useCallback((enabled: boolean) => {
+        setExpandedEditorToolbar(enabled);
+        void updateDesktopSettings({ expandedEditorToolbar: enabled });
+    }, [setExpandedEditorToolbar]);
 
     const handleCollapsibleUserMessagesChange = React.useCallback((enabled: boolean) => {
         setCollapsibleUserMessages(enabled);
@@ -533,7 +525,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         ? hasLocalizationSettings
         : (shouldShow('theme') || showMobileLayoutSetting || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart'));
     const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('spacing') || shouldShow('inputBarOffset');
-    const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || shouldShow('fileEditorKeymap');
+    const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || shouldShow('fileEditorKeymap') || shouldShow('expandedEditorToolbar');
     const hasBehaviorSettings = shouldShow('mermaidRendering')
         || shouldShow('userMessageRendering')
         || shouldShow('chatRenderMode')
@@ -1320,6 +1312,29 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     </div>
                                 </div>
                             )}
+                            {shouldShow('expandedEditorToolbar') && (
+                                <div
+                                    data-settings-item="appearance.expanded-editor-toolbar"
+                                    className="group flex cursor-pointer items-center gap-2 py-1.5"
+                                    role="button"
+                                    tabIndex={0}
+                                    aria-pressed={expandedEditorToolbar}
+                                    onClick={() => handleExpandedEditorToolbarChange(!expandedEditorToolbar)}
+                                    onKeyDown={(event) => {
+                                        if (event.key === ' ' || event.key === 'Enter') {
+                                            event.preventDefault();
+                                            handleExpandedEditorToolbarChange(!expandedEditorToolbar);
+                                        }
+                                    }}
+                                >
+                                    <Checkbox
+                                        checked={expandedEditorToolbar}
+                                        onChange={handleExpandedEditorToolbarChange}
+                                        ariaLabel={t('settings.openchamber.visual.field.expandedEditorToolbarAria')}
+                                    />
+                                    <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.expandedEditorToolbar')}</span>
+                                </div>
+                            )}
                             {shouldShow('terminalQuickKeys') && !isMobile && (
                                 <div
                                     data-settings-item="appearance.terminal-quick-keys"
@@ -1666,41 +1681,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         </section>
                                     )}
 
-                                    {shouldShow('diffLayout') && !isVSCode && (
-                                        <section className="p-2">
-                                            <h4 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.visual.section.diffViewMode')}</h4>
-                                            <div role="radiogroup" aria-label={t('settings.openchamber.visual.section.diffViewModeAria')} className="mt-0.5 space-y-0">
-                                                {DIFF_VIEW_MODE_OPTIONS.map((option) => {
-                                                    const selected = diffViewMode === option.id;
-                                                    return (
-                                                        <div
-                                                            key={option.id}
-                                                            role="button"
-                                                            tabIndex={0}
-                                                            aria-pressed={selected}
-                                                            onClick={() => setDiffViewMode(option.id)}
-                                                            onKeyDown={(event) => {
-                                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                                    event.preventDefault();
-                                                                    setDiffViewMode(option.id);
-                                                                }
-                                                            }}
-                                                            className="flex w-full items-center gap-2 py-0 text-left"
-                                                        >
-                                                            <Radio
-                                                                checked={selected}
-                                                                onChange={() => setDiffViewMode(option.id)}
-                                                                ariaLabel={t('settings.openchamber.visual.field.diffViewModeAria', { option: tUnsafe(option.labelKey) })}
-                                                            />
-                                                            <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
-                                                                {tUnsafe(option.labelKey)}
-                                                            </span>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        </section>
-                                    )}
                                 </div>
                             )}
 

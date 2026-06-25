@@ -101,6 +101,24 @@ export async function getGitStatus(directory: string, options?: { mode?: 'light'
   return gitHttp.getGitStatus(directory, options);
 }
 
+export async function resolveGitPrimaryRoot(directory: string): Promise<string> {
+  const result = await gitHttp.resolveGitPrimaryRoot(directory);
+  return result.root;
+}
+
+export async function resolveGitTopLevel(directory: string): Promise<string> {
+  const result = await gitHttp.resolveGitTopLevel(directory);
+  return result.root;
+}
+
+export async function getGitCommitSummaries(
+  directory: string,
+  shas: string[]
+): Promise<Array<{ sha: string; short: string; subject: string }>> {
+  const result = await gitHttp.getGitCommitSummaries(directory, shas);
+  return result.commits;
+}
+
 export async function getGitDiff(directory: string, options: import('./api/types').GetGitDiffOptions): Promise<import('./api/types').GitDiffResponse> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.getGitDiff(directory, options);
@@ -148,6 +166,24 @@ export async function unstageGitFiles(directory: string, filePaths: string[]): P
   const runtime = getRuntimeGit();
   if (runtime?.unstageGitFiles) return runtime.unstageGitFiles(directory, filePaths);
   return gitHttp.unstageGitFiles(directory, filePaths);
+}
+
+export async function stageGitHunk(directory: string, filePath: string, patch: string): Promise<void> {
+  const runtime = getRuntimeGit();
+  if (runtime?.stageGitHunk) return runtime.stageGitHunk(directory, filePath, patch);
+  return gitHttp.stageGitHunk(directory, filePath, patch);
+}
+
+export async function unstageGitHunk(directory: string, filePath: string, patch: string): Promise<void> {
+  const runtime = getRuntimeGit();
+  if (runtime?.unstageGitHunk) return runtime.unstageGitHunk(directory, filePath, patch);
+  return gitHttp.unstageGitHunk(directory, filePath, patch);
+}
+
+export async function revertGitHunk(directory: string, filePath: string, patch: string): Promise<void> {
+  const runtime = getRuntimeGit();
+  if (runtime?.revertGitHunk) return runtime.revertGitHunk(directory, filePath, patch);
+  return gitHttp.revertGitHunk(directory, filePath, patch);
 }
 
 export async function isLinkedWorktree(directory: string): Promise<boolean> {

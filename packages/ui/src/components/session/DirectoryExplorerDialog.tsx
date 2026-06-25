@@ -421,7 +421,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
         });
         selectedTarget = result.path;
       } else if (shouldCreateSelection) {
-        await opencodeClient.createDirectory(target, { allowOutsideWorkspace: true });
+        await opencodeClient.createDirectory(target);
       }
       const added = addProject(selectedTarget);
       if (!added) {

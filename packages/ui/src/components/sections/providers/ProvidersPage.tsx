@@ -23,6 +23,7 @@ import type { ModelMetadata } from '@/types';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { opencodeClient } from '@/lib/opencode/client';
+import { shouldLoadAvailableProviders } from './providerAvailability';
 
 const formatCompactNumber = (value: number) => new Intl.NumberFormat(getCurrentIntlLocale(), {
   notation: 'compact',
@@ -169,6 +170,7 @@ export const ProvidersPage: React.FC = () => {
   const [providerDropdownOpen, setProviderDropdownOpen] = React.useState(false);
   const [providerSources, setProviderSources] = React.useState<Record<string, ProviderSources>>({});
   const [showAuthPanel, setShowAuthPanel] = React.useState(false);
+  const isAddMode = selectedProviderId === ADD_PROVIDER_ID;
 
   React.useEffect(() => {
     if (!selectedProviderId && providers.length > 0) {
@@ -177,6 +179,10 @@ export const ProvidersPage: React.FC = () => {
   }, [providers, selectedProviderId, setSelectedProvider]);
 
   React.useEffect(() => {
+    if (!isAddMode) {
+      return;
+    }
+
     let isMounted = true;
 
     const loadAuthMethods = async () => {
@@ -204,9 +210,13 @@ export const ProvidersPage: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [t]);
+  }, [isAddMode, t]);
 
   React.useEffect(() => {
+    if (!shouldLoadAvailableProviders(isAddMode)) {
+      return;
+    }
+
     let isMounted = true;
 
     const loadAvailableProviders = async () => {
@@ -235,7 +245,7 @@ export const ProvidersPage: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [t]);
+  }, [isAddMode, t]);
 
   const connectedProviderIds = React.useMemo(
     () => new Set(providers.map((provider) => provider.id)),
@@ -467,9 +477,14 @@ export const ProvidersPage: React.FC = () => {
     setAuthBusyKey(busyKey);
 
     try {
-      const result = await opencodeClient.getSdkClient().auth.remove({ providerID: providerId });
-      if (result.error) {
-        throw new Error(t('settings.providers.page.toast.providerDisconnectFailed'));
+      const response = await runtimeFetch(`/api/provider/${encodeURIComponent(providerId)}/auth?scope=all`, {
+        method: 'DELETE',
+        headers: { Accept: 'application/json' },
+      });
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.error || t('settings.providers.page.toast.providerDisconnectFailed'));
       }
 
       toast.success(t('settings.providers.page.toast.providerDisconnected'));
@@ -481,8 +496,6 @@ export const ProvidersPage: React.FC = () => {
       setAuthBusyKey(null);
     }
   };
-
-  const isAddMode = selectedProviderId === ADD_PROVIDER_ID;
 
   if (!isAddMode && providers.length === 0) {
     return (

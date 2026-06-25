@@ -4,6 +4,7 @@ import { vscodeStreamPerfCount, vscodeStreamPerfMeasure, vscodeStreamPerfObserve
 import { extractBodyBase64, extractBodyText, extractJsonBody, hasInitBody } from './requestBodyTransport';
 import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
 import { opencodeClient } from '@openchamber/ui/lib/opencode/client';
+import { sanitizeHeadersForBrowser } from '@openchamber/ui/lib/runtime-fetch';
 import {
   buildVSCodeThemeFromPalette,
   readVSCodeThemePalette,
@@ -138,36 +139,6 @@ const waitForUiMount = (timeoutMs = 8000): Promise<boolean> => {
 };
 
 let uiMounted = false;
-let bootstrapProvidersReady = false;
-let bootstrapAgentsReady = false;
-let bootstrapFailed = false;
-
-const recordBootstrapFetch = (pathname: string, ok: boolean) => {
-  if (!pathname.startsWith('/api/')) return;
-
-  // Don't mark as failed while still connecting — early 503s are expected
-  const isConnected = window.__OPENCHAMBER_CONNECTION__?.status === 'connected';
-
-  if (pathname.startsWith('/api/config/providers')) {
-    if (ok) {
-      bootstrapProvidersReady = true;
-      // Reset failed flag — a successful retry supersedes earlier 503s
-      if (bootstrapAgentsReady || !isConnected) bootstrapFailed = false;
-    } else if (isConnected) {
-      bootstrapFailed = true;
-    }
-    return;
-  }
-
-  if (pathname === '/api/agent' || pathname.startsWith('/api/agent?')) {
-    if (ok) {
-      bootstrapAgentsReady = true;
-      if (bootstrapProvidersReady || !isConnected) bootstrapFailed = false;
-    } else if (isConnected) {
-      bootstrapFailed = true;
-    }
-  }
-};
 
 const maybeHideLoadingOverlay = () => {
   const connectionStatus = window.__OPENCHAMBER_CONNECTION__?.status ?? 'connecting';
@@ -177,19 +148,14 @@ const maybeHideLoadingOverlay = () => {
   }
 
   if (connectionStatus === 'connected') {
-    if (bootstrapFailed) {
-      setLoadingStatusText(bootstrapMessages.initialDataLoadFailed, 'error');
-      fadeOutLoadingScreen();
-      return;
-    }
-
-    if (bootstrapProvidersReady && bootstrapAgentsReady) {
-      fadeOutLoadingScreen();
-      return;
-    }
-
-    // Still loading providers/agents — stay silent (the animated logo signals work).
-    setLoadingStatusText('');
+    // The UI hydrates pickers and the sidebar from cache and refreshes
+    // providers/agents in the background, so once it's mounted and OpenCode is
+    // connected there's real interactive content underneath the splash. Don't
+    // keep the overlay up waiting on the live provider/agent fetches — on a cold
+    // start those are the slowest tail, and gating on them makes the splash
+    // linger long after the app is usable. Per-widget loaders convey any
+    // remaining background work.
+    fadeOutLoadingScreen();
     return;
   }
 
@@ -314,7 +280,7 @@ const normalizeUrl = (input: string | URL) => {
 
 const headersToRecord = (headers: HeadersInit | undefined): Record<string, string> => {
   if (!headers) return {};
-  const normalized = headers instanceof Headers ? headers : new Headers(headers);
+  const normalized = new Headers(sanitizeHeadersForBrowser(headers) ?? headers);
   const result: Record<string, string> = {};
   normalized.forEach((value, key) => {
     result[key] = value;
@@ -332,8 +298,14 @@ const getRequestDirectoryHint = (url: URL, input?: RequestInfo | URL, init?: Req
   const queryDirectory = url.searchParams.get('directory') || undefined;
   if (queryDirectory) return queryDirectory;
   const headers = getRequestHeaders(input, init);
+  const directoryEncoding = Object.entries(headers).find(([key]) => key.toLowerCase() === 'x-opencode-directory-encoding')?.[1];
   for (const [key, value] of Object.entries(headers)) {
-    if (key.toLowerCase() === 'x-opencode-directory') return value;
+    if (key.toLowerCase() === 'x-opencode-directory') {
+      // headersToRecord marks encoded directory hints so direct/raw percent
+      // sequences from other callers are not decoded accidentally.
+      if (directoryEncoding !== 'uri') return value;
+      try { return decodeURIComponent(value); } catch { return value; }
+    }
   }
   return undefined;
 };
@@ -1120,7 +1092,6 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   if (targetUrl && isLocalRuntimePath(normalizedPathname)) {
     const localResponse = await handleLocalApiRequest(input, targetUrl, init, method);
     if (localResponse) {
-      recordBootstrapFetch(targetUrl.pathname, localResponse.ok);
       maybeHideLoadingOverlay();
       return localResponse;
     }
@@ -1208,7 +1179,6 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const signal = (input instanceof Request ? input.signal : init?.signal) as AbortSignal | undefined;
       const proxied = await proxySessionMessageRequest({ path: suffixPath, headers, bodyText, signal });
       const response = buildProxiedResponse(proxied);
-      recordBootstrapFetch(targetUrl.pathname, response.ok);
       maybeHideLoadingOverlay();
       return response;
     }
@@ -1217,7 +1187,6 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const signal = (input instanceof Request ? input.signal : init?.signal) as AbortSignal | undefined;
     const proxied = await proxyApiRequest({ method, path: suffixPath, headers, bodyBase64, signal });
     const response = buildProxiedResponse(proxied);
-    recordBootstrapFetch(targetUrl.pathname, response.ok);
     maybeHideLoadingOverlay();
     return response;
   }
@@ -1558,7 +1527,7 @@ const extractNotificationTextFromParts = (parts: unknown): string => {
     .map((part) => {
       if (!part || typeof part !== 'object') return '';
       const entry = part as { type?: unknown; text?: unknown; content?: unknown };
-      if (entry.type === 'text' || typeof entry.text === 'string' || typeof entry.content === 'string') {
+      if (entry.type === 'text') {
         return typeof entry.text === 'string' ? entry.text : typeof entry.content === 'string' ? entry.content : '';
       }
       return '';

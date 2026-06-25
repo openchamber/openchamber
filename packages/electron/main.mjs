@@ -13,6 +13,7 @@ import updaterPkg from 'electron-updater';
 import { ElectronSshManager } from './ssh-manager.mjs';
 import { createTrayController } from './tray.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
+import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -284,6 +285,22 @@ const performConfirmedQuit = () => {
   app.exit(0);
 };
 
+// Hard-stop signals (`Ctrl+C` on `electron:dev`, an external `kill`/SIGTERM,
+// terminal close) bypass the normal app-quit flow — which would orphan the
+// in-process web server's managed OpenCode child. Run the same background
+// teardown the quit path uses (which kills the sidecar), then exit. The startup
+// reaper remains the backstop for an unhandled hard crash (SIGKILL).
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+  process.on(signal, () => {
+    try {
+      shutdownBackgroundServices();
+    } catch (error) {
+      log.warn(`[electron] ${signal} shutdown failed:`, error);
+    }
+    app.exit(0);
+  });
+}
+
 const requestQuitWithConfirmation = async () => {
   await refreshQuitRiskFlags();
 
@@ -464,6 +481,24 @@ const sameOrigin = (left, right) => {
   } catch {
     return false;
   }
+};
+
+const shouldUseSameOriginDevProxy = (uiUrl, apiBaseUrl) => (
+  isDev
+  && uiUrl
+  && apiBaseUrl
+  && !shouldUsePackagedUi()
+  && !sameOrigin(uiUrl, apiBaseUrl)
+  && isLocalRuntimeUrl(apiBaseUrl)
+);
+
+const buildRendererRuntimeConfig = (uiUrl, runtimeConfig = {}) => {
+  const apiBaseUrl = typeof runtimeConfig.apiBaseUrl === 'string' ? runtimeConfig.apiBaseUrl : (state.apiBaseUrl || '');
+  const clientToken = typeof runtimeConfig.clientToken === 'string' ? runtimeConfig.clientToken : (state.clientToken || '');
+  if (shouldUseSameOriginDevProxy(uiUrl, apiBaseUrl)) {
+    return { apiBaseUrl: '', clientToken: '' };
+  }
+  return { apiBaseUrl, clientToken };
 };
 
 const readDesktopLocalClientToken = () => {
@@ -891,6 +926,37 @@ const focusForegroundWindow = () => {
 // click events to silently stop firing after ~1 min.
 // See https://blog.bloomca.me/2025/02/22/electron-mac-notifications
 const activeNotifications = new Set();
+const nativeNotificationClaims = new Map();
+const NATIVE_NOTIFICATION_DEDUPE_TTL_MS = 5000;
+
+const getNativeNotificationClaimKey = (payload) => {
+  const tag = typeof payload?.tag === 'string' ? payload.tag.trim() : '';
+  if (tag) return tag;
+  return [payload?.sessionId, payload?.kind, payload?.title, payload?.body]
+    .filter((value) => typeof value === 'string' && value.trim())
+    .map((value) => value.trim())
+    .join('|');
+};
+
+const claimNativeNotification = (payload) => {
+  const key = getNativeNotificationClaimKey(payload);
+  if (!key) return true;
+
+  const now = Date.now();
+  for (const [claimKey, claimedAt] of nativeNotificationClaims) {
+    if (now - claimedAt > NATIVE_NOTIFICATION_DEDUPE_TTL_MS) {
+      nativeNotificationClaims.delete(claimKey);
+    }
+  }
+
+  const claimedAt = nativeNotificationClaims.get(key) ?? 0;
+  if (now - claimedAt < NATIVE_NOTIFICATION_DEDUPE_TTL_MS) {
+    return false;
+  }
+
+  nativeNotificationClaims.set(key, now);
+  return true;
+};
 
 const maybeShowNativeNotification = (rawInput) => {
   const payload = normalizeNotificationInput(rawInput);
@@ -901,6 +967,10 @@ const maybeShowNativeNotification = (rawInput) => {
   }
 
   if (!Notification.isSupported()) {
+    return;
+  }
+
+  if (!claimNativeNotification(payload)) {
     return;
   }
 
@@ -1065,8 +1135,13 @@ const spawnLocalServer = async () => {
   // so phones/tablets on the same Wi-Fi can reach the app. UI shows a clear
   // warning and persists the flag via /api/config/settings.
   const lanAccessEnabled = settings.desktopLanAccessEnabled === true;
-  const bindHost = lanAccessEnabled ? LAN_BIND_HOST : LOOPBACK_BIND_HOST;
   const desktopUiPassword = typeof settings.desktopUiPassword === 'string' ? settings.desktopUiPassword.trim() : '';
+  const lanAccessBlockedByMissingPassword = lanAccessEnabled && !desktopUiPassword;
+  const effectiveLanAccessEnabled = lanAccessEnabled && !lanAccessBlockedByMissingPassword;
+  const bindHost = effectiveLanAccessEnabled ? LAN_BIND_HOST : LOOPBACK_BIND_HOST;
+  if (lanAccessBlockedByMissingPassword) {
+    log.warn('[desktop] LAN access was requested without a desktop UI password; starting on loopback only.');
+  }
 
   // Probe before starting the server — main() in the server module sets up a
   // lot of global state before binding, and calling it twice after a listen
@@ -1088,6 +1163,12 @@ const spawnLocalServer = async () => {
   // set before the first import. After this point, the same env is used by
   // both the Electron main and the server running inside it.
   process.env.OPENCHAMBER_HOST = bindHost;
+  process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_ACTIVE = effectiveLanAccessEnabled ? 'true' : 'false';
+  if (lanAccessBlockedByMissingPassword) {
+    process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_BLOCKED_REASON = 'missing-password';
+  } else {
+    delete process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_BLOCKED_REASON;
+  }
   process.env.OPENCHAMBER_DIST_DIR = resolveWebDistDir();
   process.env.OPENCHAMBER_RUNTIME = 'desktop';
   // OpenCode uses process cwd as a fallback directory; app userData would make
@@ -1777,6 +1858,12 @@ const reloadMenuTargetWindow = () => {
   target.webContents.reload();
 };
 
+const openDevToolsForMenuTarget = () => {
+  const target = getMenuTargetWindow();
+  if (!target || target.isDestroyed()) return;
+  target.webContents.toggleDevTools();
+};
+
 const relaunchFromMenu = () => {
   prepareForQuit();
   app.relaunch();
@@ -1823,8 +1910,9 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   const useSaved = saved && typeof saved.width === 'number' && typeof saved.height === 'number';
   const restoredBounds = useSaved ? clampWindowBoundsToVisibleWorkArea(saved) : null;
   const desktopLocalOrigin = state.localOrigin || state.sidecarUrl || '';
-  const desktopApiBaseUrl = typeof runtimeConfig.apiBaseUrl === 'string' ? runtimeConfig.apiBaseUrl : (state.apiBaseUrl || '');
-  const desktopClientToken = typeof runtimeConfig.clientToken === 'string' ? runtimeConfig.clientToken : (state.clientToken || '');
+  const rendererRuntimeConfig = buildRendererRuntimeConfig(url, runtimeConfig);
+  const desktopApiBaseUrl = rendererRuntimeConfig.apiBaseUrl;
+  const desktopClientToken = rendererRuntimeConfig.clientToken;
   const desktopHome = os.homedir() || '';
   const desktopMacosMajor = String(macosMajorVersion());
   const usesCustomTitleBar = process.platform === 'darwin' || process.platform === 'win32';
@@ -2069,11 +2157,20 @@ const activateMainWindow = async (url, localOrigin, bootOutcome, runtimeConfig =
   state.apiBaseUrl = typeof runtimeConfig.apiBaseUrl === 'string' ? runtimeConfig.apiBaseUrl : state.apiBaseUrl;
   state.clientToken = typeof runtimeConfig.clientToken === 'string' ? runtimeConfig.clientToken : '';
   state.bootOutcome = bootOutcome ?? null;
-  state.initScript = buildInitScript(localOrigin, state.bootOutcome, state.apiBaseUrl, state.clientToken);
+  const rendererRuntimeConfig = buildRendererRuntimeConfig(url, {
+    apiBaseUrl: state.apiBaseUrl || '',
+    clientToken: state.clientToken || '',
+  });
+  state.initScript = buildInitScript(
+    localOrigin,
+    state.bootOutcome,
+    rendererRuntimeConfig.apiBaseUrl,
+    rendererRuntimeConfig.clientToken,
+  );
 
   const mainWindow = state.mainWindow;
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.__ocRuntimeConfig = { apiBaseUrl: state.apiBaseUrl || '', clientToken: state.clientToken || '' };
+    mainWindow.__ocRuntimeConfig = rendererRuntimeConfig;
     mainWindow.__ocInitScript = state.initScript;
     await navigateWindow(mainWindow, url, { allowAbort: true });
     mainWindow.show();
@@ -3801,6 +3898,7 @@ const buildMacMenu = () => {
       submenu: [
         { label: 'Keyboard Shortcuts', accelerator: 'Cmd+.', click: () => dispatchAction('help-dialog') },
         { label: 'Show Diagnostics', accelerator: 'Cmd+Shift+L', click: () => dispatchAction('download-logs') },
+        { label: 'Toggle Developer Tools', accelerator: 'Cmd+Alt+I', click: () => openDevToolsForMenuTarget() },
         { type: 'separator' },
         { label: 'Clear Cache', click: () => void handleInvoke(null, 'desktop_clear_cache') },
         { type: 'separator' },
@@ -3868,7 +3966,7 @@ const buildAutoHiddenMenu = () => {
       submenu: [
         { role: 'reload' },
         { role: 'forceReload' },
-        ...(isDev ? [{ role: 'toggleDevTools' }] : []),
+        { label: 'Toggle Developer Tools', accelerator: 'Ctrl+Alt+I', click: () => openDevToolsForMenuTarget() },
         { type: 'separator' },
         { label: 'Toggle Right Sidebar', accelerator: 'Ctrl+B', click: () => dispatchAction('toggle-right-sidebar') },
         { label: 'Open Git Sidebar', accelerator: 'Ctrl+Shift+G', click: () => dispatchAction('open-right-sidebar-git') },
@@ -4052,8 +4150,43 @@ ipcMain.handle('openchamber:dialog:open', async (event, options) => {
     ].filter(Boolean),
   });
   if (result.canceled) return null;
+  const grantFilePath = async (filePath) => {
+    if (options?.directory) return { path: filePath };
+    try {
+      const grant = await mintOutsideFileGrant(filePath, { scopes: ['stat', 'read', 'raw'], fsPromises: fsp, path });
+      return { path: grant.path, outsideFileGrant: grant.outsideFileGrant, expiresAt: grant.expiresAt };
+    } catch (error) {
+      log.warn(`[ipc] failed to mint outside file grant: ${error?.message || error}`);
+      return { path: filePath };
+    }
+  };
+  if (options?.returnGrant) {
+    if (options?.multiple) {
+      return Promise.all(result.filePaths.map((filePath) => grantFilePath(filePath)));
+    }
+    return result.filePaths[0] ? grantFilePath(result.filePaths[0]) : null;
+  }
   if (options?.multiple) return result.filePaths;
   return result.filePaths[0] || null;
+});
+
+ipcMain.handle('openchamber:file:grant-existing', async (event, filePath) => {
+  if (!isLocalSender(event.sender)) {
+    log.warn(`[ipc] rejected file:grant-existing from non-local origin: ${event.sender?.getURL?.() || '(unknown)'}`);
+    throw new Error('IPC not available for this origin');
+  }
+
+  const targetPath = typeof filePath === 'string' ? filePath.trim() : '';
+  if (!targetPath) {
+    throw new Error('Path is required');
+  }
+
+  const grant = await mintOutsideFileGrant(targetPath, { scopes: ['stat', 'read', 'raw'], fsPromises: fsp, path });
+  return {
+    path: grant.path,
+    outsideFileGrant: grant.outsideFileGrant,
+    expiresAt: grant.expiresAt,
+  };
 });
 
 // --- macOS menu bar (status bar) ---------------------------------------------

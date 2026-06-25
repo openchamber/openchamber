@@ -97,6 +97,51 @@ describe("createEventPipeline", () => {
     })).toEqual(["updated:a", "delta:b", "updated:ab"])
   })
 
+  test("does not merge deltas across an intervening part snapshot", async () => {
+    let resolveStreamFinished!: () => void
+    const streamFinished = new Promise<void>((resolve) => {
+      resolveStreamFinished = resolve
+    })
+    let resolveDelivered!: () => void
+    const deliveredAll = new Promise<void>((resolve) => {
+      resolveDelivered = resolve
+    })
+    const delivered: Event[] = []
+    const pipeline = createEventPipeline({
+      sdk: createSdk([
+        partUpdatedEvent("a"),
+        deltaEvent("b"),
+        partUpdatedEvent("ab"),
+        deltaEvent("c"),
+      ], resolveStreamFinished),
+      onEvent: (_directory, payload) => {
+        delivered.push(payload)
+        if (delivered.length === 4) {
+          resolveDelivered()
+        }
+      },
+      transport: "sse",
+      heartbeatTimeoutMs: 1_000,
+    })
+
+    try {
+      await streamFinished
+      await Promise.race([deliveredAll, new Promise<void>((resolve) => setTimeout(resolve, 300))])
+    } finally {
+      pipeline.cleanup()
+    }
+
+    // The "ab" snapshot is a coalescing barrier: the trailing "c" delta must
+    // stay a separate event after it, not merge into the "b" delta queued
+    // before the snapshot (which the snapshot would then overwrite).
+    expect(delivered.map((event) => {
+      if (event.type === "message.part.delta") {
+        return `delta:${(event.properties as { delta: string }).delta}`
+      }
+      return `updated:${((event.properties as { part: { text: string } }).part).text}`
+    })).toEqual(["updated:a", "delta:b", "updated:ab", "delta:c"])
+  })
+
   test("normalizes openchamber session status events", async () => {
     let resolveStreamFinished!: () => void
     const streamFinished = new Promise<void>((resolve) => {

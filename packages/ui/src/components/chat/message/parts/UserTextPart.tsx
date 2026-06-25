@@ -10,11 +10,10 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { getDirectoryForFilePath } from '@/lib/path-utils';
 import { useI18n } from '@/lib/i18n';
 import {
-    buildAgentHref,
     buildAgentMentionUrl,
-    buildSkillHref,
     parseSkillHref,
 } from '@/lib/messages/inlineMessageLinks';
+import { prepareUserMarkdownContent, SKILL_TOKEN_PATTERN } from './userTextPartContent';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string };
 
@@ -25,29 +24,8 @@ type UserTextPartProps = {
     agentMention?: AgentMentionInfo;
 };
 
-const SKILL_TOKEN_PATTERN = /(^|\s)\/([a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)/g;
-
-const escapeHtml = (text: string): string => {
-    return text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#x27;');
-};
-
 const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' => {
     return mode === 'markdown' ? 'markdown' : 'plain';
-};
-
-// In Markdown a single "\n" is a soft break (rendered as a space). Users type plain
-// text where each newline is meant literally, so convert soft breaks into hard breaks
-// (two trailing spaces) outside of fenced code blocks, where newlines are already literal.
-const applyHardLineBreaks = (markdown: string): string => {
-    return markdown
-        .split(/(```[\s\S]*?```|~~~[\s\S]*?~~~)/g)
-        .map((segment, index) => (index % 2 === 1 ? segment : segment.replace(/ *\n/g, '  \n')))
-        .join('');
 };
 
 const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMention }) => {
@@ -64,6 +42,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
     const effectiveDirectory = useEffectiveDirectory();
     const { t } = useI18n();
     const normalizedRenderingMode = normalizeUserMessageRenderingMode(userMessageRenderingMode);
+    const isCollapsed = collapsibleUserMessages && !isExpanded;
     const textRef = React.useRef<HTMLDivElement>(null);
     const skillByName = React.useMemo(() => new Map(skills.map((skill) => [skill.name, skill])), [skills]);
 
@@ -144,26 +123,11 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
     }, []);
 
     const processedMarkdownContent = React.useMemo(() => {
-        let content = textContent;
-
-        // Step 1: First escape HTML to protect against XSS and ensure HTML tags display as text
-        content = escapeHtml(content);
-
-        // Step 2: Insert agent mention links with an internal href so markdown renders them as mentions, not external links.
-        if (agentMention?.token && content.includes(agentMention.token)) {
-            const mentionMarkdown = `[${agentMention.token}](${buildAgentHref(agentMention.name)})`;
-            content = content.replace(agentMention.token, mentionMarkdown);
-        }
-
-        content = content.replace(SKILL_TOKEN_PATTERN, (match, prefix: string, skillName: string) => {
-            if (!skillByName.has(skillName)) return match;
-            return `${prefix}[/${skillName}](${buildSkillHref(skillName)})`;
+        return prepareUserMarkdownContent({
+            textContent,
+            agentMention,
+            skillNames: new Set(skillByName.keys()),
         });
-
-        // Step 4: Preserve user newlines (markdown soft breaks would otherwise collapse to spaces)
-        content = applyHardLineBreaks(content);
-
-        return content;
     }, [agentMention, skillByName, textContent]);
 
     const plainTextContent = React.useMemo(() => {
@@ -247,7 +211,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
                     "break-words font-sans typography-markdown-body",
                     isExpanded && "pb-3",
                     normalizedRenderingMode === 'plain' && 'whitespace-pre-wrap',
-                    collapsibleUserMessages && !isExpanded && "line-clamp-2",
+                    isCollapsed && "line-clamp-2",
                     collapsibleUserMessages && isTruncated && !isExpanded && "cursor-pointer"
                 )}
                 ref={textRef}
@@ -256,8 +220,23 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
                 {normalizedRenderingMode === 'markdown' ? (
                     <SimpleMarkdownRenderer
                         content={processedMarkdownContent}
-                        className="[&_.markdown-content>*:first-child]:mt-0 [&_.markdown-content>*:last-child]:mb-0"
-                        disableLinkSafety 
+                        className={cn(
+                            "[&_.markdown-content>*:first-child]:mt-0 [&_.markdown-content>*:last-child]:mb-0",
+                            isCollapsed && [
+                                "[&_.markdown-content>*]:my-0",
+                                "[&_[data-component='markdown-code']]:my-0",
+                                "[&_[data-component='markdown-code']]:inline",
+                                "[&_[data-component='markdown-code']]:border-0",
+                                "[&_[data-component='markdown-code']]:bg-transparent",
+                                "[&_[data-component='markdown-code']>*:first-child]:hidden",
+                                "[&_[data-component='markdown-code']>div]:inline",
+                                "[&_[data-component='markdown-code']>div]:p-0",
+                                "[&_[data-component='markdown-code']_pre]:inline",
+                                "[&_[data-component='markdown-code']_code]:inline",
+                            ]
+                        )}
+                        disableLinkSafety
+                        enableFileReferences={false}
                     />
                 ) : (
                     plainTextContent
