@@ -243,7 +243,12 @@ class OpencodeService {
 
   constructor(baseUrl: string = DEFAULT_BASE_URL) {
     const runtimeBase = resolveRuntimeBaseUrl();
-    const requestedBaseUrl = runtimeBase || baseUrl;
+    // When resolveRuntimeBaseUrl returns '/' (no VITE_OPENCODE_URL set,
+    // no window.__OPENCHAMBER_API_BASE_URL__), it means the SDK should
+    // use the DEFAULT_BASE_URL ('/api') so paths resolve to
+    // http://localhost:9090/api/session (with /api/ prefix) instead of
+    // http://localhost:9090/session (which hits the SPA catch-all).
+    const requestedBaseUrl = (runtimeBase && runtimeBase !== '/') ? runtimeBase : baseUrl;
     this.baseUrl = ensureAbsoluteBaseUrl(requestedBaseUrl);
     this.client = createRuntimeOpencodeClient({ baseUrl: this.baseUrl });
   }
@@ -254,7 +259,7 @@ class OpencodeService {
 
   reconnectToRuntimeBaseUrl(): void {
     const runtimeBase = resolveRuntimeBaseUrl();
-    const nextBaseUrl = ensureAbsoluteBaseUrl(runtimeBase || DEFAULT_BASE_URL);
+    const nextBaseUrl = ensureAbsoluteBaseUrl((runtimeBase && runtimeBase !== '/') ? runtimeBase : DEFAULT_BASE_URL);
     if (nextBaseUrl === this.baseUrl) {
       return;
     }

@@ -1325,6 +1325,60 @@ async function main(options = {}) {
   } catch (error) {
     console.warn('[ScheduledTasks] Failed to start runtime:', error?.message || error);
   }
+  // Proxy unmatched /api/* SDK requests to the OpenCode upstream.
+  // Registered AFTER all Express routes so existing OpenChamber handlers
+  // (settings, health, etc.) take priority; only unhandled /api/* paths
+  // reach this proxy. The SPA catch-all explicitly excludes /api/* paths.
+  app.use('/api', async (req, res, next) => {
+    if (res.headersSent) return next();
+    try {
+      const upstreamPort = openCodePort || 4096;
+      // Strip the /api mount point so SDK paths like /api/session
+      // become /session for the OpenCode upstream, which serves
+      // paths WITHOUT the /api/ prefix.
+      const upstreamPath = req.originalUrl.replace(/^\/api(\/|$)/, '/') || '/';
+      const upstream = `http://127.0.0.1:${upstreamPort}${upstreamPath}`;
+      const authHeaders = getOpenCodeAuthHeaders();
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+      try {
+        const contentType = req.headers['content-type'] || '';
+        const forwardedHeaders = {
+          ...(Object.keys(authHeaders).length ? authHeaders : {}),
+          ...(contentType ? { 'content-type': contentType } : {}),
+        };
+        let body;
+        const bodyMethods = ['POST', 'PUT', 'PATCH'];
+        if (bodyMethods.includes(req.method) && typeof req.body === 'object' && req.body !== null) {
+          body = JSON.stringify(req.body);
+          forwardedHeaders['content-type'] = 'application/json';
+        }
+        const response = await fetch(upstream, {
+          method: req.method,
+          headers: forwardedHeaders,
+          body,
+          signal: controller.signal,
+        });
+        const responseText = await response.text();
+        const resContentType = response.headers.get('content-type') || 'application/json';
+        if (resContentType.includes('application/json') || resContentType.includes('text/plain')) {
+          res.status(response.status).type(resContentType).send(responseText);
+        } else {
+          res.status(response.status).send(responseText);
+        }
+      } finally {
+        clearTimeout(timeout);
+      }
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        res.status(504).json({ error: 'OpenCode upstream timeout' });
+      } else {
+        console.warn('[API Proxy] Failed to proxy', req.originalUrl, ':', error.message);
+        res.status(502).json({ error: 'OpenCode proxy error', message: error.message });
+      }
+    }
+
+  });
 
   return {
     expressApp: app,
@@ -1346,7 +1400,7 @@ async function main(options = {}) {
       port: openCodePort,
     }),
     stop: (shutdownOptions = {}) =>
-      gracefulShutdown({ exitProcess: shutdownOptions.exitProcess ?? false })
+      gracefulShutdown({ exitProcess: shutdownOptions.exitProcess ?? false }),
   };
 }
 
