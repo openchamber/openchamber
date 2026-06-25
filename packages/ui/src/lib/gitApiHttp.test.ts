@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { stageGitFile, stageGitFiles, unstageGitFile, unstageGitFiles } from './gitApiHttp';
+import { getGitStatus, gitFetch, stageGitFile, stageGitFiles, unstageGitFile, unstageGitFiles } from './gitApiHttp';
 
 type FetchCall = {
   input: RequestInfo | URL;
@@ -105,6 +105,56 @@ describe('gitApiHttp index mutations', () => {
       expect(unstageError).toBeInstanceOf(Error);
       expect((unstageError as Error).message).toBe('path is required to unstage git changes');
       expect(calls).toHaveLength(0);
+    } finally {
+      restoreMocks();
+    }
+  });
+});
+
+describe('gitApiHttp status cache', () => {
+  test('invalidates cached status after fetch', async () => {
+    installWindowMock();
+    const calls: FetchCall[] = [];
+    let statusRequestCount = 0;
+    globalThis.fetch = (async (input, init) => {
+      calls.push({ input, init });
+      const url = String(input);
+      if (url.startsWith('/api/git/status')) {
+        statusRequestCount += 1;
+        return new Response(JSON.stringify({
+          current: 'main',
+          tracking: 'origin/main',
+          ahead: 0,
+          behind: statusRequestCount === 1 ? 0 : 2,
+          files: [],
+          isClean: true,
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    try {
+      const directory = '/repo-cache-fetch';
+      const first = await getGitStatus(directory);
+      const cached = await getGitStatus(directory);
+      await gitFetch(directory, { remote: 'origin' });
+      const afterFetch = await getGitStatus(directory);
+
+      expect(first.behind).toBe(0);
+      expect(cached.behind).toBe(0);
+      expect(afterFetch.behind).toBe(2);
+      expect(statusRequestCount).toBe(2);
+      expect(calls.map((call) => String(call.input))).toEqual([
+        '/api/git/status?directory=%2Frepo-cache-fetch',
+        '/api/git/fetch?directory=%2Frepo-cache-fetch',
+        '/api/git/status?directory=%2Frepo-cache-fetch',
+      ]);
     } finally {
       restoreMocks();
     }

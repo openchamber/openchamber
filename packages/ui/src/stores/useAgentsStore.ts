@@ -104,8 +104,9 @@ export interface AgentConfig {
   name: string;
   description?: string;
   model?: string | null;
-  temperature?: number;
-  top_p?: number;
+  variant?: string | null;
+  temperature?: number | null;
+  top_p?: number | null;
   prompt?: string | null;
   mode?: "primary" | "subagent" | "all";
   permission?: PermissionConfig | null;
@@ -170,8 +171,9 @@ export interface AgentDraft {
   scope: AgentScope;
   description?: string;
   model?: string | null;
-  temperature?: number;
-  top_p?: number;
+  variant?: string;
+  temperature?: number | null;
+  top_p?: number | null;
   prompt?: string;
   mode?: "primary" | "subagent" | "all";
   permission?: PermissionConfig;
@@ -331,8 +333,9 @@ export const useAgentsStore = create<AgentsStore>()(
 
             if (config.description) agentConfig.description = config.description;
             if (config.model) agentConfig.model = config.model;
-            if (config.temperature !== undefined) agentConfig.temperature = config.temperature;
-            if (config.top_p !== undefined) agentConfig.top_p = config.top_p;
+            if (config.variant) agentConfig.variant = config.variant;
+            if (config.temperature !== undefined) agentConfig.temperature = config.temperature ?? null;
+            if (config.top_p !== undefined) agentConfig.top_p = config.top_p ?? null;
             if (config.prompt) agentConfig.prompt = config.prompt;
             if (config.permission) agentConfig.permission = config.permission;
             if (config.disable !== undefined) agentConfig.disable = config.disable;
@@ -395,8 +398,9 @@ export const useAgentsStore = create<AgentsStore>()(
             if (config.mode !== undefined) agentConfig.mode = config.mode;
             if (config.description !== undefined) agentConfig.description = config.description;
             if (config.model !== undefined) agentConfig.model = config.model;
-            if (config.temperature !== undefined) agentConfig.temperature = config.temperature;
-            if (config.top_p !== undefined) agentConfig.top_p = config.top_p;
+            if ('variant' in config) agentConfig.variant = config.variant ?? null;
+            if ('temperature' in config) agentConfig.temperature = config.temperature ?? null;
+            if ('top_p' in config) agentConfig.top_p = config.top_p ?? null;
             if (config.prompt !== undefined) agentConfig.prompt = config.prompt;
             if (config.permission !== undefined) agentConfig.permission = config.permission;
             if (config.disable !== undefined) agentConfig.disable = config.disable;

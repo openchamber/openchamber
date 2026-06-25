@@ -520,19 +520,28 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           title={t('sessions.sidebar.session.status.unread')}
         />
       );
-  const leadingIndicators = showStatusMarker || isPinnedSession ? (
+  const hideLeadingIndicatorOnHover = !alwaysShowActions && hasChildren && (showStatusMarker || isPinnedSession);
+  const showPinnedMarker = isPinnedSession && !showStatusMarker;
+  const pinnedMarkerContent = (
+    <Icon
+      name="pushpin"
+      className="h-3 w-3 flex-shrink-0 text-primary"
+      aria-label={t('sessions.sidebar.session.status.pinned')}
+    />
+  );
+  const leadingIndicators = showStatusMarker || showPinnedMarker ? (
     <span
       className={cn(
-        'pointer-events-none absolute inline-flex h-3.5 items-center justify-center gap-0.5 transition-opacity',
+        'pointer-events-none absolute left-0.5 inline-flex h-3.5 w-3.5 items-center justify-center transition-opacity',
         isMinimalMode ? 'top-1/2 -translate-y-1/2' : 'top-[14.5px] -translate-y-1/2',
-        showStatusMarker && isPinnedSession ? 'left-[-6px] w-6' : 'left-0.5 w-3.5',
-        hasChildren && !alwaysShowActions ? 'opacity-100 group-hover:opacity-0 group-focus-within:opacity-0' : '',
+        hideLeadingIndicatorOnHover ? 'opacity-100 group-hover:opacity-0 group-focus-within:opacity-0' : '',
       )}
     >
       {showStatusMarker ? statusMarkerContent : null}
-      {isPinnedSession ? <Icon name="pushpin" className="h-3 w-3 flex-shrink-0 text-primary"  aria-label={t('sessions.sidebar.session.status.pinned')}/> : null}
+      {showPinnedMarker ? pinnedMarkerContent : null}
     </span>
   ) : null;
+  const hideChevronUntilHover = hasChildren && !alwaysShowActions && (showStatusMarker || isPinnedSession);
   const subsessionChevron = hasChildren ? (
     <span
       role="button"
@@ -556,7 +565,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           : inlineSubsessionChevron
           ? 'relative mr-0.5 shrink-0'
           : cn('absolute left-0.5', isMinimalMode ? 'top-1/2 -translate-y-1/2' : 'top-[14.5px] -translate-y-1/2'),
-        !metadataSubsessionChevron && !inlineSubsessionChevron && isMinimalMode && showStatusMarker && !alwaysShowActions
+        !metadataSubsessionChevron && !inlineSubsessionChevron && hideChevronUntilHover
           ? 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto'
           : '',
       )}

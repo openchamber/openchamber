@@ -285,6 +285,22 @@ const performConfirmedQuit = () => {
   app.exit(0);
 };
 
+// Hard-stop signals (`Ctrl+C` on `electron:dev`, an external `kill`/SIGTERM,
+// terminal close) bypass the normal app-quit flow — which would orphan the
+// in-process web server's managed OpenCode child. Run the same background
+// teardown the quit path uses (which kills the sidecar), then exit. The startup
+// reaper remains the backstop for an unhandled hard crash (SIGKILL).
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+  process.on(signal, () => {
+    try {
+      shutdownBackgroundServices();
+    } catch (error) {
+      log.warn(`[electron] ${signal} shutdown failed:`, error);
+    }
+    app.exit(0);
+  });
+}
+
 const requestQuitWithConfirmation = async () => {
   await refreshQuitRiskFlags();
 

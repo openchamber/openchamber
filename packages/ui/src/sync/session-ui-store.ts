@@ -623,10 +623,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const currentDirProject = resolveDraftProjectForDirectory(projects, availableWorktreesByProject, currentDirectory)
 
     const selectedProject = (() => {
-      if (explicitProject || explicitDirectory !== null) {
-        return explicitProject ?? inferredProjectFromDir ?? fallbackProject
-      }
-      if (currentDirectory) return currentDirProject ?? fallbackProject
+      if (explicitProject) return explicitProject
+      if (explicitDirectory !== null) return inferredProjectFromDir
+      if (currentDirectory) return currentDirProject
       return persistedProjectByDir ?? persistedProjectById ?? fallbackProject
     })()
 

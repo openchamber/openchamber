@@ -2390,6 +2390,11 @@ function removeInstanceFile(instanceFilePath) {
   }
 }
 
+// Liveness only — "is *some* process alive with this PID". Use this when the
+// PID is known to be ours (a child we just spawned, or a process we are
+// stopping). Do NOT use it to validate a PID read from a pid file: after an
+// ungraceful shutdown the pid file is stale and the kernel may have recycled
+// that PID to an unrelated process — see isOpenchamberProcessRunning.
 function isProcessRunning(pid) {
   try {
     process.kill(pid, 0);
@@ -2397,6 +2402,64 @@ function isProcessRunning(pid) {
   } catch {
     return false;
   }
+}
+
+// Best-effort command line for a live PID, used for identity verification.
+// Returns the cmdline string, '' when the process has no readable cmdline, or
+// null when identity can't be determined on this platform (caller falls back to
+// liveness — so behaviour is unchanged where we can't check).
+function readProcessCmdline(pid) {
+  try {
+    if (process.platform === 'linux') {
+      // /proc/<pid>/cmdline is a NUL-delimited argv list.
+      return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ').trim();
+    }
+    if (process.platform === 'darwin') {
+      const result = spawnSync('ps', ['-p', String(pid), '-o', 'command='], {
+        encoding: 'utf8',
+        timeout: 3000,
+        windowsHide: true,
+      });
+      const out = (result.stdout || '').trim();
+      return out.length > 0 ? out : null;
+    }
+  } catch {
+    return null;
+  }
+  // Windows / other: a process's full command line isn't cheaply available, so
+  // we can't verify identity — fall back to liveness-only.
+  return null;
+}
+
+function isOpenchamberCmdline(cmdline) {
+  if (typeof cmdline !== 'string' || cmdline.length === 0) {
+    return false;
+  }
+  // Every install path contains the "openchamber" segment — the npm package
+  // (@openchamber/web) and the source checkout both do, for the foreground
+  // (bin/cli.js) and daemon (server/index.js) entrypoints alike. Matching the
+  // path segment (not a generic "cli.js") keeps a recycled stranger such as
+  // "npm-cli.js" or "agentmemory" from being mistaken for us.
+  return cmdline.toLowerCase().includes('openchamber');
+}
+
+// Liveness + identity — "is the OpenChamber instance recorded in a pid file
+// still the process running under this PID". Use this (not isProcessRunning)
+// when validating a PID read from a pid file. After an ungraceful shutdown
+// removePidFile never runs, so the stale PID can be recycled to an unrelated
+// process; a liveness-only check then reports us as "already running" and aborts
+// startup, which loops forever under systemd Restart=always (issue #1721).
+// Where identity can't be determined (Windows, unreadable /proc or ps), we fall
+// back to liveness so there are no false negatives on those platforms.
+function isOpenchamberProcessRunning(pid) {
+  if (!isProcessRunning(pid)) {
+    return false;
+  }
+  const cmdline = readProcessCmdline(pid);
+  if (cmdline === null) {
+    return true;
+  }
+  return isOpenchamberCmdline(cmdline);
 }
 
 function waitForProcessExit(pid, timeoutMs) {
@@ -2702,7 +2765,7 @@ async function discoverRunningInstances() {
       if (!Number.isFinite(port) || port <= 0) continue;
       const pidFilePath = path.join(runDir, file);
       const pid = readPidFile(pidFilePath);
-      if (!pid || !isProcessRunning(pid)) {
+      if (!pid || !isOpenchamberProcessRunning(pid)) {
         removePidFile(pidFilePath);
         removeInstanceFile(path.join(runDir, `openchamber-${port}.json`));
         continue;
@@ -3430,8 +3493,13 @@ const commands = {
     if (targetPort !== 0) {
       const pidFilePath = await getPidFilePath(targetPort);
       const existingPid = readPidFile(pidFilePath);
-      if (existingPid && isProcessRunning(existingPid)) {
-        throw new Error(`OpenChamber is already running on port ${targetPort} (PID: ${existingPid})`);
+      if (existingPid) {
+        if (isOpenchamberProcessRunning(existingPid)) {
+          throw new Error(`OpenChamber is already running on port ${targetPort} (PID: ${existingPid})`);
+        }
+        // Stale pid file from an ungraceful shutdown (PID dead or recycled to an
+        // unrelated process). Clear it so it can't trip later checks.
+        removePidFile(pidFilePath);
       }
 
       if (explicitPort && !(await isPortAvailable(targetPort, options.host))) {
@@ -5734,6 +5802,9 @@ export {
   isValidTunnelDoctorResponse,
   readDesktopLocalPortFromSettings,
   getPidFilePath,
+  isProcessRunning,
+  isOpenchamberProcessRunning,
+  isOpenchamberCmdline,
   resolveTunnelProviders,
   fetchTunnelProvidersFromPort,
   fetchSystemInfoFromPort,

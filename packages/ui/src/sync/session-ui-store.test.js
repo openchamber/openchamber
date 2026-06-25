@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { opencodeClient } from '@/lib/opencode/client';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionWorktreeStore } from './session-worktree-store';
 import { routeMessage, useSessionUIStore } from './session-ui-store';
 import { setActionRefs, setOptimisticRefs } from './session-actions';
@@ -223,6 +225,61 @@ describe('routeMessage directory scoping', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].sessionId).toBe('session-a');
     expect(calls[0].directory).toBe('/session/project');
+  });
+});
+
+describe('openNewSessionDraft project binding', () => {
+  const projectA = { id: 'proj-a', path: '/projects/alpha', label: 'Alpha' };
+  const projectB = { id: 'proj-b', path: '/projects/beta', label: 'Beta' };
+
+  beforeEach(() => {
+    useSessionUIStore.setState({
+      currentSessionId: null,
+      currentSessionDirectory: null,
+      newSessionDraft: { open: false, directoryOverride: null, parentID: null },
+      availableWorktreesByProject: new Map(),
+    });
+    useProjectsStore.setState({
+      projects: [projectA, projectB],
+      activeProjectId: projectA.id,
+    });
+    useDirectoryStore.getState().setDirectory(projectB.path, { showOverlay: false });
+  });
+
+  test('keeps implicit draft on current directory when active project differs', () => {
+    useSessionUIStore.getState().openNewSessionDraft();
+    const draft = useSessionUIStore.getState().newSessionDraft;
+
+    expect(draft.open).toBe(true);
+    expect(draft.selectedProjectId).toBe(projectB.id);
+    expect(draft.directoryOverride).toBe(projectB.path);
+  });
+
+  test('does not attach active project when current directory is unmatched', () => {
+    useDirectoryStore.getState().setDirectory('/external/worktree', { showOverlay: false });
+
+    useSessionUIStore.getState().openNewSessionDraft();
+    const draft = useSessionUIStore.getState().newSessionDraft;
+
+    expect(draft.open).toBe(true);
+    expect(draft.selectedProjectId).toBeNull();
+    expect(draft.directoryOverride).toBe('/external/worktree');
+  });
+
+  test('respects explicit directoryOverride over active project', () => {
+    useSessionUIStore.getState().openNewSessionDraft({ directoryOverride: '/projects/beta/src' });
+    const draft = useSessionUIStore.getState().newSessionDraft;
+
+    expect(draft.open).toBe(true);
+    expect(draft.directoryOverride).toBe('/projects/beta/src');
+  });
+
+  test('respects explicit selectedProjectId over active project', () => {
+    useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: projectB.id });
+    const draft = useSessionUIStore.getState().newSessionDraft;
+
+    expect(draft.open).toBe(true);
+    expect(draft.selectedProjectId).toBe(projectB.id);
   });
 });
 

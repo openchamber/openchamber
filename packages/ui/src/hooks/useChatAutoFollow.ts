@@ -2,7 +2,7 @@ import React from 'react';
 
 import { MessageFreshnessDetector } from '@/lib/messageFreshness';
 import { createScrollSpy } from '@/components/chat/lib/scroll/scrollSpy';
-import { getViewportSessionMemory, useViewportStore, type SessionMemoryState } from '@/sync/viewport-store';
+import { useViewportStore } from '@/sync/viewport-store';
 
 export type AutoFollowState = 'following' | 'released';
 
@@ -96,13 +96,6 @@ const nestedScrollableCanConsumeUp = (root: HTMLElement, target: EventTarget | n
     const nested = nestedScrollableTarget(root, target);
     if (!nested) return false;
     return nested.scrollTop > 0;
-};
-
-const isAtBottomSnapshot = (snapshot: NonNullable<SessionMemoryState['scrollPosition']>, isMobile: boolean): boolean => {
-    const max = Math.max(0, snapshot.scrollHeight - snapshot.clientHeight);
-    if (max <= 0) return true;
-    const threshold = computeBottomZoneThreshold(isMobile, null);
-    return max - snapshot.scrollTop <= threshold;
 };
 
 export const useChatAutoFollow = ({
@@ -358,35 +351,17 @@ export const useChatAutoFollow = ({
         }
         pendingInitialRestoreRef.current = null;
 
-        const saved = getViewportSessionMemory(sessionId)?.scrollPosition;
-
-        if (!saved || isAtBottomSnapshot(saved, isMobile)) {
-            setStateValue('following');
-            lastUserReleaseAtRef.current = 0;
-            const target = Math.max(0, container.scrollHeight - container.clientHeight);
-            writeScrollTopInstant(target);
-            startFollowLoop();
-            startSettleBurst();
-            return false;
-        }
-
-        const savedMaxScroll = Math.max(0, saved.scrollHeight - saved.clientHeight);
-        const ratio = savedMaxScroll > 0 ? saved.scrollTop / savedMaxScroll : 0;
-        const currentMaxScroll = Math.max(0, container.scrollHeight - container.clientHeight);
-        const targetTop = Math.round(ratio * currentMaxScroll);
-
-        setStateValue('released');
-        writeScrollTopInstant(targetTop);
-
-        const memState = getViewportSessionMemory(sessionId);
-        updateViewportAnchor(sessionId, memState?.viewportAnchor ?? 0, {
-            scrollTop: container.scrollTop,
-            scrollHeight: container.scrollHeight,
-            clientHeight: container.clientHeight,
-        });
-
-        return true;
-    }, [isMobile, setStateValue, startFollowLoop, startSettleBurst, updateViewportAnchor, writeScrollTopInstant]);
+        // Always return to the bottom on session switch. The previous saved-ratio
+        // restore had a low success rate and, by landing 'released' partway up,
+        // produced the visible backward jump as content finished loading.
+        setStateValue('following');
+        lastUserReleaseAtRef.current = 0;
+        const target = Math.max(0, container.scrollHeight - container.clientHeight);
+        writeScrollTopInstant(target);
+        startFollowLoop();
+        startSettleBurst();
+        return false;
+    }, [setStateValue, startFollowLoop, startSettleBurst, writeScrollTopInstant]);
 
     React.useEffect(() => {
         if (!currentSessionId || currentSessionId === lastSessionIdRef.current) {
@@ -411,7 +386,9 @@ export const useChatAutoFollow = ({
     }, [sessionIsWorking, startFollowLoop]);
 
     // Replay a deferred restoreSnapshot once ChatViewport mounts.
-    React.useEffect(() => {
+    // useLayoutEffect ensures scroll position is set before the browser paints,
+    // preventing a visible flash of content at the wrong scroll position.
+    React.useLayoutEffect(() => {
         if (!containerEl) return;
         if (pendingInitialRestoreRef.current && pendingInitialRestoreRef.current === currentSessionId) {
             void restoreSnapshot();
@@ -441,7 +418,6 @@ export const useChatAutoFollow = ({
 
         const programmatic = isInProgrammaticWindow();
         const currentTop = container.scrollTop;
-        const previousTop = lastScrollTopRef.current;
         lastScrollTopRef.current = currentTop;
 
         updateOverflowAndButton();
@@ -450,7 +426,12 @@ export const useChatAutoFollow = ({
             return;
         }
 
-        if (currentTop < previousTop && stateRef.current === 'following') {
+        // Release auto-follow only when the user has actually left the near-bottom
+        // zone — not on the small scrollTop clamp the browser applies when the
+        // composer grows and shrinks the viewport (which keeps you at the bottom).
+        // Position-based, mirroring the re-pin check below; this removes the false
+        // release that produced the visible backward jump on session switch.
+        if (stateRef.current === 'following' && !isNearBottom(container, isMobile)) {
             stopFollowLoop();
             stopSettleBurst();
             lastUserReleaseAtRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now();
