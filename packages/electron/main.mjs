@@ -1695,7 +1695,7 @@ const switchToHostById = async (rawId) => {
   let apiBaseUrl = null;
   let clientToken = '';
   if (id === LOCAL_HOST_ID) {
-    targetUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : (state.sidecarUrl || state.localOrigin);
+    targetUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : (state.localOrigin || state.sidecarUrl);
     apiBaseUrl = state.sidecarUrl;
     clientToken = readDesktopLocalClientToken();
   } else {
@@ -2194,7 +2194,7 @@ const openMainWindow = async () => {
   }
 
   const config = readDesktopHostsConfig();
-  const localUiUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : (state.sidecarUrl || state.localOrigin);
+  const localUiUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : (state.localOrigin || state.sidecarUrl);
   const host = config.defaultHostId && config.defaultHostId !== LOCAL_HOST_ID
     ? config.hosts.find((entry) => entry.id === config.defaultHostId)
     : null;
@@ -2426,7 +2426,7 @@ const resolveInitialUrl = async () => {
   state.sidecarUrl = localUrl;
   const localAvailable = Boolean(localUrl);
 
-  const localOrigin = new URL(localUrl).origin;
+  const localOrigin = new URL(localUiUrl).origin;
   let initialUrl = localUiUrl;
   let apiBaseUrl = localUrl;
   let clientToken = readDesktopLocalClientToken();
@@ -3642,7 +3642,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
 
     case 'desktop_new_window': {
       const config = readDesktopHostsConfig();
-      const localUiUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : (state.sidecarUrl || state.localOrigin);
+      const localUiUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : (state.localOrigin || state.sidecarUrl);
       let targetUrl = localUiUrl;
       let runtimeConfig = {
         apiBaseUrl: state.sidecarUrl || state.localOrigin || '',
