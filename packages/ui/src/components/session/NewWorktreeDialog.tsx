@@ -1142,10 +1142,10 @@ export function NewWorktreeDialog({
                           </div>
                         )}
 
-                        {existingBranchRankedGroups.otherLocal.length > 0 && (
+                        {!hasExistingBranchQuery && existingBranchRankedGroups.otherLocal.length > 0 && (
                           <div className="space-y-2">
                             <div className="typography-small font-semibold text-foreground px-2">
-                              {hasExistingBranchQuery ? t('session.newWorktree.otherLocalBranches') : t('session.newWorktree.localBranches')}
+                              {t('session.newWorktree.localBranches')}
                             </div>
                             <div className="space-y-1">
                               {existingBranchRankedGroups.otherLocal.map((branch) => (
@@ -1174,10 +1174,10 @@ export function NewWorktreeDialog({
                           </div>
                         )}
 
-                        {existingBranchRankedGroups.otherRemote.length > 0 && (
+                        {!hasExistingBranchQuery && existingBranchRankedGroups.otherRemote.length > 0 && (
                           <div className="space-y-2">
                             <div className="typography-small font-semibold text-foreground px-2">
-                              {hasExistingBranchQuery ? t('session.newWorktree.otherRemoteBranches') : t('session.newWorktree.remoteBranches')}
+                              {t('session.newWorktree.remoteBranches')}
                             </div>
                             <div className="space-y-1">
                               {existingBranchRankedGroups.otherRemote.map((branch) => (
@@ -1401,10 +1401,10 @@ export function NewWorktreeDialog({
                           </div>
                         )}
 
-                        {sourceBranchRankedGroups.otherLocal.length > 0 && (
+                        {!hasSourceBranchQuery && sourceBranchRankedGroups.otherLocal.length > 0 && (
                           <div className="space-y-2">
                             <div className="typography-small font-semibold text-foreground px-2">
-                              {hasSourceBranchQuery ? t('session.newWorktree.otherLocalBranches') : t('session.newWorktree.localBranches')}
+                              {t('session.newWorktree.localBranches')}
                             </div>
                             <div className="space-y-1">
                               {sourceBranchRankedGroups.otherLocal.map((branch) => (
@@ -1428,10 +1428,10 @@ export function NewWorktreeDialog({
                           </div>
                         )}
 
-                        {sourceBranchRankedGroups.otherRemote.length > 0 && (
+                        {!hasSourceBranchQuery && sourceBranchRankedGroups.otherRemote.length > 0 && (
                           <div className="space-y-2">
                             <div className="typography-small font-semibold text-foreground px-2">
-                              {hasSourceBranchQuery ? t('session.newWorktree.otherRemoteBranches') : t('session.newWorktree.remoteBranches')}
+                              {t('session.newWorktree.remoteBranches')}
                             </div>
                             <div className="space-y-1">
                               {sourceBranchRankedGroups.otherRemote.map((branch) => (
@@ -1607,10 +1607,9 @@ export function NewWorktreeDialog({
                                 </div>
                               )}
 
-                              {existingBranchRankedGroups.otherLocal.length > 0 && (
+                              {!hasExistingBranchQuery && existingBranchRankedGroups.otherLocal.length > 0 && (
                                 <>
-                                  {hasExistingBranchQuery && <CommandSeparator />}
-                                  <CommandGroup heading={hasExistingBranchQuery ? t('session.newWorktree.otherLocalBranches') : t('session.newWorktree.localBranches')}>
+                                  <CommandGroup heading={t('session.newWorktree.localBranches')}>
                                     {existingBranchRankedGroups.otherLocal.map((branch) => (
                                       <CommandItem
                                         key={`local-${branch}`}
@@ -1632,12 +1631,12 @@ export function NewWorktreeDialog({
                                 </>
                               )}
 
-                              {existingBranchRankedGroups.otherRemote.length > 0 && (
+                              {!hasExistingBranchQuery && existingBranchRankedGroups.otherRemote.length > 0 && (
                                 <>
-                                  {(existingBranchRankedGroups.otherLocal.length > 0 || hasExistingBranchQuery) && (
+                                  {existingBranchRankedGroups.otherLocal.length > 0 && (
                                     <CommandSeparator />
                                   )}
-                                  <CommandGroup heading={hasExistingBranchQuery ? t('session.newWorktree.otherRemoteBranches') : t('session.newWorktree.remoteBranches')}>
+                                  <CommandGroup heading={t('session.newWorktree.remoteBranches')}>
                                     {existingBranchRankedGroups.otherRemote.map((branch) => (
                                       <CommandItem
                                         key={`remote-${branch}`}
@@ -1843,10 +1842,9 @@ export function NewWorktreeDialog({
                                 </div>
                               )}
 
-                              {sourceBranchRankedGroups.otherLocal.length > 0 && (
+                              {!hasSourceBranchQuery && sourceBranchRankedGroups.otherLocal.length > 0 && (
                                 <>
-                                  {hasSourceBranchQuery && <CommandSeparator />}
-                                  <CommandGroup heading={hasSourceBranchQuery ? t('session.newWorktree.otherLocalBranches') : t('session.newWorktree.localBranches')}>
+                                  <CommandGroup heading={t('session.newWorktree.localBranches')}>
                                     {sourceBranchRankedGroups.otherLocal.map((branch) => (
                                       <CommandItem
                                         key={`local-${branch}`}
@@ -1863,12 +1861,12 @@ export function NewWorktreeDialog({
                                 </>
                               )}
 
-                              {sourceBranchRankedGroups.otherRemote.length > 0 && (
+                              {!hasSourceBranchQuery && sourceBranchRankedGroups.otherRemote.length > 0 && (
                                 <>
-                                  {(sourceBranchRankedGroups.otherLocal.length > 0 || hasSourceBranchQuery) && (
+                                  {sourceBranchRankedGroups.otherLocal.length > 0 && (
                                     <CommandSeparator />
                                   )}
-                                  <CommandGroup heading={hasSourceBranchQuery ? t('session.newWorktree.otherRemoteBranches') : t('session.newWorktree.remoteBranches')}>
+                                  <CommandGroup heading={t('session.newWorktree.remoteBranches')}>
                                     {sourceBranchRankedGroups.otherRemote.map((branch) => (
                                       <CommandItem
                                         key={`remote-${branch}`}
