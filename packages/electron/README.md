@@ -79,7 +79,8 @@ The package supports macOS and Windows desktop features. Some native discovery h
 | Variable | Use |
 |----------|-----|
 | `OPENCHAMBER_ELECTRON_DEV=1` | Marks the runtime as desktop development mode |
-| `OPENCHAMBER_ELECTRON_USE_BUNDLED_UI=1` | Uses staged web assets instead of the HMR dev server |
+| `OPENCHAMBER_ELECTRON_LOAD_SERVER_UI=1` | Forces the UI to load through the local web server instead of the packaged custom protocol |
+| `OPENCHAMBER_ELECTRON_USE_BUNDLED_UI=1` | Forces staged web assets through the packaged custom protocol; by default packaged Windows builds use the local server for realtime stability |
 | `OPENCHAMBER_HMR_UI_PORT` | Preferred Vite UI port for desktop dev, default `5173` |
 | `OPENCHAMBER_HMR_API_PORT` | Preferred API port for desktop dev, default `3901` |
 | `OPENCHAMBER_RUNTIME=desktop` | Set by Electron before starting the web server |
