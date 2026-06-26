@@ -25,15 +25,18 @@ const localeDictionaries = {
 } as const;
 
 describe('i18n dictionaries', () => {
-  test('french stays in key parity with english', () => {
+  test('all locales stay in key parity with english', () => {
     const englishKeys = Object.keys(enDict).sort();
 
-    expect(Object.keys(frDict).sort()).toEqual(englishKeys);
+    for (const dictionary of Object.values(localeDictionaries)) {
+      expect(Object.keys(dictionary).sort()).toEqual(englishKeys);
+    }
   });
 
-  test('all locales expose the french language label key', () => {
+  test('all locales expose language label keys', () => {
     for (const [, dictionary] of Object.entries(localeDictionaries)) {
       expect(dictionary['common.language.french']).toBeTruthy();
+      expect(dictionary['common.language.japanese']).toBeTruthy();
     }
   });
 });

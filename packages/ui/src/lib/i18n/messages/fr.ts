@@ -104,6 +104,7 @@ export const dict = {
   'sessions.scheduledTasks.editor.scheduleType.daily': 'Tous les jours',
   'sessions.scheduledTasks.editor.scheduleType.weekly': 'Hebdomadaire',
   'sessions.scheduledTasks.editor.scheduleType.once': 'Une fois',
+  'sessions.scheduledTasks.editor.scheduleType.cron': 'Cron',
   'sessions.scheduledTasks.editor.date.label': 'Date',
   'sessions.scheduledTasks.editor.date.placeholder': 'Sélectionnez une date',
   'sessions.scheduledTasks.editor.date.previousMonth': 'Mois précédent',
