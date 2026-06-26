@@ -13,12 +13,14 @@ import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import { deleteGitBranch, getGitBranches, git, renameBranch } from '@/lib/gitApi';
 import type { GitBranch, GitWorktreeInfo } from '@/lib/api/types';
+import type { Session } from '@opencode-ai/sdk/v2';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { createWorktreeWithDefaults } from '@/lib/worktrees/worktreeCreate';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { getWorktreeSetupCommands } from '@/lib/openchamberConfig';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { useSessions } from '@/sync/sync-context';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useI18n } from '@/lib/i18n';
 
 export interface BranchPickerProject {
@@ -235,9 +237,16 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
     });
     const directSessionIds = new Set(directSessions.map((session) => session.id));
 
-    const findSubsessions = (parentIds: Set<string>): typeof sessions => {
-      const subsessions = sessions.filter((session) => {
-        const parentID = (session as { parentID?: string | null }).parentID;
+    // Search subsessions across all directories so subagent sessions in other
+    // worktrees/project roots are still included in the delete list.
+    const allKnownSessions = [
+      ...useGlobalSessionsStore.getState().activeSessions,
+      ...useGlobalSessionsStore.getState().archivedSessions,
+    ];
+
+    const findSubsessions = (parentIds: Set<string>): Session[] => {
+      const subsessions = allKnownSessions.filter((session) => {
+        const parentID = (session as Session & { parentID?: string | null }).parentID;
         if (!parentID) {
           return false;
         }

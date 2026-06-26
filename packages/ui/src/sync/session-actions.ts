@@ -466,6 +466,10 @@ function restoreSessionListSnapshots(snapshots: SessionListSnapshot[]): void {
   }
 }
 
+function cleanupSessionWorktreeMetadata(sessionId: string): void {
+  useSessionUIStore.getState().setWorktreeMetadata(sessionId, null)
+}
+
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function deleteSession(sessionId: string, _options?: Record<string, unknown>): Promise<boolean> {
   const sessionDirectory = getSessionDirectory(sessionId)
@@ -484,6 +488,7 @@ export async function deleteSession(sessionId: string, _options?: Record<string,
       throw new Error("session.delete failed: server did not confirm deletion")
     }
     useGlobalSessionsStore.getState().removeSessions([sessionId])
+    cleanupSessionWorktreeMetadata(sessionId)
     return true
   } catch (error) {
     console.error("[session-actions] deleteSession failed", error)
@@ -491,6 +496,7 @@ export async function deleteSession(sessionId: string, _options?: Record<string,
     // Subsequent delete attempts for those children return 404; treat as
     // success since the session was already deleted by the cascade.
     if ((error as { status?: number })?.status === 404) {
+      cleanupSessionWorktreeMetadata(sessionId)
       return true
     }
     restoreSessionListSnapshots(snapshots)
@@ -514,10 +520,12 @@ export async function deleteSessionInDirectory(sessionId: string, directory: str
       throw new Error("session.delete failed: server did not confirm deletion")
     }
     useGlobalSessionsStore.getState().removeSessions([sessionId])
+    cleanupSessionWorktreeMetadata(sessionId)
     return true
   } catch (error) {
     console.error("[session-actions] deleteSessionInDirectory failed", error)
     if ((error as { status?: number })?.status === 404) {
+      cleanupSessionWorktreeMetadata(sessionId)
       return true
     }
     restoreSessionListSnapshots(snapshots)
