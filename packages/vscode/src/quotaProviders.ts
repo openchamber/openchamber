@@ -1242,22 +1242,19 @@ const fetchMiniMaxQuota = async (data: {
     const weeklyStartAt = toTimestamp(firstModel.weekly_start_time);
     const weeklyResetAt = toTimestamp(firstModel.weekly_end_time);
 
-    const intervalUsed = data.usageFieldsAreRemaining && intervalTotal !== null && intervalUsage !== null
-      ? intervalTotal - intervalUsage
-      : intervalUsage;
-    const weeklyUsed = data.usageFieldsAreRemaining && weeklyTotal !== null && weeklyUsage !== null
-      ? weeklyTotal - weeklyUsage
-      : weeklyUsage;
-
-    const intervalUsedPercent = intervalTotal !== null && intervalTotal > 0 && intervalUsed !== null
-      ? Math.max(0, Math.min(100, (intervalUsed / intervalTotal) * 100))
-      : null;
+    const intervalUsedPercent = data.usageFieldsAreRemaining
+      ? remainingPercentToUsedPercent(firstModel.current_interval_remaining_percent)
+      : intervalTotal !== null && intervalTotal > 0 && intervalUsage !== null
+        ? Math.max(0, Math.min(100, (intervalUsage / intervalTotal) * 100))
+        : null;
     const intervalWindowSeconds = intervalStartAt && intervalResetAt && intervalResetAt > intervalStartAt
       ? Math.floor((intervalResetAt - intervalStartAt) / 1000)
       : null;
-    const weeklyUsedPercent = weeklyTotal !== null && weeklyTotal > 0 && weeklyUsed !== null
-      ? Math.max(0, Math.min(100, (weeklyUsed / weeklyTotal) * 100))
-      : null;
+    const weeklyUsedPercent = data.usageFieldsAreRemaining
+      ? remainingPercentToUsedPercent(firstModel.current_weekly_remaining_percent)
+      : weeklyTotal !== null && weeklyTotal > 0 && weeklyUsage !== null
+        ? Math.max(0, Math.min(100, (weeklyUsage / weeklyTotal) * 100))
+        : null;
     const weeklyWindowSeconds = weeklyStartAt && weeklyResetAt && weeklyResetAt > weeklyStartAt
       ? Math.floor((weeklyResetAt - weeklyStartAt) / 1000)
       : null;
@@ -1291,6 +1288,12 @@ const fetchMiniMaxQuota = async (data: {
       error: error instanceof Error ? error.message : 'Request failed',
     });
   }
+};
+
+export const remainingPercentToUsedPercent = (value: unknown): number | null => {
+  const remainingPercent = toNumber(value);
+  if (remainingPercent === null) return null;
+  return Math.max(0, Math.min(100, 100 - remainingPercent));
 };
 
 export const fetchMiniMaxCodingPlanQuota = () => fetchMiniMaxQuota({
