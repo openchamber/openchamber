@@ -7,6 +7,7 @@ import { MEMORY_LIMITS } from '@/stores/types/sessionTypes';
 import { useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 import { getBackgroundTrimLimit } from '@/stores/types/sessionTypes';
 import { getStreamPerfSnapshot, getVsCodeStreamPerfSnapshot, resetStreamPerf, type StreamPerfSnapshot } from '@/stores/utils/streamDebug';
+import { getRequestsInFlightSnapshot, resetRequestsInFlight, type RequestsInFlightSnapshot } from '@/stores/utils/requestsInFlight';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
@@ -18,7 +19,7 @@ interface DebugPanelProps {
   onClose?: () => void;
 }
 
-type DebugTab = 'memory' | 'streaming';
+type DebugTab = 'memory' | 'streaming' | 'requests';
 
 const formatDuration = (durationMs: number): string => {
   if (durationMs < 1000) {
@@ -34,6 +35,10 @@ const formatDuration = (durationMs: number): string => {
   const remainderSeconds = Math.round(seconds % 60);
   return `${minutes}m ${remainderSeconds}s`;
 };
+
+// Fixed-width seconds format ("XX.XX s") for the percentile series so the
+// legend/labels don't jitter as values change. Pair with `tabular-nums`.
+const formatSeconds = (durationMs: number): string => `${(durationMs / 1000).toFixed(2)} s`;
 
 const MetricCard: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => {
   return (
@@ -99,6 +104,74 @@ const PerfSection: React.FC<{ title: string; snapshot: StreamPerfSnapshot; empty
   );
 };
 
+type LineSeries = { samples: number[]; color: string; filled?: boolean };
+
+const LineChart: React.FC<{
+  series: LineSeries[];
+  peak: number;
+  windowSeconds: number;
+  ariaLabel: string;
+  maxLabel: string;
+}> = ({ series, peak, windowSeconds, ariaLabel, maxLabel }) => {
+  const width = windowSeconds;
+  const height = 56;
+  const padTop = 4;
+  const n = series.reduce((max, s) => Math.max(max, s.samples.length), 0);
+  const scale = peak > 0 ? (height - padTop) / peak : 0;
+  const xFor = (i: number): number => width - n + i;
+  const yFor = (v: number): number => height - v * scale;
+  const baseline = height;
+
+  return (
+    <div className="relative w-full">
+      <span className="pointer-events-none absolute left-0 top-0 typography-meta text-[var(--surface-muted-foreground)]">{maxLabel}</span>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        preserveAspectRatio="none"
+        className="h-14 w-full"
+        role="img"
+        aria-label={ariaLabel}
+      >
+        <line
+          x1={0}
+          y1={baseline}
+          x2={width}
+          y2={baseline}
+          stroke="var(--interactive-border)"
+          strokeWidth={1}
+          vectorEffect="non-scaling-stroke"
+        />
+        {series.map((s, si) => {
+          const sn = s.samples.length;
+          if (sn === 0) return null;
+          const points = s.samples.map((v, i) => `${xFor(i)},${yFor(v).toFixed(2)}`);
+          const linePath = `M ${points.join(' L ')}`;
+          return (
+            <React.Fragment key={si}>
+              {s.filled ? (
+                <path
+                  d={`M ${xFor(0)},${baseline} L ${points.join(' L ')} L ${xFor(sn - 1)},${baseline} Z`}
+                  fill={`color-mix(in srgb, ${s.color} 18%, transparent)`}
+                  stroke="none"
+                />
+              ) : null}
+              <path
+                d={linePath}
+                fill="none"
+                stroke={s.color}
+                strokeWidth={1.5}
+                strokeLinejoin="round"
+                strokeLinecap="round"
+                vectorEffect="non-scaling-stroke"
+              />
+            </React.Fragment>
+          );
+        })}
+      </svg>
+    </div>
+  );
+};
+
 export const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
   const { t } = useI18n();
   const [activeTab, setActiveTab] = React.useState<DebugTab>('memory');
@@ -110,6 +183,15 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
   const totalGitHubRequests = useGitHubPrStatusStore((state) => state.totalRequestCount);
   const [streamSnapshot, setStreamSnapshot] = React.useState<StreamPerfSnapshot>(() => getStreamPerfSnapshot());
   const [vscodeStreamSnapshot, setVsCodeStreamSnapshot] = React.useState<StreamPerfSnapshot>(() => getVsCodeStreamPerfSnapshot());
+  const [requestsSnapshot, setRequestsSnapshot] = React.useState<RequestsInFlightSnapshot>(() => getRequestsInFlightSnapshot());
+  const ageLines = [
+    { label: 'p50', current: requestsSnapshot.ageP50, samples: requestsSnapshot.p50Samples, color: 'var(--status-success)' },
+    { label: 'p90', current: requestsSnapshot.ageP90, samples: requestsSnapshot.p90Samples, color: 'var(--status-info)' },
+    { label: 'p99', current: requestsSnapshot.ageP99, samples: requestsSnapshot.p99Samples, color: 'var(--status-warning)' },
+    { label: 'max', current: requestsSnapshot.ageMax, samples: requestsSnapshot.maxSamples, color: 'var(--status-error)' },
+  ];
+  const countMax = requestsSnapshot.samples.reduce((m, v) => Math.max(m, v), 0);
+  const percentileMax = ageLines.reduce((m, l) => l.samples.reduce((mm, v) => Math.max(mm, v), m), 0);
   const streamMetricCounts = React.useMemo(() => {
     const counts = new Map<string, number>();
     streamSnapshot.entries.forEach((entry) => {
@@ -130,6 +212,7 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
     const refresh = () => {
       setStreamSnapshot(getStreamPerfSnapshot());
       setVsCodeStreamSnapshot(getVsCodeStreamPerfSnapshot());
+      setRequestsSnapshot(getRequestsInFlightSnapshot());
     };
 
     refresh();
@@ -218,11 +301,10 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
     >
       <div className="mb-3 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          {activeTab === 'memory' ? (
-            <Icon name="database-2" className="h-4 w-4 text-[var(--surface-foreground)]" />
-          ) : (
-            <Icon name="bar-chart-box" className="h-4 w-4 text-[var(--surface-foreground)]" />
-          )}
+          <Icon
+            name={activeTab === 'memory' ? 'database-2' : activeTab === 'streaming' ? 'bar-chart-box' : 'pulse'}
+            className="h-4 w-4 text-[var(--surface-foreground)]"
+          />
           <h3 className="typography-ui-label font-semibold text-[var(--surface-foreground)]">{t('memoryDebugPanel.title')}</h3>
         </div>
         <div className="flex items-center gap-1">
@@ -243,6 +325,18 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
                 <Icon name="refresh" className="h-3.5 w-3.5" />
               </Button>
             </>
+          ) : null}
+          {activeTab === 'requests' ? (
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={() => {
+                resetRequestsInFlight();
+                setRequestsSnapshot(getRequestsInFlightSnapshot());
+              }}
+            >
+              <Icon name="refresh" className="h-3.5 w-3.5" />
+            </Button>
           ) : null}
           {onClose ? (
             <Button size="icon" variant="ghost" className="h-6 w-6" onClick={onClose}>
@@ -271,6 +365,14 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
           onClick={() => setActiveTab('streaming')}
         >
           {t('memoryDebugPanel.tabs.streaming')}
+        </Button>
+        <Button
+          size="sm"
+          variant={activeTab === 'requests' ? 'secondary' : 'ghost'}
+          className="flex-1"
+          onClick={() => setActiveTab('requests')}
+        >
+          {t('memoryDebugPanel.tabs.requests')}
         </Button>
       </div>
 
@@ -366,7 +468,7 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
             </Tooltip>
           </div>
         </div>
-      ) : (
+      ) : activeTab === 'streaming' ? (
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-2 rounded-md border border-[var(--interactive-border)] px-3 py-2 typography-meta text-[var(--surface-muted-foreground)]">
             <span>
@@ -408,6 +510,70 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
               emptyLabel={t('memoryDebugPanel.section.noVscodeSamples')}
             />
           ) : null}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2 typography-meta">
+            <MetricCard label={t('memoryDebugPanel.requests.totalRequests')} value={`${requestsSnapshot.totalSettled} / ${requestsSnapshot.totalStarted}`} />
+            <MetricCard
+              label={t('memoryDebugPanel.requests.tracking')}
+              value={requestsSnapshot.startedAt ? formatDuration(requestsSnapshot.durationMs) : t('memoryDebugPanel.common.idle')}
+            />
+          </div>
+
+          {requestsSnapshot.samples.length === 0 ? (
+            <div
+              className="rounded-md p-3 typography-meta text-[var(--surface-muted-foreground)]"
+              style={{ backgroundColor: 'color-mix(in srgb, var(--surface-muted) 45%, transparent)' }}
+            >
+              {t('memoryDebugPanel.requests.noSamples')}
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between typography-meta">
+                <span className="text-[var(--surface-muted-foreground)]">{t('memoryDebugPanel.requests.inFlight')}</span>
+                <span>
+                  <span className="font-medium text-[var(--surface-foreground)]">{requestsSnapshot.inFlight}</span>
+                  <span className="text-[var(--surface-muted-foreground)]"> · {t('memoryDebugPanel.requests.peak')} </span>
+                  <span className="font-medium text-[var(--surface-foreground)]">{requestsSnapshot.peak}</span>
+                </span>
+              </div>
+              <LineChart
+                series={[{ samples: requestsSnapshot.samples, color: 'var(--status-info)', filled: true }]}
+                peak={countMax}
+                windowSeconds={requestsSnapshot.windowSeconds}
+                ariaLabel={t('memoryDebugPanel.requests.chartLabel', { peak: requestsSnapshot.peak })}
+                maxLabel={`${countMax}`}
+              />
+
+              <div className="flex items-center justify-between typography-meta">
+                <span className="text-[var(--surface-muted-foreground)]">{t('memoryDebugPanel.requests.duration')}</span>
+                <span className="font-medium tabular-nums text-[var(--surface-foreground)]">{formatSeconds(requestsSnapshot.peakAgeMs)}</span>
+              </div>
+              <LineChart
+                series={ageLines.map((line) => ({ samples: line.samples, color: line.color }))}
+                peak={percentileMax}
+                windowSeconds={requestsSnapshot.windowSeconds}
+                ariaLabel={t('memoryDebugPanel.requests.percentileChartLabel')}
+                maxLabel={formatSeconds(percentileMax)}
+              />
+
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 typography-meta">
+                {ageLines.map((line) => (
+                  <span key={line.label} className="flex items-center gap-1">
+                    <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: line.color }} />
+                    <span className="text-[var(--surface-muted-foreground)]">{line.label}</span>
+                    <span className="font-medium tabular-nums text-[var(--surface-foreground)]">{formatSeconds(line.current)}</span>
+                  </span>
+                ))}
+              </div>
+
+              <div className="flex items-center justify-between typography-meta text-[var(--surface-muted-foreground)]">
+                <span>{t('memoryDebugPanel.requests.windowHint', { seconds: requestsSnapshot.windowSeconds })}</span>
+                <span>{t('memoryDebugPanel.requests.now')}</span>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </Card>
