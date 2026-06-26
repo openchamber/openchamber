@@ -519,6 +519,23 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
       store.setWeekStartPreference(settings.weekStartPreference);
     }
   }
+  if (typeof settings.messageTimestampFormat === 'string'
+    && (settings.messageTimestampFormat === 'hidden'
+      || settings.messageTimestampFormat === 'relative'
+      || settings.messageTimestampFormat === 'absolute'
+      || settings.messageTimestampFormat === 'hybrid')) {
+    if (settings.messageTimestampFormat !== store.messageTimestampFormat) {
+      store.setMessageTimestampFormat(settings.messageTimestampFormat);
+    }
+  }
+  if (typeof settings.messageTimestampHybridThresholdMinutes === 'number'
+    && Number.isFinite(settings.messageTimestampHybridThresholdMinutes)
+    && settings.messageTimestampHybridThresholdMinutes >= 1) {
+    const next = Math.floor(settings.messageTimestampHybridThresholdMinutes);
+    if (next !== store.messageTimestampHybridThresholdMinutes) {
+      store.setMessageTimestampHybridThresholdMinutes(next);
+    }
+  }
   if (typeof settings.chatRenderMode === 'string'
     && (settings.chatRenderMode === 'sorted' || settings.chatRenderMode === 'live')) {
     if (settings.chatRenderMode !== store.chatRenderMode) {
@@ -1040,6 +1057,18 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.weekStartPreference === 'string'
     && (candidate.weekStartPreference === 'auto' || candidate.weekStartPreference === 'sunday' || candidate.weekStartPreference === 'monday')) {
     result.weekStartPreference = candidate.weekStartPreference;
+  }
+  if (typeof candidate.messageTimestampFormat === 'string'
+    && (candidate.messageTimestampFormat === 'hidden'
+      || candidate.messageTimestampFormat === 'relative'
+      || candidate.messageTimestampFormat === 'absolute'
+      || candidate.messageTimestampFormat === 'hybrid')) {
+    result.messageTimestampFormat = candidate.messageTimestampFormat;
+  }
+  if (typeof candidate.messageTimestampHybridThresholdMinutes === 'number'
+    && Number.isFinite(candidate.messageTimestampHybridThresholdMinutes)
+    && candidate.messageTimestampHybridThresholdMinutes >= 1) {
+    result.messageTimestampHybridThresholdMinutes = Math.floor(candidate.messageTimestampHybridThresholdMinutes);
   }
   if (typeof candidate.chatRenderMode === 'string'
     && (candidate.chatRenderMode === 'sorted' || candidate.chatRenderMode === 'live')) {

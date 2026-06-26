@@ -2626,4 +2626,7 @@ export const dict: Record<I18nKey, string> = {
   'quota.window.chat': 'Chat Requests',
   'quota.window.completions': 'Completions',
   'quota.window.premiumInteractions': 'Premium interactions',
+  'common.relative.minutesAgoShort2': '{count}m ago',
+  'common.relative.hoursMinutesAgoShort': '{hours}h {minutes}m ago',
+  'common.relative.daysHoursMinutesAgoShort': '{days}d {hours}h {minutes}m ago',
 };

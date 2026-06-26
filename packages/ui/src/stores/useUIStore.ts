@@ -20,6 +20,15 @@ export type SessionRetentionAction = 'archive' | 'delete';
 export type TimeFormatPreference = 'auto' | '12h' | '24h';
 export type WeekStartPreference = 'auto' | 'sunday' | 'monday';
 export type FileEditorKeymap = 'default' | 'vim';
+export type MessageTimestampFormatPreference = 'hidden' | 'relative' | 'absolute' | 'hybrid';
+
+export const MESSAGE_TIMESTAMP_HYBRID_THRESHOLD_MIN = 1;
+
+function normalizeMessageTimestampHybridThreshold(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= MESSAGE_TIMESTAMP_HYBRID_THRESHOLD_MIN
+    ? Math.floor(value)
+    : 1440;
+}
 
 function normalizeFileEditorKeymap(value: unknown): FileEditorKeymap {
   return value === 'vim' ? 'vim' : 'default';
@@ -635,6 +644,8 @@ interface UIStore {
   reportUsage: boolean;
   shortcutOverrides: Record<string, ShortcutCombo>;
   fileEditorKeymap: FileEditorKeymap;
+  messageTimestampFormat: MessageTimestampFormatPreference;
+  messageTimestampHybridThresholdMinutes: number;
 
   setTheme: (theme: 'light' | 'dark' | 'system') => void;
   toggleSidebar: () => void;
@@ -786,6 +797,8 @@ interface UIStore {
   clearShortcutOverride: (actionId: string) => void;
   resetAllShortcutOverrides: () => void;
   setFileEditorKeymap: (value: FileEditorKeymap) => void;
+  setMessageTimestampFormat: (value: MessageTimestampFormatPreference) => void;
+  setMessageTimestampHybridThresholdMinutes: (value: number) => void;
 }
 
 
@@ -916,6 +929,8 @@ export const useUIStore = create<UIStore>()(
         reportUsage: true,
         shortcutOverrides: {},
         fileEditorKeymap: 'default',
+        messageTimestampFormat: 'hybrid',
+        messageTimestampHybridThresholdMinutes: 1440,
 
         setTheme: (theme) => {
           set({ theme });
@@ -2068,6 +2083,14 @@ export const useUIStore = create<UIStore>()(
           set({ fileEditorKeymap: normalizeFileEditorKeymap(value) });
         },
 
+        setMessageTimestampFormat: (value) => {
+          set({ messageTimestampFormat: value });
+        },
+
+        setMessageTimestampHybridThresholdMinutes: (value) => {
+          set({ messageTimestampHybridThresholdMinutes: normalizeMessageTimestampHybridThreshold(value) });
+        },
+
         toggleExpandedInput: () => {
           set((state) => ({ isExpandedInput: !state.isExpandedInput }));
         },
@@ -2256,6 +2279,8 @@ export const useUIStore = create<UIStore>()(
           mobileSessionFilterProjectId: state.mobileSessionFilterProjectId,
           shortcutOverrides: state.shortcutOverrides,
           fileEditorKeymap: state.fileEditorKeymap,
+          messageTimestampFormat: state.messageTimestampFormat,
+          messageTimestampHybridThresholdMinutes: state.messageTimestampHybridThresholdMinutes,
         })
       }
     ),
