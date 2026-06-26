@@ -107,6 +107,10 @@ export const VSCodeLayout: React.FC = () => {
   }, []);
 
   const [currentView, setCurrentView] = React.useState<VSCodeView>(() => (bootDraftOpen ? 'chat' : 'sessions'));
+  // Mirror currentView so the navigate event handler (registered once) can read the live value.
+  const currentViewRef = React.useRef(currentView);
+  // Snapshot of the view the user was on before opening Settings, so close restores it.
+  const viewBeforeSettingsRef = React.useRef<VSCodeView | null>(null);
   const [containerWidth, setContainerWidth] = React.useState<number>(0);
   const [expandedSidebarWidth, setExpandedSidebarWidth] = React.useState<number>(SESSIONS_SIDEBAR_WIDTH);
   const [isResizingExpandedSidebar, setIsResizingExpandedSidebar] = React.useState(false);
@@ -183,6 +187,11 @@ export const VSCodeLayout: React.FC = () => {
       setCurrentView('chat');
     }
   }, [currentSessionId]);
+
+  // Keep currentViewRef in sync so the stable navigate handler reads the live view.
+  React.useEffect(() => {
+    currentViewRef.current = currentView;
+  }, [currentView]);
 
   React.useEffect(() => {
     const vscodeApi = runtimeApis.vscode;
@@ -346,6 +355,9 @@ export const VSCodeLayout: React.FC = () => {
       const detail = (event as CustomEvent<{ view?: string }>).detail;
       const view = detail?.view;
       if (view === 'settings') {
+        if (currentViewRef.current !== 'settings') {
+          viewBeforeSettingsRef.current = currentViewRef.current;
+        }
         setCurrentView('settings');
       } else if (view === 'chat') {
         setCurrentView('chat');
@@ -531,7 +543,11 @@ export const VSCodeLayout: React.FC = () => {
         // Settings view
         <React.Suspense fallback={null}>
           <SettingsView
-            onClose={() => setCurrentView(usesExpandedLayout ? 'chat' : 'sessions')}
+            onClose={() => {
+              const previousView = viewBeforeSettingsRef.current;
+              viewBeforeSettingsRef.current = null;
+              setCurrentView(previousView ?? (usesExpandedLayout ? 'chat' : 'sessions'));
+            }}
             forceMobile={usesMobileLayout}
           />
         </React.Suspense>
