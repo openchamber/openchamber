@@ -29,7 +29,7 @@ import { syncDebug } from "./debug"
 import { getReconnectCandidateSessionIds } from "./reconnect-recovery"
 import { opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
-import { useConfigStore } from "@/stores/useConfigStore"
+import { useConfigStore, type RuntimeTransportPhase } from "@/stores/useConfigStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { toast } from "@/components/ui"
 import { appendNotification } from "./notification-store"
@@ -549,6 +549,22 @@ export function needsSnapshotAfterStatusPoll(
   if (incoming && incoming.type !== "idle") return false
   const currentStatus = state.session_status?.[sessionId]
   return Boolean(currentStatus && currentStatus.type !== "idle")
+}
+
+export function shouldUseDisconnectedTransportPhase(reason: string | null): boolean {
+  if (typeof reason !== "string" || reason.length === 0) return false
+  // A close before the WS stream ever becomes ready typically means the
+  // server rejected the upgrade (for example missing/expired URL auth). Treat
+  // it as a terminal disconnect so the indicator stays red instead of looking
+  // like an in-progress reconnect that can self-heal without user action.
+  if (reason === "ws_closed_before_ready") return true
+  return (
+    reason.includes("auth")
+    || reason === "401"
+    || reason === "403"
+    || reason === "unauthorized"
+    || reason === "forbidden"
+  )
 }
 
 type EventRoutingIndex = {
@@ -1611,6 +1627,12 @@ export function SyncProvider(props: {
   const resyncingDirectoriesRef = useRef(new Set<string>())
   const statusPollingDirectoriesRef = useRef(new Set<string>())
   const pipelineReconnectRef = useRef<((reason?: string) => void) | null>(null)
+  // Phase observed immediately before the most recent browser `offline`
+  // transition. Captured in the `offline` listener (sibling useEffect below)
+  // and consumed by the `online` listener to restore the previous narrow
+  // state. Reset to `null` whenever the transport is observed to be online
+  // again, so each new offline transition re-records a fresh pre-offline phase.
+  const preOfflinePhaseRef = useRef<RuntimeTransportPhase | null>(null)
 
   const system = useMemo<SyncSystem>(
     () => ({
@@ -1808,6 +1830,11 @@ export function SyncProvider(props: {
           hasEverConnected: true,
           connectionPhase: "connected",
         })
+        useConfigStore.getState().setRuntimeTransportState({
+          phase: "connected",
+          reason: null,
+          updatedAt: Date.now(),
+        })
         if (isRecentBoot()) {
           return
         }
@@ -1817,10 +1844,18 @@ export function SyncProvider(props: {
       },
       onDisconnect: (reason) => {
         const { hasEverConnected } = useConfigStore.getState()
+        const transportPhase = shouldUseDisconnectedTransportPhase(reason)
+          ? "disconnected"
+          : hasEverConnected ? "reconnecting" : "connecting"
         useConfigStore.setState({
           isConnected: false,
-          connectionPhase: hasEverConnected ? "reconnecting" : "connecting",
+          connectionPhase: transportPhase,
           lastDisconnectReason: reason,
+        })
+        useConfigStore.getState().setRuntimeTransportState({
+          phase: transportPhase,
+          reason,
+          updatedAt: Date.now(),
         })
       },
       onTransportSwitch: () => {
@@ -1830,6 +1865,11 @@ export function SyncProvider(props: {
           isConnected: true,
           hasEverConnected: true,
           connectionPhase: "connected",
+        })
+        useConfigStore.getState().setRuntimeTransportState({
+          phase: "connected",
+          reason: null,
+          updatedAt: Date.now(),
         })
         for (const dir of childStores.children.keys()) {
           triggerDirectoryResync(dir)
@@ -1844,6 +1884,62 @@ export function SyncProvider(props: {
       pipeline.cleanup()
     }
   }, [props.sdk, childStores, routingIndex, messageStreamTransport, triggerDirectoryResync])
+
+  // Browser-level online/offline observability for the narrow
+  // `runtimeTransportState` field. The pipeline itself only reads
+  // `navigator.onLine` synchronously inside `computeRetryDelay`; it does NOT
+  // install `online`/`offline` listeners, so subscribing here is safe and
+  // non-conflicting. The existing `connectionPhase`/`isConnected` readiness
+  // gating is intentionally NOT touched by these handlers — they only
+  // adjust the per-hop narrow state.
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return
+    }
+
+    const handleOffline = () => {
+      const current = useConfigStore.getState().runtimeTransportState.phase
+      if (current === "offline") {
+        return
+      }
+      if (
+        current === "connected"
+        || current === "connecting"
+        || current === "reconnecting"
+        || current === "disconnected"
+      ) {
+        preOfflinePhaseRef.current = current
+        useConfigStore.getState().setRuntimeTransportState({
+          phase: "offline",
+          reason: "offline",
+          updatedAt: Date.now(),
+        })
+      }
+    }
+
+    const handleOnline = () => {
+      const restored = preOfflinePhaseRef.current
+      preOfflinePhaseRef.current = null
+      if (restored === null || restored === "offline") {
+        // No recorded pre-offline phase, or the pre-offline state was
+        // already `offline` — let the event pipeline's `onReconnect`
+        // eventually set the narrow state to `connected`.
+        return
+      }
+      useConfigStore.getState().setRuntimeTransportState({
+        phase: restored,
+        reason: null,
+        updatedAt: Date.now(),
+      })
+    }
+
+    window.addEventListener("offline", handleOffline)
+    window.addEventListener("online", handleOnline)
+    return () => {
+      window.removeEventListener("offline", handleOffline)
+      window.removeEventListener("online", handleOnline)
+    }
+  }, [])
 
   useEffect(() => {
     let stopped = false
