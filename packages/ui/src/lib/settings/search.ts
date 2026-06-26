@@ -2,7 +2,7 @@ import type { I18nKey } from '@/lib/i18n/store';
 import type { SettingsPageSlug, SettingsRuntimeContext } from './metadata';
 import { getSettingsPageMeta } from './metadata';
 
-export interface SettingsSearchItem {
+interface SettingsSearchItem {
   id: string;
   page: SettingsPageSlug;
   titleKey: I18nKey;
@@ -17,12 +17,12 @@ export interface SettingsSearchResult extends SettingsSearchItem {
   pageTitle: string;
 }
 
-export interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
+interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
   isMobile: boolean;
   isDesktopLocalOrigin: boolean;
 }
 
-export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
+const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   {
     id: 'appearance.language',
     page: 'appearance',
@@ -374,6 +374,12 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['worktree', 'branch', 'repository'],
   },
   {
+    id: 'projects.worktree.setup.wait',
+    page: 'projects',
+    titleKey: 'settings.openchamber.worktrees.setup.waitForCommands',
+    keywords: ['worktree', 'setup commands', 'bootstrap', 'wait'],
+  },
+  {
     id: 'remote-instances.client-auth',
     page: 'remote-instances',
     titleKey: 'settings.remoteInstances.clientAuth.title',
@@ -427,6 +433,13 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'agents',
     titleKey: 'settings.agents.page.field.overrideModel',
     keywords: ['model', 'provider'],
+  },
+  {
+    id: 'agents.variant',
+    page: 'agents',
+    titleKey: 'settings.agents.page.field.variant',
+    descriptionKey: 'settings.agents.page.field.variantTooltip',
+    keywords: ['thinking', 'reasoning', 'variant', 'depth'],
   },
   {
     id: 'agents.temperature',

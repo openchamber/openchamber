@@ -394,8 +394,14 @@ describe('runtimeFetch header sanitization', () => {
     expect(result).toBeFalsy();
   });
 
-  test('sanitizeHeadersForBrowser always encodes directory hints with marker', () => {
+  test('sanitizeHeadersForBrowser leaves Latin-1 directory hints unchanged', () => {
     const path = 'C:\\work\\foo%20bar';
+    const result = sanitizeHeadersForBrowser({ 'x-opencode-directory': path });
+    expect(result).toBeFalsy();
+  });
+
+  test('sanitizeHeadersForBrowser encodes non-Latin-1 directory hints with marker', () => {
+    const path = 'D:\\文件夹';
     const result = sanitizeHeadersForBrowser({ 'x-opencode-directory': path });
     expect(result).toBeTruthy();
     const encoded = Object.fromEntries(result!);

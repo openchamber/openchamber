@@ -685,12 +685,6 @@ function deleteAgent(agentName, workingDirectory, scope) {
 }
 
 export {
-  ensureProjectAgentDir,
-  getProjectAgentPath,
-  getUserAgentPath,
-  getAgentScope,
-  getAgentWritePath,
-  getAgentPermissionSource,
   getAgentSources,
   getAgentConfig,
   createAgent,

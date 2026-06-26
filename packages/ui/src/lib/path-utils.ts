@@ -33,7 +33,7 @@ export const isAbsoluteFilePath = (value: string | null | undefined): boolean =>
   return normalized.startsWith('/') || WINDOWS_DRIVE_ABSOLUTE_PATTERN.test(normalized);
 };
 
-export const toComparableFilePath = (value: string | null | undefined): string => {
+const toComparableFilePath = (value: string | null | undefined): string => {
   const normalized = normalizeFilePath(value);
   return WINDOWS_DRIVE_ABSOLUTE_PATTERN.test(normalized) || normalized.startsWith('//')
     ? normalized.toLowerCase()

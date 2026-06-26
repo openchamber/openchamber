@@ -99,9 +99,9 @@ const shouldAttachRuntimeAuth = (input: string | URL | Request): boolean => {
 // Headers API only accepts ISO-8859-1 (Latin-1) characters. Any value containing
 // characters outside \u0000-\u00FF causes "Failed to construct/set 'Headers':
 // String contains non ISO-8859-1 code point." Encode those values so they round-trip
-// safely through the browser's Headers API. Directory hints are always encoded
-// with an explicit marker header so the server decodes only values produced by
-// this transport and preserves literal percent sequences from direct clients.
+// safely through the browser's Headers API. Directory hints get an explicit marker
+// only when encoded, so plain ASCII paths remain compatible with routes that read
+// the header directly.
 export const isLatin1Safe = (value: string): boolean => {
   for (let i = 0; i < value.length; i += 1) {
     if (value.charCodeAt(i) > 0xFF) return false;
@@ -109,9 +109,7 @@ export const isLatin1Safe = (value: string): boolean => {
   return true;
 };
 
-const shouldEncodeHeaderValue = (key: string, value: string): boolean => (
-  key.toLowerCase() === 'x-opencode-directory' || !isLatin1Safe(value)
-);
+const shouldEncodeHeaderValue = (_key: string, value: string): boolean => !isLatin1Safe(value);
 
 export const sanitizeHeadersForBrowser = (init?: HeadersInit): [string, string][] | undefined => {
   if (!init) return undefined;

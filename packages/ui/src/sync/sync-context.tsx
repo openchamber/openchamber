@@ -9,7 +9,7 @@ import { createEventPipeline } from "./event-pipeline"
 import { isVSCodeRuntime } from "@/lib/desktop"
 import { isMobileSurfaceRuntime } from "@/lib/runtimeSurface"
 import { reduceGlobalEvent, applyGlobalProject, applyDirectoryEvent } from "./event-reducer"
-import { useGlobalSyncStore, type GlobalSyncStore } from "./global-sync-store"
+import { useGlobalSyncStore } from "./global-sync-store"
 import { ChildStoreManager, type DirectoryStore } from "./child-store"
 import {
   aggregateLiveSessions,
@@ -148,35 +148,6 @@ export function useAllSessionStatuses(): Record<string, SessionStatus> {
   return useLiveSyncSelector(
     useCallback((states) => aggregateLiveSessionStatuses(states), []),
     areStatusMapsEquivalent,
-  )
-}
-
-type LiveSessionStatusCounts = {
-  running: number
-}
-
-const EMPTY_LIVE_SESSION_STATUS_COUNTS: LiveSessionStatusCounts = { running: 0 }
-
-const isRunningSessionStatus = (status: SessionStatus | undefined): boolean => (
-  status?.type === "busy" || status?.type === "retry"
-)
-
-const areLiveSessionStatusCountsEquivalent = (left: LiveSessionStatusCounts, right: LiveSessionStatusCounts): boolean => (
-  left.running === right.running
-)
-
-export function useLiveSessionStatusCounts(): LiveSessionStatusCounts {
-  return useLiveSyncSelector(
-    useCallback((states) => {
-      let running = 0
-      for (const state of states) {
-        for (const status of Object.values(state.session_status ?? {})) {
-          if (isRunningSessionStatus(status)) running += 1
-        }
-      }
-      return running === 0 ? EMPTY_LIVE_SESSION_STATUS_COUNTS : { running }
-    }, []),
-    areLiveSessionStatusCountsEquivalent,
   )
 }
 
@@ -2047,16 +2018,6 @@ export function SyncProvider(props: {
 // Hooks
 // ---------------------------------------------------------------------------
 
-/** Access the global sync store */
-export function useGlobalSync() {
-  return useGlobalSyncStore()
-}
-
-/** Access the global sync store with a selector */
-export function useGlobalSyncSelector<T>(selector: (state: GlobalSyncStore) => T): T {
-  return useGlobalSyncStore(selector)
-}
-
 /**
  * Get the child store for a directory (defaults to current).
  *
@@ -2081,17 +2042,6 @@ export function useDirectorySync<T>(selector: (state: State) => T, directory?: s
   return useStore(store, selector)
 }
 
-/** Get the revert messageID for a session (if reverted) */
-export function useSessionRevertMessageID(sessionID: string, directory?: string): string | undefined {
-  return useDirectorySync(
-    useCallback((state: State) => {
-      const session = state.session.find((s) => s.id === sessionID)
-      return (session as { revert?: { messageID?: string } } | undefined)?.revert?.messageID
-    }, [sessionID]),
-    directory,
-  )
-}
-
 /** Get session messages for a specific session */
 export function useSessionMessages(sessionID: string, directory?: string) {
   const store = useDirectoryStore(directory)
@@ -2104,19 +2054,6 @@ export function useSessionMessages(sessionID: string, directory?: string) {
     return store.subscribe(notify)
   }, [sessionID, store])
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
-}
-
-/**
- * Get visible session messages — filters out reverted messages.
- * Filters out reverted messages (id >= session.revert.messageID).
- */
-export function useVisibleSessionMessages(sessionID: string, directory?: string) {
-  const messages = useSessionMessages(sessionID, directory)
-  const revertMessageID = useSessionRevertMessageID(sessionID, directory)
-  return useMemo(() => {
-    if (!revertMessageID) return messages
-    return messages.filter((m) => m.id < revertMessageID)
-  }, [messages, revertMessageID])
 }
 
 /** Check whether the message list for a session has been loaded into sync state. */
@@ -2251,116 +2188,6 @@ export function useParentSession(sessionID: string | null, directory?: string): 
     }, [sessionID]),
     directory,
   )
-}
-
-const getSidebarSessionSignature = (session: Session, stableUpdatedAt: number): string => {
-  const directory = (session as Session & { directory?: string | null }).directory ?? ''
-  const parentID = (session as Session & { parentID?: string | null }).parentID ?? ''
-  const projectWorktree = (session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? ''
-  const shared = session.share?.url ?? ''
-  return [
-    session.id,
-    session.title ?? '',
-    session.time?.created ?? 0,
-    session.time?.archived ? 1 : 0,
-    directory,
-    parentID,
-    projectWorktree,
-    shared,
-    stableUpdatedAt,
-  ].join('|')
-}
-
-/** Get sessions stabilized for sidebar tree rendering */
-export function useSidebarSessions(directory?: string): Session[] {
-  const store = useDirectoryStore(directory)
-  const cacheRef = React.useRef<{
-    source: Session[]
-    streamingSignature: string
-    array: Session[]
-    signatures: Map<string, string>
-    sessionsById: Map<string, Session>
-    stableUpdatedAtById: Map<string, number>
-    streamingById: Map<string, boolean>
-  } | null>(null)
-
-  const getSnapshot = React.useCallback(() => {
-    const state = store.getState()
-    const source = state.session
-    const cached = cacheRef.current
-    const streamingSignature = source
-      .map((session) => {
-        const statusType = state.session_status?.[session.id]?.type
-        const isStreaming = statusType === 'busy' || statusType === 'retry'
-        return `${session.id}:${isStreaming ? 1 : 0}`
-      })
-      .join('|')
-
-    if (cached && cached.source === source && cached.streamingSignature === streamingSignature) {
-      return cached.array
-    }
-
-    const signatures = new Map<string, string>()
-    const sessionsById = new Map<string, Session>()
-    const stableUpdatedAtById = new Map<string, number>()
-    const streamingById = new Map<string, boolean>()
-    let changed = !cached || cached.array.length !== source.length
-
-    const array = source.map((session) => {
-      const rawUpdatedAt = Number(session.time?.updated ?? session.time?.created ?? 0)
-      const statusType = state.session_status?.[session.id]?.type
-      const isStreaming = statusType === 'busy' || statusType === 'retry'
-      const cachedUpdatedAt = cached?.stableUpdatedAtById.get(session.id) ?? rawUpdatedAt
-      const wasStreaming = cached?.streamingById.get(session.id) ?? false
-      const stableUpdatedAt = isStreaming
-        ? (wasStreaming ? cachedUpdatedAt : Math.max(rawUpdatedAt, cachedUpdatedAt, Date.now()))
-        : Math.max(rawUpdatedAt, cachedUpdatedAt)
-      const signature = getSidebarSessionSignature(session, stableUpdatedAt)
-      signatures.set(session.id, signature)
-      stableUpdatedAtById.set(session.id, stableUpdatedAt)
-      streamingById.set(session.id, isStreaming)
-
-      const cachedSession = cached?.sessionsById.get(session.id)
-      if (
-        cachedSession
-        && cached?.signatures.get(session.id) === signature
-      ) {
-        sessionsById.set(session.id, cachedSession)
-        return cachedSession
-      }
-
-      changed = true
-      const nextSession = stableUpdatedAt === rawUpdatedAt
-        ? session
-        : {
-            ...session,
-            time: {
-              ...session.time,
-              updated: stableUpdatedAt,
-            },
-          }
-      sessionsById.set(session.id, nextSession)
-      return nextSession
-    })
-
-    if (!changed && cached) {
-      cacheRef.current = {
-        source,
-        streamingSignature,
-        array: cached.array,
-        signatures,
-        sessionsById: cached.sessionsById,
-        stableUpdatedAtById,
-        streamingById,
-      }
-      return cached.array
-    }
-
-    cacheRef.current = { source, streamingSignature, array, signatures, sessionsById, stableUpdatedAtById, streamingById }
-    return array
-  }, [store])
-
-  return React.useSyncExternalStore(store.subscribe, getSnapshot, getSnapshot)
 }
 
 /** Get one session by id for a directory */
@@ -2805,41 +2632,6 @@ export function useEnsureSessionMessages(sessionID: string, directory?: string) 
     })()
   }, [sessionID, store, resolvedDirectory])
 }
-
-/**
- * Determines if a session is actively working.
- * Checks session_status and only falls back to incomplete assistant messages
- * when authoritative status is missing.
- * Returns false when permissions are pending (permission indicator takes priority).
- */
-export function useIsSessionWorking(sessionID: string, directory?: string): boolean {
-  const status = useSessionStatus(sessionID, directory)
-  const permissions = useSessionPermissions(sessionID, directory)
-  const messages = useSessionMessages(sessionID, directory)
-
-  return useMemo(() => {
-    // Permissions pending → not "working" (show permission indicator instead)
-    if (permissions.length > 0) return false
-
-    // Check session_status
-    const hasAuthoritativeStatus = status !== undefined
-    const statusWorking = hasAuthoritativeStatus && status.type !== "idle"
-
-    // Check for incomplete assistant message (fallback if status event delayed)
-    let hasPendingAssistant = false
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i]
-      if (m.role === "assistant" && typeof (m as { time?: { completed?: number } }).time?.completed !== "number") {
-        hasPendingAssistant = true
-        break
-      }
-    }
-
-    if (hasAuthoritativeStatus) return statusWorking
-    return hasPendingAssistant
-  }, [status, permissions, messages])
-}
-
 const EMPTY_MESSAGES: Message[] = []
 const EMPTY_PARTS: Part[] = []
 const EMPTY_PERMISSION_REQUESTS: PermissionRequest[] = []

@@ -5,7 +5,7 @@ import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import type { IconName } from "@/components/icon/icons";
 
 type ThemeVariant = 'light' | 'dark';
-export type ProjectIconImageOptions = { themeVariant?: ThemeVariant; iconColor?: string };
+type ProjectIconImageOptions = { themeVariant?: ThemeVariant; iconColor?: string };
 
 const PROJECT_ICON_OBJECT_URL_CACHE_LIMIT = 200;
 
@@ -150,7 +150,7 @@ const loadProjectIconObjectUrl = (
   return promise;
 };
 
-export const useProjectIconImageObjectUrl = (
+const useProjectIconImageObjectUrl = (
   project: Pick<ProjectEntry, 'id' | 'iconImage'>,
   options?: ProjectIconImageOptions,
 ): string | null => {

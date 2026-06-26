@@ -180,6 +180,28 @@ describe('project directory runtime', () => {
       expect(result).toEqual({ directory: rawPath, error: null });
     });
 
+    it('falls back to query directory when an unmarked encoded header is invalid', async () => {
+      const validPath = '/home/user/workspace/project';
+      const runtime = createTestRuntime({
+        fsPromises: {
+          stat: async (p) => {
+            if (p === validPath) return { isDirectory: () => true };
+            throw { code: 'ENOENT' };
+          },
+          realpath: async (p) => p,
+        },
+      });
+
+      const req = {
+        get: (header) => header === 'x-opencode-directory' ? encodeURIComponent(validPath) : null,
+        query: { directory: validPath },
+      };
+
+      const result = await runtime.resolveProjectDirectory(req);
+
+      expect(result).toEqual({ directory: validPath, error: null });
+    });
+
     it('resolves symlinks in query directory parameter', async () => {
       const runtime = createTestRuntime({
         fsPromises: {

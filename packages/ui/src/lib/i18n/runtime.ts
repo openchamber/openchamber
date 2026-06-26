@@ -65,7 +65,7 @@ export function normalizeLocale(value: string | undefined | null): Locale {
   return DEFAULT_LOCALE;
 }
 
-export function readStoredLocale(): Locale | undefined {
+function readStoredLocale(): Locale | undefined {
   if (typeof window === 'undefined') {
     return undefined;
   }

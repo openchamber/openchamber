@@ -10,23 +10,6 @@ const PATCH_DIFF_CACHE_LIMIT = 64;
 const DEFAULT_PATCH_CONTEXT_LINES = 3;
 const patchFileDiffCache = new Map<string, FileDiffMetadata>();
 
-export const fileDiffFromContent = (
-  file: string,
-  before: string,
-  after: string,
-  contextLines = DEFAULT_PATCH_CONTEXT_LINES
-): FileDiffMetadata => {
-  if (!before && !after) {
-    return emptyFileDiff(file);
-  }
-
-  return parseDiffFromFile(
-    { name: file, contents: before },
-    { name: file, contents: after },
-    { context: contextLines },
-  );
-};
-
 export const fileDiffFromPatch = (
   file: string,
   patch: string,

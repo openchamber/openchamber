@@ -3,7 +3,7 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { dedupeSessionsById, getArchivedScopeKey, isSessionRelatedToProject, normalizePath, resolveArchivedFolderName } from '../utils';
 
-export type ProjectForArchivedFolders = {
+type ProjectForArchivedFolders = {
   normalizedPath: string;
 };
 

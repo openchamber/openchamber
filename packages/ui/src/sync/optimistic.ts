@@ -7,25 +7,9 @@ function sortParts(parts: Part[]) {
   return parts.filter((part) => !!part?.id).sort((a, b) => cmp(a.id, b.id))
 }
 
-export type OptimisticStore = {
-  message: Record<string, Message[] | undefined>
-  part: Record<string, Part[] | undefined>
-}
-
 export type OptimisticItem = {
   message: Message
   parts: Part[]
-}
-
-export type OptimisticAddInput = {
-  sessionID: string
-  message: Message
-  parts: Part[]
-}
-
-export type OptimisticRemoveInput = {
-  sessionID: string
-  messageID: string
 }
 
 export type MessagePage = {
@@ -84,30 +68,6 @@ export function mergeOptimisticPage(page: MessagePage, items: OptimisticItem[]) 
       .map(([id, part]) => ({ id, part })),
     confirmed,
   }
-}
-
-/** Apply optimistic add to a mutable draft (for immer/produce) */
-export function applyOptimisticAdd(draft: OptimisticStore, input: OptimisticAddInput) {
-  const messages = draft.message[input.sessionID]
-  if (messages) {
-    const result = Binary.search(messages, input.message.id, (m) => m.id)
-    if (!result.found) {
-      messages.splice(result.index, 0, input.message)
-    }
-  } else {
-    draft.message[input.sessionID] = [input.message]
-  }
-  draft.part[input.message.id] = sortParts(input.parts)
-}
-
-/** Apply optimistic remove to a mutable draft (for immer/produce) */
-export function applyOptimisticRemove(draft: OptimisticStore, input: OptimisticRemoveInput) {
-  const messages = draft.message[input.sessionID]
-  if (messages) {
-    const result = Binary.search(messages, input.messageID, (m) => m.id)
-    if (result.found) messages.splice(result.index, 1)
-  }
-  delete draft.part[input.messageID]
 }
 
 /** Merge two sorted message arrays by id, deduplicating.

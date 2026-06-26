@@ -1,30 +1,3 @@
-/**
- * Google Provider
- *
- * Google quota provider implementation.
- * @module quota/providers/google
- */
-
-export {
-  resolveGoogleOAuthClient,
-  resolveGeminiCliAuth,
-  resolveAntigravityAuth,
-  resolveGoogleAuthSources,
-  DEFAULT_PROJECT_ID
-} from './auth.js';
-
-export {
-  resolveGoogleWindow,
-  transformQuotaBucket,
-  transformModelData
-} from './transforms.js';
-
-export {
-  refreshGoogleAccessToken,
-  fetchGoogleQuotaBuckets,
-  fetchGoogleModels
-} from './api.js';
-
 import { buildResult } from '../../utils/index.js';
 import {
   resolveGoogleAuthSources,

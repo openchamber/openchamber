@@ -18,6 +18,7 @@ type FilesViewTabsActions = {
   addOpenPath: (root: string, path: string, options?: { allowOutsideRoot?: boolean }) => void;
   removeOpenPath: (root: string, path: string) => void;
   removeOpenPathsByPrefix: (root: string, prefixPath: string) => void;
+  removeExpandedPathsByPrefix: (root: string, prefixPath: string) => void;
   setSelectedPath: (root: string, path: string | null, options?: { allowOutsideRoot?: boolean }) => void;
   ensureSelectedPath: (root: string) => void;
   toggleExpandedPath: (root: string, path: string) => void;
@@ -262,6 +263,43 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
                 ...current,
                 openPaths,
                 selectedPath,
+                touchedAt: Date.now(),
+              },
+            };
+
+            return { byRoot: clampRoots(byRoot, 20) };
+          });
+        },
+
+        removeExpandedPathsByPrefix: (root, prefixPath) => {
+          const normalizedRoot = normalizePath((root || '').trim());
+          const normalizedPrefix = normalizePath((prefixPath || '').trim());
+          if (!normalizedRoot || !normalizedPrefix) {
+            return;
+          }
+
+          set((state) => {
+            const current = state.byRoot[normalizedRoot];
+            if (!current) {
+              return state;
+            }
+
+            const comparablePrefix = toComparablePath(normalizedPrefix);
+            const comparablePrefixWithSlash = comparablePrefix.endsWith('/') ? comparablePrefix : `${comparablePrefix}/`;
+            const expandedPaths = current.expandedPaths.filter((candidate) => {
+              const comparablePath = toComparablePath(candidate);
+              return comparablePath !== comparablePrefix && !comparablePath.startsWith(comparablePrefixWithSlash);
+            });
+
+            if (expandedPaths.length === current.expandedPaths.length) {
+              return state;
+            }
+
+            const byRoot = {
+              ...state.byRoot,
+              [normalizedRoot]: {
+                ...current,
+                expandedPaths,
                 touchedAt: Date.now(),
               },
             };

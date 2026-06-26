@@ -9,11 +9,11 @@ type DesktopBridgeGlobal = {
   ) => Promise<() => void>;
 };
 
-export type DesktopSshRemoteMode = 'managed' | 'external';
-export type DesktopSshInstallMethod = 'npm' | 'bun' | 'download_release' | 'upload_bundle';
-export type DesktopSshSecretStore = 'never' | 'settings';
+type DesktopSshRemoteMode = 'managed' | 'external';
+type DesktopSshInstallMethod = 'npm' | 'bun' | 'download_release' | 'upload_bundle';
+type DesktopSshSecretStore = 'never' | 'settings';
 
-export type DesktopSshStoredSecret = {
+type DesktopSshStoredSecret = {
   enabled: boolean;
   value?: string;
   store: DesktopSshSecretStore;
@@ -62,7 +62,7 @@ export type DesktopSshInstancesConfig = {
   instances: DesktopSshInstance[];
 };
 
-export type DesktopSshPhase =
+type DesktopSshPhase =
   | 'idle'
   | 'config_resolved'
   | 'auth_check'

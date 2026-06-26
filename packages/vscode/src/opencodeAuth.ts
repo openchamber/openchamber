@@ -63,10 +63,3 @@ export const getProviderAuth = (providerId: string): AuthEntry | null => {
   const auth = readAuthFile();
   return auth[providerId] || null;
 };
-
-export const listProviderAuths = (): string[] => {
-  const auth = readAuthFile();
-  return Object.keys(auth);
-};
-
-export { AUTH_FILE, OPENCODE_DATA_DIR };
