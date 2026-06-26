@@ -10,6 +10,7 @@ import { pathToFileURL } from 'url';
 import { isModuleCliExecution, normalizeCliEntryPath } from './cli-entry.js';
 import { requestJson } from './lib/cli-http.js';
 import { inspectTunnelAttachability } from './lib/cli-lifecycle.js';
+import { parseLingerState } from './lib/cli-startup.js';
 import {
   assertAuthenticatedNetworkExposure,
   commands,
@@ -870,5 +871,33 @@ describe('lifecycle commands with unmanaged explicit ports', () => {
         await server.close();
       }
     });
+  });
+});
+
+describe('parseLingerState', () => {
+  it('returns true when lingering is enabled', () => {
+    expect(parseLingerState('Linger=yes')).toBe(true);
+  });
+
+  it('returns false when lingering is disabled', () => {
+    expect(parseLingerState('Linger=no')).toBe(false);
+  });
+
+  it('parses the Linger property among other loginctl output lines', () => {
+    expect(parseLingerState('UID=1000\nName=alice\nLinger=no\nState=active')).toBe(false);
+  });
+
+  it('tolerates a trailing carriage return', () => {
+    expect(parseLingerState('Linger=yes\r\n')).toBe(true);
+  });
+
+  it('returns null when the Linger property is absent', () => {
+    expect(parseLingerState('UID=1000\nState=active')).toBe(null);
+  });
+
+  it('returns null for empty or non-string input', () => {
+    expect(parseLingerState('')).toBe(null);
+    expect(parseLingerState(undefined)).toBe(null);
+    expect(parseLingerState(null)).toBe(null);
   });
 });

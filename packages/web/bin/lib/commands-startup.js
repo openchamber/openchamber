@@ -46,7 +46,10 @@ async function startupCommand(options, action = 'status') {
   }
 
   if (isQuietMode(options)) {
-    process.stdout.write(`startup ${result.enabled ? 'enabled' : 'disabled'} platform:${result.platform} supported:${result.supported ? 'yes' : 'no'}${result.servicePath ? ` path:${result.servicePath}` : ''}\n`);
+    const lingerToken = result.platform === 'linux'
+      ? ` linger:${result.lingerEnabled === true ? 'yes' : result.lingerEnabled === false ? 'no' : 'unknown'}`
+      : '';
+    process.stdout.write(`startup ${result.enabled ? 'enabled' : 'disabled'} platform:${result.platform} supported:${result.supported ? 'yes' : 'no'}${result.servicePath ? ` path:${result.servicePath}` : ''}${lingerToken}\n`);
     return;
   }
 
@@ -57,6 +60,10 @@ async function startupCommand(options, action = 'status') {
   }
   if (normalized === 'enable') {
     logStatus('info', 'service command', 'openchamber serve --foreground');
+  }
+  if (result.platform === 'linux' && result.enabled && result.lingerEnabled === false) {
+    logStatus('warning', 'user lingering disabled', 'service may stop when you log out');
+    logStatus('info', '[ENABLE_LINGER]', `sudo loginctl enable-linger ${result.lingerUser || '<username>'}`);
   }
   clackOutro(normalized === 'status' ? 'status complete' : `${normalized} complete`);
 }
