@@ -8,6 +8,7 @@ import { setActionRefs, setOptimisticRefs } from './session-actions';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useUIStore } from '@/stores/useUIStore';
 
 /**
  * Unit tests for session worktree routing through the authoritative store.
@@ -380,5 +381,124 @@ describe('routeMessage skill invocation', () => {
 
     expect(sendMessageCalls).toHaveLength(1);
     expect(sendCommandCalls).toHaveLength(0);
+  });
+});
+
+describe('routeMessage with stripSlashOnSubmit', () => {
+  const sendCommandCalls = [];
+  const sendMessageCalls = [];
+  let originalSendCommand;
+  let originalSendMessage;
+  let originalStripSlash;
+
+  beforeEach(() => {
+    sendCommandCalls.length = 0;
+    sendMessageCalls.length = 0;
+
+    const childStore = {
+      getState: () => ({ session_status: {} }),
+      setState: () => {},
+    };
+    const childStores = {
+      children: new Map(),
+      ensureChild: () => childStore,
+      getChild: () => childStore,
+    };
+    setActionRefs(opencodeClient, childStores, () => '/skills/project');
+    setOptimisticRefs(() => {}, () => {});
+    useConfigStore.setState({ isConnected: true });
+    useCommandsStore.setState({ commands: [] });
+    useSkillsStore.setState({ skills: [] });
+
+    originalStripSlash = useUIStore.getState().stripSlashOnSubmit;
+    originalSendCommand = opencodeClient.sendCommand;
+    originalSendMessage = opencodeClient.sendMessage;
+    opencodeClient.sendCommand = async (params) => {
+      sendCommandCalls.push(params);
+      return 'msg';
+    };
+    opencodeClient.sendMessage = async (params) => {
+      sendMessageCalls.push(params);
+      return 'msg';
+    };
+  });
+
+  afterEach(() => {
+    opencodeClient.sendCommand = originalSendCommand;
+    opencodeClient.sendMessage = originalSendMessage;
+    useUIStore.setState({ stripSlashOnSubmit: originalStripSlash });
+    useSkillsStore.setState({ skills: [] });
+  });
+
+  test('setting off + known skill → invokes sendCommand', async () => {
+    useUIStore.setState({ stripSlashOnSubmit: false });
+    useSkillsStore.setState({
+      skills: [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }],
+    });
+
+    await routeMessage({
+      sessionId: 'session-skill',
+      directory: '/skills/project',
+      content: '/grill-with-docs',
+      providerID: 'provider-a',
+      modelID: 'model-a',
+    });
+
+    expect(sendCommandCalls).toHaveLength(1);
+    expect(sendCommandCalls[0].command).toBe('grill-with-docs');
+    expect(sendMessageCalls).toHaveLength(0);
+  });
+
+  test('setting on + known skill → sends as plain message without leading slash', async () => {
+    useUIStore.setState({ stripSlashOnSubmit: true });
+    useSkillsStore.setState({
+      skills: [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }],
+    });
+
+    await routeMessage({
+      sessionId: 'session-skill',
+      directory: '/skills/project',
+      content: '/grill-with-docs',
+      providerID: 'provider-a',
+      modelID: 'model-a',
+    });
+
+    expect(sendCommandCalls).toHaveLength(0);
+    expect(sendMessageCalls).toHaveLength(1);
+    expect(sendMessageCalls[0].text).toBe('grill-with-docs');
+  });
+
+  test('setting on + "/skill args" → strips slash and preserves arguments', async () => {
+    useUIStore.setState({ stripSlashOnSubmit: true });
+    useSkillsStore.setState({
+      skills: [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }],
+    });
+
+    await routeMessage({
+      sessionId: 'session-skill',
+      directory: '/skills/project',
+      content: '/grill-with-docs focus on auth',
+      providerID: 'provider-a',
+      modelID: 'model-a',
+    });
+
+    expect(sendCommandCalls).toHaveLength(0);
+    expect(sendMessageCalls).toHaveLength(1);
+    expect(sendMessageCalls[0].text).toBe('grill-with-docs focus on auth');
+  });
+
+  test('setting on + bare "/" without attachments → no sendCommand, no sendMessage', async () => {
+    useUIStore.setState({ stripSlashOnSubmit: true });
+
+    await routeMessage({
+      sessionId: 'session-skill',
+      directory: '/skills/project',
+      content: '/',
+      providerID: 'provider-a',
+      modelID: 'model-a',
+    });
+
+    expect(sendCommandCalls).toHaveLength(0);
+    expect(sendMessageCalls).toHaveLength(0);
   });
 });

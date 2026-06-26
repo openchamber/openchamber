@@ -1062,6 +1062,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const inputBarOffset = useUIStore((state) => state.inputBarOffset);
     const persistChatDraft = useUIStore((state) => state.persistChatDraft);
     const inputSpellcheckEnabled = useUIStore((state) => state.inputSpellcheckEnabled);
+    const stripSlashOnSubmit = useUIStore((state) => state.stripSlashOnSubmit);
     const isExpandedInput = useUIStore((state) => state.isExpandedInput);
     const setExpandedInput = useUIStore((state) => state.setExpandedInput);
     const setTimelineDialogOpen = useUIStore((state) => state.setTimelineDialogOpen);
@@ -1953,7 +1954,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         // Handle local slash commands only in normal mode
         const normalizedCommand = primaryText.trimStart();
-        if (inputMode === 'normal' && normalizedCommand.startsWith('/')) {
+        // When stripSlashOnSubmit is enabled (and we're in normal mode), skip
+        // all built-in slash command handling — strip the leading slash and
+        // fall through to send as plain text so the user sees what they typed
+        // (no skill-prompt expansion). Shell mode is left untouched because
+        // paths like /usr/bin/foo must keep their leading slash.
+        if (inputMode === 'normal' && stripSlashOnSubmit && normalizedCommand.startsWith('/')) {
+            primaryText = primaryText.replace(/^(\s*)\/+/, '$1');
+            // Guard: bare "/" or "///" becomes empty after strip — bail out
+            if (!primaryText.trim() && primaryAttachments.length === 0 && additionalParts.length === 0) return;
+        } else if (inputMode === 'normal' && normalizedCommand.startsWith('/')) {
             const commandName = normalizedCommand
                 .slice(1)
                 .trim()
