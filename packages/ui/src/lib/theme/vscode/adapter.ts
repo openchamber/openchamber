@@ -302,6 +302,37 @@ const applyAlpha = (color: string, opacity: number): string => {
   return color;
 };
 
+// VS Code overlay tokens (chat.requestBackground, list.inactiveSelectionBackground,
+// editor.lineHighlightBackground, ...) are frequently *translucent* because VS Code
+// paints them over other surfaces. When we feed those values directly into opaque
+// surface fills (tooltip/popover/card/sidebar backgrounds) the alpha leaks through
+// and the UI text becomes unreadable. Flatten any alpha channel so these surfaces
+// render as solid backgrounds, matching the built-in theme expectations.
+const flattenAlpha = (color: string): string => {
+  const normalized = color.trim();
+  if (!normalized) return normalized;
+
+  const rgbMatch = normalized.match(
+    /^rgba?\(\s*([0-9]{1,3})\s*,\s*([0-9]{1,3})\s*,\s*([0-9]{1,3})(?:\s*,\s*([0-9.]+))?\s*\)$/i,
+  );
+  if (rgbMatch) {
+    const r = Math.min(255, Math.max(0, Number(rgbMatch[1])));
+    const g = Math.min(255, Math.max(0, Number(rgbMatch[2])));
+    const b = Math.min(255, Math.max(0, Number(rgbMatch[3])));
+    return `rgb(${r}, ${g}, ${b})`;
+  }
+
+  const hex = normalized.replace(/^#/, '');
+  if (hex.length === 4) {
+    return `#${hex.slice(0, 3)}`;
+  }
+  if (hex.length === 8) {
+    return `#${hex.slice(0, 6)}`;
+  }
+
+  return normalized;
+};
+
 const readKind = (preferred?: VSCodeThemeKind): VSCodeThemeKind => {
   if (preferred === 'light' || preferred === 'dark' || preferred === 'high-contrast') {
     return preferred;
@@ -356,23 +387,25 @@ export const buildVSCodeThemeFromPalette = (palette: VSCodeThemePalette): Theme 
   // ===========================================
   
   // Main chat background: match VS Code's chat list first, then fall back to shell surfaces.
-  const background = read('chat.list.background', read('sideBar.background', base.colors.surface.background));
+  const background = flattenAlpha(read('chat.list.background', read('sideBar.background', base.colors.surface.background)));
   
   // Main foreground text color
   const foreground = read('interactive-session.foreground', read('foreground', read('editor.foreground', base.colors.surface.foreground)));
   
-  // Elevated surfaces: panels, cards, dialogs - use editorWidget or panel
-  const elevated = read('editorWidget.background', read('panel.background', read('editor.background', base.colors.surface.elevated)));
+  // Elevated surfaces: panels, cards, dialogs, popovers, tooltips - use editorWidget or panel
+  const elevated = flattenAlpha(read('editorWidget.background', read('panel.background', read('editor.background', base.colors.surface.elevated))));
   const elevatedForeground = read('editorWidget.foreground', read('panel.foreground', foreground));
   
-  // Muted background: used for inactive/deemphasized areas - use list inactive selection
-  const muted = read('chat.requestBackground', read('list.inactiveSelectionBackground', read('editor.lineHighlightBackground', base.colors.surface.muted)));
+  // Muted background: used for inactive/deemphasized areas AND tooltip fills - use list inactive selection.
+  // Flattened because list.inactiveSelectionBackground / editor.lineHighlightBackground are usually
+  // translucent overlays in VS Code themes, which would render the tooltip background transparent.
+  const muted = flattenAlpha(read('chat.requestBackground', read('list.inactiveSelectionBackground', read('editor.lineHighlightBackground', base.colors.surface.muted))));
   
   // Muted foreground: secondary text - description foreground is perfect semantic match
   const mutedForeground = read('descriptionForeground', read('input.placeholderForeground', base.colors.surface.mutedForeground));
   
   // Subtle: used for input backgrounds, user message bubbles - input.background is the semantic match
-  const subtle = read('input.background', read('dropdown.background', elevated));
+  const subtle = flattenAlpha(read('input.background', read('dropdown.background', elevated)));
   
   // Overlay: modal backdrops, status bar
   const overlay = read('statusBar.background', base.colors.surface.overlay);
