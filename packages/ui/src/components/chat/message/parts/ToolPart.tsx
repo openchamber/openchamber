@@ -1630,7 +1630,7 @@ interface ToolExpandedContentProps {
     onShowPopup?: (content: ToolPopupContent) => void;
 }
 
-const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
+export const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     part,
     state,
     currentDirectory,

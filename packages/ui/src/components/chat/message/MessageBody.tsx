@@ -1821,6 +1821,8 @@ const AssistantMessageBody = React.memo(({
                                     },
                                 ]}
                                 animateTailText={animatedToolIdsLookup.has(toolPart.id)}
+                                isExpanded={expandedTools.has(toolPart.id)}
+                                onToggleTool={onToggleTool}
                             />
                         </ToolRevealOnMount>
                     </FadeInOnReveal>
