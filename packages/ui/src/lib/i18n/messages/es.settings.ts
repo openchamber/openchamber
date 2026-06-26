@@ -43,6 +43,7 @@ export const settingsDict = {
   "settings.page.skills.title": "Habilidades",
   "settings.page.skillsCatalog.title": "Catálogo de habilidades",
   "settings.page.git.title": "Git",
+  "settings.page.integrations.title": "Integraciones",
   "settings.page.appearance.title": "Apariencia",
   "settings.page.chat.title": "Chat",
   "settings.page.shortcuts.title": "Atajos",
