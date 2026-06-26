@@ -64,7 +64,7 @@ const parseSettings = (data: Record<string, unknown> | null): QuotaSettingsState
     : null;
   const dropdownProviderIds = rawDropdownProviders
     ? rawDropdownProviders.filter((entry): entry is QuotaProviderId =>
-        typeof entry === 'string' && allProviderIds.includes(entry as QuotaProviderId)
+        typeof entry === 'string'
       )
     : allProviderIds;
 
@@ -164,6 +164,19 @@ export const useQuotaStore = create<QuotaStore>()(
       fetchAllQuotas: async () => {
         set({ isLoading: true, error: null });
         const providerIds = QUOTA_PROVIDERS.map((provider) => provider.id);
+        try {
+          const resp = await runtimeFetch('/api/quota/providers');
+          if (resp.ok) {
+            const data = await resp.json().catch(() => null);
+            if (data?.providers) {
+              for (const id of data.providers) {
+                if (!providerIds.includes(id)) providerIds.push(id);
+              }
+            }
+          }
+        } catch (error) {
+          console.warn('Failed to fetch dynamic quota providers:', error);
+        }
         try {
           await Promise.all(
             providerIds.map((providerId) => get().fetchProviderQuota(providerId))

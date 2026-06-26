@@ -28,3 +28,30 @@ export const QUOTA_PROVIDER_MAP = QUOTA_PROVIDERS.reduce<
   acc[provider.id] = provider;
   return acc;
 }, {});
+
+export const getQuotaProviderMeta = (
+  providerId: QuotaProviderId | string,
+  providerName?: string | null
+): QuotaProviderMeta => {
+  return QUOTA_PROVIDER_MAP[providerId] ?? {
+    id: providerId as QuotaProviderId,
+    name: providerName || providerId,
+  };
+};
+
+export const mergeQuotaProviders = (
+  results: Array<{ providerId: QuotaProviderId | string; providerName?: string | null }> = []
+): QuotaProviderMeta[] => {
+  const providers = [...QUOTA_PROVIDERS];
+  const seen = new Set(providers.map((provider) => provider.id));
+
+  for (const result of results) {
+    if (seen.has(result.providerId)) {
+      continue;
+    }
+    providers.push(getQuotaProviderMeta(result.providerId, result.providerName));
+    seen.add(result.providerId);
+  }
+
+  return providers;
+};

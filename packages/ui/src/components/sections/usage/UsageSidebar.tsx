@@ -7,7 +7,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
-import { QUOTA_PROVIDERS, resolveUsageTone } from '@/lib/quota';
+import { mergeQuotaProviders, resolveUsageTone } from '@/lib/quota';
 import { useQuotaStore } from '@/stores/useQuotaStore';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useI18n } from '@/lib/i18n';
@@ -43,6 +43,7 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
   const showPredValues = useQuotaStore((state) => state.showPredValues);
   const setShowPredValues = useQuotaStore((state) => state.setShowPredValues);
   const loadUsageSettings = useQuotaStore((state) => state.loadSettings);
+  const providers = React.useMemo(() => mergeQuotaProviders(results), [results]);
 
   React.useEffect(() => {
     void loadUsageSettings();
@@ -90,7 +91,7 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
       <div className="border-b px-3 pt-4 pb-3">
         <h2 className="text-base font-semibold text-foreground mb-3">{t('settings.usage.sidebar.title')}</h2>
         <div className="flex items-center justify-between gap-2">
-          <span className="typography-meta text-muted-foreground">{t('settings.usage.sidebar.total', { count: QUOTA_PROVIDERS.length })}</span>
+          <span className="typography-meta text-muted-foreground">{t('settings.usage.sidebar.total', { count: providers.length })}</span>
           <div className="flex items-center gap-2">
             <Tooltip>
               <TooltipTrigger asChild>
@@ -157,7 +158,7 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
       </div>
 
       <ScrollableOverlay outerClassName="flex-1 min-h-0" className="space-y-1 px-3 py-2 overflow-x-hidden">
-        {QUOTA_PROVIDERS.map((provider) => {
+        {providers.map((provider) => {
           const result = results.find((entry) => entry.providerId === provider.id);
           const percent = getUsagePercent(result?.usage);
           const tone = resolveUsageTone(percent);

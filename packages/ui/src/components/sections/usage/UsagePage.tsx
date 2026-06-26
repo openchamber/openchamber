@@ -2,7 +2,7 @@ import React from 'react';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Checkbox } from '@/components/ui/checkbox';
 import { UsageCard } from './UsageCard';
-import { QUOTA_PROVIDERS } from '@/lib/quota';
+import { QUOTA_PROVIDERS, getQuotaProviderMeta } from '@/lib/quota';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
@@ -70,7 +70,9 @@ export const UsagePage: React.FC = () => {
 
   const selectedResult = results.find((entry) => entry.providerId === selectedProviderId) ?? null;
 
-  const providerMeta = QUOTA_PROVIDERS.find((provider) => provider.id === selectedProviderId);
+  const providerMeta = selectedProviderId
+    ? getQuotaProviderMeta(selectedProviderId, selectedResult?.providerName)
+    : null;
   const providerName = providerMeta?.name ?? selectedProviderId ?? t('settings.usage.sidebar.title');
   const usage = selectedResult?.usage;
   const showInDropdown = selectedProviderId ? dropdownProviderIds.includes(selectedProviderId) : false;

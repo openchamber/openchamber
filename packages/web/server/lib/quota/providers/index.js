@@ -22,6 +22,7 @@ import * as minimaxCodingPlan from './minimax-coding-plan.js';
 import * as minimaxCnCodingPlan from './minimax-cn-coding-plan.js';
 import * as ollamaCloud from './ollama-cloud.js';
 import * as wafer from './wafer.js';
+import { loadQuotaPlugins } from '../../plugins/loader.js';
 
 const registry = {
   claude: {
@@ -115,6 +116,21 @@ const registry = {
     fetchQuota: wafer.fetchQuota
   }
 };
+
+// Load user quota plugins from ~/.config/openchamber/plugins/quota/.
+// Wrapped in try/catch so a failure in plugin loading (filesystem errors,
+// malformed plugin modules, internal module resolution problems) can never
+// take down the entire built-in quota registry. Built-in providers keep
+// working; plugins are silently skipped.
+let pluginProviders = {};
+try {
+  pluginProviders = await loadQuotaPlugins();
+} catch (err) {
+  console.warn('[openchamber:quota] Failed to load quota plugins:', err);
+}
+if (Object.keys(pluginProviders).length > 0) {
+  Object.assign(registry, pluginProviders);
+}
 
 export const listConfiguredQuotaProviders = () => {
   const configured = [];

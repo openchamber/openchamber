@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { pathToFileURL } from 'node:url';
 
 type AuthEntry = Record<string, unknown> | string;
 type AuthFile = Record<string, AuthEntry>;
@@ -124,6 +125,7 @@ const OPENCODE_CONFIG_DIR = path.join(os.homedir(), '.config', 'opencode');
 const OPENCODE_DATA_DIR = path.join(os.homedir(), '.local', 'share', 'opencode');
 const AUTH_FILE = path.join(OPENCODE_DATA_DIR, 'auth.json');
 const OLLAMA_CLOUD_COOKIE_PATH = path.join(os.homedir(), '.config', 'ollama-quota', 'cookie');
+const OPENCHAMBER_PLUGINS_DIR = path.join(os.homedir(), '.config', 'openchamber', 'plugins', 'quota');
 
 
 const ANTIGRAVITY_ACCOUNTS_PATHS = [
@@ -453,7 +455,76 @@ export const listConfiguredQuotaProviders = () => {
     configured.add('wafer');
   }
 
+  // Plugin providers from ~/.config/openchamber/plugins/quota/. Each plugin
+  // exports a default function; we don't execute plugin code (different
+  // runtime, no server context) but we read its static `providerId` and
+  // `aliases` via regex on the file text. A plugin is considered
+  // "configured" if any of its alias keys has an auth.json entry. The
+  // plugin file's own `isConfigured` and `fetchQuota` still run inside the
+  // webview bridge, which has access to the same `~/.config/opencode/auth.json`
+  // and the same plugin loader the standalone web/desktop servers use.
+  if (fs.existsSync(OPENCHAMBER_PLUGINS_DIR)) {
+    let pluginFiles: string[] = [];
+    try {
+      pluginFiles = fs.readdirSync(OPENCHAMBER_PLUGINS_DIR).filter((name) => name.endsWith('.js') || name.endsWith('.mjs'));
+    } catch (err) {
+      // Plugin directory unreadable — fall through to no plugins.
+      void err;
+    }
+    for (const file of pluginFiles) {
+      const fullPath = path.join(OPENCHAMBER_PLUGINS_DIR, file);
+      const text = readTextFile(fullPath);
+      if (!text) continue;
+      const providerId = extractPluginId(text);
+      if (!providerId) continue;
+      const aliases = extractPluginAliases(text);
+      const candidateKeys = aliases.length > 0 ? [providerId, ...aliases] : [providerId];
+      const pluginAuth = normalizeAuthEntry(getAuthEntry(auth, candidateKeys));
+      if (pluginAuth && ((pluginAuth as Record<string, unknown>).key || (pluginAuth as Record<string, unknown>).token)) {
+        configured.add(providerId);
+      }
+    }
+  }
+
   return Array.from(configured);
+};
+
+// Extracts the first `providerId: ...` value from a plugin source file.
+// Accepts a string literal (`'foo'`, `"foo"`) or a `const` reference
+// (`PROVIDER_ID`) that is also defined in the same file. Cheap, regex-
+// only; the plugin file is not executed.
+const extractPluginId = (source: string): string | null => {
+  const literal = source.match(/providerId\s*[:=]\s*['"]([^'"]+)['"]/);
+  if (literal) return literal[1];
+  const constRef = source.match(/providerId\s*[:=]\s*([A-Z][A-Z0-9_]*)/);
+  if (!constRef) return null;
+  const name = constRef[1];
+  const def = source.match(new RegExp(`(?:const|let|var)\\s+${name}\\s*=\\s*['"]([^'"]+)['"]`));
+  return def ? def[1] : null;
+};
+
+const extractStringArrayItems = (arraySource: string): string[] => {
+  const items: string[] = [];
+  const re = /['"]([^'"]+)['"]/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(arraySource)) !== null) {
+    items.push(m[1]);
+  }
+  return items;
+};
+
+// Extracts `aliases: ['a', 'b']`, multiline arrays, or const references like
+// `aliases: ALIASES` where `const ALIASES = [...]` is declared in the same file.
+const extractPluginAliases = (source: string): string[] => {
+  const inline = source.match(/aliases\s*[:=]\s*\[([\s\S]*?)\]/);
+  if (inline) return extractStringArrayItems(inline[1]);
+
+  const constRef = source.match(/aliases\s*[:=]\s*([A-Z][A-Z0-9_]*)/);
+  if (!constRef) return [];
+
+  const name = constRef[1];
+  const def = source.match(new RegExp(String.raw`(?:const|let|var)\s+${name}\s*=\s*\[([\s\S]*?)\]`));
+  return def ? extractStringArrayItems(def[1]) : [];
 };
 
 export const fetchCodexQuota = async (): Promise<ProviderResult> => {
@@ -1893,12 +1964,89 @@ export const fetchQuotaForProvider = async (providerId: string): Promise<Provide
     case 'wafer':
       return fetchWaferQuota();
     default:
-      return buildResult({
-        providerId,
-        providerName: providerId,
-        ok: false,
-        configured: false,
-        error: 'Unsupported provider',
+      // Plugin provider: load ~/.config/openchamber/plugins/quota/<id>.js,
+      // execute it with the same context the web/desktop loader passes, and
+      // delegate to its fetchQuota. The plugin's own isConfigured() decides
+      // whether the API key / cookie is present; we surface that result.
+      return fetchPluginProviderQuota(providerId);
+  }
+};
+
+// Load and execute a single quota plugin by providerId. Mirrors the
+// web/desktop server loader but inlines it here so VS Code users do not
+// need a running web server.
+const loadPluginProvider = async (providerId: string) => {
+  if (!fs.existsSync(OPENCHAMBER_PLUGINS_DIR)) return null;
+  let files: string[] = [];
+  try {
+    files = fs.readdirSync(OPENCHAMBER_PLUGINS_DIR).filter((n) => n.endsWith('.js') || n.endsWith('.mjs'));
+  } catch {
+    return null;
+  }
+  for (const file of files) {
+    const text = readTextFile(path.join(OPENCHAMBER_PLUGINS_DIR, file));
+    if (!text) continue;
+    if (extractPluginId(text) !== providerId) continue;
+    try {
+      // Use dynamic import() so the file is evaluated as an ES module.
+      // Plugins are expected to `export default (ctx) => ({...})`.
+      const fileUrl = pathToFileURL(path.join(OPENCHAMBER_PLUGINS_DIR, file)).href;
+      // Bust Node's import cache between calls so plugin authors can edit
+      // a plugin file and reload without restarting the extension host.
+      const mod = await import(`${fileUrl}?t=${Date.now()}`);
+      const factory = (mod && (mod.default || mod)) as (ctx: unknown) => Record<string, unknown>;
+      if (typeof factory !== 'function') return null;
+      const provider = factory({
+        buildResult,
+        toUsageWindow,
+        toNumber,
+        toTimestamp,
+        formatMoney,
+        readAuthFile,
+        getAuthEntry,
+        normalizeAuthEntry,
       });
+      return provider;
+    } catch (err) {
+      console.error(`[openchamber:plugins] Failed to load ${file}:`, err);
+      return null;
+    }
+  }
+  return null;
+};
+
+const fetchPluginProviderQuota = async (providerId: string): Promise<ProviderResult> => {
+  const plugin = await loadPluginProvider(providerId);
+  if (!plugin || typeof (plugin as { fetchQuota?: unknown }).fetchQuota !== 'function') {
+    return buildResult({
+      providerId,
+      providerName: providerId,
+      ok: false,
+      configured: false,
+      error: 'Unsupported provider (no built-in or plugin handler for this id)',
+    });
+  }
+  const isConfigured = typeof (plugin as { isConfigured?: () => boolean }).isConfigured === 'function'
+    ? Boolean((plugin as { isConfigured: () => boolean }).isConfigured())
+    : true;
+  if (!isConfigured) {
+    return buildResult({
+      providerId,
+      providerName: (plugin as { providerName?: string }).providerName || providerId,
+      ok: false,
+      configured: false,
+      error: 'Plugin not configured (missing auth)',
+    });
+  }
+  try {
+    return await (plugin as { fetchQuota: () => Promise<ProviderResult> }).fetchQuota();
+  } catch (err) {
+    return buildResult({
+      providerId,
+      providerName: (plugin as { providerName?: string }).providerName || providerId,
+      ok: false,
+      configured: true,
+      error: err instanceof Error ? err.message : 'Plugin fetch failed',
+    });
   }
 };
