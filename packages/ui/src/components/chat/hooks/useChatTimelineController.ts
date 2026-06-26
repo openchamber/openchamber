@@ -350,6 +350,25 @@ export const useChatTimelineController = ({
         const container = scrollRef.current;
         if (!container) return;
 
+        // Bottom-pinned: auto-follow is the single owner of the scroll position.
+        // Route the prepend re-pin through goToBottom (a programmatic, authoritative
+        // instant write to the bottom) rather than a manual scrollTop adjustment. A
+        // manual write here is NOT marked programmatic, so auto-follow's scroll
+        // handler treats it as movement and issues its own correcting scroll — a
+        // redundant up/down move on every prepend that, on some setups, resonates
+        // into the reported infinite oscillation. Delegating keeps exactly one
+        // writer and no fight.
+        if (isPinnedRef.current) {
+            prePrependScrollRef.current = null;
+            goToBottom('instant');
+            prependTrackingRef.current = {
+                oldestId: renderedMessages[0]?.info?.id ?? null,
+                newestId: renderedMessages[renderedMessages.length - 1]?.info?.id ?? null,
+                scrollHeight: container.scrollHeight,
+            };
+            return;
+        }
+
         const snap = prePrependScrollRef.current;
         if (snap) {
             prePrependScrollRef.current = null;
@@ -395,7 +414,7 @@ export const useChatTimelineController = ({
             newestId: renderedMessages[renderedMessages.length - 1]?.info?.id ?? null,
             scrollHeight: container.scrollHeight,
         };
-    }, [renderedMessages, scrollRef, restoreViewportAnchor]);
+    }, [renderedMessages, scrollRef, restoreViewportAnchor, goToBottom]);
 
     const revealBufferedTurns = React.useCallback(async (): Promise<boolean> => false, []);
 

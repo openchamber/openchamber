@@ -341,6 +341,7 @@ describe('createWorktree', () => {
 
       fs.rmSync(worktree, { recursive: true, force: true });
       runGit(repo, ['worktree', 'add', '-b', 'feature/in-use', worktree, 'HEAD']);
+      const canonicalWorktree = fs.realpathSync(worktree);
 
       await expect(createWorktree(repo, {
         mode: 'existing',
@@ -348,7 +349,7 @@ describe('createWorktree', () => {
         branchName: 'feature/in-use',
         worktreeName: 'feature-in-use',
         returnAfterDirectoryCreated: true,
-      })).rejects.toThrow(`Branch is already checked out in ${worktree}`);
+      })).rejects.toThrow(`Branch is already checked out in ${canonicalWorktree}`);
 
       const candidateDirectory = path.join(dataHome, 'opencode', 'worktree', projectID, 'feature-in-use');
       expect(fs.existsSync(candidateDirectory)).toBe(false);

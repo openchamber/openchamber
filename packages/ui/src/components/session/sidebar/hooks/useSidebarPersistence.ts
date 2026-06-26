@@ -154,6 +154,10 @@ export const useSidebarPersistence = (args: Args) => {
       return;
     }
 
+    if (sessions.length === 0) {
+      return;
+    }
+
     const existingSessionIds = new Set(sessions.map((session) => session.id));
     setPinnedSessionIds((prev) => {
       let changed = false;

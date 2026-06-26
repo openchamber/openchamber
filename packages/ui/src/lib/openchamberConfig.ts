@@ -33,6 +33,7 @@ function getRuntimeFilesAPI(): FilesAPI | null {
 export interface OpenChamberConfig {
   projectPath?: string;
   'setup-worktree'?: string[];
+  'setup-worktree-wait'?: boolean;
   projectNotes?: string;
   projectTodos?: OpenChamberProjectTodoItem[];
   projectPlanFiles?: OpenChamberProjectPlanFileLink[];
@@ -697,6 +698,15 @@ export async function getWorktreeSetupCommands(project: ProjectRef): Promise<str
 export async function saveWorktreeSetupCommands(project: ProjectRef, commands: string[]): Promise<boolean> {
   const filtered = commands.filter((cmd) => cmd.trim().length > 0);
   return updateOpenChamberConfig(project, { 'setup-worktree': filtered });
+}
+
+export async function getWorktreeSetupWaitEnabled(project: ProjectRef): Promise<boolean> {
+  const config = await readOpenChamberConfig(project);
+  return config?.['setup-worktree-wait'] === true;
+}
+
+export async function saveWorktreeSetupWaitEnabled(project: ProjectRef, enabled: boolean): Promise<boolean> {
+  return updateOpenChamberConfig(project, { 'setup-worktree-wait': enabled });
 }
 
 /**

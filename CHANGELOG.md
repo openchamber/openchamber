@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.13.3] - 2026-06-24
+
+- Chat: selecting a user-installed skill from the slash command menu now invokes the skill instead of inserting the skill name as plain text (thanks to @IbrahimKhan12).
+- Chat: pasted text containing `@` no longer opens file mention autocomplete unexpectedly (thanks to @charpeni).
+- Chat: code blocks in user messages now preserve characters like `<` and `->` instead of escaping them inside the code block (thanks to @bashrusakh).
+- Chat: switching sessions and loading older messages no longer causes the conversation to jump backward or oscillate around the current scroll position (thanks to @herjarsa).
+- Chat: Arrow Up opens prompt history again when the cursor is at the start of the composer.
+- Sessions: new sessions now stay attached to the selected project or current workspace directory instead of sometimes appearing under a stale project (thanks to @bashrusakh).
+- Sessions: pinned sessions and folder rows no longer disappear from the sidebar after an empty session-list refresh (thanks to @bashrusakh).
+- Agents: agent settings now include thinking variant, temperature, and top-p controls, and clearing temperature or top-p now removes the override (thanks to @bashrusakh).
+- Settings/Models: per-model visibility and sibling model selections now stay saved after changes (thanks to @attilaszasz).
+- Settings/Skills: the skills catalog refreshes after catalog settings change (thanks to @gokulkgm).
+- Providers: disconnecting a provider from settings now works for the selected provider (thanks to @bashrusakh).
+- Git: Git identities can now enable SSH commit signing.
+- Git: pushing from the Git view now syncs first, reducing rejected pushes when the branch needs to update.
+- Usage: MiniMax M3 and Token Plan usage now handle the provider's latest API response format (thanks to @baruchvitorino).
+- VSCode: font size and padding preferences now apply inside the extension webview (thanks to @Sin991114).
+- Startup: managed OpenCode server processes left behind by a previous crash are cleaned up on the next start.
+- CLI: stale server PID files are checked more carefully so unrelated processes are not mistaken for an OpenChamber server.
+- Files: downloads and file names with non-Latin characters now handle those characters correctly in headers (thanks to @FanFan4204).
+- Mobile: subagent chevrons no longer overlap long session titles, and session grouping now matches the exact workspace directory (thanks to @weixiang1862, @lilyzhaun).
+
 ## [1.13.2] - 2026-06-18
 
 - Chat/Performance: long conversations and large session lists now stay smooth and responsive while a response is streaming (thanks to @bashrusakh).

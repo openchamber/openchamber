@@ -152,6 +152,10 @@ function resolveConfiguredBindHost(hostOverride) {
   return configured || '127.0.0.1';
 }
 
+function resolveServeHost(hostOverride) {
+  return resolveConfiguredBindHost(hostOverride);
+}
+
 function resolveApiHost(hostOverride) {
   const configured = resolveConfiguredBindHost(hostOverride);
 
@@ -2390,6 +2394,11 @@ function removeInstanceFile(instanceFilePath) {
   }
 }
 
+// Liveness only — "is *some* process alive with this PID". Use this when the
+// PID is known to be ours (a child we just spawned, or a process we are
+// stopping). Do NOT use it to validate a PID read from a pid file: after an
+// ungraceful shutdown the pid file is stale and the kernel may have recycled
+// that PID to an unrelated process — see isOpenchamberProcessRunning.
 function isProcessRunning(pid) {
   try {
     process.kill(pid, 0);
@@ -2397,6 +2406,150 @@ function isProcessRunning(pid) {
   } catch {
     return false;
   }
+}
+
+// Best-effort command line for a live PID, used for identity verification.
+// Returns the cmdline string, '' when the process has no readable cmdline, or
+// null when identity can't be determined on this platform (caller falls back to
+// liveness — so behaviour is unchanged where we can't check).
+function readProcessCmdline(pid) {
+  try {
+    if (process.platform === 'linux') {
+      // /proc/<pid>/cmdline is a NUL-delimited argv list.
+      return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ').trim();
+    }
+    if (process.platform === 'darwin') {
+      const result = spawnSync('ps', ['-p', String(pid), '-o', 'command='], {
+        encoding: 'utf8',
+        timeout: 3000,
+        windowsHide: true,
+      });
+      const out = (result.stdout || '').trim();
+      return out.length > 0 ? out : null;
+    }
+  } catch {
+    return null;
+  }
+  // Windows / other: a process's full command line isn't cheaply available, so
+  // we can't verify identity — fall back to liveness-only.
+  return null;
+}
+
+function isOpenchamberCmdline(cmdline) {
+  if (typeof cmdline !== 'string' || cmdline.length === 0) {
+    return false;
+  }
+  // Every install path contains the "openchamber" segment — the npm package
+  // (@openchamber/web) and the source checkout both do, for the foreground
+  // (bin/cli.js) and daemon (server/index.js) entrypoints alike. Matching the
+  // path segment (not a generic "cli.js") keeps a recycled stranger such as
+  // "npm-cli.js" or "agentmemory" from being mistaken for us.
+  return cmdline.toLowerCase().includes('openchamber');
+}
+
+// Liveness + identity — "is the OpenChamber instance recorded in a pid file
+// still the process running under this PID". Use this (not isProcessRunning)
+// when validating a PID read from a pid file. After an ungraceful shutdown
+// removePidFile never runs, so the stale PID can be recycled to an unrelated
+// process; a liveness-only check then reports us as "already running" and aborts
+// startup, which loops forever under systemd Restart=always (issue #1721).
+// Where identity can't be determined (Windows, unreadable /proc or ps), we fall
+// back to liveness so there are no false negatives on those platforms.
+function isOpenchamberProcessRunning(pid) {
+  const state = getOpenchamberProcessState(pid);
+  return state === 'matched' || state === 'unknown';
+}
+
+function getOpenchamberProcessState(pid, options = {}) {
+  const checkProcessRunning = typeof options.isProcessRunning === 'function'
+    ? options.isProcessRunning
+    : isProcessRunning;
+  if (!Number.isFinite(pid) || pid <= 0 || !checkProcessRunning(pid)) {
+    return 'dead';
+  }
+
+  const readCmdline = typeof options.readProcessCmdline === 'function'
+    ? options.readProcessCmdline
+    : readProcessCmdline;
+  const cmdline = readCmdline(pid);
+  if (cmdline === null) {
+    return 'unknown';
+  }
+  return isOpenchamberCmdline(cmdline) ? 'matched' : 'mismatched';
+}
+
+function hasOpenchamberRuntimeInfo(info) {
+  return Boolean(info && typeof info.runtime === 'string' && info.runtime.length > 0);
+}
+
+function createLivePortInstance(port, info, host) {
+  if (!hasOpenchamberRuntimeInfo(info)) return null;
+  return {
+    port,
+    pid: Number.isFinite(info.pid) ? info.pid : null,
+    pidFilePath: path.join(getRunDir(), `openchamber-${port}.pid`),
+    instanceFilePath: path.join(getRunDir(), `openchamber-${port}.json`),
+    mtime: 0,
+    startedAt: 0,
+    launchMode: 'daemon',
+    runtime: info.runtime,
+    source: 'probe',
+    host: typeof host === 'string' && host.length > 0 ? host : undefined,
+  };
+}
+
+function normalizeProbeHost(host) {
+  return typeof host === 'string' && host.trim().length > 0 ? host.trim() : undefined;
+}
+
+function isWildcardProbeHost(host) {
+  const normalized = normalizeProbeHost(host);
+  return normalized === '0.0.0.0' || normalized === '::' || normalized === '[::]';
+}
+
+function isLoopbackProbeHost(host) {
+  const normalized = normalizeProbeHost(host);
+  return normalized === '127.0.0.1' || normalized === 'localhost' || normalized === '::1' || normalized === '[::1]';
+}
+
+function isConcreteProbeHost(host) {
+  const normalized = normalizeProbeHost(host);
+  return Boolean(normalized && !isWildcardProbeHost(normalized) && !isLoopbackProbeHost(normalized));
+}
+
+function getSystemInfoProbeHosts(...hosts) {
+  const out = [];
+  const hasConcreteAuthoritativeHost = hosts.some(isConcreteProbeHost);
+  const pushHost = (host, requiresPidMatch = false) => {
+    const normalized = normalizeProbeHost(host);
+    const key = resolveApiHost(normalized);
+    if (!out.some((entry) => resolveApiHost(entry.host) === key)) {
+      out.push({ host: normalized, requiresPidMatch });
+    }
+  };
+
+  for (const host of hosts) {
+    if (normalizeProbeHost(host)) {
+      pushHost(host, false);
+    }
+  }
+
+  pushHost(undefined, hasConcreteAuthoritativeHost);
+  pushHost('127.0.0.1', hasConcreteAuthoritativeHost);
+  return out;
+}
+
+async function fetchSystemInfoFromPortCandidates(port, fetchImpl, hosts, expectedPid) {
+  for (const { host, requiresPidMatch } of hosts) {
+    const info = await fetchSystemInfoFromPort(port, fetchImpl, host);
+    if (hasOpenchamberRuntimeInfo(info)) {
+      if (requiresPidMatch && info.pid !== expectedPid) {
+        continue;
+      }
+      return { info, host };
+    }
+  }
+  return { info: null, host: null };
 }
 
 function waitForProcessExit(pid, timeoutMs) {
@@ -2501,12 +2654,12 @@ async function stopInstanceProcess(pid, options = {}) {
   return terminateProcessTree(pid, options);
 }
 
-async function requestServerShutdown(port) {
+async function requestServerShutdown(port, hostOverride) {
   if (!Number.isFinite(port) || port <= 0) return false;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 1500);
   try {
-    const resp = await fetch(buildLocalUrl(port, '/api/system/shutdown'), {
+    const resp = await fetch(buildLocalUrl(port, '/api/system/shutdown', hostOverride), {
       method: 'POST',
       signal: controller.signal,
     });
@@ -2691,9 +2844,13 @@ async function resolveDoctorPortStatuses(options = {}) {
   return { statuses, availableEntries: runningEntries };
 }
 
-async function discoverRunningInstances() {
+async function discoverRunningInstances(options = {}) {
   const instances = [];
   const runDir = getRunDir();
+  const fetchImpl = typeof options.fetchImpl === 'function' ? options.fetchImpl : globalThis.fetch;
+  const getProcessState = typeof options.getOpenchamberProcessState === 'function'
+    ? options.getOpenchamberProcessState
+    : (pid) => getOpenchamberProcessState(pid, options);
   try {
     const files = fs.readdirSync(runDir);
     const pidFiles = files.filter((file) => file.startsWith('openchamber-') && file.endsWith('.pid'));
@@ -2702,29 +2859,148 @@ async function discoverRunningInstances() {
       if (!Number.isFinite(port) || port <= 0) continue;
       const pidFilePath = path.join(runDir, file);
       const pid = readPidFile(pidFilePath);
-      if (!pid || !isProcessRunning(pid)) {
+      if (!pid) {
         removePidFile(pidFilePath);
         removeInstanceFile(path.join(runDir, `openchamber-${port}.json`));
         continue;
       }
+
       const instanceFilePath = path.join(runDir, `openchamber-${port}.json`);
+      const storedOptions = readInstanceOptions(instanceFilePath);
+      const processState = getProcessState(pid);
+      if (processState === 'dead') {
+        removePidFile(pidFilePath);
+        removeInstanceFile(instanceFilePath);
+        continue;
+      }
+
+      // A live PID-file is only the right instance if the recorded port also
+      // confirms OpenChamber. Cmdline identity alone can match a recycled PID
+      // from another OpenChamber process on a different port. Try all plausible
+      // hosts first; if matched/unknown identity still can't be confirmed, keep
+      // the registry files but don't claim the instance is running.
+      const { info: liveInfo, host: confirmedHost } = await fetchSystemInfoFromPortCandidates(
+        port,
+        fetchImpl,
+        getSystemInfoProbeHosts(storedOptions?.host, options.host),
+        pid,
+      );
+      const livePid = Number.isFinite(liveInfo?.pid) ? liveInfo.pid : null;
+      if (!hasOpenchamberRuntimeInfo(liveInfo)) {
+        if (processState === 'mismatched') {
+          removePidFile(pidFilePath);
+          removeInstanceFile(instanceFilePath);
+        }
+        continue;
+      }
+
+      if (liveInfo.runtime === 'desktop') {
+        removePidFile(pidFilePath);
+        removeInstanceFile(instanceFilePath);
+        continue;
+      }
+
       let mtime = 0;
       let startedAt = 0;
       try {
         mtime = fs.statSync(pidFilePath).mtimeMs;
       } catch {
       }
-      const storedOptions = readInstanceOptions(instanceFilePath);
       if (Number.isFinite(storedOptions?.startedAt)) {
         startedAt = storedOptions.startedAt;
       }
       const launchMode = storedOptions?.launchMode === 'foreground' ? 'foreground' : 'daemon';
-      instances.push({ port, pid, pidFilePath, instanceFilePath, mtime, startedAt, launchMode });
+      instances.push({
+        port,
+        pid: livePid || (processState === 'matched' ? pid : null),
+        pidFilePath,
+        instanceFilePath,
+        mtime,
+        startedAt,
+        launchMode,
+        runtime: liveInfo.runtime,
+        source: 'registry+probe',
+        host: typeof confirmedHost === 'string' && confirmedHost.length > 0
+          ? confirmedHost
+          : (typeof storedOptions?.host === 'string' && storedOptions.host.length > 0 ? storedOptions.host : undefined),
+      });
     }
   } catch {
   }
   instances.sort((a, b) => a.port - b.port);
   return instances;
+}
+
+async function discoverOpenChamberInstanceOnPort(port, options = {}) {
+  if (!Number.isFinite(port) || port <= 0) return null;
+  const runningInstances = Array.isArray(options.runningInstances)
+    ? options.runningInstances
+    : await discoverRunningInstances(options);
+  const registryMatch = runningInstances.find((entry) => entry.port === port);
+  if (registryMatch) return registryMatch;
+
+  const info = await fetchSystemInfoFromPort(
+    port,
+    typeof options.fetchImpl === 'function' ? options.fetchImpl : globalThis.fetch,
+    options.host,
+  );
+  return createLivePortInstance(port, info, options.host);
+}
+
+async function discoverLifecycleInstances(options = {}, deps = {}) {
+  const runningInstances = await discoverRunningInstances({ ...deps, host: options.host });
+  if (!options.explicitPort) {
+    return runningInstances;
+  }
+  const found = runningInstances.find((entry) => entry.port === options.port);
+  if (found) return [found];
+  const liveInstance = await discoverOpenChamberInstanceOnPort(options.port, {
+    ...deps,
+    host: options.host,
+    runningInstances,
+  });
+  return liveInstance ? [liveInstance] : [];
+}
+
+async function discoverUnconfirmedRegistryInstanceOnPort(port, options = {}) {
+  if (!Number.isFinite(port) || port <= 0) return null;
+
+  const pidFilePath = await getPidFilePath(port);
+  const pid = readPidFile(pidFilePath);
+  if (!pid) return null;
+
+  const instanceFilePath = await getInstanceFilePath(port);
+  const storedOptions = readInstanceOptions(instanceFilePath);
+  const processState = getOpenchamberProcessState(pid);
+  if (processState === 'dead') {
+    removePidFile(pidFilePath);
+    removeInstanceFile(instanceFilePath);
+    return null;
+  }
+
+  if (processState !== 'matched') {
+    return null;
+  }
+
+  const host = storedOptions?.host || options.host;
+  if (await isPortAvailable(port, host)) {
+    removePidFile(pidFilePath);
+    removeInstanceFile(instanceFilePath);
+    return null;
+  }
+
+  return {
+    port,
+    pid,
+    pidFilePath,
+    instanceFilePath,
+    mtime: 0,
+    startedAt: Number.isFinite(storedOptions?.startedAt) ? storedOptions.startedAt : 0,
+    launchMode: storedOptions?.launchMode === 'foreground' ? 'foreground' : 'daemon',
+    runtime: 'cli',
+    source: 'registry-unconfirmed',
+    host: typeof host === 'string' && host.length > 0 ? host : undefined,
+  };
 }
 
 function getLatestInstance(instances) {
@@ -2753,7 +3029,7 @@ async function fetchTunnelProvidersFromPort(port, fetchImpl = globalThis.fetch) 
   }
 }
 
-async function fetchSystemInfoFromPort(port, fetchImpl = globalThis.fetch) {
+async function fetchSystemInfoFromPort(port, fetchImpl = globalThis.fetch, hostOverride) {
   if (!Number.isFinite(port) || port <= 0 || typeof fetchImpl !== 'function') {
     return null;
   }
@@ -2761,7 +3037,7 @@ async function fetchSystemInfoFromPort(port, fetchImpl = globalThis.fetch) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 1500);
   try {
-    const response = await fetchImpl(buildLocalUrl(port, '/api/system/info'), {
+    const response = await fetchImpl(buildLocalUrl(port, '/api/system/info', hostOverride), {
       headers: { Accept: 'application/json' },
       signal: controller.signal,
     });
@@ -2880,7 +3156,7 @@ async function resolveTargetInstance({
     }
 
     if (rejectDesktopRuntime) {
-      const systemInfo = await fetchSystemInfoFromPort(options.port);
+      const systemInfo = await fetchSystemInfoFromPort(options.port, globalThis.fetch, options.host);
       if (systemInfo?.runtime === 'desktop') {
         throw new Error(
           `Port ${options.port} is used by OpenChamber Desktop app. Tunnel attach requires a CLI instance from \`openchamber serve\`.`
@@ -3421,6 +3697,7 @@ const commands = {
       }
     };
     const explicitPort = options.explicitPort === true;
+    const effectiveHost = resolveServeHost(options.host);
     const targetPort = await resolveAvailablePort(options.port, explicitPort, emitNotice);
 
     if (targetPort !== 0 && !options.suppressUnsafePortWarning) {
@@ -3428,14 +3705,22 @@ const commands = {
     }
 
     if (targetPort !== 0) {
-      const pidFilePath = await getPidFilePath(targetPort);
-      const existingPid = readPidFile(pidFilePath);
-      if (existingPid && isProcessRunning(existingPid)) {
-        throw new Error(`OpenChamber is already running on port ${targetPort} (PID: ${existingPid})`);
+      const existingInstance = await discoverOpenChamberInstanceOnPort(targetPort, { host: effectiveHost });
+      if (existingInstance?.runtime === 'desktop') {
+        throw new Error(
+          `Port ${targetPort} is used by OpenChamber Desktop app. Choose another port or stop the desktop app.`
+        );
+      }
+      if (existingInstance) {
+        const pidSuffix = Number.isFinite(existingInstance.pid) ? ` (PID: ${existingInstance.pid})` : '';
+        if (existingInstance.source === 'probe') {
+          throw new Error(`OpenChamber is already running on port ${targetPort}. Use \`openchamber status\` or \`openchamber stop --port ${targetPort}\`.`);
+        }
+        throw new Error(`OpenChamber is already running on port ${targetPort}${pidSuffix}`);
       }
 
-      if (explicitPort && !(await isPortAvailable(targetPort, options.host))) {
-        const systemInfo = await fetchSystemInfoFromPort(targetPort);
+      if (explicitPort && !(await isPortAvailable(targetPort, effectiveHost))) {
+        const systemInfo = await fetchSystemInfoFromPort(targetPort, globalThis.fetch, effectiveHost);
         if (systemInfo?.runtime === 'desktop') {
           throw new Error(
             `Port ${targetPort} is used by OpenChamber Desktop app. Choose another port or stop the desktop app.`
@@ -3461,11 +3746,11 @@ const commands = {
 
     const effectiveUiPassword = hasUiPasswordConfigured(options.uiPassword) ? options.uiPassword : undefined;
     assertAuthenticatedNetworkExposure({
-      host: options.host,
+      host: effectiveHost,
       uiPassword: effectiveUiPassword,
     });
     if (!effectiveUiPassword && !options.suppressUiPasswordWarning) {
-      const bindHost = resolveConfiguredBindHost(options.host);
+      const bindHost = effectiveHost;
       const networkExposed = isNetworkExposedBindHost(bindHost);
       const warningLine = 'OPENCHAMBER_UI_PASSWORD is not set';
       const warningDetail = networkExposed
@@ -3504,6 +3789,7 @@ const commands = {
       if (effectiveUiPassword) {
         process.env.OPENCHAMBER_UI_PASSWORD = effectiveUiPassword;
       }
+      process.env.OPENCHAMBER_HOST = effectiveHost;
 
       // In --quiet mode, redirect stdout/stderr to the log file so that
       // server runtime output (console.log calls) does not pollute the
@@ -3533,9 +3819,6 @@ const commands = {
       if (!isQuietMode(options)) {
         console.log(`Starting OpenChamber on port ${targetPort === 0 ? 'auto' : targetPort} (foreground)`);
       }
-
-      const effectiveHost = typeof options.host === 'string' && options.host.length > 0
-        ? options.host : undefined;
 
       const { startWebUiServer } = await import(pathToFileURL(serverPath).href);
       const controller = await startWebUiServer({
@@ -3606,10 +3889,7 @@ const commands = {
     }
 
     const serverArgs = [serverPath, '--port', String(targetPort)];
-    const effectiveHost = typeof options.host === 'string' && options.host.length > 0 ? options.host : undefined;
-    if (effectiveHost) {
-      serverArgs.push('--host', effectiveHost);
-    }
+    serverArgs.push('--host', effectiveHost);
     if (options.apiOnly === true) {
       serverArgs.push('--api-only');
     }
@@ -3624,7 +3904,7 @@ const commands = {
         ...process.env,
         OPENCHAMBER_PORT: String(targetPort),
         OPENCODE_BINARY: opencodeBinary,
-        ...(effectiveHost ? { OPENCHAMBER_HOST: effectiveHost } : {}),
+        OPENCHAMBER_HOST: effectiveHost,
         ...(effectiveUiPassword ? { OPENCHAMBER_UI_PASSWORD: effectiveUiPassword } : {}),
         ...(options.apiOnly === true ? { OPENCHAMBER_API_ONLY: 'true' } : {}),
         ...(process.env.OPENCODE_SKIP_START ? { OPENCHAMBER_SKIP_OPENCODE_START: process.env.OPENCODE_SKIP_START } : {}),
@@ -3820,100 +4100,16 @@ const commands = {
       clackIntro('OpenChamber Stop');
     }
 
-    let runningInstances = await discoverRunningInstances();
-    if (runningInstances.length === 0) {
-      if (isJsonMode(options)) {
-        printJson({ stoppedCount: 0, results: jsonResults });
-      }
-      if (showOutput) {
-        logStatus('info', 'No running OpenChamber instances found');
-        finish('nothing to stop');
-      }
-      printQuietStopResults();
-      return;
-    }
-
+    let runningInstances = await discoverLifecycleInstances(options);
     if (options.explicitPort) {
-      runningInstances = runningInstances.filter((entry) => entry.port === options.port);
       if (runningInstances.length === 0) {
-        const systemInfo = await fetchSystemInfoFromPort(options.port);
-        if (systemInfo?.runtime === 'desktop') {
-          jsonResults.push({ port: options.port, runtime: 'desktop', stopped: false, reason: 'desktop-managed' });
-          if (isJsonMode(options)) {
-            printJson({ stoppedCount: 0, results: jsonResults, messages: [{ level: 'warning', code: 'DESKTOP_MANAGED_PORT', message: `Port ${options.port} is managed by OpenChamber Desktop and cannot be stopped with this command.` }] });
-          }
-          if (showOutput) {
-            logStatus('warning', `port ${options.port} is managed by OpenChamber Desktop`, 'cannot be stopped with this command');
-            finish('no changes applied');
-          }
-          printQuietStopResults();
-          return;
+        const unconfirmedInstance = await discoverUnconfirmedRegistryInstanceOnPort(options.port, options);
+        if (unconfirmedInstance) {
+          runningInstances = [unconfirmedInstance];
         }
+      }
 
-        if (systemInfo?.runtime) {
-          const unmanagedStopSpin = showOutput ? createSpinner(options) : null;
-          if (showOutput && !unmanagedStopSpin) {
-            logStatus('info', `found unmanaged OpenChamber instance on port ${options.port}`, 'attempting shutdown');
-          }
-          unmanagedStopSpin?.start(`Stopping unmanaged OpenChamber on port ${options.port}...`);
-          const requested = await requestServerShutdown(options.port);
-
-          if (Number.isFinite(systemInfo.pid) && isProcessRunning(systemInfo.pid)) {
-            await stopInstanceProcess(systemInfo.pid, {
-              shutdownWaitMs: requested ? 5000 : 0,
-              gracefulTimeoutMs: 2500,
-              forceTimeoutMs: 3000,
-            }).catch(() => false);
-          }
-
-          const stopped = await isPortAvailable(options.port);
-          if (stopped) {
-            unmanagedStopSpin?.stop(`Stopped unmanaged OpenChamber on port ${options.port}`);
-            jsonResults.push({ port: options.port, runtime: 'unmanaged', stopped: true });
-            if (isJsonMode(options)) {
-              printJson({ stoppedCount: 1, results: jsonResults });
-            }
-            if (showOutput && !unmanagedStopSpin) {
-              logStatus('success', `stopped OpenChamber on port ${options.port}`);
-              finish('stop complete');
-            }
-            printQuietStopResults();
-          } else if (requested) {
-            unmanagedStopSpin?.stop(`Shutdown requested on port ${options.port} (still occupied)`);
-            jsonResults.push({ port: options.port, runtime: 'unmanaged', stopped: false, reason: 'shutdown-requested-port-busy' });
-            if (isJsonMode(options)) {
-              printJson({
-                status: 'warning',
-                stoppedCount: 0,
-                results: jsonResults,
-                messages: [{ level: 'warning', code: 'SHUTDOWN_PARTIAL', message: `Shutdown was requested for port ${options.port}, but the port is still occupied.` }],
-              });
-            }
-            if (showOutput && !unmanagedStopSpin) {
-              logStatus('warning', `shutdown requested on port ${options.port}`, 'port is still occupied');
-              finish('partial stop');
-            }
-            printQuietStopResults();
-          } else {
-            unmanagedStopSpin?.error(`Could not stop OpenChamber on port ${options.port}`);
-            jsonResults.push({ port: options.port, runtime: 'unmanaged', stopped: false, reason: 'stop-failed' });
-            if (isJsonMode(options)) {
-              printJson({
-                status: 'error',
-                stoppedCount: 0,
-                results: jsonResults,
-                messages: [{ level: 'error', code: 'STOP_FAILED', message: `Could not stop OpenChamber on port ${options.port}.` }],
-              });
-            }
-            if (showOutput && !unmanagedStopSpin) {
-              logStatus('error', `could not stop OpenChamber on port ${options.port}`);
-              finish('failed');
-            }
-            printQuietStopResults();
-          }
-          return;
-        }
-
+      if (runningInstances.length === 0) {
         jsonResults.push({ port: options.port, stopped: false, reason: 'not-found' });
         if (isJsonMode(options)) {
           printJson({ stoppedCount: 0, results: jsonResults });
@@ -3925,6 +4121,140 @@ const commands = {
         printQuietStopResults();
         return;
       }
+
+      const explicitInstance = runningInstances[0];
+      if (explicitInstance.runtime === 'desktop') {
+        jsonResults.push({ port: options.port, runtime: 'desktop', stopped: false, reason: 'desktop-managed' });
+        if (isJsonMode(options)) {
+          printJson({ stoppedCount: 0, results: jsonResults, messages: [{ level: 'warning', code: 'DESKTOP_MANAGED_PORT', message: `Port ${options.port} is managed by OpenChamber Desktop and cannot be stopped with this command.` }] });
+        }
+        if (showOutput) {
+          logStatus('warning', `port ${options.port} is managed by OpenChamber Desktop`, 'cannot be stopped with this command');
+          finish('no changes applied');
+        }
+        printQuietStopResults();
+        return;
+      }
+
+      if (explicitInstance.source === 'probe') {
+        const unmanagedStopSpin = showOutput ? createSpinner(options) : null;
+        if (showOutput && !unmanagedStopSpin) {
+          logStatus('info', `found unmanaged OpenChamber instance on port ${options.port}`, 'attempting shutdown');
+        }
+        unmanagedStopSpin?.start(`Stopping unmanaged OpenChamber on port ${options.port}...`);
+        const requested = await requestServerShutdown(options.port, options.host);
+
+        if (Number.isFinite(explicitInstance.pid) && isProcessRunning(explicitInstance.pid)) {
+          await stopInstanceProcess(explicitInstance.pid, {
+            shutdownWaitMs: requested ? 5000 : 0,
+            gracefulTimeoutMs: 2500,
+            forceTimeoutMs: 3000,
+          }).catch(() => false);
+        }
+
+        const stopped = await isPortAvailable(options.port, options.host);
+        if (stopped) {
+          unmanagedStopSpin?.stop(`Stopped unmanaged OpenChamber on port ${options.port}`);
+          jsonResults.push({ port: options.port, runtime: 'unmanaged', stopped: true });
+          if (isJsonMode(options)) {
+            printJson({ stoppedCount: 1, results: jsonResults });
+          }
+          if (showOutput && !unmanagedStopSpin) {
+            logStatus('success', `stopped OpenChamber on port ${options.port}`);
+            finish('stop complete');
+          }
+          printQuietStopResults();
+        } else if (requested) {
+          unmanagedStopSpin?.stop(`Shutdown requested on port ${options.port} (still occupied)`);
+          jsonResults.push({ port: options.port, runtime: 'unmanaged', stopped: false, reason: 'shutdown-requested-port-busy' });
+          if (isJsonMode(options)) {
+            printJson({
+              status: 'warning',
+              stoppedCount: 0,
+              results: jsonResults,
+              messages: [{ level: 'warning', code: 'SHUTDOWN_PARTIAL', message: `Shutdown was requested for port ${options.port}, but the port is still occupied.` }],
+            });
+          }
+          if (showOutput && !unmanagedStopSpin) {
+            logStatus('warning', `shutdown requested on port ${options.port}`, 'port is still occupied');
+            finish('partial stop');
+          }
+          printQuietStopResults();
+        } else {
+          unmanagedStopSpin?.error(`Could not stop OpenChamber on port ${options.port}`);
+          jsonResults.push({ port: options.port, runtime: 'unmanaged', stopped: false, reason: 'stop-failed' });
+          if (isJsonMode(options)) {
+            printJson({
+              status: 'error',
+              stoppedCount: 0,
+              results: jsonResults,
+              messages: [{ level: 'error', code: 'STOP_FAILED', message: `Could not stop OpenChamber on port ${options.port}.` }],
+            });
+          }
+          if (showOutput && !unmanagedStopSpin) {
+            logStatus('error', `could not stop OpenChamber on port ${options.port}`);
+            finish('failed');
+          }
+          printQuietStopResults();
+        }
+        return;
+      }
+
+      if (explicitInstance.source === 'registry-unconfirmed') {
+        const unconfirmedStopSpin = showOutput ? createSpinner(options) : null;
+        if (showOutput && !unconfirmedStopSpin) {
+          logStatus('info', `found unconfirmed OpenChamber pid ${explicitInstance.pid} on port ${options.port}`, 'HTTP shutdown endpoint is unreachable; stopping by PID');
+        }
+        unconfirmedStopSpin?.start(`Stopping unconfirmed OpenChamber on port ${options.port}...`);
+        const stopped = await stopInstanceProcess(explicitInstance.pid, {
+          shutdownWaitMs: 0,
+          gracefulTimeoutMs: 2500,
+          forceTimeoutMs: 3000,
+        }).catch(() => false);
+
+        if (stopped || !isProcessRunning(explicitInstance.pid)) {
+          removePidFile(explicitInstance.pidFilePath);
+          removeInstanceFile(explicitInstance.instanceFilePath);
+          unconfirmedStopSpin?.stop(`Stopped OpenChamber PID ${explicitInstance.pid}`);
+          jsonResults.push({ port: options.port, pid: explicitInstance.pid, runtime: 'unconfirmed', stopped: true });
+          if (isJsonMode(options)) {
+            printJson({ stoppedCount: 1, results: jsonResults });
+          }
+          if (showOutput && !unconfirmedStopSpin) {
+            logStatus('success', `stopped pid ${explicitInstance.pid}`);
+            finish('stop complete');
+          }
+          printQuietStopResults();
+          return;
+        }
+
+        unconfirmedStopSpin?.error(`Could not stop OpenChamber PID ${explicitInstance.pid}`);
+        jsonResults.push({ port: options.port, pid: explicitInstance.pid, runtime: 'unconfirmed', stopped: false, reason: 'stop-failed' });
+        if (isJsonMode(options)) {
+          printJson({
+            status: 'error',
+            stoppedCount: 0,
+            results: jsonResults,
+            messages: [{ level: 'error', code: 'STOP_FAILED', message: `Could not stop OpenChamber PID ${explicitInstance.pid}.` }],
+          });
+        }
+        if (showOutput && !unconfirmedStopSpin) {
+          logStatus('error', `could not stop pid ${explicitInstance.pid}`);
+          finish('failed');
+        }
+        printQuietStopResults();
+        return;
+      }
+    } else if (runningInstances.length === 0) {
+      if (isJsonMode(options)) {
+        printJson({ stoppedCount: 0, results: jsonResults });
+      }
+      if (showOutput) {
+        logStatus('info', 'No running OpenChamber instances found');
+        finish('nothing to stop');
+      }
+      printQuietStopResults();
+      return;
     }
 
     for (const instance of runningInstances) {
@@ -3934,7 +4264,7 @@ const commands = {
       }
       stopSpin?.start(`Stopping OpenChamber on port ${instance.port}...`);
       try {
-        const requested = await requestServerShutdown(instance.port);
+        const requested = await requestServerShutdown(instance.port, instance.host || options.host);
         const stopped = await stopInstanceProcess(instance.pid, {
           shutdownWaitMs: requested ? 5000 : 0,
           gracefulTimeoutMs: 2500,
@@ -3984,7 +4314,7 @@ const commands = {
       clackIntro('OpenChamber Restart');
     }
 
-    let runningInstances = await discoverRunningInstances();
+    let runningInstances = await discoverLifecycleInstances(options);
     if (runningInstances.length === 0) {
       if (isJsonMode(options)) {
         printJson({ restartedCount: 0, results: restarted });
@@ -3998,24 +4328,31 @@ const commands = {
       return;
     }
 
-    if (options.explicitPort) {
-      runningInstances = runningInstances.filter((entry) => entry.port === options.port);
-      if (runningInstances.length === 0) {
+    for (const instance of runningInstances) {
+      if (instance.runtime === 'desktop') {
+        const message = `Port ${instance.port} is managed by OpenChamber Desktop and cannot be restarted with this command.`;
         if (isJsonMode(options)) {
-          printJson({ restartedCount: 0, results: restarted });
+          printJson({
+            status: 'warning',
+            restartedCount: 0,
+            results: [{ fromPort: instance.port, runtime: 'desktop', ok: false, reason: 'desktop-managed' }],
+            messages: [{ level: 'warning', code: 'DESKTOP_MANAGED_PORT', message }],
+          });
+          return;
         }
         if (showOutput) {
-          logStatus('warning', `no OpenChamber instance found on port ${options.port}`);
-          clackOutro('nothing to restart');
+          logStatus('warning', `port ${instance.port} is managed by OpenChamber Desktop`, 'cannot be restarted with this command');
+          clackOutro('no changes applied');
         } else if (isQuietMode(options)) {
           process.stdout.write('restarted 0\n');
         }
         return;
       }
-    }
 
-    for (const instance of runningInstances) {
-      const storedOptions = readInstanceOptions(instance.instanceFilePath) || { port: instance.port };
+      const storedOptions = instance.instanceFilePath
+        ? (readInstanceOptions(instance.instanceFilePath) || { port: instance.port })
+        : { port: instance.port };
+      const instanceHost = storedOptions.host || instance.host || options.host;
       const launchMode = instance.launchMode || 'daemon';
       const isForeground = launchMode === 'foreground';
 
@@ -4030,6 +4367,7 @@ const commands = {
         await this.stop({
           explicitPort: true,
           port: instance.port,
+          host: instanceHost,
           quiet: true,
           suppressQuietOutput: true,
         });
@@ -4051,10 +4389,10 @@ const commands = {
 
         const restartedPort = await this.serve({
           port: restartPort,
-          host: storedOptions.host,
+          host: instanceHost,
           explicitPort: true,
-          uiPassword: options.explicitUiPassword ? options.uiPassword : storedOptions.uiPassword,
-          apiOnly: storedOptions.apiOnly === true,
+          uiPassword: options.explicitUiPassword ? options.uiPassword : (storedOptions.uiPassword || options.uiPassword),
+          apiOnly: storedOptions.apiOnly === true || options.apiOnly === true,
           suppressStartupSummary: true,
           quiet: true,
           suppressUiPasswordWarning: true,
@@ -4088,10 +4426,12 @@ const commands = {
   },
 
   async status(options = {}) {
-    const [runningInstances, desktopInstance] = await Promise.all([
-      discoverRunningInstances(),
-      discoverDesktopInstance(),
-    ]);
+    const [runningInstances, desktopInstance] = options.explicitPort
+      ? [await discoverLifecycleInstances(options), null]
+      : await Promise.all([
+          discoverLifecycleInstances(options),
+          discoverDesktopInstance(),
+        ]);
 
     const toPasswordProtectionLabel = (value) => {
       if (value === true) return 'yes';
@@ -4109,21 +4449,36 @@ const commands = {
         }
       : null;
 
-    const cliInstances = runningInstances.map((instance) => {
-      const storedOptions = readInstanceOptions(instance.instanceFilePath) || {};
-      const passwordProtected = storedOptions.hasUiPassword === true
-        || (typeof storedOptions.uiPassword === 'string' && storedOptions.uiPassword.trim().length > 0);
+    const cliInstances = runningInstances
+      .filter((instance) => instance.runtime !== 'desktop')
+      .map((instance) => {
+        const storedOptions = instance.instanceFilePath ? (readInstanceOptions(instance.instanceFilePath) || {}) : {};
+        const passwordProtected = storedOptions.hasUiPassword === true
+          || (typeof storedOptions.uiPassword === 'string' && storedOptions.uiPassword.trim().length > 0);
 
-      return {
-        runtime: 'cli',
-        port: instance.port,
-        pid: instance.pid,
-        launchMode: instance.launchMode || 'daemon',
-        passwordProtected,
-      };
-    });
+        return {
+          runtime: instance.source === 'probe' ? 'unmanaged' : 'cli',
+          port: instance.port,
+          pid: instance.pid,
+          launchMode: instance.launchMode || 'daemon',
+          passwordProtected: instance.source === 'probe' ? null : passwordProtected,
+        };
+      });
+
+    const explicitDesktop = options.explicitPort
+      ? runningInstances.find((entry) => entry.runtime === 'desktop')
+      : null;
 
     const instances = desktopOnly ? [...cliInstances, desktopOnly] : cliInstances;
+    if (explicitDesktop) {
+      instances.push({
+        runtime: 'desktop',
+        port: explicitDesktop.port,
+        pid: Number.isFinite(explicitDesktop.pid) ? explicitDesktop.pid : null,
+        launchMode: null,
+        passwordProtected: null,
+      });
+    }
     const runningCount = instances.length;
 
     if (isJsonMode(options)) {
@@ -5512,7 +5867,7 @@ const commands = {
       updateSpin?.message(`Stopping ${runningInstances.length} running instance(s)...`);
       for (const instance of runningInstances) {
         try {
-          const requested = await requestServerShutdown(instance.port);
+          const requested = await requestServerShutdown(instance.port, instance.host);
           await stopInstanceProcess(instance.pid, {
             shutdownWaitMs: requested ? 5000 : 0,
             gracefulTimeoutMs: 2500,
@@ -5729,15 +6084,24 @@ export {
   commands,
   parseArgs,
   assertAuthenticatedNetworkExposure,
+  resolveServeHost,
   hasUiPasswordConfigured,
   shouldDisplayTunnelQr,
   isValidTunnelDoctorResponse,
   readDesktopLocalPortFromSettings,
   getPidFilePath,
+  getInstanceFilePath,
+  isProcessRunning,
+  isOpenchamberProcessRunning,
+  isOpenchamberCmdline,
+  getOpenchamberProcessState,
   resolveTunnelProviders,
   fetchTunnelProvidersFromPort,
   fetchSystemInfoFromPort,
   discoverRunningInstances,
+  discoverOpenChamberInstanceOnPort,
+  discoverLifecycleInstances,
+  discoverUnconfirmedRegistryInstanceOnPort,
   ensureTunnelProfilesMigrated,
   resolveToken,
   redactProfileForOutput,

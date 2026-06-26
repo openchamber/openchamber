@@ -24,12 +24,14 @@ import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from "@/stores/
 import { useDirectoryStore } from "@/stores/useDirectoryStore"
 import { useSessionFoldersStore } from "@/stores/useSessionFoldersStore"
 import { useCommandsStore } from "@/stores/useCommandsStore"
+import { useSkillsStore } from "@/stores/useSkillsStore"
 import { getSafeStorage } from "@/stores/utils/safeStorage"
 import { markPendingUserSendAnimation } from "@/lib/userSendAnimation"
 import { flattenAssistantTextParts } from "@/lib/messages/messageText"
 import { composeForkSessionMessage } from "@/lib/messages/executionMeta"
 import { waitForPendingDraftWorktreeRequest } from "@/lib/worktrees/pendingDraftWorktree"
 import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap"
+import { getWorktreeSetupWaitEnabled } from "@/lib/openchamberConfig"
 import { resolveProjectForSessionDirectory } from "@/lib/projectResolution"
 import {
   getSyncSessions,
@@ -102,8 +104,14 @@ export function routeMessage(params: {
     const syncCommands = dirState?.command ?? []
     const storeCommands = useCommandsStore.getState().commands
 
+    // OpenCode registers every skill as a command (source: "skill"), but the
+    // commands store filters skills out and the synced command list is only
+    // hydrated at bootstrap. Consult the live skills store so a skill selected
+    // from the slash menu is invoked via session.command (injecting its
+    // content) instead of being sent as a literal "/name" message (#1605).
     const isCommand = syncCommands.find((c) => c.name === cmdName)
       || storeCommands.find((c) => c.name === cmdName)
+      || useSkillsStore.getState().skills.some((s) => s.name === cmdName)
 
     if (isCommand) {
       return optimisticSend({
@@ -409,6 +417,24 @@ type MaterializedDraftSession = {
   syntheticParts?: SyntheticContextPart[]
 }
 
+const resolveProjectRefForWorktreeDirectory = (directory: string | null, projectId?: string | null): { id: string; path: string } | null => {
+  const projectsState = useProjectsStore.getState()
+  if (projectId) {
+    const project = projectsState.projects.find((entry) => entry.id === projectId)
+    if (project?.path) return { id: project.id, path: project.path }
+  }
+  const resolved = resolveProjectForSessionDirectory(projectsState.projects, useSessionUIStore.getState().availableWorktreesByProject, directory)
+  return resolved?.path ? { id: resolved.id, path: resolved.path } : null
+}
+
+const waitForWorktreeBootstrapIfConfigured = async (directory: string | null, projectId?: string | null): Promise<void> => {
+  if (!directory) return
+  const project = resolveProjectRefForWorktreeDirectory(directory, projectId)
+  if (project && await getWorktreeSetupWaitEnabled(project)) {
+    await waitForWorktreeBootstrap(directory)
+  }
+}
+
 export async function materializeOpenDraftSession(selection: {
   providerID: string
   modelID: string
@@ -422,7 +448,6 @@ export async function materializeOpenDraftSession(selection: {
   const trimmedAgent = typeof selection.agent === "string" && selection.agent.trim().length > 0
     ? selection.agent.trim()
     : undefined
-  const draftTargetFolderId = draft.targetFolderId
   let draftDirectoryOverride = draft.bootstrapPendingDirectory ?? draft.directoryOverride ?? null
   const draftProjectId = draft.selectedProjectId ?? null
 
@@ -431,9 +456,7 @@ export async function materializeOpenDraftSession(selection: {
     store.resolvePendingDraftWorktreeTarget(draft.pendingWorktreeRequestId, draftDirectoryOverride)
   }
 
-  if (draftDirectoryOverride) {
-    await waitForWorktreeBootstrap(draftDirectoryOverride)
-  }
+  await waitForWorktreeBootstrapIfConfigured(draftDirectoryOverride, draftProjectId)
 
   const created = await store.createSession(draft.title, draftDirectoryOverride, draft.parentID ?? null)
   if (!created?.id) throw new Error("Failed to create session")
@@ -462,15 +485,7 @@ export async function materializeOpenDraftSession(selection: {
 
   store.initializeNewOpenChamberSession(created.id, configState.agents ?? [])
 
-  store.closeNewSessionDraft()
   store.setCurrentSession(created.id, createdDirectory)
-
-  if (draftTargetFolderId) {
-    const scopeKey = draftDirectoryOverride || created.directory || null
-    if (scopeKey) {
-      useSessionFoldersStore.getState().addSessionToFolder(scopeKey, draftTargetFolderId, created.id)
-    }
-  }
 
   return {
     sessionId: created.id,
@@ -695,10 +710,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const currentDirProject = resolveDraftProjectForDirectory(projects, availableWorktreesByProject, currentDirectory)
 
     const selectedProject = (() => {
-      if (explicitProject || explicitDirectory !== null) {
-        return explicitProject ?? inferredProjectFromDir ?? fallbackProject
-      }
-      if (currentDirectory) return currentDirProject ?? fallbackProject
+      if (explicitProject) return explicitProject
+      if (explicitDirectory !== null) return inferredProjectFromDir
+      if (currentDirectory) return currentDirProject
       return persistedProjectByDir ?? persistedProjectById ?? fallbackProject
     })()
 
@@ -1377,7 +1391,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       if (!sessionDirectory) {
         throw new Error("Worktree create missing name/path")
       }
-      await waitForWorktreeBootstrap(sessionDirectory)
+      if (await configModule.getWorktreeSetupWaitEnabled(createdWorktreeProject)) {
+        await waitForWorktreeBootstrap(sessionDirectory)
+      }
     }
 
     const session = await get().createSession(undefined, sessionDirectory || null, null)

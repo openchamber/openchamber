@@ -4,7 +4,7 @@ import { routeMessage, useSessionUIStore } from '@/sync/session-ui-store';
 import { devtools } from 'zustand/middleware';
 import type { CreateMultiRunParams, CreateMultiRunResult } from '@/types/multirun';
 import { opencodeClient } from '@/lib/opencode/client';
-import { saveWorktreeSetupCommands } from '@/lib/openchamberConfig';
+import { getWorktreeSetupWaitEnabled, saveWorktreeSetupCommands } from '@/lib/openchamberConfig';
 import type { ProjectRef } from '@/lib/worktrees/worktreeManager';
 import { createWorktreeWithDefaults, resolveRootTrackingRemote } from '@/lib/worktrees/worktreeCreate';
 import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
@@ -245,7 +245,9 @@ export const useMultiRunStore = create<MultiRunStore>()(
                   kind: 'standard' as const,
                 };
 
-                await waitForWorktreeBootstrap(worktreeMetadata.path);
+                if (await getWorktreeSetupWaitEnabled(project)) {
+                  await waitForWorktreeBootstrap(worktreeMetadata.path);
+                }
 
                 const session = await opencodeClient.withDirectory(
                   worktreeMetadata.path,

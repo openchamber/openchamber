@@ -7,6 +7,7 @@ import { scopeMatches, subscribeToConfigChanges } from "@/lib/configSync";
 import type { ModelMetadata } from "@/types";
 import { getSafeStorage } from "./utils/safeStorage";
 import { filterVisibleAgents } from "./useAgentsStore";
+import { isPrimaryMode } from "@/components/chat/mobileControlsUtils";
 import { useSessionUIStore } from "@/sync/session-ui-store";
 import { useSelectionStore } from "@/sync/selection-store";
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry";
@@ -178,8 +179,6 @@ const parseModelString = (modelString: string): { providerId: string; modelId: s
 };
 
 const normalizeProviderId = (value: string) => value?.toLowerCase?.() ?? '';
-
-const isPrimaryMode = (mode?: string) => mode === "primary" || mode === "all" || mode === undefined || mode === null;
 
 type ProviderModel = Provider["models"][string];
 type ProviderWithModelList = Omit<Provider, "models"> & { models: ProviderModel[] };
@@ -2437,6 +2436,35 @@ export const useConfigStore = create<ConfigStore>()(
                             });
                         };
 
+                        const resolveVariantForModel = (
+                            providerId: string,
+                            modelId: string,
+                            agentVariant?: string,
+                        ): string | undefined => {
+                            const model = providers
+                                .find((provider) => provider.id === providerId)
+                                ?.models.find((candidate) => candidate.id === modelId) as { variants?: Record<string, unknown> } | undefined;
+                            const variants = model?.variants;
+                            if (!variants) return undefined;
+
+                            const savedVariant = currentSessionId
+                                ? useSelectionStore.getState().getAgentModelVariantForSession(
+                                    currentSessionId,
+                                    agentName,
+                                    providerId,
+                                    modelId,
+                                )
+                                : undefined;
+
+                            for (const candidate of [savedVariant, agentVariant, settingsDefaultVariant]) {
+                                if (candidate && Object.prototype.hasOwnProperty.call(variants, candidate)) {
+                                    return candidate;
+                                }
+                            }
+
+                            return undefined;
+                        };
+
                         // Prefer the selected agent's configured model when switching agents.
                         const agent = agents.find((candidate) => candidate.name === agentName);
                         const agentModelSelection = agent?.model;
@@ -2446,7 +2474,7 @@ export const useConfigStore = create<ConfigStore>()(
                             const agentModel = agentProvider?.models.find((model) => model.id === modelID);
 
                             if (agentModel) {
-                                applyResolvedModelSelection(providerID, modelID, undefined);
+                                applyResolvedModelSelection(providerID, modelID, resolveVariantForModel(providerID, modelID, agent?.variant));
                                 return;
                             }
                         }
@@ -2454,18 +2482,13 @@ export const useConfigStore = create<ConfigStore>()(
                         if (currentSessionId) {
                             const existingAgentModel = useSelectionStore.getState().getAgentModelForSession(currentSessionId, agentName);
                             if (existingAgentModel && hasProviderModel(providers, existingAgentModel.providerId, existingAgentModel.modelId)) {
-                                const savedVariant = useSelectionStore.getState().getAgentModelVariantForSession(
-                                    currentSessionId,
-                                    agentName,
-                                    existingAgentModel.providerId,
-                                    existingAgentModel.modelId,
-                                );
+                                const resolvedVariant = resolveVariantForModel(existingAgentModel.providerId, existingAgentModel.modelId, agent?.variant);
                                 if (
                                     currentProviderId !== existingAgentModel.providerId
                                     || currentModelId !== existingAgentModel.modelId
-                                    || get().currentVariant !== savedVariant
+                                    || get().currentVariant !== resolvedVariant
                                 ) {
-                                    applyResolvedModelSelection(existingAgentModel.providerId, existingAgentModel.modelId, savedVariant);
+                                    applyResolvedModelSelection(existingAgentModel.providerId, existingAgentModel.modelId, resolvedVariant);
                                 }
                                 return;
                             }
@@ -2477,16 +2500,7 @@ export const useConfigStore = create<ConfigStore>()(
                             if (parsed) {
                                 const settingsProvider = providers.find((p) => p.id === parsed.providerId);
                                 if (settingsProvider?.models.some((m) => m.id === parsed.modelId)) {
-                                    let nextVariant: string | undefined;
-                                    if (settingsDefaultVariant) {
-                                        const model = settingsProvider.models.find((m) => m.id === parsed.modelId) as { variants?: Record<string, unknown> } | undefined;
-                                        const variants = model?.variants;
-                                        if (variants && Object.prototype.hasOwnProperty.call(variants, settingsDefaultVariant)) {
-                                            nextVariant = settingsDefaultVariant;
-                                        }
-                                    }
-
-                                    applyResolvedModelSelection(parsed.providerId, parsed.modelId, nextVariant);
+                                    applyResolvedModelSelection(parsed.providerId, parsed.modelId, resolveVariantForModel(parsed.providerId, parsed.modelId, agent?.variant));
                                     return;
                                 }
                             }

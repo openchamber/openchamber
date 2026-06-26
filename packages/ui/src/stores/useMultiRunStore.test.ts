@@ -9,6 +9,7 @@ const worktreeCreateCalls: Array<{ project: { id?: string; path: string }; args:
 const worktreeBootstrapWaitCalls: string[] = [];
 const operationOrder: string[] = [];
 let isGitRepository = false;
+let waitForWorktreeSetup = false;
 const createWorktreeWithDefaultsMock = mock((project: { id?: string; path: string }, args: Record<string, unknown>, options: unknown) => {
   worktreeCreateCalls.push({ project, args, options });
   return Promise.resolve({
@@ -88,6 +89,7 @@ mock.module('@/lib/worktrees/worktreeStatus', () => ({
 }));
 
 mock.module('@/lib/openchamberConfig', () => ({
+  getWorktreeSetupWaitEnabled: mock(() => Promise.resolve(waitForWorktreeSetup)),
   saveWorktreeSetupCommands: mock(() => Promise.resolve()),
 }));
 
@@ -155,6 +157,7 @@ describe('useMultiRunStore', () => {
     worktreeBootstrapWaitCalls.length = 0;
     operationOrder.length = 0;
     isGitRepository = false;
+    waitForWorktreeSetup = false;
     childState.session = [];
     childState.sessionTotal = 0;
     childState.limit = 5;
@@ -196,12 +199,30 @@ describe('useMultiRunStore', () => {
     expect(worktreeCreateCalls[0]?.project).toEqual({ id: 'project-1', path: '/repo' });
     expect(worktreeCreateCalls[0]?.args.returnAfterDirectoryCreated).toBe(true);
     expect(worktreeCreateCalls[0]?.options).toEqual({ resolvedRootTrackingRemote: null });
+    expect(worktreeBootstrapWaitCalls).toEqual([]);
+    expect(operationOrder).toEqual(['createSession:/repo-worktrees/fix-thing']);
+    expect(registeredDirectories).toEqual([{ sessionID: 'ses_multirun', directory: '/repo-worktrees/fix-thing' }]);
+    expect(worktreeMetadataCalls).toEqual([{ sessionId: 'ses_multirun', path: '/repo-worktrees/fix-thing' }]);
+  });
+
+  test('waits for isolated worktree bootstrap when setup wait is enabled', async () => {
+    isGitRepository = true;
+    waitForWorktreeSetup = true;
+
+    const result = await useMultiRunStore.getState().createMultiRun({
+      name: 'Fix thing',
+      isolateRuns: true,
+      groups: [{
+        prompt: 'Fix it',
+        models: [{ providerID: 'anthropic', modelID: 'claude-sonnet-4-5' }],
+      }],
+    });
+
+    expect(result?.sessionIds).toEqual(['ses_multirun']);
     expect(worktreeBootstrapWaitCalls).toEqual(['/repo-worktrees/fix-thing']);
     expect(operationOrder).toEqual([
       'wait:/repo-worktrees/fix-thing',
       'createSession:/repo-worktrees/fix-thing',
     ]);
-    expect(registeredDirectories).toEqual([{ sessionID: 'ses_multirun', directory: '/repo-worktrees/fix-thing' }]);
-    expect(worktreeMetadataCalls).toEqual([{ sessionId: 'ses_multirun', path: '/repo-worktrees/fix-thing' }]);
   });
 });

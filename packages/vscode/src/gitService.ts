@@ -3302,12 +3302,15 @@ export async function setGitIdentity(
   directory: string,
   userName: string,
   userEmail: string,
-  sshKey?: string | null
+  sshKey?: string | null,
+  signCommits?: boolean | null,
+  signingKey?: string | null
 ): Promise<{ success: boolean }> {
   const repo = await getRepository(directory);
   
   // Build SSH command once if needed
   const sshCommand = sshKey ? buildSshCommand(sshKey) : null;
+  const shouldSignCommits = signCommits === true && typeof signingKey === 'string' && signingKey.trim().length > 0;
   
   if (repo) {
     try {
@@ -3315,6 +3318,11 @@ export async function setGitIdentity(
       await repo.setConfig('user.email', userEmail);
       if (sshCommand) {
         await repo.setConfig('core.sshCommand', sshCommand);
+      }
+      if (shouldSignCommits) {
+        await repo.setConfig('gpg.format', 'ssh');
+        await repo.setConfig('user.signingkey', signingKey.trim());
+        await repo.setConfig('commit.gpgsign', 'true');
       }
       return { success: true };
     } catch (error) {
@@ -3327,6 +3335,11 @@ export async function setGitIdentity(
   await execGit(['config', 'user.email', userEmail], directory);
   if (sshCommand) {
     await execGit(['config', 'core.sshCommand', sshCommand], directory);
+  }
+  if (shouldSignCommits) {
+    await execGit(['config', 'gpg.format', 'ssh'], directory);
+    await execGit(['config', 'user.signingkey', signingKey.trim()], directory);
+    await execGit(['config', 'commit.gpgsign', 'true'], directory);
   }
 
   return { success: true };

@@ -8,6 +8,7 @@ const scopedClientDirectories: string[] = []
 const registeredSessionDirectories: Array<{ sessionID: string; directory: string }> = []
 let sessionRevertResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
 let questionReplyError: unknown | null = null
+let questionRejectError: unknown | null = null
 let sessionShareResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
 const globalUpsertedSessions: unknown[] = []
 
@@ -28,6 +29,9 @@ const mockScopedClient = {
     }),
     reject: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "question.reject", params })
+      if (questionRejectError) {
+        return Promise.resolve({ error: questionRejectError, response: { status: 404 } })
+      }
       return Promise.resolve({ data: true })
     }),
   },
@@ -72,6 +76,9 @@ const mockSdk = {
     }),
     reject: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "question.reject", params })
+      if (questionRejectError) {
+        return Promise.resolve({ error: questionRejectError, response: { status: 404 } })
+      }
       return Promise.resolve({ data: true })
     }),
   },
@@ -597,5 +604,93 @@ describe("rejectQuestion passes directory", () => {
     expect(replyCalls.length).toBe(1)
     expect(replyCalls[0].params.requestID).toBe("q-2")
     expect(replyCalls[0].params.directory).toBe("/test/project")
+  })
+})
+
+function buildQuestion(id: string, sessionId: string): QuestionRequest {
+  return {
+    id,
+    sessionID: sessionId,
+    questions: [
+      {
+        question: "Choose an option",
+        header: "Choice",
+        options: [{ label: "Yes", description: "Proceed" }],
+      },
+    ],
+  }
+}
+
+describe("dismissOpenQuestionsForSession", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+    scopedClientDirectories.length = 0
+    questionReplyError = null
+  })
+
+  test("returns false and rejects nothing when no questions are pending", async () => {
+    const store = createStore({}, { session: [{ id: "session-a", time: { created: 1 } } as Session] })
+    const childStores = createChildStores([["/test/project", store]])
+
+    const { setActionRefs, dismissOpenQuestionsForSession } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    const dismissed = await dismissOpenQuestionsForSession("session-a")
+
+    expect(dismissed).toBe(false)
+    expect(replyCalls.filter((call) => call.method === "question.reject")).toHaveLength(0)
+  })
+
+  test("rejects every pending question in the session subtree (root + subagent child)", async () => {
+    const rootQuestion = buildQuestion("q-root", "session-a")
+    const childQuestion = buildQuestion("q-child", "session-child")
+    const store = createStore({}, {
+      session: [
+        { id: "session-a", time: { created: 1 } } as Session,
+        { id: "session-child", parentID: "session-a", time: { created: 2 } } as Session,
+      ],
+      question: {
+        "session-a": [rootQuestion],
+        "session-child": [childQuestion],
+      },
+    })
+    const childStores = createChildStores([["/test/project", store]])
+
+    const { setActionRefs, dismissOpenQuestionsForSession } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    const dismissed = await dismissOpenQuestionsForSession("session-a")
+
+    expect(dismissed).toBe(true)
+    const rejectCalls = replyCalls.filter((call) => call.method === "question.reject")
+    expect(rejectCalls).toHaveLength(2)
+    const rejectedIds = rejectCalls.map((call) => call.params.requestID).sort()
+    expect(rejectedIds).toEqual(["q-child", "q-root"])
+    // Optimistic clear: the questions are removed from the local store so the
+    // prompt disappears instantly, without waiting for the reject round-trip.
+    expect(store.getState().question["session-a"]).toBe(undefined)
+    expect(store.getState().question["session-child"]).toBe(undefined)
+  })
+
+  test("swallows QuestionNotFoundError so a stranded question never blocks the send", async () => {
+    const staleQuestion = buildQuestion("q-stale", "session-a")
+    const store = createStore({}, {
+      session: [{ id: "session-a", time: { created: 1 } } as Session],
+      question: { "session-a": [staleQuestion] },
+    })
+    const childStores = createChildStores([["/test/project", store]])
+    questionRejectError = Object.assign(new Error("question.reject failed (404): QuestionNotFoundError"), { status: 404 })
+
+    const { setActionRefs, dismissOpenQuestionsForSession } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    const dismissed = await dismissOpenQuestionsForSession("session-a")
+
+    expect(dismissed).toBe(true)
+    const rejectCalls = replyCalls.filter((call) => call.method === "question.reject")
+    expect(rejectCalls).toHaveLength(1)
+    expect(rejectCalls[0].params.requestID).toBe("q-stale")
+    // The stale entry is cleared from the store even though the server reported not-found.
+    expect(store.getState().question["session-a"]).toBe(undefined)
   })
 })

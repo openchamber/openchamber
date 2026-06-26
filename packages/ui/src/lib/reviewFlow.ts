@@ -80,24 +80,27 @@ const resolveModelContext = (sessionID: string): SessionModelContext | null => {
   const selection = useSelectionStore.getState();
   const config = useConfigStore.getState();
   const lastChoice = useSessionUIStore.getState().getLastUserChoice(sessionID);
-  const agent = selection.getSessionAgentSelection(sessionID) || lastChoice?.agent || config.currentAgentName || undefined;
+  const agent = lastChoice?.agent || selection.getSessionAgentSelection(sessionID) || config.currentAgentName || undefined;
   const sessionModel = selection.getSessionModelSelection(sessionID);
   const agentModel = agent ? selection.getAgentModelForSession(sessionID, agent) : null;
   const lastChoiceModel = lastChoice?.providerID && lastChoice.modelID
     ? { providerId: lastChoice.providerID, modelId: lastChoice.modelID }
     : null;
-  const selectedModel = agentModel || sessionModel || lastChoiceModel || (config.currentProviderId && config.currentModelId
+  const selectedModel = lastChoiceModel || agentModel || sessionModel || (config.currentProviderId && config.currentModelId
     ? { providerId: config.currentProviderId, modelId: config.currentModelId }
     : null);
   if (!selectedModel?.providerId || !selectedModel?.modelId) return null;
+  if (lastChoiceModel) {
+    return {
+      providerID: lastChoiceModel.providerId,
+      modelID: lastChoiceModel.modelId,
+      agent,
+      variant: lastChoice?.variant,
+    };
+  }
   // Variants are model-specific; only reuse one resolved for the same model.
   const selectionVariant = agent
     ? selection.getAgentModelVariantForSession(sessionID, agent, selectedModel.providerId, selectedModel.modelId)
-    : undefined;
-  const lastChoiceVariant = lastChoiceModel
-    && lastChoiceModel.providerId === selectedModel.providerId
-    && lastChoiceModel.modelId === selectedModel.modelId
-    ? lastChoice?.variant
     : undefined;
   const configVariant = config.currentProviderId === selectedModel.providerId && config.currentModelId === selectedModel.modelId
     ? config.currentVariant
@@ -106,7 +109,7 @@ const resolveModelContext = (sessionID: string): SessionModelContext | null => {
     providerID: selectedModel.providerId,
     modelID: selectedModel.modelId,
     agent,
-    variant: selectionVariant || lastChoiceVariant || configVariant || undefined,
+    variant: selectionVariant || configVariant || undefined,
   };
 };
 
