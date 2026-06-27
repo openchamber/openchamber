@@ -29,7 +29,7 @@ import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { Icon } from "@/components/icon/Icon";
 import { useUIStore } from '@/stores/useUIStore';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
-import { useSessionUIStore } from '@/sync/session-ui-store';
+import { materializeOpenDraftSession, useSessionUIStore, type SyntheticContextPart } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
@@ -244,6 +244,7 @@ type ChatDispatchTarget = {
   modelID: string;
   currentAgentName: string | null;
   currentVariant: string | null;
+  carriedSyntheticParts?: SyntheticContextPart[];
 };
 
 const pullRequestDraftSnapshots = new Map<string, PullRequestDraftSnapshot>();
@@ -473,6 +474,7 @@ export const PullRequestSection: React.FC<{
   const [commentsDialogOpen, setCommentsDialogOpen] = React.useState(false);
   const [commentsDetails, setCommentsDetails] = React.useState<GitHubPullRequestContextResult | null>(null);
   const [isLoadingCommentsDetails, setIsLoadingCommentsDetails] = React.useState(false);
+  const [isSendingComments, setIsSendingComments] = React.useState(false);
 
   const attemptedBodyHydrationRef = React.useRef<Set<string>>(new Set());
   const lastSyncedPrNumberRef = React.useRef<number | null>(null);
@@ -694,28 +696,59 @@ export const PullRequestSection: React.FC<{
     return all;
   }, [commentsDetails, t]);
 
-  const resolveChatDispatchTarget = React.useCallback((): ChatDispatchTarget | null => {
-    if (!currentSessionId) {
-      toast.error(t('gitView.pr.toast.noActiveSession'), { description: t('gitView.pr.toast.noActiveSessionDescription') });
+  const resolveChatDispatchTarget = React.useCallback(async (): Promise<ChatDispatchTarget | null> => {
+    try {
+      let sessionId = currentSessionId;
+      let carriedSyntheticParts: SyntheticContextPart[] | undefined;
+
+      if (!sessionId) {
+        const draft = useSessionUIStore.getState().newSessionDraft;
+        if (draft?.open) {
+          const config = useConfigStore.getState();
+          if (!config.currentProviderId || !config.currentModelId) {
+            toast.error(t('gitView.pr.toast.noModelSelected'));
+            return null;
+          }
+          const materialized = await materializeOpenDraftSession({
+            providerID: config.currentProviderId,
+            modelID: config.currentModelId,
+            agent: config.currentAgentName || undefined,
+            variant: config.currentVariant || undefined,
+          });
+          if (!materialized) {
+            toast.error(t('gitView.pr.toast.noActiveSession'), { description: t('gitView.pr.toast.noActiveSessionDescription') });
+            return null;
+          }
+          sessionId = materialized.sessionId;
+          carriedSyntheticParts = materialized.syntheticParts;
+        } else {
+          toast.error(t('gitView.pr.toast.noActiveSession'), { description: t('gitView.pr.toast.noActiveSessionDescription') });
+          return null;
+        }
+      }
+
+      const { currentProviderId, currentModelId, currentAgentName, currentVariant } = useConfigStore.getState();
+      const lastUsedProvider = useSelectionStore.getState().lastUsedProvider;
+      const providerID = currentProviderId || lastUsedProvider?.providerID;
+      const modelID = currentModelId || lastUsedProvider?.modelID;
+      if (!providerID || !modelID) {
+        toast.error(t('gitView.pr.toast.noModelSelected'));
+        return null;
+      }
+
+      return {
+        sessionId,
+        providerID,
+        modelID,
+        currentAgentName: currentAgentName ?? null,
+        currentVariant: currentVariant ?? null,
+        carriedSyntheticParts,
+      };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      toast.error(t('gitView.pr.toast.sendMessageFailed'), { description: message });
       return null;
     }
-
-    const { currentProviderId, currentModelId, currentAgentName, currentVariant } = useConfigStore.getState();
-    const lastUsedProvider = useSelectionStore.getState().lastUsedProvider;
-    const providerID = currentProviderId || lastUsedProvider?.providerID;
-    const modelID = currentModelId || lastUsedProvider?.modelID;
-    if (!providerID || !modelID) {
-      toast.error(t('gitView.pr.toast.noModelSelected'));
-      return null;
-    }
-
-    return {
-      sessionId: currentSessionId,
-      providerID,
-      modelID,
-      currentAgentName: currentAgentName ?? null,
-      currentVariant: currentVariant ?? null,
-    };
   }, [currentSessionId, t]);
 
   const dispatchSyntheticPrompt = React.useCallback((
@@ -724,6 +757,12 @@ export const PullRequestSection: React.FC<{
     instructionsText: string,
     payloadText: string,
   ) => {
+    const syntheticParts: SyntheticContextPart[] = [
+      { text: instructionsText, synthetic: true },
+      { text: payloadText, synthetic: true },
+      ...(target.carriedSyntheticParts ?? []),
+    ];
+
     void useSessionUIStore.getState().sendMessage(
       visibleText,
       target.providerID,
@@ -731,11 +770,10 @@ export const PullRequestSection: React.FC<{
       target.currentAgentName ?? undefined,
       undefined,
       undefined,
-      [
-        { text: instructionsText, synthetic: true },
-        { text: payloadText, synthetic: true },
-      ],
+      syntheticParts,
       target.currentVariant ?? undefined,
+      undefined,
+      { sessionId: target.sessionId },
     ).catch((e) => {
       const message = e instanceof Error ? e.message : String(e);
       toast.error(t('gitView.pr.toast.sendMessageFailed'), { description: message });
@@ -880,12 +918,13 @@ export const PullRequestSection: React.FC<{
       return;
     }
     if (!directory || !pr) return;
-    const target = resolveChatDispatchTarget();
-    if (!target) {
-      return;
-    }
 
     try {
+      const target = await resolveChatDispatchTarget();
+      if (!target) {
+        return;
+      }
+
       const context = await github.prContext(directory, pr.number, { includeDiff: false, includeCheckDetails: true });
       const runs = context.checkRuns ?? [];
       const failed = runs.filter((r) => {
@@ -936,12 +975,15 @@ export const PullRequestSection: React.FC<{
       return;
     }
     if (!directory || !pr) return;
-    const target = resolveChatDispatchTarget();
-    if (!target) {
-      return;
-    }
+
+    setIsSendingComments(true);
 
     try {
+      const target = await resolveChatDispatchTarget();
+      if (!target) {
+        return;
+      }
+
       const context = await github.prContext(directory, pr.number, { includeDiff: false, includeCheckDetails: false });
       const issueComments = context.issueComments ?? [];
       const reviewComments = context.reviewComments ?? [];
@@ -964,6 +1006,8 @@ export const PullRequestSection: React.FC<{
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       toast.error(t('gitView.pr.toast.loadPrCommentsFailed'), { description: message });
+    } finally {
+      setIsSendingComments(false);
     }
   }, [directory, dispatchSyntheticPrompt, github, pr, resolveChatDispatchTarget, setActiveMainTab, t]);
 
@@ -971,21 +1015,26 @@ export const PullRequestSection: React.FC<{
     setCommentsDialogOpen(false);
     setActiveMainTab('chat');
 
-    const target = resolveChatDispatchTarget();
-    if (!target) {
-      return;
+    try {
+      const visibleText = await renderMagicPrompt('github.pr.comment.single.visible');
+      const instructionsText = await renderMagicPrompt('github.pr.comment.single.instructions');
+      const payloadText = `GitHub PR comment (JSON)\n${JSON.stringify({
+        repo: commentsDetails?.repo ?? null,
+        pr: commentsDetails?.pr ?? pr ?? null,
+        comment,
+      }, null, 2)}`;
+
+      const target = await resolveChatDispatchTarget();
+      if (!target) {
+        return;
+      }
+
+      dispatchSyntheticPrompt(target, visibleText, instructionsText, payloadText);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      toast.error(t('gitView.pr.toast.sendMessageFailed'), { description: message });
     }
-
-    const visibleText = await renderMagicPrompt('github.pr.comment.single.visible');
-    const instructionsText = await renderMagicPrompt('github.pr.comment.single.instructions');
-    const payloadText = `GitHub PR comment (JSON)\n${JSON.stringify({
-      repo: commentsDetails?.repo ?? null,
-      pr: commentsDetails?.pr ?? pr ?? null,
-      comment,
-    }, null, 2)}`;
-
-    dispatchSyntheticPrompt(target, visibleText, instructionsText, payloadText);
-  }, [commentsDetails, dispatchSyntheticPrompt, pr, resolveChatDispatchTarget, setActiveMainTab]);
+  }, [commentsDetails, dispatchSyntheticPrompt, pr, resolveChatDispatchTarget, setActiveMainTab, t]);
 
   const refresh = React.useCallback(async (options?: { force?: boolean; onlyExistingPr?: boolean; silent?: boolean; markInitialResolved?: boolean }) => {
     await refreshPrStatus(prStatusKey, options);
@@ -1660,9 +1709,10 @@ export const PullRequestSection: React.FC<{
                             size="sm"
                             className="h-7 w-7 px-0 border-[var(--status-success-border)] bg-[var(--status-success-background)] text-[var(--status-success)]"
                             onClick={sendCommentsToChat}
+                            disabled={isSendingComments}
                             aria-label={t('gitView.pr.actions.shareCommentsAria')}
                           >
-                            <Icon name="ai-generate-2" className="size-4" />
+                            {isSendingComments ? <Icon name="loader-4" className="size-4 animate-spin" /> : <Icon name="ai-generate-2" className="size-4" />}
                           </Button>
                         </TooltipTrigger>
                         <TooltipContent><p>{t('gitView.pr.actions.shareComments')}</p></TooltipContent>
