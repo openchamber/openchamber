@@ -366,6 +366,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
     const toggleFavoriteModel = useUIStore((state) => state.toggleFavoriteModel);
     const reorderFavoriteModel = useUIStore((state) => state.reorderFavoriteModel);
+    const providerOrder = useUIStore((state) => state.providerOrder);
+    const setProviderOrder = useUIStore((state) => state.setProviderOrder);
     const isFavoriteModel = useUIStore((state) => state.isFavoriteModel);
     const addRecentModel = useUIStore((state) => state.addRecentModel);
     const addRecentAgent = useUIStore((state) => state.addRecentAgent);
@@ -2368,6 +2370,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 )}
                                 reorderFavoriteAriaLabel={t('chat.modelControls.reorderFavoriteAria')}
                                 reorderFavoriteTitle={t('chat.modelControls.reorderFavoriteTitle')}
+                                providerOrder={providerOrder}
+                                onReorderProvider={setProviderOrder}
+                                reorderProviderTitle={t('chat.modelControls.reorderProviderTitle')}
                                 footerContent={(activeEntry) => {
                                     const activeHasThinkingVariants = activeEntry
                                         ? getModelVariantOptions(activeEntry.providerID, activeEntry.modelID).length > 0

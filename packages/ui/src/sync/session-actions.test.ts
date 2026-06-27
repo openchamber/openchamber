@@ -220,6 +220,21 @@ function createChildStores(entries: Array<[string, StoreApi<DirectoryStore>]>) {
   } as unknown as import("./child-store").ChildStoreManager
 }
 
+describe("fetchMessagesForSession startup race", () => {
+  test("does not reject before sync action refs are initialized", async () => {
+    const { fetchMessagesForSession } = await import("./session-actions")
+
+    let error: unknown = null
+    try {
+      await fetchMessagesForSession("session-a", "/test/project")
+    } catch (err) {
+      error = err
+    }
+
+    expect(error).toBe(null)
+  })
+})
+
 describe("shareSession live state", () => {
   beforeEach(() => {
     replyCalls.length = 0
@@ -371,6 +386,57 @@ describe("optimisticSend target directory", () => {
     expect(optimisticRemove).toBe(null)
     expect(targetStore.getState().session_status["session-new"]?.type).toBe("busy")
     expect(currentStore.getState().session_status["session-new"]).toBe(undefined)
+  })
+
+  test("allows callers to block final send when runtime changes after optimistic insert", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    let optimisticAdd: OptimisticAddCall | null = null
+    let optimisticRemove: OptimisticRemoveCall | null = null
+    let finalSendCalled = false
+    const { getRuntimeKey, switchRuntimeEndpoint } = await import("../lib/runtime-switch")
+    switchRuntimeEndpoint({ apiBaseUrl: "http://runtime-a.test", runtimeKey: "runtime-a" })
+
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(
+      (input) => {
+        optimisticAdd = input
+      },
+      (input) => {
+        optimisticRemove = input
+      },
+    )
+
+    let caught: unknown = null
+    try {
+      await optimisticSend({
+        sessionId: "session-race",
+        directory: "/target/project",
+        content: "hello",
+        providerID: "provider",
+        modelID: "model",
+        beforeOptimisticInsert: () => {
+          expect(getRuntimeKey()).toBe("runtime-a")
+        },
+        send: async () => {
+          switchRuntimeEndpoint({ apiBaseUrl: "http://runtime-b.test", runtimeKey: "runtime-b" })
+          if (getRuntimeKey() !== "runtime-a") throw new Error("Auto-review stopped because the runtime changed.")
+          finalSendCalled = true
+        },
+      })
+    } catch (error) {
+      caught = error
+    }
+
+    expect(caught).toBeInstanceOf(Error)
+    expect((caught as Error).message).toContain("runtime changed")
+
+    expect(optimisticAdd).not.toBeNull()
+    expect(finalSendCalled).toBe(false)
+    expect(optimisticRemove).not.toBeNull()
+    expect((optimisticRemove as unknown as OptimisticRemoveCall).sessionID).toBe("session-race")
+    expect(targetStore.getState().session_status["session-race"]?.type).toBe("idle")
   })
 })
 

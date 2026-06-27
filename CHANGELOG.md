@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.13.5] - 2026-06-27
+
+- CLI: global web installs no longer crash on startup when tunnel commands load ngrok capabilities.
+- CLI: `openchamber update` works again, and tunnel start paths no longer fail when using managed-local config prompts, multi-instance port selection, or auto-started servers.
+- GitHub/Usage: fork upstream detection and Google quota checks no longer fail because of missing server helpers.
+
+## [1.13.4] - 2026-06-27
+
+- UI/Localization: added Japanese interface translations and Japanese documentation (thanks to @yuchi0531).
+- Chat: queued messages can now be reordered by dragging them in the queue (thanks to @makeittech).
+- Chat: sending a message now closes an open question prompt instead of leaving stale question UI in the composer (thanks to @tomzx).
+- Chat: conversations pinned to the bottom no longer jiggle or double-scroll after sending, and revisiting older sessions snaps to the latest message without a smooth-scroll delay.
+- Reviews: the Review changes dialog can now run an automatic review loop, with a chat banner for opening or stopping the linked review sessions.
+- Models: the model picker now remembers provider group expansion and custom ordering, and Shift+Delete removes a recent model from recents (thanks to @makeittech).
+- Shortcuts: the model-selector shortcut can now be customized (thanks to @makeittech).
+- Agents: agent edits against an external OpenCode server no longer show a saved-state update when the save did not succeed (thanks to @makeittech).
+- Providers: the add-provider form no longer loses the selected provider during background provider refreshes (thanks to @IbrahimKhan12).
+- Worktrees: messages sent to new worktree sessions now wait until the worktree session is ready instead of racing ahead (thanks to @bashrusakh).
+- Git: commit and pull-request generation from a draft session now starts from the created chat session instead of a temporary draft (thanks to @bashrusakh).
+- CLI: startup and status commands now check the live server port before treating an existing process as the active OpenChamber server.
+
 ## [1.13.3] - 2026-06-24
 
 - Chat: selecting a user-installed skill from the slash command menu now invokes the skill instead of inserting the skill name as plain text (thanks to @IbrahimKhan12).

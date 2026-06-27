@@ -594,8 +594,6 @@ function deleteSkill(skillName, workingDirectory) {
 
 export {
   getSkillSources,
-  getSkillScope,
-  getSkillWritePath,
   discoverSkills,
   mergeDiscoveredSkills,
   createSkill,

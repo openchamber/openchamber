@@ -4,7 +4,7 @@ import { MessageFreshnessDetector } from '@/lib/messageFreshness';
 import { createScrollSpy } from '@/components/chat/lib/scroll/scrollSpy';
 import { useViewportStore } from '@/sync/viewport-store';
 
-export type AutoFollowState = 'following' | 'released';
+type AutoFollowState = 'following' | 'released';
 
 export type ContentChangeReason = 'text' | 'structural' | 'permission';
 
@@ -36,6 +36,7 @@ export interface UseChatAutoFollowResult {
     notifyContentChange: (reason?: ContentChangeReason) => void;
     getAnimationHandlers: (messageId: string) => AnimationHandlers;
     goToBottom: (mode?: 'instant' | 'smooth') => void;
+    scrollToBottomOnSend: () => void;
     releaseAutoFollow: () => void;
     saveSnapshotNow: () => void;
     restoreSnapshot: () => Promise<boolean>;
@@ -170,7 +171,21 @@ export const useChatAutoFollow = ({
         }
         followRafRef.current = null;
         settledFramesRef.current = 0;
-        setIsFollowingProgrammatically(false);
+        // Only the active scroll-writer owns the "programmatic follow" flag. If the
+        // settle burst is still running it remains the owner, so don't clear here.
+        if (settleBurstRafRef.current === null) {
+            setIsFollowingProgrammatically(false);
+        }
+    }, []);
+
+    const stopSettleBurst = React.useCallback(() => {
+        if (settleBurstRafRef.current !== null && typeof window !== 'undefined') {
+            window.cancelAnimationFrame(settleBurstRafRef.current);
+        }
+        settleBurstRafRef.current = null;
+        if (followRafRef.current === null) {
+            setIsFollowingProgrammatically(false);
+        }
     }, []);
 
     const tickFollow = React.useCallback(() => {
@@ -188,6 +203,21 @@ export const useChatAutoFollow = ({
         const target = Math.max(0, container.scrollHeight - container.clientHeight);
         const current = container.scrollTop;
         const delta = target - current;
+
+        // A delta larger than a full viewport is a DISCRETE jump (late history
+        // measurement, session entry, a big block rendering in one commit) — not
+        // incremental streaming growth. Easing it produces a visible smooth scroll
+        // from a mid position to the bottom, which felt inconsistent when entering
+        // historical sessions. Snap such jumps; only ease small, streaming-sized
+        // deltas below.
+        if (Math.abs(delta) > container.clientHeight) {
+            markProgrammaticWrite();
+            container.scrollTop = target;
+            lastScrollTopRef.current = target;
+            settledFramesRef.current = 0;
+            followRafRef.current = window.requestAnimationFrame(tickFollow);
+            return;
+        }
 
         if (Math.abs(delta) <= SETTLE_EPSILON) {
             if (current !== target) {
@@ -214,8 +244,17 @@ export const useChatAutoFollow = ({
 
     const startFollowLoop = React.useCallback(() => {
         if (typeof window === 'undefined') return;
-        if (followRafRef.current !== null) return;
         if (stateRef.current !== 'following') return;
+        // Single-writer invariant, asymmetric on purpose: the settle burst is the
+        // AUTHORITATIVE instant pin (session restore / goToBottom 'instant'). While
+        // it is snapping to the bottom, YIELD — never preempt it with the easing
+        // follow loop. Preempting it let a content-measurement ResizeObserver tick
+        // downgrade an instant restore into a visible smooth scroll from a mid
+        // position when entering a historical session. When the burst ends, the
+        // next content kick starts the follow loop. (startSettleBurst still stops
+        // this loop, so the two never write scrollTop in the same frame.)
+        if (settleBurstRafRef.current !== null) return;
+        if (followRafRef.current !== null) return;
         settledFramesRef.current = 0;
         setIsFollowingProgrammatically(true);
         followRafRef.current = window.requestAnimationFrame(tickFollow);
@@ -231,22 +270,32 @@ export const useChatAutoFollow = ({
         lastScrollTopRef.current = container.scrollTop;
     }, [markProgrammaticWrite]);
 
-    const stopSettleBurst = React.useCallback(() => {
-        if (settleBurstRafRef.current !== null && typeof window !== 'undefined') {
-            window.cancelAnimationFrame(settleBurstRafRef.current);
-        }
-        settleBurstRafRef.current = null;
-    }, []);
-
     const startSettleBurst = React.useCallback(() => {
         if (typeof window === 'undefined') return;
+        // Single-writer invariant (mirror of startFollowLoop): the settle burst is
+        // taking over scroll ownership, so stop the easing follow loop first. The
+        // two must never write scrollTop in the same frame.
+        stopFollowLoop();
         stopSettleBurst();
+        setIsFollowingProgrammatically(true);
         const until = (typeof performance !== 'undefined' ? performance.now() : Date.now()) + SETTLE_BURST_DURATION_MS;
+        const finish = () => {
+            settleBurstRafRef.current = null;
+            if (followRafRef.current === null) {
+                setIsFollowingProgrammatically(false);
+            }
+        };
         const tick = () => {
             settleBurstRafRef.current = null;
-            if (stateRef.current !== 'following') return;
+            if (stateRef.current !== 'following') {
+                finish();
+                return;
+            }
             const c = scrollRef.current;
-            if (!c) return;
+            if (!c) {
+                finish();
+                return;
+            }
             const target = Math.max(0, c.scrollHeight - c.clientHeight);
             if (Math.abs(c.scrollTop - target) > SETTLE_EPSILON) {
                 markProgrammaticWrite();
@@ -256,10 +305,12 @@ export const useChatAutoFollow = ({
             const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
             if (now < until) {
                 settleBurstRafRef.current = window.requestAnimationFrame(tick);
+            } else {
+                finish();
             }
         };
         settleBurstRafRef.current = window.requestAnimationFrame(tick);
-    }, [markProgrammaticWrite, stopSettleBurst]);
+    }, [markProgrammaticWrite, stopFollowLoop, stopSettleBurst]);
 
     const releaseAutoFollow = React.useCallback(() => {
         stopFollowLoop();
@@ -292,6 +343,21 @@ export const useChatAutoFollow = ({
         writeScrollTopInstant(target);
         startSettleBurst();
     }, [setStateValue, startFollowLoop, startSettleBurst, writeScrollTopInstant]);
+
+    const scrollToBottomOnSend = React.useCallback(() => {
+        // Keep a SINGLE movement to the just-sent message.
+        // If we're already following the bottom, the optimistic message is eased
+        // into view by the follow loop (kicked by the content ResizeObserver). Just
+        // (re)kick that one owner — do NOT also fire an instant goToBottom here, or
+        // the instant snap races the easing loop and you see a visible double scroll
+        // (ease, then snap).
+        if (stateRef.current === 'following') {
+            startFollowLoop();
+            return;
+        }
+        // Scrolled up (released): bring the user down to the message they just sent.
+        goToBottom('instant');
+    }, [goToBottom, startFollowLoop]);
 
     const flushSave = React.useCallback(() => {
         if (saveTimerRef.current !== null) {
@@ -357,11 +423,14 @@ export const useChatAutoFollow = ({
         setStateValue('following');
         lastUserReleaseAtRef.current = 0;
         const target = Math.max(0, container.scrollHeight - container.clientHeight);
+        // Mirror goToBottom('instant'): jump to the bottom now, then hold it with the
+        // settle burst while late history content measures in. Do NOT also start the
+        // easing follow loop here — that is what produced the smooth scroll-from-mid
+        // position on session entry.
         writeScrollTopInstant(target);
-        startFollowLoop();
         startSettleBurst();
         return false;
-    }, [setStateValue, startFollowLoop, startSettleBurst, writeScrollTopInstant]);
+    }, [setStateValue, startSettleBurst, writeScrollTopInstant]);
 
     React.useEffect(() => {
         if (!currentSessionId || currentSessionId === lastSessionIdRef.current) {
@@ -676,6 +745,7 @@ export const useChatAutoFollow = ({
         notifyContentChange,
         getAnimationHandlers,
         goToBottom,
+        scrollToBottomOnSend,
         releaseAutoFollow,
         saveSnapshotNow,
         restoreSnapshot,

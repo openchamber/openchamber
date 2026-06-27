@@ -150,5 +150,3 @@ export const configureRuntimeUrlResolver = (config: RuntimeUrlConfig): RuntimeUr
   activeRuntimeUrlResolver = createRuntimeUrlResolver(config);
   return activeRuntimeUrlResolver;
 };
-
-export const runtimeUrl = activeRuntimeUrlResolver;

@@ -389,6 +389,25 @@ describe('useConfigStore provider persistence', () => {
     expect(state.currentVariant).toBe('fast');
   });
 
+  test('provider reload preserves the add-provider sentinel selection', async () => {
+    // The user has opened the "Add provider" form, which sets selectedProviderId
+    // to the sentinel. A background provider refresh must not navigate them away
+    // (and discard their unsaved input) just because the sentinel is not a real
+    // provider id. See issue #1765.
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      currentProviderId: 'live',
+      currentModelId: 'live-model',
+      selectedProviderId: '__add_provider__',
+      directoryScoped: {},
+    });
+
+    liveProviderId = 'live';
+    await useConfigStore.getState().loadProviders({ source: 'test:add-provider' });
+
+    expect(useConfigStore.getState().selectedProviderId).toBe('__add_provider__');
+  });
+
   test('setAgent applies settings default variant for an agent configured model', () => {
     useSessionUIStore.setState({ currentSessionId: 'ses_agent_default_variant' });
     useConfigStore.setState({

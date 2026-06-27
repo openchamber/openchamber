@@ -1,6 +1,6 @@
 import { WebSocketServer } from 'ws';
 
-import { parseRequestPathname } from '../terminal/index.js';
+import { parseRequestPathname } from '../terminal/terminal-ws-protocol.js';
 import {
   MESSAGE_STREAM_DIRECTORY_WS_PATH,
   MESSAGE_STREAM_GLOBAL_WS_PATH,

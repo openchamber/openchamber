@@ -77,10 +77,6 @@ export const getMultiRunSessionTitle = (parts: {
   return segments.join('/');
 };
 
-export const isMultiRunSessionTitle = (title?: string | null): boolean => {
-  return parseMultiRunSessionTitle(title) !== null;
-};
-
 export const getFusionSessionTitle = (groupSlug: string, providerID: string, modelID: string, runGroup?: string): string => {
   const segments = [groupSlug];
   if (runGroup) segments.push(runGroup);

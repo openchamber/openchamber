@@ -5,6 +5,7 @@ import { BrowserVoiceButton } from '@/components/voice';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
+import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useInputStore } from '@/sync/input-store';
@@ -16,11 +17,13 @@ import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { startReviewFlow } from '@/lib/reviewFlow';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import { ReviewFlowDialog, type ReviewFlowExecution } from '@/components/session/ReviewFlowDialog';
 import { AttachedFilesList, AttachedVSCodeFileChips, ActiveEditorFileSuggestion } from './FileAttachment';
 import ToolOutputDialog from './message/ToolOutputDialog';
 import type { ToolPopupContent } from './message/types';
 import { QueuedMessageChips } from './QueuedMessageChips';
+import { AutoReviewBanner } from './AutoReviewBanner';
 import { FileMentionAutocomplete, type FileMentionHandle } from './FileMentionAutocomplete';
 import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from './CommandAutocomplete';
 import { SkillAutocomplete, type SkillAutocompleteHandle } from './SkillAutocomplete';
@@ -1157,6 +1160,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 variant: execution.variant || undefined,
                 generateHandoff: execution.generateHandoff,
                 returnAfterHandoffRequest: execution.generateHandoff,
+                autoReview: execution.autoReview,
             });
             setReviewDialogOpen(false);
         } catch (error) {
@@ -1661,6 +1665,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     // Session activity for queue availability and controls
     const { phase: sessionPhase } = useCurrentSessionActivity();
+    const autoReviewRunning = useAutoReviewStore(React.useCallback((state) => {
+        if (!currentSessionId) return false;
+        const run = state.runsByOriginalSessionID[currentSessionId];
+        return run?.status === 'running' && run.runtimeKey === getRuntimeKey();
+    }, [currentSessionId]));
 
     const handleOpenMobilePanel = React.useCallback((panel: MobileControlsPanel) => {
         if (!isMobile) {
@@ -1790,6 +1799,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             ? queuedMessages.filter((message) => message.id === queuedMessageId)
             : queuedMessages;
 
+        if (queuedOnly && autoReviewRunning) {
+            return;
+        }
+
         if (queuedOnly) {
             if (queuedMessagesToSend.length === 0 || !currentSessionId) return;
         } else if ((!inputSnapshot.hasContent && !hasQueuedMessages) || (!currentSessionId && !newSessionDraftOpen)) {
@@ -1816,6 +1829,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         // queued-message auto-send hook delivers it as the next turn once the
         // rejected turn winds down and the session returns to idle. This avoids
         // aborting the turn (which would surface an "aborted" notice).
+        if (currentSessionId && !queuedOnly && autoReviewRunning) {
+            handleQueueMessage();
+            return;
+        }
+
         if (currentSessionId && !queuedOnly) {
             const dismissedQuestions = await sessionActions.dismissOpenQuestionsForSession(currentSessionId);
             if (dismissedQuestions) {
@@ -2404,13 +2422,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     // Primary action for send button - respects queue mode setting
     const handlePrimaryAction = React.useCallback(() => {
         const inputSnapshot = getCurrentInputSnapshot();
-        const canQueue = inputMode === 'normal' && inputSnapshot.hasContent && currentSessionId && sessionPhase !== 'idle';
+        const canQueue = inputMode === 'normal' && inputSnapshot.hasContent && currentSessionId && (sessionPhase !== 'idle' || autoReviewRunning);
         if (queueModeEnabled && canQueue) {
             handleQueueMessage();
         } else {
             void handleSubmitRef.current();
         }
-    }, [inputMode, getCurrentInputSnapshot, currentSessionId, sessionPhase, queueModeEnabled, handleQueueMessage]);
+    }, [inputMode, getCurrentInputSnapshot, currentSessionId, sessionPhase, autoReviewRunning, queueModeEnabled, handleQueueMessage]);
 
     // Draft welcome presets: populate the composer and submit immediately.
     // getCurrentInputSnapshot reads textareaRef.current.value first, so setting it
@@ -2659,7 +2677,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             // Normal mode: Enter sends, Ctrl+Enter queues
             // Note: Queueing only works when there's an existing session (currentSessionId)
             // For new sessions (draft), always send immediately
-            const canQueue = inputMode === 'normal' && hasContent && currentSessionId && sessionPhase !== 'idle';
+            const canQueue = inputMode === 'normal' && hasContent && currentSessionId && (sessionPhase !== 'idle' || autoReviewRunning);
 
             if (queueModeEnabled) {
                 if (isCtrlEnter || !canQueue) {
@@ -4150,6 +4168,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     onEditMessage={handleQueuedMessageEdit}
                     onSendMessage={handleQueuedMessageSend}
                 />
+                <AutoReviewBanner />
                 {hasDrafts && (
                     <div className="flex flex-wrap items-center gap-2 pb-2">
                         {reviewCount > 0 ? (

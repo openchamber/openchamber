@@ -50,7 +50,7 @@ export const normalizeForwardedDirectoryHeaders = (headers) => {
   return headers;
 };
 
-export const waitForSseDrain = (res, signal) => new Promise((resolve) => {
+const waitForSseDrain = (res, signal) => new Promise((resolve) => {
   if (signal?.aborted || res.writableEnded || res.destroyed) {
     resolve();
     return;
@@ -132,7 +132,7 @@ const SESSION_LIST_ALLOWED_FIELDS = [
   'project',
 ];
 
-export const sanitizeSessionListItem = (session) => {
+const sanitizeSessionListItem = (session) => {
   if (!session || typeof session !== 'object' || Array.isArray(session)) {
     return session;
   }
@@ -168,7 +168,7 @@ export const sanitizeSessionListItem = (session) => {
   return sanitized;
 };
 
-export const sanitizeSessionListPayload = (payload) => {
+const sanitizeSessionListPayload = (payload) => {
   if (!Array.isArray(payload)) {
     return payload;
   }

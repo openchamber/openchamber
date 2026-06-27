@@ -8,7 +8,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 
 export type SnippetScope = 'global' | 'project';
 
-export interface SnippetDraft {
+interface SnippetDraft {
   name: string;
   scope: SnippetScope;
   content?: string;

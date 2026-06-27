@@ -92,5 +92,3 @@ export const MobileAgentButton: React.FC<MobileAgentButtonProps> = ({ onCycleAge
         </button>
     );
 };
-
-export default MobileAgentButton;

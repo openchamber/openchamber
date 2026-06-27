@@ -8,12 +8,21 @@ import { spawn } from 'child_process';
 import { pathToFileURL } from 'url';
 
 import { isModuleCliExecution, normalizeCliEntryPath } from './cli-entry.js';
+import { requestJson } from './lib/cli-http.js';
+import { inspectTunnelAttachability } from './lib/cli-lifecycle.js';
+import { DEFAULT_TUNNEL_PROVIDER_CAPABILITIES } from './lib/cli-tunnel-capabilities.js';
+import {
+  TUNNEL_PROVIDER_CLOUDFLARE,
+  TUNNEL_PROVIDER_NGROK,
+} from '../server/lib/tunnels/types.js';
 import {
   assertAuthenticatedNetworkExposure,
   commands,
+  discoverOpenChamberInstanceOnPort,
   discoverLifecycleInstances,
   discoverRunningInstances,
   discoverUnconfirmedRegistryInstanceOnPort,
+  ensureTunnelProfilesMigrated,
   getInstanceFilePath,
   getPidFilePath,
   isOpenchamberCmdline,
@@ -169,6 +178,13 @@ function spawnOpenChamberLikeHungServer(port) {
 }
 
 describe('cli args', () => {
+  it('loads fallback tunnel provider capabilities for CLI startup', () => {
+    expect(DEFAULT_TUNNEL_PROVIDER_CAPABILITIES.map((provider) => provider.provider)).toEqual([
+      TUNNEL_PROVIDER_CLOUDFLARE,
+      TUNNEL_PROVIDER_NGROK,
+    ]);
+  });
+
   it('accepts legacy daemon flags as no-ops', () => {
     expect(parseArgs(['serve', '--daemon']).removedFlagErrors).toEqual([]);
     expect(parseArgs(['serve', '-d']).removedFlagErrors).toEqual([]);
@@ -298,6 +314,98 @@ describe('serve host resolution', () => {
   });
 });
 
+describe('compatibility exports', () => {
+  it('allows tunnel profile migration before command options are initialized', async () => {
+    await withTempOpenChamberDataDir(async () => {
+      const store = ensureTunnelProfilesMigrated();
+
+      expect(store).toEqual({ version: 1, profiles: [] });
+    });
+  });
+
+  it('includes ngrok in fallback tunnel providers when no server is reachable', async () => {
+    await withTempOpenChamberDataDir(async () => {
+      const output = await captureStdout(async () => {
+        await commands.tunnel({ json: true }, 'providers');
+      });
+
+      const body = JSON.parse(output);
+      expect(body.source).toBe('fallback');
+      expect(body.providers.map((entry) => entry.provider)).toContain('ngrok');
+    });
+  });
+
+  it('supports ngrok quick dry-run with an explicit port', async () => {
+    await withTempOpenChamberDataDir(async () => {
+      const output = await captureStdout(async () => {
+        await commands.tunnel({
+          json: true,
+          dryRun: true,
+          explicitPort: true,
+          port: 3003,
+          provider: 'ngrok',
+          mode: 'quick',
+        }, 'start');
+      });
+
+      const body = JSON.parse(output);
+      expect(body).toEqual(expect.objectContaining({
+        ok: true,
+        dryRun: true,
+        provider: 'ngrok',
+        mode: 'quick',
+      }));
+    });
+  });
+});
+
+describe('CLI HTTP helpers', () => {
+  it('retries UI-authenticated API requests with the stored instance password', async () => {
+    await withTempOpenChamberDataDir(async () => {
+      const port = 45678;
+      fs.writeFileSync(await getInstanceFilePath(port), JSON.stringify({ port, uiPassword: 'secret' }, null, 2));
+      const originalFetch = globalThis.fetch;
+      const calls = [];
+      globalThis.fetch = async (url, options = {}) => {
+        calls.push({ url: String(url), options });
+        if (String(url).endsWith('/auth/session')) {
+          expect(JSON.parse(options.body)).toEqual({ password: 'secret' });
+          return {
+            ok: true,
+            headers: { get: (name) => name.toLowerCase() === 'set-cookie' ? 'oc_ui_session=session-token; Path=/; HttpOnly' : null },
+            json: async () => ({ authenticated: true }),
+          };
+        }
+        if (options.headers?.Cookie === 'oc_ui_session=session-token') {
+          return createMockJsonResponse({ ok: true });
+        }
+        return {
+          ok: false,
+          status: 401,
+          json: async () => ({ error: 'UI authentication required', locked: true }),
+        };
+      };
+
+      try {
+        const { response, body } = await requestJson(port, '/api/openchamber/tunnel/start', {
+          method: 'POST',
+          body: JSON.stringify({ provider: 'ngrok', mode: 'quick' }),
+        });
+
+        expect(response.ok).toBe(true);
+        expect(body).toEqual({ ok: true });
+        expect(calls.map((call) => new URL(call.url).pathname)).toEqual([
+          '/api/openchamber/tunnel/start',
+          '/auth/session',
+          '/api/openchamber/tunnel/start',
+        ]);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  });
+});
+
 describe('cli entry detection', () => {
   const modulePath = '/tmp/openchamber/bin/cli.js';
   const moduleUrl = pathToFileURL(modulePath).href;
@@ -387,6 +495,49 @@ describe('isOpenchamberProcessRunning', () => {
 });
 
 describe('lifecycle instance discovery', () => {
+  it('does not attribute a desktop runtime response to a different explicit port', async () => {
+    await withTempOpenChamberDataDir(async (dir) => {
+      fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ desktopLocalPort: 57123 }, null, 2));
+
+      const instance = await discoverOpenChamberInstanceOnPort(3003, {
+        fetchImpl: async () => createMockJsonResponse({ runtime: 'desktop', pid: 934 }),
+      });
+
+      expect(instance).toBeNull();
+    });
+  });
+
+  it('attributes a desktop runtime response to its configured desktop port', async () => {
+    await withTempOpenChamberDataDir(async (dir) => {
+      fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ desktopLocalPort: 57123 }, null, 2));
+
+      const instance = await discoverOpenChamberInstanceOnPort(57123, {
+        fetchImpl: async () => createMockJsonResponse({ runtime: 'desktop', pid: 934 }),
+      });
+
+      expect(instance).toEqual(expect.objectContaining({
+        port: 57123,
+        pid: 934,
+        runtime: 'desktop',
+      }));
+    });
+  });
+
+  it('does not mark tunnel attachability as desktop for a different explicit port', async () => {
+    await withTempOpenChamberDataDir(async (dir) => {
+      fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ desktopLocalPort: 57123 }, null, 2));
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async () => createMockJsonResponse({ runtime: 'desktop', pid: 934 });
+      try {
+        const attachability = await inspectTunnelAttachability(3004, { requireHealthy: false });
+
+        expect(attachability.reason).not.toBe('desktop');
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  });
+
   it('keeps pid and instance files when live port probe confirms a cmdline mismatch', async () => {
     await withTempOpenChamberDataDir(async () => {
       const port = 45123;

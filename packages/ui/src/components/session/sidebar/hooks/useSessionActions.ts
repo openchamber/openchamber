@@ -15,6 +15,8 @@ type DeleteSessionConfirmSetter = React.Dispatch<React.SetStateAction<{
 type DeleteSessionSource = {
   archivedBucket?: boolean;
   hardDelete?: boolean;
+  /** Bypass the confirmation dialog and delete/archive immediately. */
+  skipConfirm?: boolean;
 };
 
 type Args = {
@@ -253,7 +255,7 @@ export const useSessionActions = (args: Args) => {
         collectDescendants(session.id),
         shouldHardDelete,
       ).map((s) => s.id);
-      if (!args.showDeletionDialog) {
+      if (!args.showDeletionDialog || source?.skipConfirm === true) {
         void executeDeleteSession(session, source, { descendantIds: effectiveDescendantIds });
         return;
       }

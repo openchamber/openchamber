@@ -1,0 +1,34 @@
+---
+title: GitHub Issues と PR
+description: GitHub を接続し、Issue やプルリクエストからセッションを開始します。
+---
+
+# GitHub Issues と PR
+
+GitHub アカウントを接続すると、OpenChamber は Issue とプルリクエストを取り込み、そこから直接セッションを開始したり、PR を開いたり更新したりできます。
+
+## GitHub を接続する
+
+1. **Settings → Git** を開きます。
+2. GitHub セクションで **Connect** を選びます。OpenChamber がリンクと短いコードを表示します。
+3. リンクを開き、コードを入力して承認します。
+
+接続されると、GitHub セクションにアカウントが表示されます。複数のアカウントを接続して切り替えたり、いつでも切断したりできます。
+
+## Issue または PR から作業を始める
+
+GitHub 接続済みで [worktree セッション](/worktrees/) を作成すると、**Start from GitHub issue/PR** を選べます。
+
+- **issue** を選ぶと、OpenChamber はその Issue に基づいてブランチ名を付け、Issue とコメントを最初のメッセージとしてセッションを開きます
+- **pull request** を選ぶと、その PR のブランチをチェックアウトします。PR の差分を含めて、エージェントに変更全体を渡すこともできます
+
+これにより、必要なコンテキストが読み込まれた状態でそのままセッションに入れます。
+
+## プルリクエストを開いて管理する
+
+[Git ビュー](/git/) の **PR** タブから、プルリクエストの作成、更新、draft から ready への変更、マージができます。OpenChamber は変更内容から PR のタイトルと説明を生成できます。
+
+## 関連
+
+- [Git と GitHub ワークフロー](/git/) — コミットとブランチ管理
+- [Worktree セッション](/worktrees/) — Issue と PR のセッションが始まる場所

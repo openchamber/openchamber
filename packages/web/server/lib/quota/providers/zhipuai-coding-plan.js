@@ -38,7 +38,7 @@ import {
 
 export const providerId = 'zhipuai-coding-plan';
 export const providerName = 'Zhipu AI Coding Plan';
-export const aliases = ['zhipuai-coding-plan', 'zhipuai', 'zhipu'];
+const aliases = ['zhipuai-coding-plan', 'zhipuai', 'zhipu'];
 
 function getApiKey() {
   const auth = readAuthFile();

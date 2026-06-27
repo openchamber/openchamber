@@ -36,5 +36,3 @@ export const MobileModelButton: React.FC<MobileModelButtonProps> = ({ onOpenMode
         </button>
     );
 };
-
-export default MobileModelButton;

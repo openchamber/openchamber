@@ -753,12 +753,22 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
     await restartOpenCode();
 
+    // A managed OpenCode process is restarted (and thus re-reads config from
+    // disk) by restartOpenCode(). An external OpenCode server is NOT owned by
+    // OpenChamber: restartOpenCode() only re-probes its health, so the freshly
+    // written config is on disk but the running server keeps serving its old,
+    // startup-cached config until the user restarts it themselves. Report this
+    // honestly so callers don't claim the change is live.
+    const external = state.isExternalOpenCode === true;
+
     try {
       await waitForOpenCodeReady();
       state.isOpenCodeReady = true;
       state.openCodeNotReadySince = 0;
 
-      if (agentName) {
+      // Waiting for the agent to appear only makes sense when we actually
+      // reloaded config. An external server will never surface it here.
+      if (agentName && !external) {
         await waitForAgentPresence(agentName);
       }
 
@@ -770,6 +780,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       console.error(`Failed to refresh OpenCode after ${reason}:`, error.message);
       throw error;
     }
+
+    return { reloaded: !external, external };
   };
 
   const bootstrapOpenCodeAtStartup = async () => {

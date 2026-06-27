@@ -3,7 +3,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionStatus, useSessionMessages, useSessionPermissions, useSessionQuestions } from '@/sync/sync-context';
 
 // Mirrors OpenCode SessionStatus: busy|retry|idle.
-export type SessionActivityPhase = 'idle' | 'busy' | 'retry';
+type SessionActivityPhase = 'idle' | 'busy' | 'retry';
 
 export interface SessionActivityResult {
   phase: SessionActivityPhase;
@@ -27,7 +27,7 @@ const IDLE_RESULT: SessionActivityResult = {
  * question indicator takes priority, and the send button must stay available so
  * the user can supersede the prompt with a new message).
  */
-export function useSessionActivity(sessionId: string | null | undefined, directory?: string): SessionActivityResult {
+function useSessionActivity(sessionId: string | null | undefined, directory?: string): SessionActivityResult {
   const status = useSessionStatus(sessionId ?? '', directory);
   const messages = useSessionMessages(sessionId ?? '', directory);
   const permissions = useSessionPermissions(sessionId ?? '', directory);

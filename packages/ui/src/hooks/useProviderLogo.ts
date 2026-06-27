@@ -63,7 +63,7 @@ const resolveProviderLogoSrc = (providerId: string | null | undefined): string |
     return remoteResolvedId ? `https://models.dev/logos/${remoteResolvedId}.svg` : null;
 };
 
-export const preloadProviderLogo = (providerId: string | null | undefined): void => {
+const preloadProviderLogo = (providerId: string | null | undefined): void => {
     if (typeof Image === 'undefined') return;
     const src = resolveProviderLogoSrc(providerId);
     if (!src || PRELOADED_LOGO_SRCS.has(src)) return;

@@ -21,7 +21,7 @@ import {
     type DraftStarterType,
 } from '@/lib/draftStarters';
 
-export type StarterGroup = 'global' | 'project';
+type StarterGroup = 'global' | 'project';
 
 export type ResolvedStarter = {
     id: string;

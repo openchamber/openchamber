@@ -1,6 +1,6 @@
 {
   "name": "openchamber-monorepo",
-  "version": "1.13.3",
+  "version": "1.13.5",
   "description": "OpenChamber monorepo workspace for web, ui, and desktop runtimes",
   "private": true,
   "type": "module",
@@ -51,6 +51,7 @@
     "vscode:package": "bun run --cwd packages/vscode package",
     "vscode:type-check": "bun run --cwd packages/vscode type-check",
     "docs:validate": "node scripts/docs/validate-docs.mjs",
+    "dead-code": "bunx knip@5.80.0 --no-exit-code --include files,exports,nsExports,types,nsTypes,enumMembers,duplicates",
     "doctor": "node scripts/react-doctor.mjs",
     "icons:sprite": "node scripts/generate-file-type-sprite.mjs",
     "icons:generate": "bun run scripts/generate-icon-sprite.mjs",
