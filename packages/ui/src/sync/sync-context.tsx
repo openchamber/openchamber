@@ -1911,7 +1911,6 @@ export function SyncProvider(props: {
           store,
           candidateSessionIds,
           "monotonic",
-          (sessionId) => recordSessionWatchdogFreshness(directory, sessionId),
         )
         if (!statuses) return
         const needsSnapshot = candidateSessionIds.some((sessionId) => (

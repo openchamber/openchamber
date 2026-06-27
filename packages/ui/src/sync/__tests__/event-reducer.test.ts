@@ -164,6 +164,25 @@ describe("applyDirectoryEvent", () => {
     expect(freshness).toEqual(["ses_1"])
   })
 
+  test("touches freshness for message activity even before status is seeded", () => {
+    const draft = state()
+    const freshness: string[] = []
+    const event = {
+      type: "message.updated",
+      properties: {
+        info: {
+          id: "msg_1",
+          sessionID: "ses_1",
+          role: "assistant",
+          time: { created: 1 },
+        },
+      },
+    } as Event
+
+    expect(applyDirectoryEvent(draft, event, { onSessionFreshness: (sessionID) => freshness.push(sessionID) })).toBe(true)
+    expect(freshness).toEqual(["ses_1"])
+  })
+
   test("skips duplicate session idle events", () => {
     const draft = state()
     const event = {

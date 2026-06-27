@@ -168,7 +168,7 @@ export async function bootstrapDirectory(input: {
       const sessionStatus = unwrap(x, "session.status") as State["session_status"]
       set({ session_status: sessionStatus })
       for (const [sessionID, status] of Object.entries(sessionStatus)) {
-        if (status?.type && status.type !== "idle") {
+        if (status?.type === "busy" || status?.type === "retry") {
           input.onSessionFreshness?.(directory, sessionID)
         }
       }
