@@ -2635,5 +2635,16 @@ export const dict: Record<I18nKey, string> = {
   'onboarding.localSetup.status.autoContinue': '検出され次第自動的に続行します。',
   'updateDialog.changelog.title': '新機能',
   'quota.window.premiumInteractions': 'プレミアムインタラクション',
-
+  'desktopHostSwitcher.actions.removeServerAria': 'サーバーを削除',
+  'desktopHostSwitcher.actions.removeServer': 'サーバーを削除',
+  'desktopHostSwitcher.toast.sshDisconnected': 'SSHインスタンス "{host}" が切断されました',
+  'server.sidebar.status.connectionError': '接続エラー',
+  'server.sidebar.status.disconnected': '切断済み',
+  'server.sidebar.search.searchingServers': '{count}個のサーバーを検索中',
+  'server.sidebar.localLabel': 'ローカル',
+  'server.sidebar.manageServers': 'サーバーを管理',
+  'server.sidebar.actions.connect': 'サーバーに接続',
+  'server.sidebar.actions.disconnect': 'サーバーを切断',
+  'server.sidebar.actions.disconnectConfirm': 'このサーバーを切断してもよろしいですか？',
+  'server.sidebar.status.label': 'サーバーステータス: {status}',
 };
