@@ -122,6 +122,29 @@ export const registerPluginRoutes = (app, dependencies) => {
     }
   });
 
+  app.get('/api/config/plugins/status', async (req, res) => {
+    try {
+      const directory = await resolveDirectory(req, res);
+      if (directory === null && res.headersSent) return;
+
+      const entries = listPluginEntries(directory);
+      const statusItems = (entries ?? []).map((entry) => ({
+        id: entry.id ?? entry.spec ?? 'unknown',
+        name: entry.spec ?? entry.id ?? 'Unknown Plugin',
+        shortName: (entry.spec ?? entry.id ?? 'unknown').split('/').pop() ?? 'unknown',
+        status: 'ok',
+        command: entry.kind === 'npm'
+          ? `opencode add ${entry.spec}`
+          : `opencode add ${entry.spec}`,
+        version: entry.scope ?? undefined,
+      }));
+      res.json({ status: statusItems });
+    } catch (error) {
+      console.error('[API:GET /api/config/plugins/status] Failed:', error);
+      res.status(500).json({ error: 'Failed to get plugin status' });
+    }
+  });
+
   app.get('/api/config/plugins/registry', async (req, res) => {
     try {
       const { directory, error: directoryError } = await resolveOptionalProjectDirectory(req);

@@ -32,6 +32,7 @@ export const dict = {
   'layout.rightSidebar.files': 'Fichiers',
   'layout.rightSidebar.context': 'Contexte',
   'layout.services.instance': 'Instance',
+  'layout.services.pluginStatus': 'Plugin Status',
   'layout.services.usage': 'Usage',
   'sessions.sidebar.header.actions.closeSessions': 'Fermer les sessions',
   'sessions.sidebar.header.actions.addProject': 'Ajouter un projet',
