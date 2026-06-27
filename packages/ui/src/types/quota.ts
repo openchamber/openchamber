@@ -13,6 +13,7 @@ export type QuotaProviderId =
   | 'zhipuai-coding-plan'
   | 'minimax-coding-plan'
   | 'minimax-cn-coding-plan'
+  | 'kiro'
   | 'ollama-cloud'
   | 'wafer';
 
