@@ -144,6 +144,7 @@ export const dict: Record<I18nKey, string> = {
   'layout.rightSidebar.files': 'Pliki',
   'layout.rightSidebar.context': 'Kontekst',
   'layout.services.instance': 'Instancja',
+  'layout.services.pluginStatus': 'Plugin Status',
   'layout.services.usage': 'Użycie',
   'sessions.sidebar.header.actions.closeSessions': 'Zamknij sesje',
   'sessions.sidebar.header.actions.addProject': 'Dodaj projekt',
