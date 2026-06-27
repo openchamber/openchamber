@@ -38,7 +38,7 @@ import { useIsTextTruncated } from '@/hooks/useIsTextTruncated';
 import { formatEffortLabel, getCycledPrimaryAgentName, isPrimaryMode, type MobileControlsPanel } from './mobileControlsUtils';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
-import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
+import { eventMatchesShortcut, formatShortcutForDisplay, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
 import { markStartupTrace } from '@/lib/startupTrace';
 
 type IconComponent = IconName;
@@ -2381,7 +2381,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                     return (
                                         <div className="flex items-center gap-x-2 whitespace-nowrap overflow-hidden">
                                             <span>{t('chat.modelControls.keyboardHintNavigate')}</span>
-                                            <span>{t('chat.modelControls.keyboardHintSwitchAgent', { shortcut: 'Tab' })}</span>
+                                            <span>{t('chat.modelControls.keyboardHintSwitchAgent', { shortcut: formatShortcutForDisplay(cycleAgentShortcut) })}</span>
                                             {activeHasThinkingVariants ? <span>{t('chat.modelControls.keyboardHintThinking')}</span> : null}
                                         </div>
                                     );
