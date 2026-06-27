@@ -106,6 +106,8 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
 }) => {
     const { t } = useI18n();
     const hasEnded = typeof time?.end === 'number';
+    const innerUserScrolledUpRef = React.useRef(false);
+    const innerLastScrollTopRef = React.useRef(0);
     const canAutoExpand = isStreaming && !hasEnded;
     const [expansion, setExpansion] = React.useState<ExpansionState>(() => {
         if (defaultExpanded === true) {
@@ -131,6 +133,10 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     const handleToggle = React.useCallback(() => {
         setShouldRenderExpandedContent(true);
         setExpansion({ expanded: !isExpanded, source: 'user' });
+        // Reset internal scroll state so auto-scroll resumes after
+        // collapse → re-expand (see PR review feedback).
+        innerUserScrolledUpRef.current = false;
+        innerLastScrollTopRef.current = 0;
         onContentChange?.('structural');
     }, [isExpanded, onContentChange]);
 
@@ -161,10 +167,37 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     }, [onContentChange, text]);
 
     React.useEffect(() => {
-        if (isStreaming && isExpanded && scrollRef.current) {
+        if (isStreaming && isExpanded && scrollRef.current && !innerUserScrolledUpRef.current) {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
         }
     }, [text, isStreaming, isExpanded]);
+
+    // Internal scroll tracking — independent of main container auto-follow.
+    // When the user scrolls up within the thinking block, pause internal auto-scroll.
+    // When they scroll back to the bottom, resume.
+    React.useEffect(() => {
+        const el = scrollRef.current;
+        if (!el) return;
+
+        const handleInnerScroll = () => {
+            const currentTop = el.scrollTop;
+            const previousTop = innerLastScrollTopRef.current;
+            innerLastScrollTopRef.current = currentTop;
+
+            if (currentTop < previousTop) {
+                innerUserScrolledUpRef.current = true;
+                return;
+            }
+
+            const distFromBottom = el.scrollHeight - currentTop - el.clientHeight;
+            if (distFromBottom <= 8) {
+                innerUserScrolledUpRef.current = false;
+            }
+        };
+
+        el.addEventListener('scroll', handleInnerScroll, { passive: true });
+        return () => el.removeEventListener('scroll', handleInnerScroll);
+    }, [shouldRenderExpandedContent]);
 
     React.useEffect(() => {
         if (isExpanded || isStreaming) {
