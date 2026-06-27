@@ -16,6 +16,7 @@ export {
   fetchCopilotQuota,
   fetchCopilotAddonQuota,
   fetchKimiQuota,
+  fetchKiroQuota,
   fetchOpenRouterQuota,
   fetchZaiQuota,
   fetchNanoGptQuota,
