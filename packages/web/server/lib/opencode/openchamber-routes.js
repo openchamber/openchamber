@@ -367,16 +367,19 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
           console.warn('Failed to open update log file, continuing without log capture:', logError);
         }
 
+        const systemdRunArgs = [
+          '--user',
+          ...(typeof process.env.PATH === 'string' && process.env.PATH.length > 0 ? ['-E', 'PATH'] : []),
+          '--unit', `openchamber-update-${Date.now()}`,
+          '--collect',
+          '--quiet',
+          'sh',
+          '-lc',
+          script,
+        ];
+
         const child = useSystemdRunDetachedUpdate
-          ? spawnChild('systemd-run', [
-            '--user',
-            '--unit', `openchamber-update-${Date.now()}`,
-            '--collect',
-            '--quiet',
-            'sh',
-            '-lc',
-            script,
-          ], {
+          ? spawnChild('systemd-run', systemdRunArgs, {
             detached: true,
             stdio: logFd !== null ? ['ignore', logFd, logFd] : 'ignore',
             env: process.env,
