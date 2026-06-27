@@ -12,7 +12,7 @@ const NANO_GPT_DAILY_WINDOW_SECONDS = 86400;
 
 export const providerId = 'nano-gpt';
 export const providerName = 'NanoGPT';
-export const aliases = ['nano-gpt', 'nanogpt', 'nano_gpt'];
+const aliases = ['nano-gpt', 'nanogpt', 'nano_gpt'];
 
 export const isConfigured = () => {
   const auth = readAuthFile();

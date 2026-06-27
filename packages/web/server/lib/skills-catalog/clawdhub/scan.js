@@ -7,7 +7,6 @@
 
 import { fetchClawdHubSkills } from './api.js';
 
-const MAX_PAGES = 20; // Safety limit to prevent infinite loops
 const CLAWDHUB_PAGE_LIMIT = 25;
 
 const mapClawdHubItem = (item) => {
@@ -38,57 +37,6 @@ const mapClawdHubItem = (item) => {
     },
   };
 };
-
-/**
- * Scan ClawdHub registry for all available skills
- * @returns {Promise<{ ok: boolean, items?: Array, error?: Object }>}
- */
-export async function scanClawdHub() {
-  try {
-    const allItems = [];
-    let cursor = null;
-
-    for (let page = 0; page < MAX_PAGES; page++) {
-      let items = [];
-      let nextCursor = null;
-
-      try {
-        const pageResult = await fetchClawdHubSkills({ cursor });
-        items = pageResult.items || [];
-        nextCursor = pageResult.nextCursor || null;
-      } catch (error) {
-        if (page > 0 && allItems.length > 0) {
-          console.warn('ClawdHub pagination failed; returning partial results.');
-          break;
-        }
-        throw error;
-      }
-
-      for (const item of items) {
-        allItems.push(mapClawdHubItem(item));
-      }
-
-      if (!nextCursor) {
-        break;
-      }
-      cursor = nextCursor;
-    }
-
-    // Sort by downloads (most popular first)
-    allItems.sort((a, b) => (b.clawdhub?.downloads || 0) - (a.clawdhub?.downloads || 0));
-
-    return { ok: true, items: allItems };
-  } catch (error) {
-    console.error('ClawdHub scan error:', error);
-    return {
-      ok: false,
-      error: {
-        kind: 'networkError',
-        message: error instanceof Error ? error.message : 'Failed to fetch skills from ClawdHub',
-      },
-    };
-  }
-}
 
 /**
  * Scan a single ClawdHub page (cursor-based)

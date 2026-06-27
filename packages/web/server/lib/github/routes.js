@@ -982,6 +982,7 @@ export function registerGitHubRoutes(app) {
       if (upstream) {
         try {
           const { getRemotes } = await import('../git/index.js');
+          const { resolveGitHubRepoFromDirectory } = await import('./index.js');
           const remotes = await getRemotes(directory);
           for (const r of remotes) {
             if (r?.name) {

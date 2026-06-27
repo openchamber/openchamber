@@ -104,14 +104,26 @@ export interface AgentConfig {
   name: string;
   description?: string;
   model?: string | null;
-  temperature?: number;
-  top_p?: number;
+  variant?: string | null;
+  temperature?: number | null;
+  top_p?: number | null;
   prompt?: string | null;
   mode?: "primary" | "subagent" | "all";
   permission?: PermissionConfig | null;
 
   disable?: boolean;
   scope?: AgentScope;
+}
+
+/**
+ * Result of an agent config mutation.
+ * `requiresManualRestart` is true when the change was persisted to disk but the
+ * connected (external) OpenCode server could not be reloaded by OpenChamber, so
+ * the user must restart that server before the change takes effect.
+ */
+export interface AgentMutationResult {
+  ok: boolean;
+  requiresManualRestart?: boolean;
 }
 
 // Extended Agent type for API properties not in SDK types
@@ -170,8 +182,9 @@ export interface AgentDraft {
   scope: AgentScope;
   description?: string;
   model?: string | null;
-  temperature?: number;
-  top_p?: number;
+  variant?: string;
+  temperature?: number | null;
+  top_p?: number | null;
   prompt?: string;
   mode?: "primary" | "subagent" | "all";
   permission?: PermissionConfig;
@@ -188,9 +201,9 @@ interface AgentsStore {
   setSelectedAgent: (name: string | null) => void;
   setAgentDraft: (draft: AgentDraft | null) => void;
   loadAgents: () => Promise<boolean>;
-  createAgent: (config: AgentConfig) => Promise<boolean>;
-  updateAgent: (name: string, config: Partial<AgentConfig>) => Promise<boolean>;
-  deleteAgent: (name: string, scope?: AgentScope) => Promise<boolean>;
+  createAgent: (config: AgentConfig) => Promise<AgentMutationResult>;
+  updateAgent: (name: string, config: Partial<AgentConfig>) => Promise<AgentMutationResult>;
+  deleteAgent: (name: string, scope?: AgentScope) => Promise<AgentMutationResult>;
   getAgentByName: (name: string) => Agent | undefined;
   // Returns only visible agents (excludes hidden internal agents)
   getVisibleAgents: () => Agent[];
@@ -331,8 +344,9 @@ export const useAgentsStore = create<AgentsStore>()(
 
             if (config.description) agentConfig.description = config.description;
             if (config.model) agentConfig.model = config.model;
-            if (config.temperature !== undefined) agentConfig.temperature = config.temperature;
-            if (config.top_p !== undefined) agentConfig.top_p = config.top_p;
+            if (config.variant) agentConfig.variant = config.variant;
+            if (config.temperature !== undefined) agentConfig.temperature = config.temperature ?? null;
+            if (config.top_p !== undefined) agentConfig.top_p = config.top_p ?? null;
             if (config.prompt) agentConfig.prompt = config.prompt;
             if (config.permission) agentConfig.permission = config.permission;
             if (config.disable !== undefined) agentConfig.disable = config.disable;
@@ -358,8 +372,16 @@ export const useAgentsStore = create<AgentsStore>()(
               throw new Error(message);
             }
 
-            const needsReload = payload?.requiresReload ?? true;
             invalidateAgentsLoadCache(configDirectory);
+
+            // External OpenCode server: persisted to disk but not reloaded.
+            // Skip the reload so the form keeps the just-saved values instead of
+            // reverting to the server's stale, startup-cached config.
+            if (payload?.requiresManualRestart) {
+              return { ok: true, requiresManualRestart: true };
+            }
+
+            const needsReload = payload?.requiresReload ?? true;
             if (needsReload) {
               requiresReload = true;
               await refreshAfterOpenCodeRestart({
@@ -368,17 +390,17 @@ export const useAgentsStore = create<AgentsStore>()(
                 scopes: ["agents"],
                 mode: "projects",
               });
-              return true;
+              return { ok: true };
             }
 
             const loaded = await get().loadAgents();
             if (loaded) {
               emitConfigChange("agents", { source: CONFIG_EVENT_SOURCE });
             }
-            return loaded;
+            return { ok: loaded };
           } catch (error) {
             console.error('Failed to create agent:', error);
-            return false;
+            return { ok: false };
           } finally {
             if (!requiresReload) {
               finishConfigUpdate();
@@ -395,8 +417,9 @@ export const useAgentsStore = create<AgentsStore>()(
             if (config.mode !== undefined) agentConfig.mode = config.mode;
             if (config.description !== undefined) agentConfig.description = config.description;
             if (config.model !== undefined) agentConfig.model = config.model;
-            if (config.temperature !== undefined) agentConfig.temperature = config.temperature;
-            if (config.top_p !== undefined) agentConfig.top_p = config.top_p;
+            if ('variant' in config) agentConfig.variant = config.variant ?? null;
+            if ('temperature' in config) agentConfig.temperature = config.temperature ?? null;
+            if ('top_p' in config) agentConfig.top_p = config.top_p ?? null;
             if (config.prompt !== undefined) agentConfig.prompt = config.prompt;
             if (config.permission !== undefined) agentConfig.permission = config.permission;
             if (config.disable !== undefined) agentConfig.disable = config.disable;
@@ -420,8 +443,16 @@ export const useAgentsStore = create<AgentsStore>()(
               throw new Error(message);
             }
 
-            const needsReload = payload?.requiresReload ?? true;
             invalidateAgentsLoadCache(configDirectory);
+
+            // External OpenCode server: persisted to disk but not reloaded.
+            // Skip the reload so the form keeps the just-saved values instead of
+            // reverting to the server's stale, startup-cached config.
+            if (payload?.requiresManualRestart) {
+              return { ok: true, requiresManualRestart: true };
+            }
+
+            const needsReload = payload?.requiresReload ?? true;
             if (needsReload) {
               requiresReload = true;
               await refreshAfterOpenCodeRestart({
@@ -430,14 +461,14 @@ export const useAgentsStore = create<AgentsStore>()(
                 scopes: ["agents"],
                 mode: "projects",
               });
-              return true;
+              return { ok: true };
             }
 
             const loaded = await get().loadAgents();
             if (loaded) {
               emitConfigChange("agents", { source: CONFIG_EVENT_SOURCE });
             }
-            return loaded;
+            return { ok: loaded };
           } catch (error) {
             console.error('Failed to update agent:', error);
             throw error;
@@ -471,8 +502,18 @@ export const useAgentsStore = create<AgentsStore>()(
               throw new Error(message);
             }
 
-            const needsReload = payload?.requiresReload ?? true;
             invalidateAgentsLoadCache(configDirectory);
+
+            if (get().selectedAgentName === name) {
+              set({ selectedAgentName: null });
+            }
+
+            // External OpenCode server: persisted to disk but not reloaded.
+            if (payload?.requiresManualRestart) {
+              return { ok: true, requiresManualRestart: true };
+            }
+
+            const needsReload = payload?.requiresReload ?? true;
             if (needsReload) {
               requiresReload = true;
               await refreshAfterOpenCodeRestart({
@@ -481,7 +522,7 @@ export const useAgentsStore = create<AgentsStore>()(
                 scopes: ["agents"],
                 mode: "projects",
               });
-              return true;
+              return { ok: true };
             }
 
             const loaded = await get().loadAgents();
@@ -489,10 +530,7 @@ export const useAgentsStore = create<AgentsStore>()(
               emitConfigChange("agents", { source: CONFIG_EVENT_SOURCE });
             }
 
-            if (get().selectedAgentName === name) {
-              set({ selectedAgentName: null });
-            }
-            return loaded;
+            return { ok: loaded };
           } catch (error) {
             console.error('Failed to delete agent:', error);
             throw error;

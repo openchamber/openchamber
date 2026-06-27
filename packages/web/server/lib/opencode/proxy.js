@@ -31,7 +31,26 @@ export const createDirectoryQueryCanonicalizer = ({ realpath, ...cacheOptions } 
   };
 };
 
-export const waitForSseDrain = (res, signal) => new Promise((resolve) => {
+export const normalizeForwardedDirectoryHeaders = (headers) => {
+  const rawDirectory = headers?.['x-opencode-directory'];
+  if (typeof rawDirectory !== 'string') {
+    return headers;
+  }
+
+  if (headers['x-opencode-directory-encoding'] !== 'uri') {
+    return headers;
+  }
+
+  try {
+    headers['x-opencode-directory'] = decodeURIComponent(rawDirectory);
+  } catch {
+    // Leave malformed values untouched; upstream will reject invalid paths.
+  }
+  delete headers['x-opencode-directory-encoding'];
+  return headers;
+};
+
+const waitForSseDrain = (res, signal) => new Promise((resolve) => {
   if (signal?.aborted || res.writableEnded || res.destroyed) {
     resolve();
     return;
@@ -113,7 +132,7 @@ const SESSION_LIST_ALLOWED_FIELDS = [
   'project',
 ];
 
-export const sanitizeSessionListItem = (session) => {
+const sanitizeSessionListItem = (session) => {
   if (!session || typeof session !== 'object' || Array.isArray(session)) {
     return session;
   }
@@ -149,7 +168,7 @@ export const sanitizeSessionListItem = (session) => {
   return sanitized;
 };
 
-export const sanitizeSessionListPayload = (payload) => {
+const sanitizeSessionListPayload = (payload) => {
   if (!Array.isArray(payload)) {
     return payload;
   }
@@ -295,7 +314,9 @@ export const registerOpenCodeProxy = (app, deps) => {
         ? req.originalUrl
         : (typeof req.url === 'string' ? req.url : '');
       const upstreamPath = requestUrl.startsWith('/api') ? requestUrl.slice(4) || '/' : requestUrl;
-      const headers = collectForwardProxyHeaders(req.headers, getOpenCodeAuthHeaders());
+      const headers = normalizeForwardedDirectoryHeaders(
+        collectForwardProxyHeaders(req.headers, getOpenCodeAuthHeaders())
+      );
       headers.accept ??= 'text/event-stream';
       headers['cache-control'] ??= 'no-cache';
 
@@ -414,7 +435,7 @@ export const registerOpenCodeProxy = (app, deps) => {
   const fetchSessionListPayload = async (upstreamPath, { req = null, timeoutMs = null } = {}) => {
     const headers = req
       ? {
-          ...collectForwardProxyHeaders(req.headers, getOpenCodeAuthHeaders()),
+          ...normalizeForwardedDirectoryHeaders(collectForwardProxyHeaders(req.headers, getOpenCodeAuthHeaders())),
           accept: 'application/json',
           'accept-encoding': 'identity',
         }
@@ -652,6 +673,18 @@ export const registerOpenCodeProxy = (app, deps) => {
         const authHeaders = getOpenCodeAuthHeaders();
         if (authHeaders.Authorization) {
           proxyReq.setHeader('Authorization', authHeaders.Authorization);
+        }
+
+        if (req.headers?.['x-opencode-directory-encoding'] === 'uri') {
+          const rawDirectory = req.headers['x-opencode-directory'];
+          if (typeof rawDirectory === 'string') {
+            try {
+              proxyReq.setHeader('x-opencode-directory', decodeURIComponent(rawDirectory));
+            } catch {
+              proxyReq.setHeader('x-opencode-directory', rawDirectory);
+            }
+          }
+          proxyReq.removeHeader?.('x-opencode-directory-encoding');
         }
 
         // Defensive: request identity encoding from upstream OpenCode.

@@ -18,13 +18,6 @@ import { getRuntimeUrlResolver } from "@/lib/runtime-url"
 import { clearRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from "@/lib/runtime-auth"
 import { syncDebug } from "./debug"
 
-export type QueuedEvent = {
-  directory: string
-  payload: Event
-}
-
-export type FlushHandler = (events: QueuedEvent[]) => void
-
 const FLUSH_FRAME_MS = 33
 const BACKPRESSURE_FLUSH_FRAME_MS = 200
 const BACKPRESSURE_MODE_MS = 10_000

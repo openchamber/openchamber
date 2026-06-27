@@ -35,7 +35,7 @@ import { getSessionMaterializationStatus } from '@/sync/materialization';
 import { useUIStore } from '@/stores/useUIStore';
 import { useModelLists } from '@/hooks/useModelLists';
 import { useIsTextTruncated } from '@/hooks/useIsTextTruncated';
-import { formatEffortLabel, getCycledPrimaryAgentName, type MobileControlsPanel } from './mobileControlsUtils';
+import { formatEffortLabel, getCycledPrimaryAgentName, isPrimaryMode, type MobileControlsPanel } from './mobileControlsUtils';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
 import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
@@ -366,6 +366,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
     const toggleFavoriteModel = useUIStore((state) => state.toggleFavoriteModel);
     const reorderFavoriteModel = useUIStore((state) => state.reorderFavoriteModel);
+    const providerOrder = useUIStore((state) => state.providerOrder);
+    const setProviderOrder = useUIStore((state) => state.setProviderOrder);
     const isFavoriteModel = useUIStore((state) => state.isFavoriteModel);
     const addRecentModel = useUIStore((state) => state.addRecentModel);
     const addRecentAgent = useUIStore((state) => state.addRecentAgent);
@@ -492,7 +494,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     }, [isAgentSelectorOpen, isCompact]);
 
     const selectableDesktopAgents = React.useMemo(() => {
-        return agents.filter((agent) => agent.mode !== 'subagent');
+        return agents.filter((agent) => isPrimaryMode(agent.mode));
     }, [agents]);
 
     const sortedAndFilteredAgents = React.useMemo(() => {
@@ -2368,6 +2370,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 )}
                                 reorderFavoriteAriaLabel={t('chat.modelControls.reorderFavoriteAria')}
                                 reorderFavoriteTitle={t('chat.modelControls.reorderFavoriteTitle')}
+                                providerOrder={providerOrder}
+                                onReorderProvider={setProviderOrder}
+                                reorderProviderTitle={t('chat.modelControls.reorderProviderTitle')}
                                 footerContent={(activeEntry) => {
                                     const activeHasThinkingVariants = activeEntry
                                         ? getModelVariantOptions(activeEntry.providerID, activeEntry.modelID).length > 0

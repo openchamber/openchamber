@@ -456,7 +456,7 @@ export const listConfiguredQuotaProviders = () => {
   return Array.from(configured);
 };
 
-export const fetchCodexQuota = async (): Promise<ProviderResult> => {
+const fetchCodexQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['openai', 'codex', 'chatgpt'])) as Record<string, unknown> | null;
   const accessToken = (entry?.access as string | undefined) ?? (entry?.token as string | undefined);
@@ -723,7 +723,7 @@ const fetchGoogleModels = async (accessToken: string, projectId?: string) => {
   return null;
 };
 
-export const fetchGoogleQuota = async (): Promise<ProviderResult> => {
+const fetchGoogleQuota = async (): Promise<ProviderResult> => {
   const authSources = resolveGoogleAuthSources();
   if (!authSources.length) {
     return buildResult({
@@ -851,7 +851,7 @@ export const fetchGoogleQuota = async (): Promise<ProviderResult> => {
   });
 };
 
-export const fetchClaudeQuota = async (): Promise<ProviderResult> => {
+const fetchClaudeQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['anthropic', 'claude'])) as Record<string, unknown> | null;
   const accessToken = (entry?.access as string | undefined) ?? (entry?.token as string | undefined);
@@ -969,7 +969,7 @@ const buildCopilotWindows = (payload: Record<string, unknown>) => {
   return windows;
 };
 
-export const fetchCopilotQuota = async (): Promise<ProviderResult> => {
+const fetchCopilotQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['github-copilot', 'copilot'])) as Record<string, unknown> | null;
   const accessToken = (entry?.access as string | undefined) ?? (entry?.token as string | undefined);
@@ -1024,7 +1024,7 @@ export const fetchCopilotQuota = async (): Promise<ProviderResult> => {
   }
 };
 
-export const fetchCopilotAddonQuota = async (): Promise<ProviderResult> => {
+const fetchCopilotAddonQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['github-copilot', 'copilot'])) as Record<string, unknown> | null;
   const accessToken = (entry?.access as string | undefined) ?? (entry?.token as string | undefined);
@@ -1082,7 +1082,7 @@ export const fetchCopilotAddonQuota = async (): Promise<ProviderResult> => {
   }
 };
 
-export const fetchKimiQuota = async (): Promise<ProviderResult> => {
+const fetchKimiQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['kimi-for-coding', 'kimi'])) as Record<string, unknown> | null;
   const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
@@ -1293,14 +1293,14 @@ const fetchMiniMaxQuota = async (data: {
   }
 };
 
-export const fetchMiniMaxCodingPlanQuota = () => fetchMiniMaxQuota({
+const fetchMiniMaxCodingPlanQuota = () => fetchMiniMaxQuota({
   providerId: 'minimax-coding-plan',
   providerName: 'MiniMax Coding Plan (minimax.io)',
   endpoint: 'https://api.minimax.io/v1/api/openplatform/coding_plan/remains',
   usageFieldsAreRemaining: false,
 });
 
-export const fetchMiniMaxCnCodingPlanQuota = () => fetchMiniMaxQuota({
+const fetchMiniMaxCnCodingPlanQuota = () => fetchMiniMaxQuota({
   providerId: 'minimax-cn-coding-plan',
   providerName: 'MiniMax Coding Plan (minimaxi.com)',
   endpoint: 'https://www.minimaxi.com/v1/api/openplatform/coding_plan/remains',
@@ -1343,7 +1343,7 @@ const parseOllamaSettingsHtml = (html: string) => {
   return windows;
 };
 
-export const fetchOllamaCloudQuota = async (): Promise<ProviderResult> => {
+const fetchOllamaCloudQuota = async (): Promise<ProviderResult> => {
   const cookie = readTextFile(OLLAMA_CLOUD_COOKIE_PATH);
 
   if (!cookie) {
@@ -1393,7 +1393,7 @@ export const fetchOllamaCloudQuota = async (): Promise<ProviderResult> => {
   }
 };
 
-export const fetchOpenRouterQuota = async (): Promise<ProviderResult> => {
+const fetchOpenRouterQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['openrouter'])) as Record<string, unknown> | null;
   const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
@@ -1491,7 +1491,7 @@ const resolveWindowLabel = (windowSeconds: number | null) => {
   return `${windowSeconds}s`;
 };
 
-export const fetchZaiQuota = async (): Promise<ProviderResult> => {
+const fetchZaiQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['zai-coding-plan', 'zai', 'z.ai'])) as Record<string, unknown> | null;
   const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
@@ -1560,7 +1560,7 @@ export const fetchZaiQuota = async (): Promise<ProviderResult> => {
   }
 };
 
-export const fetchZhipuaiCodingPlanQuota = async (): Promise<ProviderResult> => {
+const fetchZhipuaiCodingPlanQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['zhipuai-coding-plan'])) as Record<string, unknown> | null;
   const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
@@ -1649,7 +1649,7 @@ export const fetchZhipuaiCodingPlanQuota = async (): Promise<ProviderResult> => 
 
 const NANO_GPT_DAILY_WINDOW_SECONDS = 86400;
 
-export const fetchNanoGptQuota = async (): Promise<ProviderResult> => {
+const fetchNanoGptQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['nano-gpt', 'nanogpt', 'nano_gpt'])) as Record<string, unknown> | null;
   const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
@@ -1755,7 +1755,7 @@ export const fetchNanoGptQuota = async (): Promise<ProviderResult> => {
 const WAFER_QUOTA_URL = 'https://pass.wafer.ai/v1/inference/quota';
 const WAFER_WINDOW_SECONDS = 5 * 3600;
 
-export const fetchWaferQuota = async (): Promise<ProviderResult> => {
+const fetchWaferQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['wafer', 'wafer-ai', 'wafer_ai', 'wafer.ai'])) as Record<string, unknown> | null;
   const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);

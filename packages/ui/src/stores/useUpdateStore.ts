@@ -13,7 +13,7 @@ import {
 } from '@/lib/desktop';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
-export type UpdateState = {
+type UpdateState = {
   checking: boolean;
   available: boolean;
   downloading: boolean;

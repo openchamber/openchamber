@@ -3550,6 +3550,19 @@ export async function validateWorktreeCreate(directory, input = {}) {
   }
 }
 
+const assertWorktreeCreatePreflight = async (directory, input = {}) => {
+  const validation = await validateWorktreeCreate(directory, input);
+  if (validation?.ok) {
+    return;
+  }
+
+  const message = validation?.errors
+    ?.map((error) => error?.message)
+    .filter(Boolean)
+    .join('\n') || 'Failed to validate worktree creation';
+  throw new Error(message);
+};
+
 export async function previewWorktreeCreate(directory, input = {}) {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const context = await resolveWorktreeProjectContext(directory);
@@ -3698,6 +3711,11 @@ async function attachGitWorktreeToCandidate(context, candidate, input = {}) {
 export async function createWorktree(directory, input = {}) {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const context = await resolveWorktreeProjectContext(directory);
+
+  if (input?.returnAfterDirectoryCreated === true) {
+    await assertWorktreeCreatePreflight(directory, input);
+  }
+
   await fsp.mkdir(context.worktreeRoot, { recursive: true });
 
   const preferredName = String(input?.worktreeName || input?.name || '').trim();

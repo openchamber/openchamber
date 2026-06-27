@@ -24,14 +24,6 @@ import {
 } from "./contextFormatters";
 import { getVoiceSession, isVoiceSessionStarted } from "./voiceSession";
 
-// Re-export registry functions from voiceSession.ts for convenience
-export {
-    registerVoiceSession,
-    unregisterVoiceSession,
-    getVoiceSession,
-    isVoiceSessionStarted,
-} from "./voiceSession";
-
 /**
  * Report a contextual update to the voice session
  * Internal helper that checks preconditions and handles errors

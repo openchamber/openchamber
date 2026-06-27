@@ -140,5 +140,3 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
 
   return createPortal(content, overlayRootRef.current);
 };
-
-export default MobileOverlayPanel;

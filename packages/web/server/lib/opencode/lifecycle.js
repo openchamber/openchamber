@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import net from 'node:net';
+import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } from './managed-process-registry.js';
 
 const parsePositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(String(value ?? ''), 10);
@@ -140,7 +141,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     });
   };
 
-  const closeManagedOpenCodeChild = async (child) => {
+  const terminateChildProcess = async (child) => {
     if (!child) {
       return;
     }
@@ -210,6 +211,19 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     signalProcessTree('SIGKILL');
 
     await waitForChildProcessClose(child, 1000);
+  };
+
+  const closeManagedOpenCodeChild = async (child) => {
+    const pid = child?.pid;
+    try {
+      await terminateChildProcess(child);
+    } finally {
+      // Drop it from the registry only once it has actually exited, so a child
+      // that survived teardown stays eligible for the next run's reaper.
+      if (Number.isInteger(pid) && hasChildProcessExited(child)) {
+        unregisterManagedProcess(pid);
+      }
+    }
   };
 
   const formatCapturedOutput = ({ stdout, stderr }) => {
@@ -322,6 +336,19 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       child.stderr?.on('data', onStderr);
       child.on('exit', onExit);
       child.on('error', onError);
+    });
+
+    // Record this child so a future run can reap it if we crash before teardown.
+    // The web-server lifecycle runs in-process inside multiple hosts, so tag the
+    // actual host (Electron sets OPENCHAMBER_RUNTIME='desktop'; the standalone
+    // web CLI leaves it unset → 'web'; SSH remote → 'ssh-remote') rather than a
+    // hardcoded label, matching the server's existing runtimeName convention.
+    registerManagedProcess({
+      pid: child.pid,
+      ownerPid: process.pid,
+      port,
+      binary,
+      runtime: process.env.OPENCHAMBER_RUNTIME || 'web',
     });
 
     return {
@@ -726,12 +753,22 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
     await restartOpenCode();
 
+    // A managed OpenCode process is restarted (and thus re-reads config from
+    // disk) by restartOpenCode(). An external OpenCode server is NOT owned by
+    // OpenChamber: restartOpenCode() only re-probes its health, so the freshly
+    // written config is on disk but the running server keeps serving its old,
+    // startup-cached config until the user restarts it themselves. Report this
+    // honestly so callers don't claim the change is live.
+    const external = state.isExternalOpenCode === true;
+
     try {
       await waitForOpenCodeReady();
       state.isOpenCodeReady = true;
       state.openCodeNotReadySince = 0;
 
-      if (agentName) {
+      // Waiting for the agent to appear only makes sense when we actually
+      // reloaded config. An external server will never surface it here.
+      if (agentName && !external) {
         await waitForAgentPresence(agentName);
       }
 
@@ -743,10 +780,22 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       console.error(`Failed to refresh OpenCode after ${reason}:`, error.message);
       throw error;
     }
+
+    return { reloaded: !external, external };
   };
 
   const bootstrapOpenCodeAtStartup = async () => {
     try {
+      // Before doing anything, reap any OpenCode process WE spawned in a prior
+      // run that was orphaned by a crash/hard-exit. Verified + scoped to our own
+      // pids, so it never touches a live instance's or the user's own server.
+      try {
+        const { reaped } = await reapOrphanedProcesses({ log: (msg) => console.log(msg) });
+        if (reaped > 0) console.log(`[lifecycle] startup reaped ${reaped} orphaned OpenCode process(es)`);
+      } catch (error) {
+        console.warn('[lifecycle] orphan reap failed:', error?.message ?? error);
+      }
+
       syncFromHmrState();
       if (await isOpenCodeProcessHealthy()) {
         console.log(`[HMR] Reusing existing OpenCode process on port ${state.openCodePort}`);

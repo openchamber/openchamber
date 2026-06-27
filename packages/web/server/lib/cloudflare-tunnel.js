@@ -41,7 +41,7 @@ export async function checkCloudflaredAvailable() {
   return { available: false, path: null, version: null };
 }
 
-export function printCloudflareTunnelInstallHelp() {
+function printCloudflareTunnelInstallHelp() {
   const platform = process.platform;
   let installCmd = '';
 
@@ -600,7 +600,7 @@ export async function startCloudflareManagedLocalTunnel({ configPath, hostname }
   };
 }
 
-export async function startCloudflareTunnel({ originUrl, port }) {
+async function startCloudflareTunnel({ originUrl, port }) {
   void port;
   return startCloudflareQuickTunnel({ originUrl });
 }

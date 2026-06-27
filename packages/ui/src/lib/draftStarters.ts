@@ -34,8 +34,6 @@ export const BUILTIN_STARTERS: readonly BuiltInStarter[] = [
 const BUILTIN_BY_NAME = new Map<string, BuiltInStarter>(BUILTIN_STARTERS.map((s) => [s.name, s]));
 
 export const getBuiltInStarter = (name: string): BuiltInStarter | undefined => BUILTIN_BY_NAME.get(name);
-export const isBuiltInStarter = (ref: DraftStarterRef): boolean =>
-    ref.type === 'command' && BUILTIN_BY_NAME.has(ref.name);
 
 // Default global starter set (used until the user customizes the global list).
 export const DEFAULT_GLOBAL_STARTERS: readonly DraftStarterRef[] = BUILTIN_STARTERS.map((s) => ({

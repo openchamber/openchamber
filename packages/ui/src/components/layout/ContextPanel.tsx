@@ -17,6 +17,8 @@ import { useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
+import { markSessionViewed } from '@/sync/notification-store';
+import { setExternallyViewedSession } from '@/sync/sync-context';
 import { ContextPanelContent } from './ContextSidebarTab';
 import { toast } from '@/components/ui';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -447,6 +449,21 @@ const stripPreviewTokenFromUrl = (value: string): string => {
     return value;
   }
 };
+
+const stripPreviewQueryParams = (value: string): string => {
+  if (!value) return value;
+  try {
+    const parsed = new URL(value);
+    parsed.searchParams.delete('ocPreview');
+    parsed.searchParams.delete('oc_preview_token');
+    parsed.searchParams.delete('oc_client_token');
+    parsed.searchParams.delete('oc_url_token');
+    return parsed.toString();
+  } catch {
+    return value;
+  }
+};
+
 const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
@@ -593,6 +610,8 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
     ? (() => {
       const path = normalizedUrl.pathname || '/';
       const searchParams = new URLSearchParams(normalizedUrl.search);
+      searchParams.delete('oc_url_token');
+      searchParams.delete('oc_client_token');
       searchParams.set('ocPreview', String(reloadNonce));
       searchParams.set('oc_preview_token', proxyState.previewToken || '');
       const search = searchParams.toString();
@@ -1394,6 +1413,8 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
       const parsed = new URL(currentUrl);
       const path = parsed.pathname || '/';
       const searchParams = new URLSearchParams(parsed.search);
+      searchParams.delete('oc_url_token');
+      searchParams.delete('oc_client_token');
       searchParams.set('ocPreview', String(reloadNonce));
       searchParams.set('oc_preview_token', proxyState.previewToken || '');
       const search = searchParams.toString();
@@ -1418,7 +1439,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
 
       const rest = parsedFrameUrl.pathname.slice(proxyBasePath.length) || '/';
       const upstreamOrigin = new URL(currentUrl).origin;
-      return new URL(`${rest}${parsedFrameUrl.search}${parsedFrameUrl.hash}`, upstreamOrigin).toString();
+      return stripPreviewQueryParams(new URL(`${rest}${parsedFrameUrl.search}${parsedFrameUrl.hash}`, upstreamOrigin).toString());
     } catch {
       return '';
     }
@@ -1440,7 +1461,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
         return '';
       }
 
-      return new URL(`${parsedFrameUrl.pathname}${parsedFrameUrl.search}${parsedFrameUrl.hash}`, upstreamOrigin).toString();
+      return stripPreviewQueryParams(new URL(`${parsedFrameUrl.pathname}${parsedFrameUrl.search}${parsedFrameUrl.hash}`, upstreamOrigin).toString());
     } catch {
       return '';
     }
@@ -2157,6 +2178,35 @@ export const ContextPanel: React.FC = () => {
   }, [activeTab, directoryKey, setSelectedFilePath]);
 
   const activeChatTabID = activeTab?.mode === 'chat' ? activeTab.id : null;
+  const activeChatSessionID = activeTab?.mode === 'chat' ? getSessionIDFromDedupeKey(activeTab.dedupeKey) : null;
+
+  React.useEffect(() => {
+    if (!isOpen || !directoryKey || !activeChatSessionID || typeof window === 'undefined') {
+      return;
+    }
+
+    const markActiveChatViewed = () => {
+      if (document.visibilityState === 'hidden' || !document.hasFocus()) {
+        setExternallyViewedSession(directoryKey, activeChatSessionID, false);
+        return;
+      }
+
+      markSessionViewed(activeChatSessionID);
+      setExternallyViewedSession(directoryKey, activeChatSessionID, true);
+    };
+
+    markActiveChatViewed();
+    const interval = window.setInterval(markActiveChatViewed, 10_000);
+    window.addEventListener('focus', markActiveChatViewed);
+    document.addEventListener('visibilitychange', markActiveChatViewed);
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', markActiveChatViewed);
+      document.removeEventListener('visibilitychange', markActiveChatViewed);
+      setExternallyViewedSession(directoryKey, activeChatSessionID, false);
+    };
+  }, [activeChatSessionID, directoryKey, isOpen]);
 
   const getEmbeddedChatSrc = React.useCallback((tabID: string, sessionID: string, readOnly: boolean): string => {
     return getOrCreateEmbeddedSessionChatURL(chatFrameSrcByTabIDRef.current, tabID, sessionID, directoryKey || null, readOnly, {

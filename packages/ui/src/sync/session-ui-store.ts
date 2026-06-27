@@ -30,6 +30,8 @@ import { markPendingUserSendAnimation } from "@/lib/userSendAnimation"
 import { flattenAssistantTextParts } from "@/lib/messages/messageText"
 import { composeForkSessionMessage } from "@/lib/messages/executionMeta"
 import { waitForPendingDraftWorktreeRequest } from "@/lib/worktrees/pendingDraftWorktree"
+import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap"
+import { getWorktreeSetupWaitEnabled } from "@/lib/openchamberConfig"
 import { resolveProjectForSessionDirectory } from "@/lib/projectResolution"
 import {
   getSyncSessions,
@@ -408,6 +410,91 @@ const writeRuntimeSessionMemory = (key: string, patch: Partial<RuntimeSessionMem
   })
 }
 
+type MaterializedDraftSession = {
+  sessionId: string
+  directory: string | null
+  agent?: string
+  syntheticParts?: SyntheticContextPart[]
+}
+
+const resolveProjectRefForWorktreeDirectory = (directory: string | null, projectId?: string | null): { id: string; path: string } | null => {
+  const projectsState = useProjectsStore.getState()
+  if (projectId) {
+    const project = projectsState.projects.find((entry) => entry.id === projectId)
+    if (project?.path) return { id: project.id, path: project.path }
+  }
+  const resolved = resolveProjectForSessionDirectory(projectsState.projects, useSessionUIStore.getState().availableWorktreesByProject, directory)
+  return resolved?.path ? { id: resolved.id, path: resolved.path } : null
+}
+
+const waitForWorktreeBootstrapIfConfigured = async (directory: string | null, projectId?: string | null): Promise<void> => {
+  if (!directory) return
+  const project = resolveProjectRefForWorktreeDirectory(directory, projectId)
+  if (project && await getWorktreeSetupWaitEnabled(project)) {
+    await waitForWorktreeBootstrap(directory)
+  }
+}
+
+export async function materializeOpenDraftSession(selection: {
+  providerID: string
+  modelID: string
+  agent?: string
+  variant?: string
+}): Promise<MaterializedDraftSession | null> {
+  const store = useSessionUIStore.getState()
+  const draft = store.newSessionDraft
+  if (!draft?.open) return null
+
+  const trimmedAgent = typeof selection.agent === "string" && selection.agent.trim().length > 0
+    ? selection.agent.trim()
+    : undefined
+  let draftDirectoryOverride = draft.bootstrapPendingDirectory ?? draft.directoryOverride ?? null
+  const draftProjectId = draft.selectedProjectId ?? null
+
+  if (draft.pendingWorktreeRequestId) {
+    draftDirectoryOverride = await waitForPendingDraftWorktreeRequest(draft.pendingWorktreeRequestId)
+    store.resolvePendingDraftWorktreeTarget(draft.pendingWorktreeRequestId, draftDirectoryOverride)
+  }
+
+  await waitForWorktreeBootstrapIfConfigured(draftDirectoryOverride, draftProjectId)
+
+  const created = await store.createSession(draft.title, draftDirectoryOverride, draft.parentID ?? null)
+  if (!created?.id) throw new Error("Failed to create session")
+
+  persistDraftTarget({
+    projectId: draftProjectId,
+    directory: normalizePath(draftDirectoryOverride ?? created.directory ?? null),
+  })
+
+  const draftSyntheticParts = draft.syntheticParts
+  const createdDirectory = normalizePath(draftDirectoryOverride ?? created.directory ?? null)
+  const configState = useConfigStore.getState()
+  void activateConfigForDirectory(createdDirectory).catch((error) => {
+    console.warn("Failed to activate directory after creating session:", error)
+  })
+
+  const effectiveDraftAgent = trimmedAgent ?? configState.currentAgentName
+
+  useSelectionStore.getState().saveSessionModelSelection(created.id, selection.providerID, selection.modelID)
+
+  if (effectiveDraftAgent) {
+    useSelectionStore.getState().saveSessionAgentSelection(created.id, effectiveDraftAgent)
+    useSelectionStore.getState().saveAgentModelForSession(created.id, effectiveDraftAgent, selection.providerID, selection.modelID)
+    useSelectionStore.getState().saveAgentModelVariantForSession(created.id, effectiveDraftAgent, selection.providerID, selection.modelID, selection.variant)
+  }
+
+  store.initializeNewOpenChamberSession(created.id, configState.agents ?? [])
+
+  store.setCurrentSession(created.id, createdDirectory)
+
+  return {
+    sessionId: created.id,
+    directory: createdDirectory,
+    agent: effectiveDraftAgent,
+    syntheticParts: draftSyntheticParts,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
@@ -623,10 +710,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const currentDirProject = resolveDraftProjectForDirectory(projects, availableWorktreesByProject, currentDirectory)
 
     const selectedProject = (() => {
-      if (explicitProject || explicitDirectory !== null) {
-        return explicitProject ?? inferredProjectFromDir ?? fallbackProject
-      }
-      if (currentDirectory) return currentDirProject ?? fallbackProject
+      if (explicitProject) return explicitProject
+      if (explicitDirectory !== null) return inferredProjectFromDir
+      if (currentDirectory) return currentDirProject
       return persistedProjectByDir ?? persistedProjectById ?? fallbackProject
     })()
 
@@ -920,59 +1006,21 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     // ---- New session from draft ----
     if (!options?.sessionId && draft?.open) {
-      const draftTargetFolderId = draft.targetFolderId
-      let draftDirectoryOverride = draft.bootstrapPendingDirectory ?? draft.directoryOverride ?? null
-      const draftProjectId = draft.selectedProjectId ?? null
-
-      if (draft.pendingWorktreeRequestId) {
-        draftDirectoryOverride = await waitForPendingDraftWorktreeRequest(draft.pendingWorktreeRequestId)
-        get().resolvePendingDraftWorktreeTarget(draft.pendingWorktreeRequestId, draftDirectoryOverride)
-      }
-
-      const created = await get().createSession(draft.title, draftDirectoryOverride, draft.parentID ?? null)
-      if (!created?.id) throw new Error("Failed to create session")
-
-      persistDraftTarget({
-        projectId: draftProjectId,
-        directory: normalizePath(draftDirectoryOverride ?? created.directory ?? null),
+      const createdDraftSession = await materializeOpenDraftSession({
+        providerID,
+        modelID,
+        agent: trimmedAgent,
+        variant,
       })
+      if (!createdDraftSession) throw new Error("Failed to create session")
 
-      const draftSyntheticParts = draft.syntheticParts
-      const createdDirectory = normalizePath(draftDirectoryOverride ?? created.directory ?? null)
-      const configState = useConfigStore.getState()
-      void activateConfigForDirectory(createdDirectory).catch((error) => {
-        console.warn("Failed to activate directory after creating session:", error)
-      })
-
-      const effectiveDraftAgent = trimmedAgent ?? configState.currentAgentName
-
-      useSelectionStore.getState().saveSessionModelSelection(created.id, providerID, modelID)
-
-      if (effectiveDraftAgent) {
-        useSelectionStore.getState().saveSessionAgentSelection(created.id, effectiveDraftAgent)
-        useSelectionStore.getState().saveAgentModelForSession(created.id, effectiveDraftAgent, providerID, modelID)
-        useSelectionStore.getState().saveAgentModelVariantForSession(created.id, effectiveDraftAgent, providerID, modelID, variant)
-      }
-
-      get().initializeNewOpenChamberSession(created.id, configState.agents ?? [])
-
-      get().closeNewSessionDraft()
-      get().setCurrentSession(created.id, createdDirectory)
-
-      if (draftTargetFolderId) {
-        const scopeKey = draftDirectoryOverride || created.directory || null
-        if (scopeKey) {
-          useSessionFoldersStore.getState().addSessionToFolder(scopeKey, draftTargetFolderId, created.id)
-        }
-      }
-
-      const mergedAdditionalParts = draftSyntheticParts?.length
-        ? [...(additionalParts || []), ...draftSyntheticParts]
+      const mergedAdditionalParts = createdDraftSession.syntheticParts?.length
+        ? [...(additionalParts || []), ...createdDraftSession.syntheticParts]
         : additionalParts
 
-      notifyMessageSent(created.id)
+      notifyMessageSent(createdDraftSession.sessionId)
 
-      markPendingUserSendAnimation(created.id)
+      markPendingUserSendAnimation(createdDraftSession.sessionId)
 
       const files = attachments?.map((a) => ({
         type: "file" as const,
@@ -982,12 +1030,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       }))
 
       await routeMessage({
-        sessionId: created.id,
-        directory: createdDirectory,
+        sessionId: createdDraftSession.sessionId,
+        directory: createdDraftSession.directory,
         content,
         providerID,
         modelID,
-        agent: effectiveDraftAgent,
+        agent: createdDraftSession.agent,
         agentMentionName,
         variant,
         inputMode,
@@ -1340,6 +1388,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         returnAfterDirectoryCreated: true,
       })
       sessionDirectory = normalizePath(createdWorktree.path)
+      if (!sessionDirectory) {
+        throw new Error("Worktree create missing name/path")
+      }
+      if (await configModule.getWorktreeSetupWaitEnabled(createdWorktreeProject)) {
+        await waitForWorktreeBootstrap(sessionDirectory)
+      }
     }
 
     const session = await get().createSession(undefined, sessionDirectory || null, null)
