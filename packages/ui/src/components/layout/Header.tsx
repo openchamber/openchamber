@@ -486,9 +486,14 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
                 return (
                   <React.Fragment key={group.providerId}>
                     {index > 0 ? <div className="mx-4 my-2 border-t border-[var(--interactive-border)]" /> : null}
-                    <div className="flex items-center gap-2 px-4 py-2">
-                      <ProviderLogo providerId={group.providerId} className="h-4 w-4" />
-                      <span className="typography-ui-label font-medium text-foreground">{group.providerName}</span>
+                    <div className="flex flex-col gap-0.5 px-4 py-2">
+                      <div className="flex items-center gap-2">
+                        <ProviderLogo providerId={group.providerId} className="h-4 w-4 shrink-0" />
+                        <span className="typography-ui-label font-medium text-foreground truncate">{group.providerName}</span>
+                      </div>
+                      {group.subtitle ? (
+                        <div className="pl-6 typography-meta text-muted-foreground truncate">{group.subtitle}</div>
+                      ) : null}
                     </div>
                     {group.entries.length === 0 && (!group.modelFamilies || group.modelFamilies.length === 0) ? (
                       <div className="px-4 pb-2">
@@ -686,6 +691,8 @@ interface TabConfig {
 interface RateLimitGroup {
   providerId: string;
   providerName: string;
+  subtitle?: string;
+  note?: string;
   entries: Array<[string, UsageWindow]>;
   error?: string;
   modelFamilies?: Array<{
@@ -1032,6 +1039,8 @@ export const Header: React.FC<HeaderProps> = ({
       const group: RateLimitGroup = {
         providerId: provider.id,
         providerName: provider.name,
+        subtitle: result?.usage?.subtitle,
+        note: result?.usage?.note,
         entries,
         error: (result && !result.ok && result.configured) ? result.error : undefined,
       };
@@ -2488,9 +2497,14 @@ export const Header: React.FC<HeaderProps> = ({
                             ) : null}
 
                             {/* Provider header */}
-                            <div className="flex items-center gap-2 px-4 py-2">
-                              <ProviderLogo providerId={group.providerId} className="h-4 w-4" />
-                              <span className="typography-ui-label font-medium text-foreground">{group.providerName}</span>
+                            <div className="flex flex-col gap-0.5 px-4 py-2">
+                              <div className="flex items-center gap-2">
+                                <ProviderLogo providerId={group.providerId} className="h-4 w-4 shrink-0" />
+                                <span className="typography-ui-label font-medium text-foreground truncate">{group.providerName}</span>
+                              </div>
+                              {group.subtitle ? (
+                                <div className="pl-6 typography-meta text-muted-foreground truncate">{group.subtitle}</div>
+                              ) : null}
                             </div>
 
                             {group.entries.length === 0 && (!group.modelFamilies || group.modelFamilies.length === 0) ? (

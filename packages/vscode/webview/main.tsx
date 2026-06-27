@@ -1036,6 +1036,89 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     }
   }
 
+  if (pathname === '/api/quota/credentials' && method === 'GET') {
+    try {
+      const data = await sendBridgeMessage<{ credentials?: unknown[] }>('api:quota/credentials:list');
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname === '/api/quota/credentials' && method === 'POST') {
+    try {
+      const body = await extractJsonBody(input, init, method);
+      const data = await sendBridgeMessage<{ error?: string }>('api:quota/credentials:create', body);
+      const status = data?.error ? 400 : 201;
+      return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  const credentialLegacyMatch = pathname.match(/^\/api\/quota\/credentials\/legacy\/([^/]+)$/);
+  if (credentialLegacyMatch && method === 'GET') {
+    const providerId = decodeURIComponent(credentialLegacyMatch[1]);
+    try {
+      const data = await sendBridgeMessage('api:quota/credentials:legacy', { providerId });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  const credentialValidateMatch = pathname.match(/^\/api\/quota\/credentials\/([^/]+)\/validate$/);
+  if (credentialValidateMatch && method === 'POST') {
+    const credentialId = decodeURIComponent(credentialValidateMatch[1]);
+    try {
+      const data = await sendBridgeMessage<{ error?: string }>('api:quota/credentials:validate', { credentialId });
+      const status = data?.error ? 404 : 200;
+      return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  const credentialMatch = pathname.match(/^\/api\/quota\/credentials\/([^/]+)$/);
+  if (credentialMatch) {
+    const credentialId = decodeURIComponent(credentialMatch[1]);
+    if (method === 'GET') {
+      try {
+        const data = await sendBridgeMessage<{ error?: string }>('api:quota/credentials:get', { credentialId });
+        const status = data?.error ? 404 : 200;
+        return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+      }
+    }
+    if (method === 'PATCH') {
+      try {
+        const body = await extractJsonBody(input, init, method);
+        const data = await sendBridgeMessage<{ error?: string }>('api:quota/credentials:update', { credentialId, updates: body });
+        const status = data?.error ? (data.error === 'Credential not found' ? 404 : 400) : 200;
+        return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+      }
+    }
+    if (method === 'DELETE') {
+      try {
+        const data = await sendBridgeMessage<{ error?: string }>('api:quota/credentials:delete', { credentialId });
+        const status = data?.error ? 404 : 204;
+        return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+      }
+    }
+  }
+
   // Handle provider auth deletion: DELETE /api/provider/:providerId/auth
   const providerAuthMatch = pathname.match(/^\/api\/provider\/([^/]+)\/auth$/);
   if (providerAuthMatch && method === 'DELETE') {

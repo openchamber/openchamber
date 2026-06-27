@@ -1,4 +1,8 @@
+import { registerCredentialRoutes } from './credentials/routes.js';
+
 export function registerQuotaRoutes(app, { getQuotaProviders }) {
+  registerCredentialRoutes(app);
+
   app.get('/api/quota/providers', async (_req, res) => {
     try {
       const { listConfiguredQuotaProviders } = await getQuotaProviders();

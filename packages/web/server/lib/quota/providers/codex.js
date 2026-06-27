@@ -5,7 +5,6 @@ import {
   buildResult,
   toUsageWindow,
   toNumber,
-  toTimestamp,
   formatMoney
 } from '../utils/index.js';
 
@@ -68,14 +67,18 @@ export const fetchQuota = async () => {
       windows['5h'] = toUsageWindow({
         usedPercent: toNumber(primary.used_percent),
         windowSeconds: toNumber(primary.limit_window_seconds),
-        resetAt: toTimestamp(primary.reset_at)
+        resetAt: primary.reset_after_seconds != null ? Date.now() + Number(primary.reset_after_seconds) * 1000 : null,
+        suffix: 'primary',
+        trendKey: 'codex:5h'
       });
     }
     if (secondary) {
       windows['weekly'] = toUsageWindow({
         usedPercent: toNumber(secondary.used_percent),
         windowSeconds: toNumber(secondary.limit_window_seconds),
-        resetAt: toTimestamp(secondary.reset_at)
+        resetAt: secondary.reset_after_seconds != null ? Date.now() + Number(secondary.reset_after_seconds) * 1000 : null,
+        suffix: 'weekly cap',
+        trendKey: 'codex:weekly'
       });
     }
     if (credits) {
@@ -90,8 +93,15 @@ export const fetchQuota = async () => {
         usedPercent: null,
         windowSeconds: null,
         resetAt: null,
-        valueLabel: label
+        valueLabel: label,
+        suffix: 'balance',
+        trendKey: 'codex:credits_balance'
       });
+    }
+
+    const usage = { windows, subtitle: 'ChatGPT subscription' };
+    if (credits?.unlimited) {
+      usage.note = 'Unlimited plan';
     }
 
     return buildResult({
@@ -99,7 +109,8 @@ export const fetchQuota = async () => {
       providerName,
       ok: true,
       configured: true,
-      usage: { windows }
+      usage,
+      accountKey: accountId ?? undefined
     });
   } catch (error) {
     return buildResult({

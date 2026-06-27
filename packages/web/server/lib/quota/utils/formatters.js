@@ -37,7 +37,19 @@ export const calculateResetAfterSeconds = (resetAt) => {
   return delta < 0 ? 0 : delta;
 };
 
-export const toUsageWindow = ({ usedPercent, windowSeconds, resetAt, valueLabel }) => {
+export const toUsageWindow = ({
+  usedPercent,
+  windowSeconds,
+  resetAt,
+  valueLabel,
+  suffix,
+  detail,
+  extra,
+  warn,
+  sectionHeader,
+  trendKey,
+  resetText
+}) => {
   const resetAfterSeconds = calculateResetAfterSeconds(resetAt);
   const resetFormatted = hasResetTimestamp(resetAt) ? formatResetTime(resetAt) : null;
   const hasFiniteUsedPercent = typeof usedPercent === 'number' && Number.isFinite(usedPercent);
@@ -49,18 +61,26 @@ export const toUsageWindow = ({ usedPercent, windowSeconds, resetAt, valueLabel 
     resetAt,
     resetAtFormatted: resetFormatted,
     resetAfterFormatted: resetFormatted,
-    ...(valueLabel ? { valueLabel } : {})
+    ...(valueLabel ? { valueLabel } : {}),
+    ...(suffix ? { suffix } : {}),
+    ...(Array.isArray(detail) && detail.length ? { detail } : {}),
+    ...(Array.isArray(extra) && extra.length ? { extra } : {}),
+    ...(warn ? { warn } : {}),
+    ...(sectionHeader ? { sectionHeader } : {}),
+    ...(trendKey ? { trendKey } : {}),
+    ...(resetText ? { resetText } : {})
   };
 };
 
-export const buildResult = ({ providerId, providerName, ok, configured, usage, error }) => ({
+export const buildResult = ({ providerId, providerName, ok, configured, usage, error, accountKey }) => ({
   providerId,
   providerName,
   ok,
   configured,
   usage: usage ?? null,
   ...(error ? { error } : {}),
-  fetchedAt: Date.now()
+  fetchedAt: Date.now(),
+  ...(accountKey ? { accountKey } : {})
 });
 
 export const durationToLabel = (duration, unit) => {

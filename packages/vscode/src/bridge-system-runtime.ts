@@ -6,6 +6,15 @@ import { randomUUID } from 'crypto';
 import { removeProviderConfig, getProviderSources } from './opencodeConfig';
 import { getProviderAuth, removeProviderAuth } from './opencodeAuth';
 import { fetchQuotaForProvider, listConfiguredQuotaProviders } from './quotaProviders';
+import {
+  listCredentials,
+  getCredentialById,
+  createCredential,
+  updateCredentialById,
+  deleteCredentialById,
+  validateCredentialById,
+  discoverCredentials,
+} from './quota/credentials/registry';
 import { getSessionActivitySnapshot } from './sessionActivityWatcher';
 import type { BridgeContext, BridgeResponse } from './bridge';
 
@@ -489,6 +498,117 @@ export async function handleSystemBridgeMessage(
       try {
         const result = await fetchQuotaForProvider(providerId);
         return { id, type, success: true, data: result };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:quota/credentials:list': {
+      try {
+        const credentials = listCredentials();
+        return { id, type, success: true, data: { credentials } };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:quota/credentials:get': {
+      const { credentialId } = (payload || {}) as { credentialId?: string };
+      if (!credentialId) {
+        return { id, type, success: false, error: 'Credential ID is required' };
+      }
+      try {
+        const credential = getCredentialById(credentialId);
+        if (!credential) {
+          return { id, type, success: false, error: 'Credential not found' };
+        }
+        return { id, type, success: true, data: credential };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:quota/credentials:create': {
+      try {
+        const body = (payload || {}) as { providerId?: string; label?: string; accountHint?: string; credential?: Record<string, unknown> };
+        const result = createCredential({
+          providerId: body.providerId ?? '',
+          label: body.label ?? '',
+          accountHint: body.accountHint,
+          credential: body.credential ?? {},
+        });
+        if (!result.valid) {
+          return { id, type, success: false, error: result.error };
+        }
+        return { id, type, success: true, data: result.record };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:quota/credentials:update': {
+      const { credentialId, updates } = (payload || {}) as { credentialId?: string; updates?: { label?: string; accountHint?: string; credential?: Record<string, unknown> } };
+      if (!credentialId) {
+        return { id, type, success: false, error: 'Credential ID is required' };
+      }
+      try {
+        const result = updateCredentialById(credentialId, updates ?? {});
+        if (!result.valid) {
+          return { id, type, success: false, error: result.error };
+        }
+        return { id, type, success: true, data: result.record };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:quota/credentials:delete': {
+      const { credentialId } = (payload || {}) as { credentialId?: string };
+      if (!credentialId) {
+        return { id, type, success: false, error: 'Credential ID is required' };
+      }
+      try {
+        const removed = deleteCredentialById(credentialId);
+        if (!removed) {
+          return { id, type, success: false, error: 'Credential not found' };
+        }
+        return { id, type, success: true, data: { removed: true } };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:quota/credentials:validate': {
+      const { credentialId } = (payload || {}) as { credentialId?: string };
+      if (!credentialId) {
+        return { id, type, success: false, error: 'Credential ID is required' };
+      }
+      try {
+        const result = validateCredentialById(credentialId);
+        if (result.status === null) {
+          return { id, type, success: false, error: result.error };
+        }
+        return { id, type, success: true, data: { valid: result.valid, error: result.error } };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:quota/credentials:legacy': {
+      const { providerId } = (payload || {}) as { providerId?: string };
+      if (!providerId) {
+        return { id, type, success: false, error: 'Provider ID is required' };
+      }
+      try {
+        const result = await discoverCredentials(providerId);
+        return { id, type, success: true, data: { legacy: result } };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         return { id, type, success: false, error: errorMessage };

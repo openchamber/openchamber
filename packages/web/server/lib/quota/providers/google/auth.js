@@ -64,30 +64,43 @@ const resolveGeminiCliAuth = (auth) => {
   };
 };
 
+// Resolve ALL antigravity accounts across every candidate file, deduped by
+// email (first-seen wins, matching canonical byEmail merge order) and filtered
+// to enabled accounts with a refresh token. Canonical loadAntigravityAccountsMerged
+// returns one entry per email; we preserve that contract here so the provider
+// emits a card PER account.
 const resolveAntigravityAuth = () => {
+  const byEmail = new Map();
+
   for (const filePath of ANTIGRAVITY_ACCOUNTS_PATHS) {
     const data = readJsonFile(filePath);
     const accounts = data?.accounts;
-    if (Array.isArray(accounts) && accounts.length > 0) {
-      const index = typeof data.activeIndex === 'number' ? data.activeIndex : 0;
-      const account = accounts[index] ?? accounts[0];
-      if (account?.refreshToken) {
-        const refreshParts = parseGoogleRefreshToken(account.refreshToken);
-        return {
-          sourceId: 'antigravity',
-          sourceLabel: 'Antigravity',
-          refreshToken: refreshParts.refreshToken,
-          projectId: asNonEmptyString(account.projectId)
-            ?? asNonEmptyString(account.managedProjectId)
-            ?? refreshParts.projectId
-            ?? refreshParts.managedProjectId,
-          email: account.email
-        };
-      }
+    if (!Array.isArray(accounts) || accounts.length === 0) {
+      continue;
+    }
+    for (const account of accounts) {
+      if (!account || account.enabled === false) continue;
+      const refreshTokenRaw = asNonEmptyString(account.refreshToken);
+      if (!refreshTokenRaw) continue;
+      const email = asNonEmptyString(account.email);
+      if (!email) continue;
+      const key = email.toLowerCase();
+      if (byEmail.has(key)) continue;
+      const refreshParts = parseGoogleRefreshToken(refreshTokenRaw);
+      byEmail.set(key, {
+        sourceId: 'antigravity',
+        sourceLabel: 'Antigravity',
+        refreshToken: refreshParts.refreshToken,
+        projectId: asNonEmptyString(account.projectId)
+          ?? asNonEmptyString(account.managedProjectId)
+          ?? refreshParts.projectId
+          ?? refreshParts.managedProjectId,
+        email
+      });
     }
   }
 
-  return null;
+  return [...byEmail.values()];
 };
 
 export const resolveGoogleAuthSources = () => {
@@ -99,8 +112,7 @@ export const resolveGoogleAuthSources = () => {
     sources.push(geminiAuth);
   }
 
-  const antigravityAuth = resolveAntigravityAuth();
-  if (antigravityAuth) {
+  for (const antigravityAuth of resolveAntigravityAuth()) {
     sources.push(antigravityAuth);
   }
 

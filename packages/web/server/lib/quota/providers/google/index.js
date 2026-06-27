@@ -4,7 +4,11 @@ import {
   resolveGoogleOAuthClient,
   DEFAULT_PROJECT_ID
 } from './auth.js';
-import { transformQuotaBucket, transformModelData } from './transforms.js';
+import {
+  transformQuotaBucket,
+  transformModelData,
+  transformAntigravityBuckets
+} from './transforms.js';
 import {
   refreshGoogleAccessToken,
   fetchGoogleQuotaBuckets,
@@ -32,6 +36,7 @@ export const fetchGoogleQuota = async () => {
   }
 
   const models = {};
+  const accounts = [];
   const sourceErrors = [];
 
   for (const source of authSources) {
@@ -53,7 +58,6 @@ export const fetchGoogleQuota = async () => {
     }
 
     const projectId = source.projectId ?? DEFAULT_PROJECT_ID;
-    let mergedAnyModel = false;
 
     if (source.sourceId === 'gemini') {
       const quotaPayload = await fetchGoogleQuotaBuckets(accessToken, projectId);
@@ -63,26 +67,39 @@ export const fetchGoogleQuota = async () => {
         const transformed = transformQuotaBucket(bucket, source.sourceId);
         if (transformed) {
           Object.assign(models, transformed);
-          mergedAnyModel = true;
         }
       }
-    }
 
-    const payload = await fetchGoogleModels(accessToken, projectId);
-    if (payload) {
-      for (const [modelName, modelData] of Object.entries(payload.models ?? {})) {
-        const transformed = transformModelData(modelName, modelData, source.sourceId);
-        Object.assign(models, transformed);
-        mergedAnyModel = true;
+      const payload = await fetchGoogleModels(accessToken, projectId);
+      if (payload) {
+        for (const [modelName, modelData] of Object.entries(payload.models ?? {})) {
+          const transformed = transformModelData(modelName, modelData, source.sourceId);
+          Object.assign(models, transformed);
+        }
       }
+      continue;
     }
 
-    if (!mergedAnyModel) {
-      sourceErrors.push(`${source.sourceLabel}: Failed to fetch models`);
+    if (source.sourceId === 'antigravity') {
+      const quotaPayload = await fetchGoogleQuotaBuckets(accessToken, projectId);
+      const buckets = Array.isArray(quotaPayload?.buckets) ? quotaPayload.buckets : [];
+      const windows = transformAntigravityBuckets(buckets);
+
+      if (Object.keys(windows).length === 0) {
+        sourceErrors.push(`${source.sourceLabel}: No quota buckets`);
+        continue;
+      }
+
+      accounts.push({
+        accountKey: source.email ?? source.sourceLabel,
+        label: source.email ?? source.sourceLabel,
+        subtitle: source.email ?? undefined,
+        windows
+      });
     }
   }
 
-  if (!Object.keys(models).length) {
+  if (!Object.keys(models).length && accounts.length === 0) {
     return buildResult({
       providerId,
       providerName,
@@ -92,14 +109,34 @@ export const fetchGoogleQuota = async () => {
     });
   }
 
+  const sourceLabels = authSources.map((source) => source.sourceLabel);
+  const subtitle = sourceLabels.length > 0
+    ? sourceLabels.join(' + ')
+    : 'Google Cloud Code';
+
+  const usage = {
+    windows: {},
+    subtitle,
+    models: Object.keys(models).length ? models : undefined
+  };
+
+  if (accounts.length > 0) {
+    usage.accounts = accounts;
+    usage.windows = accounts[0].windows;
+  }
+
+  if (sourceErrors.length > 0) {
+    usage.note = `${sourceErrors.length} source(s) failed`;
+  }
+
+  const singleEmail = authSources.length === 1 ? authSources[0]?.email : null;
+
   return buildResult({
     providerId,
     providerName,
     ok: true,
     configured: true,
-    usage: {
-      windows: {},
-      models: Object.keys(models).length ? models : undefined
-    }
+    usage,
+    accountKey: singleEmail ?? undefined
   });
 };
