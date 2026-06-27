@@ -6,6 +6,7 @@ import { INITIAL_STATE, type State } from "../types"
 import type { DirectoryStore } from "../child-store"
 import {
   applySessionStatusSnapshot,
+  getSessionWatchdogFreshnessAt,
   needsSnapshotAfterStatusPoll,
 } from "../sync-context"
 
@@ -52,6 +53,21 @@ describe("applySessionStatusSnapshot", () => {
       const changed = applySessionStatusSnapshot(store, { ses_a: { type: "busy" } }, ["ses_a"], "monotonic")
       expect(changed).toBe(true)
       expect(store.getState().session_status.ses_a).toEqual(BUSY)
+    })
+
+    test("seeds freshness when the snapshot reports an active session", () => {
+      const store = createDirectoryStore({ session_status: {} })
+      const freshness: string[] = []
+
+      applySessionStatusSnapshot(
+        store,
+        { ses_a: { type: "busy" } },
+        ["ses_a"],
+        "monotonic",
+        (sessionId) => freshness.push(sessionId),
+      )
+
+      expect(freshness).toEqual(["ses_a"])
     })
 
     test("updates busy → retry from the snapshot", () => {
@@ -113,5 +129,27 @@ describe("needsSnapshotAfterStatusPoll", () => {
   test("does NOT escalate when the store already considers the session idle", () => {
     const store = createDirectoryStore({ session_status: {} })
     expect(needsSnapshotAfterStatusPoll(store.getState(), "ses_a", undefined)).toBe(false)
+  })
+})
+
+describe("getSessionWatchdogFreshnessAt", () => {
+  test("prefers a session-scoped timestamp over unrelated directory activity in the same directory", () => {
+    const freshnessBySessionByDirectory = new Map<string, Map<string, number>>([
+      ["dir_a", new Map<string, number>([["ses_a", 1_000]])],
+    ])
+    const freshnessByDirectory = new Map<string, number>([["dir_a", 9_000]])
+
+    expect(
+      getSessionWatchdogFreshnessAt("dir_a", "ses_a", freshnessBySessionByDirectory, freshnessByDirectory),
+    ).toBe(1_000)
+  })
+
+  test("falls back to directory freshness until a session has its own timestamp", () => {
+    const freshnessBySessionByDirectory = new Map<string, Map<string, number>>()
+    const freshnessByDirectory = new Map<string, number>([["dir_a", 9_000]])
+
+    expect(
+      getSessionWatchdogFreshnessAt("dir_a", "ses_a", freshnessBySessionByDirectory, freshnessByDirectory),
+    ).toBe(9_000)
   })
 })
