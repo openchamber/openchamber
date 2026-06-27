@@ -1,6 +1,8 @@
 import React from 'react';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
+import { ProviderQuotaCredentials } from './ProviderQuotaCredentials';
+import { resolveQuotaProviderId } from '@/lib/quota/credentialSchemas';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { Button } from '@/components/ui/button';
@@ -982,6 +984,12 @@ export const ProvidersPage: React.FC = () => {
             </div>
           </section>
         </div>
+
+        {/* Quota Credentials */}
+        {(() => {
+          const quotaProviderId = resolveQuotaProviderId(selectedProvider.id);
+          return quotaProviderId ? <ProviderQuotaCredentials quotaProviderId={quotaProviderId} /> : null;
+        })()}
 
         {/* Models */}
         <div data-settings-item="providers.models" className="mb-8">

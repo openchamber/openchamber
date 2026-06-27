@@ -226,9 +226,34 @@ export const UsagePage: React.FC = () => {
           </div>
         )}
 
+        {!error && selectedResult && selectedResult.configured && !selectedResult.ok && selectedResult.error && (
+          <div className="mb-8 rounded-lg border border-[var(--status-error-border)] bg-[var(--status-error-background)] px-4 py-3">
+            <p className="typography-ui-label font-medium text-[var(--status-error)]">{t('settings.usage.page.state.refreshFailedTitle')}</p>
+            <p className="typography-meta text-[var(--status-error)]/80 mt-1">{selectedResult.error}</p>
+          </div>
+        )}
+
         {/* Overall Usage Windows */}
+        {usage?.subtitle && (
+          <div className="mb-2 px-2">
+            <p className="typography-ui-label text-foreground">{usage.subtitle}</p>
+          </div>
+        )}
+        {usage?.note && (
+          <div className="mb-6 px-2">
+            <p className="typography-meta text-muted-foreground">{usage.note}</p>
+          </div>
+        )}
+        {usage?.header && usage.header.length > 0 && (
+          <div className="mb-4 px-2 space-y-1">
+            {usage.header.map((line, i) => (
+              <p key={i} className="typography-meta text-muted-foreground">{line}</p>
+            ))}
+          </div>
+        )}
+
         {usage?.windows && Object.keys(usage.windows).length > 0 && (
-          <div data-settings-item="usage.model-quotas" className="mb-8">
+          <div data-settings-item="usage.model-quotas" className="mb-6">
             <section className="px-2 pb-2 pt-0">
               <div className="divide-y divide-[var(--surface-subtle)]">
                 {Object.entries(usage.windows).map(([label, window]) => (
@@ -236,6 +261,64 @@ export const UsagePage: React.FC = () => {
                 ))}
               </div>
             </section>
+          </div>
+        )}
+
+        {usage?.footer && usage.footer.length > 0 && (
+          <div className="mb-8 px-2 space-y-1">
+            {usage.footer.map((line, i) => (
+              <p key={i} className="typography-meta text-muted-foreground">{line}</p>
+            ))}
+          </div>
+        )}
+
+        {/* Accounts */}
+        {usage?.accounts && usage.accounts.length > 0 && (
+          <div className="mb-8 space-y-6">
+            {usage.accounts.map((account, i) => (
+              <div key={account.accountKey ?? i} className="rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-4">
+                <div className="mb-3">
+                  <h3 className="typography-ui-header font-medium text-foreground">{account.label || 'Account'}</h3>
+                  {account.subtitle && <p className="typography-ui-label text-muted-foreground mt-0.5">{account.subtitle}</p>}
+                  {account.note && <p className="typography-meta text-muted-foreground mt-1">{account.note}</p>}
+                </div>
+                {account.header && account.header.length > 0 && (
+                  <div className="mb-3 space-y-1">
+                    {account.header.map((line, j) => (
+                      <p key={j} className="typography-meta text-muted-foreground">{line}</p>
+                    ))}
+                  </div>
+                )}
+                {account.windows && Object.keys(account.windows).length > 0 && (
+                  <div className="divide-y divide-[var(--surface-subtle)]">
+                    {Object.entries(account.windows).map(([label, window]) => (
+                      <UsageCard key={label} title={label} window={window} />
+                    ))}
+                  </div>
+                )}
+                {account.models && Object.keys(account.models).length > 0 && (
+                  <div className="mt-4 pt-3 border-t border-[var(--surface-subtle)] space-y-2">
+                    {Object.entries(account.models).map(([modelName, modelUsage]) => {
+                       const winEntries = Object.entries(modelUsage.windows);
+                       if (!winEntries.length) return null;
+                       const [label, window] = winEntries[0];
+                       return (
+                         <div key={modelName} className="pl-2 border-l-2 border-[var(--surface-subtle)]">
+                           <UsageCard title={label} subtitle={getDisplayModelName(modelName)} window={window} />
+                         </div>
+                       );
+                    })}
+                  </div>
+                )}
+                {account.footer && account.footer.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-[var(--surface-subtle)] space-y-1">
+                    {account.footer.map((line, j) => (
+                      <p key={j} className="typography-meta text-muted-foreground">{line}</p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         )}
 

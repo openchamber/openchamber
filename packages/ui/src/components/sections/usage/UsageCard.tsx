@@ -57,10 +57,19 @@ export const UsageCard: React.FC<UsageCardProps> = ({
             />
           )}
           <div className="min-w-0 flex flex-col">
-            <span className="typography-ui-label text-foreground truncate">{windowLabel}</span>
+            {window.sectionHeader ? (
+              <span className="typography-ui-label font-medium text-foreground truncate mb-0.5">{window.sectionHeader}</span>
+            ) : null}
+            <span className="typography-ui-label text-foreground truncate">
+              {windowLabel}
+              {window.suffix ? <span className="ml-1 opacity-70 font-normal">{window.suffix}</span> : null}
+            </span>
             {subtitle && (
               <span className="typography-meta text-muted-foreground truncate">{subtitle}</span>
             )}
+            {window.detail?.map((line, i) => (
+              <span key={i} className="typography-meta text-muted-foreground truncate">{line}</span>
+            ))}
           </div>
         </div>
         <div className="typography-ui-label text-foreground tabular-nums flex items-center justify-end">
@@ -77,7 +86,7 @@ export const UsageCard: React.FC<UsageCardProps> = ({
         />
         <div className="mt-1 flex items-center justify-between">
           <span className="typography-micro text-muted-foreground">
-            {resetLabel ? `Resets ${resetLabel}` : ''}
+            {window.resetText ? window.resetText : resetLabel ? `Resets ${resetLabel}` : ''}
           </span>
           <span className="typography-micro text-muted-foreground">
             {barLabel}

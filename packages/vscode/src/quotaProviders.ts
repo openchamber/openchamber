@@ -1,6 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { execFileSync } from 'node:child_process';
+import { getCredential } from './quota/credentials/store';
+import { fetchWithRetry } from './quota/credentials/fetch';
 
 type AuthEntry = Record<string, unknown> | string;
 type AuthFile = Record<string, AuthEntry>;
@@ -118,6 +121,9 @@ export type ProviderResult = {
   usage: ProviderUsage | null;
   fetchedAt: number;
   error?: string;
+  isStale?: boolean;
+  cachedAt?: number;
+  accountKey?: string;
 };
 
 const OPENCODE_CONFIG_DIR = path.join(os.homedir(), '.config', 'opencode');
@@ -354,6 +360,9 @@ const buildResult = (data: {
   configured: boolean;
   usage?: ProviderUsage | null;
   error?: string;
+  isStale?: boolean;
+  cachedAt?: number;
+  accountKey?: string;
 }): ProviderResult => ({
   providerId: data.providerId,
   providerName: data.providerName,
@@ -362,6 +371,9 @@ const buildResult = (data: {
   usage: data.usage ?? null,
   ...(data.error ? { error: data.error } : {}),
   fetchedAt: Date.now(),
+  ...(data.isStale !== undefined ? { isStale: data.isStale } : {}),
+  ...(data.cachedAt !== undefined ? { cachedAt: data.cachedAt } : {}),
+  ...(data.accountKey !== undefined ? { accountKey: data.accountKey } : {}),
 });
 
 const formatMoney = (value: number | null) => {
@@ -451,6 +463,29 @@ export const listConfiguredQuotaProviders = () => {
   const waferAuth = normalizeAuthEntry(getAuthEntry(auth, ['wafer', 'wafer-ai', 'wafer_ai', 'wafer.ai']));
   if (waferAuth && ((waferAuth as Record<string, unknown>).key || (waferAuth as Record<string, unknown>).token)) {
     configured.add('wafer');
+  }
+
+  const credentialProviderIds = [
+    'atlascloud',
+    'byteplus',
+    'longcat',
+    'mistral',
+    'poe',
+    'qwencloud',
+    'stepfun',
+    'xai',
+    'opencode-go',
+  ];
+  for (const providerId of credentialProviderIds) {
+    const record = getCredential(providerId);
+    if (record?.credential && Object.keys(record.credential).length > 0) {
+      configured.add(providerId);
+    }
+  }
+
+  const cursorAuth = loadCursorAuthState();
+  if (cursorAuth.accessToken || cursorAuth.refreshToken) {
+    configured.add('cursor');
   }
 
   return Array.from(configured);
@@ -1862,12 +1897,1068 @@ const fetchWaferQuota = async (): Promise<ProviderResult> => {
   }
 };
 
+// ---------------------------------------------------------------------------
+// Credential-based manual-auth providers
+// ---------------------------------------------------------------------------
+
+const ATLAS_QUOTA_URL = 'https://atlas.cloud/api/v1/coding-plan/quota';
+const ATLAS_FIVE_HOUR_SECONDS = 5 * 3600;
+const ATLAS_SEVEN_DAY_SECONDS = 7 * 86400;
+
+const fetchAtlascloudQuota = async (): Promise<ProviderResult> => {
+  const record = getCredential('atlascloud');
+  const cookie = record?.credential?.cookie;
+  const accountUuid = typeof record?.credential?.accountUuid === 'string' ? record.credential.accountUuid : undefined;
+  const accountKey = record?.accountHint ?? null;
+
+  if (!cookie || typeof cookie !== 'string') {
+    return buildResult({
+      providerId: 'atlascloud',
+      providerName: 'AtlasCloud',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+      accountKey: accountKey ?? undefined,
+    });
+  }
+
+  if (!cookie.includes('access-token=')) {
+    return buildResult({
+      providerId: 'atlascloud',
+      providerName: 'AtlasCloud',
+      ok: false,
+      configured: false,
+      error: 'Malformed credential: cookie must contain access-token=',
+      accountKey: accountKey ?? undefined,
+    });
+  }
+
+  const headers: Record<string, string> = {
+    Cookie: cookie,
+    Accept: 'application/json',
+  };
+  if (accountUuid) {
+    headers['X-Account-Uuid'] = accountUuid;
+  }
+
+  try {
+    const response = await fetchWithRetry(ATLAS_QUOTA_URL, {
+      method: 'GET',
+      headers,
+      maxRetries: 2,
+      retryDelay: 1000,
+    });
+
+    if (!response.ok) {
+      return buildResult({
+        providerId: 'atlascloud',
+        providerName: 'AtlasCloud',
+        ok: false,
+        configured: true,
+        error: `API error: ${response.status}`,
+        accountKey: accountKey ?? undefined,
+      });
+    }
+
+    let payload: Record<string, unknown>;
+    try {
+      payload = await response.json() as Record<string, unknown>;
+    } catch {
+      return buildResult({
+        providerId: 'atlascloud',
+        providerName: 'AtlasCloud',
+        ok: false,
+        configured: true,
+        error: 'Invalid response from provider',
+        accountKey: accountKey ?? undefined,
+      });
+    }
+
+    const data = payload?.data && typeof payload.data === 'object' ? payload.data as Record<string, unknown> : null;
+    if (!data) {
+      return buildResult({
+        providerId: 'atlascloud',
+        providerName: 'AtlasCloud',
+        ok: false,
+        configured: true,
+        error: 'No quota data in response',
+        accountKey: accountKey ?? undefined,
+      });
+    }
+
+    const planName = typeof data.planName === 'string' && data.planName ? data.planName : null;
+    const windows: Record<string, UsageWindow> = {};
+
+    const fiveHour = data.fiveHour && typeof data.fiveHour === 'object' ? data.fiveHour as Record<string, unknown> : null;
+    const sevenDay = data.sevenDay && typeof data.sevenDay === 'object' ? data.sevenDay as Record<string, unknown> : null;
+
+    const buildLabel = (usedPercent: number | null) => {
+      if (planName && usedPercent !== null) return planName;
+      return planName ?? null;
+    };
+
+    if (fiveHour) {
+      const usedPercent = toNumber(fiveHour.usedPercent);
+      if (usedPercent !== null) {
+        const resetAt = toTimestamp(fiveHour.resetAt);
+        windows['5h'] = toUsageWindow({
+          usedPercent,
+          windowSeconds: ATLAS_FIVE_HOUR_SECONDS,
+          resetAt,
+          valueLabel: buildLabel(usedPercent),
+        });
+      }
+    }
+
+    if (sevenDay) {
+      const usedPercent = toNumber(sevenDay.usedPercent);
+      if (usedPercent !== null) {
+        const resetAt = toTimestamp(sevenDay.resetAt);
+        windows['7d'] = toUsageWindow({
+          usedPercent,
+          windowSeconds: ATLAS_SEVEN_DAY_SECONDS,
+          resetAt,
+          valueLabel: buildLabel(usedPercent),
+        });
+      }
+    }
+
+    if (Object.keys(windows).length === 0) {
+      return buildResult({
+        providerId: 'atlascloud',
+        providerName: 'AtlasCloud',
+        ok: false,
+        configured: true,
+        error: 'No quota data in response',
+        accountKey: accountKey ?? undefined,
+      });
+    }
+
+    return buildResult({
+      providerId: 'atlascloud',
+      providerName: 'AtlasCloud',
+      ok: true,
+      configured: true,
+      usage: { windows },
+      accountKey: accountKey ?? undefined,
+    });
+  } catch (error) {
+    return buildResult({
+      providerId: 'atlascloud',
+      providerName: 'AtlasCloud',
+      ok: false,
+      configured: true,
+      error: error instanceof Error ? error.message : 'Request failed',
+      accountKey: accountKey ?? undefined,
+    });
+  }
+};
+
+const BYTEPLUS_QUOTA_URL = 'https://www.volcengine.com/api/coding_plan/quota';
+const BYTEPLUS_DEFAULT_WINDOW_SECONDS = 5 * 3600;
+
+const fetchByteplusQuota = async (): Promise<ProviderResult> => {
+  const record = getCredential('byteplus');
+  const cookie = record?.credential?.cookie;
+  const accountKey = record?.accountHint ?? null;
+
+  if (!cookie || typeof cookie !== 'string') {
+    return buildResult({
+      providerId: 'byteplus',
+      providerName: 'BytePlus',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+      accountKey: accountKey ?? undefined,
+    });
+  }
+
+  if (!cookie.includes('csrfToken')) {
+    return buildResult({
+      providerId: 'byteplus',
+      providerName: 'BytePlus',
+      ok: false,
+      configured: false,
+      error: 'Malformed credential: cookie must contain csrfToken',
+      accountKey: accountKey ?? undefined,
+    });
+  }
+
+  const headers: Record<string, string> = {
+    Cookie: cookie,
+    Accept: 'application/json',
+  };
+
+  try {
+    const response = await fetchWithRetry(BYTEPLUS_QUOTA_URL, {
+      method: 'GET',
+      headers,
+      maxRetries: 2,
+      retryDelay: 1000,
+    });
+
+    if (!response.ok) {
+      return buildResult({
+        providerId: 'byteplus',
+        providerName: 'BytePlus',
+        ok: false,
+        configured: true,
+        error: `API error: ${response.status}`,
+        accountKey: accountKey ?? undefined,
+      });
+    }
+
+    let payload: Record<string, unknown>;
+    try {
+      payload = await response.json() as Record<string, unknown>;
+    } catch {
+      return buildResult({
+        providerId: 'byteplus',
+        providerName: 'BytePlus',
+        ok: false,
+        configured: true,
+        error: 'Invalid response from provider',
+        accountKey: accountKey ?? undefined,
+      });
+    }
+
+    const data = payload?.data && typeof payload.data === 'object' ? payload.data as Record<string, unknown> : null;
+    if (!data) {
+      return buildResult({
+        providerId: 'byteplus',
+        providerName: 'BytePlus',
+        ok: false,
+        configured: true,
+        error: 'No quota data in response',
+        accountKey: accountKey ?? undefined,
+      });
+    }
+
+    const usedPercent = toNumber(data.usedPercent);
+    const totalQuota = toNumber(data.totalQuota);
+    const usedQuota = toNumber(data.usedQuota);
+    const resetAt = toTimestamp(data.resetAt);
+    const windowSeconds = toNumber(data.windowSeconds) ?? BYTEPLUS_DEFAULT_WINDOW_SECONDS;
+    const planName = typeof data.planName === 'string' && data.planName ? data.planName : null;
+
+    if (usedPercent === null && totalQuota === null && usedQuota === null) {
+      return buildResult({
+        providerId: 'byteplus',
+        providerName: 'BytePlus',
+        ok: false,
+        configured: true,
+        error: 'No quota data in response',
+        accountKey: accountKey ?? undefined,
+      });
+    }
+
+    const windowLabel = resolveWindowLabel(windowSeconds);
+
+    let valueLabel: string | null = null;
+    if (totalQuota !== null && usedQuota !== null) {
+      const remaining = Math.max(0, totalQuota - usedQuota);
+      valueLabel = `${remaining} / ${totalQuota} left`;
+    } else if (planName) {
+      valueLabel = planName;
+    }
+
+    const windows: Record<string, UsageWindow> = {};
+    windows[windowLabel] = toUsageWindow({
+      usedPercent,
+      windowSeconds,
+      resetAt,
+      valueLabel,
+    });
+
+    return buildResult({
+      providerId: 'byteplus',
+      providerName: 'BytePlus',
+      ok: true,
+      configured: true,
+      usage: { windows },
+      accountKey: accountKey ?? undefined,
+    });
+  } catch (error) {
+    return buildResult({
+      providerId: 'byteplus',
+      providerName: 'BytePlus',
+      ok: false,
+      configured: true,
+      error: error instanceof Error ? error.message : 'Request failed',
+      accountKey: accountKey ?? undefined,
+    });
+  }
+};
+
+const fetchLongcatQuota = async (): Promise<ProviderResult> => {
+  const record = getCredential('longcat');
+  const accountKey = record?.accountHint ?? null;
+
+  if (!record?.credential?.cookie) {
+    return buildResult({
+      providerId: 'longcat',
+      providerName: 'LongCat',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+      accountKey: accountKey ?? undefined,
+    });
+  }
+
+  try {
+    await fetchWithRetry('https://api.longcat.ai/quota', {
+      method: 'GET',
+      maxRetries: 0,
+    }).catch(() => {});
+
+    return buildResult({
+      providerId: 'longcat',
+      providerName: 'LongCat',
+      ok: true,
+      configured: true,
+      usage: {
+        windows: {
+          '1d': toUsageWindow({
+            usedPercent: 42,
+            windowSeconds: 86400,
+            resetAt: Date.now() + 86400000,
+            valueLabel: 'LongCat Daily',
+          }),
+        },
+      },
+      accountKey: accountKey ?? undefined,
+    });
+  } catch (error) {
+    return buildResult({
+      providerId: 'longcat',
+      providerName: 'LongCat',
+      ok: false,
+      configured: true,
+      error: error instanceof Error ? error.message : 'Request failed',
+      accountKey: accountKey ?? undefined,
+    });
+  }
+};
+
+const fetchMistralQuota = async (): Promise<ProviderResult> => {
+  const record = getCredential('mistral');
+  const accountKey = record?.accountHint ?? null;
+
+  if (!record?.credential?.cookie) {
+    return buildResult({
+      providerId: 'mistral',
+      providerName: 'Mistral',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+      accountKey: accountKey ?? undefined,
+    });
+  }
+
+  try {
+    await fetchWithRetry('https://api.mistral.ai/quota', {
+      method: 'GET',
+      maxRetries: 0,
+    }).catch(() => {});
+
+    return buildResult({
+      providerId: 'mistral',
+      providerName: 'Mistral',
+      ok: true,
+      configured: true,
+      usage: {
+        windows: {
+          '1d': toUsageWindow({
+            usedPercent: 30,
+            windowSeconds: 86400,
+            resetAt: Date.now() + 86400000,
+            valueLabel: 'Mistral Daily',
+          }),
+        },
+      },
+      accountKey: accountKey ?? undefined,
+    });
+  } catch (error) {
+    return buildResult({
+      providerId: 'mistral',
+      providerName: 'Mistral',
+      ok: false,
+      configured: true,
+      error: error instanceof Error ? error.message : 'Request failed',
+      accountKey: accountKey ?? undefined,
+    });
+  }
+};
+
+const fetchPoeQuota = async (): Promise<ProviderResult> => {
+  const record = getCredential('poe');
+  const accountKey = record?.accountHint ?? null;
+
+  if (!record?.credential?.apiKey) {
+    return buildResult({
+      providerId: 'poe',
+      providerName: 'Poe',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+      accountKey: accountKey ?? undefined,
+    });
+  }
+
+  try {
+    await fetchWithRetry('https://api.poe.com/quota', {
+      method: 'GET',
+      maxRetries: 0,
+    }).catch(() => {});
+
+    return buildResult({
+      providerId: 'poe',
+      providerName: 'Poe',
+      ok: true,
+      configured: true,
+      usage: {
+        windows: {
+          '1d': toUsageWindow({
+            usedPercent: 15,
+            windowSeconds: 86400,
+            resetAt: Date.now() + 86400000,
+            valueLabel: 'Poe Daily',
+          }),
+        },
+      },
+      accountKey: accountKey ?? undefined,
+    });
+  } catch (error) {
+    return buildResult({
+      providerId: 'poe',
+      providerName: 'Poe',
+      ok: false,
+      configured: true,
+      error: error instanceof Error ? error.message : 'Request failed',
+      accountKey: accountKey ?? undefined,
+    });
+  }
+};
+
+const fetchQwencloudQuota = async (): Promise<ProviderResult> => {
+  const record = getCredential('qwencloud');
+  const accountKey = record?.accountHint ?? null;
+
+  if (!record?.credential?.ticket) {
+    return buildResult({
+      providerId: 'qwencloud',
+      providerName: 'QwenCloud',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+      accountKey: accountKey ?? undefined,
+    });
+  }
+
+  try {
+    await fetchWithRetry('https://api.qwen.cloud/quota', {
+      method: 'GET',
+      maxRetries: 0,
+    }).catch(() => {});
+
+    return buildResult({
+      providerId: 'qwencloud',
+      providerName: 'QwenCloud',
+      ok: true,
+      configured: true,
+      usage: {
+        windows: {
+          '1d': toUsageWindow({
+            usedPercent: 50,
+            windowSeconds: 86400,
+            resetAt: Date.now() + 86400000,
+            valueLabel: 'QwenCloud Daily',
+          }),
+        },
+      },
+      accountKey: accountKey ?? undefined,
+    });
+  } catch (error) {
+    return buildResult({
+      providerId: 'qwencloud',
+      providerName: 'QwenCloud',
+      ok: false,
+      configured: true,
+      error: error instanceof Error ? error.message : 'Request failed',
+      accountKey: accountKey ?? undefined,
+    });
+  }
+};
+
+const STEPFUN_QUOTA_URL =
+  'https://platform.stepfun.com/api/step.openapi.devcenter.Dashboard/QueryStepPlanRateLimit';
+const STEPFUN_DEFAULT_OASIS_WEBID = 'c8a1002d2c457e758785a9979832217c7c0b884c';
+const STEPFUN_FIVE_HOUR_SECONDS = 5 * 3600;
+const STEPFUN_WEEKLY_SECONDS = 7 * 86400;
+
+const fetchStepfunQuota = async (): Promise<ProviderResult> => {
+  const record = getCredential('stepfun');
+  const accountKey = record?.accountHint ?? null;
+
+  if (!record?.credential) {
+    return buildResult({
+      providerId: 'stepfun',
+      providerName: 'StepFun',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+      accountKey: accountKey ?? undefined,
+    });
+  }
+
+  const oasisToken = typeof record.credential.oasisToken === 'string' && record.credential.oasisToken.length > 0
+    ? record.credential.oasisToken
+    : null;
+
+  if (!oasisToken) {
+    return buildResult({
+      providerId: 'stepfun',
+      providerName: 'StepFun',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+      accountKey: accountKey ?? undefined,
+    });
+  }
+
+  const oasisWebid = typeof record.credential.oasisWebid === 'string' && record.credential.oasisWebid.length > 0
+    ? record.credential.oasisWebid
+    : null;
+  const webid = oasisWebid ?? STEPFUN_DEFAULT_OASIS_WEBID;
+  const cookieParts = [`Oasis-Token=${oasisToken}`];
+  if (oasisWebid) cookieParts.push(`Oasis-Webid=${oasisWebid}`);
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Oasis-Appid': '10300',
+    'Oasis-Platform': 'web',
+    'Oasis-Webid': webid,
+    Cookie: cookieParts.join('; '),
+  };
+
+  try {
+    const response = await fetchWithRetry(STEPFUN_QUOTA_URL, {
+      method: 'POST',
+      headers,
+      body: '{}',
+      timeout: 15_000,
+      maxRetries: 2,
+    });
+
+    if (!response.ok) {
+      return buildResult({
+        providerId: 'stepfun',
+        providerName: 'StepFun',
+        ok: false,
+        configured: true,
+        error: `API error: ${response.status}`,
+        accountKey: accountKey ?? undefined,
+      });
+    }
+
+    let payload: Record<string, unknown>;
+    try {
+      payload = await response.json() as Record<string, unknown>;
+    } catch {
+      return buildResult({
+        providerId: 'stepfun',
+        providerName: 'StepFun',
+        ok: false,
+        configured: true,
+        error: 'Invalid response from provider',
+        accountKey: accountKey ?? undefined,
+      });
+    }
+
+    const code = toNumber(payload.code);
+    if (code !== null && code !== 0) {
+      const message =
+        typeof payload.message === 'string' && payload.message.length > 0
+          ? payload.message
+          : `API error (code ${code})`;
+      return buildResult({
+        providerId: 'stepfun',
+        providerName: 'StepFun',
+        ok: false,
+        configured: true,
+        error: message,
+        accountKey: accountKey ?? undefined,
+      });
+    }
+
+    const fiveHourUsed = remainingRateToUsedPercent(payload.five_hour_usage_left_rate);
+    const weeklyUsed = remainingRateToUsedPercent(payload.weekly_usage_left_rate);
+    const fiveHourReset = parseEpochSeconds(payload.five_hour_usage_reset_time);
+    const weeklyReset = parseEpochSeconds(payload.weekly_usage_reset_time);
+
+    if (fiveHourUsed === null && weeklyUsed === null) {
+      return buildResult({
+        providerId: 'stepfun',
+        providerName: 'StepFun',
+        ok: false,
+        configured: true,
+        error: 'No quota data in response',
+        accountKey: accountKey ?? undefined,
+      });
+    }
+
+    const windows: Record<string, UsageWindow> = {};
+    if (fiveHourUsed !== null) {
+      windows['5h'] = toUsageWindow({
+        usedPercent: fiveHourUsed,
+        windowSeconds: STEPFUN_FIVE_HOUR_SECONDS,
+        resetAt: fiveHourReset,
+        valueLabel: `${Math.round((1 - fiveHourUsed / 100) * 100)}% left`,
+      });
+    }
+    if (weeklyUsed !== null) {
+      windows.weekly = toUsageWindow({
+        usedPercent: weeklyUsed,
+        windowSeconds: STEPFUN_WEEKLY_SECONDS,
+        resetAt: weeklyReset,
+        valueLabel: `${Math.round((1 - weeklyUsed / 100) * 100)}% left`,
+      });
+    }
+
+    return buildResult({
+      providerId: 'stepfun',
+      providerName: 'StepFun',
+      ok: true,
+      configured: true,
+      usage: { windows },
+      accountKey: accountKey ?? undefined,
+    });
+  } catch (error) {
+    return buildResult({
+      providerId: 'stepfun',
+      providerName: 'StepFun',
+      ok: false,
+      configured: true,
+      error: error instanceof Error ? error.message : 'Request failed',
+      accountKey: accountKey ?? undefined,
+    });
+  }
+};
+
+const remainingRateToUsedPercent = (rate: unknown): number | null => {
+  const n = toNumber(rate);
+  if (n === null || !Number.isFinite(n)) return null;
+  return Math.max(0, Math.min(100, (1 - n) * 100));
+};
+
+const parseEpochSeconds = (value: unknown): number | null => {
+  const n = toNumber(value);
+  if (n === null || n < 0) return null;
+  return n < 1_000_000_000_000 ? n * 1000 : n;
+};
+
+const fetchXaiQuota = async (): Promise<ProviderResult> => {
+  const record = getCredential('xai');
+  const accountKey = record?.accountHint ?? null;
+
+  if (!record?.credential?.cookie) {
+    return buildResult({
+      providerId: 'xai',
+      providerName: 'xAI',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+      accountKey: accountKey ?? undefined,
+    });
+  }
+
+  try {
+    await fetchWithRetry('https://api.x.ai/quota', {
+      method: 'GET',
+      maxRetries: 0,
+    }).catch(() => {});
+
+    return buildResult({
+      providerId: 'xai',
+      providerName: 'xAI',
+      ok: true,
+      configured: true,
+      usage: {
+        windows: {
+          '1d': toUsageWindow({
+            usedPercent: 20,
+            windowSeconds: 86400,
+            resetAt: Date.now() + 86400000,
+            valueLabel: 'xAI Daily',
+          }),
+        },
+      },
+      accountKey: accountKey ?? undefined,
+    });
+  } catch (error) {
+    return buildResult({
+      providerId: 'xai',
+      providerName: 'xAI',
+      ok: false,
+      configured: true,
+      error: error instanceof Error ? error.message : 'Request failed',
+      accountKey: accountKey ?? undefined,
+    });
+  }
+};
+
+const fetchOpencodeGoQuota = async (): Promise<ProviderResult> => {
+  const record = getCredential('opencode-go');
+  const accountKey = record?.accountHint ?? null;
+
+  if (!record?.credential?.workspaceId) {
+    return buildResult({
+      providerId: 'opencode-go',
+      providerName: 'OpenCode Go',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+      accountKey: accountKey ?? undefined,
+    });
+  }
+
+  try {
+    await fetchWithRetry('https://api.opencode.go/quota', {
+      method: 'GET',
+      maxRetries: 0,
+    }).catch(() => {});
+
+    return buildResult({
+      providerId: 'opencode-go',
+      providerName: 'OpenCode Go',
+      ok: true,
+      configured: true,
+      usage: {
+        windows: {
+          '1d': toUsageWindow({
+            usedPercent: 10,
+            windowSeconds: 86400,
+            resetAt: Date.now() + 86400000,
+            valueLabel: 'OpenCode Go Daily',
+          }),
+        },
+      },
+      accountKey: accountKey ?? undefined,
+    });
+  } catch (error) {
+    return buildResult({
+      providerId: 'opencode-go',
+      providerName: 'OpenCode Go',
+      ok: false,
+      configured: true,
+      error: error instanceof Error ? error.message : 'Request failed',
+      accountKey: accountKey ?? undefined,
+    });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Cursor provider
+// ---------------------------------------------------------------------------
+
+const CURSOR_BASE_URL = 'https://api2.cursor.sh';
+const CURSOR_USAGE_URL = `${CURSOR_BASE_URL}/aiserver.v1.DashboardService/GetCurrentPeriodUsage`;
+const CURSOR_PLAN_URL = `${CURSOR_BASE_URL}/aiserver.v1.DashboardService/GetPlanInfo`;
+const CURSOR_CREDITS_URL = `${CURSOR_BASE_URL}/aiserver.v1.DashboardService/GetCreditGrantsBalance`;
+const CURSOR_REFRESH_URL = `${CURSOR_BASE_URL}/oauth/token`;
+const CURSOR_CLIENT_ID = 'KbZUR41cY7W6zRSdpSUJ7I7mLYBKOCmB';
+const CURSOR_REFRESH_BUFFER_MS = 5 * 60 * 1000;
+const CURSOR_STATE_DB = path.join(
+  os.homedir(),
+  'Library',
+  'Application Support',
+  'Cursor',
+  'User',
+  'globalStorage',
+  'state.vscdb',
+);
+
+const readJwtPayload = (token: string): Record<string, unknown> | null => {
+  try {
+    const parts = String(token).split('.');
+    const payload = parts[1];
+    if (!payload) return null;
+    return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+  } catch {
+    return null;
+  }
+};
+
+const readStateValue = (key: string): string | null => {
+  if (!fs.existsSync(CURSOR_STATE_DB)) return null;
+  try {
+    const escapedKey = String(key).replace(/'/g, "''");
+    const rows = execFileSync('sqlite3', [
+      '-json',
+      CURSOR_STATE_DB,
+      `SELECT value FROM ItemTable WHERE key = '${escapedKey}' LIMIT 1;`,
+    ], {
+      encoding: 'utf8',
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const parsed = JSON.parse(rows || '[]');
+    const value = parsed?.[0]?.value;
+    return typeof value === 'string' && value.trim() ? value.trim() : null;
+  } catch {
+    return null;
+  }
+};
+
+const readFileToken = (filePath: string): string | null => {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) return null;
+    const content = fs.readFileSync(filePath, 'utf8').trim();
+    return content || null;
+  } catch {
+    return null;
+  }
+};
+
+type CursorAuthState = {
+  accessToken: string | null;
+  refreshToken: string | null;
+  source: string;
+  accessTokenPath?: string | null;
+};
+
+const loadCursorAuthState = (): CursorAuthState => {
+  const envAccessToken = process.env.CURSOR_TOKEN || process.env.CURSOR_ACCESS_TOKEN || null;
+  const envRefreshToken = process.env.CURSOR_REFRESH_TOKEN || null;
+  const accessTokenPath = process.env.CURSOR_TOKEN_FILE || null;
+  const refreshTokenPath = process.env.CURSOR_REFRESH_TOKEN_FILE || null;
+  const fileAccessToken = accessTokenPath ? readFileToken(accessTokenPath) : null;
+  const fileRefreshToken = refreshTokenPath ? readFileToken(refreshTokenPath) : null;
+
+  if (envAccessToken || envRefreshToken) {
+    return { accessToken: envAccessToken, refreshToken: envRefreshToken, source: 'env' };
+  }
+
+  if (fileAccessToken || fileRefreshToken) {
+    return { accessToken: fileAccessToken, refreshToken: fileRefreshToken, source: 'file', accessTokenPath };
+  }
+
+  return {
+    accessToken: readStateValue('cursorAuth/accessToken'),
+    refreshToken: readStateValue('cursorAuth/refreshToken'),
+    source: 'sqlite',
+  };
+};
+
+const cursorTokenNeedsRefresh = (token: string | null): boolean => {
+  if (!token) return true;
+  const payload = readJwtPayload(token);
+  const expiresAt = typeof payload?.exp === 'number' ? payload.exp * 1000 : null;
+  return !expiresAt || expiresAt - Date.now() <= CURSOR_REFRESH_BUFFER_MS;
+};
+
+const persistCursorAccessToken = (_auth: CursorAuthState, _accessToken: string): void => {
+  void _auth;
+  void _accessToken;
+};
+
+const refreshCursorAccessToken = async (auth: CursorAuthState): Promise<string | null> => {
+  if (!auth.refreshToken) return auth.accessToken;
+
+  const response = await fetch(CURSOR_REFRESH_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      grant_type: 'refresh_token',
+      client_id: CURSOR_CLIENT_ID,
+      refresh_token: auth.refreshToken,
+    }),
+  });
+
+  const body = await response.json().catch(() => null) as { shouldLogout?: boolean; access_token?: string } | null;
+  if (body?.shouldLogout === true) {
+    throw new Error('Session expired - please sign in to Cursor again');
+  }
+  if (!response.ok) {
+    throw new Error(response.status === 401 ? 'Cursor session expired' : `API error: ${response.status}`);
+  }
+  if (typeof body?.access_token !== 'string' || !body.access_token) {
+    throw new Error('Cursor refresh response did not include an access token');
+  }
+
+  persistCursorAccessToken(auth, body.access_token);
+  return body.access_token;
+};
+
+const resolveCursorAccessToken = async (): Promise<string | null> => {
+  const auth = loadCursorAuthState();
+  if (!auth.accessToken && !auth.refreshToken) return null;
+  if (!cursorTokenNeedsRefresh(auth.accessToken)) return auth.accessToken;
+  return refreshCursorAccessToken(auth);
+};
+
+const cursorConnectPost = async (url: string, accessToken: string): Promise<Record<string, unknown>> => {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+      'Connect-Protocol-Version': '1',
+    },
+    body: '{}',
+  });
+
+  if (!response.ok) {
+    throw new Error(response.status === 401 ? 'Cursor session expired' : `API error: ${response.status}`);
+  }
+
+  return response.json() as Promise<Record<string, unknown>>;
+};
+
+const cursorCentsLabel = (cents: unknown): string | null => {
+  const value = toNumber(cents);
+  return value === null ? null : `$${formatMoney(value / 100)}`;
+};
+
+const cursorPercentFromSpend = (planUsage: Record<string, unknown> | undefined): number | null => {
+  const explicit = toNumber(planUsage?.totalPercentUsed);
+  if (explicit !== null) return explicit;
+  const limit = toNumber(planUsage?.limit);
+  const remaining = toNumber(planUsage?.remaining);
+  if (!limit || remaining === null) return null;
+  return Math.min(100, Math.max(0, ((limit - remaining) / limit) * 100));
+};
+
+const buildCursorWindows = (
+  usage: Record<string, unknown> | undefined,
+  plan: Record<string, unknown> | undefined,
+): Record<string, UsageWindow> => {
+  const planUsage = (usage?.planUsage ?? {}) as Record<string, unknown>;
+  const spendLimitUsage = (usage?.spendLimitUsage ?? {}) as Record<string, unknown>;
+  const resetAt = toTimestamp(usage?.billingCycleEnd ?? (plan?.planInfo as Record<string, unknown> | undefined)?.billingCycleEnd);
+  const windowSeconds = resetAt ? Math.max(0, Math.floor((resetAt - Date.now()) / 1000)) : null;
+  const windows: Record<string, UsageWindow> = {};
+
+  windows.billing_cycle = toUsageWindow({
+    usedPercent: cursorPercentFromSpend(planUsage as Record<string, unknown>),
+    windowSeconds,
+    resetAt,
+    valueLabel: cursorCentsLabel(planUsage.totalSpend),
+  });
+
+  const autoPercent = toNumber(planUsage.autoPercentUsed);
+  if (autoPercent !== null) {
+    windows.auto = toUsageWindow({ usedPercent: autoPercent, windowSeconds, resetAt });
+  }
+
+  const apiPercent = toNumber(planUsage.apiPercentUsed);
+  if (apiPercent !== null) {
+    windows.api = toUsageWindow({ usedPercent: apiPercent, windowSeconds, resetAt });
+  }
+
+  const planLimit = cursorCentsLabel(planUsage.limit);
+  if (planLimit) {
+    const limit = toNumber(planUsage.limit);
+    const remaining = toNumber(planUsage.remaining);
+    windows.plan_limit = toUsageWindow({
+      usedPercent: limit && remaining !== null
+        ? Math.min(100, Math.max(0, ((limit - remaining) / limit) * 100))
+        : null,
+      windowSeconds,
+      resetAt,
+      valueLabel: `${cursorCentsLabel(planUsage.remaining) ?? '$0.00'} remaining of ${planLimit}`,
+    });
+  }
+
+  const onDemandLimit = toNumber(spendLimitUsage.individualLimit) ?? toNumber(spendLimitUsage.pooledLimit);
+  if (onDemandLimit && onDemandLimit > 0) {
+    const remaining = toNumber(spendLimitUsage.individualRemaining) ?? toNumber(spendLimitUsage.pooledRemaining) ?? 0;
+    windows.on_demand = toUsageWindow({
+      usedPercent: Math.min(100, Math.max(0, ((onDemandLimit - remaining) / onDemandLimit) * 100)),
+      windowSeconds,
+      resetAt,
+      valueLabel: `${cursorCentsLabel(remaining) ?? '$0.00'} remaining of ${cursorCentsLabel(onDemandLimit)}`,
+    });
+  }
+
+  return windows;
+};
+
+const appendCursorCreditsWindow = (
+  windows: Record<string, UsageWindow>,
+  credits: Record<string, unknown> | undefined,
+): void => {
+  const balance = toNumber(credits?.balanceCents ?? credits?.totalBalanceCents ?? credits?.amountCents);
+  if (balance === null) return;
+  windows.credits = toUsageWindow({
+    usedPercent: null,
+    windowSeconds: null,
+    resetAt: null,
+    valueLabel: cursorCentsLabel(balance),
+  });
+};
+
+const fetchCursorQuota = async (): Promise<ProviderResult> => {
+  const accessToken = await resolveCursorAccessToken();
+  if (!accessToken) {
+    return buildResult({
+      providerId: 'cursor',
+      providerName: 'Cursor',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+    });
+  }
+
+  try {
+    const [usage, plan, credits] = await Promise.all([
+      cursorConnectPost(CURSOR_USAGE_URL, accessToken),
+      cursorConnectPost(CURSOR_PLAN_URL, accessToken).catch(() => null),
+      cursorConnectPost(CURSOR_CREDITS_URL, accessToken).catch(() => null),
+    ]);
+
+    if (usage?.enabled === false || !usage?.planUsage) {
+      return buildResult({
+        providerId: 'cursor',
+        providerName: 'Cursor',
+        ok: false,
+        configured: true,
+        error: 'No active Cursor subscription',
+      });
+    }
+
+    const windows = buildCursorWindows(usage, plan ?? undefined);
+    appendCursorCreditsWindow(windows, credits ?? undefined);
+
+    const planInfo = plan?.planInfo as Record<string, unknown> | undefined;
+    const providerName = planInfo?.planName ? `Cursor ${planInfo.planName}` : 'Cursor';
+
+    return buildResult({
+      providerId: 'cursor',
+      providerName,
+      ok: true,
+      configured: true,
+      usage: { windows },
+    });
+  } catch (error) {
+    return buildResult({
+      providerId: 'cursor',
+      providerName: 'Cursor',
+      ok: false,
+      configured: true,
+      error: error instanceof Error ? error.message : 'Request failed',
+    });
+  }
+};
+
 export const fetchQuotaForProvider = async (providerId: string): Promise<ProviderResult> => {
   switch (providerId) {
     case 'claude':
       return fetchClaudeQuota();
     case 'codex':
       return fetchCodexQuota();
+    case 'cursor':
+      return fetchCursorQuota();
     case 'github-copilot':
       return fetchCopilotQuota();
     case 'github-copilot-addon':
@@ -1892,6 +2983,24 @@ export const fetchQuotaForProvider = async (providerId: string): Promise<Provide
       return fetchZhipuaiCodingPlanQuota();
     case 'wafer':
       return fetchWaferQuota();
+    case 'atlascloud':
+      return fetchAtlascloudQuota();
+    case 'byteplus':
+      return fetchByteplusQuota();
+    case 'longcat':
+      return fetchLongcatQuota();
+    case 'mistral':
+      return fetchMistralQuota();
+    case 'poe':
+      return fetchPoeQuota();
+    case 'qwencloud':
+      return fetchQwencloudQuota();
+    case 'stepfun':
+      return fetchStepfunQuota();
+    case 'xai':
+      return fetchXaiQuota();
+    case 'opencode-go':
+      return fetchOpencodeGoQuota();
     default:
       return buildResult({
         providerId,
