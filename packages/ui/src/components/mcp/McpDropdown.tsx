@@ -110,7 +110,7 @@ export const McpDropdownContent = React.memo<McpDropdownContentProps>(function M
   // components when the status map contains excessive entries (which causes
   // browser freeze from 200k+ DOM nodes). Show a truncated indicator.
   const MAX_VISIBLE_SERVERS = 100;
-  const { visibleNames, totalCount } = React.useMemo(() => {
+  const { visibleNames, totalCount, filteredCount } = React.useMemo(() => {
     // Collect all unique server names from both sources
     const allNames = new Set<string>();
     for (const server of mcpServers) {
@@ -142,15 +142,20 @@ export const McpDropdownContent = React.memo<McpDropdownContentProps>(function M
         prioritized.add(name);
       }
     }
-    // 2. Fill remaining slots from sorted status names
+    // 2. Fill remaining slots from sorted status keys, skipping purely numeric
+    //    names that are noise (OpenCode internal entries, not real MCP servers).
     for (const name of sorted) {
       if (prioritized.size >= MAX_VISIBLE_SERVERS) break;
+      if (prioritized.has(name)) continue;
+      // Skip names that are purely numeric (noise from OpenCode status map)
+      if (/^\d+$/.test(name)) continue;
       prioritized.add(name);
     }
 
     return {
       visibleNames: Array.from(prioritized),
       totalCount: sorted.length,
+      filteredCount: sorted.length - Array.from(prioritized).length,
     };
   }, [mcpServers, status]);
 
@@ -273,9 +278,9 @@ export const McpDropdownContent = React.memo<McpDropdownContentProps>(function M
           </div>
         )}
 
-        {totalCount > MAX_VISIBLE_SERVERS && (
+        {filteredCount > 0 && (
           <div className="px-4 py-2 typography-caption text-muted-foreground text-center border-t border-border/50">
-            Showing {MAX_VISIBLE_SERVERS} of {totalCount} servers
+            Showing {visibleNames.length} of {totalCount} servers
           </div>
         )}
       </div>
