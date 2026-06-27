@@ -137,6 +137,69 @@ export function getForegroundSystemdUserServiceController({
   };
 }
 
+export function resolveUpdateRestartOwnerForInstance({
+  launchMode,
+  port,
+  platform = process.platform,
+  homedir = os.homedir(),
+  fsImpl = fs,
+  spawnSyncImpl = spawnSync,
+} = {}) {
+  const controller = getForegroundSystemdUserServiceController({
+    launchMode,
+    port,
+    platform,
+    homedir,
+    fsImpl,
+    spawnSyncImpl,
+  });
+
+  if (controller) {
+    return {
+      kind: 'systemd-user-service',
+      label: controller.label,
+      controller,
+    };
+  }
+
+  return {
+    kind: 'cli',
+    label: 'CLI',
+    controller: null,
+  };
+}
+
+export function partitionInstancesForUpdateRestart(instances = [], options = {}) {
+  const cliManagedInstances = [];
+  const serviceManagedInstances = [];
+  let serviceManagerOwner = null;
+
+  for (const instance of instances) {
+    const owner = resolveUpdateRestartOwnerForInstance({
+      launchMode: instance?.launchMode,
+      port: instance?.port,
+      platform: options.platform,
+      homedir: options.homedir,
+      fsImpl: options.fsImpl,
+      spawnSyncImpl: options.spawnSyncImpl,
+    });
+
+    if (owner.controller) {
+      serviceManagerOwner = serviceManagerOwner || owner;
+      serviceManagedInstances.push(instance);
+      continue;
+    }
+
+    cliManagedInstances.push(instance);
+  }
+
+  return {
+    cliManagedInstances,
+    serviceManagedInstances,
+    serviceManagerOwner,
+  };
+}
+
 export function runForegroundSystemdUserServiceControllerAction(
   controller,
   action,

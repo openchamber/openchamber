@@ -1,4 +1,4 @@
-import { getForegroundSystemdUserServiceController } from '../systemd-user-service.js';
+import { resolveUpdateRestartOwnerForInstance } from '../systemd-user-service.js';
 
 const UPDATE_STATUS_FILE_NAME = 'update-install-status';
 
@@ -190,11 +190,11 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
       } catch {
       }
       const launchMode = storedOptions.launchMode === 'foreground' ? 'foreground' : 'daemon';
-      const isForegroundService = launchMode === 'foreground';
-      const managedForegroundController = getForegroundSystemdUserServiceController({
+      const restartOwner = resolveUpdateRestartOwnerForInstance({
         launchMode,
         port: storedOptions.port,
       });
+      const managedForegroundController = restartOwner.controller;
 
       const isWindows = process.platform === 'win32';
       const quotePosix = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
@@ -241,9 +241,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
       }
       const restartCmd = managedForegroundController
         ? managedForegroundController.start.shellCommand
-        : isForegroundService
-          ? ''
-          : `(${restartCmdPrimary}) || (${restartCmdFallback})`;
+        : `(${restartCmdPrimary}) || (${restartCmdFallback})`;
       const stopCmd = managedForegroundController?.stop.shellCommand || '';
       const useSystemdRunDetachedUpdate = Boolean(managedForegroundController);
       const updateStatusFilePath = getUpdateStatusFilePath(path, openchamberDataDir);
@@ -251,7 +249,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         currentVersion: updateInfo.currentVersion || 'unknown',
         targetVersion: updateInfo.version || 'unknown',
         launchMode,
-        restartManager: managedForegroundController ? 'systemd-user-service' : isForegroundService ? 'process-manager' : 'cli',
+        restartManager: restartOwner.kind,
       });
       writeUpdateStatus(path, fs, openchamberDataDir, buildUpdateStatusPayload(statusBase, { state: 'queued' }));
       const statusCmd = (state) => {
@@ -288,7 +286,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         version: updateInfo.version,
         packageManager: pm,
         autoRestart: true,
-        restartManager: managedForegroundController ? 'systemd-user-service' : isForegroundService ? 'process-manager' : 'cli',
+        restartManager: restartOwner.kind,
       });
 
         setTimeout(() => {

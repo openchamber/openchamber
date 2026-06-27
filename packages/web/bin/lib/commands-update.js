@@ -16,7 +16,7 @@ import {
   logStatus,
 } from '../cli-output.js';
 import {
-  getForegroundSystemdUserServiceController,
+  partitionInstancesForUpdateRestart,
   runForegroundSystemdUserServiceControllerAction,
 } from '../../server/lib/systemd-user-service.js';
 
@@ -33,25 +33,12 @@ function createUpdateCommand({ importFromFilePath, packageManagerPath, serveComm
     } = await importFromFilePath(packageManagerPath);
 
     const runningInstances = await discoverRunningInstances();
-    let managedForegroundController = null;
-    for (const instance of runningInstances) {
-      managedForegroundController = getForegroundSystemdUserServiceController({
-        launchMode: instance.launchMode,
-        port: instance.port,
-      });
-      if (managedForegroundController) {
-        break;
-      }
-    }
-    const managedForegroundInstances = managedForegroundController
-      ? runningInstances.filter((instance) => (
-        instance.launchMode === 'foreground'
-        && (!Number.isFinite(managedForegroundController.configuredPort)
-          || managedForegroundController.configuredPort === instance.port)
-      ))
-      : [];
-    const managedForegroundPorts = new Set(managedForegroundInstances.map((instance) => instance.port));
-    const cliManagedInstances = runningInstances.filter((instance) => !managedForegroundPorts.has(instance.port));
+    const {
+      cliManagedInstances,
+      serviceManagedInstances,
+      serviceManagerOwner,
+    } = partitionInstancesForUpdateRestart(runningInstances);
+    const managedForegroundController = serviceManagerOwner?.controller || null;
     const currentVersion = getCurrentVersion();
 
     if (showOutput) {
@@ -118,7 +105,7 @@ function createUpdateCommand({ importFromFilePath, packageManagerPath, serveComm
         runForegroundSystemdUserServiceControllerAction(managedForegroundController, 'stop', {
           stdio: isJsonMode(options) || isQuietMode(options) ? 'pipe' : 'inherit',
         });
-        for (const instance of managedForegroundInstances) {
+        for (const instance of serviceManagedInstances) {
           removePidFile(instance.pidFilePath);
         }
       }
@@ -167,7 +154,7 @@ function createUpdateCommand({ importFromFilePath, packageManagerPath, serveComm
       });
     }
 
-    const restartedByServiceManagerCount = managedForegroundInstances.length;
+    const restartedByServiceManagerCount = serviceManagedInstances.length;
 
     if (showOutput && !updateSpin) {
       logStatus('success', `updated to ${updateInfo.version || 'latest'}`);
