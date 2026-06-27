@@ -235,10 +235,16 @@ export const useChatAutoFollow = ({
         }
 
         settledFramesRef.current = 0;
-        const next = current + delta * LERP;
-        markProgrammaticWrite();
-        container.scrollTop = next;
-        lastScrollTopRef.current = container.scrollTop;
+        if (delta < 0) {
+            markProgrammaticWrite();
+            container.scrollTop = target;
+            lastScrollTopRef.current = target;
+        } else {
+            const next = current + delta * LERP;
+            markProgrammaticWrite();
+            container.scrollTop = next;
+            lastScrollTopRef.current = container.scrollTop;
+        }
         followRafRef.current = window.requestAnimationFrame(tickFollow);
     }, [markProgrammaticWrite, stopFollowLoop]);
 
@@ -492,6 +498,12 @@ export const useChatAutoFollow = ({
         updateOverflowAndButton();
 
         if (programmatic) {
+            if (currentTop < previousTop && stateRef.current === 'following') {
+                stopFollowLoop();
+                stopSettleBurst();
+                lastUserReleaseAtRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now();
+                setStateValue('released');
+            }
             return;
         }
 
