@@ -1761,6 +1761,7 @@ export const dict = {
   'chat.questionCard.dismissFailed': 'Failed to dismiss question',
   'chat.questionCard.noLongerPending': 'This question is no longer waiting for a response.',
   'chat.questionCard.tryAgain': 'Please try again in a moment.',
+  'chat.questionCard.autoAnswerCountdown': 'Auto-selecting first option in {seconds}s — click to cancel',
   'chat.textSelection.toast.noProject': 'No project found for this session',
   'chat.textSelection.toast.addToNotesFailed': 'Failed to add to notes',
   'chat.textSelection.toast.addToNotesSuccess': 'Added selected text to notes',

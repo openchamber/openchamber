@@ -1763,6 +1763,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.questionCard.dismissFailed': '질문 닫기에 실패했습니다',
   'chat.questionCard.noLongerPending': '이 질문은 더 이상 응답을 기다리지 않습니다.',
   'chat.questionCard.tryAgain': '잠시 후 다시 시도하세요.',
+  'chat.questionCard.autoAnswerCountdown': '{seconds}초 후 첫 번째 옵션 자동 선택 — 클릭하여 취소',
   'chat.textSelection.toast.noProject': '이 세션의 프로젝트를 찾을 수 없음',
   'chat.textSelection.toast.addToNotesFailed': '메모 추가 실패',
   'chat.textSelection.toast.addToNotesSuccess': '선택한 텍스트를 메모에 추가함',

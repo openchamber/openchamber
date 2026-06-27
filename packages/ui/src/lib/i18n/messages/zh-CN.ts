@@ -1727,6 +1727,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.questionCard.dismissFailed': '忽略问题失败',
   'chat.questionCard.noLongerPending': '此问题不再等待回答。',
   'chat.questionCard.tryAgain': '请稍后重试。',
+  'chat.questionCard.autoAnswerCountdown': '{seconds} 秒后自动选择第一个选项 — 点击可取消',
   'chat.textSelection.toast.noProject': '未找到此会话对应的项目',
   'chat.textSelection.toast.addToNotesFailed': '添加到笔记失败',
   'chat.textSelection.toast.addToNotesSuccess': '已将选中文本添加到笔记',
