@@ -1,25 +1,35 @@
 name: Bug report
-description: Report something broken
-title: "[Bug] "
-labels: [bug]
+description: Report a reproducible bug or broken behavior.
+title: "bug: "
+labels: ["bug", "needs-triage"]
 body:
-  - type: textarea
-    id: what
+  - type: markdown
     attributes:
-      label: What's wrong? Maybe some steps to reproduce.
-      description: What happened and what you expected.
-      placeholder: "Expected … but got …"
+      value: |
+        Thanks for reporting a bug.
+
+        Keep this short and specific. Do not paste long AI-generated reports.
+        Search existing issues before submitting.
+
+  - type: input
+    id: summary
+    attributes:
+      label: Short summary
+      description: One sentence describing the broken behavior.
+      placeholder: "Queued messages are not sent after /compact"
     validations:
       required: true
 
   - type: dropdown
     id: runtime
     attributes:
-      label: Where does it happen?
+      label: Runtime
+      description: Where does this happen?
       options:
-        - Desktop (macOS)
-        - Desktop Web
-        - Mobile (Web/PWA)
+        - Web
+        - Desktop - macOS
+        - Desktop - Windows
+        - Mobile Web / PWA
         - VS Code extension
         - Not sure
     validations:
@@ -28,18 +38,63 @@ body:
   - type: input
     id: version
     attributes:
-      label: Version (if known)
-      placeholder: "e.g. 1.2.3"
+      label: Version
+      placeholder: "e.g. 1.13.2, latest main, commit SHA, or unknown"
+    validations:
+      required: true
 
   - type: textarea
-    id: screenshots
+    id: steps
     attributes:
-      label: Screenshots / recordings (optional)
-      description: "Anything visual that helps."
+      label: Steps to reproduce
+      description: Use the smallest reproduction you can.
+      placeholder: |
+        1. Open ...
+        2. Click ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      placeholder: "What happened?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: "What should have happened?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Screenshots or recordings
+      description: Required for visual/UI issues when possible.
+      placeholder: "Drag screenshots or recordings here."
 
   - type: textarea
     id: logs
     attributes:
-      label: Logs (optional)
-      description: "Paste relevant logs."
+      label: Logs
+      description: Paste only relevant logs. Remove secrets, tokens, and private data.
       render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues.
+          required: true
+        - label: I kept this report short and specific.
+          required: true
+        - label: I removed secrets, tokens, and private data.
+          required: true
+        - label: I wrote this issue in English.
+          required: true
