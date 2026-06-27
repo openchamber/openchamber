@@ -33,7 +33,6 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { useChatSurfaceMode } from '@/components/chat/useChatSurfaceMode';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import { toPng } from 'html-to-image';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import { formatTimestampForDisplay } from './timeFormat';
@@ -1455,6 +1454,9 @@ const AssistantMessageBody = React.memo(({
                 wrapper.appendChild(clone);
                 document.body.appendChild(wrapper);
 
+                // Lazy-load html-to-image: only needed when the user exports a
+                // message as an image, so keep it out of the eager app shell.
+                const { toPng } = await import('html-to-image');
                 const dataUrl = await toPng(wrapper, {
                     quality: 1,
                     pixelRatio: 2,

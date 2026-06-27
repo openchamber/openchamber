@@ -1,5 +1,3 @@
-import { snapdom } from '@zumer/snapdom';
-import { getFontEmbedCSS, toJpeg } from 'html-to-image';
 import { invokeDesktop } from '@/lib/desktop';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
@@ -825,6 +823,9 @@ async function captureIframeSnapdomScreenshot(
       // Defensive: undo any nested-scroll drift from asset inlining before capture.
       nestedScroll.reapply();
 
+      // Lazy-load snapDOM: only needed when actually capturing a preview
+      // annotation screenshot, so keep it out of the eager app shell.
+      const { snapdom } = await import('@zumer/snapdom');
       const snapdomOptions = {
         backgroundColor: getCaptureBackgroundColor(document),
         cache: 'disabled' as const,
@@ -924,6 +925,8 @@ async function captureIframeDomScreenshot(
       await document.fonts?.ready.catch(() => undefined);
       restoreAssets = await inlineIframeCaptureAssets(document, viewportWidth, viewportHeight, { applyLayoutWorkarounds: true });
       frameWindow.scrollTo(scrollX, scrollY);
+      // Lazy-load html-to-image: only the fallback DOM-capture path needs it.
+      const { getFontEmbedCSS, toJpeg } = await import('html-to-image');
       const fontEmbedCSS = await getFontEmbedCSS(root).catch(() => '');
 
       dataUrl = await toJpeg(root, {
