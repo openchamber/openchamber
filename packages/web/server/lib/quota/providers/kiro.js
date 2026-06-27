@@ -5,7 +5,7 @@ import {
   normalizeAuthEntry,
   buildResult,
   toUsageWindow,
-  normalizeTimestamp
+  toTimestamp
 } from '../utils/index.js';
 
 export const providerId = 'kiro';
@@ -79,7 +79,7 @@ export const fetchQuota = async () => {
     const usageLimit = credits.limit ?? 0;
     const currentUsage = credits.used ?? 0;
     const usedPercent = usageLimit > 0 ? (currentUsage / usageLimit) * 100 : null;
-    const resetAt = normalizeTimestamp(payload.next_reset);
+    const resetAt = toTimestamp(payload.next_reset);
 
     let valueLabel = `${Math.round(currentUsage)} / ${usageLimit} credits`;
     if (credits.overage > 0 && typeof credits.overage_charges_usd === 'number') {
