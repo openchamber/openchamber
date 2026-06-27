@@ -14,7 +14,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useAutoReviewStore, type AutoReviewRun } from '@/stores/useAutoReviewStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { optimisticSend, patchSessionMetadata, waitForConnectionOrThrow } from '@/sync/session-actions';
+import { optimisticSend, waitForConnectionOrThrow } from '@/sync/session-actions';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { getSyncMessages, getSyncParts, getSyncSessionStatus, registerSessionDirectory } from '@/sync/sync-refs';
@@ -30,6 +30,17 @@ const AUTO_REVIEW_FINAL_MARKER_NORMALIZED = AUTO_REVIEW_FINAL_MARKER.toLowerCase
 const REVIEW_SESSION_TITLE = 'Review of workspace changes';
 const activeAutoReviewLoops = new Set<string>();
 const activeAutoReviewForwardKeys = new Set<string>();
+
+const patchSessionMetadata = async (
+  sessionID: string,
+  directory: string,
+  transform: (metadata: Record<string, unknown>) => Record<string, unknown>,
+): Promise<void> => {
+  const session = await opencodeClient.getSession(sessionID, directory);
+  const metadata = (session as Session & { metadata?: Record<string, unknown> }).metadata ?? {};
+  const next = transform(metadata);
+  await opencodeClient.updateSession(sessionID, { metadata: next }, directory);
+};
 
 type SessionModelContext = {
   providerID: string;

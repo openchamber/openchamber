@@ -108,16 +108,16 @@ const normalizeDirectoryCandidate = (value: unknown): string | null => {
     return trimmed.length > 0 ? trimmed : null;
 };
 
-const collectPendingFromSyncStores = (): Array<{ id: string; sessionID: string }> => {
+const collectPendingFromSyncStores = (): Array<{ id: string; sessionID: string; serverId?: string }> => {
     try {
         const stores = getSyncChildStores();
-        const pending: Array<{ id: string; sessionID: string }> = [];
-        for (const store of stores.children.values()) {
+        const pending: Array<{ id: string; sessionID: string; serverId?: string }> = [];
+        for (const { serverId, store } of stores.getAllEntries()) {
             const permissionMap = store.getState().permission ?? {};
             for (const [sessionId, entries] of Object.entries(permissionMap)) {
                 for (const permission of entries ?? []) {
                     if (!permission?.id) continue;
-                    pending.push({ id: permission.id, sessionID: permission.sessionID || sessionId });
+                    pending.push({ id: permission.id, sessionID: permission.sessionID || sessionId, serverId });
                 }
             }
         }
@@ -149,7 +149,11 @@ const sessionBelongsToScope = async (
 
         for (const directory of directories) {
             try {
-                const result = await opencodeClient.getScopedSdkClient(directory).session.get({
+                const sessionFromKnown = knownSessions.find((s) => s.id === id) as Session & { serverId?: string } | undefined
+                const serverId = typeof sessionFromKnown?.serverId === 'string' && sessionFromKnown.serverId.length > 0
+                  ? sessionFromKnown.serverId
+                  : undefined
+                const result = await opencodeClient.getScopedSdkClient(directory, serverId).session.get({
                     sessionID: id,
                     directory,
                 });
@@ -274,7 +278,7 @@ export const usePermissionStore = create<PermissionStore>()(
                     const pendingFromApi = await opencodeClient
                       .listPendingPermissions({ directories: Array.from(directories) })
                       .catch(() => []);
-                    const mergedPending = new Map<string, { id: string; sessionID: string }>();
+                    const mergedPending = new Map<string, { id: string; sessionID: string; serverId?: string }>();
 
                     for (const permission of pendingFromStores) {
                         if (sessionScope.has(permission.sessionID)) {
@@ -295,12 +299,13 @@ export const usePermissionStore = create<PermissionStore>()(
                                 continue;
                             }
                         }
-                        mergedPending.set(permission.id, { id: permission.id, sessionID: permission.sessionID });
+                        const apiServerId = (permission as unknown as Record<string, unknown>).serverId as string | undefined;
+                        mergedPending.set(permission.id, { id: permission.id, sessionID: permission.sessionID, serverId: apiServerId });
                     }
 
                     await Promise.all(
                         Array.from(mergedPending.values())
-                            .map((permission) => respondToPermission(permission.sessionID, permission.id, "once").catch(() => undefined)),
+                            .map((permission) => respondToPermission(permission.sessionID, permission.id, "once", permission.serverId).catch(() => undefined)),
                     );
                 },
             }),

@@ -278,8 +278,8 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     return undefined
   }
 
-  const flushDir = (directory: string) => {
-    const d = directories.get(directory)
+  const flushDir = (dirKey: string) => {
+    const d = directories.get(dirKey)
     if (!d) return
     if (d.timer) {
       clearTimeout(d.timer)
@@ -295,8 +295,15 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
 
     d.last = Date.now()
     syncDebug.pipeline.flush(events.length)
+    const nullIdx = dirKey.indexOf('\x00')
+    const bareDir = nullIdx !== -1 ? dirKey.slice(nullIdx + 1) : dirKey
     for (const payload of events) {
-      onEvent(directory, payload)
+      try {
+        onEvent(bareDir, payload)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error('[EventPipeline] Error processing event:', msg)
+      }
     }
 
     d.buffer.length = 0
@@ -439,7 +446,11 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
   const enqueueEvent = (directory: string, payload: Event) => {
     const normalizedPayload = normalizeEventType(payload)
     const routedDirectory = routeDirectory?.(directory, normalizedPayload) || directory
-    const d = getOrCreateDir(routedDirectory)
+    const sId = typeof (normalizedPayload as Record<string, unknown>).serverId === 'string'
+      ? (normalizedPayload as Record<string, unknown>).serverId as string
+      : 'local'
+    const dirKey = `${sId}\x00${routedDirectory}`
+    const d = getOrCreateDir(dirKey)
 
     // A full part snapshot is a coalescing barrier for that part's deltas:
     // drop its pending delta coalescing keys so a delta arriving after the
@@ -483,8 +494,9 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
       d.coalesced.set(k, d.queue.length)
     }
 
+    if (d.queue.length >= 2048) return
     d.queue.push(normalizedPayload)
-    scheduleDir(routedDirectory)
+    scheduleDir(dirKey)
   }
 
   const resetHeartbeat = () => {

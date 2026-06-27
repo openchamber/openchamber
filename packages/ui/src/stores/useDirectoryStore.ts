@@ -8,17 +8,30 @@ import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { streamDebugEnabled } from '@/stores/utils/streamDebug';
 import { getSafeStorage } from './utils/safeStorage';
 
+let _serverExists: ((serverId: string) => boolean) | null = null
+
+export function setServerExistsValidator(fn: (serverId: string) => boolean) {
+  _serverExists = fn
+}
+
+function resolveServerId(serverId: string): string {
+  if (!serverId || serverId === 'local') return 'local'
+  if (_serverExists && !_serverExists(serverId)) return 'local'
+  return serverId
+}
+
 interface DirectoryStore {
 
   currentDirectory: string;
-  directoryHistory: string[];
+  currentServerId: string;
+  history: Array<{ directory: string; serverId: string }>;
   historyIndex: number;
   homeDirectory: string;
   hasPersistedDirectory: boolean;
   isHomeReady: boolean;
   isSwitchingDirectory: boolean;
 
-  setDirectory: (path: string, options?: { showOverlay?: boolean }) => void;
+  setDirectory: (path: string, options?: { showOverlay?: boolean; serverId?: string }) => void;
   goBack: () => void;
   goForward: () => void;
   goToParent: () => void;
@@ -32,6 +45,12 @@ const safeStorage = getSafeStorage();
 const persistedLastDirectory = safeStorage.getItem('lastDirectory');
 const initialHasPersistedDirectory =
   typeof persistedLastDirectory === 'string' && persistedLastDirectory.length > 0;
+
+const persistedLastServerId = safeStorage.getItem('lastServerId');
+const initialServerId =
+  typeof persistedLastServerId === 'string' && persistedLastServerId.length > 0
+    ? persistedLastServerId
+    : 'local';
 
 
 const invalidateFileSearchCache = (scope?: string | null) => {
@@ -254,14 +273,15 @@ export const useDirectoryStore = create<DirectoryStore>()(
     (set, get) => ({
 
       currentDirectory: initialCurrentDirectory,
-      directoryHistory: [initialCurrentDirectory],
+      currentServerId: initialServerId,
+      history: [{ directory: initialCurrentDirectory, serverId: initialServerId }],
       historyIndex: 0,
       homeDirectory: initialHomeDirectory,
       hasPersistedDirectory: initialHasPersistedDirectory,
       isHomeReady: initialIsHomeReady,
       isSwitchingDirectory: false,
 
-      setDirectory: (path: string, options?: { showOverlay?: boolean }) => {
+      setDirectory: (path: string, options?: { showOverlay?: boolean; serverId?: string }) => {
         void options;
         const homeDir = cachedHomeDirectory || get().homeDirectory || safeStorage.getItem('homeDirectory');
         const resolvedPath = resolveDirectoryPath(path, homeDir);
@@ -272,15 +292,21 @@ export const useDirectoryStore = create<DirectoryStore>()(
         opencodeClient.setDirectory(resolvedPath);
         invalidateFileSearchCache();
 
+        const serverId = options?.serverId ?? get().currentServerId;
+
         set((state) => {
-          const newHistory = [...state.directoryHistory.slice(0, state.historyIndex + 1), resolvedPath];
+          const newHistory = [...state.history.slice(0, state.historyIndex + 1), { directory: resolvedPath, serverId }];
 
           safeStorage.setItem('lastDirectory', resolvedPath);
+          if (serverId) {
+            safeStorage.setItem('lastServerId', serverId);
+          }
           void updateDesktopSettings({ lastDirectory: resolvedPath });
 
           return {
             currentDirectory: resolvedPath,
-            directoryHistory: newHistory,
+            currentServerId: serverId,
+            history: newHistory,
             historyIndex: newHistory.length - 1,
             hasPersistedDirectory: true,
             isHomeReady: true,
@@ -293,17 +319,21 @@ export const useDirectoryStore = create<DirectoryStore>()(
         const state = get();
         if (state.historyIndex > 0) {
           const newIndex = state.historyIndex - 1;
-          const newDirectory = state.directoryHistory[newIndex];
+          const entry = state.history[newIndex];
+          const newDirectory = entry.directory;
+          const newServerId = resolveServerId(entry.serverId);
 
           opencodeClient.setDirectory(newDirectory);
           invalidateFileSearchCache();
 
           safeStorage.setItem('lastDirectory', newDirectory);
+          safeStorage.setItem('lastServerId', newServerId);
 
           void updateDesktopSettings({ lastDirectory: newDirectory });
 
           set({
             currentDirectory: newDirectory,
+            currentServerId: newServerId,
             historyIndex: newIndex,
             hasPersistedDirectory: true,
             isHomeReady: true,
@@ -314,19 +344,23 @@ export const useDirectoryStore = create<DirectoryStore>()(
 
       goForward: () => {
         const state = get();
-        if (state.historyIndex < state.directoryHistory.length - 1) {
+        if (state.historyIndex < state.history.length - 1) {
           const newIndex = state.historyIndex + 1;
-          const newDirectory = state.directoryHistory[newIndex];
+          const entry = state.history[newIndex];
+          const newDirectory = entry.directory;
+          const newServerId = resolveServerId(entry.serverId);
 
           opencodeClient.setDirectory(newDirectory);
           invalidateFileSearchCache();
 
           safeStorage.setItem('lastDirectory', newDirectory);
+          safeStorage.setItem('lastServerId', newServerId);
 
           void updateDesktopSettings({ lastDirectory: newDirectory });
 
           set({
             currentDirectory: newDirectory,
+            currentServerId: newServerId,
             historyIndex: newIndex,
             hasPersistedDirectory: true,
             isHomeReady: true,
@@ -393,8 +427,8 @@ export const useDirectoryStore = create<DirectoryStore>()(
         const resolvedCurrent = state.currentDirectory
           ? resolveDirectoryPath(state.currentDirectory, resolvedHome)
           : state.currentDirectory;
-        const resolvedHistory = state.directoryHistory.map((entry) => resolveDirectoryPath(entry, resolvedHome));
-        const historyChanged = resolvedHistory.some((entry, index) => entry !== state.directoryHistory[index]);
+        const resolvedHistory = state.history.map((entry) => ({ ...entry, directory: resolveDirectoryPath(entry.directory, resolvedHome) }));
+        const historyChanged = resolvedHistory.some((entry, index) => entry.directory !== state.history[index].directory);
         const currentChanged = Boolean(resolvedCurrent && resolvedCurrent !== state.currentDirectory);
 
         const updates: Partial<DirectoryStore> = {
@@ -405,12 +439,12 @@ export const useDirectoryStore = create<DirectoryStore>()(
 
         if (shouldReplaceCurrent) {
           updates.currentDirectory = resolvedHome;
-          updates.directoryHistory = [resolvedHome];
+          updates.history = [{ directory: resolvedHome, serverId: state.currentServerId }];
           updates.historyIndex = 0;
           updates.isSwitchingDirectory = false;
         } else if (currentChanged || historyChanged) {
           updates.currentDirectory = resolvedCurrent as string;
-          updates.directoryHistory = resolvedHistory;
+          updates.history = resolvedHistory;
           updates.historyIndex = Math.min(state.historyIndex, resolvedHistory.length - 1);
           updates.isSwitchingDirectory = false;
         }

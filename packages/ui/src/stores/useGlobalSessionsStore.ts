@@ -1,35 +1,39 @@
 import { create } from 'zustand';
 import type { OpencodeClient, Session } from '@opencode-ai/sdk/v2';
 import { opencodeClient } from '@/lib/opencode/client';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import { listGlobalSessionPages } from '@/stores/globalSessions';
 import { getReviewTransferDirection, type ReviewTransferDirection } from '@/lib/reviewFlow';
 import { getOriginalSessionID, getReviewSessionID } from '@/lib/sessionReviewMetadata';
 
+type GlobalSessionEntry = Session & { serverId: string };
+
 type GlobalSessionsStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 type LoadResult = {
-  activeSessions: Session[];
-  archivedSessions: Session[];
+  activeSessions: GlobalSessionEntry[];
+  archivedSessions: GlobalSessionEntry[];
 };
 
 type GlobalSessionsState = {
-  activeSessions: Session[];
-  archivedSessions: Session[];
-  sessionsByDirectory: Map<string, Session[]>;
+  activeSessions: GlobalSessionEntry[];
+  archivedSessions: GlobalSessionEntry[];
+  sessionsByDirectory: Map<string, Map<string, GlobalSessionEntry[]>>;
   reviewTransferBySessionId: Map<string, ReviewTransferDirection>;
   hasLoaded: boolean;
   status: GlobalSessionsStatus;
   loadSessions: (fallbackActive?: Session[]) => Promise<LoadResult>;
   refreshSessionsForDirectories: (directories: Iterable<string>, fallbackActive?: Session[]) => Promise<LoadResult>;
-  applySnapshot: (activeSessions: Session[], archivedSessions: Session[], status?: GlobalSessionsStatus) => void;
-  upsertSession: (session: Session) => void;
+  applySnapshot: (activeSessions: GlobalSessionEntry[], archivedSessions: GlobalSessionEntry[], status?: GlobalSessionsStatus) => void;
+  upsertSession: (session: GlobalSessionEntry | Session) => void;
   removeSessions: (ids: Iterable<string>) => void;
   archiveSessions: (ids: Iterable<string>, archivedAt?: number) => void;
+  removeServerEntries: (serverId: string) => void;
 };
 
-const PAGE_SIZE = 500;
-
 let inflightLoad: Promise<LoadResult> | null = null;
+
+const PAGE_SIZE = 500;
 
 const normalizePath = (value?: string | null): string | null => {
   if (typeof value !== 'string') {
@@ -54,6 +58,12 @@ export const resolveGlobalSessionDirectory = (session: Session): string | null =
 
   return normalizePath(record.directory ?? null)
     ?? normalizePath(record.project?.worktree ?? null);
+};
+
+export const resolveGlobalSessionServerId = (session: Session): string => {
+  const record = session as Session & { serverId?: string | null };
+  const raw = record.serverId;
+  return typeof raw === 'string' && raw.trim().length > 0 ? raw.trim() : 'local';
 };
 
 export const mergeSessionDirectoryMetadata = (incoming: Session, existing?: Session | null): Session => {
@@ -111,24 +121,63 @@ export const mergeLiveSessionWithGlobalSession = (
   return merged;
 };
 
-const buildSessionsByDirectory = (sessions: Session[]): Map<string, Session[]> => {
-  const next = new Map<string, Session[]>();
+const mapsAreEqual = (prev: Map<string, Map<string, GlobalSessionEntry[]>>, next: Map<string, Map<string, GlobalSessionEntry[]>>): boolean => {
+  if (prev === next) return true;
+  const prevKeys = [...prev.keys()];
+  const nextKeys = [...next.keys()];
+  if (prevKeys.length !== nextKeys.length) return false;
+  for (const key of prevKeys) {
+    if (!next.has(key)) return false;
+    const prevInner = prev.get(key);
+    const nextInner = next.get(key);
+    if (!prevInner || !nextInner) return !prevInner === !nextInner;
+    if (prevInner.size !== nextInner.size) return false;
+    for (const innerKey of prevInner.keys()) {
+      if (!nextInner.has(innerKey)) return false;
+      const prevList = prevInner.get(innerKey);
+      const nextList = nextInner.get(innerKey);
+      if (!prevList || !nextList) return !prevList === !nextList;
+      if (prevList.length !== nextList.length) return false;
+      const sortedPrev = [...prevList].sort((a, b) => getSessionSignature(a).localeCompare(getSessionSignature(b)));
+      const sortedNext = [...nextList].sort((a, b) => getSessionSignature(a).localeCompare(getSessionSignature(b)));
+      for (let i = 0; i < sortedPrev.length; i++) {
+        if (getSessionSignature(sortedPrev[i]) !== getSessionSignature(sortedNext[i])) return false;
+      }
+    }
+  }
+  return true;
+};
+
+let _prevSessionsByDirectory: Map<string, Map<string, GlobalSessionEntry[]>> | null = null;
+
+const buildSessionsByDirectory = (sessions: GlobalSessionEntry[]): Map<string, Map<string, GlobalSessionEntry[]>> => {
+  const next = new Map<string, Map<string, GlobalSessionEntry[]>>();
   for (const session of sessions) {
+    const serverId = session.serverId || "local";
     const directory = resolveGlobalSessionDirectory(session);
     if (!directory) {
       continue;
     }
-    const existing = next.get(directory);
+    let serverMap = next.get(serverId);
+    if (!serverMap) {
+      serverMap = new Map();
+      next.set(serverId, serverMap);
+    }
+    const existing = serverMap.get(directory);
     if (existing) {
       existing.push(session);
       continue;
     }
-    next.set(directory, [session]);
+    serverMap.set(directory, [session]);
   }
+  if (_prevSessionsByDirectory && mapsAreEqual(_prevSessionsByDirectory, next)) {
+    return _prevSessionsByDirectory;
+  }
+  _prevSessionsByDirectory = next;
   return next;
 };
 
-const getSessionSignature = (session: Session): string => {
+const getSessionSignature = (session: GlobalSessionEntry): string => {
   return [
     session.id,
     session.title ?? '',
@@ -138,10 +187,11 @@ const getSessionSignature = (session: Session): string => {
     session.share?.url ?? '',
     JSON.stringify((session as Session & { metadata?: unknown }).metadata ?? null),
     resolveGlobalSessionDirectory(session) ?? '',
+    session.serverId ?? '',
   ].join(':');
 };
 
-const sameSessionList = (prev: Session[], next: Session[]): boolean => {
+const sameSessionList = (prev: GlobalSessionEntry[], next: GlobalSessionEntry[]): boolean => {
   if (prev === next) {
     return true;
   }
@@ -242,12 +292,12 @@ const fetchDirectoryPages = async (
   return { directories: fulfilledDirectories, sessions, errors };
 };
 
-const upsertSessionIntoList = (sessions: Session[], session: Session): Session[] => {
+const upsertSessionIntoList = (sessions: GlobalSessionEntry[], session: GlobalSessionEntry): GlobalSessionEntry[] => {
   const index = sessions.findIndex((candidate) => candidate.id === session.id);
   if (index === -1) {
     return [session, ...sessions];
   }
-  const mergedSession = mergeSessionDirectoryMetadata(session, sessions[index]);
+  const mergedSession = mergeSessionDirectoryMetadata(session, sessions[index]) as GlobalSessionEntry;
   if (getSessionSignature(sessions[index]) === getSessionSignature(mergedSession)) {
     return sessions;
   }
@@ -256,7 +306,7 @@ const upsertSessionIntoList = (sessions: Session[], session: Session): Session[]
   return next;
 };
 
-const mergeSessionLists = (existing: Session[], incoming?: Session[]): Session[] => {
+const mergeSessionLists = (existing: GlobalSessionEntry[], incoming?: GlobalSessionEntry[]): GlobalSessionEntry[] => {
   if (!incoming || incoming.length === 0) {
     return existing;
   }
@@ -267,10 +317,10 @@ const mergeSessionLists = (existing: Session[], incoming?: Session[]): Session[]
 
   const byId = new Map(existing.map((session) => [session.id, session]));
   incoming.forEach((session) => {
-    byId.set(session.id, mergeSessionDirectoryMetadata(session, byId.get(session.id)));
+    byId.set(session.id, mergeSessionDirectoryMetadata(session, byId.get(session.id)) as GlobalSessionEntry);
   });
 
-  const ordered: Session[] = [];
+  const ordered: GlobalSessionEntry[] = [];
   const seen = new Set<string>();
 
   existing.forEach((session) => {
@@ -298,8 +348,8 @@ const mergeSessionLists = (existing: Session[], incoming?: Session[]): Session[]
 
 const applySnapshot = (
   state: GlobalSessionsState,
-  activeSessions: Session[],
-  archivedSessions: Session[],
+  activeSessions: GlobalSessionEntry[],
+  archivedSessions: GlobalSessionEntry[],
   status: GlobalSessionsStatus,
 ): Partial<GlobalSessionsState> | GlobalSessionsState => {
   const nextActiveSessions = sameSessionList(state.activeSessions, activeSessions)
@@ -372,37 +422,55 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
 
     inflightLoad = (async () => {
       const current = get();
+      const FETCH_TIMEOUT_MS = 30000;
 
       try {
-        const sdk = opencodeClient.getSdkClient();
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
         const [activeResult, archivedResult] = await Promise.allSettled([
-          listGlobalSessionPages(sdk, { archived: false, pageSize: PAGE_SIZE }),
-          listGlobalSessionPages(sdk, { archived: true, pageSize: PAGE_SIZE }),
+          runtimeFetch('/api/servers/all/sessions', { signal: controller.signal }),
+          runtimeFetch('/api/servers/all/sessions?archived=true', { signal: controller.signal }),
         ]);
 
-        const fallbackSnapshot = mergeSessionLists(current.activeSessions, fallbackActive);
-        const nextActiveSessions = activeResult.status === 'fulfilled'
-          ? activeResult.value
-          : fallbackSnapshot;
-        const nextArchivedSessions = archivedResult.status === 'fulfilled'
-          ? archivedResult.value
-          : current.archivedSessions;
+        clearTimeout(timeoutId);
 
-        if (activeResult.status === 'rejected') {
-          console.warn('[GlobalSessions] Failed to load active sessions, preserving existing snapshot with fallback merge:', activeResult.reason);
+        let nextActiveSessions: GlobalSessionEntry[] = [];
+        let nextArchivedSessions: GlobalSessionEntry[] = [];
+
+        if (activeResult.status === 'fulfilled' && activeResult.value.ok) {
+          const activeJson = await activeResult.value.json() as { sessions?: GlobalSessionEntry[]; errors?: Array<{ serverId: string; error: string }> };
+          nextActiveSessions = mergeSessionLists(current.activeSessions, activeJson.sessions);
+          if (activeJson.errors && activeJson.errors.length > 0) {
+            console.warn('[GlobalSessions] Partial failures loading active sessions:', activeJson.errors);
+          }
+        } else {
+          console.warn('[GlobalSessions] Failed to load active sessions, using fallback:', activeResult.status === 'fulfilled' ? `HTTP ${activeResult.value.status}` : activeResult.reason);
+          const fallbackSnapshot = mergeSessionLists(
+            current.activeSessions,
+            fallbackActive as unknown as GlobalSessionEntry[],
+          );
+          nextActiveSessions = fallbackSnapshot;
         }
-        if (archivedResult.status === 'rejected') {
-          console.warn('[GlobalSessions] Failed to load archived sessions, preserving current snapshot:', archivedResult.reason);
+
+        if (archivedResult.status === 'fulfilled' && archivedResult.value.ok) {
+          const archivedJson = await archivedResult.value.json() as { sessions?: GlobalSessionEntry[] };
+          nextArchivedSessions = archivedJson.sessions ?? [];
+        } else {
+          console.warn('[GlobalSessions] Failed to load archived sessions, preserving current snapshot:', archivedResult.status === 'fulfilled' ? `HTTP ${archivedResult.value.status}` : archivedResult.reason);
+          nextArchivedSessions = current.archivedSessions;
         }
 
         set((state) => applySnapshot(state, nextActiveSessions, nextArchivedSessions, 'ready'));
         return { activeSessions: nextActiveSessions, archivedSessions: nextArchivedSessions };
       } catch (error) {
-        const nextActiveSessions = mergeSessionLists(current.activeSessions, fallbackActive);
-        const nextArchivedSessions = current.archivedSessions;
+        const fallbackSnapshot = mergeSessionLists(
+          current.activeSessions,
+          fallbackActive as unknown as GlobalSessionEntry[],
+        );
         console.warn('[GlobalSessions] Failed to load sessions, using fallback snapshot:', error);
-        set((state) => applySnapshot(state, nextActiveSessions, nextArchivedSessions, 'error'));
-        return { activeSessions: nextActiveSessions, archivedSessions: nextArchivedSessions };
+        set((state) => applySnapshot(state, fallbackSnapshot, current.archivedSessions, 'error'));
+        return { activeSessions: fallbackSnapshot, archivedSessions: current.archivedSessions };
       } finally {
         inflightLoad = null;
       }
@@ -432,13 +500,13 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     }
 
     set((state) => {
-      let nextActiveSessions = replaceSessionsForDirectories(state.activeSessions, active.sessions, active.directories);
-      nextActiveSessions = mergeSessionLists(nextActiveSessions, fallbackActive);
+      let nextActiveSessions = replaceSessionsForDirectories(state.activeSessions, active.sessions, active.directories) as GlobalSessionEntry[];
+      nextActiveSessions = mergeSessionLists(nextActiveSessions, fallbackActive as GlobalSessionEntry[] | undefined);
       if (sameSessionList(state.activeSessions, nextActiveSessions)) {
         nextActiveSessions = state.activeSessions;
       }
 
-      let nextArchivedSessions = replaceSessionsForDirectories(state.archivedSessions, archived.sessions, archived.directories);
+      let nextArchivedSessions = replaceSessionsForDirectories(state.archivedSessions, archived.sessions, archived.directories) as GlobalSessionEntry[];
       if (sameSessionList(state.archivedSessions, nextArchivedSessions)) {
         nextArchivedSessions = state.archivedSessions;
       }
@@ -470,11 +538,15 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
   },
 
   upsertSession: (session) => {
+    const rawServerId = (session as GlobalSessionEntry).serverId
+    const normalized: GlobalSessionEntry = typeof rawServerId === 'string' && rawServerId.length > 0
+      ? session as GlobalSessionEntry
+      : { ...session, serverId: 'local' as const };
     set((state) => {
       const existingSession = state.activeSessions.find((candidate) => candidate.id === session.id)
         ?? state.archivedSessions.find((candidate) => candidate.id === session.id)
         ?? null;
-      const sessionWithMetadata = mergeSessionDirectoryMetadata(session, existingSession);
+      const sessionWithMetadata = mergeSessionDirectoryMetadata(normalized, existingSession) as GlobalSessionEntry;
       const isArchived = Boolean(sessionWithMetadata.time?.archived);
       const nextActiveSessions = isArchived
         ? state.activeSessions.filter((candidate) => candidate.id !== session.id)
@@ -536,7 +608,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     }
 
     set((state) => {
-      const movedSessions: Session[] = [];
+      const movedSessions: GlobalSessionEntry[] = [];
       const nextActiveSessions = state.activeSessions.filter((session) => {
         if (!idSet.has(session.id)) {
           return true;
@@ -563,6 +635,20 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         archivedSessions: [...movedSessions, ...remainingArchivedSessions],
         sessionsByDirectory: buildSessionsByDirectory(nextActiveSessions),
         reviewTransferBySessionId: buildReviewTransferMap(nextActiveSessions),
+      };
+    });
+  },
+
+  removeServerEntries: (serverId) => {
+    set((state) => {
+      const prevCount = state.activeSessions.length + state.archivedSessions.length;
+      const nextActiveSessions = state.activeSessions.filter((s) => s.serverId !== serverId);
+      const nextArchivedSessions = state.archivedSessions.filter((s) => s.serverId !== serverId);
+      if (nextActiveSessions.length + nextArchivedSessions.length === prevCount) return state;
+      return {
+        activeSessions: nextActiveSessions,
+        archivedSessions: nextArchivedSessions,
+        sessionsByDirectory: buildSessionsByDirectory(nextActiveSessions),
       };
     });
   },

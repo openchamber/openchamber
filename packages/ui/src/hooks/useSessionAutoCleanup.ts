@@ -1,7 +1,7 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { opencodeClient } from '@/lib/opencode/client';
-import { ensureGlobalSessionsLoaded, useGlobalSessionsStore, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { ensureGlobalSessionsLoaded, useGlobalSessionsStore, resolveGlobalSessionDirectory, resolveGlobalSessionServerId } from '@/stores/useGlobalSessionsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { getAllSyncSessions } from '@/sync/sync-refs';
 import { useUIStore } from '@/stores/useUIStore';
@@ -147,16 +147,18 @@ export const useSessionAutoCleanup = (enabledOrOptions?: boolean | CleanupOption
         for (const id of candidateIds) {
           const session = sessionMap.get(id);
           const directory = session ? resolveGlobalSessionDirectory(session) : null;
+          const serverId = session ? resolveGlobalSessionServerId(session) : undefined;
           if (!directory) {
             failedIds.push(id);
             continue;
           }
 
           try {
+            const scopedSdk = opencodeClient.getScopedSdkClient(directory, serverId);
             if (sessionRetentionAction === 'archive') {
-              await opencodeClient.updateSession(id, { time: { archived: Date.now() } }, directory);
+              await scopedSdk.session.update({ sessionID: id, directory, time: { archived: Date.now() } });
             } else {
-              await opencodeClient.deleteSession(id, directory);
+              await scopedSdk.session.delete({ sessionID: id, directory });
             }
             completedIds.push(id);
           } catch {

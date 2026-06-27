@@ -27,6 +27,8 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     getActiveTunnelController,
     setActiveTunnelController,
     tunnelAuthController,
+    getSseFanIn,
+    getServerManager,
   } = dependencies;
 
   let shutdownPromise = null;
@@ -43,6 +45,27 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     sessionRuntime.dispose();
     scheduledTasksRuntime?.stop?.();
 
+    const sseFanIn = getSseFanIn?.();
+    if (sseFanIn && typeof sseFanIn.destroy === 'function') {
+      try { sseFanIn.destroy(); } catch (err) { console.warn('Error destroying SseFanIn:', err); }
+    }
+
+    const serverManager = getServerManager?.();
+    if (serverManager) {
+      try {
+        for (const server of serverManager.listServers()) {
+          if (server.type === 'local' || server.id === 'local') continue;
+          try {
+            serverManager.removeServer(server.id);
+          } catch (err) {
+            console.warn(`Error disconnecting server '${server.id}':`, err?.message || err);
+          }
+        }
+      } catch (err) {
+        console.warn('Error cleaning up multi-server manager:', err?.message || err);
+      }
+    }
+
     const healthCheckInterval = getHealthCheckInterval();
     if (healthCheckInterval) {
       clearHealthCheckInterval(healthCheckInterval);
@@ -52,7 +75,8 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     if (terminalRuntime) {
       try {
         await terminalRuntime.shutdown();
-      } catch {
+      } catch (err) {
+        console.warn('Error shutting down terminal runtime:', err?.message || err);
       } finally {
         setTerminalRuntime(null);
       }
@@ -62,7 +86,8 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     if (messageStreamRuntime) {
       try {
         await messageStreamRuntime.close();
-      } catch {
+      } catch (err) {
+        console.warn('Error closing message stream runtime:', err?.message || err);
       } finally {
         setMessageStreamRuntime(null);
       }

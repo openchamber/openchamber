@@ -184,6 +184,9 @@ export type DesktopSettings = {
   sttSilenceThresholdDb?: number;
   sttSilenceHoldMs?: number;
   sttTranscribeOnStop?: boolean;
+
+  // Multi-server: IDs of servers to auto-register on startup
+  desktopActiveServerIds?: string[];
   // Global draft welcome starters (pinned commands/skills), persisted to settings.json
   draftStarters?: DraftStarterRef[];
 };
