@@ -44,20 +44,20 @@
   :root.mobile-pointer:not(.desktop-runtime) {
     --text-markdown: 1rem;
     --text-code: 0.875rem;
-    --text-ui-header: 0.9375rem;
-    --text-ui-label: 0.875rem;
-    --text-meta: 0.875rem;
-    --text-micro: 0.8125rem;
+    --text-ui-header: 0.875rem;
+    --text-ui-label: 0.75rem;
+    --text-meta: 0.75rem;
+    --text-micro: 0.6875rem;
   }
 
   /* Force override with higher specificity */
   :root.mobile-pointer:not(.desktop-runtime) * {
     --text-markdown: 1rem !important;
     --text-code: 0.875rem !important;
-    --text-ui-header: 0.9375rem !important;
-    --text-ui-label: 0.875rem !important;
-    --text-meta: 0.875rem !important;
-    --text-micro: 0.8125rem !important;
+    --text-ui-header: 0.875rem !important;
+    --text-ui-label: 0.75rem !important;
+    --text-meta: 0.75rem !important;
+    --text-micro: 0.6875rem !important;
   }
 
   /* Additional override for elements using typography classes */
@@ -325,19 +325,19 @@
     }
 
     .typography-ui-header {
-      font-size: 0.9375rem !important;
+      font-size: 0.875rem !important;
     }
 
     .typography-ui-label {
-      font-size: 0.875rem !important;
+      font-size: 0.75rem !important;
     }
 
     .typography-meta {
-      font-size: 0.875rem !important;
+      font-size: 0.75rem !important;
     }
 
     .typography-micro {
-      font-size: 0.8125rem !important;
+      font-size: 0.6875rem !important;
     }
 
     /* Fix font size for tool displays */
