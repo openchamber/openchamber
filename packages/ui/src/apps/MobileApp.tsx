@@ -3,8 +3,9 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { McpIcon } from '@/components/icons/McpIcon';
-import { McpDropdownContent } from '@/components/mcp/McpDropdown';
+import { McpDropdownContent, DeferredMount } from '@/components/mcp/McpDropdown';
 import { AboutSettings } from '@/components/sections/openchamber/AboutSettings';
+import { PluginStatusPage } from '@/components/sections/plugin-status';
 import { OpenCodeUpdateToast } from '@/components/update/OpenCodeUpdateToast';
 import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
@@ -103,7 +104,7 @@ const getProjectLabel = (path: string): string => {
 };
 
 type OverflowItem = {
-  key: 'files' | 'changes' | 'mcp' | 'update' | 'settings';
+  key: 'files' | 'changes' | 'mcp' | 'plugin-status' | 'update' | 'settings';
   icon?: IconName;
   iconNode?: React.ReactNode;
   label: string;
@@ -793,6 +794,7 @@ const MobileShell: React.FC = () => {
   const [filesOpen, setFilesOpen] = React.useState(false);
   const [changesOpen, setChangesOpen] = React.useState(false);
   const [mcpOpen, setMcpOpen] = React.useState(false);
+  const [pluginStatusOpen, setPluginStatusOpen] = React.useState(false);
   const [isMcpRefreshing, setIsMcpRefreshing] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [updateOpen, setUpdateOpen] = React.useState(false);
@@ -900,6 +902,12 @@ const MobileShell: React.FC = () => {
         iconNode: <McpIcon className="size-5 shrink-0 text-muted-foreground" />,
         label: t('mobile.menu.mcp'),
         onSelect: () => setMcpOpen(true),
+      },
+      {
+        key: 'plugin-status',
+        icon: 'plug',
+        label: t('layout.services.pluginStatus'),
+        onSelect: () => setPluginStatusOpen(true),
       },
       ...(showUpdateItem ? [{
         key: 'update' as const,
@@ -1025,13 +1033,39 @@ const MobileShell: React.FC = () => {
             )}
           >
             <ErrorBoundary>
-              <McpDropdownContent
-                active
-                className="h-full"
-                listClassName="max-h-none"
-                hideHeader
-                mobileListDensity
-              />
+              <DeferredMount>
+                <McpDropdownContent
+                  active
+                  className="h-full"
+                  listClassName="max-h-none"
+                  hideHeader
+                  mobileListDensity
+                />
+              </DeferredMount>
+            </ErrorBoundary>
+          </MobileOverlayPanel>
+        ) : null}
+
+        {pluginStatusOpen ? (
+          <MobileOverlayPanel
+            open
+            onClose={() => setPluginStatusOpen(false)}
+            title={t('layout.services.pluginStatus')}
+            className="h-[72vh]"
+            contentMaxHeightClassName="max-h-full"
+            renderHeader={(closeButton) => (
+              <div className="shrink-0">
+                <div className="flex justify-center pt-2.5 pb-1">
+                  <div className="h-1 w-9 rounded-full bg-[color-mix(in_srgb,var(--surface-mutedForeground)_40%,transparent)]" />
+                </div>
+                <div className="flex items-center justify-end gap-2 px-4 pb-2">
+                  {closeButton}
+                </div>
+              </div>
+            )}
+          >
+            <ErrorBoundary>
+              <PluginStatusPage onClose={() => setPluginStatusOpen(false)} showHeader={false} />
             </ErrorBoundary>
           </MobileOverlayPanel>
         ) : null}
