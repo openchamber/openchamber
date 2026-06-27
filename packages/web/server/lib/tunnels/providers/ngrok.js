@@ -13,7 +13,7 @@ import {
 } from '../types.js';
 import { getTunnelDependencyInstallInfo } from '../install-help.js';
 
-const ngrokTunnelProviderCapabilities = {
+export const ngrokTunnelProviderCapabilities = {
   provider: TUNNEL_PROVIDER_NGROK,
   defaults: {
     mode: TUNNEL_MODE_QUICK,

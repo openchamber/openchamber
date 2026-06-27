@@ -10,6 +10,7 @@ import { pathToFileURL } from 'url';
 import { isModuleCliExecution, normalizeCliEntryPath } from './cli-entry.js';
 import { requestJson } from './lib/cli-http.js';
 import { inspectTunnelAttachability } from './lib/cli-lifecycle.js';
+import { DEFAULT_TUNNEL_PROVIDER_CAPABILITIES } from './lib/cli-tunnel-capabilities.js';
 import {
   assertAuthenticatedNetworkExposure,
   commands,
@@ -303,6 +304,12 @@ describe('serve host resolution', () => {
 });
 
 describe('compatibility exports', () => {
+  it('exports fallback tunnel provider capabilities for both cloudflare and ngrok', () => {
+    expect(DEFAULT_TUNNEL_PROVIDER_CAPABILITIES.map((entry) => entry.provider)).toEqual(
+      expect.arrayContaining(['cloudflare', 'ngrok']),
+    );
+  });
+
   it('allows tunnel profile migration before command options are initialized', async () => {
     await withTempOpenChamberDataDir(async () => {
       const store = ensureTunnelProfilesMigrated();
