@@ -104,6 +104,8 @@ const OPENCHAMBER_INTERNAL_PREFIXES = [
   '/api/opencode/',
   '/api/config/themes',
   '/api/config/commands',
+  '/api/config/plugins',
+  '/api/config/mcp',
   '/api/notifications/',
   '/api/openchamber/',
   '/api/tts/',
