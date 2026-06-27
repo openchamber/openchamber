@@ -8,3 +8,7 @@
 export * from './auth.js';
 export * from './transformers.js';
 export * from './formatters.js';
+export * from './redact.js';
+export * from './fetch.js';
+export * from './credentials-path.js';
+export * from './import-legacy.js';

@@ -15,6 +15,22 @@ import {
 const GOOGLE_FIVE_HOUR_WINDOW_SECONDS = 5 * 60 * 60;
 const GOOGLE_DAILY_WINDOW_SECONDS = 24 * 60 * 60;
 
+const ANTIGRAVITY_GROUPS = [
+  { key: 'claude', display: 'Claude' },
+  { key: 'gpt-oss', display: 'GPT-OSS' },
+  { key: 'gemini-flash', display: 'Gemini Flash' },
+  { key: 'gemini-pro', display: 'Gemini Pro' }
+];
+
+const classifyAntigravityGroup = (modelId) => {
+  const m = String(modelId ?? '').toLowerCase();
+  if (m.startsWith('chat_') || m.startsWith('tab_')) return null;
+  if (m.includes('claude')) return 'claude';
+  if (m.includes('gpt-oss') || m.includes('gpt')) return 'gpt-oss';
+  if (!m.includes('gemini')) return null;
+  return m.includes('flash') ? 'gemini-flash' : 'gemini-pro';
+};
+
 export const parseGoogleRefreshToken = (rawRefreshToken) => {
   const refreshToken = asNonEmptyString(rawRefreshToken);
   if (!refreshToken) {
@@ -66,6 +82,7 @@ export const transformQuotaBucket = (bucket, sourceId) => {
   const usedPercent = remainingPercent !== null ? Math.max(0, 100 - remainingPercent) : null;
   const resetAt = toTimestamp(bucket?.resetTime);
   const window = resolveGoogleWindow(sourceId, resetAt);
+  const suffix = sourceId === 'antigravity' ? 'Antigravity' : 'Gemini';
 
   return {
     [scopedName]: {
@@ -73,7 +90,9 @@ export const transformQuotaBucket = (bucket, sourceId) => {
         [window.label]: toUsageWindow({
           usedPercent,
           windowSeconds: window.seconds,
-          resetAt
+          resetAt,
+          suffix,
+          trendKey: `google:${scopedName}:${window.label}`
         })
       }
     }
@@ -94,6 +113,7 @@ export const transformModelData = (modelName, modelData, sourceId) => {
     ? new Date(modelData.quotaInfo.resetTime).getTime()
     : null;
   const window = resolveGoogleWindow(sourceId, resetAt);
+  const suffix = sourceId === 'antigravity' ? 'Antigravity' : 'Gemini';
 
   return {
     [scopedName]: {
@@ -101,9 +121,69 @@ export const transformModelData = (modelName, modelData, sourceId) => {
         [window.label]: toUsageWindow({
           usedPercent,
           windowSeconds: window.seconds,
-          resetAt
+          resetAt,
+          suffix,
+          trendKey: `google:${scopedName}:${window.label}`
         })
       }
     }
   };
+};
+
+// Aggregate antigravity retrieveUserQuota buckets into family windows
+// (gemini-pro, gemini-flash, claude, gpt-oss), matching canonical
+// aggregateAntigravityQuota: minimum remainingFraction across the family,
+// earliest resetTime. Drops chat_*/tab_* helper models. Returns a windows
+// object keyed by family display label.
+export const transformAntigravityBuckets = (buckets) => {
+  const groups = {};
+  for (const bucket of Array.isArray(buckets) ? buckets : []) {
+    const modelId = asNonEmptyString(bucket?.modelId);
+    if (!modelId) continue;
+    const group = classifyAntigravityGroup(modelId);
+    if (!group) continue;
+
+    const rawFraction = toNumber(bucket?.remainingFraction);
+    const fraction = rawFraction !== null
+      ? Math.max(0, Math.min(1, rawFraction))
+      : null;
+    const resetAt = toTimestamp(bucket?.resetTime);
+    const existing = groups[group];
+
+    const nextRemaining = fraction === null
+      ? existing?.remainingFraction
+      : existing?.remainingFraction === undefined
+        ? fraction
+        : Math.min(existing.remainingFraction, fraction);
+
+    let nextResetAt = existing?.resetAt;
+    if (resetAt !== null) {
+      if (existing?.resetAt === undefined || resetAt < existing.resetAt) {
+        nextResetAt = resetAt;
+      }
+    }
+
+    groups[group] = {
+      remainingFraction: nextRemaining,
+      resetAt: nextResetAt,
+      modelCount: (existing?.modelCount ?? 0) + 1
+    };
+  }
+
+  const windows = {};
+  for (const { key, display } of ANTIGRAVITY_GROUPS) {
+    const info = groups[key];
+    if (!info || info.remainingFraction === undefined) continue;
+    const remainingPercent = Math.round(info.remainingFraction * 100);
+    const usedPercent = Math.max(0, 100 - remainingPercent);
+    const window = resolveGoogleWindow('antigravity', info.resetAt);
+    windows[display] = toUsageWindow({
+      usedPercent,
+      windowSeconds: window.seconds,
+      resetAt: info.resetAt,
+      suffix: 'Antigravity',
+      trendKey: `google:antigravity:${display}`
+    });
+  }
+  return windows;
 };

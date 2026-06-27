@@ -3,9 +3,7 @@ import {
   getAuthEntry,
   normalizeAuthEntry,
   buildResult,
-  toUsageWindow,
-  toNumber,
-  toTimestamp
+  toUsageWindow
 } from '../utils/index.js';
 
 const providerId = 'openai';
@@ -61,14 +59,18 @@ export const fetchQuota = async () => {
       windows['5h'] = toUsageWindow({
         usedPercent: primary.used_percent ?? null,
         windowSeconds: primary.limit_window_seconds ?? null,
-        resetAt: primary.reset_at ? primary.reset_at * 1000 : null
+        resetAt: primary.reset_after_seconds != null ? Date.now() + primary.reset_after_seconds * 1000 : null,
+        suffix: 'primary',
+        trendKey: 'openai:5h'
       });
     }
     if (secondary) {
       windows['weekly'] = toUsageWindow({
         usedPercent: secondary.used_percent ?? null,
         windowSeconds: secondary.limit_window_seconds ?? null,
-        resetAt: secondary.reset_at ? secondary.reset_at * 1000 : null
+        resetAt: secondary.reset_after_seconds != null ? Date.now() + secondary.reset_after_seconds * 1000 : null,
+        suffix: 'weekly cap',
+        trendKey: 'openai:weekly'
       });
     }
 
@@ -77,7 +79,7 @@ export const fetchQuota = async () => {
       providerName,
       ok: true,
       configured: true,
-      usage: { windows }
+      usage: { windows, subtitle: 'ChatGPT subscription' }
     });
   } catch (error) {
     return buildResult({
