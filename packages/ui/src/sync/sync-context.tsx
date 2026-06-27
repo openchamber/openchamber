@@ -418,11 +418,6 @@ function toSessionStatus(status: Awaited<ReturnType<typeof opencodeClient.getSes
   return undefined
 }
 
-function isStreamHeartbeatEvent(payload: Event): boolean {
-  const type = (payload as { type?: unknown }).type
-  return type === "server.heartbeat" || type === "openchamber:heartbeat"
-}
-
 function getActiveSessionCandidateIds(directory: string, state: DirectoryStore): string[] {
   return getReconnectCandidateSessionIds(state, {
     directory,
@@ -455,10 +450,12 @@ export function applySessionStatusSnapshot(
   snapshot: DirectorySessionStatusSnapshot,
   candidateSessionIds: string[],
   mode: StatusSnapshotMode,
+  onSessionFreshness?: (sessionId: string) => void,
 ): boolean {
   if (candidateSessionIds.length === 0) return false
 
   let changed = false
+  const freshSessionIds = new Set<string>()
   store.setState((state: DirectoryStore) => {
     const current = state.session_status ?? {}
     let next: Record<string, SessionStatus> | undefined
@@ -468,6 +465,7 @@ export function applySessionStatusSnapshot(
       const incoming = toSessionStatus(snapshot[sessionId])
 
       if (incoming && incoming.type !== "idle") {
+        freshSessionIds.add(sessionId)
         // Confirm or raise active status (catches a busy event the SSE missed).
         if (!haveEquivalentSyncSnapshots(current[sessionId], incoming)) {
           draft()[sessionId] = incoming
@@ -490,20 +488,24 @@ export function applySessionStatusSnapshot(
     return next ? { session_status: next } : state
   })
 
+  for (const sessionId of freshSessionIds) {
+    onSessionFreshness?.(sessionId)
+  }
+
   return changed
 }
-
 async function resyncDirectorySessionStatuses(
   directory: string,
   store: StoreApi<DirectoryStore>,
   candidateSessionIds: string[],
   mode: StatusSnapshotMode,
+  onSessionFreshness?: (sessionId: string) => void,
 ): Promise<DirectorySessionStatusSnapshot | null> {
   const nextStatuses = await opencodeClient.getSessionStatusForDirectory(directory)
   // null = fetch failed; preserve existing state. {} or populated = a snapshot
   // of active sessions — reconciled per `mode` (absence ≠ idle under monotonic).
   if (nextStatuses === null) return null
-  applySessionStatusSnapshot(store, nextStatuses, candidateSessionIds, mode)
+  applySessionStatusSnapshot(store, nextStatuses, candidateSessionIds, mode, onSessionFreshness)
   return nextStatuses
 }
 
@@ -520,6 +522,37 @@ export function needsSnapshotAfterStatusPoll(
   if (incoming && incoming.type !== "idle") return false
   const currentStatus = state.session_status?.[sessionId]
   return Boolean(currentStatus && currentStatus.type !== "idle")
+}
+
+export function getSessionWatchdogFreshnessAt(
+  directory: string,
+  sessionId: string,
+  freshnessBySessionByDirectory: ReadonlyMap<string, ReadonlyMap<string, number>>,
+  freshnessByDirectory: ReadonlyMap<string, number>,
+): number | undefined {
+  return freshnessBySessionByDirectory.get(directory)?.get(sessionId) ?? freshnessByDirectory.get(directory)
+}
+
+export function getSessionWatchdogFreshnessLineage(
+  directory: string,
+  sessionId: string,
+  lookupSession: (directory: string, sessionId: string) => Session | undefined,
+): string[] {
+  const lineage = new Set<string>()
+  const seen = new Set<string>()
+  let currentSessionId: string | undefined = sessionId
+
+  while (currentSessionId && !seen.has(currentSessionId)) {
+    lineage.add(currentSessionId)
+    seen.add(currentSessionId)
+
+    const currentSession = lookupSession(directory, currentSessionId)
+    const parentID = (currentSession as Session & { parentID?: string | null } | undefined)?.parentID ?? undefined
+    if (!parentID) break
+    currentSessionId = parentID
+  }
+
+  return Array.from(lineage)
 }
 
 type EventRoutingIndex = {
@@ -1172,12 +1205,19 @@ async function resyncDirectoryAfterReconnect(
   directory: string,
   store: StoreApi<DirectoryStore>,
   routingIndex: EventRoutingIndex,
+  onSessionFreshness?: (directory: string, sessionId: string) => void,
 ) {
   const current = store.getState()
   const candidateSessionIds = getActiveSessionCandidateIds(directory, current)
   if (candidateSessionIds.length === 0) return
 
-  await resyncDirectorySessionStatuses(directory, store, candidateSessionIds, "authoritative")
+  await resyncDirectorySessionStatuses(
+    directory,
+    store,
+    candidateSessionIds,
+    "authoritative",
+    (sessionId) => onSessionFreshness?.(directory, sessionId),
+  )
 
   const scopedClient = opencodeClient.getScopedSdkClient(directory)
   await Promise.all(candidateSessionIds.map(async (sessionId) => {
@@ -1267,6 +1307,7 @@ function handleEvent(
   payload: Event,
   childStores: ChildStoreManager,
   routingIndex: EventRoutingIndex,
+  onSessionFreshness?: (directory: string, sessionId: string) => void,
 ) {
   const directory = resolveDirectoryFromRoutingIndex(routingIndex, rawDirectory, payload, childStores)
 
@@ -1515,6 +1556,9 @@ function handleEvent(
     onSetSessionTodo: (sessionID, todos) => {
       useTodosPersistStore.getState().setSessionTodos(sessionID, todos)
     },
+    onSessionFreshness: onSessionFreshness
+      ? (sessionID) => onSessionFreshness(resolvedDirectory, sessionID)
+      : undefined,
   })
   const reducerChanged = typeof reducerResult === "boolean" ? reducerResult : reducerResult.changed
   const materializationResult = typeof reducerResult === "boolean" ? undefined : reducerResult.materialization
@@ -1539,7 +1583,6 @@ function handleEvent(
     const sessionID = getSessionIdFromPayload(payload) ?? undefined
     const messageID = getMessageIdFromPayload(payload) ?? undefined
     syncDebug.dispatch.eventNoChange(payload.type, sessionID, messageID)
-
   }
 
   // Snapshot materialization is driven by typed reducer outcomes, not by
@@ -1575,6 +1618,7 @@ export function SyncProvider(props: {
   const routingIndexRef = useRef<EventRoutingIndex | null>(null)
   if (!routingIndexRef.current) routingIndexRef.current = createEventRoutingIndex()
   const routingIndex = routingIndexRef.current
+  const lastActiveEventAtBySessionRef = useRef(new Map<string, Map<string, number>>())
   const lastActiveEventAtByDirectoryRef = useRef(new Map<string, number>())
   const lastStatusPollAtByDirectoryRef = useRef(new Map<string, number>())
   const lastFullResyncAtByDirectoryRef = useRef(new Map<string, number>())
@@ -1582,6 +1626,23 @@ export function SyncProvider(props: {
   const resyncingDirectoriesRef = useRef(new Set<string>())
   const statusPollingDirectoriesRef = useRef(new Set<string>())
   const pipelineReconnectRef = useRef<((reason?: string) => void) | null>(null)
+
+  const recordSessionWatchdogFreshness = useCallback((directory: string, sessionId: string) => {
+    const store = childStores.children.get(directory)
+    const lookupSession = (targetDirectory: string, targetSessionId: string) => (
+      store?.getState().session.find((session) => session.id === targetSessionId)
+      ?? getAllSyncSessions().find((session) => session.id === targetSessionId && (!session.directory || session.directory === targetDirectory))
+    )
+    const now = Date.now()
+    let sessionFreshnessByDirectory = lastActiveEventAtBySessionRef.current.get(directory)
+    if (!sessionFreshnessByDirectory) {
+      sessionFreshnessByDirectory = new Map<string, number>()
+      lastActiveEventAtBySessionRef.current.set(directory, sessionFreshnessByDirectory)
+    }
+    for (const targetSessionId of getSessionWatchdogFreshnessLineage(directory, sessionId, lookupSession)) {
+      sessionFreshnessByDirectory.set(targetSessionId, now)
+    }
+  }, [childStores.children])
 
   const system = useMemo<SyncSystem>(
     () => ({
@@ -1600,14 +1661,14 @@ export function SyncProvider(props: {
 
     lastFullResyncAtByDirectoryRef.current.set(directory, Date.now())
     resyncing.add(directory)
-    void resyncDirectoryAfterReconnect(directory, store, routingIndex)
+    void resyncDirectoryAfterReconnect(directory, store, routingIndex, recordSessionWatchdogFreshness)
       .catch(() => {
         // Transient failure — the watchdog, next SSE event, or reconnect will catch up.
       })
       .finally(() => {
         resyncing.delete(directory)
       })
-  }, [childStores, routingIndex])
+  }, [childStores, routingIndex, recordSessionWatchdogFreshness])
 
   // Configure child store manager
   useEffect(() => {
@@ -1633,6 +1694,7 @@ export function SyncProvider(props: {
                 ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
               }
             },
+            onSessionFreshness: recordSessionWatchdogFreshness,
             global: {
               config: globalState.config,
               projects: globalState.projects,
@@ -1719,7 +1781,7 @@ export function SyncProvider(props: {
       isBooting: (directory) => bootingDirs.has(directory),
       isLoadingSessions: () => false,
     })
-  }, [childStores, props.sdk, routingIndex])
+  }, [childStores, props.sdk, routingIndex, recordSessionWatchdogFreshness])
 
   // Bootstrap global state — set bootingRoot/bootedAt to suppress
   // redundant refresh events during startup
@@ -1759,9 +1821,6 @@ export function SyncProvider(props: {
         return resolveDirectoryFromRoutingIndex(routingIndex, directory, payload, childStores)
       },
       onEvent: (directory, payload) => {
-        if (!isStreamHeartbeatEvent(payload)) {
-          lastActiveEventAtByDirectoryRef.current.set(directory, Date.now())
-        }
         dispatchVSCodeRuntimeNotificationEvent(directory, payload)
         if (payload.type === "installation.update-available") {
           const version = typeof (payload.properties as { version?: unknown })?.version === "string"
@@ -1771,7 +1830,7 @@ export function SyncProvider(props: {
             dispatchOpenCodeUpdateAvailable({ version })
           }
         }
-        handleEvent(directory, payload, childStores, routingIndex)
+        handleEvent(directory, payload, childStores, routingIndex, recordSessionWatchdogFreshness)
       },
       onReconnect: () => {
         useConfigStore.setState({
@@ -1814,7 +1873,7 @@ export function SyncProvider(props: {
       }
       pipeline.cleanup()
     }
-  }, [props.sdk, childStores, routingIndex, messageStreamTransport, triggerDirectoryResync])
+  }, [props.sdk, childStores, routingIndex, messageStreamTransport, triggerDirectoryResync, recordSessionWatchdogFreshness])
 
   useEffect(() => {
     let stopped = false
@@ -1877,7 +1936,12 @@ export function SyncProvider(props: {
       polling.add(directory)
       try {
         const before = store.getState()
-        const statuses = await resyncDirectorySessionStatuses(directory, store, candidateSessionIds, "monotonic")
+        const statuses = await resyncDirectorySessionStatuses(
+          directory,
+          store,
+          candidateSessionIds,
+          "monotonic",
+        )
         if (!statuses) return
         const needsSnapshot = candidateSessionIds.some((sessionId) => (
           needsSnapshotAfterStatusPoll(before, sessionId, statuses[sessionId])
@@ -1902,6 +1966,7 @@ export function SyncProvider(props: {
             const candidateSessionIds = getActiveSessionCandidateIds(directory, state)
             if (candidateSessionIds.length === 0) {
               lastActiveEventAtByDirectoryRef.current.delete(directory)
+              lastActiveEventAtBySessionRef.current.delete(directory)
               lastStatusPollAtByDirectoryRef.current.delete(directory)
               lastFullResyncAtByDirectoryRef.current.delete(directory)
               continue
@@ -1917,12 +1982,17 @@ export function SyncProvider(props: {
               void pollDirectoryStatuses(directory, store, candidateSessionIds).catch(() => undefined)
             }
 
-            const lastActiveEventAt = lastActiveEventAtByDirectoryRef.current.get(directory) ?? now
             const lastFullResyncAt = lastFullResyncAtByDirectoryRef.current.get(directory) ?? 0
-            if (
-              now - lastActiveEventAt >= ACTIVE_SESSION_STALE_EVENT_MS
-              && now - lastFullResyncAt >= ACTIVE_SESSION_FULL_RESYNC_COOLDOWN_MS
-            ) {
+            const staleSessionId = candidateSessionIds.find((sessionId) => {
+              const lastActiveEventAt = getSessionWatchdogFreshnessAt(
+                directory,
+                sessionId,
+                lastActiveEventAtBySessionRef.current,
+                lastActiveEventAtByDirectoryRef.current,
+              ) ?? now
+              return now - lastActiveEventAt >= ACTIVE_SESSION_STALE_EVENT_MS
+            })
+            if (staleSessionId && now - lastFullResyncAt >= ACTIVE_SESSION_FULL_RESYNC_COOLDOWN_MS) {
               pipelineReconnectRef.current?.("active_stream_stale")
               triggerDirectoryResync(directory)
             }
@@ -1951,7 +2021,7 @@ export function SyncProvider(props: {
       stopped = true
       clearInterval(interval)
     }
-  }, [childStores, triggerDirectoryResync])
+  }, [childStores, triggerDirectoryResync, recordSessionWatchdogFreshness])
 
   // Ensure current directory's child store exists
   useEffect(() => {
@@ -1996,8 +2066,9 @@ export function SyncProvider(props: {
       props.sdk,
       childStores,
       () => opencodeClient.getDirectory() || props.directory,
+      recordSessionWatchdogFreshness,
     )
-  }, [props.sdk, props.directory, childStores, routingIndex])
+  }, [props.sdk, props.directory, childStores, routingIndex, recordSessionWatchdogFreshness])
 
   // Subscribe to child store for streaming state derivation
   useEffect(() => {

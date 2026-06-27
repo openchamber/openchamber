@@ -122,6 +122,7 @@ export async function bootstrapDirectory(input: {
   sdk: OpencodeClient
   getState: () => State
   set: (patch: Partial<State>) => void
+  onSessionFreshness?: (directory: string, sessionId: string) => void
   global: {
     config: Record<string, unknown>
     projects: Project[]
@@ -163,7 +164,15 @@ export async function bootstrapDirectory(input: {
         if (next) set({ project: next })
       }),
     ),
-    retry(() => sdk.session.status().then((x) => set({ session_status: unwrap(x, "session.status") }))),
+    retry(() => sdk.session.status().then((x) => {
+      const sessionStatus = unwrap(x, "session.status") as State["session_status"]
+      set({ session_status: sessionStatus })
+      for (const [sessionID, status] of Object.entries(sessionStatus)) {
+        if (status?.type === "busy" || status?.type === "retry") {
+          input.onSessionFreshness?.(directory, sessionID)
+        }
+      }
+    })),
   ])
 
   const phase1Errors = phase1Results
