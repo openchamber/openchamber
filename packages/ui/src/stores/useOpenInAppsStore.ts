@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-import { fetchDesktopInstalledApps, isDesktopLocalOriginActive, isDesktopShell, type DesktopSettings, type InstalledDesktopAppInfo } from '@/lib/desktop';
+import { fetchDesktopInstalledApps, isOpenInAppAvailable, type DesktopSettings, type InstalledDesktopAppInfo } from '@/lib/desktop';
 import { OPEN_IN_APPS, DEFAULT_OPEN_IN_APP_ID, OPEN_IN_ALWAYS_AVAILABLE_APP_IDS, getOpenInAppById, getPlatformOpenInApp, type OpenInApp } from '@/lib/openInApps';
 import { updateDesktopSettings } from '@/lib/persistence';
 
@@ -51,6 +51,31 @@ const clearRetryTimeout = () => {
   }
 };
 
+const applyInstalledApps = (
+  installed: InstalledDesktopAppInfo[],
+  hasLoadedApps: boolean,
+  set: (partial: Partial<OpenInAppsState>) => void,
+) => {
+  if (!Array.isArray(installed) || installed.length === 0) {
+    set({ availableApps: getAlwaysAvailableApps(), hasLoadedApps });
+    return;
+  }
+
+  const allowed = new Set(installed.map((app) => app.name));
+  const iconMap = new Map(installed.map((app) => [app.name, app.iconDataUrl ?? undefined]));
+
+  const filtered = OPEN_IN_APPS.filter(
+    (app) => allowed.has(app.appName) || OPEN_IN_ALWAYS_AVAILABLE_APP_IDS.has(app.id)
+  );
+
+  const withIcons = filtered.map((app) => ({
+    ...getPlatformOpenInApp(app),
+    iconDataUrl: iconMap.get(app.appName),
+  }));
+
+  set({ availableApps: withIcons.length > 0 ? withIcons : getAlwaysAvailableApps(), hasLoadedApps });
+};
+
 export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
   selectedAppId: getStoredAppId(),
   availableApps: getAlwaysAvailableApps(),
@@ -64,29 +89,12 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
     }
     initialized = true;
 
-    const applyInstalledApps = (installed: InstalledDesktopAppInfo[], hasLoadedApps = true) => {
-      if (!Array.isArray(installed) || installed.length === 0) {
-        set({ availableApps: getAlwaysAvailableApps(), hasLoadedApps });
-        return;
-      }
-
-      const allowed = new Set(installed.map((app) => app.name));
-      const iconMap = new Map(installed.map((app) => [app.name, app.iconDataUrl ?? undefined]));
-
-      const filtered = OPEN_IN_APPS.filter(
-        (app) => allowed.has(app.appName) || OPEN_IN_ALWAYS_AVAILABLE_APP_IDS.has(app.id)
-      );
-
-      const withIcons = filtered.map((app) => ({
-        ...getPlatformOpenInApp(app),
-        iconDataUrl: iconMap.get(app.appName),
-      }));
-
-      set({ availableApps: withIcons, hasLoadedApps: true });
+    const applyApps = (installed: InstalledDesktopAppInfo[], hasLoadedApps = true) => {
+      applyInstalledApps(installed, hasLoadedApps, set);
     };
 
     const loadInstalledApps = async (force?: boolean) => {
-      if (!isDesktopShell() || !isDesktopLocalOriginActive()) {
+      if (!isOpenInAppAvailable()) {
         return;
       }
 
@@ -121,7 +129,7 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
         const shouldRetryEmptyScan = success && !hasCache && installed.length === 0 && retryAttempt < 3;
 
         set({ isCacheStale: hasCache ? isCacheStale : false });
-        applyInstalledApps(installed, success ? !shouldRetryEmptyScan : false);
+        applyApps(installed, success ? !shouldRetryEmptyScan : false);
 
         if (success) {
           if (shouldRetryEmptyScan) {
@@ -181,6 +189,7 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
     };
 
     const updateHandler = (event: Event) => {
+      if (!isOpenInAppAvailable()) return;
       const detail = (event as CustomEvent<InstalledDesktopAppInfo[]>).detail;
       if (!Array.isArray(detail)) {
         return;
@@ -189,7 +198,7 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
       retryAttempt = 3;
       keepScanning = false;
       set({ isScanning: false, isCacheStale: false });
-      applyInstalledApps(detail);
+      applyApps(detail);
     };
 
     window.addEventListener('openchamber:settings-synced', settingsHandler);
@@ -213,7 +222,7 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
       get().initialize();
     }
 
-    if (!isDesktopShell() || !isDesktopLocalOriginActive()) {
+    if (!isOpenInAppAvailable()) {
       return;
     }
 
@@ -244,21 +253,8 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
         isCacheStale,
       } = await fetchDesktopInstalledApps(appNames, force);
 
-      const allowed = new Set(installed.map((app) => app.name));
-      const iconMap = new Map(installed.map((app) => [app.name, app.iconDataUrl ?? undefined]));
-      const filtered = OPEN_IN_APPS.filter(
-        (app) => allowed.has(app.appName) || OPEN_IN_ALWAYS_AVAILABLE_APP_IDS.has(app.id)
-      );
-      const withIcons = filtered.map((app) => ({
-        ...app,
-        iconDataUrl: iconMap.get(app.appName),
-      }));
-
-      set({
-        availableApps: withIcons.length > 0 ? withIcons : getAlwaysAvailableApps(),
-        hasLoadedApps: withIcons.length > 0,
-        isCacheStale: hasCache ? isCacheStale : false,
-      });
+      applyInstalledApps(installed, installed.length > 0, set);
+      set({ isCacheStale: hasCache ? isCacheStale : false });
     } finally {
       loading = false;
       if (!keepScanning) {
