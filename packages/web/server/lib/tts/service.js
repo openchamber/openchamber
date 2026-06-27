@@ -129,12 +129,88 @@ class TTSService {
       const arrayBuffer = await response.arrayBuffer();
       return {
         buffer: Buffer.from(arrayBuffer),
-        contentType: 'audio/mpeg',
+        contentType: normalizedBaseURL ? 'audio/wav' : 'audio/mpeg',
       };
     } catch (error) {
       console.error('[TTSService] Error generating speech:', error);
       throw new Error(`Failed to generate speech: ${error.message || 'Unknown error'}`);
     }
+  }
+
+  /**
+   * Generate speech and yield chunks as they arrive (streaming).
+   * Returns an async generator of Buffer chunks + contentType via callback.
+   */
+  async *generateSpeechStreamRaw(options) {
+    const {
+      text,
+      voice = 'coral',
+      model = 'gpt-4o-mini-tts',
+      speed = 1.0,
+      instructions,
+      apiKey,
+      baseURL,
+    } = options;
+
+    const normalizedBaseURLResult = normalizeCustomOpenAIBaseURL(baseURL);
+    if (normalizedBaseURLResult.error) {
+      throw new Error(normalizedBaseURLResult.error);
+    }
+    const normalizedBaseURL = normalizedBaseURLResult.value;
+
+    let client;
+    if (normalizedBaseURL || apiKey) {
+      const clientOpts = {};
+      if (apiKey) clientOpts.apiKey = apiKey;
+      if (!apiKey) clientOpts.apiKey = 'not-required';
+      if (normalizedBaseURL) clientOpts.baseURL = normalizedBaseURL;
+      client = new OpenAI(clientOpts);
+    } else {
+      client = this._getClient();
+    }
+
+    if (!client) {
+      throw new Error('TTS service not available. Configure OpenAI in OpenCode, provide an API key, or set a custom server URL in settings.');
+    }
+
+    if (!text.trim()) {
+      throw new Error('Text is required for TTS');
+    }
+
+    const speechParams = normalizedBaseURL
+      ? { model, voice, input: text, speed }
+      : {
+          model,
+          voice,
+          input: text,
+          speed,
+          ...(instructions && { instructions }),
+          response_format: 'mp3',
+        };
+
+    console.log('[TTSService] Streaming speech — model:', model, 'voice:', voice, 'baseURL:', normalizedBaseURL ?? '(openai)');
+    const response = await client.audio.speech.create(speechParams);
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => 'Unknown error');
+      throw new Error(`TTS API error ${response.status}: ${errorText}`);
+    }
+
+    const reader = response.body.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      yield Buffer.from(value);
+    }
+  }
+
+  /**
+   * Get the content type for a given baseURL
+   */
+  getContentType(baseURL) {
+    const normalizedBaseURLResult = normalizeCustomOpenAIBaseURL(baseURL);
+    const normalizedBaseURL = normalizedBaseURLResult.value;
+    return normalizedBaseURL ? 'audio/wav' : 'audio/mpeg';
   }
 
   /**
