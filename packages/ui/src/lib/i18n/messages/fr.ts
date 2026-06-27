@@ -2,6 +2,15 @@ import { settingsDict } from './fr.settings';
 
 export const dict = {
   ...settingsDict,
+  'pet.resize.aria': 'Redimensionner le compagnon',
+  'pet.bubble.working': 'Traitement…',
+  'pet.bubble.review': 'Prêt pour la revue',
+  'pet.bubble.failed': 'Une erreur est survenue',
+  'pet.bubble.waitingQuestion': 'En attente de votre réponse',
+  'pet.bubble.minimizeAria': 'Réduire',
+  'pet.bubble.expandAria': 'Afficher le statut',
+  'pet.action.allow': 'Autoriser',
+  'pet.action.deny': 'Refuser',
   'common.loading': 'Chargement...',
   'common.unavailable': 'Indisponible',
   'common.language.english': 'Anglais',

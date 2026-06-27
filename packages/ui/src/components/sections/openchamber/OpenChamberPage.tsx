@@ -11,6 +11,7 @@ import { VoiceSettings } from './VoiceSettings';
 import { TunnelSettings } from './TunnelSettings';
 import { OpenCodeCliSettings } from './OpenCodeCliSettings';
 import { DesktopNetworkSettings } from './DesktopNetworkSettings';
+import { DesktopPetSettings } from './DesktopPetSettings';
 import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useDeviceInfo } from '@/lib/device';
@@ -84,6 +85,8 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
         switch (section) {
             case 'visual':
                 return <VisualSectionContent />;
+            case 'pet':
+                return <PetSectionContent />;
             case 'chat':
                 return <ChatSectionContent />;
             case 'sessions':
@@ -124,7 +127,9 @@ const ShortcutsSectionContent: React.FC = () => {
 // Visual section: Theme Mode, Font Size, Spacing, Input Bar Offset (mobile), Nav Rail
 const VisualSectionContent: React.FC = () => {
     const isVSCode = isVSCodeRuntime();
-    return <OpenChamberVisualSettings visibleSettings={[
+    return (
+        <div className="space-y-6">
+            <OpenChamberVisualSettings visibleSettings={[
         'theme',
         'pwaInstallName',
         'pwaOrientation',
@@ -139,7 +144,14 @@ const VisualSectionContent: React.FC = () => {
         'expandedEditorToolbar',
         ...(!isVSCode ? ['terminalQuickKeys' as const] : []),
         'reportUsage',
-    ]} />;
+    ]} />
+        </div>
+    );
+};
+
+// Pet section: floating desktop companion (desktop local origin only)
+const PetSectionContent: React.FC = () => {
+    return <DesktopPetSettings />;
 };
 
 // Chat section: User message rendering, Diff layout, Mobile status bar, Show reasoning traces, Queue mode, Persist draft

@@ -83,6 +83,7 @@ interface SettingsViewProps {
 
 const pageOrder: SettingsPageSlug[] = [
   'appearance',
+  'pet',
   'chat',
   'notifications',
   'sessions',
@@ -173,6 +174,8 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
       return 'server';
     case 'appearance':
       return 'palette';
+    case 'pet':
+      return 'ghost-3';
     case 'chat':
       return 'chat-ai-3';
     case 'magic-prompts':
@@ -342,8 +345,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       .filter((page) => !allowedPages || allowedPages.has(page.slug))
       .filter((page) => isPageAvailable(page, runtimeCtx))
       .filter((page) => !(runtimeCtx.isVSCode && page.slug === 'projects'))
-      .filter((page) => !(isMobile && page.slug === 'shortcuts'));
-  }, [runtimeCtx, isMobile, visiblePageSlugs]);
+      .filter((page) => !(isMobile && page.slug === 'shortcuts'))
+      // Pet relies on native desktop IPC; hide it when the desktop shell points at a remote instance.
+      .filter((page) => !(page.slug === 'pet' && !isDesktopLocalOrigin));
+  }, [runtimeCtx, isMobile, visiblePageSlugs, isDesktopLocalOrigin]);
 
   const sortedFilteredPages = React.useMemo(() => {
     const rank = new Map<SettingsPageSlug, number>(pageOrder.map((s, i) => [s, i]));
@@ -469,6 +474,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
   const openChamberSectionBySlug: Partial<Record<SettingsPageSlug, OpenChamberSection>> = React.useMemo(() => ({
     appearance: 'visual',
+    pet: 'pet',
     chat: 'chat',
     shortcuts: 'shortcuts',
     sessions: 'sessions',
@@ -505,6 +511,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return t('settings.page.git.title');
       case 'appearance':
         return t('settings.page.appearance.title');
+      case 'pet':
+        return t('settings.openchamber.pet.section');
       case 'chat':
         return t('settings.page.chat.title');
       case 'shortcuts':
@@ -810,7 +818,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       case 'sessions':
       case 'notifications':
       case 'voice':
-      case 'tunnel': {
+      case 'tunnel':
+      case 'pet': {
         const section = openChamberSectionBySlug[slug] ?? 'visual';
         return <OpenChamberPage section={section} />;
       }

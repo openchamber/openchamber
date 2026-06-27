@@ -3,6 +3,15 @@ import { settingsDict } from './ko.settings';
 
 export const dict: Record<I18nKey, string> = {
   ...settingsDict,
+  'pet.resize.aria': '펫 크기 조절',
+  'pet.bubble.working': '작업 중…',
+  'pet.bubble.review': '검토 준비 완료',
+  'pet.bubble.failed': '문제가 발생했습니다',
+  'pet.bubble.waitingQuestion': '답변을 기다리는 중',
+  'pet.bubble.minimizeAria': '최소화',
+  'pet.bubble.expandAria': '상태 보기',
+  'pet.action.allow': '허용',
+  'pet.action.deny': '거부',
   'common.loading': '로딩 중...',
   'common.unavailable': '사용할 수 없음',
   'common.language.english': '영어',

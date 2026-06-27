@@ -3,6 +3,15 @@ import { settingsDict } from './es.settings';
 
 export const dict: Record<I18nKey, string> = {
   ...settingsDict,
+  "pet.resize.aria": "Redimensionar mascota",
+  "pet.bubble.working": "Trabajando…",
+  "pet.bubble.review": "Listo para revisar",
+  "pet.bubble.failed": "Algo salió mal",
+  "pet.bubble.waitingQuestion": "Esperando tu respuesta",
+  "pet.bubble.minimizeAria": "Minimizar",
+  "pet.bubble.expandAria": "Mostrar estado",
+  "pet.action.allow": "Permitir",
+  "pet.action.deny": "Denegar",
   "common.loading": "Cargando...",
   "common.unavailable": "No disponible",
   "common.language.english": "Inglés",

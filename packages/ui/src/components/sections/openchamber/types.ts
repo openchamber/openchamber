@@ -1,5 +1,6 @@
 export type OpenChamberSection =
   | 'visual'
+  | 'pet'
   | 'chat'
   | 'shortcuts'
   | 'sessions'
