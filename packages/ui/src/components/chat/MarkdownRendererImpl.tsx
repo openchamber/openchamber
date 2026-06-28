@@ -18,7 +18,7 @@ import type { EditorAPI } from '@/lib/api/types';
 import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { ensureOutsideFileGrantForDesktop } from '@/lib/outsideFileGrants';
 import { getDirectoryForFilePath, isAbsoluteFilePath, isFilePathWithinDirectory, normalizeFilePath, toAbsoluteFilePath } from '@/lib/path-utils';
-import { renderMarkdownBlocks, renderMarkdownSync } from './markdown/markdownCore';
+import { renderMarkdownBlocks, renderMarkdownSync, hash } from './markdown/markdownCore';
 import { ensureMarkdownShikiTheme, getMarkdownSyntaxVars } from './markdown/markdownTheme';
 import {
   attachMarkdownInteractions,
@@ -1021,11 +1021,21 @@ const useMorphdomMarkdown = ({
   // runs when the target is empty — subsequent updates keep the prior rich DOM
   // until the next async render morphs in (no flash). Mirrors OpenCode's
   // `initialValue: fallback(text)` resource pattern.
+  //
+  // For non-streaming mode, always sync-render when text changes (replace the
+  // existing block) so the DOM never shows raw markdown source even if the
+  // async render is cancelled or delayed. The async pass then upgrades syntax
+  // coloring on top of the sync-rendered structure.
   React.useLayoutEffect(() => {
     const container = containerRef.current;
     const target = container?.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
     if (!target) return;
-    if (text && target.childNodes.length === 0) {
+    if (text) {
+      // For streaming mode, only render on first mount (when target is empty)
+      // to avoid flashing partial content. For non-streaming mode, always
+      // sync-render so the DOM is never left with stale or raw content.
+      if (streaming && target.childNodes.length > 0) return;
+
       const block = document.createElement('div');
       block.setAttribute('data-md-block', '');
       // `display:contents` keeps margin-collapsing/spacing identical to a flat
@@ -1038,9 +1048,19 @@ const useMorphdomMarkdown = ({
       // <pre>/tables that "snap" into their decorated form a tick later. Matching
       // the structure here keeps the async morph to syntax colors only.
       decorateMarkdown(block, ctx);
-      target.appendChild(block);
+      // Use a deliberately mismatched id (`:sync:0` vs the async `:full:1` /
+      // `:live:1`) so the async useEffect always detects a change and morphs
+      // the block, upgrading syntax coloring on top of the sync-rendered structure.
+      block.setAttribute('data-md-id', `${hash(text)}:sync:0`);
+      // Replace any existing block to keep exactly one block in the DOM.
+      const existing = target.querySelector('[data-md-block]');
+      if (existing) {
+        target.replaceChild(block, existing);
+      } else {
+        target.appendChild(block);
+      }
     }
-  }, [containerRef, text, ctx]);
+  }, [containerRef, text, streaming, ctx]);
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -1195,6 +1215,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
   mermaidControls?: MermaidControlOptions;
   allowMermaidWheelZoom?: boolean;
   enableFileReferences?: boolean;
+  cacheKey?: string;
 }> = ({
   content,
   className,
@@ -1204,6 +1225,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
   onShowPopup,
   allowMermaidWheelZoom = false,
   enableFileReferences = true,
+  cacheKey,
 }) => {
   const { editor, runtime } = useRuntimeAPIs();
   const currentTheme = useCurrentMermaidTheme();
@@ -1238,7 +1260,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
     containerRef,
     text: renderedContent,
     streaming: false,
-    cacheKey: `simple:${variant}`,
+    cacheKey: cacheKey ?? `simple:${variant}`,
     syntaxVars,
     ctx,
   });
@@ -1258,5 +1280,6 @@ export const SimpleMarkdownRenderer = React.memo(SimpleMarkdownRendererImpl, (pr
     && prev.stripFrontmatter === next.stripFrontmatter
     && prev.onShowPopup === next.onShowPopup
     && prev.allowMermaidWheelZoom === next.allowMermaidWheelZoom
-    && prev.enableFileReferences === next.enableFileReferences;
+    && prev.enableFileReferences === next.enableFileReferences
+    && prev.cacheKey === next.cacheKey;
 });
