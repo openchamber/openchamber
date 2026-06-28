@@ -471,6 +471,9 @@ export function applySessionStatusSnapshot(
 
       if (incoming && incoming.type !== "idle") {
         const isNewOrChanged = !haveEquivalentSyncSnapshots(current[sessionId], incoming)
+        // Authoritative mode (bootstrap/reconnect) treats the snapshot as truth,
+        // so any active entry confirms liveness. Monotonic mode only seeds freshness
+        // when the status meaningfully changes.
         if (mode === "authoritative" || isNewOrChanged) {
           freshSessionIds.add(sessionId)
         }
@@ -555,7 +558,7 @@ export function getSessionWatchdogFreshnessLineage(
     seen.add(currentSessionId)
 
     const currentSession = lookupSession(directory, currentSessionId)
-    const parentID = (currentSession as Session & { parentID?: string | null } | undefined)?.parentID ?? undefined
+    const parentID = currentSession?.parentID ?? undefined
     if (!parentID) break
     currentSessionId = parentID
   }
@@ -1650,7 +1653,8 @@ export function SyncProvider(props: {
     for (const targetSessionId of getSessionWatchdogFreshnessLineage(directory, sessionId, lookupSession)) {
       sessionFreshnessByDirectory.set(targetSessionId, now)
     }
-  }, [childStores.children])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- childStores is a stable singleton; the callback reads the live Map at call time
+  }, [])
 
   const system = useMemo<SyncSystem>(
     () => ({
@@ -1982,6 +1986,16 @@ export function SyncProvider(props: {
               lastStatusPollAtByDirectoryRef.current.delete(directory)
               lastFullResyncAtByDirectoryRef.current.delete(directory)
               continue
+            }
+
+            const sessionFreshnessByDirectory = lastActiveEventAtBySessionRef.current.get(directory)
+            if (sessionFreshnessByDirectory) {
+              const candidateSet = new Set(candidateSessionIds)
+              for (const staleSessionId of sessionFreshnessByDirectory.keys()) {
+                if (!candidateSet.has(staleSessionId)) {
+                  sessionFreshnessByDirectory.delete(staleSessionId)
+                }
+              }
             }
 
             if (!lastActiveEventAtByDirectoryRef.current.has(directory)) {

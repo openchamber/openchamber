@@ -216,6 +216,12 @@ export function applyDirectoryEvent(
     callbacks?.onSessionFreshness?.(sessionID)
   }
 
+  const isSessionActive = (sessionID?: string) => {
+    if (!sessionID) return false
+    const currentStatus = draft.session_status?.[sessionID]
+    return Boolean(currentStatus) && currentStatus.type !== "idle"
+  }
+
   switch (event.type) {
     case "server.instance.disposed": {
       callbacks?.onRefresh?.("")
@@ -243,8 +249,7 @@ export function applyDirectoryEvent(
       const result = Binary.search(sessions, info.id, (s) => s.id)
 
       if (info.time.archived) {
-        const currentStatus = draft.session_status?.[info.id]
-        const wasActive = Boolean(currentStatus) && currentStatus.type !== "idle"
+        const wasActive = isSessionActive(info.id)
         if (result.found) sessions.splice(result.index, 1)
         cleanupSessionCaches(draft, info.id, callbacks?.onSetSessionTodo)
         if (!info.parentID) draft.sessionTotal = Math.max(0, draft.sessionTotal - 1)
@@ -266,8 +271,7 @@ export function applyDirectoryEvent(
       const info = (event.properties as { info: Session }).info
       const sessions = draft.session
       const result = Binary.search(sessions, info.id, (s) => s.id)
-      const currentStatus = draft.session_status?.[info.id]
-      const wasActive = Boolean(currentStatus) && currentStatus.type !== "idle"
+      const wasActive = isSessionActive(info.id)
       if (result.found) sessions.splice(result.index, 1)
       cleanupSessionCaches(draft, info.id, callbacks?.onSetSessionTodo)
       if (!info.parentID) draft.sessionTotal = Math.max(0, draft.sessionTotal - 1)
@@ -278,6 +282,7 @@ export function applyDirectoryEvent(
     case "session.diff": {
       const props = event.properties as { sessionID: string; diff: FileDiff[] }
       draft.session_diff[props.sessionID] = props.diff
+      // Diff events are live session activity, so they always refresh freshness.
       touchSessionFreshness(props.sessionID)
       return true
     }
@@ -286,6 +291,7 @@ export function applyDirectoryEvent(
       const props = event.properties as { sessionID: string; todos: Todo[] }
       draft.todo[props.sessionID] = props.todos
       callbacks?.onSetSessionTodo?.(props.sessionID, props.todos)
+      // Todo updates are also live session activity and should keep the watchdog alive.
       touchSessionFreshness(props.sessionID)
       return true
     }
@@ -309,6 +315,7 @@ export function applyDirectoryEvent(
       if (areSessionStatusesEqual(draft.session_status[props.sessionID], status)) {
         return false
       }
+      // Idle/error transitions intentionally do not refresh freshness.
       draft.session_status[props.sessionID] = status
       return true
     }
@@ -319,6 +326,7 @@ export function applyDirectoryEvent(
       if (areSessionStatusesEqual(draft.session_status[props.sessionID], status)) {
         return false
       }
+      // Idle/error transitions intentionally do not refresh freshness.
       draft.session_status[props.sessionID] = status
       return true
     }
