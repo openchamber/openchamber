@@ -201,8 +201,27 @@ export function applyDirectoryEvent(
     onRefresh?: (directory: string) => void
     onLoadLsp?: () => void
     onSetSessionTodo?: (sessionID: string, todos: Todo[] | undefined) => void
+    onSessionFreshness?: (sessionID: string) => void
+    onResolveSessionIDForMessageID?: (messageID: string) => string | undefined
   },
 ): DirectoryEventResult {
+  const isSessionActive = (sessionID?: string) => {
+    if (!sessionID) return false
+    const currentStatus = draft.session_status?.[sessionID]
+    return Boolean(currentStatus) && currentStatus.type !== "idle"
+  }
+
+  const touchSessionFreshness = (sessionID?: string) => {
+    if (!sessionID) return
+    callbacks?.onSessionFreshness?.(sessionID)
+  }
+
+  const touchSessionFreshnessIfActive = (sessionID?: string) => {
+    if (!sessionID) return
+    if (!isSessionActive(sessionID)) return
+    callbacks?.onSessionFreshness?.(sessionID)
+  }
+
   switch (event.type) {
     case "server.instance.disposed": {
       callbacks?.onRefresh?.("")
@@ -220,6 +239,9 @@ export function applyDirectoryEvent(
         trimSessions(draft)
         if (!info.parentID) draft.sessionTotal += 1
       }
+      // Metadata-only session creation should not keep an idle session alive;
+      // freshness is only touched when the session is already active.
+      touchSessionFreshnessIfActive(info.id)
       return true
     }
 
@@ -229,9 +251,11 @@ export function applyDirectoryEvent(
       const result = Binary.search(sessions, info.id, (s) => s.id)
 
       if (info.time.archived) {
+        const wasActive = isSessionActive(info.id)
         if (result.found) sessions.splice(result.index, 1)
         cleanupSessionCaches(draft, info.id, callbacks?.onSetSessionTodo)
         if (!info.parentID) draft.sessionTotal = Math.max(0, draft.sessionTotal - 1)
+        if (wasActive) touchSessionFreshness(info.id)
         return true
       }
 
@@ -241,6 +265,8 @@ export function applyDirectoryEvent(
         sessions.splice(result.index, 0, info)
         trimSessions(draft)
       }
+      // Metadata-only updates should not mask a stuck idle session.
+      touchSessionFreshnessIfActive(info.id)
       return true
     }
 
@@ -248,15 +274,19 @@ export function applyDirectoryEvent(
       const info = (event.properties as { info: Session }).info
       const sessions = draft.session
       const result = Binary.search(sessions, info.id, (s) => s.id)
+      const wasActive = isSessionActive(info.id)
       if (result.found) sessions.splice(result.index, 1)
       cleanupSessionCaches(draft, info.id, callbacks?.onSetSessionTodo)
       if (!info.parentID) draft.sessionTotal = Math.max(0, draft.sessionTotal - 1)
+      if (wasActive) touchSessionFreshness(info.id)
       return true
     }
 
     case "session.diff": {
       const props = event.properties as { sessionID: string; diff: FileDiff[] }
       draft.session_diff[props.sessionID] = props.diff
+      // Diff events are live session activity, so they always refresh freshness.
+      touchSessionFreshness(props.sessionID)
       return true
     }
 
@@ -264,15 +294,22 @@ export function applyDirectoryEvent(
       const props = event.properties as { sessionID: string; todos: Todo[] }
       draft.todo[props.sessionID] = props.todos
       callbacks?.onSetSessionTodo?.(props.sessionID, props.todos)
+      // Todo updates are also live session activity and should keep the watchdog alive.
+      touchSessionFreshness(props.sessionID)
       return true
     }
 
     case "session.status": {
       const props = event.properties as { sessionID: string; status: SessionStatus }
+      const isActive = props.status.type !== "idle"
       if (areSessionStatusesEqual(draft.session_status[props.sessionID], props.status)) {
+        // Identical non-idle status events still count as live activity because
+        // the server may emit repeated busy/retry updates while work continues.
+        if (isActive) touchSessionFreshness(props.sessionID)
         return false
       }
       draft.session_status[props.sessionID] = props.status
+      if (isActive) touchSessionFreshness(props.sessionID)
       return true
     }
 
@@ -282,6 +319,7 @@ export function applyDirectoryEvent(
       if (areSessionStatusesEqual(draft.session_status[props.sessionID], status)) {
         return false
       }
+      // Idle/error transitions intentionally do not refresh freshness.
       draft.session_status[props.sessionID] = status
       return true
     }
@@ -292,6 +330,7 @@ export function applyDirectoryEvent(
       if (areSessionStatusesEqual(draft.session_status[props.sessionID], status)) {
         return false
       }
+      // Idle/error transitions intentionally do not refresh freshness.
       draft.session_status[props.sessionID] = status
       return true
     }
@@ -301,6 +340,7 @@ export function applyDirectoryEvent(
       const messages = draft.message[info.sessionID]
       if (!messages) {
         draft.message[info.sessionID] = [info]
+        touchSessionFreshness(info.sessionID)
         return true
       }
       const result = Binary.search(messages, info.id, (m) => m.id)
@@ -310,6 +350,7 @@ export function applyDirectoryEvent(
         const unchanged = areMessageUpdateFieldsEqual(existing, info)
         if (unchanged) {
           syncDebug.reducer.messageUpdatedUnchanged(info.sessionID, info.id, info.role, (info as { finish?: unknown }).finish, (info.time as { completed?: number })?.completed)
+          touchSessionFreshness(info.sessionID)
           return false
         }
         const next = [...messages]
@@ -320,6 +361,7 @@ export function applyDirectoryEvent(
         next.splice(result.index, 0, info)
         draft.message[info.sessionID] = next
       }
+      touchSessionFreshness(info.sessionID)
       return true
     }
 
@@ -335,24 +377,30 @@ export function applyDirectoryEvent(
         }
       }
       delete draft.part[props.messageID]
+      touchSessionFreshness(props.sessionID)
       return true
     }
 
     case "message.part.updated": {
       const props = event.properties as { sessionID?: string; part: Part }
       const part = props.part
+      const sessionID = props.sessionID ?? (part as { sessionID?: string }).sessionID
       if (SKIP_PARTS.has(part.type)) {
         syncDebug.reducer.partSkipped((part as { messageID: string }).messageID, part.id, part.type)
+        touchSessionFreshnessIfActive(sessionID)
         return false
       }
       const messageID = (part as { messageID?: string }).messageID
-      const sessionID = props.sessionID ?? (part as { sessionID?: string }).sessionID
-      if (!messageID) return false
+      if (!messageID) {
+        touchSessionFreshnessIfActive(sessionID)
+        return false
+      }
       const missingOwningMessage = !hasMessage(draft, sessionID, messageID)
       const parts = draft.part[messageID]
       if (!parts) {
         syncDebug.reducer.partUpdatedNoExistingParts(messageID, part.id, part.type)
         draft.part[messageID] = [part]
+        touchSessionFreshness(sessionID)
         return missingOwningMessage
           ? {
             changed: true,
@@ -365,6 +413,7 @@ export function applyDirectoryEvent(
       if (result.found) {
         const previous = next[result.index]
         if (shouldPreserveExistingPart(previous, part)) {
+          touchSessionFreshnessIfActive(sessionID)
           return false
         }
         const dedupeFields = getUpdatedDeltaFields(previous, part)
@@ -387,6 +436,7 @@ export function applyDirectoryEvent(
         next.splice(insertResult.index, 0, part)
       }
       draft.part[messageID] = next
+      touchSessionFreshness(sessionID)
       return missingOwningMessage
         ? {
           changed: true,
@@ -396,9 +446,13 @@ export function applyDirectoryEvent(
     }
 
     case "message.part.removed": {
-      const props = event.properties as { messageID: string; partID: string }
+      const props = event.properties as { sessionID?: string; messageID: string; partID: string }
+      const sessionID = props.sessionID ?? callbacks?.onResolveSessionIDForMessageID?.(props.messageID)
       const parts = draft.part[props.messageID]
-      if (!parts) return false
+      if (!parts) {
+        touchSessionFreshnessIfActive(sessionID)
+        return false
+      }
       const result = Binary.search(parts, props.partID, (p) => p.id)
       if (result.found) {
         const next = [...parts]
@@ -408,8 +462,10 @@ export function applyDirectoryEvent(
         } else {
           draft.part[props.messageID] = next
         }
+        touchSessionFreshnessIfActive(sessionID)
         return true
       }
+      touchSessionFreshnessIfActive(sessionID)
       return false
     }
 
@@ -421,20 +477,23 @@ export function applyDirectoryEvent(
         field: string
         delta: string
       }
+      const sessionID = props.sessionID ?? callbacks?.onResolveSessionIDForMessageID?.(props.messageID)
       const parts = draft.part[props.messageID]
       if (!parts) {
         syncDebug.reducer.partDeltaNoParts(props.messageID, props.partID)
+        touchSessionFreshnessIfActive(sessionID)
         return {
           changed: false,
-          materialization: { type: "incomplete-session-snapshot", sessionID: props.sessionID, messageID: props.messageID, partID: props.partID },
+          materialization: { type: "incomplete-session-snapshot", sessionID, messageID: props.messageID, partID: props.partID },
         }
       }
       const result = Binary.search(parts, props.partID, (p) => p.id)
       if (!result.found) {
         syncDebug.reducer.partDeltaNotFound(props.messageID, props.partID)
+        touchSessionFreshnessIfActive(sessionID)
         return {
           changed: false,
-          materialization: { type: "incomplete-session-snapshot", sessionID: props.sessionID, messageID: props.messageID, partID: props.partID },
+          materialization: { type: "incomplete-session-snapshot", sessionID, messageID: props.messageID, partID: props.partID },
         }
       }
       const existing = parts[result.index] as Record<string, unknown>
@@ -449,6 +508,7 @@ export function applyDirectoryEvent(
         __dedupeNextDeltaFields: dedupeFields.filter((field) => field !== props.field),
       } as unknown as Part
       draft.part[props.messageID] = next
+      touchSessionFreshnessIfActive(sessionID)
       return true
     }
 
@@ -470,20 +530,26 @@ export function applyDirectoryEvent(
         next.splice(result.index, 0, permission)
       }
       draft.permission[permission.sessionID] = next
+      touchSessionFreshness(permission.sessionID)
       return true
     }
 
     case "permission.replied": {
       const props = event.properties as { sessionID: string; requestID: string }
       const permissions = draft.permission[props.sessionID]
-      if (!permissions) return false
+      if (!permissions) {
+        touchSessionFreshness(props.sessionID)
+        return false
+      }
       const result = Binary.search(permissions, props.requestID, (p) => p.id)
       if (result.found) {
         const next = [...permissions]
         next.splice(result.index, 1)
         draft.permission[props.sessionID] = next
+        touchSessionFreshness(props.sessionID)
         return true
       }
+      touchSessionFreshness(props.sessionID)
       return false
     }
 
@@ -498,6 +564,7 @@ export function applyDirectoryEvent(
         next.splice(result.index, 0, question)
       }
       draft.question[question.sessionID] = next
+      touchSessionFreshness(question.sessionID)
       return true
     }
 
@@ -505,14 +572,19 @@ export function applyDirectoryEvent(
     case "question.rejected": {
       const props = event.properties as { sessionID: string; requestID: string }
       const questions = draft.question[props.sessionID]
-      if (!questions) return false
+      if (!questions) {
+        touchSessionFreshness(props.sessionID)
+        return false
+      }
       const result = Binary.search(questions, props.requestID, (q) => q.id)
       if (result.found) {
         const next = [...questions]
         next.splice(result.index, 1)
         draft.question[props.sessionID] = next
+        touchSessionFreshness(props.sessionID)
         return true
       }
+      touchSessionFreshness(props.sessionID)
       return false
     }
 
