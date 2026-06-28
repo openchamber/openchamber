@@ -45,6 +45,7 @@ import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/pro
 import { cn } from '@/lib/utils';
 import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { mergeLiveSessionWithGlobalSession, refreshGlobalSessions, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useMobileSessionExpansionStore } from '@/stores/useMobileSessionExpansionStore';
 import { useMobileSessionTreeStore } from '@/stores/useMobileSessionTreeStore';
@@ -531,6 +532,8 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const worktreeExpandedMap = useMobileSessionTreeStore((state) => state.worktreeExpanded);
   const setProjectExpanded = useMobileSessionTreeStore((state) => state.setProjectExpanded);
   const setWorktreeExpanded = useMobileSessionTreeStore((state) => state.setWorktreeExpanded);
+  const showSubagentSessionsInSidebar = useUIStore((state) => state.showSubagentSessionsInSidebar);
+  const setShowSubagentSessionsInSidebar = useUIStore((state) => state.setShowSubagentSessionsInSidebar);
   const worktreeOrderByProject = useWorktreeOrderStore((state) => state.orderByProject);
   const expandedParents = useMobileSessionExpansionStore((state) => state.expandedParents);
   const toggleParent = useMobileSessionExpansionStore((state) => state.toggleParent);
@@ -753,11 +756,15 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const renderBucketSessions = (node: ProjectNode, bucket: WorktreeBucket, indent: number) => {
     const bucketKey = `${node.project.id}::${bucket.key}`;
 
+    const effectiveSessions = showSubagentSessionsInSidebar
+      ? bucket.sessions
+      : bucket.sessions.filter((s) => !getParentId(s));
+
     // Group children by parent within this bucket, and treat sessions whose parent
     // is not in this bucket as top-level so nothing is hidden.
-    const idsInBucket = new Set(bucket.sessions.map((entry) => entry.id));
+    const idsInBucket = new Set(effectiveSessions.map((entry) => entry.id));
     const childrenByParent = new Map<string, Session[]>();
-    for (const candidate of bucket.sessions) {
+    for (const candidate of effectiveSessions) {
       const parentId = getParentId(candidate);
       if (parentId && idsInBucket.has(parentId)) {
         const list = childrenByParent.get(parentId) ?? [];
@@ -765,7 +772,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         childrenByParent.set(parentId, list);
       }
     }
-    const roots = bucket.sessions.filter((entry) => {
+    const roots = effectiveSessions.filter((entry) => {
       const parentId = getParentId(entry);
       return !parentId || !idsInBucket.has(parentId);
     });
@@ -1030,6 +1037,27 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             ) : null}
           </div>
         </div>
+
+        <div className="flex items-center gap-2 px-4 py-1.5">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={showSubagentSessionsInSidebar}
+            onClick={() => setShowSubagentSessionsInSidebar(!showSubagentSessionsInSidebar)}
+            className={cn("relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors",
+              showSubagentSessionsInSidebar ? "bg-[var(--primary-base)]" : "bg-[var(--interactive-border)]"
+            )}
+          >
+            <span className={cn("pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-sm transform ring-0 transition-transform",
+              showSubagentSessionsInSidebar ? "translate-x-4" : "translate-x-0"
+            )} />
+          </button>
+          <span className="text-xs text-muted-foreground select-none" onClick={() => setShowSubagentSessionsInSidebar(!showSubagentSessionsInSidebar)}>
+            {t('sidebar.subagent.toggleLabel')}
+          </span>
+        </div>
+
+
 
         <ScrollShadow className="min-h-0 flex-1 overflow-y-auto pb-4">
           {projectsMeta.length === 0 ? (
