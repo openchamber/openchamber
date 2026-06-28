@@ -60,6 +60,24 @@ export interface UseChatTimelineControllerResult {
 
 const TURN_MODEL_CACHE_MAX = 30
 const HISTORY_SCROLL_THRESHOLD = 200
+// On touch surfaces the user can drag continuously toward the top, and
+// loadEarlier is an async (network) fetch. A 200px lead is enough on desktop
+// (wheel + fast render) but the finger can outrun an in-flight fetch on mobile
+// and hit the very top before history lands. Give touch a much larger,
+// viewport-relative head start so the fetch completes before the top is
+// reached, regardless of how fast the user drags.
+const MOBILE_HISTORY_SCROLL_THRESHOLD_MIN = 1200
+const MOBILE_HISTORY_SCROLL_VIEWPORT_FACTOR = 2
+
+const resolveHistoryScrollThreshold = (clientHeight: number): number => {
+    if (!isMobileSurfaceRuntime()) {
+        return HISTORY_SCROLL_THRESHOLD
+    }
+    return Math.max(
+        MOBILE_HISTORY_SCROLL_THRESHOLD_MIN,
+        clientHeight * MOBILE_HISTORY_SCROLL_VIEWPORT_FACTOR,
+    )
+}
 const VSCODE_TURN_MODEL_CACHE_MAX = 4
 const VSCODE_TURN_MODEL_CACHE_MAX_MESSAGES = 30
 const MOBILE_TURN_MODEL_CACHE_MAX = 4
@@ -382,12 +400,13 @@ export const useChatTimelineController = ({
             // through goToBottom — the single programmatic writer.
             //
             // A normal bottom APPEND (a sent message, a streaming part) must NOT
-            // re-pin here. Auto-follow's own follow loop — kicked by the content
-            // ResizeObserver and the streaming chunk handlers — already eases to the
-            // new bottom. Calling goToBottom on every append layered its settle burst
-            // on top of that loop: two writers aiming at different positions, which
-            // is exactly the up/down jiggle reported on send / from the queue / while
-            // streaming. So for an append we do nothing and let the follow loop own it.
+            // re-pin here. Auto-follow already owns the bottom: its content
+            // ResizeObserver re-pins instantly (scrollTop = scrollHeight, before
+            // paint) on every append. Re-pinning again from here would just be a
+            // second writer chasing the same target a frame later — redundant at
+            // best, and the source of the old up/down jiggle on send / from the
+            // queue / while streaming. So for an append we do nothing and let
+            // auto-follow own it.
             if (snap || isPrepend) {
                 prePrependScrollRef.current = null;
                 goToBottom('instant');
@@ -520,7 +539,7 @@ export const useChatTimelineController = ({
         const container = scrollRef.current;
         if (!container) return;
         if (isPinnedRef.current) return;
-        if (container.scrollTop >= HISTORY_SCROLL_THRESHOLD) return;
+        if (container.scrollTop >= resolveHistoryScrollThreshold(container.clientHeight)) return;
         if (!historySignalsRef.current.canLoadEarlier) return;
         if (isLoadingOlderRef.current || pendingRevealWorkRef.current) return;
 

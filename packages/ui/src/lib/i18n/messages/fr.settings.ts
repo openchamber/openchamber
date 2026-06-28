@@ -1766,6 +1766,8 @@ export const settingsDict = {
   'settings.openchamber.visual.option.mobileLayout.new': 'Nouvelle',
   'settings.openchamber.visual.field.macVibrancy': 'Transparence de la fenêtre',
   'settings.openchamber.visual.field.macVibrancyHint': 'Utiliser le flou macOS natif (vibrancy) derrière la barre latérale. Désactivez cette option pour des surfaces entièrement opaques.',
+  'settings.openchamber.visual.field.dockBadge': 'Badge du Dock',
+  'settings.openchamber.visual.field.dockBadgeHint': 'Afficher sur l’icône du Dock de macOS le nombre de discussions avec une activité non vue.',
   'settings.openchamber.visual.actions.saveAndRestart': 'Enregistrer et redémarrer',
   'settings.openchamber.visual.actions.restarting': 'Redémarrage…',
   'settings.openchamber.visual.field.fileEditorKeymap': 'Keymap de l’éditeur de fichiers',

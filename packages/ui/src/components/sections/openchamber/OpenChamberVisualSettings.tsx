@@ -336,6 +336,17 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const macVibrancyEnabled = typeof window !== 'undefined' && window.__OPENCHAMBER_ELECTRON__?.macVibrancy === true;
     const [vibrancyChecked, setVibrancyChecked] = React.useState(macVibrancyEnabled);
     const [vibrancyRestarting, setVibrancyRestarting] = React.useState(false);
+
+    // macOS-desktop-only dock badge that counts chats with unseen activity.
+    // The tray sync (mac-only) pumps the count to the main process, so the
+    // toggle is offered only where it actually has an effect. No relaunch needed.
+    const dockBadgeSupported = React.useMemo(
+        () => isDesktopShell() && typeof window !== 'undefined'
+            && (window as unknown as { __OPENCHAMBER_PLATFORM__?: string }).__OPENCHAMBER_PLATFORM__ === 'darwin',
+        [],
+    );
+    const dockBadgeEnabled = useUIStore(state => state.dockBadgeEnabled);
+    const setDockBadgeEnabled = useUIStore(state => state.setDockBadgeEnabled);
     const [chatRenderPreviewTick, setChatRenderPreviewTick] = React.useState(0);
     const reportUsage = useUIStore(state => state.reportUsage);
     const setReportUsage = useUIStore(state => state.setReportUsage);
@@ -852,6 +863,38 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 </Button>
                                             </div>
                                         )}
+                                    </div>
+                                )}
+
+                                {dockBadgeSupported && (
+                                    <div data-settings-item="appearance.dock-badge" className="flex flex-col gap-1.5 border-t border-border/40 pt-3">
+                                        <div
+                                            className="group flex cursor-pointer items-start gap-2 py-0.5"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={dockBadgeEnabled}
+                                            onClick={() => setDockBadgeEnabled(!dockBadgeEnabled)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    setDockBadgeEnabled(!dockBadgeEnabled);
+                                                }
+                                            }}
+                                        >
+                                            <Checkbox
+                                                checked={dockBadgeEnabled}
+                                                onChange={setDockBadgeEnabled}
+                                                ariaLabel={t('settings.openchamber.visual.field.dockBadge')}
+                                            />
+                                            <div className="flex min-w-0 flex-col">
+                                                <span className="typography-ui-label text-foreground">
+                                                    {t('settings.openchamber.visual.field.dockBadge')}
+                                                </span>
+                                                <span className="typography-meta text-muted-foreground">
+                                                    {t('settings.openchamber.visual.field.dockBadgeHint')}
+                                                </span>
+                                            </div>
+                                        </div>
                                     </div>
                                 )}
                             </section>

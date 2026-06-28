@@ -907,6 +907,8 @@ export const settingsDict = {
   'settings.openchamber.visual.actions.reloadThemes': 'Przeładuj motywy',
   'settings.openchamber.visual.field.macVibrancy': 'Przezroczystość okna',
   'settings.openchamber.visual.field.macVibrancyHint': 'Używaj natywnego rozmycia macOS (vibrancy) za panelem bocznym. Wyłącz, aby uzyskać w pełni nieprzezroczyste powierzchnie.',
+  'settings.openchamber.visual.field.dockBadge': 'Plakietka w Docku',
+  'settings.openchamber.visual.field.dockBadgeHint': 'Pokazuj na ikonie w Docku macOS liczbę czatów z nieprzeczytaną aktywnością.',
   'settings.openchamber.visual.actions.saveAndRestart': 'Zapisz i uruchom ponownie',
   'settings.openchamber.visual.actions.restarting': 'Ponowne uruchamianie…',
   'settings.openchamber.visual.actions.reloadingThemes': 'Przeładowywanie motywów...',

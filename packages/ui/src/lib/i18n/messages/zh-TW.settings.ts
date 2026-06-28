@@ -1495,6 +1495,8 @@
   'settings.openchamber.visual.actions.reloadThemes': '重新載入主題',
   'settings.openchamber.visual.field.macVibrancy': '視窗透明度',
   'settings.openchamber.visual.field.macVibrancyHint': '在側邊欄後使用 macOS 原生模糊（vibrancy）。關閉以獲得完全不透明的介面。',
+  'settings.openchamber.visual.field.dockBadge': 'Dock 標記',
+  'settings.openchamber.visual.field.dockBadgeHint': '在 macOS Dock 圖示上顯示有未讀動態的對話數量。',
   'settings.openchamber.visual.actions.saveAndRestart': '儲存並重新啟動',
   'settings.openchamber.visual.actions.restarting': '正在重新啟動…',
   'settings.openchamber.visual.actions.reloadingThemes': '正在重新載入主題...',

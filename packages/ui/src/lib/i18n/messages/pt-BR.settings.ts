@@ -1576,6 +1576,8 @@ export const settingsDict = {
   "settings.openchamber.visual.actions.reloadThemes": "Recarregar temas",
   "settings.openchamber.visual.field.macVibrancy": "Transparência da janela",
   "settings.openchamber.visual.field.macVibrancyHint": "Usa o desfoque nativo do macOS (vibrancy) atrás da barra lateral. Desative para superfícies totalmente sólidas e opacas.",
+  "settings.openchamber.visual.field.dockBadge": "Selo no Dock",
+  "settings.openchamber.visual.field.dockBadgeHint": "Mostra no ícone do Dock do macOS o número de conversas com atividade não vista.",
   "settings.openchamber.visual.actions.saveAndRestart": "Salvar e reiniciar",
   "settings.openchamber.visual.actions.restarting": "Reiniciando…",
   "settings.openchamber.visual.actions.reloadingThemes": "Recarregando temas...",

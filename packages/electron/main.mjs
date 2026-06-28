@@ -3265,6 +3265,17 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
           log.warn('[electron] tray update failed', error);
         }
       }
+      // Dock badge: count of chats with unseen activity (0 = cleared, also when
+      // the user disabled the badge). setBadgeCount drives the macOS dock badge.
+      try {
+        const rawCount = args && typeof args.dockBadgeCount === 'number' ? args.dockBadgeCount : 0;
+        const badgeCount = Number.isFinite(rawCount) ? Math.max(0, Math.floor(rawCount)) : 0;
+        if (typeof app.setBadgeCount === 'function') {
+          app.setBadgeCount(badgeCount);
+        }
+      } catch (error) {
+        log.warn('[electron] dock badge update failed', error);
+      }
       return null;
 
     case 'desktop_clear_cache':

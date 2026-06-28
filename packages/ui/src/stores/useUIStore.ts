@@ -31,6 +31,7 @@ type ContextPanelTab = {
   targetPath: string | null;
   dedupeKey: string;
   label: string | null;
+  sessionTitleFallback: string | null;
   readOnly: boolean;
   stagedDiff: boolean;
   touchedAt: number;
@@ -41,6 +42,7 @@ type ContextPanelTabDescriptor = {
   targetPath?: string | null;
   dedupeKey?: string | null;
   label?: string | null;
+  sessionTitleFallback?: string | null;
   readOnly?: boolean;
   stagedDiff?: boolean;
 };
@@ -223,6 +225,7 @@ const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPa
     targetPath: normalizedTargetPath,
     dedupeKey,
     label: normalizeContextTabLabel(descriptor.label),
+    sessionTitleFallback: normalizeContextTabLabel(descriptor.sessionTitleFallback),
     readOnly: descriptor.readOnly === true,
     stagedDiff: descriptor.stagedDiff === true,
     touchedAt: Date.now(),
@@ -263,6 +266,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       targetPath?: unknown;
       dedupeKey?: unknown;
       label?: unknown;
+      sessionTitleFallback?: unknown;
       readOnly?: unknown;
       stagedDiff?: unknown;
       touchedAt?: unknown;
@@ -290,6 +294,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       targetPath,
       dedupeKey,
       label: normalizeContextTabLabel(typeof candidate.label === 'string' ? candidate.label : null),
+      sessionTitleFallback: normalizeContextTabLabel(typeof candidate.sessionTitleFallback === 'string' ? candidate.sessionTitleFallback : null),
       readOnly: candidate.readOnly === true,
       stagedDiff: candidate.stagedDiff === true,
       touchedAt: typeof candidate.touchedAt === 'number' && Number.isFinite(candidate.touchedAt)
@@ -350,6 +355,7 @@ const upsertContextPanelTab = (
           targetPath: nextTab.targetPath || tab.targetPath,
           dedupeKey: nextTab.dedupeKey,
           label: nextTab.label,
+          sessionTitleFallback: nextTab.sessionTitleFallback || tab.sessionTitleFallback,
           stagedDiff: nextTab.stagedDiff,
           readOnly: nextTab.readOnly,
           touchedAt: Date.now(),
@@ -592,6 +598,8 @@ interface UIStore {
   nativeNotificationsEnabled: boolean;
   notificationMode: 'always' | 'hidden-only';
   notifyOnSubtasks: boolean;
+  // Desktop dock badge showing the count of sessions with unseen activity (macOS).
+  dockBadgeEnabled: boolean;
 
   // Event toggles (which events trigger notifications)
   notifyOnCompletion: boolean;
@@ -750,6 +758,7 @@ interface UIStore {
   setNotificationMode: (mode: 'always' | 'hidden-only') => void;
   setShowTerminalQuickKeysOnDesktop: (value: boolean) => void;
   setNotifyOnSubtasks: (value: boolean) => void;
+  setDockBadgeEnabled: (value: boolean) => void;
   setNotifyOnCompletion: (value: boolean) => void;
   setNotifyOnError: (value: boolean) => void;
   setNotifyOnQuestion: (value: boolean) => void;
@@ -877,6 +886,7 @@ export const useUIStore = create<UIStore>()(
         nativeNotificationsEnabled: false,
         notificationMode: 'hidden-only',
         notifyOnSubtasks: true,
+        dockBadgeEnabled: true,
 
         // Event toggles (which events trigger notifications)
         notifyOnCompletion: true,
@@ -1975,6 +1985,10 @@ export const useUIStore = create<UIStore>()(
           set({ notifyOnSubtasks: value });
         },
 
+        setDockBadgeEnabled: (value) => {
+          set({ dockBadgeEnabled: value });
+        },
+
         setNotifyOnCompletion: (value) => { set({ notifyOnCompletion: value }); },
         setNotifyOnError: (value) => { set({ notifyOnError: value }); },
         setNotifyOnQuestion: (value) => { set({ notifyOnQuestion: value }); },
@@ -2243,6 +2257,7 @@ export const useUIStore = create<UIStore>()(
           notificationMode: state.notificationMode,
           showTerminalQuickKeysOnDesktop: state.showTerminalQuickKeysOnDesktop,
           notifyOnSubtasks: state.notifyOnSubtasks,
+          dockBadgeEnabled: state.dockBadgeEnabled,
           notifyOnCompletion: state.notifyOnCompletion,
           notifyOnError: state.notifyOnError,
           notifyOnQuestion: state.notifyOnQuestion,

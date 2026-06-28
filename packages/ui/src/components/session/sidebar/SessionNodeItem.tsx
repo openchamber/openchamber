@@ -82,7 +82,7 @@ type Props = {
   removeSessionFromFolder: (scopeKey: string, sessionId: string) => void;
   addSessionToFolder: (scopeKey: string, folderId: string, sessionId: string) => void;
   createFolderAndStartRename: (scopeKey: string, parentId?: string | null) => { id: string } | null;
-  openContextPanelTab: (directory: string, options: { mode: 'chat'; dedupeKey: string; label: string; readOnly?: boolean }) => void;
+  openContextPanelTab: (directory: string, options: { mode: 'chat'; dedupeKey: string; label: string; sessionTitleFallback?: string; readOnly?: boolean }) => void;
   handleDeleteSession: (session: Session, source?: { archivedBucket?: boolean; hardDelete?: boolean; skipConfirm?: boolean }) => void;
   mobileVariant: boolean;
   alwaysShowActions: boolean;
@@ -867,6 +867,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
               mode: 'chat',
               dedupeKey: `session:${session.id}`,
               label: sessionTitle,
+              sessionTitleFallback: sessionTitle,
             });
           }}
           className="[&>svg]:mr-1"

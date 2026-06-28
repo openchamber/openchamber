@@ -1,3 +1,12 @@
+## [1.13.7] - 2026-06-28
+
+- Chat: with tool calls (such as Bash and Edit) shown expanded by default, scrolling no longer twitches, and slow scrolling no longer jumps past several messages.
+- Providers: the Add provider form stays open while provider data refreshes or a model is picked in the background, instead of snapping back to an existing provider.
+
+## [1.13.6] - 2026-06-28
+
+- Chat: scrolling in conversations now stays steady while sending, queueing, streaming, switching sessions, and loading older messages.
+
 ## [1.13.5] - 2026-06-27
 
 - No notable changes.

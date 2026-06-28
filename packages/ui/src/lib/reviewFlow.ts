@@ -27,7 +27,6 @@ const AUTO_REVIEW_POLL_MS = 300;
 const AUTO_REVIEW_MAX_ITERATIONS = 15;
 const AUTO_REVIEW_FINAL_MARKER = 'FINAL_REVIEW_STATUS: no_remaining_findings';
 const AUTO_REVIEW_FINAL_MARKER_NORMALIZED = AUTO_REVIEW_FINAL_MARKER.toLowerCase();
-const REVIEW_SESSION_TITLE = 'Review of workspace changes';
 const activeAutoReviewLoops = new Set<string>();
 const activeAutoReviewForwardKeys = new Set<string>();
 
@@ -417,6 +416,7 @@ const openReviewSessionPanel = (directory: string, session: Session): void => {
     mode: 'chat',
     dedupeKey: `session:${session.id}`,
     label: session.title ?? null,
+    sessionTitleFallback: session.title ?? null,
   });
 };
 
@@ -426,6 +426,11 @@ const getSessionOrNull = async (sessionID: string, directory: string): Promise<S
   } catch {
     return null;
   }
+};
+
+const getReviewSessionTitle = (original: Session): string => {
+  const implementationTitle = original.title?.trim() || original.id;
+  return `Review: ${implementationTitle}`;
 };
 
 const createOrReuseReviewSession = async (originalSessionID: string, directory: string, expectedRuntimeKey?: string): Promise<Session> => {
@@ -451,7 +456,7 @@ const createOrReuseReviewSession = async (originalSessionID: string, directory: 
 
   assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
   const review = await opencodeClient.createSession({
-    title: REVIEW_SESSION_TITLE,
+    title: getReviewSessionTitle(original),
     metadata: withReviewSessionMarker({}, originalSessionID),
   }, directory);
   assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);

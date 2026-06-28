@@ -1576,6 +1576,8 @@ export const settingsDict = {
   'settings.openchamber.visual.actions.reloadThemes': '重新加载主题',
   'settings.openchamber.visual.field.macVibrancy': '窗口透明度',
   'settings.openchamber.visual.field.macVibrancyHint': '在侧边栏后使用 macOS 原生模糊（vibrancy）。关闭以获得完全不透明的界面。',
+  'settings.openchamber.visual.field.dockBadge': 'Dock 角标',
+  'settings.openchamber.visual.field.dockBadgeHint': '在 macOS Dock 图标上显示有未读动态的会话数量。',
   'settings.openchamber.visual.actions.saveAndRestart': '保存并重启',
   'settings.openchamber.visual.actions.restarting': '正在重启…',
   'settings.openchamber.visual.actions.reloadingThemes': '正在重新加载主题...',
