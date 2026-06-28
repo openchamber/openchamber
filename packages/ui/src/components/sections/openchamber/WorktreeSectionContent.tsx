@@ -1,5 +1,6 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
@@ -11,7 +12,12 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useDeviceInfo } from '@/lib/device';
 import { checkIsGitRepository } from '@/lib/gitApi';
-import { getWorktreeSetupCommands, saveWorktreeSetupCommands } from '@/lib/openchamberConfig';
+import {
+  getWorktreeSetupCommands,
+  getWorktreeSetupWaitEnabled,
+  saveWorktreeSetupCommands,
+  saveWorktreeSetupWaitEnabled,
+} from '@/lib/openchamberConfig';
 import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
 import { sessionEvents } from '@/lib/sessionEvents';
 import type { WorktreeMetadata } from '@/types/worktree';
@@ -35,6 +41,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
 
   const [setupCommands, setSetupCommands] = React.useState<string[]>([]);
+  const [waitForSetupCommands, setWaitForSetupCommands] = React.useState(false);
   const [isLoadingCommands, setIsLoadingCommands] = React.useState(false);
   const [isGitRepoLocal, setIsGitRepoLocal] = React.useState<boolean | null>(null);
   const [availableWorktrees, setAvailableWorktrees] = React.useState<WorktreeMetadata[]>([]);
@@ -129,13 +136,18 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
 
     (async () => {
       try {
-        const commands = await getWorktreeSetupCommands(projectRef);
+        const [commands, waitForSetup] = await Promise.all([
+          getWorktreeSetupCommands(projectRef),
+          getWorktreeSetupWaitEnabled(projectRef),
+        ]);
         if (!cancelled) {
           setSetupCommands(commands.length > 0 ? commands : ['']);
+          setWaitForSetupCommands(waitForSetup);
         }
       } catch {
         if (!cancelled) {
           setSetupCommands(['']);
+          setWaitForSetupCommands(false);
         }
       } finally {
         if (!cancelled) {
@@ -180,6 +192,13 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
   const handleCommandBlur = React.useCallback(() => {
     void persistSetupCommands(setupCommands);
   }, [persistSetupCommands, setupCommands]);
+
+  const handleWaitForSetupCommandsChange = React.useCallback((enabled: boolean) => {
+    setWaitForSetupCommands(enabled);
+    if (projectRef) {
+      void saveWorktreeSetupWaitEnabled(projectRef, enabled);
+    }
+  }, [projectRef]);
 
   // Delete worktree handler
   const handleDeleteWorktree = React.useCallback((worktree: WorktreeMetadata) => {
@@ -331,6 +350,22 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
               <Icon name="add" className="h-3.5 w-3.5" />
               {t('settings.openchamber.worktrees.setup.addCommand')}
             </Button>
+            <label
+              data-settings-item="projects.worktree.setup.wait"
+              className="flex cursor-pointer items-center gap-2 py-1.5"
+            >
+              <Checkbox
+                checked={waitForSetupCommands}
+                onChange={handleWaitForSetupCommandsChange}
+                ariaLabel={t('settings.openchamber.worktrees.setup.waitForCommandsAria')}
+              />
+              <span className={cn(
+                'typography-ui-label font-normal',
+                waitForSetupCommands ? 'text-foreground' : 'text-foreground/60'
+              )}>
+                {t('settings.openchamber.worktrees.setup.waitForCommands')}
+              </span>
+            </label>
           </div>
         )}
       </div>

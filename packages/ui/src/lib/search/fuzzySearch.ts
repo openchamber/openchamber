@@ -89,24 +89,6 @@ function getFuzzyMatchMask<T>(
   return matches;
 }
 
-export function filterByFuzzyQuery<T>(
-  items: T[],
-  query: string,
-  getText: (item: T) => string,
-  options?: FuzzySearchOptions
-): T[] {
-  const matches = getFuzzyMatchMask(items, query, getText, options);
-  const matching: T[] = [];
-
-  for (let i = 0; i < items.length; i++) {
-    if (matches[i]) {
-      matching.push(items[i]);
-    }
-  }
-
-  return matching;
-}
-
 /**
  * Score-sorted fuzzy ranking. Strict (low threshold), prioritizes substring
  * matches (especially prefix matches), and returns the top N.
@@ -157,15 +139,6 @@ export function scoreByFuzzyQuery<T>(
 
   scored.sort((a, b) => a.score - b.score);
   return scored.slice(0, limit);
-}
-
-export function rankByFuzzyQuery<T>(
-  items: T[],
-  query: string,
-  getText: (item: T) => string,
-  options?: { limit?: number; threshold?: number; noFuzzy?: boolean },
-): T[] {
-  return scoreByFuzzyQuery(items, query, getText, options).map((x) => x.item);
 }
 
 export function partitionByFuzzyQuery<T>(

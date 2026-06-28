@@ -91,14 +91,12 @@ const withUrlAuth = (urlValue: string): string => {
   const token = getRuntimeUrlAuthTokenSync();
   if (!token) return urlValue;
 
-  if (ABSOLUTE_URL_PATTERN.test(urlValue)) {
-    const url = new URL(urlValue);
-    url.searchParams.set('oc_url_token', token);
-    return url.toString();
-  }
-
-  const separator = urlValue.includes('?') ? '&' : '?';
-  return `${urlValue}${separator}oc_url_token=${encodeURIComponent(token)}`;
+  const url = ABSOLUTE_URL_PATTERN.test(urlValue)
+    ? new URL(urlValue)
+    : new URL(urlValue, 'http://openchamber.local');
+  url.searchParams.set('oc_url_token', token);
+  if (ABSOLUTE_URL_PATTERN.test(urlValue)) return url.toString();
+  return `${url.pathname}${url.search}${url.hash}`;
 };
 
 const toWebSocketUrl = (candidate: string, config: RuntimeUrlConfig): string => {
@@ -150,5 +148,3 @@ export const configureRuntimeUrlResolver = (config: RuntimeUrlConfig): RuntimeUr
   activeRuntimeUrlResolver = createRuntimeUrlResolver(config);
   return activeRuntimeUrlResolver;
 };
-
-export const runtimeUrl = activeRuntimeUrlResolver;

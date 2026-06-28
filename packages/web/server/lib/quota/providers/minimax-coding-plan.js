@@ -10,6 +10,6 @@ const provider = createMiniMaxCodingPlanProvider({
 
 export const providerId = provider.providerId;
 export const providerName = provider.providerName;
-export const aliases = provider.aliases;
+const aliases = provider.aliases;
 export const isConfigured = provider.isConfigured;
 export const fetchQuota = provider.fetchQuota;

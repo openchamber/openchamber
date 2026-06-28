@@ -40,7 +40,7 @@ export interface SupportingFile {
   fullPath: string;
 }
 
-export interface SkillSources {
+interface SkillSources {
   md: {
     exists: boolean;
     path: string | null;
@@ -123,7 +123,7 @@ export interface SkillDraft {
   pendingFiles?: PendingFile[];
 }
 
-export interface SkillDetail {
+interface SkillDetail {
   name: string;
   sources: SkillSources;
   scope?: SkillScope | null;

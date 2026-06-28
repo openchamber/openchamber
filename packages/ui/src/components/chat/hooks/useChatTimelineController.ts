@@ -60,6 +60,24 @@ export interface UseChatTimelineControllerResult {
 
 const TURN_MODEL_CACHE_MAX = 30
 const HISTORY_SCROLL_THRESHOLD = 200
+// On touch surfaces the user can drag continuously toward the top, and
+// loadEarlier is an async (network) fetch. A 200px lead is enough on desktop
+// (wheel + fast render) but the finger can outrun an in-flight fetch on mobile
+// and hit the very top before history lands. Give touch a much larger,
+// viewport-relative head start so the fetch completes before the top is
+// reached, regardless of how fast the user drags.
+const MOBILE_HISTORY_SCROLL_THRESHOLD_MIN = 1200
+const MOBILE_HISTORY_SCROLL_VIEWPORT_FACTOR = 2
+
+const resolveHistoryScrollThreshold = (clientHeight: number): number => {
+    if (!isMobileSurfaceRuntime()) {
+        return HISTORY_SCROLL_THRESHOLD
+    }
+    return Math.max(
+        MOBILE_HISTORY_SCROLL_THRESHOLD_MIN,
+        clientHeight * MOBILE_HISTORY_SCROLL_VIEWPORT_FACTOR,
+    )
+}
 const VSCODE_TURN_MODEL_CACHE_MAX = 4
 const VSCODE_TURN_MODEL_CACHE_MAX_MESSAGES = 30
 const MOBILE_TURN_MODEL_CACHE_MAX = 4
@@ -351,6 +369,52 @@ export const useChatTimelineController = ({
         if (!container) return;
 
         const snap = prePrependScrollRef.current;
+        const prev = prependTrackingRef.current;
+        const currentOldestId = renderedMessages[0]?.info?.id ?? null;
+        const currentNewestId = renderedMessages[renderedMessages.length - 1]?.info?.id ?? null;
+        // A prepend = content inserted ABOVE the viewport: the oldest message id
+        // changed while the newest stayed the same. This distinguishes a history
+        // load from a bottom append, a streaming part growing, or a session switch.
+        const isPrepend = Boolean(
+            prev
+            && prev.oldestId
+            && currentOldestId
+            && currentOldestId !== prev.oldestId
+            && prev.newestId
+            && currentNewestId
+            && currentNewestId === prev.newestId,
+        );
+
+        const updateTracking = () => {
+            prependTrackingRef.current = {
+                oldestId: currentOldestId,
+                newestId: currentNewestId,
+                scrollHeight: container.scrollHeight,
+            };
+        };
+
+        if (isPinnedRef.current) {
+            // Bottom-pinned. Only content inserted ABOVE (a prepend / history load)
+            // needs an explicit re-pin: with overflow-anchor:none the browser leaves
+            // scrollTop unchanged, so the viewport would visibly jump. Route that
+            // through goToBottom — the single programmatic writer.
+            //
+            // A normal bottom APPEND (a sent message, a streaming part) must NOT
+            // re-pin here. Auto-follow already owns the bottom: its content
+            // ResizeObserver re-pins instantly (scrollTop = scrollHeight, before
+            // paint) on every append. Re-pinning again from here would just be a
+            // second writer chasing the same target a frame later — redundant at
+            // best, and the source of the old up/down jiggle on send / from the
+            // queue / while streaming. So for an append we do nothing and let
+            // auto-follow own it.
+            if (snap || isPrepend) {
+                prePrependScrollRef.current = null;
+                goToBottom('instant');
+            }
+            updateTracking();
+            return;
+        }
+
         if (snap) {
             prePrependScrollRef.current = null;
             // When a viewport anchor is available, delegate to MessageList
@@ -363,39 +427,18 @@ export const useChatTimelineController = ({
                     container.scrollTop = snap.top + delta;
                 }
             }
-        } else {
-            // Auto-detect a prepend: the oldest message changed while the newest
-            // stayed the same (distinguishes a real prepend from a session
-            // switch, a bottom append, or a streaming part growing). Compensate
-            // synchronously by the exact height delta — for a bottom-pinned
-            // viewport this keeps it pinned, for a released one it preserves the
-            // read position, with no intermediate frame for auto-follow to fight.
-            const prev = prependTrackingRef.current;
-            const currentOldestId = renderedMessages[0]?.info?.id ?? null;
-            const currentNewestId = renderedMessages[renderedMessages.length - 1]?.info?.id ?? null;
-            const isPrepend = Boolean(
-                prev
-                && prev.oldestId
-                && currentOldestId
-                && currentOldestId !== prev.oldestId
-                && prev.newestId
-                && currentNewestId
-                && currentNewestId === prev.newestId,
-            );
-            if (isPrepend && prev) {
-                const delta = container.scrollHeight - prev.scrollHeight;
-                if (delta > 0) {
-                    container.scrollTop = container.scrollTop + delta;
-                }
+        } else if (isPrepend && prev) {
+            // Released viewport: preserve the read position by compensating for the
+            // exact height the prepend added above, with no intermediate frame for
+            // auto-follow to fight.
+            const delta = container.scrollHeight - prev.scrollHeight;
+            if (delta > 0) {
+                container.scrollTop = container.scrollTop + delta;
             }
         }
 
-        prependTrackingRef.current = {
-            oldestId: renderedMessages[0]?.info?.id ?? null,
-            newestId: renderedMessages[renderedMessages.length - 1]?.info?.id ?? null,
-            scrollHeight: container.scrollHeight,
-        };
-    }, [renderedMessages, scrollRef, restoreViewportAnchor]);
+        updateTracking();
+    }, [renderedMessages, scrollRef, restoreViewportAnchor, goToBottom]);
 
     const revealBufferedTurns = React.useCallback(async (): Promise<boolean> => false, []);
 
@@ -496,7 +539,7 @@ export const useChatTimelineController = ({
         const container = scrollRef.current;
         if (!container) return;
         if (isPinnedRef.current) return;
-        if (container.scrollTop >= HISTORY_SCROLL_THRESHOLD) return;
+        if (container.scrollTop >= resolveHistoryScrollThreshold(container.clientHeight)) return;
         if (!historySignalsRef.current.canLoadEarlier) return;
         if (isLoadingOlderRef.current || pendingRevealWorkRef.current) return;
 

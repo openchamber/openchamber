@@ -12,17 +12,3 @@ export interface PermissionRequest {
 }
 
 export type PermissionResponse = 'once' | 'always' | 'reject';
-
-export interface PermissionAskedEvent {
-  type: 'permission.asked';
-  properties: PermissionRequest;
-}
-
-export interface PermissionRepliedEvent {
-  type: 'permission.replied';
-  properties: {
-    sessionID: string;
-    requestID: string;
-    reply: PermissionResponse;
-  };
-}

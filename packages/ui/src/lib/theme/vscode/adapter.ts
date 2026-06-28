@@ -4,7 +4,7 @@ import { getDefaultTheme } from '@/lib/theme/themes';
 
 export type VSCodeThemeKind = 'light' | 'dark' | 'high-contrast';
 
-export type VSCodeThemeColorToken =
+type VSCodeThemeColorToken =
   // Editor core
   | 'editor.background'
   | 'editor.foreground'

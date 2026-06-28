@@ -13,7 +13,7 @@ import {
 
 export const providerId = 'zai-coding-plan';
 export const providerName = 'z.ai';
-export const aliases = ['zai-coding-plan', 'zai', 'z.ai'];
+const aliases = ['zai-coding-plan', 'zai', 'z.ai'];
 
 export const isConfigured = () => {
   const auth = readAuthFile();

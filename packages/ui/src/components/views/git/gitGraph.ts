@@ -1,6 +1,6 @@
 import type { GitLogEntry } from '@/lib/api/types';
 
-export type LaneColor = string;
+type LaneColor = string;
 
 /**
  * Describes one visible line/curve in a commit row's SVG.
@@ -14,7 +14,7 @@ export type LaneColor = string;
  *  - 'branch-out' : bezier from (dot-x, dot-y) to (toLane-x, 100%) — new parent lane opens
  *  - 'merge-in'   : bezier from (fromLane-x, 0) to (dot-x, dot-y) — lane converges here
  */
-export interface ConnectorSegment {
+interface ConnectorSegment {
   fromLane: number;
   toLane: number;
   color: LaneColor;
@@ -40,7 +40,7 @@ const LANE_COLORS: LaneColor[] = [
   'var(--status-info)',
 ];
 
-export function laneColor(lane: number): LaneColor {
+function laneColor(lane: number): LaneColor {
   return LANE_COLORS[lane % LANE_COLORS.length];
 }
 

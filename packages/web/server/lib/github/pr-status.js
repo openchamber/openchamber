@@ -160,6 +160,17 @@ const getRepoDefaultBranch = async (octokit, repo) => {
     return cached.defaultBranch;
   }
 
+  // Reuse the full repo metadata if it was already fetched (expandRepoNetwork
+  // calls getRepoMetadata for every candidate before the default-branch loop).
+  // This avoids a redundant repos.get per repo — fewer serial GitHub calls means
+  // less exposure to secondary-rate-limiting that makes PR status slow.
+  const metaCached = repoMetadataCache.get(repoKey);
+  if (metaCached && Date.now() - metaCached.fetchedAt < REPO_DEFAULT_BRANCH_TTL_MS) {
+    const defaultBranch = normalizeText(metaCached.data?.default_branch) || null;
+    defaultBranchCache.set(repoKey, { defaultBranch, fetchedAt: Date.now() });
+    return defaultBranch;
+  }
+
   try {
     const response = await octokit.rest.repos.get({
       owner: repo.owner,

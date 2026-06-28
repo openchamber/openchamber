@@ -1,6 +1,25 @@
 const PR_STATUS_CACHE_TTL_MS = 90_000;
 const PR_STATUS_CACHE_MAX_ENTRIES = 200;
+// Upper bound for resolving a single PR status. resolveGitHubPrStatus makes many
+// serial GitHub API calls; under GitHub secondary-rate-limiting a single request
+// can otherwise hang 20s+. We bound it so the route fails fast instead of holding
+// the response (and a client socket) open — the client keeps its last-known
+// status on error, and a later poll fills it in.
+const PR_STATUS_RESOLVE_TIMEOUT_MS = 12_000;
 const prStatusCache = new Map();
+
+function withTimeout(promise, timeoutMs, label) {
+  let timer;
+  const timeout = new Promise((_resolve, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error(`${label} timed out after ${timeoutMs}ms`);
+      error.code = 'ETIMEDOUT';
+      reject(error);
+    }, timeoutMs);
+    if (typeof timer.unref === 'function') timer.unref();
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 function getRequestedRepo(req) {
   const owner = typeof req.query?.owner === 'string' ? req.query.owner.trim() : '';
@@ -417,12 +436,16 @@ export function registerGitHubRoutes(app) {
       }
 
       const { resolveGitHubPrStatus } = await import('./pr-status.js');
-      const resolvedStatus = await resolveGitHubPrStatus({
-        octokit,
-        directory,
-        branch,
-        remoteName: remote,
-      });
+      const resolvedStatus = await withTimeout(
+        resolveGitHubPrStatus({
+          octokit,
+          directory,
+          branch,
+          remoteName: remote,
+        }),
+        PR_STATUS_RESOLVE_TIMEOUT_MS,
+        'resolveGitHubPrStatus',
+      );
       const searchRepo = resolvedStatus.repo;
       const first = resolvedStatus.pr;
       if (!searchRepo) {
@@ -982,6 +1005,7 @@ export function registerGitHubRoutes(app) {
       if (upstream) {
         try {
           const { getRemotes } = await import('../git/index.js');
+          const { resolveGitHubRepoFromDirectory } = await import('./index.js');
           const remotes = await getRemotes(directory);
           for (const r of remotes) {
             if (r?.name) {

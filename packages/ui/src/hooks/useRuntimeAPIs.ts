@@ -10,7 +10,7 @@ export const useRuntimeAPIs = (): RuntimeAPIs => {
   return apis;
 };
 
-export const useRuntimeAPI = <TValue,>(selector: RuntimeAPISelector<TValue>): TValue => {
+const useRuntimeAPI = <TValue,>(selector: RuntimeAPISelector<TValue>): TValue => {
   const apis = useRuntimeAPIs();
   return selector(apis);
 };

@@ -120,6 +120,19 @@ describe('createRuntimeUrlResolver', () => {
     }
   });
 
+  test('replaces existing short-lived URL auth query on relative authenticated URLs', () => {
+    setRuntimeUrlAuthToken('oc_url_secret', Date.now() + 60_000);
+    try {
+      const urls = createRuntimeUrlResolver();
+
+      expect(urls.authenticatedAsset('/api/preview/proxy/abc/?oc_url_token=stale&x=1#top')).toBe(
+        '/api/preview/proxy/abc/?oc_url_token=oc_url_secret&x=1#top',
+      );
+    } finally {
+      setRuntimeUrlAuthToken(null, null);
+    }
+  });
+
   test('does not put the long-lived client token in URLs', () => {
     setRuntimeBearerToken('oc_client_secret');
     try {

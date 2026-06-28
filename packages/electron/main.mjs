@@ -285,6 +285,22 @@ const performConfirmedQuit = () => {
   app.exit(0);
 };
 
+// Hard-stop signals (`Ctrl+C` on `electron:dev`, an external `kill`/SIGTERM,
+// terminal close) bypass the normal app-quit flow — which would orphan the
+// in-process web server's managed OpenCode child. Run the same background
+// teardown the quit path uses (which kills the sidecar), then exit. The startup
+// reaper remains the backstop for an unhandled hard crash (SIGKILL).
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+  process.on(signal, () => {
+    try {
+      shutdownBackgroundServices();
+    } catch (error) {
+      log.warn(`[electron] ${signal} shutdown failed:`, error);
+    }
+    app.exit(0);
+  });
+}
+
 const requestQuitWithConfirmation = async () => {
   await refreshQuitRiskFlags();
 
@@ -3248,6 +3264,17 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         } catch (error) {
           log.warn('[electron] tray update failed', error);
         }
+      }
+      // Dock badge: count of chats with unseen activity (0 = cleared, also when
+      // the user disabled the badge). setBadgeCount drives the macOS dock badge.
+      try {
+        const rawCount = args && typeof args.dockBadgeCount === 'number' ? args.dockBadgeCount : 0;
+        const badgeCount = Number.isFinite(rawCount) ? Math.max(0, Math.floor(rawCount)) : 0;
+        if (typeof app.setBadgeCount === 'function') {
+          app.setBadgeCount(badgeCount);
+        }
+      } catch (error) {
+        log.warn('[electron] dock badge update failed', error);
       }
       return null;
 

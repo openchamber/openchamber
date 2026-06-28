@@ -1,11 +1,11 @@
-export type GeneratedCommitResult = {
+type GeneratedCommitResult = {
   kind: 'commit';
   subject: string;
   highlights: string[];
   raw: string;
 };
 
-export type GeneratedPrResult = {
+type GeneratedPrResult = {
   kind: 'pr';
   title: string;
   body: string;
