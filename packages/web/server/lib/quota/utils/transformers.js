@@ -35,7 +35,8 @@ export const normalizeTimestamp = (value) => {
 };
 
 export const resolveWindowSeconds = (limit) => {
-  const ZAI_TOKEN_WINDOW_SECONDS = { 3: 3600 };
+  // unit: 3 = hour, 6 = week (7 days). Shared by zhipuai-coding-plan and z.ai.
+  const ZAI_TOKEN_WINDOW_SECONDS = { 3: 3600, 6: 604800 };
   if (!limit || !limit.number) return null;
   const unitSeconds = ZAI_TOKEN_WINDOW_SECONDS[limit.unit];
   if (!unitSeconds) return null;
