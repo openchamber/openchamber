@@ -418,11 +418,6 @@ function toSessionStatus(status: Awaited<ReturnType<typeof opencodeClient.getSes
   return undefined
 }
 
-function isStreamHeartbeatEvent(payload: Event): boolean {
-  const type = (payload as { type?: unknown }).type
-  return type === "server.heartbeat" || type === "openchamber:heartbeat"
-}
-
 function getActiveSessionCandidateIds(directory: string, state: DirectoryStore): string[] {
   return getReconnectCandidateSessionIds(state, {
     directory,
@@ -520,6 +515,27 @@ export function needsSnapshotAfterStatusPoll(
   if (incoming && incoming.type !== "idle") return false
   const currentStatus = state.session_status?.[sessionId]
   return Boolean(currentStatus && currentStatus.type !== "idle")
+}
+
+// Decide whether the event stream is genuinely stale and warrants a full
+// resync. Uses stream activity that includes heartbeats, so a quiet-but-
+// connected session (only receiving heartbeats) is NOT considered stale.
+// A stale signal means no events at all — including no heartbeats — for the
+// configured threshold, which is strong evidence the connection is dead.
+// Returns false when lastStreamActivityAt is 0 (no events received yet),
+// so the watchdog does not fire before the stream has delivered its first
+// heartbeat.
+export function shouldTriggerStaleResync(
+  lastStreamActivityAt: number,
+  lastFullResyncAt: number,
+  now: number,
+  staleThresholdMs: number = ACTIVE_SESSION_STALE_EVENT_MS,
+  resyncCooldownMs: number = ACTIVE_SESSION_FULL_RESYNC_COOLDOWN_MS,
+): boolean {
+  if (lastStreamActivityAt <= 0) return false
+  if (now - lastStreamActivityAt < staleThresholdMs) return false
+  if (now - lastFullResyncAt < resyncCooldownMs) return false
+  return true
 }
 
 type EventRoutingIndex = {
@@ -1575,7 +1591,7 @@ export function SyncProvider(props: {
   const routingIndexRef = useRef<EventRoutingIndex | null>(null)
   if (!routingIndexRef.current) routingIndexRef.current = createEventRoutingIndex()
   const routingIndex = routingIndexRef.current
-  const lastActiveEventAtByDirectoryRef = useRef(new Map<string, number>())
+  const lastStreamActivityAtRef = useRef(0)
   const lastStatusPollAtByDirectoryRef = useRef(new Map<string, number>())
   const lastFullResyncAtByDirectoryRef = useRef(new Map<string, number>())
   const lastChildDiscoveryAtByDirectoryRef = useRef(new Map<string, number>())
@@ -1759,9 +1775,13 @@ export function SyncProvider(props: {
         return resolveDirectoryFromRoutingIndex(routingIndex, directory, payload, childStores)
       },
       onEvent: (directory, payload) => {
-        if (!isStreamHeartbeatEvent(payload)) {
-          lastActiveEventAtByDirectoryRef.current.set(directory, Date.now())
-        }
+        // Track ALL stream activity (including heartbeats) as proof of
+        // connection health. The watchdog stale check uses this to distinguish
+        // a genuinely dead stream (no heartbeats for 20s) from a quiet-but-
+        // connected session that is only receiving heartbeats. Excluding
+        // heartbeats here caused issue #1656: the stale timer fired for any
+        // quiet session, triggering redundant full resyncs every ~15s.
+        lastStreamActivityAtRef.current = Date.now()
         dispatchVSCodeRuntimeNotificationEvent(directory, payload)
         if (payload.type === "installation.update-available") {
           const version = typeof (payload.properties as { version?: unknown })?.version === "string"
@@ -1901,14 +1921,9 @@ export function SyncProvider(props: {
             const state = store.getState()
             const candidateSessionIds = getActiveSessionCandidateIds(directory, state)
             if (candidateSessionIds.length === 0) {
-              lastActiveEventAtByDirectoryRef.current.delete(directory)
               lastStatusPollAtByDirectoryRef.current.delete(directory)
               lastFullResyncAtByDirectoryRef.current.delete(directory)
               continue
-            }
-
-            if (!lastActiveEventAtByDirectoryRef.current.has(directory)) {
-              lastActiveEventAtByDirectoryRef.current.set(directory, now)
             }
 
             const lastStatusPollAt = lastStatusPollAtByDirectoryRef.current.get(directory) ?? 0
@@ -1917,12 +1932,8 @@ export function SyncProvider(props: {
               void pollDirectoryStatuses(directory, store, candidateSessionIds).catch(() => undefined)
             }
 
-            const lastActiveEventAt = lastActiveEventAtByDirectoryRef.current.get(directory) ?? now
             const lastFullResyncAt = lastFullResyncAtByDirectoryRef.current.get(directory) ?? 0
-            if (
-              now - lastActiveEventAt >= ACTIVE_SESSION_STALE_EVENT_MS
-              && now - lastFullResyncAt >= ACTIVE_SESSION_FULL_RESYNC_COOLDOWN_MS
-            ) {
+            if (shouldTriggerStaleResync(lastStreamActivityAtRef.current, lastFullResyncAt, now)) {
               pipelineReconnectRef.current?.("active_stream_stale")
               triggerDirectoryResync(directory)
             }

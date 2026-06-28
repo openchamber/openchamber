@@ -1863,4 +1863,10 @@ export const settingsDict = {
   'settings.providers.quotaCredentials.description': 'このプロバイダーの使用量/クォータを表示するためにのみ使用される Cookie またはトークン。',
   'settings.providers.quotaCredentials.empty': '使用量認証情報はまだありません。',
   'settings.providers.quotaCredentials.add': '使用量認証情報を追加',
+  'settings.openchamber.visual.section.followUpBehavior': 'フォローアップの動作',
+  'settings.openchamber.visual.section.followUpBehaviorAria': 'フォローアップの動作',
+  'settings.openchamber.visual.field.followUpBehaviorAria': 'フォローアップの動作: {option}',
+  'settings.openchamber.visual.field.followUpBehaviorDescription': 'エージェントが応答している間にフォローアップメッセージで Enter を押したときの動作を選択します。',
+  'settings.openchamber.visual.option.followUpBehavior.steer.label': 'ステア',
+  'settings.openchamber.visual.option.followUpBehavior.queue.label': 'キュー',
 } as const;

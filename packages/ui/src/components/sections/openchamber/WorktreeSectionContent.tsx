@@ -4,10 +4,12 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
+import type { Session } from '@opencode-ai/sdk/v2';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessions } from '@/sync/sync-context';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useDeviceInfo } from '@/lib/device';
 import { checkIsGitRepository } from '@/lib/gitApi';
 import {
@@ -228,10 +230,17 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
     // Build a set of session IDs that are directly linked
     const directSessionIds = new Set(directSessions.map((s) => s.id));
 
-    // Find all subsessions recursively
-    const findSubsessions = (parentIds: Set<string>): typeof sessions => {
-      const subsessions = sessions.filter((session) => {
-        const parentID = (session as { parentID?: string | null }).parentID;
+    // Search subsessions across all directories, not just the current sync
+    // context, so subagent sessions created in other worktrees/project roots
+    // are still included in the delete list.
+    const allKnownSessions = [
+      ...useGlobalSessionsStore.getState().activeSessions,
+      ...useGlobalSessionsStore.getState().archivedSessions,
+    ];
+
+    const findSubsessions = (parentIds: Set<string>): Session[] => {
+      const subsessions = allKnownSessions.filter((session) => {
+        const parentID = (session as Session & { parentID?: string | null }).parentID;
         return parentID && parentIds.has(parentID);
       });
       if (subsessions.length === 0) {
