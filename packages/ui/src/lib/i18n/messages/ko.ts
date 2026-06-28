@@ -2592,6 +2592,8 @@ export const dict: Record<I18nKey, string> = {
   'textarea.resizeHandleAria': '텍스트 영역 크기 조정',
   'sidebar.resize.leftPanelAria': '왼쪽 패널 크기 조정',
   'sidebar.resize.rightPanelAria': '오른쪽 패널 크기 조정',
+  'sidebar.subagent.toggleLabel': 'Show subagent sessions',
+  'sidebar.subagent.toggleDescription': 'When off, only top-level sessions are shown in the sidebar.',
   'mainLayout.mobile.closeDrawerAria': '드로어 닫기',
   'sortableTabsStrip.aria.tabs': '탭',
   'openChamberLogo.aria.logo': 'OpenChamber 로고',

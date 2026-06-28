@@ -2558,6 +2558,8 @@ export const dict: Record<I18nKey, string> = {
   'textarea.resizeHandleAria': '调整文本区域大小',
   'sidebar.resize.leftPanelAria': '调整左侧面板大小',
   'sidebar.resize.rightPanelAria': '调整右侧面板大小',
+  'sidebar.subagent.toggleLabel': 'Show subagent sessions',
+  'sidebar.subagent.toggleDescription': 'When off, only top-level sessions are shown in the sidebar.',
   'mainLayout.mobile.closeDrawerAria': '关闭抽屉',
   'sortableTabsStrip.aria.tabs': '标签页',
   'openChamberLogo.aria.logo': 'OpenChamber 标志',
