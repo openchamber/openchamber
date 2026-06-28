@@ -2,9 +2,9 @@ import React from 'react';
 
 import { MessageFreshnessDetector } from '@/lib/messageFreshness';
 import { createScrollSpy } from '@/components/chat/lib/scroll/scrollSpy';
-import { useViewportStore } from '@/sync/viewport-store';
+import { getViewportSessionMemory, useViewportStore, type SessionMemoryState } from '@/sync/viewport-store';
 
-type AutoFollowState = 'following' | 'released';
+export type AutoFollowState = 'following' | 'released';
 
 export type ContentChangeReason = 'text' | 'structural' | 'permission';
 
@@ -36,51 +36,21 @@ export interface UseChatAutoFollowResult {
     notifyContentChange: (reason?: ContentChangeReason) => void;
     getAnimationHandlers: (messageId: string) => AnimationHandlers;
     goToBottom: (mode?: 'instant' | 'smooth') => void;
-    scrollToBottomOnSend: () => void;
     releaseAutoFollow: () => void;
     saveSnapshotNow: () => void;
     restoreSnapshot: () => Promise<boolean>;
 }
 
-// ──────────────────────────────────────────────────────────────────────────
-// Chat auto-follow. The model is deliberately simple, which is what makes it
-// flicker-free:
-//
-//   • Auto-follow is on unless the user scrolled up (`released`), AND passive
-//     following only acts while the session is active (working, plus a short
-//     settle window). When idle, content-size changes are layout churn
-//     (virtualizer re-measurement, async tool/code rendering) rather than live
-//     growth, so the hook leaves scroll alone — re-pinning then would fight the
-//     virtualizer and twitch the viewport.
-//   • Following the bottom is INSTANT — `scrollTop = scrollHeight` inside the
-//     content ResizeObserver, which fires after layout and before paint. There
-//     is NO easing loop and NO settle burst, so there are never two writers
-//     racing for `scrollTop` (the root cause of the old jiggle/double-scroll).
-//   • A short-lived "auto" marker (position + 1500ms) lets the scroll handler
-//     distinguish our own programmatic writes from genuine user scrolling, so
-//     a scroll event that lands at our just-written bottom never trips a false
-//     release.
-//
-// The public interface below is unchanged from the old implementation so every
-// consumer (ChatContainer, message parts, the timeline controller) keeps
-// working without edits.
-// ──────────────────────────────────────────────────────────────────────────
-
 const BOTTOM_SPACER_DESKTOP_VH = 0.10;
 const BOTTOM_SPACER_MOBILE_PX = 40;
+const PROGRAMMATIC_WRITE_WINDOW_MS = 200;
 const SAVE_DEBOUNCE_MS = 150;
+const LERP = 0.18;
+const SETTLE_EPSILON = 0.5;
+const SETTLE_FRAMES = 4;
 const TOUCH_FINGER_DOWN_THRESHOLD = 2;
-// How long an "auto" (programmatic) scroll position stays trusted. Browsers can
-// dispatch the `scroll` event for our write asynchronously, after newer content
-// has already changed the geometry; the window keeps us from reading that lag as
-// a user scroll.
-const AUTO_MARK_TTL_MS = 1500;
-const AUTO_MATCH_TOLERANCE_PX = 2;
-// After streaming stops, keep following the bottom for a short window so the
-// final content can settle into place.
-const SETTLE_MS = 300;
-
-const now = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+const SETTLE_BURST_DURATION_MS = 280;
+const REPIN_GRACE_AFTER_RELEASE_MS = 1200;
 
 // The bottom of the chat has an empty spacer (10vh on desktop, 40px on mobile)
 // — its height is exactly how far above scrollHeight the user can be while still
@@ -95,10 +65,6 @@ const computeBottomZoneThreshold = (isMobile: boolean, container?: HTMLElement |
 
 const distanceFromBottom = (el: HTMLElement): number => {
     return el.scrollHeight - el.scrollTop - el.clientHeight;
-};
-
-const canScroll = (el: HTMLElement): boolean => {
-    return el.scrollHeight - el.clientHeight > 1;
 };
 
 const isNearBottom = (el: HTMLElement, isMobile: boolean): boolean => {
@@ -132,6 +98,13 @@ const nestedScrollableCanConsumeUp = (root: HTMLElement, target: EventTarget | n
     return nested.scrollTop > 0;
 };
 
+const isAtBottomSnapshot = (snapshot: NonNullable<SessionMemoryState['scrollPosition']>, isMobile: boolean): boolean => {
+    const max = Math.max(0, snapshot.scrollHeight - snapshot.clientHeight);
+    if (max <= 0) return true;
+    const threshold = computeBottomZoneThreshold(isMobile, null);
+    return max - snapshot.scrollTop <= threshold;
+};
+
 export const useChatAutoFollow = ({
     currentSessionId,
     sessionMessageCount,
@@ -148,33 +121,21 @@ export const useChatAutoFollow = ({
     const [showScrollButton, setShowScrollButton] = React.useState(false);
     const [isFollowingProgrammatically, setIsFollowingProgrammatically] = React.useState(false);
 
-    // `stateRef` is the single source of truth for follow vs released; the React
-    // state above is a mirror for rendering. `released` means the user scrolled
-    // up and away from the bottom.
     const stateRef = React.useRef<AutoFollowState>('following');
-    const isMobileRef = React.useRef(isMobile);
-    isMobileRef.current = isMobile;
-    const sessionIsWorkingRef = React.useRef(sessionIsWorking);
-    sessionIsWorkingRef.current = sessionIsWorking;
-    // `settling` keeps passive follow alive for a short window after work stops
-    // so the final content can land at the bottom.
-    const settlingRef = React.useRef(false);
-    const settleTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const sessionMessageCountRef = React.useRef(sessionMessageCount);
     sessionMessageCountRef.current = sessionMessageCount;
     const currentSessionIdRef = React.useRef(currentSessionId);
     currentSessionIdRef.current = currentSessionId;
 
     const lastSessionIdRef = React.useRef<string | null>(null);
-
-    // Programmatic-scroll marker: the bottom position we last
-    // wrote and when. A scroll event whose scrollTop matches `top` within a few
-    // px while still inside the TTL is OUR write, not the user's.
-    const autoRef = React.useRef<{ top: number; time: number } | null>(null);
-    const autoTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-
+    const programmaticWriteUntilRef = React.useRef(0);
+    const followRafRef = React.useRef<number | null>(null);
+    const settledFramesRef = React.useRef(0);
+    const lastScrollTopRef = React.useRef(0);
     const saveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const pendingSaveRef = React.useRef<{ sessionId: string; anchor: number } | null>(null);
+    const settleBurstRafRef = React.useRef<number | null>(null);
+    const lastUserReleaseAtRef = React.useRef(0);
     // When restoreSnapshot is invoked while ChatViewport is still hydrating
     // (skeleton rendered, no scroll container yet), we record the session here
     // so a follow-up effect can replay the restore once the container mounts.
@@ -194,138 +155,145 @@ export const useChatAutoFollow = ({
         }
     });
 
-    // `active` is `working || settling`. Passive auto-follow
-    // (the ResizeObserver re-pin and any non-forced scrollToBottom) only runs
-    // while active. When the session is idle, content-size changes are layout
-    // churn — virtualizer re-measurement, async tool/code rendering — NOT live
-    // growth, so we must NOT yank the user to the bottom. Forcing this gate is
-    // what stops the twitch when tall items (expanded tools) re-measure as the
-    // user scrolls.
-    const isActive = React.useCallback((): boolean => {
-        return sessionIsWorkingRef.current || settlingRef.current;
-    }, []);
-
     const setStateValue = React.useCallback((next: AutoFollowState) => {
         if (stateRef.current === next) return;
         stateRef.current = next;
         setState(next);
     }, []);
 
-    // ── auto marker ────────────────────────────────────────────────────────
-    const markAuto = React.useCallback((el: HTMLElement) => {
-        autoRef.current = {
-            top: Math.max(0, el.scrollHeight - el.clientHeight),
-            time: now(),
-        };
-        if (autoTimerRef.current) clearTimeout(autoTimerRef.current);
-        autoTimerRef.current = setTimeout(() => {
-            autoRef.current = null;
-            autoTimerRef.current = null;
-        }, AUTO_MARK_TTL_MS);
+    const markProgrammaticWrite = React.useCallback(() => {
+        const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        programmaticWriteUntilRef.current = now + PROGRAMMATIC_WRITE_WINDOW_MS;
     }, []);
 
-    const isAuto = React.useCallback((el: HTMLElement): boolean => {
-        const a = autoRef.current;
-        if (!a) return false;
-        if (now() - a.time > AUTO_MARK_TTL_MS) {
-            autoRef.current = null;
-            return false;
+    const isInProgrammaticWindow = React.useCallback(() => {
+        const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        return now < programmaticWriteUntilRef.current;
+    }, []);
+
+    const stopFollowLoop = React.useCallback(() => {
+        if (followRafRef.current !== null && typeof window !== 'undefined') {
+            window.cancelAnimationFrame(followRafRef.current);
         }
-        return Math.abs(el.scrollTop - a.top) < AUTO_MATCH_TOLERANCE_PX;
+        followRafRef.current = null;
+        settledFramesRef.current = 0;
+        setIsFollowingProgrammatically(false);
     }, []);
 
-    // ── overflow / scroll-to-bottom button ──────────────────────────────────
-    const updateOverflowAndButton = React.useCallback(() => {
+    const tickFollow = React.useCallback(() => {
+        followRafRef.current = null;
         const container = scrollRef.current;
         if (!container) {
-            setIsOverflowing(false);
-            setShowScrollButton(false);
+            stopFollowLoop();
             return;
         }
-        const overflowing = canScroll(container);
-        setIsOverflowing(overflowing);
-        if (!overflowing) {
-            setShowScrollButton(false);
+        if (stateRef.current !== 'following') {
+            stopFollowLoop();
             return;
         }
-        const showButton = stateRef.current === 'released' && !isNearBottom(container, isMobileRef.current);
-        setShowScrollButton(showButton);
+
+        // INSTANT SNAP (OpenCode pattern from packages/ui/src/hooks/create-auto-scroll.tsx).
+        // Write scrollTop = scrollHeight directly. The browser clamps to max.
+        // No LERP, no settle counter. The loop runs every frame as long as
+        // state is 'following'. handleScrollEvent sets state='released' when
+        // the user scrolls up by more than RELEASE_DELTA_THRESHOLD (16px),
+        // which stops the loop. This eliminates the visible "catch-up" animation
+        // while Virtualizer content is still settling, AND prevents the LERP
+        // drift from leaving the scroll position above the bottom during
+        // session-switch Virtualizer remounts.
+        const target = container.scrollHeight;
+        markProgrammaticWrite();
+        container.scrollTop = target;
+        lastScrollTopRef.current = container.scrollTop;
+
+        // Reset settle counter so when the follow loop stops, it knows it
+        // tracked the bottom successfully.
+        settledFramesRef.current = 0;
+
+        followRafRef.current = window.requestAnimationFrame(tickFollow);
+    }, [markProgrammaticWrite, stopFollowLoop]);
+
+    const startFollowLoop = React.useCallback(() => {
+        if (typeof window === 'undefined') return;
+        if (followRafRef.current !== null) return;
+        if (stateRef.current !== 'following') return;
+        settledFramesRef.current = 0;
+        setIsFollowingProgrammatically(true);
+        followRafRef.current = window.requestAnimationFrame(tickFollow);
+    }, [tickFollow]);
+
+    const writeScrollTopInstant = React.useCallback((target: number) => {
+        const container = scrollRef.current;
+        if (!container) return;
+        const max = Math.max(0, container.scrollHeight - container.clientHeight);
+        const clamped = Math.max(0, Math.min(target, max));
+        markProgrammaticWrite();
+        container.scrollTop = clamped;
+        lastScrollTopRef.current = container.scrollTop;
+    }, [markProgrammaticWrite]);
+
+    const stopSettleBurst = React.useCallback(() => {
+        if (settleBurstRafRef.current !== null && typeof window !== 'undefined') {
+            window.cancelAnimationFrame(settleBurstRafRef.current);
+        }
+        settleBurstRafRef.current = null;
     }, []);
 
-    // ── core scroll primitives ───────────────────────────────────────────────
-    const scrollToBottomNow = React.useCallback((behavior: ScrollBehavior) => {
-        const el = scrollRef.current;
-        if (!el) return;
-        markAuto(el);
-        if (behavior === 'smooth') {
-            el.scrollTo({ top: el.scrollHeight, behavior });
-            return;
-        }
-        // Direct `scrollTop` assignment bypasses any CSS `scroll-behavior: smooth`
-        // and lands in the same frame — no visible catch-up animation.
-        el.scrollTop = el.scrollHeight;
-    }, [markAuto]);
-
-    // `force` true = user-intent jump (clears released and always scrolls).
-    // `force` false = passive follow (only while still following).
-    const scrollToBottom = React.useCallback((force: boolean, behavior: ScrollBehavior = 'auto') => {
-        const el = scrollRef.current;
-
-        // Passive follow only while active (working/settling). Forced jumps
-        // (send, go-to-bottom, session restore) always proceed.
-        if (!force && !isActive()) return;
-
-        if (force && stateRef.current !== 'following') {
-            setStateValue('following');
-        }
-        if (!el) return;
-        if (!force && stateRef.current !== 'following') return;
-
-        const distance = distanceFromBottom(el);
-        if (distance < AUTO_MATCH_TOLERANCE_PX) {
-            // Already at the bottom; just refresh the auto marker so the next
-            // scroll event is recognised as ours.
-            markAuto(el);
-            return;
-        }
-        scrollToBottomNow(force ? behavior : 'auto');
-    }, [isActive, markAuto, scrollToBottomNow, setStateValue]);
-
-    // User left the bottom — release auto-follow.
-    const stop = React.useCallback(() => {
-        const el = scrollRef.current;
-        if (!el) return;
-        if (!canScroll(el)) {
-            setStateValue('following');
-            return;
-        }
-        if (stateRef.current === 'released') return;
-        setStateValue('released');
-        updateOverflowAndButton();
-    }, [setStateValue, updateOverflowAndButton]);
-
-    // ── public scroll API (mapped onto the primitives) ───────────────────────
-    const goToBottom = React.useCallback((mode: 'instant' | 'smooth' = 'instant') => {
-        scrollToBottom(true, mode === 'smooth' ? 'smooth' : 'auto');
-    }, [scrollToBottom]);
-
-    const scrollToBottomOnSend = React.useCallback(() => {
-        // Single movement to the just-sent message. Force re-pins to the bottom
-        // whether we were following or scrolled up; the content ResizeObserver
-        // keeps us pinned as the optimistic message and its reply stream in.
-        scrollToBottom(true);
-    }, [scrollToBottom]);
+    const startSettleBurst = React.useCallback(() => {
+        if (typeof window === 'undefined') return;
+        stopSettleBurst();
+        const until = (typeof performance !== 'undefined' ? performance.now() : Date.now()) + SETTLE_BURST_DURATION_MS;
+        const tick = () => {
+            settleBurstRafRef.current = null;
+            if (stateRef.current !== 'following') return;
+            const c = scrollRef.current;
+            if (!c) return;
+            const target = Math.max(0, c.scrollHeight - c.clientHeight);
+            if (Math.abs(c.scrollTop - target) > SETTLE_EPSILON) {
+                markProgrammaticWrite();
+                c.scrollTop = target;
+                lastScrollTopRef.current = target;
+            }
+            const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+            if (now < until) {
+                settleBurstRafRef.current = window.requestAnimationFrame(tick);
+            }
+        };
+        settleBurstRafRef.current = window.requestAnimationFrame(tick);
+    }, [markProgrammaticWrite, stopSettleBurst]);
 
     const releaseAutoFollow = React.useCallback(() => {
+        stopFollowLoop();
+        stopSettleBurst();
+        lastUserReleaseAtRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now();
         setStateValue('released');
-        updateOverflowAndButton();
-    }, [setStateValue, updateOverflowAndButton]);
+    }, [setStateValue, stopFollowLoop, stopSettleBurst]);
 
     const releaseFromUserIntent = React.useCallback(() => {
-        stop();
-    }, [stop]);
+        if (stateRef.current === 'following') {
+            stopFollowLoop();
+            stopSettleBurst();
+            lastUserReleaseAtRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now();
+            setStateValue('released');
+        } else {
+            lastUserReleaseAtRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        }
+    }, [setStateValue, stopFollowLoop, stopSettleBurst]);
 
-    // ── per-session snapshot persistence (kept; restore still goes to bottom) ─
+    const goToBottom = React.useCallback((mode: 'instant' | 'smooth' = 'instant') => {
+        const container = scrollRef.current;
+        setStateValue('following');
+        lastUserReleaseAtRef.current = 0;
+        if (!container) return;
+        if (mode === 'smooth') {
+            startFollowLoop();
+            return;
+        }
+        const target = Math.max(0, container.scrollHeight - container.clientHeight);
+        writeScrollTopInstant(target);
+        startSettleBurst();
+    }, [setStateValue, startFollowLoop, startSettleBurst, writeScrollTopInstant]);
+
     const flushSave = React.useCallback(() => {
         if (saveTimerRef.current !== null) {
             clearTimeout(saveTimerRef.current);
@@ -384,16 +352,36 @@ export const useChatAutoFollow = ({
         }
         pendingInitialRestoreRef.current = null;
 
-        // Always return to the bottom on session switch. The content
-        // ResizeObserver re-pins instantly as late
-        // history measures in, so there is no smooth scroll-from-mid artifact.
-        setStateValue('following');
-        scrollToBottom(true);
-        updateOverflowAndButton();
-        return false;
-    }, [scrollToBottom, setStateValue, updateOverflowAndButton]);
+        const saved = getViewportSessionMemory(sessionId)?.scrollPosition;
 
-    // ── session change ───────────────────────────────────────────────────────
+        if (!saved || isAtBottomSnapshot(saved, isMobile)) {
+            setStateValue('following');
+            lastUserReleaseAtRef.current = 0;
+            const target = Math.max(0, container.scrollHeight - container.clientHeight);
+            writeScrollTopInstant(target);
+            startFollowLoop();
+            startSettleBurst();
+            return false;
+        }
+
+        const savedMaxScroll = Math.max(0, saved.scrollHeight - saved.clientHeight);
+        const ratio = savedMaxScroll > 0 ? saved.scrollTop / savedMaxScroll : 0;
+        const currentMaxScroll = Math.max(0, container.scrollHeight - container.clientHeight);
+        const targetTop = Math.round(ratio * currentMaxScroll);
+
+        setStateValue('released');
+        writeScrollTopInstant(targetTop);
+
+        const memState = getViewportSessionMemory(sessionId);
+        updateViewportAnchor(sessionId, memState?.viewportAnchor ?? 0, {
+            scrollTop: container.scrollTop,
+            scrollHeight: container.scrollHeight,
+            clientHeight: container.clientHeight,
+        });
+
+        return true;
+    }, [isMobile, setStateValue, startFollowLoop, startSettleBurst, updateViewportAnchor, writeScrollTopInstant]);
+
     React.useEffect(() => {
         if (!currentSessionId || currentSessionId === lastSessionIdRef.current) {
             return;
@@ -401,88 +389,86 @@ export const useChatAutoFollow = ({
         lastSessionIdRef.current = currentSessionId;
         MessageFreshnessDetector.getInstance().recordSessionStart(currentSessionId);
         flushSave();
-        autoRef.current = null;
+        stopFollowLoop();
+        stopSettleBurst();
+        markProgrammaticWrite();
         // Drop any pending restore request inherited from a different session.
         if (pendingInitialRestoreRef.current && pendingInitialRestoreRef.current !== currentSessionId) {
             pendingInitialRestoreRef.current = null;
         }
-    }, [currentSessionId, flushSave]);
+    }, [currentSessionId, flushSave, markProgrammaticWrite, stopFollowLoop, stopSettleBurst]);
 
-    // When work begins and we are still
-    // following, pin to the bottom. When work stops, keep following alive for a
-    // short settle window so the final content lands at the bottom, then go
-    // idle (after which passive follow is disabled — see `isActive`).
     React.useEffect(() => {
-        settlingRef.current = false;
-        if (settleTimerRef.current) {
-            clearTimeout(settleTimerRef.current);
-            settleTimerRef.current = null;
+        if (sessionIsWorking && stateRef.current === 'following') {
+            startFollowLoop();
         }
-
-        if (sessionIsWorking) {
-            if (stateRef.current === 'following') {
-                scrollToBottom(true);
-            }
-            return;
-        }
-
-        settlingRef.current = true;
-        settleTimerRef.current = setTimeout(() => {
-            settlingRef.current = false;
-            settleTimerRef.current = null;
-        }, SETTLE_MS);
-    }, [sessionIsWorking, scrollToBottom]);
-
-    // Suppress the overlay scrollbar thumb only while we are actively following a
-    // live stream (the thumb would otherwise jump on every instant re-pin). When
-    // idle or released the scrollbar behaves normally. Stable: changes only when
-    // follow-state or working-state flips, not on every frame.
-    React.useEffect(() => {
-        setIsFollowingProgrammatically(state === 'following' && sessionIsWorking);
-    }, [state, sessionIsWorking]);
+    }, [sessionIsWorking, startFollowLoop]);
 
     // Replay a deferred restoreSnapshot once ChatViewport mounts.
-    // useLayoutEffect ensures scroll position is set before the browser paints,
-    // preventing a visible flash of content at the wrong scroll position.
-    React.useLayoutEffect(() => {
+    React.useEffect(() => {
         if (!containerEl) return;
         if (pendingInitialRestoreRef.current && pendingInitialRestoreRef.current === currentSessionId) {
             void restoreSnapshot();
         }
     }, [containerEl, currentSessionId, restoreSnapshot]);
 
-    // ── scroll event handling ────────────────────────────────────────────────
+    const updateOverflowAndButton = React.useCallback(() => {
+        const container = scrollRef.current;
+        if (!container) {
+            setIsOverflowing(false);
+            setShowScrollButton(false);
+            return;
+        }
+        const overflowing = container.scrollHeight > container.clientHeight + 1;
+        setIsOverflowing(overflowing);
+        if (!overflowing) {
+            setShowScrollButton(false);
+            return;
+        }
+        const showButton = stateRef.current === 'released' && !isNearBottom(container, isMobile);
+        setShowScrollButton(showButton);
+    }, [isMobile]);
+
     const handleScrollEvent = React.useCallback(() => {
-        const el = scrollRef.current;
-        if (!el) return;
+        const container = scrollRef.current;
+        if (!container) return;
+
+        const programmatic = isInProgrammaticWindow();
+        const currentTop = container.scrollTop;
+        const previousTop = lastScrollTopRef.current;
+        lastScrollTopRef.current = currentTop;
 
         updateOverflowAndButton();
 
-        if (!canScroll(el)) {
+        if (programmatic) {
+            return;
+        }
+
+        if (currentTop < previousTop && stateRef.current === 'following') {
+            stopFollowLoop();
+            stopSettleBurst();
+            lastUserReleaseAtRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now();
+            setStateValue('released');
+        }
+
+        const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        const inGrace = (now - lastUserReleaseAtRef.current) < REPIN_GRACE_AFTER_RELEASE_MS;
+        if (stateRef.current === 'released' && isNearBottom(container, isMobile) && !inGrace) {
             setStateValue('following');
-            return;
+            startFollowLoop();
         }
 
-        // Within the bottom zone → (re-)pin to following. This is how scrolling
-        // back down to the bottom resumes auto-follow.
-        if (isNearBottom(el, isMobileRef.current)) {
-            setStateValue('following');
-            queueSave();
-            return;
-        }
-
-        // Our own programmatic write that landed at the bottom but where content
-        // grew between the write and this event — keep following, don't release.
-        if (stateRef.current === 'following' && isAuto(el)) {
-            scrollToBottom(false);
-            queueSave();
-            return;
-        }
-
-        // Genuine user scroll away from the bottom.
-        stop();
         queueSave();
-    }, [isAuto, queueSave, scrollToBottom, setStateValue, stop, updateOverflowAndButton]);
+    }, [
+        isInProgrammaticWindow,
+        isMobile,
+        queueSave,
+        setStateValue,
+        startFollowLoop,
+        stopFollowLoop,
+        stopSettleBurst,
+        updateOverflowAndButton,
+    ]);
 
     React.useEffect(() => {
         const container = containerEl;
@@ -554,29 +540,15 @@ export const useChatAutoFollow = ({
         };
     }, [containerEl, handleScrollEvent, releaseFromUserIntent]);
 
-    // The heart of the follow behaviour: the content ResizeObserver fires after
-    // layout and before paint, so re-pinning to the bottom here is invisible —
-    // there is no "jump up then catch up". Observe both the container (composer
-    // growth shrinks the viewport) and the inner content (streaming growth).
     React.useEffect(() => {
         const container = containerEl;
         if (!container || typeof ResizeObserver === 'undefined') return;
 
         const observer = new ResizeObserver(() => {
-            const el = scrollRef.current;
-            if (el && !canScroll(el)) {
-                setStateValue('following');
-                updateOverflowAndButton();
-                return;
-            }
             updateOverflowAndButton();
-            // Idle resize = layout churn (virtualizer re-measurement, async
-            // tool/code rendering), NOT live growth. Never re-pin when idle, or
-            // tall items re-measuring as the user scrolls cause an endless
-            // scroll-to-bottom/re-measure twitch.
-            if (!isActive()) return;
-            if (stateRef.current !== 'following') return;
-            scrollToBottom(false);
+            if (stateRef.current === 'following') {
+                startFollowLoop();
+            }
         });
         observer.observe(container);
         const inner = container.firstElementChild;
@@ -584,7 +556,7 @@ export const useChatAutoFollow = ({
             observer.observe(inner);
         }
         return () => observer.disconnect();
-    }, [containerEl, isActive, scrollToBottom, setStateValue, updateOverflowAndButton]);
+    }, [containerEl, startFollowLoop, updateOverflowAndButton]);
 
     React.useEffect(() => {
         updateOverflowAndButton();
@@ -594,9 +566,9 @@ export const useChatAutoFollow = ({
         void _reason;
         updateOverflowAndButton();
         if (stateRef.current === 'following') {
-            scrollToBottom(false);
+            startFollowLoop();
         }
-    }, [scrollToBottom, updateOverflowAndButton]);
+    }, [startFollowLoop, updateOverflowAndButton]);
 
     const animationHandlersRef = React.useRef<Map<string, AnimationHandlers>>(new Map());
 
@@ -606,7 +578,7 @@ export const useChatAutoFollow = ({
 
         const kick = () => {
             if (stateRef.current === 'following') {
-                scrollToBottom(false);
+                startFollowLoop();
             }
         };
 
@@ -623,25 +595,19 @@ export const useChatAutoFollow = ({
         };
         animationHandlersRef.current.set(messageId, handlers);
         return handlers;
-    }, [scrollToBottom, updateOverflowAndButton]);
+    }, [startFollowLoop, updateOverflowAndButton]);
 
     React.useEffect(() => {
         return () => {
-            if (autoTimerRef.current) {
-                clearTimeout(autoTimerRef.current);
-                autoTimerRef.current = null;
-            }
-            if (settleTimerRef.current) {
-                clearTimeout(settleTimerRef.current);
-                settleTimerRef.current = null;
-            }
+            stopFollowLoop();
+            stopSettleBurst();
             flushSave();
             if (saveTimerRef.current !== null) {
                 clearTimeout(saveTimerRef.current);
                 saveTimerRef.current = null;
             }
         };
-    }, [flushSave]);
+    }, [flushSave, stopFollowLoop, stopSettleBurst]);
 
     React.useEffect(() => {
         if (!onActiveTurnChange) return;
@@ -723,7 +689,6 @@ export const useChatAutoFollow = ({
         notifyContentChange,
         getAnimationHandlers,
         goToBottom,
-        scrollToBottomOnSend,
         releaseAutoFollow,
         saveSnapshotNow,
         restoreSnapshot,

@@ -2059,6 +2059,8 @@ export const dict = {
   'mcpDropdown.status.unknownError': 'Erreur inconnue',
   'mcpDropdown.status.needsAuth': 'Nécessite une authentification',
   'mcpDropdown.status.needsRegistration': 'Nécessite un enregistrement : {error}',
+  'mcpDropdown.status.configured': 'Configured',
+  'mcpDropdown.status.notConnected': 'Not connected',
   'mcpDropdown.empty.configureInConfig': 'Configurez les serveurs MCP dans la configuration OpenCode.',
   'sessionAuth.error.rateLimitTitle': 'Trop de tentatives',
   'sessionAuth.error.networkTitle': 'Impossible d\'atteindre le serveur',

@@ -2102,6 +2102,8 @@ export const dict: Record<I18nKey, string> = {
   'mcpDropdown.status.failed': 'Błąd: {error}',
   'mcpDropdown.status.needsAuth': 'Wymaga uwierzytelnienia',
   'mcpDropdown.status.needsRegistration': 'Wymaga rejestracji: {error}',
+  'mcpDropdown.status.configured': 'Configured',
+  'mcpDropdown.status.notConnected': 'Not connected',
   'mcpDropdown.status.unknown': 'Nieznany',
   'mcpDropdown.status.unknownError': 'Nieznany błąd',
   'mcpDropdown.statusAria': 'Status MCP',
