@@ -1,34 +1,42 @@
-const EXPANDABLE_TOOL_NAMES = new Set<string>([
-    'edit', 'multiedit', 'apply_patch', 'str_replace', 'str_replace_based_edit_tool',
-    'bash', 'shell', 'cmd', 'terminal',
-    'write', 'create', 'file_write',
-    'question', 'task', 'lsp',
-]);
+import {
+    getToolRenderMode,
+    isToolActivityGroupBoundary,
+    shouldShowToolParamSummary as shouldShowToolParamSummaryFromMetadata,
+} from '@/lib/toolHelpers';
 
-const STANDALONE_TOOL_NAMES = new Set<string>(['task']);
-
-const normalizeToolName = (toolName: unknown): string => {
-    if (typeof toolName !== 'string') return '';
-    const trimmed = toolName.trim().toLowerCase();
-    if (!trimmed) return '';
-
-    const withoutIndex = trimmed.replace(/:\d+$/, '');
-    if (withoutIndex.includes('.')) {
-        const parts = withoutIndex.split('.').filter(Boolean);
-        return parts[parts.length - 1] ?? withoutIndex;
-    }
-    return withoutIndex;
+/**
+ * Tool rendering policy is owned by toolHelpers metadata. Unknown MCP/plugin
+ * tools default to expandable rendering with an inline parameter summary.
+ */
+export const shouldShowToolParamSummary = (toolName: unknown): boolean => {
+    return shouldShowToolParamSummaryFromMetadata(toolName);
 };
 
 export const isExpandableTool = (toolName: unknown): boolean => {
-    return EXPANDABLE_TOOL_NAMES.has(normalizeToolName(toolName));
+    return getToolRenderMode(toolName) === 'expandable';
 };
 
 export const isStandaloneTool = (toolName: unknown): boolean => {
-    return STANDALONE_TOOL_NAMES.has(normalizeToolName(toolName));
+    return isToolActivityGroupBoundary(toolName) || getToolRenderMode(toolName) === 'standalone';
 };
 
 export const isStaticTool = (toolName: unknown): boolean => {
-    if (typeof toolName !== 'string') return false;
-    return !isExpandableTool(toolName) && !isStandaloneTool(toolName);
+    return getToolRenderMode(toolName) === 'static';
+};
+
+export const formatToolParamSummaryValue = (value: unknown): string => {
+    if (typeof value === 'string') {
+        return value.length > 30 ? `${value.substring(0, 30)}...` : value;
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+        return String(value);
+    }
+    if (value === null) {
+        return 'null';
+    }
+    if (typeof value === 'object') {
+        const serialized = JSON.stringify(value);
+        return serialized.length > 30 ? `${serialized.substring(0, 30)}...` : serialized;
+    }
+    return String(value);
 };
