@@ -8,7 +8,6 @@ import { useAgentsStore, type AgentConfig, type AgentMutationResult, type AgentS
 import { useShallow } from 'zustand/react/shallow';
 import { useDirectorySync } from '@/sync/sync-context';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { useDeviceInfo } from '@/lib/device';
 import { opencodeClient } from '@/lib/opencode/client';
 import { cn } from '@/lib/utils';
 import { ModelSelector } from './ModelSelector';
@@ -216,7 +215,6 @@ const getVariantOptionsForModel = (
 };
 export const AgentsPage: React.FC = () => {
   const { t } = useI18n();
-  const { isMobile } = useDeviceInfo();
   const providers = useConfigStore((state) => state.providers) as AgentVariantProvider[];
   const {
     selectedAgentName,
@@ -676,11 +674,10 @@ export const AgentsPage: React.FC = () => {
   }
 
   return (
-    <ScrollableOverlay outerClassName="h-full" className="w-full">
-      <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8">
-
-        {/* Header & Actions */}
-        <div className="mb-4 flex items-center justify-between gap-4">
+    <>
+      {/* Sticky header — outside ScrollableOverlay */}
+      <div className="sticky top-0 z-10 bg-[var(--surface-page)] border-b border-[var(--surface-subtle)]">
+        <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-4 px-3 py-3 sm:px-6">
           <div className="min-w-0">
             <h2 className="typography-ui-header font-semibold text-foreground truncate">
               {isNewAgent ? t('settings.agents.page.title.new') : selectedAgentName}
@@ -689,7 +686,18 @@ export const AgentsPage: React.FC = () => {
               {isNewAgent ? t('settings.agents.page.subtitle.new') : t('settings.agents.page.subtitle.edit')}
             </p>
           </div>
+          <Button
+            onClick={handleSave}
+            disabled={isSaving || !isDirty}
+            size="xs"
+            className="!font-normal shrink-0"
+          >
+            {isSaving ? t('settings.common.actions.saving') : t('settings.common.actions.saveChanges')}
+          </Button>
         </div>
+      </div>
+      <ScrollableOverlay outerClassName="h-full" className="w-full">
+        <div className="mx-auto w-full max-w-3xl p-3 sm:p-6">
 
         {/* Identity & Role */}
         <div className="mb-8">
@@ -706,7 +714,7 @@ export const AgentsPage: React.FC = () => {
                 <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
                   <span className="typography-ui-label text-foreground">{t('settings.agents.page.field.agentName')}</span>
                 </div>
-                <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
+              <div className="flex min-w-0 flex-1 items-center gap-2">
                   <div className="flex items-center">
                     <span className="typography-ui-label text-muted-foreground mr-1">@</span>
                     <Input
@@ -810,6 +818,7 @@ export const AgentsPage: React.FC = () => {
 
           <section className="px-2 pb-2 pt-0 space-y-0">
 
+            {/* Row 1: Model + Variant */}
             <div data-settings-item="agents.model" className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
               <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
                 <span className="typography-ui-label text-foreground">{t('settings.agents.page.field.overrideModel')}</span>
@@ -828,12 +837,9 @@ export const AgentsPage: React.FC = () => {
                   }}
                 />
               </div>
-            </div>
-
-            <div data-settings-item="agents.variant" className={cn("py-1.5", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
-              <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "sm:w-56 shrink-0")}>
+              <div data-settings-item="agents.variant" className="flex items-center gap-2 shrink-0">
                 <div className="flex items-center gap-1.5">
-                  <span className="typography-ui-label text-foreground">{t('settings.agents.page.field.variant')}</span>
+                  <span className="typography-ui-label text-foreground whitespace-nowrap">{t('settings.agents.page.field.variant')}</span>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
@@ -843,15 +849,12 @@ export const AgentsPage: React.FC = () => {
                     </TooltipContent>
                   </Tooltip>
                 </div>
-                <span className="typography-meta text-muted-foreground">{t('settings.agents.page.field.variantHint')}</span>
-              </div>
-              <div className={cn('flex items-center gap-2', isMobile ? 'w-full' : 'w-fit')}>
                 {shouldUseVariantSelect ? (
                   <Select
                     value={selectedVariantValue}
                     onValueChange={(value) => setVariant(value === '__default' ? '' : value)}
                   >
-                    <SelectTrigger className={cn('max-w-full', isMobile ? 'w-full' : 'w-fit min-w-[10rem]')}>
+                    <SelectTrigger className="w-fit min-w-[8rem]">
                       <SelectValue placeholder={t('settings.agents.page.field.variantPlaceholder')}>
                         {(value) => value === '__default' ? t('chat.modelControls.default') : value}
                       </SelectValue>
@@ -870,7 +873,7 @@ export const AgentsPage: React.FC = () => {
                       onChange={(event) => setVariant(event.target.value)}
                       placeholder={t('settings.agents.page.field.variantPlaceholder')}
                       disabled={!model && !variant}
-                      className={cn('h-7 w-40', isMobile && 'w-full')}
+                      className="h-7 w-32"
                     />
                     {variant && (
                       <Button
@@ -890,91 +893,88 @@ export const AgentsPage: React.FC = () => {
               </div>
             </div>
 
-            <div data-settings-item="agents.temperature" className={cn("py-1.5", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
-              <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "sm:w-56 shrink-0")}>
-                <div className="flex items-center gap-1.5">
-                  <span className="typography-ui-label text-foreground">{t('settings.agents.page.field.temperature')}</span>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-                    </TooltipTrigger>
-                    <TooltipContent sideOffset={8} className="max-w-xs">
-                      {t('settings.agents.page.field.temperatureTooltip')}
-                    </TooltipContent>
-                  </Tooltip>
+            {/* Row 2: Temperature + Top P */}
+            <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
+              <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
+                <span className="typography-ui-label text-foreground">{t('settings.agents.page.field.sampling')}</span>
+              </div>
+              <div className="flex min-w-0 flex-1 items-center gap-6 sm:w-fit sm:flex-initial">
+                <div data-settings-item="agents.temperature" className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="typography-ui-label text-foreground whitespace-nowrap">{t('settings.agents.page.field.temperature')}</span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                      </TooltipTrigger>
+                      <TooltipContent sideOffset={8} className="max-w-xs">
+                        {t('settings.agents.page.field.temperatureTooltip')}
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                  <NumberInput
+                    value={temperature}
+                    fallbackValue={0.7}
+                    onValueChange={setTemperature}
+                    onClear={() => setTemperature(undefined)}
+                    min={0}
+                    max={2}
+                    step={0.1}
+                    inputMode="decimal"
+                    placeholder="—"
+                    emptyLabel="—"
+                    className="w-16"
+                  />
+                  {temperature !== undefined && (
+                    <Button size="sm"
+                      type="button"
+                      variant="ghost"
+                      onClick={() => setTemperature(undefined)}
+                      className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
+                      aria-label={t('settings.agents.page.field.clearTemperatureAria')}
+                      title={t('settings.common.actions.clear')}
+                    >
+                      <Icon name="close" className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
                 </div>
-                <span className="typography-meta text-muted-foreground">{t('settings.agents.page.field.temperatureRange')}</span>
-              </div>
-              <div className={cn("flex items-center gap-2", isMobile ? "w-full" : "w-fit")}>
-                <NumberInput
-                  value={temperature}
-                  fallbackValue={0.7}
-                  onValueChange={setTemperature}
-                  onClear={() => setTemperature(undefined)}
-                  min={0}
-                  max={2}
-                  step={0.1}
-                  inputMode="decimal"
-                  placeholder="—"
-                  emptyLabel="—"
-                  className="w-16"
-                />
-                {temperature !== undefined && (
-                  <Button size="sm"
-                    type="button"
-                    variant="ghost"
-                    onClick={() => setTemperature(undefined)}
-                    className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
-                    aria-label={t('settings.agents.page.field.clearTemperatureAria')}
-                    title={t('settings.common.actions.clear')}
-                  >
-                    <Icon name="close" className="h-3.5 w-3.5" />
-                  </Button>
-                )}
-              </div>
-            </div>
-
-            <div data-settings-item="agents.top-p" className={cn("py-1.5", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
-              <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "sm:w-56 shrink-0")}>
-                <div className="flex items-center gap-1.5">
-                  <span className="typography-ui-label text-foreground">{t('settings.agents.page.field.topP')}</span>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-                    </TooltipTrigger>
-                    <TooltipContent sideOffset={8} className="max-w-xs">
-                      {t('settings.agents.page.field.topPTooltip')}
-                    </TooltipContent>
-                  </Tooltip>
+                <div data-settings-item="agents.top-p" className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="typography-ui-label text-foreground whitespace-nowrap">{t('settings.agents.page.field.topP')}</span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                      </TooltipTrigger>
+                      <TooltipContent sideOffset={8} className="max-w-xs">
+                        {t('settings.agents.page.field.topPTooltip')}
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                  <NumberInput
+                    value={topP}
+                    fallbackValue={0.9}
+                    onValueChange={setTopP}
+                    onClear={() => setTopP(undefined)}
+                    min={0}
+                    max={1}
+                    step={0.1}
+                    inputMode="decimal"
+                    placeholder="—"
+                    emptyLabel="—"
+                    className="w-16"
+                  />
+                  {topP !== undefined && (
+                    <Button size="sm"
+                      type="button"
+                      variant="ghost"
+                      onClick={() => setTopP(undefined)}
+                      className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
+                      aria-label={t('settings.agents.page.field.clearTopPAria')}
+                      title={t('settings.common.actions.clear')}
+                    >
+                      <Icon name="close" className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
                 </div>
-                <span className="typography-meta text-muted-foreground">{t('settings.agents.page.field.topPRange')}</span>
-              </div>
-              <div className={cn("flex items-center gap-2", isMobile ? "w-full" : "w-fit")}>
-                <NumberInput
-                  value={topP}
-                  fallbackValue={0.9}
-                  onValueChange={setTopP}
-                  onClear={() => setTopP(undefined)}
-                  min={0}
-                  max={1}
-                  step={0.1}
-                  inputMode="decimal"
-                  placeholder="—"
-                  emptyLabel="—"
-                  className="w-16"
-                />
-                {topP !== undefined && (
-                  <Button size="sm"
-                    type="button"
-                    variant="ghost"
-                    onClick={() => setTopP(undefined)}
-                    className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
-                    aria-label={t('settings.agents.page.field.clearTopPAria')}
-                    title={t('settings.common.actions.clear')}
-                  >
-                    <Icon name="close" className="h-3.5 w-3.5" />
-                  </Button>
-                )}
               </div>
             </div>
 
@@ -1209,19 +1209,8 @@ export const AgentsPage: React.FC = () => {
           )}
         </div>
 
-        {/* Save action */}
-        <div className="px-2 py-1">
-          <Button
-            onClick={handleSave}
-            disabled={isSaving || !isDirty}
-            size="xs"
-            className="!font-normal"
-          >
-            {isSaving ? t('settings.common.actions.saving') : t('settings.common.actions.saveChanges')}
-          </Button>
-        </div>
-
       </div>
     </ScrollableOverlay>
+    </>
   );
 };
