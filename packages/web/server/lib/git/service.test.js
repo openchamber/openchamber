@@ -8,6 +8,7 @@ import simpleGit from 'simple-git';
 import {
   checkoutCommit,
   cherryPick,
+  createWorktree,
   getStatus,
   removeWorktree,
   resolvePrimaryWorktreeRoot,
@@ -312,6 +313,53 @@ describe('worktree root resolution', () => {
     runGit(repo, ['worktree', 'add', '-b', 'feature/test', worktree, 'HEAD']);
 
     await expect(resolvePrimaryWorktreeRoot(worktree)).resolves.toEqual({ root: fs.realpathSync(repo) });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createWorktree
+// ---------------------------------------------------------------------------
+
+describe('createWorktree', () => {
+  it('preflights fast create branch-in-use failures before creating the candidate directory', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+
+    try {
+      const repo = createTempDir();
+      const worktree = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+      const projectID = runGit(repo, ['rev-list', '--max-parents=0', '--all']).trim();
+
+      fs.rmSync(worktree, { recursive: true, force: true });
+      runGit(repo, ['worktree', 'add', '-b', 'feature/in-use', worktree, 'HEAD']);
+      const canonicalWorktree = fs.realpathSync(worktree);
+
+      await expect(createWorktree(repo, {
+        mode: 'existing',
+        existingBranch: 'feature/in-use',
+        branchName: 'feature/in-use',
+        worktreeName: 'feature-in-use',
+        returnAfterDirectoryCreated: true,
+      })).rejects.toThrow(`Branch is already checked out in ${canonicalWorktree}`);
+
+      const candidateDirectory = path.join(dataHome, 'opencode', 'worktree', projectID, 'feature-in-use');
+      expect(fs.existsSync(candidateDirectory)).toBe(false);
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
   });
 });
 

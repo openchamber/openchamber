@@ -1327,11 +1327,20 @@ async function main(options = {}) {
     }),
     isReady: () => isOpenCodeReady,
     restartOpenCode: () => restartOpenCode(),
-    getOpenCodeProcessInfo: () => ({
-      managed: Boolean((openCodeProcess || openCodePort) && !ENV_SKIP_OPENCODE_START && !isExternalOpenCode),
-      pid: typeof openCodeProcess?.pid === 'number' ? openCodeProcess.pid : null,
-      port: openCodePort,
-    }),
+    getOpenCodeProcessInfo: () => {
+      const managed = Boolean((openCodeProcess || openCodePort) && !ENV_SKIP_OPENCODE_START && !isExternalOpenCode);
+      // Only ever expose pid/port for a server WE manage. The Electron-side
+      // killer kills by port (lsof + kill -KILL), so returning a port we don't
+      // own — e.g. an external/desktop OpenCode on 4096 we attached to — would
+      // let a single miscomputed `managed` flag take down the user's separate
+      // server. Structurally withhold what isn't ours so the killer has no
+      // target, instead of relying on the flag check alone.
+      return {
+        managed,
+        pid: managed && typeof openCodeProcess?.pid === 'number' ? openCodeProcess.pid : null,
+        port: managed ? openCodePort : null,
+      };
+    },
     stop: (shutdownOptions = {}) =>
       gracefulShutdown({ exitProcess: shutdownOptions.exitProcess ?? false })
   };

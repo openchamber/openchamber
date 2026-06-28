@@ -5,7 +5,7 @@ import { useI18n } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 import { Icon } from "@/components/icon/Icon";
 
-export interface NumberInputProps
+interface NumberInputProps
   extends Omit<React.ComponentProps<"input">, "value" | "onChange" | "type"> {
   value?: number
   onValueChange: (value: number) => void

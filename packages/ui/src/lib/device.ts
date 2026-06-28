@@ -1,7 +1,7 @@
 import React from 'react';
 import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 
-export type DeviceType = 'desktop' | 'mobile' | 'tablet';
+type DeviceType = 'desktop' | 'mobile' | 'tablet';
 
 export interface DeviceInfo {
   isMobile: boolean;
@@ -14,13 +14,7 @@ export interface DeviceInfo {
   hasTouchOnlyPointer: boolean;
 }
 
-export const CSS_DEVICE_VARIABLES = {
-  IS_MOBILE: 'var(--is-mobile)',
-  DEVICE_TYPE: 'var(--device-type)',
-  HAS_TOUCH_INPUT: 'var(--has-touch-input)',
-} as const;
-
-export const BREAKPOINTS = {
+const BREAKPOINTS = {
   xs: 0,
   sm: 640,
   md: 768,
@@ -291,7 +285,7 @@ export function isMobileDeviceViaCSS(): boolean {
   return isMobileValue === '1' || isMobileValue === 'true';
 }
 
-export const isStandalonePwaRuntime = (): boolean => {
+const isStandalonePwaRuntime = (): boolean => {
   if (typeof window === 'undefined') return false;
 
   const standaloneNavigator = navigator as Navigator & { standalone?: boolean };
@@ -302,7 +296,7 @@ export const isStandalonePwaRuntime = (): boolean => {
   );
 };
 
-export const isTabletStandalonePwaRuntime = (): boolean => {
+const isTabletStandalonePwaRuntime = (): boolean => {
   if (typeof window === 'undefined' || isDesktopShell()) return false;
 
   const maxTouchPoints = typeof navigator !== 'undefined' ? navigator.maxTouchPoints ?? 0 : 0;

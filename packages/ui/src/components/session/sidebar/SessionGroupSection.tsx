@@ -350,6 +350,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
     setRenameFolderDraft,
     setRenamingFolderId,
     pinnedSessionIds,
+    expandedParents,
     sessionOrderIndex,
     currentSessionId,
     editingId,
@@ -569,6 +570,16 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
     && visibleSessions.length >= ACTIVE_VIRTUALIZE_THRESHOLD;
   const shouldVirtualize = shouldVirtualizeArchived || shouldVirtualizeActive;
 
+  // Check if any parent node is expanded - expanded parents render their
+  // children inline, making them much taller than the fixed estimate.
+  // When expanded parents exist, increase bufferSize to cover the extra height.
+  const bucketTag = group.isArchivedBucket ? 'archived' : 'active';
+  const hasExpandedParent = shouldVirtualize && visibleSessions.some((node) => {
+    if (node.children.length === 0) return false;
+    const expansionKey = `project:${bucketTag}:${node.session.id}`;
+    return expandedParents.has(expansionKey);
+  });
+
   const archivedVirtualContainerRef = React.useRef<HTMLDivElement | null>(null);
   const archivedScrollRef = React.useRef<HTMLElement | null>(null);
   const [archivedScrollEl, setArchivedScrollEl] = React.useState<HTMLElement | null>(null);
@@ -664,12 +675,13 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
     return collected;
   }, []);
 
-  // The "delete all in group" handler closes over the full list of
-  // sessions in this group. Memoize so the recursive flatten only runs
-  // when the underlying source group nodes change, not on every render.
+  // Flat list of all sessions in this group (including nested children).
+  // Used by both the "delete all archived" button and the "delete worktree"
+  // button. Memoize so the recursive flatten only runs when the underlying
+  // source group nodes change, not on every render.
   const allGroupSessions = React.useMemo(
-    () => (group.isArchivedBucket ? collectGroupSessions(sourceGroupNodes) : []),
-    [collectGroupSessions, sourceGroupNodes, group.isArchivedBucket],
+    () => collectGroupSessions(sourceGroupNodes),
+    [collectGroupSessions, sourceGroupNodes],
   );
 
   // Precompute the per-folder "delete all sessions in folder" list once
@@ -904,7 +916,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
           <Virtualizer
             data={visibleSessions}
             itemSize={ARCHIVED_ROW_ESTIMATE_PX}
-            bufferSize={ARCHIVED_ROW_ESTIMATE_PX * 8}
+            bufferSize={hasExpandedParent ? ARCHIVED_ROW_ESTIMATE_PX * 20 : ARCHIVED_ROW_ESTIMATE_PX * 8}
             scrollRef={archivedScrollRef}
             startMargin={archivedScrollMargin}
           >

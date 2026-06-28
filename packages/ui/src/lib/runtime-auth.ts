@@ -1,4 +1,4 @@
-export type RuntimeAuthCredential =
+type RuntimeAuthCredential =
   | { type: 'bearer'; token: string }
   | null;
 
@@ -109,7 +109,7 @@ export const getRuntimeUrlAuthTokenSync = (): string => {
   return token;
 };
 
-export const getRuntimeAuthCredential = async (): Promise<RuntimeAuthCredential> => {
+const getRuntimeAuthCredential = async (): Promise<RuntimeAuthCredential> => {
   const credential = await credentialProvider();
   const token = credential?.type === 'bearer'
     ? normalizeBearerToken(credential.token)

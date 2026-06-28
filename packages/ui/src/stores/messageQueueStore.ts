@@ -53,6 +53,7 @@ interface MessageQueueState {
 interface MessageQueueActions {
     addToQueue: (sessionId: string, message: Omit<QueuedMessage, 'id' | 'createdAt'>) => void;
     removeFromQueue: (sessionId: string, messageId: string) => void;
+    reorderQueue: (sessionId: string, fromId: string, toId: string) => void;
     popToInput: (sessionId: string, messageId: string) => QueuedMessage | null;
     clearQueue: (sessionId: string) => void;
     clearAllQueues: () => void;
@@ -107,6 +108,28 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                             return { queuedMessages: rest };
                         }
                         
+                        return {
+                            queuedMessages: {
+                                ...state.queuedMessages,
+                                [sessionId]: newQueue,
+                            },
+                        };
+                    });
+                },
+
+                reorderQueue: (sessionId, fromId, toId) => {
+                    if (fromId === toId) return;
+                    set((state) => {
+                        const currentQueue = state.queuedMessages[sessionId];
+                        if (!currentQueue) return state;
+                        const fromIndex = currentQueue.findIndex((m) => m.id === fromId);
+                        const toIndex = currentQueue.findIndex((m) => m.id === toId);
+                        if (fromIndex === -1 || toIndex === -1) return state;
+
+                        const newQueue = currentQueue.slice();
+                        const [moved] = newQueue.splice(fromIndex, 1);
+                        newQueue.splice(toIndex, 0, moved);
+
                         return {
                             queuedMessages: {
                                 ...state.queuedMessages,

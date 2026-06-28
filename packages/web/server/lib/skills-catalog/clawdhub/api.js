@@ -83,38 +83,6 @@ export async function fetchClawdHubSkills({ cursor } = {}) {
 }
 
 /**
- * Fetch details for a specific skill version
- * @param {string} slug - Skill slug/identifier
- * @param {string} [version='latest'] - Version string or 'latest'
- * @returns {Promise<{ skill: Object, version: Object }>}
- */
-export async function fetchClawdHubSkillVersion(slug, version = 'latest') {
-  // For 'latest', we need to first get the skill metadata to find the latest version
-  if (version === 'latest') {
-    const skillResponse = await rateLimitedFetch(`${CLAWDHUB_API_BASE}/skills/${encodeURIComponent(slug)}`);
-    if (!skillResponse.ok) {
-      throw new Error(`ClawdHub skill not found: ${slug}`);
-    }
-    const skillData = await skillResponse.json();
-    const latestVersion = skillData.skill?.tags?.latest || skillData.latestVersion?.version;
-    if (!latestVersion) {
-      throw new Error(`No latest version found for skill: ${slug}`);
-    }
-    version = latestVersion;
-  }
-
-  const url = `${CLAWDHUB_API_BASE}/skills/${encodeURIComponent(slug)}/versions/${encodeURIComponent(version)}`;
-  const response = await rateLimitedFetch(url);
-
-  if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new Error(`ClawdHub version error (${response.status}): ${text || response.statusText}`);
-  }
-
-  return response.json();
-}
-
-/**
  * Download a skill package as a ZIP buffer
  * @param {string} slug - Skill slug/identifier
  * @param {string} version - Specific version string

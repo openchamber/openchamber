@@ -1157,7 +1157,34 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
       await refreshStatusAndBranches();
 
       if (options.pushAfter) {
-        const result = await git.gitPush(currentDirectory);
+        const trackingRemoteName = status?.tracking?.split('/')[0];
+        const remote = effectiveRemotes.find((entry) => entry.name === trackingRemoteName) ?? effectiveRemotes[0];
+        if (!remote) {
+          throw new Error(t('mobile.changes.noRemote'));
+        }
+
+        setSyncAction('sync');
+        const trackingPrefix = `${remote.name}/`;
+        const trackedBranch = status?.tracking?.startsWith(trackingPrefix)
+          ? status.tracking.slice(trackingPrefix.length)
+          : undefined;
+
+        await git.gitFetch(currentDirectory, { remote: remote.name });
+        const afterFetch = await git.getGitStatus(currentDirectory);
+        if ((afterFetch.behind ?? 0) > 0) {
+          if ((afterFetch.files?.length ?? 0) > 0) {
+            toast.error(t('gitView.toast.commitOrStashBeforeSync'));
+            await refreshStatusAndBranches(false);
+            return;
+          }
+          await git.gitPull(currentDirectory, { remote: remote.name, branch: trackedBranch, rebase: true });
+        }
+
+        const afterPull = await git.getGitStatus(currentDirectory);
+        let result: Awaited<ReturnType<typeof git.gitPush>> | undefined;
+        if ((afterPull.ahead ?? 0) > 0) {
+          result = await git.gitPush(currentDirectory);
+        }
         toast.success(t('gitView.toast.pushedToUpstream', { name: getPushedRemoteName(result) }));
         triggerFireworks();
         await refreshStatusAndBranches(false);

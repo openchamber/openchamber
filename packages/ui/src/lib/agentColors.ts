@@ -31,7 +31,3 @@ export function getAgentColor(agentName: string | undefined) {
   const paletteIndex = 1 + (Math.abs(hash) % (AGENT_COLOR_PALETTE.length - 1));
   return AGENT_COLOR_PALETTE[paletteIndex];
 }
-
-export function getAgentColorPalette() {
-  return AGENT_COLOR_PALETTE;
-}

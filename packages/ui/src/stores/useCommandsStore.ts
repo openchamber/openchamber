@@ -516,39 +516,6 @@ async function performFullConfigRefresh(options: { message?: string; delayMs?: n
   }
 }
 
-export async function reloadOpenCodeConfiguration(options?: { message?: string; delayMs?: number }) {
-  startConfigUpdate(options?.message || "Reloading OpenCode configuration…");
-
-  try {
-    const response = await runtimeFetch('/api/config/reload', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    });
-
-    const payload = await response.json().catch(() => null);
-
-    if (!response.ok) {
-      const message = payload?.error || 'Failed to reload configuration';
-      throw new Error(message);
-    }
-
-    if (payload?.requiresReload) {
-      await performFullConfigRefresh({
-        message: payload.message,
-        delayMs: payload.reloadDelayMs,
-      });
-    } else {
-      await performFullConfigRefresh(options);
-    }
-  } catch (error) {
-    console.error('[reloadOpenCodeConfiguration] Failed:', error);
-    updateConfigUpdateMessage('Failed to reload configuration. Please try again.');
-    await sleep(2000);
-    finishConfigUpdate();
-    throw error;
-  }
-}
-
 let unsubscribeCommandsConfigChanges: (() => void) | null = null;
 
 if (!unsubscribeCommandsConfigChanges) {

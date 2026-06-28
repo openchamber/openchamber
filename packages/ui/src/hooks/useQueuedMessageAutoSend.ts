@@ -4,6 +4,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useContextStore } from '@/stores/contextStore';
+import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { parseAgentMentions } from '@/lib/messages/agentMentions';
 import { getSyncSessionStatus } from '@/sync/sync-refs';
 import { useDirectorySync } from '@/sync/sync-context';
@@ -117,10 +118,12 @@ export const shouldDispatchQueuedAutoSend = (
 export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?: boolean }) {
   const enabled = typeof enabledOrOptions === 'boolean' ? enabledOrOptions : (enabledOrOptions?.enabled ?? true);
   const queuedMessages = useMessageQueueStore((state) => state.queuedMessages);
+  const autoReviewRuns = useAutoReviewStore((state) => state.runsByOriginalSessionID);
   const sessionStatusRecord = useDirectorySync((state) => state.session_status);
 
   const inFlightSessionsRef = React.useRef<Set<string>>(new Set());
   const previousStatusRef = React.useRef<Map<string, SessionStatusType>>(new Map());
+  const autoReviewBlockedSessionsRef = React.useRef<Set<string>>(new Set());
 
   React.useEffect(() => {
     if (!enabled) {
@@ -135,6 +138,10 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
         return;
       }
       if (hasRecentAbort(sessionId)) {
+        return;
+      }
+      if (useAutoReviewStore.getState().isRunningForSession(sessionId)) {
+        autoReviewBlockedSessionsRef.current.add(sessionId);
         return;
       }
 
@@ -191,8 +198,18 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
     queueEntries.forEach(([sessionId, queue]) => {
       const currentStatusType = (statusRecord[sessionId]?.type ?? 'idle') as SessionStatusType;
       const previousStatusType = previousStatusRef.current.get(sessionId);
+      const wasAutoReviewBlocked = autoReviewBlockedSessionsRef.current.has(sessionId);
+      const isAutoReviewRunning = useAutoReviewStore.getState().isRunningForSession(sessionId);
+      if (isAutoReviewRunning) {
+        autoReviewBlockedSessionsRef.current.add(sessionId);
+      } else if (wasAutoReviewBlocked) {
+        autoReviewBlockedSessionsRef.current.delete(sessionId);
+      }
 
-      if (queue.length > 0 && shouldDispatchQueuedAutoSend(previousStatusType, currentStatusType)) {
+      if (queue.length > 0 && (
+        shouldDispatchQueuedAutoSend(previousStatusType, currentStatusType)
+        || (wasAutoReviewBlocked && !isAutoReviewRunning && currentStatusType === 'idle')
+      )) {
         void dispatchSessionQueue(sessionId, queue);
       }
 
@@ -200,5 +217,5 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
     });
 
     previousStatusRef.current = nextStatusMap;
-  }, [enabled, queuedMessages, sessionStatusRecord]);
+  }, [enabled, queuedMessages, sessionStatusRecord, autoReviewRuns]);
 }

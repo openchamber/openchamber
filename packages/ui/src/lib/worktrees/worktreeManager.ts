@@ -163,7 +163,7 @@ const deriveSdkWorktreeNameFromDirectory = (directory: string): string => {
   return parts[parts.length - 1] ?? normalized;
 };
 
-export const buildSdkStartCommand = (args: {
+const buildSdkStartCommand = (args: {
   projectDirectory: string;
   setupCommands: string[];
 }): string | undefined => {
@@ -181,7 +181,7 @@ export const buildSdkStartCommand = (args: {
   return joined.trim().length > 0 ? joined : undefined;
 };
 
-export const toCreatePayload = (args: {
+const toCreatePayload = (args: {
   preferredName?: string;
   setupCommands?: string[];
   mode?: 'new' | 'existing';

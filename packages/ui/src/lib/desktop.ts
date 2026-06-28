@@ -5,9 +5,10 @@ import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 
-export type AssistantNotificationPayload = {
-  title?: string;
-  body?: string;
+type ManagedRemoteTunnelPreset = {
+  id: string;
+  name: string;
+  hostname: string;
 };
 
 export type UpdateInfo = {
@@ -33,12 +34,6 @@ export type SkillCatalogConfig = {
   source: string;
   subpath?: string;
   gitIdentityId?: string;
-};
-
-export type ManagedRemoteTunnelPreset = {
-  id: string;
-  name: string;
-  hostname: string;
 };
 
 export type DesktopSettings = {
@@ -159,7 +154,11 @@ export type DesktopSettings = {
   shortcutOverrides?: Record<string, string>;
 
   favoriteModels?: Array<{ providerID: string; modelID: string }>;
+  hiddenModels?: Array<{ providerID: string; modelID: string }>;
+  collapsedModelProviders?: string[];
   recentModels?: Array<{ providerID: string; modelID: string }>;
+  recentAgents?: string[];
+  recentEfforts?: Record<string, string[]>;
   diffLayoutPreference?: 'dynamic' | 'inline' | 'side-by-side';
   gitChangesViewMode?: 'flat' | 'tree';
   directoryShowHidden?: boolean;
@@ -523,28 +522,6 @@ export const stopAccessingDirectory = async (
   return { success: true };
 };
 
-export const sendAssistantCompletionNotification = async (
-  payload?: AssistantNotificationPayload
-): Promise<boolean> => {
-  if (hasDesktopInvoke()) {
-    try {
-      await invokeDesktop('desktop_notify', {
-        payload: {
-          title: payload?.title,
-          body: payload?.body,
-          tag: 'openchamber-agent-complete',
-        },
-      });
-      return true;
-    } catch (error) {
-      console.warn('Failed to send assistant completion notification', error);
-      return false;
-    }
-  }
-
-  return false;
-};
-
 export const checkForDesktopUpdates = async (): Promise<UpdateInfo | null> => {
   if (!hasDesktopInvoke()) {
     return null;
@@ -784,58 +761,6 @@ export const openDesktopFileInApp = async (
   }
 };
 
-export const filterInstalledDesktopApps = async (apps: string[]): Promise<string[]> => {
-  if (!hasDesktopInvoke() || !isDesktopLocalOriginActive()) {
-    return [];
-  }
-
-  const candidate = Array.isArray(apps) ? apps.filter((value) => typeof value === 'string') : [];
-  if (candidate.length === 0) {
-    return [];
-  }
-
-  try {
-    const result = await invokeDesktop<string[]>('desktop_filter_installed_apps', {
-      apps: candidate,
-    });
-    return Array.isArray(result) ? result.filter((value) => typeof value === 'string') : [];
-  } catch (error) {
-    console.warn('Failed to check installed apps', error);
-    return [];
-  }
-};
-
-export const fetchDesktopAppIcons = async (apps: string[]): Promise<Record<string, string>> => {
-  if (!hasDesktopInvoke() || !isDesktopLocalOriginActive()) {
-    return {};
-  }
-
-  const candidate = Array.isArray(apps) ? apps.filter((value) => typeof value === 'string') : [];
-  if (candidate.length === 0) {
-    return {};
-  }
-
-  try {
-    const result = await invokeDesktop<unknown[]>('desktop_fetch_app_icons', {
-      apps: candidate,
-    });
-    if (!Array.isArray(result)) {
-      return {};
-    }
-    const map: Record<string, string> = {};
-    for (const entry of result) {
-      if (!entry || typeof entry !== 'object') continue;
-      const candidateEntry = entry as { app?: unknown; data_url?: unknown };
-      if (typeof candidateEntry.app !== 'string' || typeof candidateEntry.data_url !== 'string') continue;
-      map[candidateEntry.app] = candidateEntry.data_url;
-    }
-    return map;
-  } catch (error) {
-    console.warn('Failed to fetch installed app icons', error);
-    return {};
-  }
-};
-
 export type InstalledDesktopAppInfo = {
   name: string;
   iconDataUrl?: string | null;
@@ -895,16 +820,3 @@ export const fetchDesktopInstalledApps = async (
   }
 };
 
-export const clearDesktopCache = async (): Promise<boolean> => {
-  if (!hasDesktopInvoke() || !isDesktopLocalOriginActive()) {
-    return false;
-  }
-
-  try {
-    await invokeDesktop('desktop_clear_cache');
-    return true;
-  } catch (error) {
-    console.warn('Failed to clear cache', error);
-    return false;
-  }
-};

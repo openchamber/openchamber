@@ -39,21 +39,21 @@ const getConfigDirectory = (): string | null => {
 
 // ============== TYPES ==============
 
-export interface McpLocalConfig {
+interface McpLocalConfig {
   type: 'local';
   command: string[];
   environment?: Record<string, string>;
   enabled: boolean;
 }
 
-export interface McpOAuthConfig {
+interface McpOAuthConfig {
   clientId?: string;
   clientSecret?: string;
   scope?: string;
   redirectUri?: string;
 }
 
-export interface McpRemoteConfig {
+interface McpRemoteConfig {
   type: 'remote';
   url: string;
   environment?: Record<string, string>;
@@ -64,7 +64,7 @@ export interface McpRemoteConfig {
 }
 
 export type McpServerConfig = (McpLocalConfig | McpRemoteConfig) & { name: string };
-export type McpServerWithScope = McpServerConfig & { scope?: McpScope | null };
+type McpServerWithScope = McpServerConfig & { scope?: McpScope | null };
 
 export interface McpDraft {
   name: string;
@@ -90,7 +90,7 @@ export const envRecordToArray = (env?: Record<string, string>): Array<{ key: str
   return Object.entries(env).map(([key, value]) => ({ key, value }));
 };
 
-export const envArrayToRecord = (arr: Array<{ key: string; value: string }>): Record<string, string> | undefined => {
+const envArrayToRecord = (arr: Array<{ key: string; value: string }>): Record<string, string> | undefined => {
   const filtered = arr.filter((e) => e.key.trim());
   if (filtered.length === 0) return undefined;
   return Object.fromEntries(filtered.map((e) => [e.key.trim(), e.value]));

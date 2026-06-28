@@ -18,7 +18,7 @@ const TOOL_ROW_DESCRIPTION_CLASS = cn('typography-meta', TOOL_ROW_TEXT_CLASS);
 
 type PartWithText = Part & { text?: string; content?: string; time?: { start?: number; end?: number } };
 
-export type ReasoningVariant = 'thinking' | 'justification';
+type ReasoningVariant = 'thinking' | 'justification';
 
 const cleanReasoningText = (text: string): string => {
     if (typeof text !== 'string' || text.trim().length === 0) {
@@ -535,8 +535,5 @@ export const MergedReasoningPart = React.memo(({
         />
     );
 });
-
-// eslint-disable-next-line react-refresh/only-export-components
-export const formatReasoningText = (text: string): string => cleanReasoningText(text);
 
 export default ReasoningPart;
