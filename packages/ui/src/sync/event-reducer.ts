@@ -168,6 +168,15 @@ function hasMessage(draft: State, sessionID: string | undefined, messageID: stri
   return Binary.search(messages, messageID, (message) => message.id).found
 }
 
+function findSessionIdByMessageId(draft: State, messageID: string): string | undefined {
+  for (const [sessionID, messages] of Object.entries(draft.message)) {
+    if (messages?.some((message) => message.id === messageID)) {
+      return sessionID
+    }
+  }
+  return undefined
+}
+
 export function reduceGlobalEvent(event: Event): GlobalEventResult {
   if (event.type === "global.disposed" || event.type === "server.connected") {
     return { type: "refresh" }
@@ -211,8 +220,7 @@ export function applyDirectoryEvent(
 
   const touchSessionFreshnessIfActive = (sessionID?: string) => {
     if (!sessionID) return
-    const currentStatus = draft.session_status?.[sessionID]
-    if (!currentStatus || currentStatus.type === "idle") return
+    if (!isSessionActive(sessionID)) return
     callbacks?.onSessionFreshness?.(sessionID)
   }
 
@@ -301,14 +309,15 @@ export function applyDirectoryEvent(
 
     case "session.status": {
       const props = event.properties as { sessionID: string; status: SessionStatus }
+      const isActive = props.status.type !== "idle"
       if (areSessionStatusesEqual(draft.session_status[props.sessionID], props.status)) {
         // Identical non-idle status events still count as live activity because
         // the server may emit repeated busy/retry updates while work continues.
-        if (props.status.type !== "idle") touchSessionFreshness(props.sessionID)
+        if (isActive) touchSessionFreshness(props.sessionID)
         return false
       }
       draft.session_status[props.sessionID] = props.status
-      if (props.status.type !== "idle") touchSessionFreshness(props.sessionID)
+      if (isActive) touchSessionFreshness(props.sessionID)
       return true
     }
 
@@ -445,9 +454,13 @@ export function applyDirectoryEvent(
     }
 
     case "message.part.removed": {
-      const props = event.properties as { messageID: string; partID: string }
+      const props = event.properties as { sessionID?: string; messageID: string; partID: string }
+      const sessionID = props.sessionID ?? findSessionIdByMessageId(draft, props.messageID)
       const parts = draft.part[props.messageID]
-      if (!parts) return false
+      if (!parts) {
+        touchSessionFreshness(sessionID)
+        return false
+      }
       const result = Binary.search(parts, props.partID, (p) => p.id)
       if (result.found) {
         const next = [...parts]
@@ -457,8 +470,10 @@ export function applyDirectoryEvent(
         } else {
           draft.part[props.messageID] = next
         }
+        touchSessionFreshness(sessionID)
         return true
       }
+      touchSessionFreshness(sessionID)
       return false
     }
 
