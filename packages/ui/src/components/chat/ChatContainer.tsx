@@ -766,7 +766,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 
 	if (!currentSessionId && draftOpen) {
 		return (
-			<div className="relative flex h-full flex-col bg-background transform-gpu">
+			<div className="relative flex h-full flex-col bg-background">
 				{useCompactDraftLayout && !isDesktopExpandedInput ? (
 					<div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
 						<h1 className="text-balance text-3xl font-normal tracking-tight text-foreground">
@@ -861,7 +861,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 
 	if (sessionMessages.length === 0 && !sessionIsWorking) {
 		return (
-			<div className="relative flex flex-col h-full bg-background transform-gpu">
+			<div className="relative flex flex-col h-full bg-background">
 				{returnToParentButton}
 				<div
 					className={cn(

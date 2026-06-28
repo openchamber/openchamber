@@ -1,5 +1,6 @@
 import fs from 'fs';
 import os from 'os';
+import path from 'path';
 
 import { getNpmInfo as defaultGetNpmInfo } from './npm-registry.js';
 import { isExactSemver as defaultIsExactSemver, isPathSpec as defaultIsPathSpec, parseNpmSpec as defaultParseNpmSpec, parsePathSpec as defaultParsePathSpec } from './plugin-spec.js';
@@ -8,6 +9,39 @@ const ENTRY_EXISTS_CODES = new Set(['ENTRY_EXISTS', 'EEXIST']);
 const FILE_EXISTS_CODES = new Set(['FILE_EXISTS', 'EEXIST']);
 const NOT_FOUND_CODES = new Set(['NOT_FOUND', 'ENOENT']);
 const BAD_REQUEST_CODES = new Set(['INVALID_FILENAME', 'INVALID_SCOPE', 'INVALID_SPEC', 'EINVAL']);
+
+/**
+ * Read the installed version for an npm plugin from the OpenCode cache.
+ * Cache location: ~/.cache/opencode/packages/<spec>/node_modules/<name>/package.json
+ * For scoped packages like @cortexkit/opencode-magic-context@latest,
+ * the package name is the part before @latest.
+ */
+function readInstalledVersion(spec) {
+  if (!spec || spec.startsWith('/') || spec.startsWith('.')) {
+    return undefined; // path plugins don't have a version
+  }
+  try {
+    // Parse package name from spec (e.g. 'envsitter-guard@latest' → 'envsitter-guard')
+    let packageName = spec;
+    const atIndex = spec.lastIndexOf('@');
+    if (atIndex > 0) {
+      packageName = spec.slice(0, atIndex);
+    }
+    // For scoped packages like @cortexkit/opencode-magic-context@latest
+    // packageName is now '@cortexkit/opencode-magic-context'
+    const cachePath = path.join(
+      process.env.HOME || os.homedir(),
+      '.cache', 'opencode', 'packages', spec, 'node_modules', packageName, 'package.json'
+    );
+    if (!fs.existsSync(cachePath)) {
+      return undefined;
+    }
+    const pkg = JSON.parse(fs.readFileSync(cachePath, 'utf-8'));
+    return pkg.version ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export const registerPluginRoutes = (app, dependencies) => {
   const {
@@ -136,7 +170,7 @@ export const registerPluginRoutes = (app, dependencies) => {
         command: entry.kind === 'npm'
           ? `opencode add ${entry.spec}`
           : `opencode add ${entry.spec}`,
-        version: entry.scope ?? undefined,
+        version: readInstalledVersion(entry.spec),
       }));
       res.json({ status: statusItems });
     } catch (error) {
