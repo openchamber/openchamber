@@ -40,7 +40,7 @@ const buildCopilotWindows = (payload) => {
 
 export const providerId = 'github-copilot';
 export const providerName = 'GitHub Copilot';
-export const aliases = ['github-copilot', 'copilot'];
+const aliases = ['github-copilot', 'copilot'];
 
 export const isConfigured = () => {
   const auth = readAuthFile();

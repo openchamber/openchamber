@@ -150,7 +150,7 @@ export interface UseServerTTSReturn {
   unlockAudio: () => Promise<void>;
 }
 
-export interface SpeakOptions {
+interface SpeakOptions {
   /** Voice to use (defaults to coral) */
   voice?: string;
   /** Model to use (defaults to gpt-4o-mini-tts) */

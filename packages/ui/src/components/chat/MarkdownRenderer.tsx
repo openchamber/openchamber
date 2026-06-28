@@ -6,9 +6,6 @@ import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 // DOM morphing, plus beautiful-mermaid) is loaded on demand, keeping the
 // initial bundle lean.
 
-export type { MarkdownVariant } from './MarkdownRendererImpl';
-
-
 const MarkdownRendererLazy = lazyWithChunkRecovery(() =>
   import('./MarkdownRendererImpl').then((m) => ({ default: m.MarkdownRenderer }))
 );

@@ -19,24 +19,21 @@ import type { StreamPhase } from './message/types';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionParts } from '@/sync/sync-context';
 import type { ReviewTransferDirection } from '@/lib/reviewFlow';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 
 const MESSAGE_LIST_VIRTUALIZE_THRESHOLD = 5;
 const EMPTY_STATIC_ENTRY_MESSAGES: ChatMessageEntry[] = [];
 const EMPTY_UNGROUPED_MESSAGE_IDS = new Set<string>();
 const MESSAGE_LIST_BUFFER_SIZE = 900;
+// Touch surfaces fling-scroll natively and dispatch scroll events less often
+// than the virtualizer can repaint, so a desktop-sized buffer leaves blank gaps
+// during momentum that only fill once measurement catches up. A larger overscan
+// keeps more rows mounted around the viewport so fast flings stay populated.
+const MOBILE_MESSAGE_LIST_BUFFER_SIZE = 2400;
+const resolveMessageListBufferSize = (): number => (
+    isMobileSurfaceRuntime() ? MOBILE_MESSAGE_LIST_BUFFER_SIZE : MESSAGE_LIST_BUFFER_SIZE
+);
 const TIMELINE_CACHE_LIMIT = 16;
-
-const estimateHistoryEntryHeight = (entry: RenderEntry | undefined): number => {
-    if (!entry) {
-        return 160;
-    }
-
-    if (entry.kind === 'turn') {
-        return 180 + Math.min(entry.turn.assistantMessages.length, 4) * 100;
-    }
-
-    return 140;
-};
 
 const sameKeys = (a: readonly string[] | undefined, b: readonly string[] | undefined): boolean => {
     if (a === b) return true;
@@ -982,8 +979,7 @@ const StaticHistoryList = React.memo(({ entries, shouldVirtualize, contentRef, s
             ref={virtualizerRef}
             data={entries}
             cache={virtualCache}
-            itemSize={virtualCache ? undefined : estimateHistoryEntryHeight(undefined)}
-            bufferSize={MESSAGE_LIST_BUFFER_SIZE}
+            bufferSize={resolveMessageListBufferSize()}
             shift={shift}
             scrollRef={scrollRef}
         >

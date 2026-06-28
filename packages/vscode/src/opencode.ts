@@ -21,7 +21,7 @@ const WINDOWS_EXECUTABLE_EXTENSIONS = (process.env.PATHEXT || '.EXE;.CMD;.BAT;.C
   .map((ext) => (ext.startsWith('.') ? ext : `.${ext}`));
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
-export type OpenCodeDebugInfo = {
+type OpenCodeDebugInfo = {
   mode: 'managed' | 'external';
   status: ConnectionStatus;
   lastError?: string;
@@ -47,7 +47,7 @@ export type OpenCodeDebugInfo = {
   authSource: 'user-env' | 'generated' | 'rotated' | null;
 };
 
-export type SetWorkingDirectoryResult =
+type SetWorkingDirectoryResult =
   | { success: true; path: string }
   | { success: false; error: string };
 

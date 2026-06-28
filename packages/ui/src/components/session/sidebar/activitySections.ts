@@ -1,6 +1,6 @@
 import type { Session } from '@opencode-ai/sdk/v2';
 
-export const RECENT_SESSION_MAX_AGE_MS = 48 * 60 * 60 * 1000;
+const RECENT_SESSION_MAX_AGE_MS = 48 * 60 * 60 * 1000;
 
 const isSubtaskSession = (session: Session): boolean => {
   return Boolean((session as Session & { parentID?: string | null }).parentID);
@@ -22,7 +22,7 @@ const getSessionUpdatedAt = (session: Session): number => {
   return 0;
 };
 
-export const sortSessionsByUpdated = (sessions: Session[]): Session[] => {
+const sortSessionsByUpdated = (sessions: Session[]): Session[] => {
   return [...sessions].sort((a, b) => getSessionUpdatedAt(b) - getSessionUpdatedAt(a));
 };
 
@@ -42,5 +42,3 @@ export const deriveRecentSessions = (
   });
   return sortSessionsByUpdated(recent);
 };
-
-export const getSessionUpdatedAtMs = getSessionUpdatedAt;

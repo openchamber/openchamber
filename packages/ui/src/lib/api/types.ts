@@ -1,9 +1,9 @@
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { DraftStarterRef } from '@/lib/draftStarters';
 
-export type RuntimePlatform = 'web' | 'desktop' | 'vscode';
+type RuntimePlatform = 'web' | 'desktop' | 'vscode';
 
-export interface RuntimeDescriptor {
+interface RuntimeDescriptor {
   platform: RuntimePlatform;
 
   isDesktop: boolean;
@@ -13,24 +13,18 @@ export interface RuntimeDescriptor {
   label?: string;
 }
 
-export interface ApiError {
-  message: string;
-  code?: string;
-  cause?: unknown;
-}
-
-export interface Subscription {
+interface Subscription {
 
   close: () => void;
 }
 
-export interface RetryPolicy {
+interface RetryPolicy {
   maxRetries: number;
   initialDelayMs: number;
   maxDelayMs: number;
 }
 
-export interface TerminalTransportCapability {
+interface TerminalTransportCapability {
   preferred?: 'ws' | 'http' | 'sse';
   transports?: Array<'ws' | 'http' | 'sse'>;
   ws?: {
@@ -99,7 +93,7 @@ export interface TerminalAPI {
   forceKill?(options: ForceKillOptions): Promise<void>;
 }
 
-export interface GitStatusFile {
+interface GitStatusFile {
   path: string;
   index: string;
   working_dir: string;
@@ -181,7 +175,7 @@ export interface GitBranch {
   branches: Record<string, GitBranchDetails>;
 }
 
-export interface GitCommitSummary {
+interface GitCommitSummary {
   changes: number;
   insertions: number;
   deletions: number;
@@ -241,29 +235,18 @@ export interface CheckoutCommitResponse {
   success: boolean;
 }
 
-export interface CherryPickRequest {
-  hash: string;
-}
 export interface CherryPickResponse {
   success: boolean;
   conflict?: boolean;
   conflictFiles?: string[];
 }
 
-export interface RevertCommitRequest {
-  hash: string;
-}
 export interface RevertCommitResponse {
   success: boolean;
   conflict?: boolean;
   conflictFiles?: string[];
 }
 
-export interface ResetToCommitRequest {
-  hash: string;
-  mode: 'soft' | 'mixed' | 'hard';
-  force?: boolean;
-}
 export interface ResetToCommitResponse {
   success: boolean;
 }
@@ -456,7 +439,7 @@ export interface GeneratedPullRequestDescription {
   body: string;
 }
 
-export interface GitWorktreeAPI {
+interface GitWorktreeAPI {
   list(directory: string): Promise<GitWorktreeInfo[]>;
   validate?(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeValidationResult>;
   bootstrapStatus?(directory: string): Promise<GitWorktreeBootstrapStatus>;
@@ -591,11 +574,11 @@ export interface CommandExecResult {
   error?: string;
 }
 
-export interface ListDirectoryOptions {
+interface ListDirectoryOptions {
   respectGitignore?: boolean;
 }
 
-export interface FileReadOptions {
+interface FileReadOptions {
   allowOutsideWorkspace?: boolean;
   outsideFileGrant?: string;
   optional?: boolean;
@@ -707,7 +690,7 @@ export interface DirectoryPermissionRequest {
   path: string;
 }
 
-export interface DirectoryPermissionResult {
+interface DirectoryPermissionResult {
   success: boolean;
   path?: string;
   error?: string;
@@ -740,7 +723,7 @@ export interface NotificationsAPI {
   canNotify?: () => boolean | Promise<boolean>;
 }
 
-export interface DiagnosticsAPI {
+interface DiagnosticsAPI {
   downloadLogs(): Promise<{ fileName: string; content: string }>;
 }
 
@@ -796,13 +779,13 @@ export type GitHubUserSummary = {
   email?: string;
 };
 
-export type GitHubRepoRef = {
+type GitHubRepoRef = {
   owner: string;
   repo: string;
   url: string;
 };
 
-export type GitHubChecksSummary = {
+type GitHubChecksSummary = {
   state: 'success' | 'failure' | 'pending' | 'unknown';
   total: number;
   success: number;
@@ -865,7 +848,7 @@ export type GitHubPullRequest = {
   mergeableState?: string | null;
 };
 
-export type GitHubPullRequestHeadRepo = {
+type GitHubPullRequestHeadRepo = {
   owner: string;
   repo: string;
   url: string;
@@ -883,7 +866,7 @@ export type GitHubPullRequestSummary = GitHubPullRequest & {
   sourceRepo?: (GitHubRepoSelector & { source: string }) | null;
 };
 
-export type GitHubPullRequestFile = {
+type GitHubPullRequestFile = {
   filename: string;
   status?: string;
   additions?: number;
@@ -892,7 +875,7 @@ export type GitHubPullRequestFile = {
   patch?: string;
 };
 
-export type GitHubPullRequestReviewComment = {
+type GitHubPullRequestReviewComment = {
   id: number;
   url: string;
   body: string;
@@ -977,7 +960,7 @@ export type GitHubPullRequestMergeResult = {
   message?: string;
 };
 
-export type GitHubIssueLabel = {
+type GitHubIssueLabel = {
   name: string;
   color?: string;
 };
@@ -1052,7 +1035,7 @@ export type GitHubAuthStatus = {
   } | null;
 };
 
-export type GitHubAuthAccount = {
+type GitHubAuthAccount = {
   id: string;
   user: GitHubUserSummary;
   scope?: string;
@@ -1156,9 +1139,9 @@ export type RuntimeAPISelector<TValue> = (apis: RuntimeAPIs) => TValue;
 
 // ============== Skills Catalog Types ==============
 
-export type SkillsCatalogSourceId = string;
+type SkillsCatalogSourceId = string;
 
-export type SkillsCatalogSourceType = 'github' | 'clawdhub';
+type SkillsCatalogSourceType = 'github' | 'clawdhub';
 
 export interface SkillsCatalogSource {
   id: SkillsCatalogSourceId;
@@ -1169,13 +1152,13 @@ export interface SkillsCatalogSource {
   sourceType?: SkillsCatalogSourceType;
 }
 
-export interface SkillsCatalogItemInstalledBadge {
+interface SkillsCatalogItemInstalledBadge {
   isInstalled: boolean;
   scope?: 'user' | 'project';
   source?: 'opencode' | 'agents' | 'claude';
 }
 
-export interface ClawdHubSkillMetadata {
+interface ClawdHubSkillMetadata {
   slug: string;
   version: string;
   displayName?: string;
@@ -1224,7 +1207,7 @@ export interface SkillsRepoScanRequest {
   gitIdentityId?: string;
 }
 
-export type SkillsRepoScanError =
+type SkillsRepoScanError =
   | { kind: 'authRequired'; message: string; sshOnly: true; identities?: Array<{ id: string; name: string }> }
   | { kind: 'invalidSource'; message: string }
   | { kind: 'gitUnavailable'; message: string }
@@ -1237,7 +1220,7 @@ export interface SkillsRepoScanResponse {
   error?: SkillsRepoScanError;
 }
 
-export interface SkillsInstallSelection {
+interface SkillsInstallSelection {
   skillDir: string;
   /** ClawdHub-specific metadata for installation */
   clawdhub?: {

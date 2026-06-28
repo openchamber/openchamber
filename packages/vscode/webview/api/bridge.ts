@@ -17,11 +17,6 @@ function getVSCodeAPI(): VSCodeAPI {
   return vscodeApi;
 }
 
-// Export vscode API for direct use
-export const vscode = {
-  postMessage: (message: unknown) => getVSCodeAPI().postMessage(message),
-};
-
 interface BridgeRequest {
   id: string;
   type: string;

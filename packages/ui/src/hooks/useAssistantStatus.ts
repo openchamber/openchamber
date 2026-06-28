@@ -7,7 +7,7 @@ import { useDirectorySync, useSessionPermissions, useSessionQuestions, useSessio
 import { isFullySyntheticMessage } from '@/lib/messages/synthetic';
 import { useCurrentSessionActivity } from './useSessionActivity';
 
-export type AssistantActivity = 'idle' | 'streaming' | 'tooling' | 'cooldown' | 'permission';
+type AssistantActivity = 'idle' | 'streaming' | 'tooling' | 'cooldown' | 'permission';
 
 interface WorkingSummary {
     activity: AssistantActivity;

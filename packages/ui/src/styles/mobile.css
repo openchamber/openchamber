@@ -85,6 +85,16 @@
     min-width: 36px;
   }
 
+  /* Composer footer action buttons (sessions / attach / auto-accept): hug the
+     icon so the group stays tight. The container only renders in the mobile
+     JSX, so no pointer/runtime gating is needed; !important overrides both the
+     w-8 utility and the global mobile touch-target min-width regardless of
+     cascade layer or specificity. */
+  .composer-mobile-actions button {
+    width: 1.5rem !important;
+    min-width: 0 !important;
+  }
+
   /* Improve input field touch targets */
   :root.mobile-pointer:not(.desktop-runtime) input,
   :root.mobile-pointer:not(.desktop-runtime) textarea,

@@ -20,10 +20,10 @@
 
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
-export type SpeechResultCallback = (text: string, isFinal: boolean) => void;
-export type ErrorCallback = (error: string) => void;
+type SpeechResultCallback = (text: string, isFinal: boolean) => void;
+type ErrorCallback = (error: string) => void;
 
-export interface AudioStreamConfig {
+interface AudioStreamConfig {
   /** Base URL of the OpenAI-compatible STT server (e.g. http://localhost:8001/v1) */
   baseURL: string;
   /** Whisper-compatible model name */
@@ -395,4 +395,3 @@ class AudioStreamService {
 }
 
 export const audioStreamService = new AudioStreamService();
-export { AudioStreamService };

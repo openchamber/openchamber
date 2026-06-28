@@ -101,6 +101,11 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
   // orderedGroups.filter/find work and any consumer-memoization see a
   // stable reference.
   const orderedGroupsCacheRef = React.useRef<Map<string, { groups: SessionGroup[]; ordered: SessionGroup[] }>>(new Map());
+  const orderedGroupsCacheGetOrderedGroupsRef = React.useRef<typeof props.getOrderedGroups>(props.getOrderedGroups);
+  if (orderedGroupsCacheGetOrderedGroupsRef.current !== props.getOrderedGroups) {
+    orderedGroupsCacheGetOrderedGroupsRef.current = props.getOrderedGroups;
+    orderedGroupsCacheRef.current.clear();
+  }
   const cachedGetOrderedGroups = (projectId: string, groups: SessionGroup[]): SessionGroup[] => {
     const cache = orderedGroupsCacheRef.current;
     const hit = cache.get(projectId);

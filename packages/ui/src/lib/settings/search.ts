@@ -2,7 +2,7 @@ import type { I18nKey } from '@/lib/i18n/store';
 import type { SettingsPageSlug, SettingsRuntimeContext } from './metadata';
 import { getSettingsPageMeta } from './metadata';
 
-export interface SettingsSearchItem {
+interface SettingsSearchItem {
   id: string;
   page: SettingsPageSlug;
   titleKey: I18nKey;
@@ -17,12 +17,14 @@ export interface SettingsSearchResult extends SettingsSearchItem {
   pageTitle: string;
 }
 
-export interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
+interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
   isMobile: boolean;
   isDesktopLocalOrigin: boolean;
+  // macOS desktop shell — for controls that only render on darwin (e.g. dock badge).
+  isMac: boolean;
 }
 
-export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
+const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   {
     id: 'appearance.language',
     page: 'appearance',
@@ -64,6 +66,16 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     descriptionKey: 'settings.openchamber.visual.field.macVibrancyHint',
     keywords: ['transparent', 'transparency', 'vibrancy', 'blur', 'macos', 'opaque'],
     isAvailable: (ctx) => ctx.isDesktopLocalOrigin,
+  },
+  {
+    id: 'appearance.dock-badge',
+    page: 'appearance',
+    titleKey: 'settings.openchamber.visual.field.dockBadge',
+    descriptionKey: 'settings.openchamber.visual.field.dockBadgeHint',
+    keywords: ['dock', 'badge', 'unread', 'unseen', 'counter', 'count', 'notification', 'macos'],
+    // Exactly matches the render guard in OpenChamberVisualSettings: any darwin
+    // Electron shell (isMac already implies isDesktopShell), local or remote host.
+    isAvailable: (ctx) => ctx.isMac,
   },
   {
     id: 'appearance.pwa-install-name',
@@ -372,6 +384,12 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'projects',
     titleKey: 'settings.projects.page.section.worktree',
     keywords: ['worktree', 'branch', 'repository'],
+  },
+  {
+    id: 'projects.worktree.setup.wait',
+    page: 'projects',
+    titleKey: 'settings.openchamber.worktrees.setup.waitForCommands',
+    keywords: ['worktree', 'setup commands', 'bootstrap', 'wait'],
   },
   {
     id: 'remote-instances.client-auth',
