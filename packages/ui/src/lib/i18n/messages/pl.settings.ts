@@ -1798,5 +1798,4 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'Choose what happens when you press Enter on a follow-up message while the agent is still responding.',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer (insert into the running turn)',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue (deliver after the current turn)',
-  'settings.openchamber.visual.option.followUpBehavior.immediate.label': 'Send immediately',
 };

@@ -2558,17 +2558,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 } else {
                     handleQueueMessage();
                 }
-            } else if (followUpBehavior === 'steer') {
+            } else {
+                // steer: Enter steers into the running turn, Ctrl+Enter sends now.
                 if (isCtrlEnter || !canQueue) {
                     handleSubmit();
                 } else {
                     handleSubmit({ delivery: 'steer' });
-                }
-            } else {
-                if (isCtrlEnter && canQueue) {
-                    handleQueueMessage();
-                } else {
-                    handleSubmit();
                 }
             }
         }

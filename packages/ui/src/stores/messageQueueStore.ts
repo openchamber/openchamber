@@ -4,24 +4,31 @@ import { getSafeStorage } from './utils/safeStorage';
 import type { AttachedFile } from './types/sessionTypes';
 import { updateDesktopSettings } from '@/lib/persistence';
 
-export type FollowUpBehavior = 'steer' | 'queue' | 'immediate';
+export type FollowUpBehavior = 'steer' | 'queue';
 
 export const DEFAULT_FOLLOW_UP_BEHAVIOR: FollowUpBehavior = 'queue';
 
 export const isFollowUpBehavior = (value: unknown): value is FollowUpBehavior => (
-    value === 'steer' || value === 'queue' || value === 'immediate'
+    value === 'steer' || value === 'queue'
 );
 
 export const normalizeFollowUpBehavior = (
     value: unknown,
     legacyQueueModeEnabled?: boolean | null,
 ): FollowUpBehavior => {
+    // "immediate" was removed: on a busy session it was wire-identical to
+    // "steer" (OpenCode only supports delivery "steer" | "queue", defaulting
+    // to "steer"), so collapse any persisted/legacy "immediate" onto "steer".
+    if (value === 'immediate') {
+        return 'steer';
+    }
+
     if (isFollowUpBehavior(value)) {
         return value;
     }
 
     if (legacyQueueModeEnabled === false) {
-        return 'immediate';
+        return 'steer';
     }
 
     if (legacyQueueModeEnabled === true) {

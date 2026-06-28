@@ -107,11 +107,15 @@ export const createSettingsHelpers = (dependencies) => {
   };
 
   const normalizeFollowUpBehavior = (value, legacyQueueModeEnabled = null) => {
-    if (value === 'steer' || value === 'queue' || value === 'immediate') {
+    // "immediate" was removed (it was wire-identical to "steer"); collapse it.
+    if (value === 'immediate') {
+      return 'steer';
+    }
+    if (value === 'steer' || value === 'queue') {
       return value;
     }
     if (legacyQueueModeEnabled === false) {
-      return 'immediate';
+      return 'steer';
     }
     return 'queue';
   };

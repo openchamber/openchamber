@@ -239,10 +239,6 @@ const FOLLOW_UP_BEHAVIOR_OPTIONS: Option<FollowUpBehavior>[] = [
         id: 'queue',
         labelKey: 'settings.openchamber.visual.option.followUpBehavior.queue.label',
     },
-    {
-        id: 'immediate',
-        labelKey: 'settings.openchamber.visual.option.followUpBehavior.immediate.label',
-    },
 ];
 
 const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' => {
