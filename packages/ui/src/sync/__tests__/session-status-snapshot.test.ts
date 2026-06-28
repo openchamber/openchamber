@@ -9,6 +9,7 @@ import {
   applySessionStatusSnapshot,
   getSessionWatchdogFreshnessAt,
   getSessionWatchdogFreshnessLineage,
+  getSessionWatchdogStaleSessionId,
   needsSnapshotAfterStatusPoll,
 } from "../sync-context"
 
@@ -168,6 +169,26 @@ describe("getSessionWatchdogFreshnessAt", () => {
     expect(
       getSessionWatchdogFreshnessAt("dir_a", "ses_a", freshnessBySessionByDirectory, freshnessByDirectory),
     ).toBe(9_000)
+  })
+})
+
+describe("getSessionWatchdogStaleSessionId", () => {
+  test("flags a stale session even when a sibling session has fresh activity", () => {
+    const freshnessBySessionByDirectory = new Map<string, Map<string, number>>([
+      ["dir_a", new Map<string, number>([["ses_fresh", 29_000]])],
+    ])
+    const freshnessByDirectory = new Map<string, number>([["dir_a", 25_000]])
+
+    expect(
+      getSessionWatchdogStaleSessionId(
+        "dir_a",
+        ["ses_stale", "ses_fresh"],
+        freshnessBySessionByDirectory,
+        freshnessByDirectory,
+        30_000,
+        20_000,
+      ),
+    ).toBe("ses_stale")
   })
 })
 

@@ -541,7 +541,35 @@ export function getSessionWatchdogFreshnessAt(
   freshnessBySessionByDirectory: ReadonlyMap<string, ReadonlyMap<string, number>>,
   freshnessByDirectory: ReadonlyMap<string, number>,
 ): number | undefined {
-  return freshnessBySessionByDirectory.get(directory)?.get(sessionId) ?? freshnessByDirectory.get(directory)
+  const perSession = freshnessBySessionByDirectory.get(directory)?.get(sessionId)
+  if (perSession !== undefined) return perSession
+
+  // Only fall back to directory freshness when no session in the directory has been
+  // seeded yet; otherwise sibling activity would mask a stuck session.
+  const dirMap = freshnessBySessionByDirectory.get(directory)
+  if (!dirMap || dirMap.size === 0) {
+    return freshnessByDirectory.get(directory)
+  }
+  return undefined
+}
+
+export function getSessionWatchdogStaleSessionId(
+  directory: string,
+  candidateSessionIds: string[],
+  freshnessBySessionByDirectory: ReadonlyMap<string, ReadonlyMap<string, number>>,
+  freshnessByDirectory: ReadonlyMap<string, number>,
+  now: number,
+  staleEventMs = ACTIVE_SESSION_STALE_EVENT_MS,
+): string | undefined {
+  return candidateSessionIds.find((sessionId) => {
+    const lastActiveEventAt = getSessionWatchdogFreshnessAt(
+      directory,
+      sessionId,
+      freshnessBySessionByDirectory,
+      freshnessByDirectory,
+    ) ?? 0
+    return now - lastActiveEventAt >= staleEventMs
+  })
 }
 
 export function getSessionWatchdogFreshnessLineage(
@@ -1561,14 +1589,15 @@ function handleEvent(
       break
   }
 
-  const reducerResult = applyDirectoryEvent(draft, payload, {
-    onSetSessionTodo: (sessionID, todos) => {
-      useTodosPersistStore.getState().setSessionTodos(sessionID, todos)
-    },
-    onSessionFreshness: onSessionFreshness
-      ? (sessionID) => onSessionFreshness(resolvedDirectory, sessionID)
-      : undefined,
-  })
+    const reducerResult = applyDirectoryEvent(draft, payload, {
+      onSetSessionTodo: (sessionID, todos) => {
+        useTodosPersistStore.getState().setSessionTodos(sessionID, todos)
+      },
+      onSessionFreshness: onSessionFreshness
+        ? (sessionID) => onSessionFreshness(resolvedDirectory, sessionID)
+        : undefined,
+      onResolveSessionIDForMessageID: (messageID) => routingIndex.messageSessionById.get(messageID),
+    })
   const reducerChanged = typeof reducerResult === "boolean" ? reducerResult : reducerResult.changed
   const materializationResult = typeof reducerResult === "boolean" ? undefined : reducerResult.materialization
 
@@ -2007,15 +2036,13 @@ export function SyncProvider(props: {
             }
 
             const lastFullResyncAt = lastFullResyncAtByDirectoryRef.current.get(directory) ?? 0
-            const staleSessionId = candidateSessionIds.find((sessionId) => {
-              const lastActiveEventAt = getSessionWatchdogFreshnessAt(
-                directory,
-                sessionId,
-                lastActiveEventAtBySessionRef.current,
-                lastActiveEventAtByDirectoryRef.current,
-              ) ?? 0
-              return now - lastActiveEventAt >= ACTIVE_SESSION_STALE_EVENT_MS
-            })
+            const staleSessionId = getSessionWatchdogStaleSessionId(
+              directory,
+              candidateSessionIds,
+              lastActiveEventAtBySessionRef.current,
+              lastActiveEventAtByDirectoryRef.current,
+              now,
+            )
             if (staleSessionId && now - lastFullResyncAt >= ACTIVE_SESSION_FULL_RESYNC_COOLDOWN_MS) {
               pipelineReconnectRef.current?.("active_stream_stale")
               triggerDirectoryResync(directory)

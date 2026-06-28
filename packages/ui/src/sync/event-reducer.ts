@@ -450,6 +450,7 @@ export function applyDirectoryEvent(
       const sessionID = props.sessionID ?? callbacks?.onResolveSessionIDForMessageID?.(props.messageID)
       const parts = draft.part[props.messageID]
       if (!parts) {
+        touchSessionFreshnessIfActive(sessionID)
         return false
       }
       const result = Binary.search(parts, props.partID, (p) => p.id)
@@ -464,6 +465,7 @@ export function applyDirectoryEvent(
         touchSessionFreshnessIfActive(sessionID)
         return true
       }
+      touchSessionFreshnessIfActive(sessionID)
       return false
     }
 
@@ -475,22 +477,23 @@ export function applyDirectoryEvent(
         field: string
         delta: string
       }
+      const sessionID = props.sessionID ?? callbacks?.onResolveSessionIDForMessageID?.(props.messageID)
       const parts = draft.part[props.messageID]
       if (!parts) {
         syncDebug.reducer.partDeltaNoParts(props.messageID, props.partID)
-        touchSessionFreshnessIfActive(props.sessionID)
+        touchSessionFreshnessIfActive(sessionID)
         return {
           changed: false,
-          materialization: { type: "incomplete-session-snapshot", sessionID: props.sessionID, messageID: props.messageID, partID: props.partID },
+          materialization: { type: "incomplete-session-snapshot", sessionID, messageID: props.messageID, partID: props.partID },
         }
       }
       const result = Binary.search(parts, props.partID, (p) => p.id)
       if (!result.found) {
         syncDebug.reducer.partDeltaNotFound(props.messageID, props.partID)
-        touchSessionFreshnessIfActive(props.sessionID)
+        touchSessionFreshnessIfActive(sessionID)
         return {
           changed: false,
-          materialization: { type: "incomplete-session-snapshot", sessionID: props.sessionID, messageID: props.messageID, partID: props.partID },
+          materialization: { type: "incomplete-session-snapshot", sessionID, messageID: props.messageID, partID: props.partID },
         }
       }
       const existing = parts[result.index] as Record<string, unknown>
@@ -505,7 +508,7 @@ export function applyDirectoryEvent(
         __dedupeNextDeltaFields: dedupeFields.filter((field) => field !== props.field),
       } as unknown as Part
       draft.part[props.messageID] = next
-      touchSessionFreshness(props.sessionID)
+      touchSessionFreshnessIfActive(sessionID)
       return true
     }
 
