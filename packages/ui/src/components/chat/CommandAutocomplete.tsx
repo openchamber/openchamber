@@ -1,5 +1,6 @@
 import React from 'react';
-import { cn, fuzzyMatch } from '@/lib/utils';
+import { cn } from '@/lib/utils';
+import { scoreByFuzzyQuery } from '@/lib/search/fuzzySearch';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionMessages } from '@/sync/sync-context';
 import { useCommandsStore } from '@/stores/useCommandsStore';
@@ -184,22 +185,29 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
         const allCommands = [...builtInCommands, ...customCommands, ...skillCommands];
 
         const allowInitCommand = !hasMessagesInCurrentSession;
-        const filtered = (searchQuery
-          ? allCommands.filter(cmd =>
-              fuzzyMatch(cmd.name, searchQuery) ||
-              (cmd.description && fuzzyMatch(cmd.description, searchQuery))
+        const scored = searchQuery
+          ? scoreByFuzzyQuery(
+              allCommands,
+              searchQuery.trim(),
+              (cmd) => `${cmd.name} ${cmd.description ?? ''}`,
+              { threshold: 0.4 }
             )
-          : allCommands).filter(cmd => allowInitCommand || cmd.name !== 'init');
+          : allCommands.map((cmd) => ({ item: cmd, score: 0 }));
+        const filtered = scored.filter((r) => allowInitCommand || r.item.name !== 'init');
 
+        const query = searchQuery.trim().toLowerCase();
         filtered.sort((a, b) => {
-          const aStartsWith = a.name.toLowerCase().startsWith(searchQuery.toLowerCase());
-          const bStartsWith = b.name.toLowerCase().startsWith(searchQuery.toLowerCase());
+          if (a.score !== b.score) return a.score - b.score;
+          const aName = a.item.name.toLowerCase();
+          const bName = b.item.name.toLowerCase();
+          const aStartsWith = aName.startsWith(query);
+          const bStartsWith = bName.startsWith(query);
           if (aStartsWith && !bStartsWith) return -1;
           if (!aStartsWith && bStartsWith) return 1;
-          return a.name.localeCompare(b.name);
+          return aName.localeCompare(bName);
         });
 
-        setCommands(filtered);
+        setCommands(filtered.map((r) => r.item));
       } catch {
 
         const allowInitCommand = !hasMessagesInCurrentSession;
@@ -251,14 +259,29 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
           ),
         ];
 
-        const filtered = (searchQuery
-          ? builtInCommands.filter(cmd =>
-              fuzzyMatch(cmd.name, searchQuery) ||
-              (cmd.description && fuzzyMatch(cmd.description, searchQuery))
+        const scored = searchQuery
+          ? scoreByFuzzyQuery(
+              builtInCommands,
+              searchQuery.trim(),
+              (cmd) => `${cmd.name} ${cmd.description ?? ''}`,
+              { threshold: 0.4 }
             )
-          : builtInCommands).filter(cmd => allowInitCommand || cmd.name !== 'init');
+          : builtInCommands.map((cmd) => ({ item: cmd, score: 0 }));
+        const filtered = scored.filter((r) => allowInitCommand || r.item.name !== 'init');
 
-        setCommands(filtered);
+        const query = searchQuery.trim().toLowerCase();
+        filtered.sort((a, b) => {
+          if (a.score !== b.score) return a.score - b.score;
+          const aName = a.item.name.toLowerCase();
+          const bName = b.item.name.toLowerCase();
+          const aStartsWith = aName.startsWith(query);
+          const bStartsWith = bName.startsWith(query);
+          if (aStartsWith && !bStartsWith) return -1;
+          if (!aStartsWith && bStartsWith) return 1;
+          return aName.localeCompare(bName);
+        });
+
+        setCommands(filtered.map((r) => r.item));
       } finally {
         setLoading(false);
       }

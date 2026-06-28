@@ -1,4 +1,5 @@
 import React from 'react';
+import { scoreByFuzzyQuery } from '@/lib/search/fuzzySearch';
 import { cn, truncatePathMiddle } from '@/lib/utils';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -257,20 +258,27 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
   React.useEffect(() => {
     const visibleAgents = getVisibleAgents();
     const normalizedQuery = (searchQuery ?? '').trim().toLowerCase();
-    const filtered = visibleAgents
+    const candidates = visibleAgents
       .filter((agent) => agent.mode && agent.mode !== 'primary')
-      .filter((agent) => {
-        if (!normalizedQuery) return true;
-        const haystack = `${agent.name} ${agent.description ?? ''}`.toLowerCase();
-        return haystack.includes(normalizedQuery);
-      })
       .map((agent) => ({
         name: agent.name,
         description: agent.description,
         mode: agent.mode,
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-    setAgents(filtered);
+      }));
+
+    if (!normalizedQuery) {
+      setAgents(candidates.sort((a, b) => a.name.localeCompare(b.name)));
+      return;
+    }
+
+    const scored = scoreByFuzzyQuery(
+      candidates,
+      normalizedQuery,
+      (agent) => `${agent.name} ${agent.description ?? ''}`,
+      { threshold: 0.4 }
+    );
+
+    setAgents(scored.map((r) => r.item));
   }, [getVisibleAgents, searchQuery]);
 
   React.useEffect(() => {
