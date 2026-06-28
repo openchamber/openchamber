@@ -330,6 +330,7 @@ export const settingsDict = {
   'settings.common.actions.copyAll': 'Copy all',
   'settings.common.actions.clear': 'Clear',
   'settings.common.actions.saving': 'Saving...',
+  'settings.common.actions.saved': 'Saved',
   'settings.common.actions.saveChanges': 'Save Changes',
   'settings.common.scope.global': 'Global',
   'settings.common.scope.project': 'Project',

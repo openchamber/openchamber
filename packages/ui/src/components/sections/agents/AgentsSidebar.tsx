@@ -606,7 +606,9 @@ const AgentListItem: React.FC<AgentListItemProps> = ({
                   ? t('settings.agents.sidebar.badge.system')
                   : extAgent.scope === 'project'
                     ? t('settings.common.scope.project')
-                    : t('settings.common.scope.global')}
+                    : extAgent.scope === 'user'
+                      ? t('settings.common.scope.global')
+                      : extAgent.scope}
               </span>
             )}
           </div>

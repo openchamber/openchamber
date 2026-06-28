@@ -606,6 +606,9 @@ export const AgentsPage: React.FC = () => {
   React.useEffect(() => () => clearTimeout(savedTimerRef.current), []);
 
   const handleSave = async () => {
+    // Clear any stale saved timer to prevent race on rapid re-saves
+    clearTimeout(savedTimerRef.current);
+
     const agentName = isNewAgent ? draftName.trim().replace(/\s+/g, '-') : selectedAgentName?.trim();
 
     if (!agentName) {
@@ -1226,7 +1229,7 @@ export const AgentsPage: React.FC = () => {
             {saveState === 'saving' ? (
               <><Icon name="loader-4" className="h-3.5 w-3.5 animate-spin" /> {t('settings.common.actions.saving')}</>
             ) : saveState === 'saved' ? (
-              <><Icon name="check" className="h-3.5 w-3.5 text-green-500" /> Done</>
+              <><Icon name="check" className="h-3.5 w-3.5 text-green-500" /> {t('settings.common.actions.saved')}</>
             ) : (
               t('settings.common.actions.saveChanges')
             )}
