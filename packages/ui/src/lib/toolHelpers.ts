@@ -4,7 +4,6 @@ export interface ToolMetadata {
   outputLanguage?: string;
   renderMode?: 'expandable' | 'static' | 'standalone';
   activityGroupBoundary?: boolean;
-  staticGroupName?: string;
   hasCustomRendering?: boolean;
   inputFields?: {
     key: string;
@@ -151,7 +150,6 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
     category: 'search',
     outputLanguage: 'text',
     renderMode: 'static',
-    staticGroupName: 'grep',
     hasCustomRendering: true,
     inputFields: [
       { key: 'pattern', label: 'Pattern', type: 'pattern' },
@@ -164,7 +162,6 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
     category: 'search',
     outputLanguage: 'text',
     renderMode: 'static',
-    staticGroupName: 'grep',
     hasCustomRendering: true,
     inputFields: [
       { key: 'pattern', label: 'Pattern', type: 'pattern' },
@@ -176,7 +173,6 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
     category: 'search',
     outputLanguage: 'text',
     renderMode: 'static',
-    staticGroupName: 'grep',
     hasCustomRendering: true,
     inputFields: []
   },
@@ -185,7 +181,6 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
     category: 'search',
     outputLanguage: 'text',
     renderMode: 'static',
-    staticGroupName: 'grep',
     hasCustomRendering: true,
     inputFields: []
   },
@@ -194,7 +189,6 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
     category: 'search',
     outputLanguage: 'text',
     renderMode: 'static',
-    staticGroupName: 'grep',
     hasCustomRendering: true,
     inputFields: []
   },
@@ -202,6 +196,8 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
     displayName: 'List Directory',
     category: 'file',
     outputLanguage: 'text',
+    renderMode: 'static',
+    hasCustomRendering: true,
     inputFields: [
       { key: 'path', label: 'Directory', type: 'file' },
       { key: 'ignore', label: 'Ignore Patterns', type: 'pattern' }
@@ -226,6 +222,8 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
     displayName: 'Fetch URL',
     category: 'web',
     outputLanguage: 'auto',
+    renderMode: 'static',
+    hasCustomRendering: true,
     inputFields: [
       { key: 'url', label: 'URL', type: 'text' },
       { key: 'format', label: 'Format', type: 'text' },
@@ -237,6 +235,8 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
      displayName: 'Web Search',
      category: 'web',
      outputLanguage: 'markdown',
+     renderMode: 'static',
+     hasCustomRendering: true,
      inputFields: [
        { key: 'query', label: 'Search Query', type: 'text' },
        { key: 'numResults', label: 'Results Count', type: 'text' },
@@ -247,6 +247,8 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
      displayName: 'Code Search',
      category: 'web',
      outputLanguage: 'markdown',
+     renderMode: 'static',
+     hasCustomRendering: true,
      inputFields: [
        { key: 'query', label: 'Search Query', type: 'text' },
        { key: 'tokensNum', label: 'Tokens', type: 'text' }
@@ -275,6 +277,8 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
      displayName: 'Load Skill',
      category: 'ai',
      outputLanguage: 'markdown',
+     renderMode: 'static',
+     hasCustomRendering: true,
      inputFields: [
        { key: 'name', label: 'Skill Name', type: 'text' }
      ]
@@ -309,6 +313,8 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
       displayName: 'Plan Mode',
       category: 'ai',
       outputLanguage: 'text',
+      renderMode: 'static',
+      hasCustomRendering: true,
       inputFields: []
     },
 
@@ -316,6 +322,8 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
       displayName: 'Build Mode',
       category: 'ai',
       outputLanguage: 'text',
+      renderMode: 'static',
+      hasCustomRendering: true,
       inputFields: []
     },
 
@@ -323,6 +331,8 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
       displayName: 'Structured Output',
       category: 'ai',
       outputLanguage: 'json',
+      renderMode: 'static',
+      hasCustomRendering: true,
       inputFields: []
     },
 
@@ -330,6 +340,8 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
       displayName: 'Structured Output',
       category: 'ai',
       outputLanguage: 'json',
+      renderMode: 'static',
+      hasCustomRendering: true,
       inputFields: []
     }
   };
