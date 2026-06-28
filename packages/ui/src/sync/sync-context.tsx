@@ -418,6 +418,11 @@ function toSessionStatus(status: Awaited<ReturnType<typeof opencodeClient.getSes
   return undefined
 }
 
+function isStreamHeartbeatEvent(payload: Event): boolean {
+  const type = (payload as { type?: unknown }).type
+  return type === "server.heartbeat" || type === "openchamber:heartbeat"
+}
+
 function getActiveSessionCandidateIds(directory: string, state: DirectoryStore): string[] {
   return getReconnectCandidateSessionIds(state, {
     directory,
@@ -465,9 +470,12 @@ export function applySessionStatusSnapshot(
       const incoming = toSessionStatus(snapshot[sessionId])
 
       if (incoming && incoming.type !== "idle") {
-        freshSessionIds.add(sessionId)
+        const isNewOrChanged = !haveEquivalentSyncSnapshots(current[sessionId], incoming)
+        if (mode === "authoritative" || isNewOrChanged) {
+          freshSessionIds.add(sessionId)
+        }
         // Confirm or raise active status (catches a busy event the SSE missed).
-        if (!haveEquivalentSyncSnapshots(current[sessionId], incoming)) {
+        if (isNewOrChanged) {
           draft()[sessionId] = incoming
           changed = true
         }
@@ -1821,6 +1829,9 @@ export function SyncProvider(props: {
         return resolveDirectoryFromRoutingIndex(routingIndex, directory, payload, childStores)
       },
       onEvent: (directory, payload) => {
+        if (!isStreamHeartbeatEvent(payload)) {
+          lastActiveEventAtByDirectoryRef.current.set(directory, Date.now())
+        }
         dispatchVSCodeRuntimeNotificationEvent(directory, payload)
         if (payload.type === "installation.update-available") {
           const version = typeof (payload.properties as { version?: unknown })?.version === "string"
@@ -1941,6 +1952,7 @@ export function SyncProvider(props: {
           store,
           candidateSessionIds,
           "monotonic",
+          (sessionId) => recordSessionWatchdogFreshness(directory, sessionId),
         )
         if (!statuses) return
         const needsSnapshot = candidateSessionIds.some((sessionId) => (

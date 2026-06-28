@@ -72,6 +72,21 @@ describe("applySessionStatusSnapshot", () => {
       expect(freshness).toEqual(["ses_a"])
     })
 
+    test("does not refresh freshness for unchanged busy snapshots in monotonic mode", () => {
+      const store = createDirectoryStore({ session_status: { ses_a: BUSY } })
+      const freshness: string[] = []
+
+      applySessionStatusSnapshot(
+        store,
+        { ses_a: { type: "busy" } },
+        ["ses_a"],
+        "monotonic",
+        (sessionId) => freshness.push(sessionId),
+      )
+
+      expect(freshness).toEqual([])
+    })
+
     test("updates busy → retry from the snapshot", () => {
       const store = createDirectoryStore({ session_status: { ses_a: BUSY } })
       const retry: SessionStatus = { type: "retry", attempt: 2, message: "x", next: 30 }

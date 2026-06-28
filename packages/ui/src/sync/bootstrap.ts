@@ -165,7 +165,11 @@ export async function bootstrapDirectory(input: {
       }),
     ),
     retry(() => sdk.session.status().then((x) => {
-      const sessionStatus = unwrap(x, "session.status") as State["session_status"]
+      const sessionStatus = unwrap(x, "session.status") as State["session_status"] | null | undefined
+      if (!sessionStatus || typeof sessionStatus !== "object") {
+        set({ session_status: {} })
+        return
+      }
       set({ session_status: sessionStatus })
       for (const [sessionID, status] of Object.entries(sessionStatus)) {
         if (status?.type === "busy" || status?.type === "retry") {

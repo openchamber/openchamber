@@ -243,7 +243,8 @@ export function applyDirectoryEvent(
       const result = Binary.search(sessions, info.id, (s) => s.id)
 
       if (info.time.archived) {
-        const wasActive = draft.session_status?.[info.id]?.type !== "idle"
+        const currentStatus = draft.session_status?.[info.id]
+        const wasActive = Boolean(currentStatus) && currentStatus.type !== "idle"
         if (result.found) sessions.splice(result.index, 1)
         cleanupSessionCaches(draft, info.id, callbacks?.onSetSessionTodo)
         if (!info.parentID) draft.sessionTotal = Math.max(0, draft.sessionTotal - 1)
@@ -265,7 +266,8 @@ export function applyDirectoryEvent(
       const info = (event.properties as { info: Session }).info
       const sessions = draft.session
       const result = Binary.search(sessions, info.id, (s) => s.id)
-      const wasActive = draft.session_status?.[info.id]?.type !== "idle"
+      const currentStatus = draft.session_status?.[info.id]
+      const wasActive = Boolean(currentStatus) && currentStatus.type !== "idle"
       if (result.found) sessions.splice(result.index, 1)
       cleanupSessionCaches(draft, info.id, callbacks?.onSetSessionTodo)
       if (!info.parentID) draft.sessionTotal = Math.max(0, draft.sessionTotal - 1)
@@ -276,6 +278,7 @@ export function applyDirectoryEvent(
     case "session.diff": {
       const props = event.properties as { sessionID: string; diff: FileDiff[] }
       draft.session_diff[props.sessionID] = props.diff
+      touchSessionFreshness(props.sessionID)
       return true
     }
 
@@ -290,6 +293,8 @@ export function applyDirectoryEvent(
     case "session.status": {
       const props = event.properties as { sessionID: string; status: SessionStatus }
       if (areSessionStatusesEqual(draft.session_status[props.sessionID], props.status)) {
+        // Identical non-idle status events still count as live activity because
+        // the server may emit repeated busy/retry updates while work continues.
         if (props.status.type !== "idle") touchSessionFreshness(props.sessionID)
         return false
       }

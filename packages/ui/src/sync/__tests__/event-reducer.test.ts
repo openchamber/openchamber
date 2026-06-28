@@ -287,6 +287,17 @@ describe("applyDirectoryEvent", () => {
     expect(draft.question.ses_1).toEqual([])
   })
 
+  test("touches freshness for session diff updates", () => {
+    const draft = state({ session_status: { ses_1: { type: "busy" } as SessionStatus } })
+    const freshness: string[] = []
+
+    expect(applyDirectoryEvent(draft, {
+      type: "session.diff",
+      properties: { sessionID: "ses_1", diff: [] },
+    } as unknown as Event, { onSessionFreshness: (sessionID) => freshness.push(sessionID) })).toBe(true)
+    expect(freshness).toEqual(["ses_1"])
+  })
+
   test("touches freshness when a session is archived before caches are cleared", () => {
     const draft = state({
       session_status: { ses_1: { type: "busy" } as SessionStatus },
