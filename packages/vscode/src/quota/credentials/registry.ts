@@ -23,39 +23,24 @@ import { getLegacyOpenCodePath } from '../credentials-path';
 import { PROVIDER_CREDENTIAL_SCHEMAS, type ValidationResult } from './schemas';
 
 /**
- * Valid QuotaProviderId values for credential storage.
- *
- * Mirrors the QuotaProviderId type from packages/ui/src/types/quota.ts.
- * Both server-dispatched providers and manual-auth providers are accepted
- * because any provider may have stored credentials for manual auth flows.
+ * Provider IDs that accept manual credentials — exactly the providers with a
+ * credential schema. OAuth providers (openai, anthropic, google, zai, xai,
+ * minimax, etc.) authenticate via OpenCode auth.json and must be rejected here.
  */
-const VALID_PROVIDER_IDS = new Set<string>([
-  'openai',
-  'codex',
-  'cursor',
-  'claude',
-  'github-copilot',
-  'github-copilot-addon',
-  'google',
-  'kimi-for-coding',
-  'nano-gpt',
-  'openrouter',
-  'zai-coding-plan',
-  'zhipuai-coding-plan',
-  'minimax-coding-plan',
-  'minimax-cn-coding-plan',
-  'ollama-cloud',
-  'wafer',
-  'atlascloud',
-  'byteplus',
-  'longcat',
-  'mistral',
-  'poe',
-  'qwencloud',
-  'stepfun',
-  'xai',
-  'opencode-go',
-]);
+const VALID_PROVIDER_IDS = new Set<string>(Object.keys(PROVIDER_CREDENTIAL_SCHEMAS));
+
+/**
+ * Apply a provider schema's optional `normalize()` to clean common paste
+ * artifacts (e.g. a cookie copied as `auth:"<value>"`) before validation and
+ * storage. Returns the credential unchanged when no normalizer is defined.
+ */
+function normalizeCredential(providerId: string, credential: Record<string, unknown>): Record<string, unknown> {
+  const schema = PROVIDER_CREDENTIAL_SCHEMAS[providerId];
+  if (schema && typeof schema.normalize === 'function' && credential && typeof credential === 'object') {
+    return schema.normalize(credential);
+  }
+  return credential;
+}
 
 /**
  * Validate a credential against provider requirements.
@@ -121,7 +106,8 @@ export interface CreateCredentialInput {
  */
 export function createCredential(input: CreateCredentialInput): CreateCredentialResult {
   const { providerId, label, accountHint, credential } = input;
-  const validation = validateCredential(providerId, credential);
+  const normalized = normalizeCredential(providerId, credential);
+  const validation = validateCredential(providerId, normalized);
   if (!validation.valid) {
     return { record: null, error: validation.error, valid: false };
   }
@@ -134,7 +120,7 @@ export function createCredential(input: CreateCredentialInput): CreateCredential
     providerId,
     label: label.trim(),
     accountHint: accountHint || null,
-    credential,
+    credential: normalized,
   });
 
   return { record: sanitize(stored), valid: true };
@@ -178,11 +164,12 @@ export function updateCredentialById(id: string, updates: UpdateCredentialInput)
   }
 
   if (updates.credential !== undefined) {
-    const validation = validateCredential(existing.providerId, updates.credential);
+    const normalized = normalizeCredential(existing.providerId, updates.credential);
+    const validation = validateCredential(existing.providerId, normalized);
     if (!validation.valid) {
       return { record: null, error: validation.error, valid: false };
     }
-    patch.credential = updates.credential;
+    patch.credential = normalized;
     patch.validationStatus = 'untested';
     patch.lastValidatedAt = null;
   }

@@ -79,6 +79,7 @@ export function loadCredentials(): QuotaCredentialRecord[] {
     const parsed = JSON.parse(trimmed);
     return Array.isArray(parsed) ? parsed : [];
   } catch {
+    console.warn('Failed to read quota credentials file; treating as empty. Existing credentials may be unreadable.');
     return [];
   }
 }
