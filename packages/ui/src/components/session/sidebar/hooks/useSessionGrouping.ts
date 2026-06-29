@@ -19,7 +19,8 @@ type Args = {
   pinnedSessionIds: Set<string>;
   gitBranches: Map<string, string | null>;
   isVSCode: boolean;
-};
+  showSubagentSessionsInSidebar: boolean;
+  };
 
 const isArchivedSession = (session: Session): boolean => Boolean(session.time?.archived);
 
@@ -70,9 +71,19 @@ export const useSessionGrouping = (args: Args) => {
       const sortedProjectSessions = dedupeSessionsById(projectSessions)
         .sort((a, b) => compareSessionsByPinnedAndTime(a, b, args.pinnedSessionIds));
 
-      const sessionMap = new Map(sortedProjectSessions.map((session) => [session.id, session]));
+      // Filter out subagent/delegated sessions (those with parentID) unless the
+      // user explicitly opts to show them. Subagent sessions are noise — the
+      // parent session contains the full context.
+      const effectiveSessions = args.showSubagentSessionsInSidebar
+        ? sortedProjectSessions
+        : sortedProjectSessions.filter((session) => {
+            const parentID = (session as Session & { parentID?: string | null }).parentID;
+            return !parentID;
+          });
+
+      const sessionMap = new Map(effectiveSessions.map((session) => [session.id, session]));
       const childrenMap = new Map<string, Session[]>();
-      sortedProjectSessions.forEach((session) => {
+      effectiveSessions.forEach((session) => {
         const parentID = (session as Session & { parentID?: string | null }).parentID;
         if (!parentID) return;
         const parentSession = sessionMap.get(parentID);
@@ -111,7 +122,7 @@ export const useSessionGrouping = (args: Args) => {
         return { session, children: children.map((child) => buildProjectNode(child)), worktree: getSessionWorktree(session) };
       };
 
-      const roots = sortedProjectSessions.filter((session) => {
+      const roots = effectiveSessions.filter((session) => {
         const parentID = (session as Session & { parentID?: string | null }).parentID;
         if (!parentID) return true;
         const parentSession = sessionMap.get(parentID);

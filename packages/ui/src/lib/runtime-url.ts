@@ -34,9 +34,19 @@ const normalizeBaseUrl = (value: string | null | undefined): string => {
 };
 
 const readInjectedApiBaseUrl = (): string => {
-  if (typeof window === 'undefined') return '';
+if (typeof window === 'undefined') return '';
   const injected = (window as typeof window & { __OPENCHAMBER_API_BASE_URL__?: string }).__OPENCHAMBER_API_BASE_URL__;
+  if (typeof injected === 'string' && injected.trim())
   return normalizeBaseUrl(injected);
+  // Build-time fallback (Vite substitutes this at compile time). In proxy-bypass
+  // mode VITE_OPENCODE_URL points the SDK at an external OpenCode upstream.
+  // Reading it here means the runtime URL resolver returns the right absolute
+  // baseUrl even at module-init time, before any runtime injection has happened.
+  // MUST use direct import.meta.env.VITE_* access — Vite's static replacement
+  // only matches that exact pattern, not typecasted/optional-chained variants.
+  const buildTime = import.meta.env.VITE_OPENCODE_URL;
+  if (typeof buildTime === 'string' && buildTime.trim()) return normalizeBaseUrl(buildTime);
+  return '';
 };
 
 const currentHref = (config: RuntimeUrlConfig): string => {
@@ -86,6 +96,62 @@ const buildHttpUrl = (baseUrl: string, path: string, query?: RuntimeUrlQuery): s
   appendQuery(url, query);
   return url.toString();
 };
+// OpenChamber-internal endpoint prefixes. Always served by OpenChamber Express,
+// NOT the OpenCode upstream — must NOT honor VITE_OPENCODE_URL in bypass mode.
+const OPENCHAMBER_INTERNAL_PREFIXES = [
+  '/auth/',
+  '/health',
+  '/api/opencode/',
+  '/api/config/themes',
+  '/api/config/commands',
+  '/api/config/plugins',
+  '/api/config/mcp',
+  '/api/notifications/',
+  '/api/openchamber/',
+  '/api/tts/',
+  '/api/voice/',
+  '/api/scheduled-tasks/',
+  '/api/projects/',
+  '/api/fs/',
+  '/api/chamber/',
+  '/api/github/',
+  '/api/skills/',
+  '/api/preview/',
+  '/api/remote-clients/',
+  '/api/worktree/',
+  '/api/git/',
+  '/api/files/',
+  '/api/sessions/',
+  '/api/session-folders',
+  '/api/desktop/',
+  '/api/mobile/',
+  '/api/mini-chat/',
+];
+
+export const isOpenChamberInternalPath = (path: string): boolean => {
+  const normalized = path.trim();
+  if (normalized === '/auth') return true;
+  // The OpenCode SDK strips the /api/ prefix when calling internal paths,
+  // so /api/fs/home arrives at runtimeFetch as /fs/home. Match both forms.
+  return OPENCHAMBER_INTERNAL_PREFIXES.some((prefix) => {
+    const slashed = prefix.replace(/\/$/, '');
+    const stripped = slashed.replace(/^\/api/, '');
+    return normalized === slashed
+      || normalized.startsWith(prefix)
+      || normalized === stripped
+      || normalized.startsWith(stripped + '/');
+  });
+};
+
+// In proxy-bypass mode VITE_OPENCODE_URL points the SDK at an external
+// OpenCode upstream. That URL must NOT be used for OpenChamber-internal
+// endpoints (they don't exist upstream). When the path is OpenChamber-
+// internal, drop apiBase and let the browser use the page origin.
+const resolveBypassBaseUrl = (apiBase: string, path: string): string => {
+  if (!apiBase) return '';
+  if (!isOpenChamberInternalPath(path)) return apiBase;
+  return '';
+};
 
 const withUrlAuth = (urlValue: string): string => {
   const token = getRuntimeUrlAuthTokenSync();
@@ -117,8 +183,10 @@ export const createRuntimeUrlResolver = (config: RuntimeUrlConfig = {}): Runtime
   const apiBaseUrl = (): string => configuredApiBaseUrl || readInjectedApiBaseUrl();
   const realtimeBaseUrl = (): string => configuredRealtimeBaseUrl || apiBaseUrl();
 
-  const http = (path: string, query?: RuntimeUrlQuery): string => buildHttpUrl(apiBaseUrl(), path, query);
-  const realtime = (path: string, query?: RuntimeUrlQuery): string => buildHttpUrl(realtimeBaseUrl(), path, query);
+  const http = (path: string, query?: RuntimeUrlQuery): string =>
+    buildHttpUrl(resolveBypassBaseUrl(apiBaseUrl(), path), path, query);
+  const realtime = (path: string, query?: RuntimeUrlQuery): string =>
+    buildHttpUrl(resolveBypassBaseUrl(realtimeBaseUrl(), path), path, query);
 
   return {
     api: http,

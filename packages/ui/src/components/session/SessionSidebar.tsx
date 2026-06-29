@@ -280,6 +280,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const notifyOnSubtasks = useUIStore((state) => state.notifyOnSubtasks);
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
   const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
+  const showSubagentSessionsInSidebar = useUIStore((state) => state.showSubagentSessionsInSidebar);
+  const setShowSubagentSessionsInSidebar = useUIStore((state) => state.setShowSubagentSessionsInSidebar);
 
   const debouncedSessionSearchQuery = useDebouncedValue(sessionSearchQuery, 120);
   const normalizedSessionSearchQuery = React.useMemo(
@@ -522,6 +524,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     worktreeMetadata,
     pinnedSessionIds,
     gitBranches,
+    showSubagentSessionsInSidebar,
     isVSCode,
   });
 
@@ -1562,6 +1565,22 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         selectionModeEnabled={selectionModeEnabled}
         onToggleSelectionMode={handleToggleSelectionMode}
       />
+
+      <div className="flex items-center gap-2 px-3 py-1">
+        <label className="flex items-center gap-2 cursor-pointer" onClick={() => setShowSubagentSessionsInSidebar(!showSubagentSessionsInSidebar)}>
+          <div className={cn("h-4 w-7 rounded-full transition-colors duration-150 flex-shrink-0",
+            showSubagentSessionsInSidebar ? "bg-[var(--primary-base)]" : "bg-[var(--interactive-border)]"
+          )}>
+            <div className={cn("h-3.5 w-3.5 rounded-full bg-white transition-transform duration-150 mt-[1px]",
+              showSubagentSessionsInSidebar ? "translate-x-3.5" : "translate-x-0.5"
+            )} />
+          </div>
+          <span className="typography-caption text-muted-foreground select-none">
+            {t('sidebar.subagent.toggleLabel')}
+          </span>
+        </label>
+      </div>
+
 
       <SidebarProjectsList
         topContent={topContent}

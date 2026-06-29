@@ -3,6 +3,10 @@ import { devtools } from 'zustand/middleware';
 import type { McpStatus } from '@opencode-ai/sdk/v2';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+// Bound MCP requests so a hung OpenCode server can't freeze the UI. Matches the
+// server's health-check window (server-utils-runtime: waitForOpenCodePort = 15s) and
+// stays well under the prior promptAsync 60s ceiling — MCP status is a cheap GET.
+const MCP_REQUEST_TIMEOUT_MS = 15_000;
 
 export type McpStatusMap = Record<string, McpStatus>;
 type McpRuntimeDiagnostic = {
@@ -51,6 +55,8 @@ export const computeMcpHealth = (status: McpStatusMap | null | undefined): McpHe
 type RefreshOptions = {
   directory?: string | null;
   silent?: boolean;
+  /** Bypass the default timeout (for testing). */
+  timeoutMs?: number;
 };
 
 type TestConnectionResult = {
@@ -110,9 +116,22 @@ export const useMcpStore = create<McpStore>()(
         }));
       }
 
+      // Bound the upstream call so a hung OpenCode server can't freeze the UI
+      // (e.g. Services > MCP tab waiting forever on an empty dropdown). The
+      // AbortController pattern matches useConfigStore and the prior promptAsync
+      // fix; it propagates through the SDK fetch chain so the in-flight request
+      // is cancelled, not just abandoned.
+      const controller = typeof AbortController !== 'undefined' ? new AbortController() : undefined;
+      const timeoutId = controller
+        ? setTimeout(() => controller.abort(), options?.timeoutMs ?? MCP_REQUEST_TIMEOUT_MS)
+        : undefined;
+
       try {
-        const api = getMcpApiClient(directory);
-        const result = await api.mcp.status();
+        const api = getMcpApiClient(null); // Use global client to get ALL MCPs (plugin-registered, project, global)
+        const result = await api.mcp.status(
+          undefined,
+          controller ? { signal: controller.signal } : undefined,
+        );
         const data = (result.data ?? {}) as McpStatusMap;
 
         set((state) => ({
@@ -127,11 +146,16 @@ export const useMcpStore = create<McpStore>()(
           lastErrorKeys: { ...state.lastErrorKeys, [key]: null },
         }));
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to load MCP status';
+        const raw = error instanceof Error ? error.message : 'Failed to load MCP status';
+        const message = controller?.signal.aborted
+          ? `MCP status request timed out after ${options?.timeoutMs ?? MCP_REQUEST_TIMEOUT_MS}ms`
+          : raw;
         set((state) => ({
           loadingKeys: { ...state.loadingKeys, [key]: false },
           lastErrorKeys: { ...state.lastErrorKeys, [key]: message },
         }));
+      } finally {
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
       }
     },
 

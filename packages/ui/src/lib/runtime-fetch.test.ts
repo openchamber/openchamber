@@ -4,6 +4,8 @@ import { buildRuntimeFetchUrl, isLatin1Safe, runtimeFetch, sanitizeHeadersForBro
 import { clearRuntimeAuthCredentialProvider, setRuntimeBearerToken } from './runtime-auth';
 import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from './runtime-url';
 
+/* eslint-disable @typescript-eslint/no-require-imports -- Phase C/F tests use require() to access non-exported helpers; tests pass without runtime overhead. */
+
 const originalFetch = globalThis.fetch;
 
 describe('buildRuntimeFetchUrl', () => {
@@ -460,5 +462,129 @@ describe('runtimeFetch header sanitization', () => {
       globalThis.fetch = originalFetch;
       clearRuntimeAuthCredentialProvider();
     }
+  });
+});
+
+describe('SDK shape unwrapping (Phase C)', () => {
+  test('shouldUnwrapSdkData matches shape-mismatch list endpoints', () => {
+    const { shouldUnwrapSdkData, SDK_SHAPE_UNWRAP_PATTERNS } = require('./runtime-fetch');
+    expect(SDK_SHAPE_UNWRAP_PATTERNS).toHaveLength(4);
+    expect(shouldUnwrapSdkData('http://127.0.0.1:4096/api/agent')).toBe(true);
+    expect(shouldUnwrapSdkData('http://127.0.0.1:4096/api/command')).toBe(true);
+    expect(shouldUnwrapSdkData('http://127.0.0.1:4096/api/skill')).toBe(true);
+    expect(shouldUnwrapSdkData('http://127.0.0.1:4096/api/provider')).toBe(true);
+    expect(shouldUnwrapSdkData('http://127.0.0.1:4096/api/agent?directory=/home')).toBe(true);
+    expect(shouldUnwrapSdkData('http://127.0.0.1:4096/agent?directory=/home')).toBe(true);
+    expect(shouldUnwrapSdkData('http://127.0.0.1:4096/command')).toBe(true);
+    // MCP is NOT in the unwrap patterns — /mcp returns a dict that useMcpStore consumes directly.
+    expect(shouldUnwrapSdkData('http://127.0.0.1:4096/api/mcp')).toBe(false);
+    expect(shouldUnwrapSdkData('http://127.0.0.1:4096/mcp')).toBe(false);
+    expect(shouldUnwrapSdkData('http://127.0.0.1:4096/mcp/status')).toBe(false);
+  });
+
+  test('shouldUnwrapSdkData does NOT match unrelated paths', () => {
+    const { shouldUnwrapSdkData } = require('./runtime-fetch');
+    expect(shouldUnwrapSdkData('http://127.0.0.1:4096/api/config')).toBe(false);
+    expect(shouldUnwrapSdkData('http://127.0.0.1:4096/api/config/skills')).toBe(false);
+    expect(shouldUnwrapSdkData('http://127.0.0.1:4096/config')).toBe(false);
+    expect(shouldUnwrapSdkData('http://127.0.0.1:4096/global/event')).toBe(false);
+    expect(shouldUnwrapSdkData('http://127.0.0.1:4096/skill/test123')).toBe(false);
+  });
+
+  test('unwrapSdkDataResponse unwraps {location, data: Agent[]}', async () => {
+    const { unwrapSdkDataResponse } = require('./runtime-fetch');
+    const url = 'http://127.0.0.1:4096/api/agent';
+    const body = JSON.stringify({ location: '/', data: [{ name: 'build' }, { name: 'plan' }] });
+    const response = new Response(body, { status: 200, headers: { 'content-type': 'application/json' } });
+    const result = await unwrapSdkDataResponse(response, url);
+    expect(result.status).toBe(200);
+    expect(result.headers.get('content-type')).toBe('application/json');
+    const parsed = JSON.parse(await result.text());
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0].name).toBe('build');
+  });
+
+  test('unwrapSdkDataResponse unwraps empty array', async () => {
+    const { unwrapSdkDataResponse } = require('./runtime-fetch');
+    const url = 'http://127.0.0.1:4096/api/skill';
+    const body = JSON.stringify({ location: '/', data: [] });
+    const response = new Response(body, { status: 200, headers: { 'content-type': 'application/json' } });
+    const result = await unwrapSdkDataResponse(response, url);
+    const parsed = JSON.parse(await result.text());
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed).toHaveLength(0);
+  });
+
+  test('unwrapSdkDataResponse passes through non-matching URL', async () => {
+    const { unwrapSdkDataResponse } = require('./runtime-fetch');
+    const url = 'http://127.0.0.1:4096/api/config';
+    const body = JSON.stringify({ foo: 'bar' });
+    const response = new Response(body, { status: 200, headers: { 'content-type': 'application/json' } });
+    const result = await unwrapSdkDataResponse(response, url);
+    expect(result).toBe(response);
+    expect(await result.text()).toBe(body);
+  });
+
+  test('unwrapSdkDataResponse passes through non-JSON content-type', async () => {
+    const { unwrapSdkDataResponse } = require('./runtime-fetch');
+    const url = 'http://127.0.0.1:4096/api/agent';
+    const response = new Response('text body', { status: 200, headers: { 'content-type': 'text/html' } });
+    const result = await unwrapSdkDataResponse(response, url);
+    expect(result).toBe(response);
+  });
+
+  test('unwrapSdkDataResponse passes through malformed JSON', async () => {
+    const { unwrapSdkDataResponse } = require('./runtime-fetch');
+    const url = 'http://127.0.0.1:4096/api/agent';
+    const response = new Response('not json{{{', { status: 200, headers: { 'content-type': 'application/json' } });
+    const result = await unwrapSdkDataResponse(response, url);
+    expect(result).toBe(response);
+  });
+
+  test('unwrapSdkDataResponse passes through body without data field', async () => {
+    const { unwrapSdkDataResponse } = require('./runtime-fetch');
+    const url = 'http://127.0.0.1:4096/api/agent';
+    const body = JSON.stringify({ foo: 'bar' });
+    const response = new Response(body, { status: 200, headers: { 'content-type': 'application/json' } });
+    const result = await unwrapSdkDataResponse(response, url);
+    expect(result).toBe(response);
+    expect(await result.text()).toBe(body);
+  });
+
+  test('unwrapSdkDataResponse passes through array body (already flat)', async () => {
+    const { unwrapSdkDataResponse } = require('./runtime-fetch');
+    const url = 'http://127.0.0.1:4096/api/agent';
+    const body = JSON.stringify([{ name: 'build' }]);
+    const response = new Response(body, { status: 200, headers: { 'content-type': 'application/json' } });
+    const result = await unwrapSdkDataResponse(response, url);
+    // Array body is not wrapped in {data: ...}, so we check for non-object
+    // The function only unwraps when body has 'data' field and is not an array itself
+    const parsed = JSON.parse(await result.text());
+    expect(parsed).toEqual([{ name: 'build' }]);
+  });
+
+  test('unwrapSdkDataResponse handles data: null', async () => {
+    const { unwrapSdkDataResponse } = require('./runtime-fetch');
+    const url = 'http://127.0.0.1:4096/api/agent';
+    const body = JSON.stringify({ location: '/', data: null });
+    const response = new Response(body, { status: 200, headers: { 'content-type': 'application/json' } });
+    const result = await unwrapSdkDataResponse(response, url);
+    // data: null should still be unwrapped (body.data is null)
+    const text = await result.text();
+    expect(text).toBe('null');
+  });
+
+  test('unwrapSdkDataResponse preserves response headers', async () => {
+    const { unwrapSdkDataResponse } = require('./runtime-fetch');
+    const url = 'http://127.0.0.1:4096/api/command';
+    const body = JSON.stringify({ data: [{ name: 'test' }] });
+    const response = new Response(body, {
+      status: 200,
+      headers: { 'content-type': 'application/json', 'x-custom': 'preserved' },
+    });
+    const result = await unwrapSdkDataResponse(response, url);
+    expect(result.headers.get('x-custom')).toBe('preserved');
+    expect(result.headers.get('content-type')).toBe('application/json');
   });
 });
