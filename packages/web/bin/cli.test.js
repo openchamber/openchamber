@@ -10,6 +10,8 @@ import { pathToFileURL } from 'url';
 import { isModuleCliExecution, normalizeCliEntryPath } from './cli-entry.js';
 import { requestJson } from './lib/cli-http.js';
 import { inspectTunnelAttachability } from './lib/cli-lifecycle.js';
+import { buildTaskPayload } from './lib/commands-schedule.js';
+import { buildSessionCreatePayload } from './lib/commands-session.js';
 import { DEFAULT_TUNNEL_PROVIDER_CAPABILITIES } from './lib/cli-tunnel-capabilities.js';
 import {
   TUNNEL_PROVIDER_CLOUDFLARE,
@@ -219,6 +221,116 @@ describe('cli args', () => {
     expect(parsed.startupAction).toBe('enable');
     expect(parsed.options.apiOnly).toBe(true);
     expect(parsed.options.port).toBe(3002);
+  });
+
+  it('parses schedule commands and options', () => {
+    const parsed = parseArgs([
+      'schedule',
+      'create',
+      '--project',
+      'proj_1',
+      '--name',
+      'Daily review',
+      '--prompt',
+      'Review the repo',
+      '--model',
+      'anthropic/claude-sonnet-4',
+      '--daily',
+      '09:30',
+      '--timezone',
+      'Europe/Kyiv',
+    ]);
+
+    expect(parsed.command).toBe('schedule');
+    expect(parsed.scheduleAction).toBe('create');
+    expect(parsed.options.project).toBe('proj_1');
+    expect(parsed.options.name).toBe('Daily review');
+    expect(parsed.options.prompt).toBe('Review the repo');
+    expect(parsed.options.model).toBe('anthropic/claude-sonnet-4');
+    expect(parsed.options.daily).toBe('09:30');
+    expect(parsed.options.timezone).toBe('Europe/Kyiv');
+  });
+
+  it('builds scheduled task payloads from CLI options', () => {
+    const payload = buildTaskPayload({
+      name: 'Daily review',
+      prompt: 'Review the repo',
+      model: 'anthropic/claude-sonnet-4',
+      daily: '09:30',
+      timezone: 'Europe/Kyiv',
+      agent: 'build',
+    });
+
+    expect(payload).toEqual({
+      name: 'Daily review',
+      enabled: true,
+      schedule: {
+        kind: 'daily',
+        times: ['09:30'],
+        timezone: 'Europe/Kyiv',
+      },
+      execution: {
+        prompt: 'Review the repo',
+        providerID: 'anthropic',
+        modelID: 'claude-sonnet-4',
+        agent: 'build',
+      },
+    });
+  });
+
+  it('rejects ambiguous scheduled task schedule selectors', () => {
+    expect(() => buildTaskPayload({
+      name: 'Bad schedule',
+      prompt: 'Run',
+      model: 'anthropic/claude-sonnet-4',
+      daily: '09:30',
+      cron: '* * * * *',
+    })).toThrow('Provide exactly one of --daily, --weekly, --once, or --cron.');
+  });
+
+  it('parses session create options', () => {
+    const parsed = parseArgs([
+      'session',
+      'create',
+      '--dir',
+      '.',
+      '--name',
+      'Side task',
+      '--prompt',
+      'Investigate cache invalidation',
+      '--model',
+      'anthropic/claude-sonnet-4',
+    ]);
+
+    expect(parsed.command).toBe('session');
+    expect(parsed.sessionAction).toBe('create');
+    expect(parsed.options.directory).toBe('.');
+    expect(parsed.options.name).toBe('Side task');
+    expect(parsed.options.prompt).toBe('Investigate cache invalidation');
+    expect(parsed.options.model).toBe('anthropic/claude-sonnet-4');
+  });
+
+  it('builds session create payloads from CLI options', () => {
+    expect(buildSessionCreatePayload({
+      directory: '.',
+      name: 'Side task',
+      prompt: 'Investigate cache invalidation',
+      model: 'anthropic/claude-sonnet-4',
+      agent: 'build',
+    })).toEqual({
+      directory: '.',
+      title: 'Side task',
+      prompt: 'Investigate cache invalidation',
+      model: 'anthropic/claude-sonnet-4',
+      agent: 'build',
+    });
+  });
+
+  it('requires a model when session create sends a prompt', () => {
+    expect(() => buildSessionCreatePayload({
+      directory: '.',
+      prompt: 'Investigate cache invalidation',
+    })).toThrow('--model is required when --prompt is provided.');
   });
 
   it('parses tunnel auto-start server options', () => {

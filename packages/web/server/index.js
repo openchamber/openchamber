@@ -1237,6 +1237,27 @@ async function main(options = {}) {
     buildAugmentedPath,
     projectConfigRuntime,
     scheduledTasksRuntime,
+    waitForOpenCodeReady,
+    emitSessionCreatedEvent: (event) => {
+      for (const client of uiOpenChamberEventClients) {
+        try {
+          writeSseEvent(client, {
+            type: 'openchamber:session-created',
+            properties: {
+              sessionId: event.sessionID,
+              directory: event.directory,
+              createdAt: event.createdAt,
+              promptDispatched: event.promptDispatched === true,
+              dispatchedAsCommand: event.dispatchedAsCommand === true,
+              ...(event.projectID ? { projectId: event.projectID } : {}),
+              ...(event.title ? { title: event.title } : {}),
+            },
+          });
+        } catch {
+          uiOpenChamberEventClients.delete(client);
+        }
+      }
+    },
     getOpenChamberEventClients: () => uiOpenChamberEventClients,
     writeSseEvent,
   });

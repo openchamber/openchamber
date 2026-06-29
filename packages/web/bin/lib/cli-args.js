@@ -67,6 +67,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     mode: undefined,
     profile: undefined,
     name: undefined,
+    title: undefined,
     configPath: undefined,
     token: undefined,
     tokenFile: undefined,
@@ -88,6 +89,20 @@ function parseArgs(argv = process.argv.slice(2)) {
     foreground: false,
     lan: false,
     apiOnly: false,
+    project: undefined,
+    task: undefined,
+    prompt: undefined,
+    model: undefined,
+    daily: undefined,
+    weekly: undefined,
+    once: undefined,
+    time: undefined,
+    cron: undefined,
+    timezone: undefined,
+    agent: undefined,
+    variant: undefined,
+    disabled: false,
+    directory: undefined,
   };
 
   const removedFlagErrors = [];
@@ -194,6 +209,94 @@ function parseArgs(argv = process.argv.slice(2)) {
         options.name = typeof value === 'string' ? value : options.name;
         break;
       }
+      case 'title': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.title = typeof value === 'string' ? value : options.title;
+        break;
+      }
+      case 'project': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.project = typeof value === 'string' ? value : options.project;
+        break;
+      }
+      case 'dir':
+      case 'directory': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.directory = typeof value === 'string' ? value : options.directory;
+        break;
+      }
+      case 'task': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.task = typeof value === 'string' ? value : options.task;
+        break;
+      }
+      case 'prompt': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.prompt = typeof value === 'string' ? value : options.prompt;
+        break;
+      }
+      case 'model': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.model = typeof value === 'string' ? value : options.model;
+        break;
+      }
+      case 'daily': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.daily = typeof value === 'string' ? value : options.daily;
+        break;
+      }
+      case 'weekly': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.weekly = typeof value === 'string' ? value : options.weekly;
+        break;
+      }
+      case 'once': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.once = typeof value === 'string' ? value : options.once;
+        break;
+      }
+      case 'time': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.time = typeof value === 'string' ? value : options.time;
+        break;
+      }
+      case 'cron': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.cron = typeof value === 'string' ? value : options.cron;
+        break;
+      }
+      case 'timezone': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.timezone = typeof value === 'string' ? value : options.timezone;
+        break;
+      }
+      case 'agent': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.agent = typeof value === 'string' ? value : options.agent;
+        break;
+      }
+      case 'variant': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.variant = typeof value === 'string' ? value : options.variant;
+        break;
+      }
+      case 'disabled':
+        options.disabled = true;
+        break;
       case 'config': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
@@ -339,6 +442,8 @@ function parseArgs(argv = process.argv.slice(2)) {
   const subcommand = command === 'tunnel' ? (positional[1] || 'help') : null;
   const tunnelAction = command === 'tunnel' ? (positional[2] || null) : null;
   const startupAction = command === 'startup' ? (positional[1] || 'status') : null;
+  const scheduleAction = command === 'schedule' ? (positional[1] || 'help') : null;
+  const sessionAction = command === 'session' ? (positional[1] || 'help') : null;
 
   if (options.lan && typeof options.host !== 'string') {
     options.host = '0.0.0.0';
@@ -353,6 +458,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     subcommand,
     tunnelAction,
     startupAction,
+    scheduleAction,
+    sessionAction,
     options,
     removedFlagErrors,
     helpRequested,
@@ -372,6 +479,8 @@ COMMANDS:
   stop           Stop running instance(s)
   restart        Stop and start the server
   status         Show server status
+  schedule       Manage scheduled tasks
+  session        Create OpenChamber sessions
   tunnel         Tunnel lifecycle commands
   startup        Manage launch at system startup
   logs           Tail OpenChamber logs
@@ -408,6 +517,9 @@ EXAMPLES:
   openchamber serve --foreground # Start in foreground (for systemd Type=simple)
   openchamber connect-url --port 3000 --qr
   openchamber connect-url --server https://openchamber.example.com
+  openchamber schedule status --json
+  openchamber session create --dir . --prompt "Investigate flaky tests" --model anthropic/claude-sonnet-4
+  openchamber schedule list --project my-project
   openchamber startup enable     # Start OpenChamber at user login
   openchamber tunnel help        # Show tunnel lifecycle help
   openchamber logs               # Follow logs for latest running instance
@@ -569,7 +681,7 @@ _openchamber_tunnel() {
   cur="\${COMP_WORDS[COMP_CWORD]}"
   prev="\${COMP_WORDS[COMP_CWORD-1]}"
 
-  commands="serve stop restart status tunnel logs update"
+    commands="serve stop restart status schedule session tunnel logs update"
   tunnel_commands="help providers ready doctor status start stop profile completion"
   profile_commands="list show add remove"
   common_flags="--port --foreground --no-daemon --json --all --help --version --plain --quiet"
@@ -621,6 +733,8 @@ _openchamber() {
     'stop:Stop running instance(s)'
     'restart:Stop and start the server'
     'status:Show server status'
+    'schedule:Manage scheduled tasks'
+    'session:Create sessions'
     'tunnel:Tunnel lifecycle commands'
     'logs:Tail OpenChamber logs'
     'update:Check for and install updates'
