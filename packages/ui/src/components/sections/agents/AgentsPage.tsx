@@ -674,9 +674,9 @@ export const AgentsPage: React.FC = () => {
   }
 
   return (
-    <>
-      {/* Sticky header — outside ScrollableOverlay */}
-      <div className="sticky top-0 z-10 bg-[var(--surface-page)] border-b border-[var(--surface-subtle)]">
+    <div className="flex h-full flex-col overflow-hidden">
+      {/* Sticky header */}
+      <div className="sticky top-0 z-10 shrink-0 bg-[var(--surface-elevated)] border-b border-[var(--surface-subtle)]">
         <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-4 px-3 py-3 sm:px-6">
           <div className="min-w-0">
             <h2 className="typography-ui-header font-semibold text-foreground truncate">
@@ -696,7 +696,7 @@ export const AgentsPage: React.FC = () => {
           </Button>
         </div>
       </div>
-      <ScrollableOverlay outerClassName="h-full" className="w-full">
+      <ScrollableOverlay outerClassName="flex-1 min-h-0" className="w-full">
         <div className="mx-auto w-full max-w-3xl p-3 sm:p-6">
 
         {/* Identity & Role */}
@@ -1211,6 +1211,6 @@ export const AgentsPage: React.FC = () => {
 
       </div>
     </ScrollableOverlay>
-    </>
+    </div>
   );
 };
