@@ -1404,6 +1404,7 @@ export const dict: Record<I18nKey, string> = {
   "aboutDialog.toast.copyFailed": "Помилка копіювання",
   "aboutDialog.toast.diagnosticsNotReady": "Діагностика ще не готова. Зачекайте секунду та повторіть спробу.",
   "aboutDialog.toast.diagnosticsCopied": "Діагностику скопійовано",
+  "aboutDialog.manualCopyFallback": "Автоматичне копіювання не вдалося — виберіть текст нижче та скопіюйте його вручну.",
   "helpDialog.title": "Комбінації клавіш",
   "helpDialog.description": "Використовуйте ці комбінації клавіш для ефективної навігації OpenChamber",
   "helpDialog.section.navigationCommands": "Навігація та команди",
