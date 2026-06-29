@@ -503,7 +503,21 @@ class OpencodeService {
       title: params?.title,
       metadata: params?.metadata,
     });
-    return unwrapSdkData(response, 'session.create');
+    const session = unwrapSdkData(response, 'session.create');
+    // V2 session.create returns SessionV2Info which places the directory inside
+    // `location.directory` rather than the legacy `directory` field. Ensure the
+    // returned object matches our Session contract so downstream grouping and
+    // routing logic (e.g. resolveGlobalSessionDirectory) can find it.
+    const v2Session = session as Session & { location?: { directory?: string | null } };
+    if (!v2Session.directory && v2Session.location?.directory) {
+      v2Session.directory = v2Session.location.directory;
+    }
+    // Some server responses omit directory metadata entirely. Fall back to the
+    // directory we explicitly requested so callers always have a usable value.
+    if (!v2Session.directory && requestDirectory) {
+      v2Session.directory = requestDirectory;
+    }
+    return v2Session;
   }
 
   async getSession(id: string, directory?: string | null): Promise<Session> {
