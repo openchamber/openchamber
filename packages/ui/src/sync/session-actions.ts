@@ -378,7 +378,6 @@ export async function createSession(
     if (sessionDirectory) {
       registerSessionDirectory(session.id, sessionDirectory)
     }
-    useSessionUIStore.getState().setCurrentSession(session.id, sessionDirectory)
     useSessionUIStore.getState().markSessionAsOpenChamberCreated(session.id)
     useGlobalSessionsStore.getState().upsertSession(session)
     return session
