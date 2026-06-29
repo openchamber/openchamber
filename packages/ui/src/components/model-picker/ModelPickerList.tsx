@@ -365,6 +365,17 @@ interface ModelPickerListProps {
   footerContent?: React.ReactNode | ((activeEntry: ModelPickerEntry | undefined) => React.ReactNode);
   renderVersion?: number;
   tooltipsEnabled?: boolean;
+  /**
+   * When the picker opens (and `selectedModel` is set), auto-expand the
+   * selected model's provider section if it is collapsed, seed keyboard
+   * selection at that row, and scroll it into view. Default: false.
+   *
+   * Intended for configuration surfaces (e.g. Settings → Agents) where the
+   * user needs to confirm the currently configured model. Quick-switch
+   * surfaces (chat) usually want to browse other models, so they leave this
+   * off.
+   */
+  scrollToSelectedOnOpen?: boolean;
 }
 
 export const ModelPickerList: React.FC<ModelPickerListProps> = ({
@@ -405,6 +416,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   footerContent,
   renderVersion,
   tooltipsEnabled = true,
+  scrollToSelectedOnOpen = false,
 }) => {
   const selectionStoreRef = React.useRef<IndexSelectionStore | null>(null);
   if (!selectionStoreRef.current) selectionStoreRef.current = createIndexSelectionStore();
@@ -504,6 +516,37 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   React.useEffect(() => {
     selectionStore.set(0);
   }, [searchQuery, selectionStore]);
+
+  // On open, if a model is selected and `scrollToSelectedOnOpen` is enabled,
+  // expand its provider section when collapsed, seed keyboard selection at
+  // that row, and scroll it into view. Runs once per mount/open unless the
+  // selected model itself changes before the user types a search query.
+  const didInitialScrollRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!scrollToSelectedOnOpen) return;
+    if (!selectedModel || !selectedModel.providerID || !selectedModel.modelID) return;
+    // Typing a search query is an explicit browse intent; don't fight it.
+    if (searchQuery.trim().length > 0) return;
+    if (didInitialScrollRef.current) return;
+
+    const providerSectionKey = `provider:${selectedModel.providerID}`;
+    if (collapsedSections.has(providerSectionKey)) {
+      toggleSection(providerSectionKey);
+    }
+
+    const selectedIndex = flatModelList.findIndex(
+      (entry) => entry.providerID === selectedModel.providerID && entry.modelID === selectedModel.modelID,
+    );
+    if (selectedIndex === -1) return;
+
+    selectionStore.set(selectedIndex);
+    didInitialScrollRef.current = true;
+
+    // Defer the scroll until the (possibly just-expanded) rows have been
+    // committed to the DOM, otherwise `itemRefs` for the newly visible row
+    // may still be null.
+    requestAnimationFrame(() => scrollIntoView(scrollRef.current, itemRefs.current[selectedIndex]));
+  }, [scrollToSelectedOnOpen, selectedModel, flatModelList, collapsedSections, toggleSection, searchQuery, selectionStore]);
 
   const selectIndex = React.useCallback((index: number) => {
     selectionStore.set(index);
