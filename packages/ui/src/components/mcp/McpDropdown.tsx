@@ -210,7 +210,7 @@ export const McpDropdownContent = React.memo<McpDropdownContentProps>(function M
           const serverStatus = status[serverName];
           const configEntry = configByName.get(serverName);
           const tone = serverStatus ? statusTone(serverStatus) : configEntry?.enabled ? 'success' : 'default';
-          const isConnected = serverStatus ? serverStatus.status === 'connected' : (configEntry?.enabled ?? false);
+          const isConnected = configEntry ? configEntry.enabled : serverStatus?.status === 'connected';
           const isBusy = busyName === serverName;
           const tooltip = serverStatus
             ? statusTooltip(serverStatus, t)
@@ -385,7 +385,7 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
         const serverStatus = status[serverName];
         const configEntry = configByName.get(serverName);
         const tone = serverStatus ? statusTone(serverStatus) : configEntry?.enabled ? 'success' : 'default';
-        const isConnected = serverStatus ? serverStatus.status === 'connected' : (configEntry?.enabled ?? false);
+        const isConnected = configEntry ? configEntry.enabled : serverStatus?.status === 'connected';
         const isBusy = busyName === serverName;
         const tooltip = serverStatus
           ? statusTooltip(serverStatus, t)
