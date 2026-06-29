@@ -21,7 +21,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Icon } from "@/components/icon/Icon";
 import { buildExportFilename, downloadAsMarkdown, formatSessionAsMarkdown, getExportRevealLabelKey, revealExportedMarkdown, saveAsMarkdownDesktop } from '@/lib/exportSession';
 import type { ChildSessionExport } from '@/lib/exportSession';
-import { buildSessionMessageRecordsSnapshot, useDirectoryStore, useGlobalSessionStatus, useSessionPermissions } from '@/sync/sync-context';
+import { buildSessionMessageRecordsSnapshot, useDirectoryStore, useGlobalSessionStatus, useSessionPermissions, useSessionQuestions } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { useViewportStore, viewportSessionKey } from '@/sync/viewport-store';
 import { DraggableSessionRow } from './sessionFolderDnd';
@@ -30,7 +30,7 @@ import type { SessionNodeChildRenderExtras, SessionNodeRenderExtras } from './se
 import type { SessionNode } from './types';
 import { formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from './utils';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
-import { useSessionUnseenCount } from '@/sync/notification-store';
+import { useNotificationStore, useSessionUnseenCount } from '@/sync/notification-store';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import { useI18n } from '@/lib/i18n';
 import { useShiftKeyHeld } from '@/hooks/useShiftKeyHeld';
@@ -353,6 +353,10 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   );
   const sessionStatus = useGlobalSessionStatus(session.id);
   const sessionPermissions = useSessionPermissions(session.id, sessionDirectory ?? undefined);
+  const sessionQuestions = useSessionQuestions(session.id, sessionDirectory ?? undefined);
+  const hasUnseenError = useNotificationStore(
+    React.useCallback((state) => state.index.session.unseenHasError[session.id] ?? false, [session.id]),
+  );
   const isActive = currentSessionId === session.id;
   const sessionTitle = resolvedSession.title || t('sessions.sidebar.session.untitled');
   const hasChildren = node.children.length > 0;
@@ -566,23 +570,30 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const statusType = sessionStatus?.type ?? 'idle';
   const isStreaming = statusType === 'busy' || statusType === 'retry';
   const pendingPermissionCount = sessionPermissions.length;
+  const pendingQuestionCount = sessionQuestions.length;
+  const hasPendingWait = pendingPermissionCount > 0 || pendingQuestionCount > 0;
   const showUnreadStatus = !isStreaming && needsAttention && !isActive;
-  const showStatusMarker = isStreaming || showUnreadStatus;
-  const statusMarkerContent = isStreaming
-    ? (
-        <span
-          className="h-1.5 w-1.5 rounded-full bg-primary animate-busy-pulse"
-          aria-label={t('sessions.sidebar.session.status.active')}
-          title={t('sessions.sidebar.session.status.active')}
-        />
-      )
-    : (
-        <span
-          className="h-1.5 w-1.5 rounded-full bg-[var(--status-info)]"
-          aria-label={t('sessions.sidebar.session.status.unread')}
-          title={t('sessions.sidebar.session.status.unread')}
-        />
-      );
+  const showStatusMarker = hasPendingWait || isStreaming || showUnreadStatus;
+  const statusMarkerLabel = hasPendingWait
+    ? pendingPermissionCount > 0
+      ? t('sessions.sidebar.session.status.permissionRequired')
+      : t('chat.toolPart.awaitingResponse')
+    : isStreaming
+      ? t('sessions.sidebar.session.status.active')
+      : t('sessions.sidebar.session.status.unread');
+  const statusMarkerContent = (
+    <span
+      className={cn(
+        'h-1.5 w-1.5 rounded-full',
+        hasPendingWait && 'bg-status-warning',
+        !hasPendingWait && isStreaming && 'bg-status-info animate-busy-pulse',
+        !hasPendingWait && !isStreaming && hasUnseenError && 'bg-status-error',
+        !hasPendingWait && !isStreaming && !hasUnseenError && 'bg-status-success',
+      )}
+      aria-label={statusMarkerLabel}
+      title={statusMarkerLabel}
+    />
+  );
   const hideLeadingIndicatorOnHover = !alwaysShowActions && hasChildren && (showStatusMarker || isPinnedSession);
   const showPinnedMarker = isPinnedSession && !showStatusMarker;
   const pinnedMarkerContent = (
