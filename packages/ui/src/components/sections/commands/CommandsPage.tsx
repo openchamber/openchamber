@@ -2,6 +2,7 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
 import { toast } from '@/components/ui';
 import { useCommandsStore, type CommandConfig, type CommandScope } from '@/stores/useCommandsStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -48,6 +49,7 @@ export const CommandsPage: React.FC = () => {
   const [agent, setAgent] = React.useState('');
   const [model, setModel] = React.useState('');
   const [template, setTemplate] = React.useState('');
+  const [subtask, setSubtask] = React.useState(false);
   const [isSaving, setIsSaving] = React.useState(false);
   const initialStateRef = React.useRef<{
     draftName: string;
@@ -56,6 +58,7 @@ export const CommandsPage: React.FC = () => {
     agent: string;
     model: string;
     template: string;
+    subtask: boolean;
   } | null>(null);
 
   React.useEffect(() => {
@@ -66,12 +69,14 @@ export const CommandsPage: React.FC = () => {
       const agentValue = commandDraft.agent || '';
       const modelValue = commandDraft.model || '';
       const templateValue = commandDraft.template || '';
+      const subtaskValue = commandDraft.subtask ?? false;
       setDraftName(draftNameValue);
       setDraftScope(draftScopeValue);
       setDescription(descriptionValue);
       setAgent(agentValue);
       setModel(modelValue);
       setTemplate(templateValue);
+      setSubtask(subtaskValue);
 
       initialStateRef.current = {
         draftName: draftNameValue,
@@ -80,16 +85,19 @@ export const CommandsPage: React.FC = () => {
         agent: agentValue,
         model: modelValue,
         template: templateValue,
+        subtask: subtaskValue,
       };
     } else if (selectedCommand) {
       const descriptionValue = selectedCommand.description || '';
       const agentValue = selectedCommand.agent || '';
       const modelValue = selectedCommand.model || '';
       const templateValue = selectedCommand.template || '';
+      const subtaskValue = selectedCommand.subtask ?? false;
       setDescription(descriptionValue);
       setAgent(agentValue);
       setModel(modelValue);
       setTemplate(templateValue);
+      setSubtask(subtaskValue);
 
       initialStateRef.current = {
         draftName: '',
@@ -98,6 +106,7 @@ export const CommandsPage: React.FC = () => {
         agent: agentValue,
         model: modelValue,
         template: templateValue,
+        subtask: subtaskValue,
       };
     }
   }, [selectedCommand, isNewCommand, selectedCommandName, commands, commandDraft]);
@@ -117,8 +126,9 @@ export const CommandsPage: React.FC = () => {
     if (agent !== initial.agent) return true;
     if (model !== initial.model) return true;
     if (template !== initial.template) return true;
+    if (subtask !== initial.subtask) return true;
     return false;
-  }, [agent, description, draftName, draftScope, isNewCommand, model, template]);
+  }, [agent, description, draftName, draftScope, isNewCommand, model, subtask, template]);
 
   const handleSave = async () => {
     const commandName = isNewCommand ? draftName.trim().replace(/\s+/g, '-') : selectedCommandName?.trim();
@@ -151,6 +161,7 @@ export const CommandsPage: React.FC = () => {
         model: trimmedModel === '' ? null : trimmedModel,
         template: trimmedTemplate,
         scope: isNewCommand ? draftScope : undefined,
+        subtask: subtask,
       };
 
       let success: boolean;
@@ -305,6 +316,20 @@ export const CommandsPage: React.FC = () => {
                       setModel('');
                     }
                   }}
+                />
+              </div>
+            </div>
+
+            <div data-settings-item="commands.subtask" className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
+              <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
+                <span className="typography-ui-label text-foreground">{t('settings.commands.page.field.subtask')}</span>
+                <span className="typography-micro text-muted-foreground">{t('settings.commands.page.field.subtaskDescription')}</span>
+              </div>
+              <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
+                <Switch
+                  checked={subtask}
+                  onCheckedChange={setSubtask}
+                  aria-label={t('settings.commands.page.field.subtaskAria')}
                 />
               </div>
             </div>
