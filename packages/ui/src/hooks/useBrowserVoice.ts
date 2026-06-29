@@ -439,6 +439,8 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
           return;
         }
         sessionId = newSession.id;
+        // Navigate to the newly created session (see PR #1925).
+        useSessionUIStore.getState().setCurrentSession(sessionId, newSession.directory ?? null);
         console.log('[useBrowserVoice] Created new session:', sessionId);
       }
 
@@ -452,6 +454,8 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
         undefined,
         undefined,
         currentVariant ?? undefined,
+        undefined,
+        { sessionId },
       );
       
       // Wait for AI response and speak it
