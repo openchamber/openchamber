@@ -1216,9 +1216,14 @@ onCommand('addContextSelection', (payload) => {
     return;
   }
 
+  // Defensive coercion: agentPath is optional and may be absent/unknown shape at the webview boundary.
+  const agentPath = typeof (payload as { agentPath?: unknown }).agentPath === 'string'
+    ? ((payload as { agentPath?: string }).agentPath as string).trim()
+    : undefined;
+
   import('@/sync/input-store').then(({ useInputStore }) => {
     const file = new File([new Blob([text], { type: 'text/plain' })], trimmedFilename, { type: 'text/plain' });
-    void useInputStore.getState().addVSCodeSelectionAttachment(trimmedPath, file);
+    void useInputStore.getState().addVSCodeSelectionAttachment(trimmedPath, file, agentPath || undefined);
   });
 });
 
@@ -1249,13 +1254,14 @@ onCommand('addFileAttachments', (payload) => {
 
   const files = rawFiles
     .map((entry) => {
-      const record = entry as { filePath?: unknown; fileName?: unknown; fileSize?: unknown };
+      const record = entry as { filePath?: unknown; fileName?: unknown; fileSize?: unknown; agentPath?: unknown };
       const filePath = typeof record.filePath === 'string' ? record.filePath.trim() : '';
       const fileName = typeof record.fileName === 'string' ? record.fileName.trim() : '';
       const fileSize = typeof record.fileSize === 'number' && Number.isFinite(record.fileSize) ? record.fileSize : null;
-      return filePath && fileName ? { filePath, fileName, fileSize } : null;
+      const agentPath = typeof record.agentPath === 'string' ? record.agentPath.trim() : '';
+      return filePath && fileName ? { filePath, fileName, fileSize, agentPath } : null;
     })
-    .filter((entry): entry is { filePath: string; fileName: string; fileSize: number | null } => entry !== null);
+    .filter((entry): entry is { filePath: string; fileName: string; fileSize: number | null; agentPath: string } => entry !== null);
 
   if (files.length === 0) {
     return;
@@ -1264,7 +1270,7 @@ onCommand('addFileAttachments', (payload) => {
   import('@/sync/input-store').then(({ useInputStore }) => {
     const inputStore = useInputStore.getState();
     for (const file of files) {
-      inputStore.addVSCodeFileAttachment(file.filePath, file.fileName, file.fileSize);
+      inputStore.addVSCodeFileAttachment(file.filePath, file.fileName, file.fileSize, file.agentPath || undefined);
     }
   });
 });

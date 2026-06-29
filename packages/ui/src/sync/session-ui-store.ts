@@ -1025,11 +1025,13 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
       markPendingUserSendAnimation(createdDraftSession.sessionId)
 
+      // VS Code attachments carry a workspace-relative `agentPath`; web/Desktop
+      // attachments have none and fall back to `filename` (basename) by design.
       const files = attachments?.map((a) => ({
         type: "file" as const,
         mime: a.mimeType,
         url: a.dataUrl,
-        filename: a.filename,
+        filename: a.agentPath ?? a.filename,
       }))
 
       await routeMessage({
@@ -1051,7 +1053,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
             type: "file" as const,
             mime: a.mimeType,
             url: a.dataUrl,
-            filename: a.filename,
+            filename: a.agentPath ?? a.filename,  // see agentPath note above
           })),
         })),
       })
@@ -1104,11 +1106,13 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       markPendingUserSendAnimation(targetSessionId)
     }
 
+    // VS Code attachments carry a workspace-relative `agentPath`; web/Desktop
+    // attachments have none and fall back to `filename` (basename) by design.
     const files = attachments?.map((a) => ({
       type: "file" as const,
       mime: a.mimeType,
       url: a.dataUrl,
-      filename: a.filename,
+      filename: a.agentPath ?? a.filename,
     }))
 
     await routeMessage({
@@ -1130,7 +1134,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           type: "file" as const,
           mime: a.mimeType,
           url: a.dataUrl,
-          filename: a.filename,
+          filename: a.agentPath ?? a.filename,  // see agentPath note above
         })),
       })),
     })
