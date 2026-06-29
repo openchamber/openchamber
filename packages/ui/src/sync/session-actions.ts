@@ -378,6 +378,10 @@ export async function createSession(
     if (sessionDirectory) {
       registerSessionDirectory(session.id, sessionDirectory)
     }
+    // NOTE: callers must call setCurrentSession themselves AFTER saving
+    // agent/model selection to selection-store. Previously this function did
+    // it, which caused ModelControls to re-render with empty data and fall
+    // back to agent "build" (see PR #1925).
     useSessionUIStore.getState().markSessionAsOpenChamberCreated(session.id)
     useGlobalSessionsStore.getState().upsertSession(session)
     return session
