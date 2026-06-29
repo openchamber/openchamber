@@ -1353,8 +1353,7 @@ const INTERNAL_API_PREFIXES = [
 '/api/sessions/', '/api/prompt/', '/api/project/',
 '/api/session-folders', '/api/auth/', '/api/passkeys',
 '/api/magic-prompts', '/api/global/event', '/api/experimental/',
-'/api/openchamber/', '/api/path', '/api/session/status',
-'/api/opencode/upgrade-status', '/api/push/',
+'/api/openchamber/', '/api/opencode/upgrade-status', '/api/push/',
 ];
 if (INTERNAL_API_PREFIXES.some(p => req.originalUrl.startsWith(p))) {
 return;
