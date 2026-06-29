@@ -627,6 +627,38 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     return merged;
   }, [globalActiveSessions, liveSessions]);
 
+  // Resolve the MOST SPECIFIC project (and worktree) a directory belongs to,
+  // i.e. the one with the longest matching path. Plain first-prefix-match lets an
+  // ancestor project (e.g. the home directory) swallow sessions from nested
+  // projects whose paths it prefixes. Used for grouping, the active-project
+  // highlight on selection, and search labels/counts so they all agree.
+  const findMostSpecificProjectMatch = React.useCallback(
+    (directory: string): { project: ProjectMeta; worktree: WorktreeMetadata | null } | null => {
+      if (!directory) return null;
+      let bestProject: ProjectMeta | null = null;
+      let bestWorktree: WorktreeMetadata | null = null;
+      let bestMatchLength = -1;
+      for (const project of projectsMeta) {
+        const projectRoot = normalizePath(project.path);
+        if (projectRoot && pathBelongsToRoot(directory, projectRoot) && projectRoot.length > bestMatchLength) {
+          bestProject = project;
+          bestWorktree = null;
+          bestMatchLength = projectRoot.length;
+        }
+        for (const worktree of project.worktrees) {
+          const worktreeRoot = normalizePath(worktree.path);
+          if (worktreeRoot && pathBelongsToRoot(directory, worktreeRoot) && worktreeRoot.length > bestMatchLength) {
+            bestProject = project;
+            bestWorktree = worktree;
+            bestMatchLength = worktreeRoot.length;
+          }
+        }
+      }
+      return bestProject ? { project: bestProject, worktree: bestWorktree } : null;
+    },
+    [projectsMeta],
+  );
+
   const normalizedQuery = query.trim().toLowerCase();
 
   const projectNodes = React.useMemo<ProjectNode[]>(() => {
@@ -659,17 +691,19 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       for (const worktree of node.project.worktrees) ensureBucket(node, worktree.path, worktree);
     }
 
+    const nodeByProjectId = new Map(nodes.map((node) => [node.project.id, node]));
     for (const session of sessions) {
       const directory = getSessionDirectory(session);
       if (!directory) continue;
-      const node = nodes.find((entry) => {
-        if (pathBelongsToRoot(directory, entry.project.path)) return true;
-        return entry.project.worktrees.some((worktree) => pathBelongsToRoot(directory, worktree.path));
-      });
+      // Assign the session to the MOST SPECIFIC matching project/worktree so an
+      // ancestor project (e.g. the home directory) can't swallow nested-project
+      // sessions whose path it merely prefixes.
+      const match = findMostSpecificProjectMatch(directory);
+      if (!match) continue;
+      const node = nodeByProjectId.get(match.project.id);
       if (!node) continue;
-      const matchedWorktree = node.project.worktrees.find((entry) => pathBelongsToRoot(directory, entry.path));
-      const bucket = matchedWorktree
-        ? ensureBucket(node, matchedWorktree.path, matchedWorktree)
+      const bucket = match.worktree
+        ? ensureBucket(node, match.worktree.path, match.worktree)
         : ensureBucket(node, node.project.path, null);
       bucket.sessions.push(session);
     }
@@ -682,7 +716,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     }
 
     return nodes;
-  }, [activeProjectId, projectsMeta, sessions]);
+  }, [activeProjectId, projectsMeta, sessions, findMostSpecificProjectMatch]);
 
   const normalizedDirectory = normalizePath(currentDirectory);
 
@@ -816,11 +850,8 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     // Switching session switches the working directory (handled by
     // setCurrentSession) — also move the active project so the rest of the app
     // and the active highlight follow the selected session, not just the draft.
-    const project = projectsMeta.find((entry) => {
-      if (pathBelongsToRoot(directory ?? '', entry.path)) return true;
-      return entry.worktrees.some((worktree) => pathBelongsToRoot(directory ?? '', worktree.path));
-    });
-    if (project) setActiveProjectIdOnly(project.id);
+    const match = findMostSpecificProjectMatch(directory ?? '');
+    if (match) setActiveProjectIdOnly(match.project.id);
     void setCurrentSession(session.id, directory);
     onOpenChange(false);
   };
@@ -878,16 +909,12 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const buildSessionContextLabel = React.useCallback(
     (session: Session): string => {
       const directory = getSessionDirectory(session);
-      const project = projectsMeta.find((entry) => {
-        if (pathBelongsToRoot(directory, entry.path)) return true;
-        return entry.worktrees.some((worktree) => pathBelongsToRoot(directory, worktree.path));
-      });
-      if (!project) return getProjectLabel(directory) || directory;
-      const matchedWorktree = project.worktrees.find((entry) => pathBelongsToRoot(directory, entry.path));
-      if (matchedWorktree?.branch) return `${project.label} · ${matchedWorktree.branch}`;
-      return project.label;
+      const match = findMostSpecificProjectMatch(directory);
+      if (!match) return getProjectLabel(directory) || directory;
+      if (match.worktree?.branch) return `${match.project.label} · ${match.worktree.branch}`;
+      return match.project.label;
     },
-    [projectsMeta],
+    [findMostSpecificProjectMatch],
   );
 
   const handleSelectProject = (project: ProjectMeta) => {
@@ -915,14 +942,11 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     return sessions
       .filter((session) => {
         const directory = getSessionDirectory(session);
-        const project = projectsMeta.find((entry) => {
-          if (pathBelongsToRoot(directory, entry.path)) return true;
-          return entry.worktrees.some((worktree) => pathBelongsToRoot(directory, worktree.path));
-        });
-        return sessionMatchesQuery(session, project?.label ?? '', normalizedQuery);
+        const match = findMostSpecificProjectMatch(directory);
+        return sessionMatchesQuery(session, match?.project.label ?? '', normalizedQuery);
       })
       .sort((a, b) => getSessionTimestamp(b) - getSessionTimestamp(a));
-  }, [normalizedQuery, projectsMeta, sessions]);
+  }, [normalizedQuery, sessions, findMostSpecificProjectMatch]);
 
   const searchProjectMatches = React.useMemo(() => {
     if (!normalizedQuery) return [] as Array<ProjectMeta & { sessionCount: number }>;
@@ -932,11 +956,10 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         ...project,
         sessionCount: sessions.filter((session) => {
           const directory = getSessionDirectory(session);
-          if (pathBelongsToRoot(directory, project.path)) return true;
-          return project.worktrees.some((worktree) => pathBelongsToRoot(directory, worktree.path));
+          return findMostSpecificProjectMatch(directory)?.project.id === project.id;
         }).length,
       }));
-  }, [normalizedQuery, projectsMeta, sessions]);
+  }, [normalizedQuery, projectsMeta, sessions, findMostSpecificProjectMatch]);
 
   const hasNoMatches =
     normalizedQuery && searchSessionMatches.length === 0 && searchProjectMatches.length === 0;
