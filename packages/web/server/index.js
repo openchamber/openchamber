@@ -1329,8 +1329,36 @@ async function main(options = {}) {
   // Registered AFTER all Express routes so existing OpenChamber handlers
   // (settings, health, etc.) take priority; only unhandled /api/* paths
   // reach this proxy. The SPA catch-all explicitly excludes /api/* paths.
+  //
+  // IMPORTANT: In Express 5, app.use() middleware runs concurrently with
+  // app.get() route handlers (not sequentially). We must explicitly skip
+  // internal OpenChamber routes to prevent the proxy from sending upstream
+  // HTML responses that override the route handler's JSON responses.
   app.use('/api', async (req, res, next) => {
     if (res.headersSent) return next();
+// Skip proxying for internal OpenChamber routes — these have dedicated
+// Express handlers and must not be forwarded to the OpenCode upstream.
+// We return without calling next() because in Express 5 the route handler
+// is already running concurrently and will send the response.
+// NOTE: /api/config/ is NOT fully excluded — only specific sub-paths have
+// OpenChamber Express handlers (skills, themes, plugins, mcp, snippets).
+// List endpoints (/api/config/providers, /api/config/agents) are proxied
+// to the OpenCode upstream which owns the canonical list data.
+const INTERNAL_API_PREFIXES = [
+'/api/fs/', '/api/git/', '/api/settings', '/api/config/skills',
+'/api/config/themes', '/api/config/plugins', '/api/config/mcp',
+'/api/config/snippets', '/api/config/opencode-resolution',
+'/api/notifications/', '/api/tts/', '/api/version',
+'/api/system/', '/api/mcp/auth', '/api/plugins/',
+'/api/sessions/', '/api/prompt/', '/api/project/',
+'/api/session-folders', '/api/auth/', '/api/passkeys',
+'/api/magic-prompts', '/api/global/event', '/api/experimental/',
+'/api/openchamber/', '/api/path', '/api/session/status',
+'/api/opencode/upgrade-status', '/api/push/',
+];
+if (INTERNAL_API_PREFIXES.some(p => req.originalUrl.startsWith(p))) {
+return;
+}
     try {
       const upstreamPort = openCodePort || 4096;
       // Strip the /api mount point so SDK paths like /api/session
@@ -1361,6 +1389,7 @@ async function main(options = {}) {
         });
         const responseText = await response.text();
         const resContentType = response.headers.get('content-type') || 'application/json';
+        if (res.headersSent) return;
         if (resContentType.includes('application/json') || resContentType.includes('text/plain')) {
           res.status(response.status).type(resContentType).send(responseText);
         } else {
@@ -1370,6 +1399,7 @@ async function main(options = {}) {
         clearTimeout(timeout);
       }
     } catch (error) {
+      if (res.headersSent) return;
       if (error.name === 'AbortError') {
         res.status(504).json({ error: 'OpenCode upstream timeout' });
       } else {
