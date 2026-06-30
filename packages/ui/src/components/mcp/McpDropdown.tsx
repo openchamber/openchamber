@@ -183,7 +183,7 @@ React.useEffect(() => {
         {sortedNames.map((serverName) => {
           const serverStatus = status[serverName];
           const configEntry = configByName.get(serverName);
-          const tone = serverStatus ? statusTone(serverStatus) : configEntry?.enabled ? 'success' : 'default';
+          const tone = configEntry ? (configEntry.enabled ? 'success' : 'default') : statusTone(serverStatus);
           const isConnected = configEntry ? configEntry.enabled : serverStatus?.status === 'connected';
           const isBusy = busyName === serverName;
           const tooltip = statusTooltip(serverStatus, t);
@@ -350,7 +350,7 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
       {sortedNames.map((serverName) => {
         const serverStatus = status[serverName];
         const configEntry = configByName.get(serverName);
-        const tone = serverStatus ? statusTone(serverStatus) : configEntry?.enabled ? 'success' : 'default';
+        const tone = configEntry ? (configEntry.enabled ? 'success' : 'default') : statusTone(serverStatus);
         const isConnected = configEntry ? configEntry.enabled : serverStatus?.status === 'connected';
         const isBusy = busyName === serverName;
         const tooltip = serverStatus
