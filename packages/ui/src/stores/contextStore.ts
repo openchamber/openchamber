@@ -15,6 +15,8 @@ interface ContextUsage {
     normalizedOutput?: number;
     thresholdLimit: number;
     lastMessageId?: string;
+    cost?: number;
+    tokensPerSecond?: number;
 }
 
 interface ContextState {
@@ -231,7 +233,9 @@ export const useContextStore = create<ContextStore>()(
                             (existing.outputLimit ?? 0) === (usage.outputLimit ?? 0) &&
                             (existing.normalizedOutput ?? 0) === (usage.normalizedOutput ?? 0) &&
                             existing.thresholdLimit === usage.thresholdLimit &&
-                            existing.lastMessageId === usage.lastMessageId
+                            existing.lastMessageId === usage.lastMessageId &&
+                            (existing.cost ?? 0) === (usage.cost ?? 0) &&
+                            (existing.tokensPerSecond ?? 0) === (usage.tokensPerSecond ?? 0)
                         ) {
                             return state;
                         }
@@ -269,6 +273,8 @@ export const useContextStore = create<ContextStore>()(
                                 normalizedOutput,
                                 thresholdLimit,
                                 lastMessageId,
+                                cost: cachedUsage.cost,
+                                tokensPerSecond: cachedUsage.tokensPerSecond,
                             };
                             scheduleUsageUpdate(recalculated);
                             return recalculated;

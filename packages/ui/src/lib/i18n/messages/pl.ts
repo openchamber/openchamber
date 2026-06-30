@@ -1333,6 +1333,7 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.session.untitled': 'Nienazwana sesja',
   'contextSidebar.stats.assistant': 'Asystent',
   'contextSidebar.stats.cost': 'Koszt',
+  'contextSidebar.stats.tokensPerSecond': 'Tokens/s',
   'contextSidebar.stats.messages': 'Wiadomości',
   'contextSidebar.stats.user': 'Użytkownik',
   'contextSidebar.tokens.cacheRead': 'Odczyt cache',

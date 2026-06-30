@@ -92,3 +92,95 @@ export const computeCacheHitRate = (breakdown: TokenBreakdown | null | undefined
     const percent = Math.min(100, Math.max(0, (safeRead / total) * 100));
     return { percent, hasInput: true };
 };
+
+export interface SessionCostAndCounts {
+    totalCost: number;
+    userCount: number;
+    assistantCount: number;
+}
+
+export const computeSessionCostAndCounts = (messages: Message[]): SessionCostAndCounts => {
+    let totalCost = 0;
+    let userCount = 0;
+    let assistantCount = 0;
+
+    for (let i = 0; i < messages.length; i++) {
+        const msg = messages[i] as { role?: string; cost?: number };
+        if (msg.role === 'user') {
+            userCount++;
+        } else if (msg.role === 'assistant') {
+            assistantCount++;
+            if (typeof msg.cost === 'number' && Number.isFinite(msg.cost) && msg.cost > 0) {
+                totalCost += msg.cost;
+            }
+        }
+    }
+
+    return { totalCost, userCount, assistantCount };
+};
+
+export interface SessionTokenRate {
+    avgTokensPerSecond: number;
+}
+
+type ToolPartLike = {
+    type: string;
+    state?: unknown;
+};
+
+type PartGetter = (messageId: string) => ToolPartLike[] | undefined;
+
+export const computeSessionTokenRate = (
+    messages: Message[],
+    getParts?: PartGetter,
+): SessionTokenRate => {
+    let totalGeneratedTokens = 0;
+    let totalGenerationMs = 0;
+
+    for (let i = 0; i < messages.length; i++) {
+        const msg = messages[i] as {
+            role?: string;
+            id?: string;
+            time?: { created?: number; completed?: number };
+            tokens?: { output?: number; reasoning?: number };
+        };
+        if (msg.role !== 'assistant') continue;
+
+        const created = msg.time?.created;
+        const completed = msg.time?.completed;
+        if (typeof created !== 'number' || typeof completed !== 'number' || completed <= created) continue;
+
+        const tokens = msg.tokens;
+        if (!tokens) continue;
+        const generatedTokens = (tokens.output ?? 0) + (tokens.reasoning ?? 0);
+        if (generatedTokens <= 0) continue;
+
+        let durationMs = completed - created;
+
+        if (getParts && msg.id) {
+            const parts = getParts(msg.id);
+            if (parts) {
+                for (let j = 0; j < parts.length; j++) {
+                    const part = parts[j];
+                    if (part.type !== 'tool') continue;
+                    const toolTime = (part.state as { time?: { start?: number; end?: number } } | undefined)?.time;
+                    if (toolTime && typeof toolTime.start === 'number' && typeof toolTime.end === 'number') {
+                        const toolDuration = toolTime.end - toolTime.start;
+                        if (toolDuration > 0) durationMs -= toolDuration;
+                    }
+                }
+            }
+        }
+
+        if (durationMs <= 0) continue;
+
+        totalGeneratedTokens += generatedTokens;
+        totalGenerationMs += durationMs;
+    }
+
+    const avgTokensPerSecond = totalGenerationMs > 0
+        ? totalGeneratedTokens / (totalGenerationMs / 1000)
+        : 0;
+
+    return { avgTokensPerSecond };
+};

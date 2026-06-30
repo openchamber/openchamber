@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { Icon } from "@/components/icon/Icon";
-import { useI18n } from '@/lib/i18n';
+import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { clampPercent, resolveUsageTone } from '@/lib/quota';
 
 interface ContextUsageDisplayProps {
@@ -12,6 +12,11 @@ interface ContextUsageDisplayProps {
   colorPercentage?: number;
   contextLimit: number;
   outputLimit?: number;
+  cost?: number;
+  totalMessages?: number;
+  userMessages?: number;
+  assistantMessages?: number;
+  tokensPerSecond?: number;
   size?: 'default' | 'compact';
   isMobile?: boolean;
   hideIcon?: boolean;
@@ -23,12 +28,21 @@ interface ContextUsageDisplayProps {
   pressed?: boolean;
 }
 
+const formatNumber = (value: number): string => {
+  return value.toLocaleString();
+};
+
 export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
   totalTokens,
   percentage,
   colorPercentage,
   contextLimit,
   outputLimit,
+  cost,
+  totalMessages,
+  userMessages,
+  assistantMessages,
+  tokensPerSecond,
   size = 'default',
   isMobile = false,
   hideIcon = false,
@@ -60,6 +74,19 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
     return tokens.toFixed(1).replace(/\.0$/, '');
   };
 
+  const formatCost = (value: number): string => {
+    const locale = getCurrentIntlLocale();
+    return new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value);
+  };
+
+  const showCost = typeof cost === 'number' && Number.isFinite(cost) && cost > 0;
+  const showTokensPerSecond = typeof tokensPerSecond === 'number' && Number.isFinite(tokensPerSecond) && tokensPerSecond > 0;
+
   const getPercentageColor = (pct: number) => {
     if (pct >= 90) return 'text-status-error';
     if (pct >= 75) return 'text-status-warning';
@@ -73,13 +100,24 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
   const circularProgressOffset = circularProgressCircumference * (1 - progressPct / 100);
 
   const safeOutputLimit = typeof outputLimit === 'number' ? Math.max(outputLimit, 0) : 0;
+  const hasStats = showCost || typeof totalMessages === 'number' || showTokensPerSecond;
   const tooltipLines = [
     t('contextUsage.tooltip.usedTokens', { tokens: formatTokens(totalTokens) }),
     t('contextUsage.tooltip.contextLimit', { tokens: formatTokens(contextLimit) }),
     t('contextUsage.tooltip.outputLimit', { tokens: formatTokens(safeOutputLimit) }),
+    ...(hasStats ? ['---'] : []),
+    ...(showCost ? [t('contextSidebar.stats.cost') + ': ' + formatCost(cost!)] : []),
+    ...(typeof totalMessages === 'number' ? [t('contextSidebar.stats.messages') + ': ' + formatNumber(totalMessages)] : []),
+    ...(typeof userMessages === 'number' ? [t('contextSidebar.stats.user') + ': ' + formatNumber(userMessages)] : []),
+    ...(typeof assistantMessages === 'number' ? [t('contextSidebar.stats.assistant') + ': ' + formatNumber(assistantMessages)] : []),
+    ...(showTokensPerSecond ? [t('contextSidebar.stats.tokensPerSecond') + ': ' + tokensPerSecond!.toFixed(1) + ' tok/s'] : []),
   ];
 
   const isInteractive = !isMobile && typeof onClick === 'function';
+
+  const costSuffix = showCost ? (
+    <span className="text-muted-foreground/60">{`・ ${formatCost(cost!)}`}</span>
+  ) : null;
 
   const contextContent = (
     <>
@@ -123,6 +161,7 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
             <span className={getPercentageColor(colorPct)}>{Math.min(percentage, 999).toFixed(1)}</span>%
           </>
         )}
+        {costSuffix}
       </span>
     </>
   );
@@ -190,6 +229,40 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
                 </span>
               </div>
             </div>
+            {hasStats && (
+              <div className="rounded-xl border border-border/40 bg-sidebar/30 px-3 py-2 space-y-1">
+                {showCost && (
+                  <div className="flex justify-between items-center">
+                    <span className="typography-meta text-muted-foreground">{t('contextSidebar.stats.cost')}</span>
+                    <span className="typography-meta text-foreground font-medium">{formatCost(cost!)}</span>
+                  </div>
+                )}
+                {typeof totalMessages === 'number' && (
+                  <div className="flex justify-between items-center">
+                    <span className="typography-meta text-muted-foreground">{t('contextSidebar.stats.messages')}</span>
+                    <span className="typography-meta text-foreground font-medium">{formatNumber(totalMessages)}</span>
+                  </div>
+                )}
+                {typeof userMessages === 'number' && (
+                  <div className="flex justify-between items-center">
+                    <span className="typography-meta text-muted-foreground">{t('contextSidebar.stats.user')}</span>
+                    <span className="typography-meta text-foreground font-medium">{formatNumber(userMessages)}</span>
+                  </div>
+                )}
+                {typeof assistantMessages === 'number' && (
+                  <div className="flex justify-between items-center">
+                    <span className="typography-meta text-muted-foreground">{t('contextSidebar.stats.assistant')}</span>
+                    <span className="typography-meta text-foreground font-medium">{formatNumber(assistantMessages)}</span>
+                  </div>
+                )}
+                {showTokensPerSecond && (
+                  <div className="flex justify-between items-center">
+                    <span className="typography-meta text-muted-foreground">{t('contextSidebar.stats.tokensPerSecond')}</span>
+                    <span className="typography-meta text-foreground font-medium">{tokensPerSecond!.toFixed(1)} tok/s</span>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </MobileOverlayPanel>
       </>
