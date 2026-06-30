@@ -1,5 +1,99 @@
+import type { PersistStorage, StateStorage, StorageValue } from 'zustand/middleware';
+
 let safeStorageInstance: Storage | null = null;
 let safeSessionStorageInstance: Storage | null = null;
+
+type JsonStorageOptions = {
+    reviver?: (key: string, value: unknown) => unknown;
+    replacer?: (key: string, value: unknown) => unknown;
+};
+
+const createDeferredJSONStorage = <S>(
+    getStorage: () => StateStorage,
+    options?: JsonStorageOptions,
+): PersistStorage<S> | undefined => {
+    let storage: StateStorage;
+    try {
+        storage = getStorage();
+    } catch {
+        return undefined;
+    }
+
+    const pendingWrites = new Map<string, StorageValue<S>>();
+    const pendingDeletes = new Set<string>();
+    let flushTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const flush = () => {
+        flushTimer = undefined;
+        if (pendingWrites.size === 0 && pendingDeletes.size === 0) return;
+
+        const writes = Array.from(pendingWrites.entries());
+        const deletes = Array.from(pendingDeletes);
+        pendingWrites.clear();
+        pendingDeletes.clear();
+
+        for (const [name, value] of writes) {
+            storage.setItem(name, JSON.stringify(value, options?.replacer));
+        }
+        for (const name of deletes) {
+            storage.removeItem(name);
+        }
+    };
+
+    const scheduleFlush = () => {
+        if (flushTimer !== undefined) return;
+        flushTimer = setTimeout(flush, 0);
+    };
+
+    if (typeof window !== 'undefined') {
+        const flushNow = () => flush();
+        try {
+            window.addEventListener('pagehide', flushNow, { capture: true });
+            window.addEventListener('beforeunload', flushNow, { capture: true });
+            window.addEventListener('visibilitychange', () => {
+                if (typeof document !== 'undefined' && document.visibilityState === 'hidden') flush();
+            });
+            window.addEventListener('freeze', flushNow);
+        } catch {
+            // Restricted environments can reject listeners; the timer still flushes.
+        }
+    }
+
+    return {
+        getItem: (name) => {
+            if (pendingWrites.has(name)) {
+                return pendingWrites.get(name) ?? null;
+            }
+            if (pendingDeletes.has(name)) {
+                return null;
+            }
+
+            const parse = (value: string | null): StorageValue<S> | null => {
+                if (value === null) return null;
+                return JSON.parse(value, options?.reviver) as StorageValue<S>;
+            };
+            const value = storage.getItem(name);
+            if (value instanceof Promise) {
+                return value.then(parse);
+            }
+            return parse(value);
+        },
+        setItem: (name, value) => {
+            pendingWrites.set(name, value);
+            pendingDeletes.delete(name);
+            scheduleFlush();
+        },
+        removeItem: (name) => {
+            pendingWrites.delete(name);
+            pendingDeletes.add(name);
+            scheduleFlush();
+        },
+    };
+};
+
+export const createDeferredSafeJSONStorage = <S>(options?: JsonStorageOptions) => (
+    createDeferredJSONStorage<S>(() => getSafeStorage(), options)
+);
 
 const getWindowStorage = (key: 'localStorage' | 'sessionStorage'): Storage | null => {
     if (typeof window === 'undefined') {
@@ -47,70 +141,7 @@ const createSafeStorage = (): Storage => {
         storageAvailable = false;
     };
 
-    // Write-behind buffer. Every zustand-persist store plus the direct
-    // writers (projects, directory, session folders, ...) funnels through
-    // setItem below. Each call re-serializes a whole store slice, and doing
-    // that synchronously during a session switch blocked the main thread for
-    // >1s (large JSON.stringify in the vendor chunk). Writes are deferred to a
-    // later task so the click->paint path is not blocked, and coalesced so
-    // repeated writes to the same key collapse into one flush. Pending values
-    // are served from memory so read-after-write stays consistent within the
-    // deferral window.
-    const pendingWrites = new Map<string, string>();
-    const pendingDeletes = new Set<string>();
-    let flushTimer: ReturnType<typeof setTimeout> | undefined;
-
-    const doFlush = () => {
-        flushTimer = undefined;
-        if (pendingWrites.size === 0 && pendingDeletes.size === 0) return;
-
-        const writes = Array.from(pendingWrites.entries());
-        const deletes = Array.from(pendingDeletes);
-        pendingWrites.clear();
-        pendingDeletes.clear();
-
-        for (const [key, value] of writes) {
-            if (storageAvailable) {
-                try {
-                    baseStorage.setItem(key, value);
-                    fallback.removeItem(key);
-                    continue;
-                } catch {
-                    disableStorage();
-                    // Prevent stale previous value from surviving when writes fail (e.g. quota).
-                    try {
-                        baseStorage.removeItem(key);
-                    } catch {
-                        // noop
-                    }
-                }
-            }
-            fallback.setItem(key, value);
-        }
-        for (const key of deletes) {
-            try {
-                baseStorage.removeItem(key);
-            } catch {
-                disableStorage();
-            }
-            fallback.removeItem(key);
-        }
-    };
-
-    const scheduleFlush = () => {
-        if (flushTimer !== undefined) return;
-        // setTimeout(0) moves the (potentially large) serialization writes out
-        // of the current task, letting the browser paint the interaction first.
-        flushTimer = setTimeout(doFlush, 0);
-    };
-
     const safeGet = (key: string): string | null => {
-        if (pendingWrites.has(key)) {
-            return pendingWrites.get(key) ?? null;
-        }
-        if (pendingDeletes.has(key)) {
-            return null;
-        }
         if (storageAvailable) {
             try {
                 const value = baseStorage.getItem(key);
@@ -125,24 +156,34 @@ const createSafeStorage = (): Storage => {
     };
 
     const safeSet = (key: string, value: string) => {
-        pendingWrites.set(key, value);
-        pendingDeletes.delete(key);
-        scheduleFlush();
+        if (storageAvailable) {
+            try {
+                baseStorage.setItem(key, value);
+                fallback.removeItem(key);
+                return;
+            } catch {
+                disableStorage();
+                // Prevent stale previous value from surviving when writes fail (e.g. quota).
+                try {
+                    baseStorage.removeItem(key);
+                } catch {
+                    // noop
+                }
+            }
+        }
+        fallback.setItem(key, value);
     };
 
     const safeRemove = (key: string) => {
-        pendingDeletes.add(key);
-        pendingWrites.delete(key);
-        scheduleFlush();
+        try {
+            baseStorage.removeItem(key);
+        } catch {
+            disableStorage();
+        }
+        fallback.removeItem(key);
     };
 
     const safeClear = () => {
-        pendingWrites.clear();
-        pendingDeletes.clear();
-        if (flushTimer !== undefined) {
-            clearTimeout(flushTimer);
-            flushTimer = undefined;
-        }
         try {
             baseStorage.clear();
         } catch {
@@ -161,23 +202,6 @@ const createSafeStorage = (): Storage => {
         }
         return fallback.key(index);
     };
-
-    // Flush pending writes before the page is hidden or unloaded so deferred
-    // state is not lost on tab close, reload, or the mobile freeze lifecycle.
-    if (typeof window !== 'undefined') {
-        const flushNow = () => doFlush();
-        try {
-            window.addEventListener('pagehide', flushNow, { capture: true });
-            window.addEventListener('beforeunload', flushNow, { capture: true });
-            window.addEventListener('visibilitychange', () => {
-                if (document.visibilityState === 'hidden') doFlush();
-            });
-            window.addEventListener('freeze', flushNow);
-        } catch {
-            // Adding listeners can fail in restricted environments; persistence
-            // still flushes via the setTimeout scheduler in that case.
-        }
-    }
 
     return {
         getItem: safeGet,

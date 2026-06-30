@@ -64,8 +64,10 @@ describe('safeStorage', () => {
         }
     });
 
-    test('defers localStorage writes off the call site and serves pending reads', async () => {
+    test('defers persisted JSON serialization and serves pending reads', async () => {
         const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+        const previousStringify = JSON.stringify;
+        const stringifyCalls: unknown[] = [];
         const backingStorage = createFakeStorage();
         const fakeWindow = {
             localStorage: backingStorage,
@@ -79,25 +81,36 @@ describe('safeStorage', () => {
         });
 
         try {
-            const { getSafeStorage } = await importSafeStorage();
-            const storage = getSafeStorage();
+            JSON.stringify = ((value: unknown, replacer?: Parameters<typeof JSON.stringify>[1], space?: Parameters<typeof JSON.stringify>[2]) => {
+                stringifyCalls.push(value);
+                return previousStringify(value, replacer, space);
+            }) as typeof JSON.stringify;
 
-            storage.setItem('k', 'v');
+            const { createDeferredSafeJSONStorage } = await importSafeStorage();
+            const storage = createDeferredSafeJSONStorage<{ value: string }>();
 
-            // Not yet written through to the backing store (write is deferred)...
+            expect(Boolean(storage)).toBe(true);
+            if (!storage) throw new Error('storage unavailable');
+
+            storage.setItem('k', { state: { value: 'v' } });
+
+            // Neither serialization nor the backing write runs on the call site...
+            expect(stringifyCalls).toHaveLength(0);
             expect(backingStorage.getItem('k')).toBeNull();
             // ...but read-after-write still returns the pending value.
-            expect(storage.getItem('k')).toBe('v');
+            expect(storage.getItem('k')).toEqual({ state: { value: 'v' } });
 
             // Coalesce: a second write to the same key should not produce two
-            // backing writes, and the latest value wins.
-            storage.setItem('k', 'v2');
+            // stringifications/backing writes, and the latest value wins.
+            storage.setItem('k', { state: { value: 'v2' } });
 
             await new Promise((resolve) => setTimeout(resolve, 10));
 
-            expect(backingStorage.getItem('k')).toBe('v2');
-            expect(storage.getItem('k')).toBe('v2');
+            expect(stringifyCalls).toEqual([{ state: { value: 'v2' } }]);
+            expect(backingStorage.getItem('k')).toBe('{"state":{"value":"v2"}}');
+            expect(storage.getItem('k')).toEqual({ state: { value: 'v2' } });
         } finally {
+            JSON.stringify = previousStringify;
             if (previousWindow) {
                 Object.defineProperty(globalThis, 'window', previousWindow);
             } else {
