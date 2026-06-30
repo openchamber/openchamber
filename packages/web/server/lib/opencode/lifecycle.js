@@ -2,18 +2,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import net from 'node:net';
 import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } from './managed-process-registry.js';
 
-const parsePositiveInt = (value, fallback) => {
-  const parsed = Number.parseInt(String(value ?? ''), 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-};
-
-const HEALTH_CHECK_TIMEOUT_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS, 5000);
-const HEALTH_CHECK_MAX_CONSECUTIVE_FAILURES = parsePositiveInt(
-  process.env.OPENCHAMBER_OPENCODE_HEALTH_CONSECUTIVE_FAILURES,
-  20
-);
-const HEALTH_CHECK_INTERVAL_OVERRIDE_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS, 0);
-const HEALTH_CHECK_RESULT_CACHE_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_CACHE_MS, 750);
+const HEALTH_CHECK_TIMEOUT_MS = 5000;
 const OPENCODE_HEALTH_PATH = '/global/health';
 
 export const createOpenCodeLifecycleRuntime = (deps) => {
@@ -32,7 +21,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     resolveManagedOpenCodeLaunchSpec,
     setOpenCodePort,
     setDetectedOpenCodeApiPrefix,
-    setupProxy,
     ensureOpenCodeApiPrefix,
     clearResolvedOpenCodeBinary,
     buildAugmentedPath,
@@ -591,7 +579,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         }
 
         if (state.expressApp) {
-          setupProxy(state.expressApp);
           ensureOpenCodeApiPrefix();
         }
         return;
@@ -635,7 +622,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       syncToHmrState();
 
       if (state.expressApp) {
-        setupProxy(state.expressApp);
         ensureOpenCodeApiPrefix();
       }
     })();
@@ -819,15 +805,15 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         state.lastOpenCodeError = null;
         state.openCodeNotReadySince = 0;
         syncToHmrState();
-      } else if (!env.ENV_EFFECTIVE_PORT && await probeExternalOpenCode(4096)) {
-        console.log('Auto-detected existing OpenCode server on default port 4096');
-        setOpenCodePort(4096);
-        state.isOpenCodeReady = true;
-        state.isExternalOpenCode = true;
-        state.lastOpenCodeError = null;
-        state.openCodeNotReadySince = 0;
-        syncToHmrState();
       } else {
+        // We never auto-attach to an arbitrary pre-existing OpenCode instance.
+        // Attaching to an external server requires explicit opt-in via env
+        // (OPENCODE_HOST / OPENCODE_PORT / OPENCODE_SKIP_START), handled by the
+        // branches above. Without that opt-in we always start our OWN managed
+        // instance on a freshly-allocated port. A blind probe of the default
+        // port 4096 used to hijack a user's separately-running OpenCode (e.g.
+        // the OpenCode desktop app), coupling our lifecycle to theirs and
+        // breaking init against an unexpected server version/config.
         if (env.ENV_EFFECTIVE_PORT) {
           console.log(`Using OpenCode port from environment: ${env.ENV_EFFECTIVE_PORT}`);
           setOpenCodePort(env.ENV_EFFECTIVE_PORT);
@@ -853,133 +839,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     }
   };
 
-  /**
-   * Perform an immediate (one-shot) health check and restart OpenCode if it's
-   * not healthy.  Callers on the SSE / WS proxy path use this to trigger
-   * recovery without waiting for the next periodic interval (up to 15 s).
-   *
-   * Skips restart when sessions are actively busy — a busy server under
-   * concurrent load can fail the health check timeout without actually
-   * being dead (the health endpoint competes with LLM work).
-   * Forces restart if sessions stay "busy" and the server stays unhealthy
-   * for over 2 minutes (staleness guard against stuck session state).
-   */
-  const STALE_BUSY_GRACE_MS = 2 * 60 * 1000;
-  let lastUnhealthyWithBusySessionsAt = 0;
-  let consecutiveHealthFailures = 0;
-  let healthProbePromise = null;
-  let healthCheckCyclePromise = null;
-  let lastHealthProbeResult = null;
-
-  const resetHealthFailureState = () => {
-    consecutiveHealthFailures = 0;
-    lastUnhealthyWithBusySessionsAt = 0;
-  };
-
-  const probeOpenCodeHealth = async () => {
-    const now = Date.now();
-    if (lastHealthProbeResult && now - lastHealthProbeResult.at < HEALTH_CHECK_RESULT_CACHE_MS) {
-      return lastHealthProbeResult.healthy;
-    }
-
-    if (healthProbePromise) {
-      return healthProbePromise;
-    }
-
-    healthProbePromise = isOpenCodeProcessHealthy()
-      .then((healthy) => {
-        lastHealthProbeResult = { at: Date.now(), healthy };
-        return healthy;
-      })
-      .finally(() => {
-        healthProbePromise = null;
-      });
-
-    return healthProbePromise;
-  };
-
-  const shouldSkipRestartForBusySessions = () => {
-    const activeCount = getActiveSessionCount();
-    if (activeCount === 0) {
-      lastUnhealthyWithBusySessionsAt = 0;
-      return false;
-    }
-
-    const now = Date.now();
-    if (!lastUnhealthyWithBusySessionsAt) {
-      lastUnhealthyWithBusySessionsAt = now;
-      return true;
-    }
-
-    if (now - lastUnhealthyWithBusySessionsAt >= STALE_BUSY_GRACE_MS) {
-      console.warn(
-        `[lifecycle] OpenCode unhealthy with ${activeCount} busy session(s) for > 2 min — forcing restart`
-      );
-      lastUnhealthyWithBusySessionsAt = 0;
-      return false;
-    }
-
-    return true;
-  };
-
-  const runHealthCheckCycle = async (source) => {
-    if (!state.openCodeProcess || state.isShuttingDown || state.isRestartingOpenCode) return;
-    if (healthCheckCyclePromise) return healthCheckCyclePromise;
-
-    healthCheckCyclePromise = (async () => {
-      const healthy = await probeOpenCodeHealth();
-      if (!healthy) {
-        if (!isManagedOpenCodeProcessAlive()) {
-          console.log(`[lifecycle] ${source} health check: OpenCode process exited, restarting...`);
-          consecutiveHealthFailures = 0;
-          lastHealthProbeResult = null;
-          await restartOpenCode();
-          return;
-        }
-        consecutiveHealthFailures += 1;
-        console.warn(
-          `[lifecycle] ${source} health check failed (${consecutiveHealthFailures}/${HEALTH_CHECK_MAX_CONSECUTIVE_FAILURES})`
-        );
-        if (consecutiveHealthFailures < HEALTH_CHECK_MAX_CONSECUTIVE_FAILURES) return;
-        if (shouldSkipRestartForBusySessions()) return;
-        console.log(`[lifecycle] ${source} health check failure threshold reached, restarting OpenCode...`);
-        consecutiveHealthFailures = 0;
-        lastHealthProbeResult = null;
-        await restartOpenCode();
-      } else {
-        resetHealthFailureState();
-      }
-    })().finally(() => {
-      healthCheckCyclePromise = null;
-    });
-
-    return healthCheckCyclePromise;
-  };
-
-  const triggerHealthCheck = async () => {
-    try {
-      await runHealthCheckCycle('immediate');
-    } catch (error) {
-      console.error(`[lifecycle] immediate health check error: ${error.message}`);
-    }
-  };
-
-  const startHealthMonitoring = (healthCheckIntervalMs) => {
-    if (state.healthCheckInterval) {
-      clearInterval(state.healthCheckInterval);
-    }
-
-    const effectiveIntervalMs = HEALTH_CHECK_INTERVAL_OVERRIDE_MS || healthCheckIntervalMs;
-
-    state.healthCheckInterval = setInterval(async () => {
-      try {
-        await runHealthCheckCycle('periodic');
-      } catch (error) {
-        console.error(`Health check error: ${error.message}`);
-      }
-    }, effectiveIntervalMs);
-  };
-
   return {
     killProcessOnPort,
     startOpenCode,
@@ -988,8 +847,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     waitForAgentPresence,
     refreshOpenCodeAfterConfigChange,
     bootstrapOpenCodeAtStartup,
-    startHealthMonitoring,
-    triggerHealthCheck,
     waitForPortRelease,
   };
 };

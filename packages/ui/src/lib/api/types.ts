@@ -638,6 +638,7 @@ export interface SettingsPayload {
   autoDeleteEnabled?: boolean;
   autoDeleteAfterDays?: number;
   sessionRetentionAction?: 'archive' | 'delete';
+  followUpBehavior?: 'steer' | 'queue';
   queueModeEnabled?: boolean;
   gitmojiEnabled?: boolean;
   inputSpellcheckEnabled?: boolean;

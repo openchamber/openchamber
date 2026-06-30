@@ -1,7 +1,7 @@
 import { create } from 'zustand';
-import { devtools, persist, createJSONStorage } from 'zustand/middleware';
+import { devtools, persist } from 'zustand/middleware';
 import type { SidebarSection } from '@/constants/sidebar';
-import { getSafeStorage } from './utils/safeStorage';
+import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import { SEMANTIC_TYPOGRAPHY, getTypographyVariable, type SemanticTypographyKey } from '@/lib/typography';
 import type { ShortcutCombo } from '@/lib/shortcuts';
 import type { DraftStarterRef } from '@/lib/draftStarters';
@@ -531,6 +531,7 @@ interface UIStore {
   todoPanelHeight: number;
   isSessionSwitcherOpen: boolean;
   isSessionDropdownOpen: boolean;
+  showSubagentSessionsInSidebar: boolean;
   activeMainTab: MainTab;
   mainTabGuard: MainTabGuard | null;
   sidebarOpenBeforeFullscreenTab: boolean | null;
@@ -676,6 +677,7 @@ interface UIStore {
   setTodoPanelHeight: (height: number) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
   setSessionDropdownOpen: (open: boolean) => void;
+  setShowSubagentSessionsInSidebar: (show: boolean) => void;
   setActiveMainTab: (tab: MainTab) => void;
   prepareForRuntimeSwitch: (runtimeKey?: string | null) => void;
   restoreForRuntimeSwitch: (runtimeKey?: string | null) => void;
@@ -824,6 +826,7 @@ export const useUIStore = create<UIStore>()(
         todoPanelHeight: 259,
         isSessionSwitcherOpen: false,
         isSessionDropdownOpen: false,
+        showSubagentSessionsInSidebar: false,
         activeMainTab: 'chat',
         mainTabGuard: null,
         sidebarOpenBeforeFullscreenTab: null,
@@ -1381,6 +1384,13 @@ export const useUIStore = create<UIStore>()(
             return;
           }
           set({ isSessionDropdownOpen: open });
+        },
+
+        setShowSubagentSessionsInSidebar: (show) => {
+          if (get().showSubagentSessionsInSidebar === show) {
+            return;
+          }
+          set({ showSubagentSessionsInSidebar: show });
         },
 
         setMainTabGuard: (guard) => {
@@ -2106,7 +2116,7 @@ export const useUIStore = create<UIStore>()(
       }),
       {
         name: 'ui-store',
-        storage: createJSONStorage(() => getSafeStorage()),
+        storage: createDeferredSafeJSONStorage(),
         version: 10,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {

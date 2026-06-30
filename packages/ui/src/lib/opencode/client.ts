@@ -149,9 +149,14 @@ const ensureAbsoluteBaseUrl = (candidate: string): string => {
   }
 };
 
+// Return the bare origin (e.g. http://127.0.0.1:4096) NOT the /api path.
+// SDK v2 does string concatenation: baseUrl + pathUrl. If baseUrl
+// already includes /api, paths like /api/agent become /api/api/agent
+// (double prefix, server returns HTML SPA fallback). Using '/' here
+// returns just the origin; the SDK appends the path verbatim.
 const resolveRuntimeBaseUrl = (): string | null => {
   try {
-    return getRuntimeUrlResolver().api('/api');
+    return getRuntimeUrlResolver().api('/');
   } catch {
     return null;
   }
@@ -238,7 +243,12 @@ class OpencodeService {
 
   constructor(baseUrl: string = DEFAULT_BASE_URL) {
     const runtimeBase = resolveRuntimeBaseUrl();
-    const requestedBaseUrl = runtimeBase || baseUrl;
+    // When resolveRuntimeBaseUrl returns '/' (no VITE_OPENCODE_URL set,
+    // no window.__OPENCHAMBER_API_BASE_URL__), it means the SDK should
+    // use the DEFAULT_BASE_URL ('/api') so paths resolve to
+    // http://localhost:9090/api/session (with /api/ prefix) instead of
+    // http://localhost:9090/session (which hits the SPA catch-all).
+    const requestedBaseUrl = (runtimeBase && runtimeBase !== '/') ? runtimeBase : baseUrl;
     this.baseUrl = ensureAbsoluteBaseUrl(requestedBaseUrl);
     this.client = createRuntimeOpencodeClient({ baseUrl: this.baseUrl });
   }
@@ -249,7 +259,7 @@ class OpencodeService {
 
   reconnectToRuntimeBaseUrl(): void {
     const runtimeBase = resolveRuntimeBaseUrl();
-    const nextBaseUrl = ensureAbsoluteBaseUrl(runtimeBase || DEFAULT_BASE_URL);
+    const nextBaseUrl = ensureAbsoluteBaseUrl((runtimeBase && runtimeBase !== '/') ? runtimeBase : DEFAULT_BASE_URL);
     if (nextBaseUrl === this.baseUrl) {
       return;
     }
@@ -735,6 +745,7 @@ class OpencodeService {
     }>;
     messageId?: string;
     agentMentions?: Array<{ name: string; source?: { value: string; start: number; end: number } }>;
+    delivery?: 'steer';
     format?: {
       type: 'json_schema';
       schema: Record<string, unknown>;
@@ -840,6 +851,7 @@ class OpencodeService {
           agent: params.agent,
           variant: params.variant,
           messageID: messageId,
+          ...(params.delivery ? { delivery: params.delivery } : {}),
           ...(params.format ? { format: params.format } : {}),
           parts,
         });
@@ -1537,9 +1549,14 @@ class OpencodeService {
   async checkHealth(): Promise<boolean> {
     try {
       const normalizedBase = this.baseUrl.endsWith('/') ? this.baseUrl.replace(/\/+$/, '') : this.baseUrl;
-      const healthUrl = normalizedBase === '/api' || normalizedBase.endsWith('/api')
-        ? '/api/opencode/health'
-        : `${normalizedBase}/opencode/health`;
+      // Proxy-bypass mode: baseUrl is absolute (OpenCode upstream).
+      // Use OpenCode's own /global/health endpoint.
+      const isAbsoluteUrl = normalizedBase.startsWith('http://') || normalizedBase.startsWith('https://');
+      const healthUrl = isAbsoluteUrl
+        ? `${normalizedBase}/global/health`
+        : normalizedBase === '/api' || normalizedBase.endsWith('/api')
+          ? '/api/opencode/health'
+          : `${normalizedBase}/opencode/health`;
       markStartupTrace('opencodeClient.checkHealth:url', { baseUrl: this.baseUrl, healthUrl });
       const response = await runtimeFetch(healthUrl);
       markStartupTrace('opencodeClient.checkHealth:response', { status: response.status });
@@ -1576,7 +1593,7 @@ class OpencodeService {
       ...(options?.allowOutsideWorkspace ? { allowOutsideWorkspace: true } : {}),
     };
 
-    const response = await runtimeFetch(`${this.baseUrl}/fs/mkdir`, {
+    const response = await runtimeFetch('/api/fs/mkdir', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1594,7 +1611,7 @@ class OpencodeService {
   }
 
   async cloneRepository(input: { remoteUrl: string; destinationPath: string; gitIdentityId?: string | null }): Promise<{ success: boolean; path: string; output?: string }> {
-    const response = await runtimeFetch(`${this.baseUrl}/fs/clone`, {
+    const response = await runtimeFetch('/api/fs/clone', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1660,7 +1677,7 @@ class OpencodeService {
         params.set('respectGitignore', 'true');
       }
       const query = params.toString();
-      const response = await runtimeFetch(`${this.baseUrl}/fs/list${query ? `?${query}` : ''}`);
+      const response = await runtimeFetch(`/api/fs/list${query ? `?${query}` : ''}`);
       if (!response.ok) {
         const error = await response.json().catch(() => ({}));
         const message = typeof error.error === 'string' ? error.error : 'Failed to list directory';
@@ -1752,8 +1769,12 @@ class OpencodeService {
       }
     }
 
+      // Use /api/fs/home (relative) instead of ${this.baseUrl}/fs/home.
+      // this.baseUrl points to OpenCode upstream (:4096) but /fs/home is an
+      // OpenChamber Express endpoint served at :9090/api/fs/home. The
+      // runtimeFetch bridge routes /api/fs/* to the page origin automatically.
     try {
-      const response = await runtimeFetch(`${this.baseUrl}/fs/home`, {
+      const response = await runtimeFetch('/api/fs/home', {
         method: 'GET',
         headers: {
           Accept: 'application/json'

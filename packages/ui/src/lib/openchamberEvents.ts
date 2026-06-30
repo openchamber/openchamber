@@ -1,4 +1,3 @@
-import { getRuntimeUrlResolver } from './runtime-url';
 import { subscribeRuntimeEndpointChanged } from './runtime-switch';
 
 type ScheduledTaskRanEvent = {
@@ -22,6 +21,17 @@ const listeners = new Set<Listener>();
 
 const MAX_RECONNECT_DELAY_MS = 30_000;
 const HEARTBEAT_TIMEOUT_MS = 45_000;
+
+// /api/openchamber/events is an OpenChamber-internal endpoint always served
+// by the OpenChamber Express server (not the upstream OpenCode). Anchor to
+// the page origin so the proxy-bypass deployment still works — see
+// useWebNotificationStream for the same rationale.
+const openchamberStreamUrl = (path: string): string => {
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return `${window.location.origin}${path}`;
+  }
+  return path;
+};
 
 const clearHeartbeatTimer = () => {
   if (!heartbeatTimer) {
@@ -133,7 +143,7 @@ const connect = () => {
 
   cleanupSource();
 
-  const source = new EventSource(getRuntimeUrlResolver().sse('/api/openchamber/events'));
+  const source = new EventSource(openchamberStreamUrl('/api/openchamber/events'));
   source.onopen = () => {
     resetHeartbeatTimer();
   };

@@ -13,7 +13,7 @@ import { useSync } from '@/sync/use-sync';
 import { useSessionPrefetch } from './sidebar/hooks/useSessionPrefetch';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { getSafeStorage } from '@/stores/utils/safeStorage';
+import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { useGitStore, useGitAllBranches, useGitRepoStatusMap } from '@/stores/useGitStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { NewWorktreeDialog } from './NewWorktreeDialog';
@@ -188,7 +188,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const [editTitle, setEditTitle] = React.useState('');
   const [editingProjectDialogId, setEditingProjectDialogId] = React.useState<string | null>(null);
   const [expandedParents, setExpandedParents] = React.useState<Set<string>>(new Set());
-  const safeStorage = React.useMemo(() => getSafeStorage(), []);
+  const safeStorage = React.useMemo(() => getDeferredSafeStorage(), []);
   const [collapsedProjects, setCollapsedProjects] = React.useState<Set<string>>(new Set());
 
   const [projectRepoStatus, setProjectRepoStatus] = React.useState<Map<string, boolean | null>>(new Map());
@@ -207,7 +207,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const togglePinnedSession = useSessionPinnedStore((state) => state.toggle);
   const [collapsedGroups, setCollapsedGroups] = React.useState<Set<string>>(() => {
     try {
-      const raw = getSafeStorage().getItem(GROUP_COLLAPSE_STORAGE_KEY);
+      const raw = getDeferredSafeStorage().getItem(GROUP_COLLAPSE_STORAGE_KEY);
       if (!raw) {
         return new Set();
       }
@@ -219,7 +219,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   });
   const [groupOrderByProject, setGroupOrderByProject] = React.useState<Map<string, string[]>>(() => {
     try {
-      const raw = getSafeStorage().getItem(GROUP_ORDER_STORAGE_KEY);
+      const raw = getDeferredSafeStorage().getItem(GROUP_ORDER_STORAGE_KEY);
       if (!raw) {
         return new Map();
       }
@@ -237,7 +237,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   });
   const [activeSessionByProject, setActiveSessionByProject] = React.useState<Map<string, string>>(() => {
     try {
-      const raw = getSafeStorage().getItem(PROJECT_ACTIVE_SESSION_STORAGE_KEY);
+      const raw = getDeferredSafeStorage().getItem(PROJECT_ACTIVE_SESSION_STORAGE_KEY);
       if (!raw) {
         return new Map();
       }
@@ -280,6 +280,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const notifyOnSubtasks = useUIStore((state) => state.notifyOnSubtasks);
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
   const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
+  const showSubagentSessionsInSidebar = useUIStore((state) => state.showSubagentSessionsInSidebar);
+  const setShowSubagentSessionsInSidebar = useUIStore((state) => state.setShowSubagentSessionsInSidebar);
 
   const debouncedSessionSearchQuery = useDebouncedValue(sessionSearchQuery, 120);
   const normalizedSessionSearchQuery = React.useMemo(
@@ -522,6 +524,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     worktreeMetadata,
     pinnedSessionIds,
     gitBranches,
+    showSubagentSessionsInSidebar,
     isVSCode,
   });
 
@@ -1562,6 +1565,22 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         selectionModeEnabled={selectionModeEnabled}
         onToggleSelectionMode={handleToggleSelectionMode}
       />
+
+      <div className="flex items-center gap-2 px-3 py-1">
+        <label className="flex items-center gap-2 cursor-pointer" onClick={() => setShowSubagentSessionsInSidebar(!showSubagentSessionsInSidebar)}>
+          <div className={cn("h-4 w-7 rounded-full transition-colors duration-150 flex-shrink-0",
+            showSubagentSessionsInSidebar ? "bg-[var(--primary-base)]" : "bg-[var(--interactive-border)]"
+          )}>
+            <div className={cn("h-3.5 w-3.5 rounded-full bg-white transition-transform duration-150 mt-[1px]",
+              showSubagentSessionsInSidebar ? "translate-x-3.5" : "translate-x-0.5"
+            )} />
+          </div>
+          <span className="typography-caption text-muted-foreground select-none">
+            {t('sidebar.subagent.toggleLabel')}
+          </span>
+        </label>
+      </div>
+
 
       <SidebarProjectsList
         topContent={topContent}

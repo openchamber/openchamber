@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import { devtools, persist, createJSONStorage } from 'zustand/middleware';
-import { getSafeStorage } from './utils/safeStorage';
+import { devtools, persist } from 'zustand/middleware';
+import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import {
   startConfigUpdate,
   finishConfigUpdate,
@@ -104,6 +104,7 @@ const trimOptionalString = (value: string | undefined): string | undefined => {
 
 const CLIENT_RELOAD_DELAY_MS = 800;
 const MCP_LOAD_CACHE_TTL_MS = 5000;
+const MCP_CONFIG_LOAD_TIMEOUT_MS = 15_000;
 const DEFAULT_MCP_CACHE_KEY = '__default__';
 const mcpLastLoadedAt = new Map<string, number>();
 const mcpLoadInFlight = new Map<string, Promise<boolean>>();
@@ -122,7 +123,7 @@ interface McpConfigStore {
 
   setSelectedMcp: (name: string | null) => void;
   setMcpDraft: (draft: McpDraft | null) => void;
-  loadMcpConfigs: (options?: { force?: boolean }) => Promise<boolean>;
+  loadMcpConfigs: (options?: { force?: boolean; timeoutMs?: number }) => Promise<boolean>;
   createMcp: (config: McpDraft) => Promise<McpMutationResult>;
   updateMcp: (name: string, config: Partial<McpDraft>) => Promise<McpMutationResult>;
   deleteMcp: (name: string) => Promise<McpMutationResult>;
@@ -164,10 +165,16 @@ export const useMcpConfigStore = create<McpConfigStore>()(
 
           const request = (async () => {
             set({ isLoading: true });
+            const controller = typeof AbortController !== 'undefined' ? new AbortController() : undefined;
+            const timeoutId = controller
+              ? setTimeout(() => controller.abort(), options?.timeoutMs ?? MCP_CONFIG_LOAD_TIMEOUT_MS)
+              : undefined;
+
             try {
               const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
               const response = await runtimeFetch(`/api/config/mcp${queryParams}`, {
                 headers: configDirectory ? { 'x-opencode-directory': configDirectory } : undefined,
+                signal: controller?.signal,
               });
               if (!response.ok) {
                 throw new Error('Failed to load MCP configs');
@@ -180,6 +187,8 @@ export const useMcpConfigStore = create<McpConfigStore>()(
               console.error('[McpConfigStore] Failed to load MCP configs:', error);
               set({ isLoading: false });
               return false;
+            } finally {
+              if (timeoutId !== undefined) clearTimeout(timeoutId);
             }
           })();
 
@@ -350,7 +359,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
       }),
       {
         name: 'mcp-config-store',
-        storage: createJSONStorage(() => getSafeStorage()),
+        storage: createDeferredSafeJSONStorage(),
         partialize: (state) => ({ selectedMcpName: state.selectedMcpName }),
       },
     ),

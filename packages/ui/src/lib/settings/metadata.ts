@@ -10,7 +10,6 @@ export type SettingsPageSlug =
   | 'behavior'
   | 'commands'
   | 'mcp'
-  | 'plugins'
   | 'skills.installed'
   | 'skills.catalog'
   | 'git'
@@ -117,13 +116,6 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     group: 'opencode',
     kind: 'split',
     keywords: ['mcp', 'model context protocol', 'servers', 'tools', 'remote', 'stdio'],
-  },
-  {
-    slug: 'plugins',
-    title: 'Plugins',
-    group: 'opencode',
-    kind: 'split',
-    keywords: ['plugin', 'plugins', 'extensions', 'addons', 'npm', 'opencode-wakatime'],
   },
   {
     slug: 'skills.installed',

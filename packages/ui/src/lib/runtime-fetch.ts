@@ -1,5 +1,5 @@
 import { buildRuntimeAuthHeaders } from './runtime-auth';
-import { getRuntimeUrlResolver, type RuntimeUrlQuery } from './runtime-url';
+import { getRuntimeUrlResolver, isOpenChamberInternalPath, type RuntimeUrlQuery } from './runtime-url';
 
 export interface RuntimeFetchOptions extends RequestInit {
   query?: RuntimeUrlQuery;
@@ -83,16 +83,73 @@ export const buildRuntimeFetchUrl = (input: string, query?: RuntimeUrlQuery): st
   return input;
 };
 
-const shouldAttachRuntimeAuth = (input: string | URL | Request): boolean => {
-  const raw = input instanceof Request ? input.url : input.toString();
-  if (!isAbsoluteUrl(raw)) {
-    return shouldResolveApiPath(raw);
-  }
-
+// In proxy-bypass mode the SDK talks to OpenCode upstream via absolute
+// URLs (e.g. http://127.0.0.1:4096/config, /session, /project). Those
+// paths DON'T start with /api/ — `shouldResolveApiPath('/config')` is false.
+// But the runtime-url resolver still considers them "active runtime service"
+// because they target the OpenCode upstream base. We need to attach auth to
+// ANY URL going to the OpenCode base, not just /api/* paths — otherwise the
+// SDK calls fail with 401 and the UI shows empty lists.
+const isRuntimeUpstreamUrl = (raw: string): boolean => {
+  if (!isAbsoluteUrl(raw)) return false;
   try {
-    return isActiveRuntimeServiceUrl(new URL(raw));
+    const apiBase = getRuntimeUrlResolver().api('/api');
+    if (!/^[a-z][a-z\d+.-]*:\/\//i.test(apiBase)) return false;
+    const base = new URL(apiBase);
+    return new URL(raw).origin === base.origin;
   } catch {
     return false;
+  }
+};
+
+const shouldAttachRuntimeAuth = (input: string | URL | Request): boolean => {
+const raw = input instanceof Request ? input.url : input.toString();
+if (!isAbsoluteUrl(raw)) {
+return shouldResolveApiPath(raw);
+}
+  // Absolute URL: any path targeting the OpenCode upstream origin gets auth,
+  // BUT only if the path is NOT an OpenChamber-internal path (those get
+  // rewritten to page origin by runtimeFetch and don't need auth).
+  try {
+    if (isOpenChamberInternalPath(new URL(raw).pathname)) return false;
+  } catch {
+    // ignore parse errors
+  }
+return isRuntimeUpstreamUrl(raw);
+};
+
+// In proxy-bypass mode the OpenCode SDK has its baseUrl set to the
+// external OpenCode upstream. But some OpenChamber code calls the SDK
+// for OpenChamber-internal endpoints (e.g. /fs/home, /path,
+// /session-folders, /project/current, /config/settings).
+// Those calls arrive at runtimeFetch as absolute URLs to :4096 with
+// OpenChamber-internal paths — and 401 because OpenCode upstream
+// doesn't have them.
+//
+// This helper detects that case and rewrites the URL to the page
+// origin (with the /api/ prefix inserted if missing) so the request
+// reaches OpenChamber Express instead.
+const rewriteOpenChamberInternalUrl = (input: string | URL | Request): string | URL | Request => {
+  if (typeof window === 'undefined') return input;
+  let raw: string;
+  try {
+    if (typeof input === 'string') raw = input;
+    else if (input instanceof URL) raw = input.toString();
+    else raw = input.url;
+  } catch {
+    return input;
+  }
+  if (!/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) return input;
+  try {
+    const url = new URL(raw);
+    if (url.origin === window.location.origin) return input;
+    if (!isOpenChamberInternalPath(url.pathname + url.search) && !isOpenChamberInternalPath('/api' + url.pathname)) return input;
+    // OpenChamber Express serves the /api/* form. If the URL doesn't
+    // already start with /api/, insert it before the pathname.
+    const apiPrefix = url.pathname.startsWith('/api/') || url.pathname === '/api' ? '' : '/api';
+    return `${window.location.origin}${apiPrefix}${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return input;
   }
 };
 
@@ -123,18 +180,13 @@ export const sanitizeHeadersForBrowser = (init?: HeadersInit): [string, string][
   if (sourceEntries.length === 0) return undefined;
   const entries: [string, string][] = [];
   let dirty = false;
-  let encodedDirectoryHint = false;
   for (const [key, value] of sourceEntries) {
     if (shouldEncodeHeaderValue(key, value)) {
       entries.push([key, encodeURIComponent(value)]);
       dirty = true;
-      if (key.toLowerCase() === 'x-opencode-directory') encodedDirectoryHint = true;
     } else {
       entries.push([key, value]);
     }
-  }
-  if (encodedDirectoryHint) {
-    entries.push(['x-opencode-directory-encoding', 'uri']);
   }
   return dirty ? entries : undefined;
 };
@@ -192,10 +244,26 @@ const coalesceReadKey = (method: string, url: string, hasSignal: boolean): strin
 
 export const runtimeFetch = async (input: string | URL | Request, init: RuntimeFetchOptions = {}): Promise<Response> => {
   const { query, ...requestInit } = init;
-  const resolvedInput = resolveRuntimeFetchInput(input, query);
+  // Rewrite absolute URLs to OpenCode upstream that target OpenChamber-internal
+  // endpoints (e.g. /fs/home, /path, /session-folders) back to the page origin
+  // (where OpenChamber Express serves /api/fs/home, /api/path, etc.). The SDK
+  // strips /api/ when calling internal endpoints but the Express routes require
+  // it, so we re-insert it in the rewrite.
+  const rewrittenInput = rewriteOpenChamberInternalUrl(input);
+  // SDK 1.17.7 calls paths that don't exist on server 1.17.9 (returns SPA HTML).
+  // Rewrite the SDK's expected paths to the server's actual paths.
+  const sdkRewrittenInput = (() => {
+    const raw = typeof rewrittenInput === 'string'
+      ? rewrittenInput
+      : rewrittenInput instanceof URL
+        ? rewrittenInput.toString()
+        : rewrittenInput.url;
+    let r = raw;
+    return rewrittenInput;
+})();
+  const resolvedInput = resolveRuntimeFetchInput(sdkRewrittenInput, query);
   const inputHeaders = resolvedInput instanceof Request ? resolvedInput.headers : undefined;
   const headers = await mergeHeaders(inputHeaders, requestInit.headers, shouldAttachRuntimeAuth(resolvedInput));
-
   const doFetch = (): Promise<Response> =>
     resolvedInput instanceof Request
       ? fetch(new Request(resolvedInput, { ...requestInit, headers }))
@@ -227,29 +295,164 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
   return pending.then((res) => res.clone());
 };
 
+// OpenCode 1.17.10 server endpoints (`/skill`, `/agent`, `/provider`, `/command`, `/mcp`) sometimes
+// wrap list responses in {location, data: T[]} even at the unprefixed path. The SDK expects flat T[].
+// Unwrap the wrapper for known endpoints so the SDK receives the shape it expects without consumer changes.
+// (Some server endpoints return flat arrays, so this is a safe no-op for those.)
+export const SDK_SHAPE_UNWRAP_PATTERNS: ReadonlyArray<RegExp> = [
+  /(?:^|[^a-z])agent(?:[?#]|$)/,
+  /(?:^|[^a-z])command(?:[?#]|$)/,
+  /(?:^|[^a-z])skill(?:[?#]|$)/,
+  /(?:^|[^a-z])provider(?:[?#]|$)/,
+];
+
+export const shouldUnwrapSdkData = (url: string): boolean =>
+  SDK_SHAPE_UNWRAP_PATTERNS.some((p) => p.test(url));
+
+export const unwrapSdkDataResponse = async (response: Response, url: string): Promise<Response> => {
+  if (!shouldUnwrapSdkData(url)) return response;
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('json')) return response;
+  try {
+    const text = await response.clone().text();
+    const body = JSON.parse(text);
+    // {location, data: T[]} → T[]
+    if (body && typeof body === 'object' && 'data' in body && !Array.isArray(body)) {
+      const unwrapped = JSON.stringify(body.data);
+      return new Response(unwrapped, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
+    }
+    return response;
+  } catch {
+    return response;
+  }
+};
+
 let runtimeFetchBridgeInstalled = false;
+
+// Cross-origin fetches (e.g. the SDK talking to an external OpenCode upstream
+// in proxy-bypass mode) MUST NOT use credentials: 'include' — the browser
+// requires Access-Control-Allow-Credentials: true on the response, but the
+// OpenCode upstream only sets Access-Control-Allow-Origin. Since we send
+// Authorization: Basic (or Bearer) on every cross-origin call, we don't need
+// cookies / credentials mode — drop it to keep CORS preflight happy.
+const resolveFetchCredentials = (target: string, init?: RequestInit): RequestCredentials | undefined => {
+  if (init && typeof init.credentials === 'string') {
+    return init.credentials;
+  }
+  if (typeof window === 'undefined') return init?.credentials;
+  try {
+    const targetOrigin = new URL(target, window.location.href).origin;
+    if (targetOrigin !== window.location.origin) {
+      return 'omit';
+    }
+  } catch {
+    // Non-URL target — fall through and let the browser handle it.
+  }
+  return init?.credentials;
+};
 
 export const installRuntimeFetchBridge = (): void => {
   if (runtimeFetchBridgeInstalled || typeof window === 'undefined') return;
   runtimeFetchBridgeInstalled = true;
 
   const nativeFetch = window.fetch.bind(window);
+const _wrappedNativeFetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  const result = nativeFetch(input, init);
+  const url = typeof input === 'string'
+    ? input
+    : input instanceof URL
+      ? input.toString()
+      : input.url;
+  return result.then((r) => unwrapSdkDataResponse(r, url));
+};
+  const mergedInit = (input: RequestInfo | URL, init?: RequestInit, targetOverride?: string) => {
+    const target = targetOverride ?? (typeof input === 'string' || input instanceof URL ? input.toString() : input.url);
+    return { ...init, credentials: resolveFetchCredentials(target, init) };
+  };
+
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    // ALWAYS override credentials for cross-origin calls so the browser
+    // doesn't require Access-Control-Allow-Credentials on the preflight.
+    // This applies even on the early-return paths below (SDK calls to
+    // /config, /session, /global/event, etc. which don't match the
+    // shouldResolveFetchInput gate). We send Authorization header explicitly,
+    // so we never need cookies / credentials mode cross-origin.
+    if (typeof window === 'undefined') {
+      return _wrappedNativeFetch(input, init);
+    }
+    const resolveTargetOrigin = (): string => {
+      try {
+        if (typeof input === 'string') return new URL(input, window.location.href).origin;
+        if (input instanceof URL) return input.origin;
+        if (typeof Request !== 'undefined' && input instanceof Request) return new URL(input.url, window.location.href).origin;
+      } catch {
+        // Non-URL fallback
+      }
+      return '';
+    };
+    const targetOrigin = resolveTargetOrigin();
+    const isCrossOrigin = targetOrigin !== '' && targetOrigin !== window.location.origin;
+    const safeInit = isCrossOrigin ? { ...init, credentials: 'omit' as RequestCredentials } : init;
+
+    // SDK 1.17.7 calls paths that don't exist on server 1.17.9 (returns SPA HTML).
+    // Rewrite the SDK's expected paths to the server's actual paths.
+    const rewriteSDKPath = (s: string): string => {
+      // Protocol-relative URLs (e.g. //fs/home from openchamberConfig.ts) need
+      // the page origin prepended AND /api/ inserted before OpenChamber-internal
+      // paths. Without the /api/ prefix, the browser resolves //fs/home against
+      // localhost:9090/fs/home which Express doesn't serve (SPA HTML).
+      let r = s;
+      if (s.startsWith('//') && typeof window !== 'undefined') {
+        let pathPart = s.slice(2); // strip leading //
+        // If the path is OpenChamber-internal (e.g. /fs/home, /git/identities)
+        // and doesn't already start with /api/, add the /api/ prefix.
+        if (!pathPart.startsWith('/api/') && !pathPart.startsWith('/auth') && !pathPart.startsWith('/health')
+            && (pathPart.startsWith('/fs/') || pathPart.startsWith('/git/')
+                || pathPart.startsWith('/session-folders') || pathPart.startsWith('/projects/')
+                || pathPart.startsWith('/config/themes') || pathPart.startsWith('/config/commands')
+                || pathPart.startsWith('/opencode/') || pathPart.startsWith('/notifications/')
+                || pathPart.startsWith('/chamber/') || pathPart.startsWith('/github/')
+                || pathPart.startsWith('/skills/') || pathPart.startsWith('/preview/')
+                || pathPart.startsWith('/remote-clients/') || pathPart.startsWith('/worktree/')
+                || pathPart.startsWith('/files/') || pathPart.startsWith('/sessions/')
+                || pathPart.startsWith('/desktop/') || pathPart.startsWith('/mobile/')
+                || pathPart.startsWith('/mini-chat/'))) {
+          pathPart = '/api' + pathPart;
+        }
+      r = window.location.origin + pathPart;
+      }
+      return r;
+    };
+    if (typeof input === 'string') {
+      input = rewriteSDKPath(input);
+    } else if (input instanceof URL) {
+      const rewritten = rewriteSDKPath(input.toString());
+      if (rewritten !== input.toString()) input = new URL(rewritten);
+    } else if (typeof Request !== 'undefined' && input instanceof Request) {
+      const rewritten = rewriteSDKPath(input.url);
+      if (rewritten !== input.url) input = new Request(rewritten, input);
+    }
+
     if (typeof input === 'string') {
       if (!shouldResolveFetchInput(input)) {
         try {
           const url = new URL(input);
           if (isActiveRuntimeServiceUrl(url)) {
             const headers = await mergeHeaders(undefined, init?.headers);
-            return nativeFetch(input, { ...init, headers });
+            return _wrappedNativeFetch(input, { ...mergedInit(input, init), headers });
           }
         } catch {
           // Non-URL fetch inputs should fall through unchanged.
         }
-        return nativeFetch(input, init);
+        return _wrappedNativeFetch(input, safeInit);
       }
+      const target = buildRuntimeFetchUrl(input);
       const headers = await mergeHeaders(undefined, init?.headers);
-      return nativeFetch(buildRuntimeFetchUrl(input), { ...init, headers });
+      return _wrappedNativeFetch(target, { ...mergedInit(input, init, target), headers });
     }
 
     if (input instanceof URL) {
@@ -257,12 +460,13 @@ export const installRuntimeFetchBridge = (): void => {
       if (!shouldResolveFetchInput(raw)) {
         if (isActiveRuntimeServiceUrl(input)) {
           const headers = await mergeHeaders(undefined, init?.headers);
-          return nativeFetch(input, { ...init, headers });
+          return _wrappedNativeFetch(input, { ...mergedInit(input, init), headers });
         }
-        return nativeFetch(input, init);
+        return _wrappedNativeFetch(input, safeInit);
       }
+      const target = buildRuntimeFetchUrl(raw);
       const headers = await mergeHeaders(undefined, init?.headers);
-      return nativeFetch(buildRuntimeFetchUrl(raw), { ...init, headers });
+      return _wrappedNativeFetch(target, { ...mergedInit(input, init, target), headers });
     }
 
     if (input instanceof Request) {
@@ -271,19 +475,19 @@ export const installRuntimeFetchBridge = (): void => {
           const url = new URL(input.url);
           if (isActiveRuntimeServiceUrl(url)) {
             const headers = await mergeHeaders(input.headers, init?.headers);
-            return nativeFetch(new Request(input, { ...init, headers }));
+            return _wrappedNativeFetch(new Request(input, { ...mergedInit(input, init), headers }));
           }
         } catch {
           // Non-URL request inputs should fall through unchanged.
         }
-        return nativeFetch(input, init);
+        return _wrappedNativeFetch(input, safeInit);
       }
       const headers = await mergeHeaders(input.headers, init?.headers);
       const target = buildRuntimeFetchUrl(input.url);
       const request = target === input.url ? input : new Request(target, input);
-      return nativeFetch(new Request(request, { ...init, headers }));
+      return _wrappedNativeFetch(new Request(request, { ...mergedInit(input, init, target), headers }));
     }
 
-    return nativeFetch(input, init);
+    return _wrappedNativeFetch(input, safeInit);
   };
 };

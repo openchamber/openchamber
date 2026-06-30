@@ -106,6 +106,20 @@ export const createSettingsHelpers = (dependencies) => {
     return fallback;
   };
 
+  const normalizeFollowUpBehavior = (value, legacyQueueModeEnabled = null) => {
+    // "immediate" was removed (it was wire-identical to "steer"); collapse it.
+    if (value === 'immediate') {
+      return 'steer';
+    }
+    if (value === 'steer' || value === 'queue') {
+      return value;
+    }
+    if (legacyQueueModeEnabled === false) {
+      return 'steer';
+    }
+    return 'queue';
+  };
+
   const sanitizeSettingsUpdate = (payload) => {
     if (!payload || typeof payload !== 'object') {
       return {};
@@ -361,8 +375,10 @@ export const createSettingsHelpers = (dependencies) => {
       const trimmed = candidate.defaultGitIdentityId.trim();
       result.defaultGitIdentityId = trimmed.length > 0 ? trimmed : undefined;
     }
-    if (typeof candidate.queueModeEnabled === 'boolean') {
-      result.queueModeEnabled = candidate.queueModeEnabled;
+    if (typeof candidate.followUpBehavior === 'string') {
+      result.followUpBehavior = normalizeFollowUpBehavior(candidate.followUpBehavior);
+    } else if (typeof candidate.queueModeEnabled === 'boolean') {
+      result.followUpBehavior = normalizeFollowUpBehavior(undefined, candidate.queueModeEnabled);
     }
     if (typeof candidate.autoCreateWorktree === 'boolean') {
       result.autoCreateWorktree = candidate.autoCreateWorktree;

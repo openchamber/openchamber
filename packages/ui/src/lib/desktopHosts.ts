@@ -2,6 +2,25 @@ import { hasDesktopInvoke, invokeDesktop } from '@/lib/desktop';
 
 type DesktopInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return typeof value === 'object' && value !== null;
+};
+
+const isReservedRequestHeaderName = (name: string): boolean => name.trim().toLowerCase() === 'authorization';
+
+const sanitizeRequestHeaders = (headers: unknown): Record<string, string> | undefined => {
+  if (!isRecord(headers)) return undefined;
+  const next: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    const name = key.trim();
+    const headerValue = typeof value === 'string' ? value.trim() : '';
+    if (!name || !headerValue || /[\r\n:]/.test(name) || /[\r\n]/.test(headerValue)) continue;
+    if (isReservedRequestHeaderName(name)) continue;
+    next[name] = headerValue;
+  }
+  return Object.keys(next).length > 0 ? next : undefined;
+};
+
 export type DesktopHost = {
   id: string;
   label: string;
@@ -11,6 +30,8 @@ export type DesktopHost = {
   apiUrl?: string;
   /** Remote client bearer token for packaged-client API access. */
   clientToken?: string;
+  /** Extra headers for desktop runtime API requests. */
+  requestHeaders?: Record<string, string>;
 };
 
 export type DesktopHostsConfig = {
@@ -135,10 +156,6 @@ export const locationMatchesHost = (locationHref: string, hostUrl: string): bool
   }
 };
 
-const isRecord = (value: unknown): value is Record<string, unknown> => {
-  return typeof value === 'object' && value !== null;
-};
-
 const readString = (obj: Record<string, unknown>, key: string): string | null => {
   const val = obj[key];
   return typeof val === 'string' ? val : null;
@@ -156,6 +173,7 @@ const parseHost = (value: unknown): DesktopHost | null => {
   const url = readString(value, 'url');
   const apiUrl = readString(value, 'apiUrl') || readString(value, 'api_url');
   const clientToken = readString(value, 'clientToken') || readString(value, 'client_token');
+  const requestHeaders = sanitizeRequestHeaders(value.requestHeaders);
   if (!id || !label || !url) return null;
   return {
     id,
@@ -163,6 +181,7 @@ const parseHost = (value: unknown): DesktopHost | null => {
     url,
     ...(apiUrl ? { apiUrl } : {}),
     ...(clientToken ? { clientToken } : {}),
+    ...(requestHeaders ? { requestHeaders } : {}),
   };
 };
 
@@ -226,13 +245,13 @@ export const desktopLocalClientTokenGet = async (): Promise<string> => {
   return typeof raw === 'string' ? raw.trim() : '';
 };
 
-export const desktopHostProbe = async (url: string, options?: { clientToken?: string | null }): Promise<HostProbeResult> => {
+export const desktopHostProbe = async (url: string, options?: { clientToken?: string | null; requestHeaders?: Record<string, string> | null }): Promise<HostProbeResult> => {
   const invoke = getInvoke();
   if (!invoke) {
     return { status: 'unreachable', latencyMs: 0 };
   }
 
-  const raw = await invoke('desktop_host_probe', { url, clientToken: options?.clientToken || undefined });
+  const raw = await invoke('desktop_host_probe', { url, clientToken: options?.clientToken || undefined, requestHeaders: options?.requestHeaders || undefined });
   if (!isRecord(raw)) {
     return { status: 'unreachable', latencyMs: 0 };
   }
@@ -247,8 +266,8 @@ export const desktopHostProbe = async (url: string, options?: { clientToken?: st
   return { status, latencyMs };
 };
 
-export const desktopOpenNewWindowAtUrl = async (url: string, options?: { clientToken?: string | null }): Promise<void> => {
+export const desktopOpenNewWindowAtUrl = async (url: string, options?: { clientToken?: string | null; requestHeaders?: Record<string, string> | null }): Promise<void> => {
   const invoke = getInvoke();
   if (!invoke) return;
-  await invoke('desktop_new_window_at_url', { url, clientToken: options?.clientToken || undefined });
+  await invoke('desktop_new_window_at_url', { url, clientToken: options?.clientToken || undefined, requestHeaders: options?.requestHeaders || undefined });
 };

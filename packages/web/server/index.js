@@ -50,7 +50,6 @@ import { createOpenCodeEnvRuntime } from './lib/opencode/env-runtime.js';
 import { resolveOpenCodeEnvConfig } from './lib/opencode/env-config.js';
 import { createHmrStateRuntime } from './lib/opencode/hmr-state-runtime.js';
 import { createOpenCodeNetworkRuntime } from './lib/opencode/network-runtime.js';
-import { createOpenCodeAuthStateRuntime } from './lib/opencode/auth-state-runtime.js';
 import { createProjectDirectoryRuntime } from './lib/opencode/project-directory-runtime.js';
 import { createSettingsNormalizationRuntime } from './lib/opencode/settings-normalization-runtime.js';
 import { createSettingsHelpers } from './lib/opencode/settings-helpers.js';
@@ -84,6 +83,7 @@ import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.j
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
 import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
+import { attachRealtimeProxy } from './lib/realtime-proxy.js';
 import { createProxyMiddleware, responseInterceptor } from 'http-proxy-middleware';
 import webPush from 'web-push';
 
@@ -95,7 +95,6 @@ const DESKTOP_NOTIFY_PREFIX = '[OpenChamberDesktopNotify] ';
 const uiNotificationClients = new Set();
 const uiNotificationWsClients = new Set();
 const uiOpenChamberEventClients = new Set();
-const HEALTH_CHECK_INTERVAL = 15000;
 const SHUTDOWN_TIMEOUT = 10000;
 const MODELS_DEV_API_URL = 'https://models.dev/api.json';
 const MODELS_METADATA_CACHE_TTL = 5 * 60 * 1000;
@@ -135,17 +134,19 @@ const SSE_PATH_PREFIXES = [
   '/api/global/event',
   '/api/notifications/stream',
   '/api/openchamber/events',
+  '/api/openchamber/realtime-proxy/sse',
 ];
 
 function shouldSkipCompression(req, res) {
+  if (process.env.OPENCHAMBER_RUNTIME === 'desktop') {
+    return true;
+  }
+
   if (headerIncludesEventStream(req.headers.accept)) {
     return true;
   }
 
   const pathname = req.path || req.url || '';
-  if ((pathname === '/api' || pathname.startsWith('/api/')) && shouldSkipApiCompression()) {
-    return true;
-  }
 
   if (pathname.startsWith('/api/terminal/') && pathname.endsWith('/stream')) {
     return true;
@@ -186,12 +187,6 @@ const isEnvFlagDisabled = (value) => {
   return normalized === '0' || normalized === 'false';
 };
 
-const shouldSkipApiCompression = () => {
-  if (isEnvFlagEnabled(process.env.OPENCHAMBER_SKIP_API_COMPRESSION)) return true;
-  if (isEnvFlagEnabled(process.env.OPENCHAMBER_COMPRESS_API)) return false;
-  if (isEnvFlagDisabled(process.env.OPENCHAMBER_COMPRESS_API)) return true;
-  return process.env.OPENCHAMBER_RUNTIME === 'desktop';
-};
 
 const OPENCHAMBER_VERBOSE_REQUEST_LOGS = isEnvFlagEnabled(process.env.OPENCHAMBER_VERBOSE_REQUEST_LOGS);
 
@@ -537,24 +532,35 @@ const ENV_DESKTOP_NOTIFY = (() => {
   const argv1 = typeof process.argv?.[1] === 'string' ? process.argv[1] : '';
   return /openchamber-server/i.test(argv0) || /openchamber-server/i.test(argv1);
 })();
-const openCodeAuthStateRuntime = createOpenCodeAuthStateRuntime({
-  crypto,
-  process,
-  getAuthPassword: () => openCodeAuthPassword,
-  setAuthPassword: (value) => {
-    openCodeAuthPassword = value;
-  },
-  getAuthSource: () => openCodeAuthSource,
-  setAuthSource: (value) => {
-    openCodeAuthSource = value;
-  },
-  getUserProvidedPassword: () => userProvidedOpenCodePassword,
-  syncToHmrState,
-});
+const getOpenCodeAuthHeaders = () => {
+  const password = typeof process.env.OPENCODE_SERVER_PASSWORD === 'string'
+    ? process.env.OPENCODE_SERVER_PASSWORD.trim()
+    : '';
+  if (!password) return {};
+  const credentials = Buffer.from(`opencode:${password}`).toString('base64');
+  return { Authorization: `Basic ${credentials}` };
+};
 
-const getOpenCodeAuthHeaders = (...args) => openCodeAuthStateRuntime.getOpenCodeAuthHeaders(...args);
-const isOpenCodeConnectionSecure = (...args) => openCodeAuthStateRuntime.isOpenCodeConnectionSecure(...args);
-const ensureLocalOpenCodeServerPassword = (...args) => openCodeAuthStateRuntime.ensureLocalOpenCodeServerPassword(...args);
+const isOpenCodeConnectionSecure = () => Boolean(process.env.OPENCODE_SERVER_PASSWORD);
+
+const ensureLocalOpenCodeServerPassword = async ({ rotateManaged = false } = {}) => {
+  const existingPassword = typeof process.env.OPENCODE_SERVER_PASSWORD === 'string'
+    ? process.env.OPENCODE_SERVER_PASSWORD.trim()
+    : '';
+  if (existingPassword && !rotateManaged) {
+    return existingPassword;
+  }
+  if (isExternalOpenCode) {
+    return null;
+  }
+  const newPassword = crypto.randomBytes(32).toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+  process.env.OPENCODE_SERVER_PASSWORD = newPassword;
+  syncToHmrState();
+  return newPassword;
+};
 
 const openCodeNetworkState = {};
 Object.defineProperties(openCodeNetworkState, {
@@ -914,7 +920,6 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   resolveManagedOpenCodeLaunchSpec,
   setOpenCodePort,
   setDetectedOpenCodeApiPrefix,
-  setupProxy: (...args) => setupProxy(...args),
   ensureOpenCodeApiPrefix,
   clearResolvedOpenCodeBinary,
   buildAugmentedPath,
@@ -927,8 +932,6 @@ const restartOpenCode = (...args) => openCodeLifecycleRuntime.restartOpenCode(..
 const waitForOpenCodeReady = (...args) => openCodeLifecycleRuntime.waitForOpenCodeReady(...args);
 const waitForAgentPresence = (...args) => openCodeLifecycleRuntime.waitForAgentPresence(...args);
 const refreshOpenCodeAfterConfigChange = (...args) => openCodeLifecycleRuntime.refreshOpenCodeAfterConfigChange(...args);
-const startHealthMonitoring = () => openCodeLifecycleRuntime.startHealthMonitoring(HEALTH_CHECK_INTERVAL);
-const triggerHealthCheck = () => openCodeLifecycleRuntime.triggerHealthCheck();
 const scheduledTasksRuntime = createScheduledTasksRuntime({
   projectConfigRuntime,
   listProjects: async () => {
@@ -974,9 +977,7 @@ const ensureGlobalWatcherStarted = async () => {
 const bootstrapOpenCodeAtStartup = async (...args) => {
   await openCodeLifecycleRuntime.bootstrapOpenCodeAtStartup(...args);
   scheduleOpenCodeApiDetection();
-  if (openCodeLifecycleState.openCodeProcess && !openCodeLifecycleState.isExternalOpenCode) {
-    startHealthMonitoring();
-  }
+  scheduleOpenCodeApiDetection();
   if (ENV_DESKTOP_NOTIFY) {
     void ensureGlobalWatcherStarted().catch((error) => {
       console.warn(`Global event watcher startup failed: ${error?.message || error}`);
@@ -989,7 +990,6 @@ const waitForPortRelease = (...args) => openCodeLifecycleRuntime.waitForPortRele
 const fetchAgentsSnapshot = (...args) => serverUtilsRuntime.fetchAgentsSnapshot(...args);
 const fetchProvidersSnapshot = (...args) => serverUtilsRuntime.fetchProvidersSnapshot(...args);
 const fetchModelsSnapshot = (...args) => serverUtilsRuntime.fetchModelsSnapshot(...args);
-const setupProxy = (...args) => serverUtilsRuntime.setupProxy(...args);
 const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   process,
   shutdownTimeoutMs: SHUTDOWN_TIMEOUT,
@@ -1087,7 +1087,29 @@ async function main(options = {}) {
   if (typeof options.getIsWindowFocused === 'function') {
     notificationTriggerRuntime.setGetIsWindowFocused(options.getIsWindowFocused);
   }
+  const getDesktopRuntimeConfig = typeof options.getDesktopRuntimeConfig === 'function'
+    ? options.getDesktopRuntimeConfig
+    : null;
 
+  // Phase E: Log installed SDK version so wire-protocol drift is visible at startup.
+  // (fs and path are already imported at the top of this module.)
+  try {
+    let dir = __dirname;
+    let sdkPkgPath = null;
+    while (dir !== path.dirname(dir)) {
+      const candidate = path.join(dir, 'node_modules', '@opencode-ai', 'sdk', 'package.json');
+      if (fs.existsSync(candidate)) { sdkPkgPath = candidate; break; }
+      dir = path.dirname(dir);
+    }
+    if (sdkPkgPath) {
+      const sdkPkg = JSON.parse(fs.readFileSync(sdkPkgPath, 'utf8'));
+      console.log(`[openchamber] SDK version: ${sdkPkg.version} (see .omo/plans/sdk-server-wire-protocol.json for wire-protocol compat)`);
+    } else {
+      console.log('[openchamber] SDK version: unknown (could not locate @opencode-ai/sdk/package.json)');
+    }
+  } catch (e) {
+    console.log('[openchamber] SDK version: unknown (' + (e.message || 'read error') + ')');
+  }
   console.log(`Starting OpenChamber on port ${port === 0 ? 'auto' : port}`);
 
   const sayTTSCapability = await detectSayTtsCapability(process);
@@ -1132,6 +1154,7 @@ async function main(options = {}) {
   }));
   expressApp = app;
   server = http.createServer(app);
+  let realtimeProxyRuntime = { stop: () => {} };
 
   const bootstrapResult = bootstrapRuntime.setupBaseRoutes(app, {
     process,
@@ -1202,6 +1225,13 @@ async function main(options = {}) {
     setAutoAcceptSession,
   });
   uiAuthController = bootstrapResult.uiAuthController;
+  realtimeProxyRuntime = attachRealtimeProxy({
+    app,
+    server,
+    getDesktopRuntimeConfig,
+    getUiAuthController: () => uiAuthController,
+    isRequestOriginAllowed,
+  });
 
   const tunnelRuntimeContext = tunnelWiringRuntime.initialize(app, port);
   const { tunnelService, startTunnelWithNormalizedRequest } = tunnelRuntimeContext;
@@ -1276,10 +1306,10 @@ async function main(options = {}) {
     terminalHeartbeatIntervalMs: TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS,
     terminalRebindWindowMs: TERMINAL_INPUT_WS_REBIND_WINDOW_MS,
     terminalMaxRebindsPerWindow: TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW,
-    setupProxy,
     scheduleOpenCodeApiDetection,
     bootstrapOpenCodeAtStartup,
-    triggerHealthCheck,
+
+    refreshOpenCodeAfterConfigChange,
     staticRoutesRuntime,
     process,
     crypto,
@@ -1312,6 +1342,96 @@ async function main(options = {}) {
   } catch (error) {
     console.warn('[ScheduledTasks] Failed to start runtime:', error?.message || error);
   }
+  // Proxy unmatched /api/* SDK requests to the OpenCode upstream.
+  // Registered AFTER all Express routes so existing OpenChamber handlers
+  // (settings, health, etc.) take priority; only unhandled /api/* paths
+  // reach this proxy. The SPA catch-all explicitly excludes /api/* paths.
+  //
+  // IMPORTANT: In Express 5, app.use() middleware runs concurrently with
+  // app.get() route handlers (not sequentially). We must explicitly skip
+  // internal OpenChamber routes to prevent the proxy from sending upstream
+  // HTML responses that override the route handler's JSON responses.
+  app.use('/api', async (req, res, next) => {
+    if (res.headersSent) return next();
+// Skip proxying for internal OpenChamber routes — these have dedicated
+// Express handlers and must not be forwarded to the OpenCode upstream.
+// We return without calling next() because in Express 5 the route handler
+// is already running concurrently and will send the response.
+// IMPORTANT: Only list paths that have ACTUAL Express handlers. Anything
+// in this list without a matching Express route will hang for 15s before the
+// proxy timeout. Paths owned by OpenCode (agent/command/skill/tool/mcp/
+// provider/path/session/etc.) MUST NOT be here — they are proxied through.
+const INTERNAL_API_PREFIXES = [
+// Filesystem + git (full prefixes — every sub-path is OpenChamber)
+'/api/fs/', '/api/git/',
+// OpenChamber config handlers (NOT OpenCode list endpoints)
+'/api/config/skills', '/api/config/themes', '/api/config/plugins',
+'/api/config/mcp', '/api/config/mcp/', '/api/config/snippets',
+'/api/config/opencode-resolution', '/api/config/settings',
+'/api/config/reload',
+// OpenChamber-managed resources (NOT OpenCode SDK endpoints)
+'/api/auth/', '/api/passkeys', '/api/session-folders',
+'/api/magic-prompts', '/api/mcp/auth',
+'/api/notifications/', '/api/tts/', '/api/version',
+'/api/system/', '/api/sessions/', '/api/projects/', '/api/push/',
+'/api/terminal/', '/api/text/', '/api/voice/', '/api/zen/',
+'/api/session-activity/', '/api/preview/', '/api/quota/',
+'/api/github/', '/api/behavior/', '/api/client-auth/',
+'/api/openchamber/', '/api/opencode/', '/api/global/event',
+];
+if (INTERNAL_API_PREFIXES.some(p => req.originalUrl.startsWith(p))) {
+return;
+}
+    try {
+      const upstreamPort = openCodePort || 4096;
+      // Strip the /api mount point so SDK paths like /api/session
+      // become /session for the OpenCode upstream, which serves
+      // paths WITHOUT the /api/ prefix.
+      const upstreamPath = req.originalUrl.replace(/^\/api(\/|$)/, '/') || '/';
+      const upstream = `http://127.0.0.1:${upstreamPort}${upstreamPath}`;
+      const authHeaders = getOpenCodeAuthHeaders();
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+      try {
+        const contentType = req.headers['content-type'] || '';
+        const forwardedHeaders = {
+          ...(Object.keys(authHeaders).length ? authHeaders : {}),
+          ...(contentType ? { 'content-type': contentType } : {}),
+        };
+        let body;
+        const bodyMethods = ['POST', 'PUT', 'PATCH'];
+        if (bodyMethods.includes(req.method) && typeof req.body === 'object' && req.body !== null) {
+          body = JSON.stringify(req.body);
+          forwardedHeaders['content-type'] = 'application/json';
+        }
+        const response = await fetch(upstream, {
+          method: req.method,
+          headers: forwardedHeaders,
+          body,
+          signal: controller.signal,
+        });
+        const responseText = await response.text();
+        const resContentType = response.headers.get('content-type') || 'application/json';
+        if (res.headersSent) return;
+        if (resContentType.includes('application/json') || resContentType.includes('text/plain')) {
+          res.status(response.status).type(resContentType).send(responseText);
+        } else {
+          res.status(response.status).send(responseText);
+        }
+      } finally {
+        clearTimeout(timeout);
+      }
+    } catch (error) {
+      if (res.headersSent) return;
+      if (error.name === 'AbortError') {
+        res.status(504).json({ error: 'OpenCode upstream timeout' });
+      } else {
+        console.warn('[API Proxy] Failed to proxy', req.originalUrl, ':', error.message);
+        res.status(502).json({ error: 'OpenCode proxy error', message: error.message });
+      }
+    }
+
+  });
 
   return {
     expressApp: app,
@@ -1327,13 +1447,22 @@ async function main(options = {}) {
     }),
     isReady: () => isOpenCodeReady,
     restartOpenCode: () => restartOpenCode(),
-    getOpenCodeProcessInfo: () => ({
-      managed: Boolean((openCodeProcess || openCodePort) && !ENV_SKIP_OPENCODE_START && !isExternalOpenCode),
-      pid: typeof openCodeProcess?.pid === 'number' ? openCodeProcess.pid : null,
-      port: openCodePort,
-    }),
+    getOpenCodeProcessInfo: () => {
+      const managed = Boolean((openCodeProcess || openCodePort) && !ENV_SKIP_OPENCODE_START && !isExternalOpenCode);
+      // Only ever expose pid/port for a server WE manage. The Electron-side
+      // killer kills by port (lsof + kill -KILL), so returning a port we don't
+      // own — e.g. an external/desktop OpenCode on 4096 we attached to — would
+      // let a single miscomputed `managed` flag take down the user's separate
+      // server. Structurally withhold what isn't ours so the killer has no
+      // target, instead of relying on the flag check alone.
+      return {
+        managed,
+        pid: managed && typeof openCodeProcess?.pid === 'number' ? openCodeProcess.pid : null,
+        port: managed ? openCodePort : null,
+      };
+    },
     stop: (shutdownOptions = {}) =>
-      gracefulShutdown({ exitProcess: shutdownOptions.exitProcess ?? false })
+      gracefulShutdown({ exitProcess: shutdownOptions.exitProcess ?? false }),
   };
 }
 
@@ -1352,7 +1481,6 @@ runCliEntryIfMain({
 
 export {
   gracefulShutdown,
-  setupProxy,
   restartOpenCode,
   main as startWebUiServer,
   parseServeCliOptions as parseArgs,
