@@ -716,6 +716,33 @@ export async function optimisticSend(input: {
         message: resolved.info,
         parts: resolved.parts,
       })
+
+      // _optimisticAdd only inserts a message that is not already in the
+      // store (binary search by id). The optimistic placeholder we just
+      // inserted has the same id, so resolved.info itself is never stored
+      // — only resolved.parts. Patch the existing message in place so
+      // message-level fields the server canonicalizes (agent, system,
+      // model, time, metadata) reflect the real values (#1949 review).
+      const resolvedInfo = resolved.info
+      const currentMessages = store.getState().message[input.sessionId]
+      if (Array.isArray(currentMessages)) {
+        const index = currentMessages.findIndex((m) => m.id === resolvedInfo.id)
+        if (index >= 0) {
+          const existing = currentMessages[index]
+          const patched = {
+            ...existing,
+            ...resolvedInfo,
+            id: existing.id,
+            sessionID: existing.sessionID,
+            role: existing.role,
+          } as Message
+          const nextMessages = currentMessages.slice()
+          nextMessages[index] = patched
+          store.setState({
+            message: { ...store.getState().message, [input.sessionId]: nextMessages },
+          })
+        }
+      }
     }
   } catch (error) {
     // Rollback via optimistic infrastructure
