@@ -56,6 +56,9 @@ import {
   forkFromMessage as forkFromMessageAction,
   fetchMessagesForSession,
 } from "./session-actions"
+import { toast } from "sonner"
+import { formatMessage, useI18nStore } from "@/lib/i18n/store"
+import { removeProjectWorktree } from "@/lib/worktrees/worktreeManager"
 import { useInputStore, type SyntheticContextPart } from "./input-store"
 import { useSelectionStore } from "./selection-store"
 import { getViewportSessionMemory, useViewportStore, viewportSessionKey } from "./viewport-store"
@@ -1250,8 +1253,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // revertToMessage handles the redo stack push internally
     await get().revertToMessage(sessionId, targetMessage.id)
 
-    const { toast } = await import("sonner")
-    const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
     const { dictionary } = useI18nStore.getState()
     toast.success(formatMessage(dictionary, "chat.revert.toast.undo", { preview }))
   },
@@ -1261,10 +1262,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   handleSlashRedo: async (sessionId, options) => {
     if (options?.fullUnrevert) {
-      const { unrevertSession } = await import("./session-actions")
-      await unrevertSession(sessionId)
-      const { toast } = await import("sonner")
-      const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
+      await unrevertSessionAction(sessionId)
       const { dictionary } = useI18nStore.getState()
       toast.success(formatMessage(dictionary, "chat.revert.toast.restored"))
       return
@@ -1282,16 +1280,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     if (targetMessage) {
       await get().revertToMessage(sessionId, targetMessage.id, { skipRedoPush: true })
-      const { toast } = await import("sonner")
-      const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
       const { dictionary } = useI18nStore.getState()
       toast.success(formatMessage(dictionary, "chat.revert.toast.redo"))
       return
     }
 
     await unrevertSessionAction(sessionId)
-    const { toast } = await import("sonner")
-    const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
     const { dictionary } = useI18nStore.getState()
     toast.success(formatMessage(dictionary, "chat.revert.toast.restored"))
   },
@@ -1307,11 +1301,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     try {
       await forkFromMessageAction(sessionId, messageId)
 
-      const { toast } = await import("sonner")
       toast.success(`Forked from ${existingSession.title}`)
     } catch (error) {
       console.error("Failed to fork session:", error)
-      const { toast } = await import("sonner")
       toast.error("Failed to fork session")
     }
   },
@@ -1404,7 +1396,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const session = await get().createSession(undefined, sessionDirectory || null, null)
     if (!session) {
       if (createdWorktree && createdWorktreeProject) {
-        const { removeProjectWorktree } = await import("@/lib/worktrees/worktreeManager")
         await removeProjectWorktree(createdWorktreeProject, createdWorktree, { deleteLocalBranch: true }).catch(() => undefined)
       }
       return
