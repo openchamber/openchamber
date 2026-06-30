@@ -19,6 +19,7 @@ import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Icon } from "@/components/icon/Icon";
+import { getSessionStatusMarker } from '../sessionStatusMarker';
 import { buildExportFilename, downloadAsMarkdown, formatSessionAsMarkdown, getExportRevealLabelKey, revealExportedMarkdown, saveAsMarkdownDesktop } from '@/lib/exportSession';
 import type { ChildSessionExport } from '@/lib/exportSession';
 import { buildSessionMessageRecordsSnapshot, useDirectoryStore, useGlobalSessionStatus, useSessionPermissions, useSessionQuestions } from '@/sync/sync-context';
@@ -567,35 +568,27 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     );
   }
 
-  const statusType = sessionStatus?.type ?? 'idle';
-  const isStreaming = statusType === 'busy' || statusType === 'retry';
   const pendingPermissionCount = sessionPermissions.length;
   const pendingQuestionCount = sessionQuestions.length;
-  const hasPendingWait = pendingPermissionCount > 0 || pendingQuestionCount > 0;
-  const showUnreadStatus = !isStreaming && needsAttention && !isActive;
-  const showStatusMarker = hasPendingWait || isStreaming || showUnreadStatus;
-  const statusMarkerLabel = hasPendingWait
-    ? pendingPermissionCount > 0
-      ? t('sessions.sidebar.session.status.permissionRequired')
-      : t('chat.toolPart.awaitingResponse')
-    : isStreaming
-      ? t('sessions.sidebar.session.status.active')
-      : hasUnseenError
-        ? t('sessions.sidebar.session.status.unreadError')
-        : t('sessions.sidebar.session.status.unread');
-  const statusMarkerContent = (
+  const statusMarker = getSessionStatusMarker({
+    statusType: sessionStatus?.type,
+    pendingPermissionCount,
+    pendingQuestionCount,
+    showUnread: needsAttention && !isActive,
+    hasUnseenError,
+  });
+  const showStatusMarker = statusMarker !== null;
+  const statusMarkerLabel = statusMarker ? t(statusMarker.labelKey) : undefined;
+  const statusMarkerContent = statusMarker ? (
     <span
       className={cn(
         'h-1.5 w-1.5 rounded-full',
-        hasPendingWait && 'bg-status-warning',
-        !hasPendingWait && isStreaming && 'bg-status-info animate-busy-pulse',
-        !hasPendingWait && !isStreaming && hasUnseenError && 'bg-status-error',
-        !hasPendingWait && !isStreaming && !hasUnseenError && 'bg-status-success',
+        statusMarker.className,
       )}
       aria-label={statusMarkerLabel}
       title={statusMarkerLabel}
     />
-  );
+  ) : null;
   const hideLeadingIndicatorOnHover = !alwaysShowActions && hasChildren && (showStatusMarker || isPinnedSession);
   const showPinnedMarker = isPinnedSession && !showStatusMarker;
   const pinnedMarkerContent = (
