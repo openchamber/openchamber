@@ -93,6 +93,7 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
   const disconnect = useMcpStore((state) => state.disconnect);
   const mcpServers = useMcpConfigStore((state) => state.mcpServers);
   const loadMcpConfigs = useMcpConfigStore((state) => state.loadMcpConfigs);
+  const updateMcp = useMcpConfigStore((state) => state.updateMcp);
 const configByName = React.useMemo(() => new Map(mcpServers.map((s) => [s.name, s])), [mcpServers]);
   const [isSpinning, setIsSpinning] = React.useState(false);
   const [busyName, setBusyName] = React.useState<string | null>(null);
@@ -228,11 +229,19 @@ React.useEffect(() => {
                 onCheckedChange={async (checked) => {
                   setBusyName(serverName);
                   try {
-                    if (checked) {
+                    if (configEntry) {
+                      // Config-managed server: toggle via config PATCH
+                      await updateMcp(serverName, { enabled: checked });
+                      await loadMcpConfigs({ force: true });
+                    } else if (checked) {
                       await connect(serverName, directory);
                     } else {
                       await disconnect(serverName, directory);
                     }
+                  } catch {
+                    // Toggle failed — refresh to restore actual state
+                    await loadMcpConfigs({ force: true }).catch(() => {});
+                    await refresh({ directory, silent: true }).catch(() => {});
                   } finally {
                     setBusyName(null);
                   }
@@ -267,7 +276,7 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
   const disconnect = useMcpStore((state) => state.disconnect);
   const mcpServers = useMcpConfigStore((state) => state.mcpServers);
   const loadMcpConfigs = useMcpConfigStore((state) => state.loadMcpConfigs);
-const configByName = React.useMemo(() => new Map(mcpServers.map((s) => [s.name, s])), [mcpServers]);
+  const updateMcp = useMcpConfigStore((state) => state.updateMcp);
 
   const handleDropdownOpenChange = React.useCallback((isOpen: boolean) => {
     if (!isOpen) {
@@ -320,11 +329,21 @@ const configByName = React.useMemo(() => new Map(mcpServers.map((s) => [s.name, 
     e?.preventDefault();
     if (isSpinning) return;
     setIsSpinning(true);
+
     const minSpinPromise = new Promise(resolve => setTimeout(resolve, 500));
     Promise.all([refresh({ directory }), minSpinPromise]).finally(() => {
       setIsSpinning(false);
     });
   }, [isSpinning, refresh, directory]);
+
+  // Config lookup for the header dropdown icon
+  const configByName = React.useMemo(() => {
+    const map = new Map<string, { name: string; enabled: boolean }>();
+    for (const server of mcpServers) {
+      if (server?.name) map.set(server.name, { name: server.name, enabled: server.enabled });
+    }
+    return map;
+  }, [mcpServers]);
 
   const renderServerList = () => (
     <>
@@ -334,7 +353,11 @@ const configByName = React.useMemo(() => new Map(mcpServers.map((s) => [s.name, 
         const tone = statusTone(serverStatus);
         const isConnected = configEntry ? configEntry.enabled : serverStatus?.status === 'connected';
         const isBusy = busyName === serverName;
-        const tooltip = statusTooltip(serverStatus, t);
+        const tooltip = serverStatus
+          ? statusTooltip(serverStatus, t)
+          : configEntry?.enabled
+            ? t('mcpDropdown.status.configured', 'Configured')
+            : t('mcpDropdown.status.notConnected', 'Not connected');
 
         return (
           <div
@@ -384,11 +407,17 @@ const configByName = React.useMemo(() => new Map(mcpServers.map((s) => [s.name, 
               onCheckedChange={async (checked) => {
                 setBusyName(serverName);
                 try {
-                  if (checked) {
+                  if (configEntry) {
+                    await updateMcp(serverName, { enabled: checked });
+                    await loadMcpConfigs({ force: true });
+                  } else if (checked) {
                     await connect(serverName, directory);
                   } else {
                     await disconnect(serverName, directory);
                   }
+                } catch {
+                  await loadMcpConfigs({ force: true }).catch(() => {});
+                  await refresh({ directory, silent: true }).catch(() => {});
                 } finally {
                   setBusyName(null);
                 }
