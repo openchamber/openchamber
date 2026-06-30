@@ -252,15 +252,9 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
   const rewrittenInput = rewriteOpenChamberInternalUrl(input);
   // SDK 1.17.7 calls paths that don't exist on server 1.17.9 (returns SPA HTML).
   // Rewrite the SDK's expected paths to the server's actual paths.
-  const sdkRewrittenInput = (() => {
-    const raw = typeof rewrittenInput === 'string'
-      ? rewrittenInput
-      : rewrittenInput instanceof URL
-        ? rewrittenInput.toString()
-        : rewrittenInput.url;
-    let r = raw;
-    return rewrittenInput;
-})();
+  const sdkRewrittenInput = typeof rewrittenInput === "string" || rewrittenInput instanceof URL
+    ? (typeof rewrittenInput === "string" ? rewrittenInput : rewrittenInput.toString())
+    : rewrittenInput.url;
   const resolvedInput = resolveRuntimeFetchInput(sdkRewrittenInput, query);
   const inputHeaders = resolvedInput instanceof Request ? resolvedInput.headers : undefined;
   const headers = await mergeHeaders(inputHeaders, requestInit.headers, shouldAttachRuntimeAuth(resolvedInput));
