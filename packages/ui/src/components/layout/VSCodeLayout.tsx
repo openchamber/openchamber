@@ -347,6 +347,7 @@ export const VSCodeLayout: React.FC = () => {
       const detail = (event as CustomEvent<{ view?: string }>).detail;
       const view = detail?.view;
       if (view === 'settings') {
+        useUIStore.getState().setSettingsPage('home');
         setCurrentView('settings');
       } else if (view === 'chat') {
         setCurrentView('chat');
