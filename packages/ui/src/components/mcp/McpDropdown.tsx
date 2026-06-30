@@ -356,8 +356,8 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
         const tooltip = serverStatus
           ? statusTooltip(serverStatus, t)
           : configEntry?.enabled
-            ? t('mcpDropdown.status.configured', 'Configured')
-            : t('mcpDropdown.status.notConnected', 'Not connected');
+            ? t('mcpDropdown.status.configured')
+            : t('mcpDropdown.status.notConnected');
 
         return (
           <div
