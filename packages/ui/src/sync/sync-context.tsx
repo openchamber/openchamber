@@ -1883,6 +1883,12 @@ export function SyncProvider(props: {
   // Event pipeline — created once per mount. No class, no start/stop.
   // Abort controller owned by the pipeline closure. Cleanup aborts + flushes.
   useEffect(() => {
+    // Stamp the pipeline lifecycle start for the warmup guard (#1769).
+    // Set before createEventPipeline so the anchor is in place for any
+    // early isWarmupGuarded() read. The cleanup resets transportConnectedAt
+    // and the next effect body re-stamps transportMountedAt on remount.
+    useConfigStore.getState().setTransportMountedAt(Date.now())
+
     const pipeline = createEventPipeline({
       sdk: props.sdk,
       transport: messageStreamTransport,
@@ -1909,10 +1915,14 @@ export function SyncProvider(props: {
         handleEvent(directory, payload, childStores, routingIndex)
       },
       onReconnect: () => {
+        // Atomic single store write: connected fields + transport marker
+        // for the warmup-guard (see #1769).
         useConfigStore.setState({
           isConnected: true,
           hasEverConnected: true,
           connectionPhase: "connected",
+          hasEverConnectedSince: Date.now(),
+          transportConnectedAt: Date.now(),
         })
         const isFirstConnect = !pipelineHasConnectedRef.current
         pipelineHasConnectedRef.current = true
@@ -1944,6 +1954,8 @@ export function SyncProvider(props: {
           isConnected: true,
           hasEverConnected: true,
           connectionPhase: "connected",
+          hasEverConnectedSince: Date.now(),
+          transportConnectedAt: Date.now(),
         })
         for (const dir of childStores.children.keys()) {
           triggerDirectoryResync(dir, "transport-switch")
@@ -1956,6 +1968,14 @@ export function SyncProvider(props: {
         pipelineReconnectRef.current = null
       }
       pipeline.cleanup()
+      // Reset the transport marker so the next pipeline lifecycle starts
+      // in the warmup-guarded state. Without this, a stale timestamp from
+      // the previous lifecycle causes probeConnection to bypass the guard.
+      // `transportMountedAt` bounds the warmup window (see #1769 and
+      // `isWarmupGuarded` in useConfigStore).
+      const configStore = useConfigStore.getState()
+      configStore.setTransportConnectedAt(null)
+      configStore.setTransportMountedAt(Date.now())
     }
   }, [props.sdk, childStores, routingIndex, messageStreamTransport, triggerDirectoryResync])
 

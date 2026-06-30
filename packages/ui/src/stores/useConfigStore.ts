@@ -688,6 +688,12 @@ const ensureModelsMetadataFetch = (
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const CONNECTION_PROBE_TIMEOUT_MS = 800;
+// Maximum time the warmup guard stays active in a single pipeline
+// lifecycle. If the SSE/WS pipeline has not reported a successful
+// `onReconnect` within this window, the guard releases so a genuinely
+// dead server surfaces `reconnecting` instead of staying stuck on
+// `connecting`. See issue #1769.
+const WARMUP_GUARD_MAX_MS = 30_000;
 
 const probeOpenCodeHealth = async (timeoutMs = CONNECTION_PROBE_TIMEOUT_MS): Promise<boolean> => {
     return Promise.race([
@@ -971,6 +977,26 @@ interface ConfigStore {
     hasEverConnected: boolean;
     connectionPhase: "connecting" | "connected" | "reconnecting";
     lastDisconnectReason: string | null;
+    // Timestamp of the last `onReconnect` / `onTransportSwitch` from the
+    // SSE/WS event pipeline in the current lifecycle. `null` means the
+    // pipeline has not yet reported a successful connect in this lifecycle.
+    // Used by `probeConnection` to distinguish a genuine transport
+    // disconnect from a probe failure during cold-start / warmup, which
+    // would otherwise flash `reconnecting` even though the stream is
+    // healthy. See issue #1769.
+    transportConnectedAt: number | null;
+    // Timestamp of when the current pipeline lifecycle started (set in the
+    // `SyncProvider` effect cleanup alongside `transportConnectedAt` reset
+    // to `null`). Bounded by `WARMUP_GUARD_MAX_MS`: once the warmup window
+    // has elapsed without the pipeline reporting a successful connect, the
+    // warmup guard is released so a genuinely dead server surfaces
+    // `reconnecting` rather than staying stuck on `connecting`. See #1769.
+    transportMountedAt: number | null;
+    // Timestamp of when `hasEverConnected` was set true. Used as a fallback
+    // anchor for the warmup-guard timeout when the pipeline effect has
+    // not yet run its cleanup (initial mount), so the guard does not stay
+    // active forever if the SSE/WS transport is broken while HTTP is up.
+    hasEverConnectedSince: number | null;
     isInitialized: boolean;
     modelsMetadata: Map<string, ModelMetadata>;
     // OpenChamber settings-based defaults (take precedence over agent preferences)
@@ -1077,6 +1103,38 @@ interface ConfigStore {
     getAgentModelSelection: (agentName: string) => { providerId: string; modelId: string } | null;
     probeConnection: (options?: { timeoutMs?: number }) => Promise<boolean>;
     checkConnection: () => Promise<boolean>;
+    // Marks the SSE/WS event pipeline as connected in the current lifecycle.
+    // Called from sync-context `onReconnect` and `onTransportSwitch`. This
+    // timestamp lets the connection probes distinguish a genuine transport
+    // disconnect from a probe failure during cold-start / warmup, which
+    // would otherwise flash `reconnecting` even though the stream is
+    // healthy. See issue #1769.
+    setTransportConnectedAt: (ts: number | null) => void;
+    // Marks the start of the current pipeline lifecycle. Called from the
+    // `SyncProvider` effect cleanup when a new pipeline lifecycle begins.
+    // Combined with `setTransportConnectedAt(null)` it bounds the warmup
+    // window (see `WARMUP_GUARD_MAX_MS` and `isWarmupGuarded`). See #1769.
+    setTransportMountedAt: (ts: number | null) => void;
+    // Atomic "we have a successful connect" update. Stamps
+    // `hasEverConnectedSince` for the warmup-guard timeout anchor and
+    // sets `isConnected` / `hasEverConnected` / `connectionPhase` in one
+    // store write. Use this from every code path that transitions to
+    // `connected` (probe, check, init). See #1769.
+    setConnected: () => void;
+    // Selector: `true` when `hasEverConnected` is true (carried over from a
+    // previous lifecycle) but the SSE/WS pipeline has not yet reported its
+    // first `onReconnect` in the current one. In that window the connection
+    // probes and `initializeApp` defer to the pipeline instead of
+    // overwriting `connectionPhase` with `reconnecting` based on a transient
+    // HTTP failure. See issue #1769.
+    isWarmupGuarded: () => boolean;
+    // Shared state update for warmup-guarded disconnect. All call sites
+    // (`probeConnection`, `checkConnection`, `initializeApp`) use this to
+    // keep the warmup-guarded disconnect shape identical: `connecting`
+    // (not `reconnecting`), `isConnected: false`, and an optional
+    // `lastDisconnectReason` for the user-facing `connectionLostError`
+    // in `session-actions.ts`. See issue #1769.
+    setWarmupGuardedDisconnect: (reason?: string) => void;
     initializeApp: () => Promise<void>;
     prewarmProjectConfigs: (initialDirectory?: string | null) => Promise<void>;
     getCurrentProvider: () => ProviderWithModelList | undefined;
@@ -1120,6 +1178,9 @@ export const useConfigStore = create<ConfigStore>()(
                 hasEverConnected: false,
                 connectionPhase: "connecting",
                 lastDisconnectReason: null,
+                transportConnectedAt: null,
+                transportMountedAt: null,
+                hasEverConnectedSince: null,
                 isInitialized: false,
                 modelsMetadata: new Map<string, ModelMetadata>(),
                 settingsDefaultModel: undefined,
@@ -3012,7 +3073,7 @@ export const useConfigStore = create<ConfigStore>()(
                 probeConnection: async (options?: { timeoutMs?: number }) => {
                     const isHealthy = await probeOpenCodeHealth(options?.timeoutMs);
                     if (isHealthy) {
-                        set({ isConnected: true, hasEverConnected: true, connectionPhase: "connected" });
+                        get().setConnected();
                         return true;
                     }
 
@@ -3021,12 +3082,77 @@ export const useConfigStore = create<ConfigStore>()(
                         return true;
                     }
 
+                    // Issue #1769: a probe failure must not flip `connectionPhase`
+                    // to `reconnecting` while the SSE/WS pipeline is in cold-start
+                    // / warmup of a new lifecycle (i.e. it has not yet reported a
+                    // successful `onReconnect` in this lifecycle). After a reload,
+                    // `hasEverConnected` is already true (from the previous
+                    // lifecycle), so the unconditional branch below would otherwise
+                    // surface a transient HTTP failure during `createSession`
+                    // bootstrap as a spurious "reconnecting" indicator flicker,
+                    // even though the stream is healthy. Only the pipeline itself
+                    // knows about a genuine transport disconnect, and it will set
+                    // `connectionPhase` itself via `onDisconnect`.
+                    if (get().isWarmupGuarded()) {
+                        markStartupTrace('probeConnection:warmupGuarded');
+                        get().setWarmupGuardedDisconnect('health_check_unhealthy');
+                        return false;
+                    }
+
                     set({
                         isConnected: false,
                         connectionPhase: state.hasEverConnected ? "reconnecting" : "connecting",
-                        lastDisconnectReason: 'health_probe_unhealthy',
+                        lastDisconnectReason: 'health_check_unhealthy',
                     });
                     return false;
+                },
+
+                setTransportConnectedAt: (ts: number | null) => {
+                    if (get().transportConnectedAt === ts) return;
+                    set({ transportConnectedAt: ts });
+                },
+
+                setTransportMountedAt: (ts: number | null) => {
+                    if (get().transportMountedAt === ts) return;
+                    set({ transportMountedAt: ts });
+                },
+
+                setConnected: () => {
+                    set({
+                        isConnected: true,
+                        hasEverConnected: true,
+                        connectionPhase: 'connected',
+                        hasEverConnectedSince: Date.now(),
+                    });
+                },
+
+                isWarmupGuarded: () => {
+                    const s = get();
+                    if (!s.hasEverConnected || s.transportConnectedAt !== null) return false;
+                    // Bound the warmup window: if the pipeline has not
+                    // reported a successful connect within WARMUP_GUARD_MAX_MS
+                    // of the current lifecycle starting, release the guard so
+                    // a genuinely dead server surfaces `reconnecting` rather
+                    // than staying stuck on `connecting`. `transportMountedAt`
+                    // is the primary anchor; `hasEverConnectedSince` is a
+                    // fallback for the initial mount (where the effect
+                    // cleanup that sets `transportMountedAt` has not yet
+                    // run). See issue #1769.
+                    const guardStart = s.transportMountedAt ?? s.hasEverConnectedSince;
+                    if (guardStart !== null && Date.now() - guardStart > WARMUP_GUARD_MAX_MS) return false;
+                    return true;
+                },
+                setWarmupGuardedDisconnect: (reason?: string) => {
+                    // If `reason` is not provided, preserve any existing
+                    // `lastDisconnectReason` from a prior failure (e.g. an
+                    // exhaust path that already set it) so we do not silently
+                    // overwrite a more specific reason with a less specific
+                    // one. See issue #1769.
+                    set({
+                        isConnected: false,
+                        connectionPhase: 'connecting',
+                        ...(reason ? { lastDisconnectReason: reason } : {}),
+                    });
                 },
 
                 checkConnection: async () => {
@@ -3034,6 +3160,16 @@ export const useConfigStore = create<ConfigStore>()(
                     const maxAttempts = 5;
                     let attempt = 0;
                     let lastError: unknown = null;
+
+                    // Issue #1769: during a fresh lifecycle (right after a reload
+                    // or pipeline re-mount), `hasEverConnected` may already be true
+                    // (store hydration), but the SSE/WS pipeline has not yet
+                    // reported its first `onReconnect`, so the warmup guard is
+                    // active. In that window a transient HTTP health failure
+                    // would otherwise surface as a spurious `reconnecting` flicker
+                    // even though the stream is healthy. Only the pipeline itself
+                    // is the authoritative source for a real transport disconnect,
+                    // and it sets `connectionPhase` itself via `onDisconnect`.
 
                     while (attempt < maxAttempts) {
                         try {
@@ -3044,25 +3180,33 @@ export const useConfigStore = create<ConfigStore>()(
                                 { attempt: attempt + 1 },
                             );
                             if (!isHealthy && attempt < maxAttempts - 1) {
+                                if (get().isWarmupGuarded()) {
+                                    get().setWarmupGuardedDisconnect('health_check_unhealthy');
+                                } else {
+                                    const hasEverConnected = get().hasEverConnected;
+                                    set({
+                                        isConnected: false,
+                                        connectionPhase: hasEverConnected ? "reconnecting" : "connecting",
+                                        lastDisconnectReason: 'health_check_unhealthy',
+                                    });
+                                }
+                                attempt += 1;
+                                await sleep(400 * attempt);
+                                continue;
+                            }
+
+                            if (isHealthy) {
+                                get().setConnected();
+                            } else if (get().isWarmupGuarded()) {
+                                get().setWarmupGuardedDisconnect('health_check_unhealthy');
+                            } else {
                                 const hasEverConnected = get().hasEverConnected;
                                 set({
                                     isConnected: false,
                                     connectionPhase: hasEverConnected ? "reconnecting" : "connecting",
                                     lastDisconnectReason: 'health_check_unhealthy',
                                 });
-                                attempt += 1;
-                                await sleep(400 * attempt);
-                                continue;
                             }
-
-                            const hasEverConnected = get().hasEverConnected;
-                            set(isHealthy
-                                ? { isConnected: true, hasEverConnected: true, connectionPhase: "connected" }
-                                : {
-                                    isConnected: false,
-                                    connectionPhase: hasEverConnected ? "reconnecting" : "connecting",
-                                    lastDisconnectReason: 'health_check_unhealthy',
-                                });
                             markStartupTrace('checkConnection:end', { healthy: isHealthy, attempts: attempt + 1 });
                             return isHealthy;
                         } catch (error) {
@@ -3076,11 +3220,15 @@ export const useConfigStore = create<ConfigStore>()(
                     if (lastError) {
                         console.warn("[ConfigStore] Failed to reach OpenCode after retrying:", lastError);
                     }
-                    set({
-                        isConnected: false,
-                        connectionPhase: get().hasEverConnected ? "reconnecting" : "connecting",
-                        lastDisconnectReason: 'health_check_failed',
-                    });
+                    if (get().isWarmupGuarded()) {
+                        get().setWarmupGuardedDisconnect('health_check_failed');
+                    } else {
+                        set({
+                            isConnected: false,
+                            connectionPhase: get().hasEverConnected ? "reconnecting" : "connecting",
+                            lastDisconnectReason: 'health_check_failed',
+                        });
+                    }
                     markStartupTrace('checkConnection:end', { healthy: false, attempts: maxAttempts });
                     return false;
                 },
@@ -3103,11 +3251,21 @@ export const useConfigStore = create<ConfigStore>()(
 
                             if (!isConnected) {
                                 if (debug) console.log("Server not connected");
-                                // checkConnection already set lastDisconnectReason; do not overwrite.
-                                set({
-                                    isConnected: false,
-                                    connectionPhase: get().hasEverConnected ? "reconnecting" : "connecting",
-                                });
+                                // Apply the same warmup guard (#1769) as in
+                                // `checkConnection`: do not flip to "reconnecting"
+                                // while the pipeline has not yet reported its
+                                // first connect in this lifecycle. Otherwise a
+                                // transient HTTP failure during the new pipeline's
+                                // bootstrap would surface the very flicker this
+                                // fix is meant to prevent.
+                                if (get().isWarmupGuarded()) {
+                                    get().setWarmupGuardedDisconnect();
+                                } else {
+                                    set({
+                                        isConnected: false,
+                                        connectionPhase: get().hasEverConnected ? "reconnecting" : "connecting",
+                                    });
+                                }
                                 return;
                             }
 
@@ -3136,7 +3294,13 @@ export const useConfigStore = create<ConfigStore>()(
                             const configDirectory = resolvedInitialDirectory ?? getFallbackProjectDirectory();
                             if (!configDirectory) {
                                 markStartupTrace('initializeApp:noProjectConfigDirectory');
-                                set({ isInitialized: true, isConnected: true, hasEverConnected: true, connectionPhase: "connected" });
+                                set({
+                                    isInitialized: true,
+                                    isConnected: true,
+                                    hasEverConnected: true,
+                                    connectionPhase: 'connected',
+                                    hasEverConnectedSince: Date.now(),
+                                });
                                 return;
                             }
                             if (!resolvedInitialDirectory && initialDirectory !== configDirectory) {
@@ -3158,7 +3322,13 @@ export const useConfigStore = create<ConfigStore>()(
                                 get().loadAgents({ directory: configDirectory, source: 'initializeApp' }),
                             ]);
 
-                            set({ isInitialized: true, isConnected: true, hasEverConnected: true, connectionPhase: "connected" });
+                            set({
+                                isInitialized: true,
+                                isConnected: true,
+                                hasEverConnected: true,
+                                connectionPhase: 'connected',
+                                hasEverConnectedSince: Date.now(),
+                            });
                             void get().prewarmProjectConfigs(configDirectory);
                             const initEnded = typeof performance !== 'undefined' ? performance.now() : Date.now();
                             markStartupTrace('initializeApp:end', {
@@ -3169,12 +3339,32 @@ export const useConfigStore = create<ConfigStore>()(
                             if (debug) console.log("App initialized successfully");
                         } catch (error) {
                             console.error("Failed to initialize app:", error);
-                            set({
-                                isInitialized: false,
-                                isConnected: false,
-                                connectionPhase: get().hasEverConnected ? "reconnecting" : "connecting",
-                                lastDisconnectReason: 'init_error',
-                            });
+                            // Apply the same warmup guard (#1769) as the other
+                            // disconnect paths: do not flip to "reconnecting"
+                            // while the pipeline has not yet reported its
+                            // first connect in this lifecycle. Otherwise a
+                            // transient `loadProviders` / `loadAgents` failure
+                            // during the new pipeline's bootstrap would
+                            // surface the very flicker this fix prevents.
+                            // The warmup-guarded branch also clears
+                            // `isInitialized` because `setWarmupGuardedDisconnect`
+                            // does not touch it, and a re-initialized lifecycle
+                            // must not show stale initialized data.
+                            if (get().isWarmupGuarded()) {
+                                set({
+                                    isInitialized: false,
+                                    isConnected: false,
+                                    connectionPhase: 'connecting',
+                                    lastDisconnectReason: 'init_error',
+                                });
+                            } else {
+                                set({
+                                    isInitialized: false,
+                                    isConnected: false,
+                                    connectionPhase: get().hasEverConnected ? "reconnecting" : "connecting",
+                                    lastDisconnectReason: 'init_error',
+                                });
+                            }
                             markStartupTrace('initializeApp:error', { error: error instanceof Error ? error.message : String(error) });
                         }
                     })().finally(() => {
