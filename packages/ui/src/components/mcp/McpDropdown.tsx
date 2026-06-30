@@ -113,6 +113,24 @@ const configByName = React.useMemo(() => new Map(mcpServers.map((s) => [s.name, 
     ]);
   }, [active, refresh, directory, loadMcpConfigs]);
 
+React.useEffect(() => {
+    if (!active) return;
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void refresh({ directory, silent: true });
+      }
+    };
+    const handleFocus = () => {
+      void refresh({ directory, silent: true });
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [active, refresh, directory]);
+
   const sortedNames = React.useMemo(() => {
     const names = new Set<string>(Object.keys(status));
     for (const server of mcpServers) {
