@@ -136,6 +136,13 @@ Merge signal in plain English: safe to merge, safe after a small fix, or not saf
 Explain the reason in a short paragraph. If there are findings, name the files that need attention.
 </details>
 
+<details open><summary><h3>Risk Score: X/5</h3></summary>
+
+1 is low risk (isolated, reversible, well-contained change), 5 is high risk (touches security, data persistence, shared state, build/release, or broad cross-runtime contracts).
+
+Explain the score in a short paragraph: which risk dimensions apply (correctness, data loss, security/supply-chain, performance, cross-runtime parity) and what makes the change more or less risky.
+</details>
+
 <details><summary><h3>Findings</h3></summary>
 
 If there are findings, list them like this:
