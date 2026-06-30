@@ -156,6 +156,7 @@ export const dict: Record<I18nKey, string> = {
   'layout.rightSidebar.files': '檔案',
   'layout.rightSidebar.context': '上下文',
   'layout.services.instance': '實例',
+  'layout.services.pluginStatus': 'Plugin Status',
   'layout.services.usage': '用量',
   'sessions.sidebar.header.actions.closeSessions': '關閉會話',
   'sessions.sidebar.header.actions.addProject': '新增專案',
