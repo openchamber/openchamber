@@ -118,4 +118,44 @@ describe('safeStorage', () => {
             }
         }
     });
+
+    test('defers direct storage writes and flushes on pagehide', async () => {
+        const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+        const backingStorage = createFakeStorage();
+        const listeners = new Map<string, Array<() => void>>();
+        const fakeWindow = {
+            localStorage: backingStorage,
+            sessionStorage: createFakeStorage(),
+            addEventListener: (event: string, listener: () => void) => {
+                listeners.set(event, [...(listeners.get(event) ?? []), listener]);
+            },
+        };
+
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: fakeWindow,
+        });
+
+        try {
+            const { getDeferredSafeStorage } = await importSafeStorage();
+            const storage = getDeferredSafeStorage();
+
+            storage.setItem('direct-k', 'direct-v');
+
+            expect(backingStorage.getItem('direct-k')).toBeNull();
+            expect(storage.getItem('direct-k')).toBe('direct-v');
+
+            for (const listener of listeners.get('pagehide') ?? []) {
+                listener();
+            }
+
+            expect(backingStorage.getItem('direct-k')).toBe('direct-v');
+        } finally {
+            if (previousWindow) {
+                Object.defineProperty(globalThis, 'window', previousWindow);
+            } else {
+                delete (globalThis as { window?: unknown }).window;
+            }
+        }
+    });
 });
