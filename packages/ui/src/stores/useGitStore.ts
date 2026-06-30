@@ -7,7 +7,7 @@ import type {
   GitLogResponse,
   GitIdentitySummary,
 } from '@/lib/api/types';
-import { getSafeStorage } from '@/stores/utils/safeStorage';
+import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 
 const LOG_STALE_THRESHOLD = 10000;
 const REPO_CHECK_STALE_THRESHOLD = 60_000;
@@ -155,7 +155,7 @@ const GIT_BRANCH_CACHE_KEY = 'oc.gitBranchCache';
 
 const readBranchCache = (): Record<string, GitBranch> => {
   try {
-    const raw = getSafeStorage().getItem(GIT_BRANCH_CACHE_KEY);
+    const raw = getDeferredSafeStorage().getItem(GIT_BRANCH_CACHE_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw) as Record<string, GitBranch>;
     return parsed && typeof parsed === 'object' ? parsed : {};
@@ -169,7 +169,7 @@ const writeCachedBranches = (directory: string, branches: GitBranch): void => {
   try {
     const cache = readBranchCache();
     cache[directory] = branches;
-    getSafeStorage().setItem(GIT_BRANCH_CACHE_KEY, JSON.stringify(cache));
+    getDeferredSafeStorage().setItem(GIT_BRANCH_CACHE_KEY, JSON.stringify(cache));
   } catch {
     // quota / serialization — ignore; live fetch still refreshes the store
   }

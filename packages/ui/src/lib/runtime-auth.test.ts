@@ -2,9 +2,12 @@ import { describe, expect, test } from 'bun:test';
 import {
   buildRuntimeAuthHeaders,
   clearRuntimeAuthCredentialProvider,
+  clearRuntimeUrlAuthToken,
   getRuntimeBearerTokenSync,
+  refreshRuntimeUrlAuthToken,
   setRuntimeAuthCredentialProvider,
   setRuntimeBearerToken,
+  setRuntimeExtraHeaders,
 } from './runtime-auth';
 
 describe('runtime auth headers', () => {
@@ -58,6 +61,88 @@ describe('runtime auth headers', () => {
       } else {
         Reflect.deleteProperty(globalThis, 'window');
       }
+    }
+  });
+
+  test('adds runtime extra headers without overriding bearer authorization', async () => {
+    try {
+      setRuntimeBearerToken('runtime-token');
+      setRuntimeExtraHeaders({
+        'CF-Access-Client-Id': 'client-id',
+        Authorization: 'Bearer proxy-token',
+      });
+
+      const headers = await buildRuntimeAuthHeaders();
+
+      expect(headers.get('CF-Access-Client-Id')).toBe('client-id');
+      expect(headers.get('Authorization')).toBe('Bearer runtime-token');
+    } finally {
+      setRuntimeExtraHeaders(null);
+      clearRuntimeAuthCredentialProvider();
+    }
+  });
+
+  test('sends runtime extra headers when minting URL auth tokens', async () => {
+    const previousFetch = globalThis.fetch;
+    let seenUrl = '';
+    let seenHeaders = new Headers();
+    try {
+      clearRuntimeUrlAuthToken();
+      setRuntimeBearerToken('runtime-token');
+      setRuntimeExtraHeaders({
+        'CF-Access-Client-Id': 'client-id',
+        Authorization: 'Bearer proxy-token',
+      });
+      globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        seenUrl = String(input);
+        seenHeaders = new Headers(init?.headers);
+        return new Response(JSON.stringify({ token: 'url-token', expiresAt: Date.now() + 60_000 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }) as typeof fetch;
+
+      const token = await refreshRuntimeUrlAuthToken('https://runtime.example');
+
+      expect(token).toBe('url-token');
+      expect(seenUrl).toBe('https://runtime.example/auth/url-token');
+      expect(seenHeaders.get('CF-Access-Client-Id')).toBe('client-id');
+      expect(seenHeaders.get('Authorization')).toBe('Bearer runtime-token');
+    } finally {
+      globalThis.fetch = previousFetch;
+      clearRuntimeUrlAuthToken();
+      setRuntimeExtraHeaders(null);
+      clearRuntimeAuthCredentialProvider();
+    }
+  });
+
+  test('does not remint URL auth token when setting equivalent empty runtime headers', async () => {
+    const previousFetch = globalThis.fetch;
+    let fetchCount = 0;
+    try {
+      clearRuntimeUrlAuthToken();
+      setRuntimeBearerToken('runtime-token');
+      setRuntimeExtraHeaders(null);
+      globalThis.fetch = (async () => {
+        fetchCount += 1;
+        return new Response(JSON.stringify({ token: `url-token-${fetchCount}`, expiresAt: Date.now() + 60_000 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }) as typeof fetch;
+
+      const firstToken = await refreshRuntimeUrlAuthToken('https://runtime.example');
+      setRuntimeExtraHeaders({});
+      const secondToken = await refreshRuntimeUrlAuthToken('https://runtime.example');
+
+      expect(firstToken).toBe('url-token-1');
+      expect(secondToken).toBe('url-token-1');
+      expect(fetchCount).toBe(1);
+    } finally {
+      globalThis.fetch = previousFetch;
+      clearRuntimeUrlAuthToken();
+      setRuntimeExtraHeaders(null);
+      clearRuntimeAuthCredentialProvider();
     }
   });
 });

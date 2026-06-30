@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Desktop: remote instances can now save additional request headers for proxy-auth setups such as Cloudflare Access, including for live updates and terminal streams.
+- Desktop: SSH remote instances with a saved UI password no longer ask for that UI password again after the tunnel connects.
+
 ## [1.13.8] - 2026-06-29
 
 - Startup: launching the app no longer hangs for around 20 seconds before you can open a session, load a diff, or send a message — GitHub pull request status checks no longer tie up the connection to the server during startup.
