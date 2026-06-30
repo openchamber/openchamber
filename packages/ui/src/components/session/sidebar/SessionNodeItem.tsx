@@ -580,7 +580,9 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       : t('chat.toolPart.awaitingResponse')
     : isStreaming
       ? t('sessions.sidebar.session.status.active')
-      : t('sessions.sidebar.session.status.unread');
+      : hasUnseenError
+        ? t('sessions.sidebar.session.status.unreadError')
+        : t('sessions.sidebar.session.status.unread');
   const statusMarkerContent = (
     <span
       className={cn(

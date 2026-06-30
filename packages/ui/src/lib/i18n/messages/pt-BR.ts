@@ -413,6 +413,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.export.dialog.confirm": "Exportar",
   "sessions.sidebar.session.status.active": "Sessão ativa",
   "sessions.sidebar.session.status.unread": "Atualizações não lidas",
+  "sessions.sidebar.session.status.unreadError": "Atualizações de erro não lidas",
   "sessions.sidebar.session.status.pinned": "Sessão fixada",
   "sessions.sidebar.session.status.permissionRequired": "Permissão obrigatória",
   "sessions.sidebar.session.subsessions.collapse": "Recolher subsessões",

@@ -413,6 +413,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.export.dialog.confirm": "Експортувати",
   "sessions.sidebar.session.status.active": "Сесія активний",
   "sessions.sidebar.session.status.unread": "Непрочитані оновлення",
+  "sessions.sidebar.session.status.unreadError": "Непрочитані оновлення з помилками",
   "sessions.sidebar.session.status.pinned": "Закріплений сесія",
   "sessions.sidebar.session.status.permissionRequired": "Потрібен дозвіл",
   "sessions.sidebar.session.subsessions.collapse": "Згорнути підсесії",
