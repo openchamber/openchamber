@@ -359,6 +359,7 @@ export const VSCodeLayout: React.FC = () => {
         if (currentViewRef.current !== 'settings') {
           viewBeforeSettingsRef.current = currentViewRef.current;
         }
+        useUIStore.getState().setSettingsPage('home');
         setCurrentView('settings');
       } else if (view === 'chat') {
         setCurrentView('chat');
