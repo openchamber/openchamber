@@ -2,6 +2,9 @@ export interface ToolMetadata {
   displayName: string;
   icon?: string;
   outputLanguage?: string;
+  renderMode?: 'expandable' | 'static' | 'standalone';
+  activityGroupBoundary?: boolean;
+  hasCustomRendering?: boolean;
   inputFields?: {
     key: string;
     label: string;
@@ -17,6 +20,8 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
     displayName: 'Read File',
     category: 'file',
     outputLanguage: 'auto',
+    renderMode: 'static',
+    hasCustomRendering: true,
     inputFields: [
       { key: 'filePath', label: 'File Path', type: 'file' },
       { key: 'offset', label: 'Start Line', type: 'text' },
@@ -27,6 +32,30 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
     displayName: 'Write File',
     category: 'file',
     outputLanguage: 'auto',
+    renderMode: 'expandable',
+    hasCustomRendering: true,
+    inputFields: [
+      { key: 'filePath', label: 'File Path', type: 'file' },
+      { key: 'content', label: 'Content', type: 'code' }
+    ]
+  },
+  create: {
+    displayName: 'Write File',
+    category: 'file',
+    outputLanguage: 'auto',
+    renderMode: 'expandable',
+    hasCustomRendering: true,
+    inputFields: [
+      { key: 'filePath', label: 'File Path', type: 'file' },
+      { key: 'content', label: 'Content', type: 'code' }
+    ]
+  },
+  file_write: {
+    displayName: 'Write File',
+    category: 'file',
+    outputLanguage: 'auto',
+    renderMode: 'expandable',
+    hasCustomRendering: true,
     inputFields: [
       { key: 'filePath', label: 'File Path', type: 'file' },
       { key: 'content', label: 'Content', type: 'code' }
@@ -36,6 +65,8 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
     displayName: 'Edit File',
     category: 'file',
     outputLanguage: 'diff',
+    renderMode: 'expandable',
+    hasCustomRendering: true,
     inputFields: [
       { key: 'filePath', label: 'File Path', type: 'file' },
       { key: 'oldString', label: 'Find', type: 'code' },
@@ -47,6 +78,8 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
     displayName: 'Multi-Edit',
     category: 'file',
     outputLanguage: 'diff',
+    renderMode: 'expandable',
+    hasCustomRendering: true,
     inputFields: [
       { key: 'filePath', label: 'File Path', type: 'file' },
       { key: 'edits', label: 'Edits', type: 'code', language: 'json' }
@@ -56,6 +89,8 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
     displayName: 'Apply Patch',
     category: 'file',
     outputLanguage: 'diff',
+    renderMode: 'expandable',
+    hasCustomRendering: true,
     inputFields: [
       { key: 'patchText', label: 'Patch', type: 'code', language: 'diff' }
     ]
@@ -65,6 +100,44 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
     displayName: 'Shell Command',
     category: 'system',
     outputLanguage: 'text',
+    renderMode: 'expandable',
+    hasCustomRendering: true,
+    inputFields: [
+      { key: 'command', label: 'Command', type: 'command', language: 'bash' },
+      { key: 'description', label: 'Description', type: 'text' },
+      { key: 'timeout', label: 'Timeout (ms)', type: 'text' }
+    ]
+  },
+  shell: {
+    displayName: 'Shell Command',
+    category: 'system',
+    outputLanguage: 'text',
+    renderMode: 'expandable',
+    hasCustomRendering: true,
+    inputFields: [
+      { key: 'command', label: 'Command', type: 'command', language: 'bash' },
+      { key: 'description', label: 'Description', type: 'text' },
+      { key: 'timeout', label: 'Timeout (ms)', type: 'text' }
+    ]
+  },
+  cmd: {
+    displayName: 'Shell Command',
+    category: 'system',
+    outputLanguage: 'text',
+    renderMode: 'expandable',
+    hasCustomRendering: true,
+    inputFields: [
+      { key: 'command', label: 'Command', type: 'command', language: 'bash' },
+      { key: 'description', label: 'Description', type: 'text' },
+      { key: 'timeout', label: 'Timeout (ms)', type: 'text' }
+    ]
+  },
+  terminal: {
+    displayName: 'Shell Command',
+    category: 'system',
+    outputLanguage: 'text',
+    renderMode: 'expandable',
+    hasCustomRendering: true,
     inputFields: [
       { key: 'command', label: 'Command', type: 'command', language: 'bash' },
       { key: 'description', label: 'Description', type: 'text' },
@@ -76,6 +149,8 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
     displayName: 'Search Files',
     category: 'search',
     outputLanguage: 'text',
+    renderMode: 'static',
+    hasCustomRendering: true,
     inputFields: [
       { key: 'pattern', label: 'Pattern', type: 'pattern' },
       { key: 'path', label: 'Directory', type: 'file' },
@@ -86,15 +161,43 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
     displayName: 'Find Files',
     category: 'search',
     outputLanguage: 'text',
+    renderMode: 'static',
+    hasCustomRendering: true,
     inputFields: [
       { key: 'pattern', label: 'Pattern', type: 'pattern' },
       { key: 'path', label: 'Directory', type: 'file' }
     ]
   },
+  search: {
+    displayName: 'Search Files',
+    category: 'search',
+    outputLanguage: 'text',
+    renderMode: 'static',
+    hasCustomRendering: true,
+    inputFields: []
+  },
+  find: {
+    displayName: 'Find Files',
+    category: 'search',
+    outputLanguage: 'text',
+    renderMode: 'static',
+    hasCustomRendering: true,
+    inputFields: []
+  },
+  ripgrep: {
+    displayName: 'Search Files',
+    category: 'search',
+    outputLanguage: 'text',
+    renderMode: 'static',
+    hasCustomRendering: true,
+    inputFields: []
+  },
   list: {
     displayName: 'List Directory',
     category: 'file',
     outputLanguage: 'text',
+    renderMode: 'static',
+    hasCustomRendering: true,
     inputFields: [
       { key: 'path', label: 'Directory', type: 'file' },
       { key: 'ignore', label: 'Ignore Patterns', type: 'pattern' }
@@ -105,6 +208,9 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
     displayName: 'Agent Task',
     category: 'ai',
     outputLanguage: 'markdown',
+    renderMode: 'expandable',
+    activityGroupBoundary: true,
+    hasCustomRendering: true,
     inputFields: [
       { key: 'description', label: 'Task', type: 'text' },
       { key: 'prompt', label: 'Instructions', type: 'text' },
@@ -116,6 +222,8 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
     displayName: 'Fetch URL',
     category: 'web',
     outputLanguage: 'auto',
+    renderMode: 'static',
+    hasCustomRendering: true,
     inputFields: [
       { key: 'url', label: 'URL', type: 'text' },
       { key: 'format', label: 'Format', type: 'text' },
@@ -127,6 +235,8 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
      displayName: 'Web Search',
      category: 'web',
      outputLanguage: 'markdown',
+     renderMode: 'static',
+     hasCustomRendering: true,
      inputFields: [
        { key: 'query', label: 'Search Query', type: 'text' },
        { key: 'numResults', label: 'Results Count', type: 'text' },
@@ -137,6 +247,8 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
      displayName: 'Code Search',
      category: 'web',
      outputLanguage: 'markdown',
+     renderMode: 'static',
+     hasCustomRendering: true,
      inputFields: [
        { key: 'query', label: 'Search Query', type: 'text' },
        { key: 'tokensNum', label: 'Tokens', type: 'text' }
@@ -147,6 +259,8 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
      displayName: 'Update Todo List',
      category: 'system',
      outputLanguage: 'json',
+     renderMode: 'static',
+     hasCustomRendering: true,
      inputFields: [
        { key: 'todos', label: 'Todo Items', type: 'code', language: 'json' }
      ]
@@ -155,12 +269,16 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
      displayName: 'Read Todo List',
      category: 'system',
      outputLanguage: 'json',
+     renderMode: 'static',
+     hasCustomRendering: true,
      inputFields: []
    },
    skill: {
      displayName: 'Load Skill',
      category: 'ai',
      outputLanguage: 'markdown',
+     renderMode: 'static',
+     hasCustomRendering: true,
      inputFields: [
        { key: 'name', label: 'Skill Name', type: 'text' }
      ]
@@ -169,6 +287,8 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
        displayName: 'Question',
        category: 'ai',
        outputLanguage: 'text',
+       renderMode: 'expandable',
+       hasCustomRendering: true,
        inputFields: [
          { key: 'questions', label: 'Questions', type: 'code', language: 'json' }
        ]
@@ -178,6 +298,8 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
       displayName: 'LSP',
       category: 'code',
       outputLanguage: 'json',
+      renderMode: 'expandable',
+      hasCustomRendering: true,
       inputFields: [
         { key: 'operation', label: 'Operation', type: 'text' },
         { key: 'filePath', label: 'File Path', type: 'file' },
@@ -191,6 +313,8 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
       displayName: 'Plan Mode',
       category: 'ai',
       outputLanguage: 'text',
+      renderMode: 'static',
+      hasCustomRendering: true,
       inputFields: []
     },
 
@@ -198,6 +322,8 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
       displayName: 'Build Mode',
       category: 'ai',
       outputLanguage: 'text',
+      renderMode: 'static',
+      hasCustomRendering: true,
       inputFields: []
     },
 
@@ -205,6 +331,8 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
       displayName: 'Structured Output',
       category: 'ai',
       outputLanguage: 'json',
+      renderMode: 'static',
+      hasCustomRendering: true,
       inputFields: []
     },
 
@@ -212,6 +340,8 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
       displayName: 'Structured Output',
       category: 'ai',
       outputLanguage: 'json',
+      renderMode: 'static',
+      hasCustomRendering: true,
       inputFields: []
     }
   };
@@ -219,16 +349,50 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
 function formatUnknownToolDisplayName(toolName: string): string {
   return toolName
     .trim()
-    .replace(/[_-]+/g, ' ')
+    .replace(/[_.-]+/g, ' ')
     .replace(/\s+/g, ' ')
     .replace(/^./, (char) => char.toUpperCase());
 }
 
+export function getCanonicalToolName(toolName: unknown): string {
+  if (typeof toolName !== 'string') return '';
+  const trimmed = toolName.trim().toLowerCase();
+  if (!trimmed) return '';
+  return trimmed.replace(/:\d+$/, '');
+}
+
+export function getToolRenderMode(toolName: unknown): 'expandable' | 'static' | 'standalone' {
+  const canonicalName = getCanonicalToolName(toolName);
+  if (!canonicalName) return 'static';
+  const metadata = TOOL_METADATA[canonicalName];
+  if (!metadata) return 'expandable';
+  return metadata.renderMode ?? 'static';
+}
+
+export function shouldShowToolParamSummary(toolName: unknown): boolean {
+  const canonicalName = getCanonicalToolName(toolName);
+  if (!canonicalName) return false;
+  const metadata = TOOL_METADATA[canonicalName];
+  if (!metadata) return true;
+  // Only known tools that explicitly opt out of custom rendering show summaries.
+  // The default is reserved for built-in tools to avoid duplicate summaries.
+  return metadata.hasCustomRendering === false;
+}
+
+export function isToolActivityGroupBoundary(toolName: unknown): boolean {
+  const canonicalName = getCanonicalToolName(toolName);
+  if (!canonicalName) return false;
+  return TOOL_METADATA[canonicalName]?.activityGroupBoundary === true;
+}
+
 export function getToolMetadata(toolName: string): ToolMetadata {
-  return TOOL_METADATA[toolName] || {
-    displayName: formatUnknownToolDisplayName(toolName),
+  const canonicalName = getCanonicalToolName(toolName);
+  return TOOL_METADATA[canonicalName] || {
+    displayName: formatUnknownToolDisplayName(canonicalName || toolName),
     category: 'system',
     outputLanguage: 'text',
+    renderMode: 'expandable',
+    hasCustomRendering: false,
     inputFields: []
   };
 }
