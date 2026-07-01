@@ -3,9 +3,16 @@ import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { AgentSelector } from '@/components/sections/commands/AgentSelector';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
+import {
+  useQuestionAutoAnswerStore,
+  clampQuestionAutoAnswerDelay,
+  MIN_QUESTION_AUTO_ANSWER_DELAY,
+  MAX_QUESTION_AUTO_ANSWER_DELAY,
+} from '@/stores/useQuestionAutoAnswerStore';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
@@ -34,6 +41,22 @@ export const DefaultsSettings: React.FC = () => {
   const setSettingsDefaultAgent = useConfigStore((state) => state.setSettingsDefaultAgent);
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
   const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
+  const questionAutoAnswerEnabled = useQuestionAutoAnswerStore((state) => state.enabled);
+  const setQuestionAutoAnswerEnabled = useQuestionAutoAnswerStore((state) => state.setEnabled);
+  const questionAutoAnswerDelay = useQuestionAutoAnswerStore((state) => state.delaySeconds);
+  const setQuestionAutoAnswerDelay = useQuestionAutoAnswerStore((state) => state.setDelaySeconds);
+  const [delayInput, setDelayInput] = React.useState(String(questionAutoAnswerDelay));
+
+  React.useEffect(() => {
+    setDelayInput(String(questionAutoAnswerDelay));
+  }, [questionAutoAnswerDelay]);
+
+  const handleDelayCommit = React.useCallback(() => {
+    const parsed = Number(delayInput);
+    const next = clampQuestionAutoAnswerDelay(parsed);
+    setQuestionAutoAnswerDelay(next);
+    setDelayInput(String(next));
+  }, [delayInput, setQuestionAutoAnswerDelay]);
   const providers = useConfigStore((state) => state.providers);
 
   const [defaultModel, setDefaultModel] = React.useState<string | undefined>();
@@ -303,6 +326,56 @@ export const DefaultsSettings: React.FC = () => {
           <Checkbox checked={showDeletionDialog} onChange={setShowDeletionDialog} ariaLabel={t('settings.openchamber.defaults.field.showDeletionDialogAria')} />
           <span className="typography-ui-label text-foreground">{t('settings.openchamber.defaults.field.showDeletionDialog')}</span>
         </div>
+
+        <div
+          className="group flex cursor-pointer items-center gap-2 py-1"
+          role="button"
+          tabIndex={0}
+          aria-pressed={questionAutoAnswerEnabled}
+          onClick={() => setQuestionAutoAnswerEnabled(!questionAutoAnswerEnabled)}
+          onKeyDown={(event) => {
+            if (event.key === ' ' || event.key === 'Enter') {
+              event.preventDefault();
+              setQuestionAutoAnswerEnabled(!questionAutoAnswerEnabled);
+            }
+          }}
+        >
+          <Checkbox checked={questionAutoAnswerEnabled} onChange={setQuestionAutoAnswerEnabled} ariaLabel={t('settings.openchamber.defaults.field.questionAutoAnswerAria')} />
+          <span className="typography-ui-label text-foreground">{t('settings.openchamber.defaults.field.questionAutoAnswer')}</span>
+        </div>
+
+        {questionAutoAnswerEnabled ? (
+          <>
+            <div className="flex flex-col gap-2 py-1 sm:flex-row sm:items-center sm:gap-8">
+              <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
+                <span className="typography-ui-label text-foreground">{t('settings.openchamber.defaults.field.questionAutoAnswerDelay')}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={MIN_QUESTION_AUTO_ANSWER_DELAY}
+                  max={MAX_QUESTION_AUTO_ANSWER_DELAY}
+                  step="1"
+                  value={delayInput}
+                  onChange={(e) => setDelayInput(e.target.value)}
+                  onBlur={handleDelayCommit}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      handleDelayCommit();
+                    }
+                  }}
+                  className="h-7 w-24 font-mono px-2"
+                  data-bwignore="true"
+                  data-1p-ignore="true"
+                />
+              </div>
+            </div>
+            <p className="typography-micro text-muted-foreground">
+              {t('settings.openchamber.defaults.field.questionAutoAnswerHint')}
+            </p>
+          </>
+        ) : null}
 
       </section>
     </div>
