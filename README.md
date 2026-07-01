@@ -172,13 +172,37 @@ Paste the printed `openchamber://connect?...` link in Desktop under Settings -> 
 <details>
 <summary>systemd service (VPN / LAN access)</summary>
 
-Run OpenChamber and OpenCode as separate persistent services — useful when you want to access your
-dev machine over a VPN (e.g. Tailscale) or LAN without a Cloudflare tunnel.
+The recommended way to run OpenChamber as a persistent systemd service is the built-in startup command:
 
-**How it works:**
-- OpenCode runs as its own service, binding only to `localhost`.
-- OpenChamber connects to it via `OPENCODE_HOST` and `--lan` makes it reachable on your VPN IP.
-- `--foreground` keeps the CLI process alive so systemd can track and restart it.
+```bash
+openchamber startup enable
+```
+
+This creates a user-level systemd unit with your current environment snapshot (PATH, provider tokens, SSH agent, UI password, and other runtime settings). Inspect the generated service:
+
+```bash
+systemctl --user status openchamber.service
+systemctl --user cat openchamber.service
+journalctl --user -u openchamber.service -f
+```
+
+To disable:
+
+```bash
+openchamber startup disable
+```
+
+> `startup enable` snapshots your current environment so the service behaves like you launched `openchamber` from the same shell. Use `--no-env-snapshot` for a minimal service env. See `openchamber startup --help` for all options.
+
+<details>
+<summary>Advanced: manual systemd units</summary>
+
+If you need to run OpenCode and OpenChamber as separate services (e.g. for a VPN/LAN setup without a Cloudflare tunnel), you can create the units manually.
+
+> **⚠️ Caveats**
+> - systemd user services start with a minimal environment — no shell profile is sourced. Use **absolute paths** in `ExecStart` or set `Environment=PATH=...` explicitly.
+> - Do not put secrets (UI password) directly in `ExecStart`. Use `EnvironmentFile=` or `openchamber startup enable` instead.
+> - If OpenCode is not in systemd's default PATH, set `OPENCODE_BINARY` to the absolute path of the `opencode` binary.
 
 **`~/.config/systemd/user/opencode.service`**
 ```ini
@@ -187,7 +211,7 @@ Description=OpenCode Server
 
 [Service]
 Type=simple
-ExecStart=opencode serve --port 4095
+ExecStart=/path/to/opencode serve --port 4095
 Environment="PATH=/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/home/YOU/.local/bin:/home/YOU/.npm-global/bin:/usr/local/bin:/usr/bin:/bin"
 Environment=SSH_AUTH_SOCK=%t/ssh-agent.socket
 Restart=on-failure
@@ -198,7 +222,6 @@ WantedBy=default.target
 ```
 
 > **Why set `PATH` and `SSH_AUTH_SOCK`?**
-> systemd user services start with a minimal environment — no shell profile is sourced.
 > Without an explicit `PATH`, OpenCode won't find tools installed via Homebrew, npm, or `~/.local/bin`.
 > Without `SSH_AUTH_SOCK`, git operations over SSH (push, pull, clone) will fail because the agent socket isn't inherited.
 > Adjust the `PATH` to match your own tool installation paths.
@@ -212,15 +235,24 @@ After=opencode.service
 
 [Service]
 Type=simple
-ExecStart=openchamber serve --port 3000 --host 0.0.0.0 --ui-password your-password --foreground
+ExecStart=/path/to/openchamber serve --port 3000 --host 0.0.0.0 --foreground
 Environment="OPENCODE_HOST=http://localhost:4095"
 Environment="OPENCODE_SKIP_START=true"
+EnvironmentFile=/path/to/openchamber-env.conf
 Restart=on-failure
 RestartSec=5
 
 [Install]
 WantedBy=default.target
 ```
+
+Create an environment file (e.g. `~/.config/openchamber/env.conf`) with your UI password:
+
+```ini
+OPENCHAMBER_UI_PASSWORD=your-password
+```
+
+Then load the units:
 
 ```bash
 systemctl --user daemon-reload
@@ -232,6 +264,8 @@ OpenChamber will be reachable at `http://<your-vpn-hostname>:3000` from any devi
 > **Note:** `--host 0.0.0.0` is required to listen on all interfaces. The default
 > bind address is `127.0.0.1` (localhost only). Use `--host <ip>` or
 > `OPENCHAMBER_HOST=<ip>` to bind to a specific interface instead.
+
+</details>
 
 </details>
 
