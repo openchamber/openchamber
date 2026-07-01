@@ -1479,6 +1479,7 @@ export const dict: Record<I18nKey, string> = {
   'aboutDialog.toast.copyFailed': '복사 실패',
   'aboutDialog.toast.diagnosticsNotReady': '진단 정보가 아직 준비되지 않았습니다. 잠시 후 다시 시도하세요.',
   'aboutDialog.toast.diagnosticsCopied': '진단 정보 복사됨',
+  'aboutDialog.manualCopyFallback': '자동 복사 실패 — 아래 텍스트를 선택하여 수동으로 복사하세요.',
   'helpDialog.title': '키보드 단축키',
   'helpDialog.description': '이 단축키로 OpenChamber를 빠르게 탐색하세요',
   'helpDialog.section.navigationCommands': '내비게이션 및 명령',

@@ -29,12 +29,14 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
   const [copiedDiagnostics, setCopiedDiagnostics] = React.useState(false);
   const [diagnosticsReport, setDiagnosticsReport] = React.useState<string | null>(null);
   const [isPreparingDiagnostics, setIsPreparingDiagnostics] = React.useState(false);
+  const [showManualCopyFallback, setShowManualCopyFallback] = React.useState(false);
 
   const handleCopyDiagnostics = React.useCallback(async () => {
     if (!showDiagnostics) return;
     if (isCopyingDiagnostics) return;
     setIsCopyingDiagnostics(true);
     setCopiedDiagnostics(false);
+    setShowManualCopyFallback(false);
     try {
       if (!diagnosticsReport) {
         toast.error(t('aboutDialog.toast.copyFailed'), {
@@ -48,12 +50,10 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
         setCopiedDiagnostics(true);
         toast.success(t('aboutDialog.toast.diagnosticsCopied'));
       } else {
-        toast.error(t('aboutDialog.toast.copyFailed'), {
-          description: result.error,
-        });
+        setShowManualCopyFallback(true);
       }
     } catch (error) {
-      toast.error(t('aboutDialog.toast.copyFailed'));
+      setShowManualCopyFallback(true);
       console.error('Failed to copy diagnostics:', error);
     } finally {
       setIsCopyingDiagnostics(false);
@@ -178,6 +178,19 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
               <p className="typography-micro text-muted-foreground">
                 {t('aboutDialog.diagnosticsDescription')}
               </p>
+            </div>
+          )}
+
+          {showDiagnostics && showManualCopyFallback && diagnosticsReport && (
+            <div className="flex flex-col items-center gap-2 w-full pt-1">
+              <p className="typography-micro text-muted-foreground">
+                {t('aboutDialog.manualCopyFallback')}
+              </p>
+              <div className="w-full max-h-48 overflow-auto rounded-md bg-secondary p-2">
+                <pre className="typography-nano whitespace-pre-wrap break-all select-all">
+                  {diagnosticsReport}
+                </pre>
+              </div>
             </div>
           )}
 

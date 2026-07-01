@@ -1473,6 +1473,7 @@ export const dict: Record<I18nKey, string> = {
   'aboutDialog.toast.copyFailed': 'コピーに失敗しました',
   'aboutDialog.toast.diagnosticsNotReady': '診断情報の準備ができていません。しばらく待ってから再試行してください。',
   'aboutDialog.toast.diagnosticsCopied': '診断情報をコピーしました',
+  'aboutDialog.manualCopyFallback': '自動コピーに失敗しました — 以下のテキストを選択して手動でコピーしてください。',
   'helpDialog.title': 'キーボードショートカット',
   'helpDialog.description': 'これらのキーボードショートカットを使ってOpenChamberを効率的に操作できます',
   'helpDialog.section.navigationCommands': 'ナビゲーションとコマンド',

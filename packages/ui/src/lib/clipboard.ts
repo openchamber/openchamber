@@ -21,7 +21,9 @@ export async function copyTextToClipboard(text: string): Promise<ClipboardCopyRe
     textarea.style.position = 'fixed';
     textarea.style.top = '-1000px';
     textarea.style.left = '-1000px';
+    textarea.tabIndex = -1;
     document.body.appendChild(textarea);
+    textarea.focus();
     textarea.select();
     textarea.setSelectionRange(0, textarea.value.length);
     const copied = document.execCommand('copy');
