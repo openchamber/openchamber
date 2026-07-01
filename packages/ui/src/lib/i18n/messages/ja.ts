@@ -1201,6 +1201,8 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.stats.user': 'ユーザー',
   'contextSidebar.stats.assistant': 'アシスタント',
   'contextSidebar.stats.cost': 'コスト',
+  'contextSidebar.stats.tokensPerSecond': 'Tokens/s',
+  'contextSidebar.stats.lastTokensPerSecond': '最後の tok/s',
   'contextSidebar.tokens.input': '入力',
   'contextSidebar.tokens.output': '出力',
   'contextSidebar.tokens.reasoning': '推論',

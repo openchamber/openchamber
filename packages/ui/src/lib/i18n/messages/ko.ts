@@ -1208,6 +1208,8 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.stats.user': '사용자',
   'contextSidebar.stats.assistant': '어시스턴트',
   'contextSidebar.stats.cost': '비용',
+  'contextSidebar.stats.tokensPerSecond': 'Tokens/s',
+  'contextSidebar.stats.lastTokensPerSecond': '마지막 tok/s',
   'contextSidebar.tokens.input': '입력',
   'contextSidebar.tokens.output': '출력',
   'contextSidebar.tokens.reasoning': '추론',

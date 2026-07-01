@@ -1171,6 +1171,8 @@ export const dict: Record<I18nKey, string> = {
   "contextSidebar.stats.user": "Користувач",
   "contextSidebar.stats.assistant": "Асистент",
   "contextSidebar.stats.cost": "Вартість",
+  "contextSidebar.stats.tokensPerSecond": "Tokens/s",
+  "contextSidebar.stats.lastTokensPerSecond": "Останній tok/s",
   "contextSidebar.tokens.input": "Вхідні токени",
   "contextSidebar.tokens.output": "Вивід",
   "contextSidebar.tokens.reasoning": "Міркування",

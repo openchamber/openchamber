@@ -624,7 +624,13 @@ const isSameContextUsage = (
     && (a.outputLimit ?? 0) === (b.outputLimit ?? 0)
     && (a.normalizedOutput ?? 0) === (b.normalizedOutput ?? 0)
     && a.thresholdLimit === b.thresholdLimit
-    && (a.lastMessageId ?? '') === (b.lastMessageId ?? '');
+    && (a.lastMessageId ?? '') === (b.lastMessageId ?? '')
+    && (a.cost ?? 0) === (b.cost ?? 0)
+    && (a.totalMessages ?? 0) === (b.totalMessages ?? 0)
+    && (a.userMessages ?? 0) === (b.userMessages ?? 0)
+    && (a.assistantMessages ?? 0) === (b.assistantMessages ?? 0)
+    && (a.tokensPerSecond ?? 0) === (b.tokensPerSecond ?? 0)
+    && (a.lastTokensPerSecond ?? 0) === (b.lastTokensPerSecond ?? 0);
 };
 
 const formatCompactHeaderLabel = (value: string): string => {
@@ -2196,6 +2202,12 @@ export const Header: React.FC<HeaderProps> = ({
               colorPercentage={stableDesktopContextUsage.percentage}
               contextLimit={stableDesktopContextUsage.contextLimit}
               outputLimit={stableDesktopContextUsage.outputLimit ?? 0}
+              cost={stableDesktopContextUsage.cost}
+              totalMessages={stableDesktopContextUsage.totalMessages}
+              userMessages={stableDesktopContextUsage.userMessages}
+              assistantMessages={stableDesktopContextUsage.assistantMessages}
+              tokensPerSecond={stableDesktopContextUsage.tokensPerSecond}
+              lastTokensPerSecond={stableDesktopContextUsage.lastTokensPerSecond}
               size="compact"
               hideIcon
               showPercentIcon

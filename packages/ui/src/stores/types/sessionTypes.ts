@@ -41,6 +41,12 @@ export interface SessionContextUsage {
     normalizedOutput?: number;
     thresholdLimit: number;
     lastMessageId?: string;
+    cost?: number;
+    totalMessages?: number;
+    userMessages?: number;
+    assistantMessages?: number;
+    tokensPerSecond?: number;
+    lastTokensPerSecond?: number;
 }
 
 // Default message limit (can be overridden via settings).

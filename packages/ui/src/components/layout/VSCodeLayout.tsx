@@ -6,6 +6,7 @@ import { ChatView } from '@/components/views/ChatView';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useViewportStore } from '@/sync/viewport-store';
 import { useSessions, useDirectorySync, useSessionMessages, useSessionMessagesResolved } from '@/sync/sync-context';
+import { getSyncParts } from '@/sync/sync-refs';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
@@ -16,6 +17,7 @@ import { SessionsTabTitle } from '@/components/session/SessionsTabTitle';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { cn } from '@/lib/utils';
+import { computeSessionCostAndCounts, computeSessionTokenRate } from '@/stores/utils/tokenUtils';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -717,6 +719,9 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
     const percentage = contextLimit > 0 ? Math.round((totalTokens / contextLimit) * 100) : 0;
     const normalizedOutput = outputLimit > 0 ? Math.round((lastTokens.output / outputLimit) * 100) : undefined;
 
+    const { totalCost, userCount, assistantCount } = computeSessionCostAndCounts(currentSessionMessages);
+    const { avgTokensPerSecond, lastTokensPerSecond } = computeSessionTokenRate(currentSessionMessages, getSyncParts);
+
     return {
       totalTokens,
       percentage,
@@ -725,8 +730,14 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
       normalizedOutput,
       thresholdLimit,
       lastMessageId: headerMessageSummary.lastMessageId,
+      cost: totalCost > 0 ? totalCost : undefined,
+      totalMessages: currentSessionMessages.length,
+      userMessages: userCount,
+      assistantMessages: assistantCount,
+      tokensPerSecond: avgTokensPerSecond > 0 ? avgTokensPerSecond : undefined,
+      lastTokensPerSecond: lastTokensPerSecond > 0 ? lastTokensPerSecond : undefined,
     };
-  }, [contextLimit, currentSessionId, headerMessageSummary.lastMessageId, headerMessageSummary.lastTokens, outputLimit]);
+  }, [contextLimit, currentSessionId, currentSessionMessages, headerMessageSummary.lastMessageId, headerMessageSummary.lastTokens, outputLimit]);
   const [stableContextUsage, setStableContextUsage] = React.useState<SessionContextUsage | null>(null);
   const isContextUsageResolvedForSession = !currentSessionId || currentSessionMessagesResolved;
 
@@ -747,6 +758,12 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
           && (prev.normalizedOutput ?? 0) === (contextUsage.normalizedOutput ?? 0)
           && prev.thresholdLimit === contextUsage.thresholdLimit
           && prev.lastMessageId === contextUsage.lastMessageId
+          && (prev.cost ?? 0) === (contextUsage.cost ?? 0)
+          && (prev.totalMessages ?? 0) === (contextUsage.totalMessages ?? 0)
+          && (prev.userMessages ?? 0) === (contextUsage.userMessages ?? 0)
+          && (prev.assistantMessages ?? 0) === (contextUsage.assistantMessages ?? 0)
+          && (prev.tokensPerSecond ?? 0) === (contextUsage.tokensPerSecond ?? 0)
+          && (prev.lastTokensPerSecond ?? 0) === (contextUsage.lastTokensPerSecond ?? 0)
         ) {
           return prev;
         }
@@ -1015,6 +1032,12 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
           percentage={stableContextUsage.percentage}
           contextLimit={stableContextUsage.contextLimit}
           outputLimit={stableContextUsage.outputLimit ?? 0}
+          cost={stableContextUsage.cost}
+          totalMessages={stableContextUsage.totalMessages}
+          userMessages={stableContextUsage.userMessages}
+          assistantMessages={stableContextUsage.assistantMessages}
+          tokensPerSecond={stableContextUsage.tokensPerSecond}
+          lastTokensPerSecond={stableContextUsage.lastTokensPerSecond}
           className="h-9 shrink-0 pl-1 pr-1 typography-ui-label"
           valueClassName="font-semibold leading-none"
           hideIcon
