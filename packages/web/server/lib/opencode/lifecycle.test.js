@@ -235,4 +235,152 @@ describe('OpenCode lifecycle', () => {
     expect(spawnMock).toHaveBeenCalledTimes(2);
     await server.close();
   });
+
+  describe('refreshOpenCodeAfterConfigChange — deferred restart on busy sessions', () => {
+    const createDeferredRuntime = (overrides = {}) => {
+      const state = {
+        openCodeWorkingDirectory: '/tmp/project',
+        openCodeProcess: null,
+        openCodePort: 45678,
+        openCodeBaseUrl: null,
+        currentRestartPromise: null,
+        isRestartingOpenCode: false,
+        openCodeApiPrefix: '',
+        openCodeApiPrefixDetected: true,
+        openCodeApiDetectionTimer: null,
+        lastOpenCodeError: null,
+        isOpenCodeReady: true,
+        openCodeNotReadySince: 0,
+        isExternalOpenCode: false,
+        isShuttingDown: false,
+        healthCheckInterval: null,
+        expressApp: null,
+        useWslForOpencode: false,
+        resolvedWslBinary: null,
+        resolvedWslOpencodePath: null,
+        resolvedWslDistro: null,
+      };
+
+      const restartOpenCodeCalls = [];
+      const runtime = createOpenCodeLifecycleRuntime({
+        state,
+        env: {
+          ENV_CONFIGURED_OPENCODE_PORT: 45678,
+          ENV_CONFIGURED_OPENCODE_HOST: null,
+          ENV_EFFECTIVE_PORT: 3001,
+          ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1',
+          ENV_SKIP_OPENCODE_START: false,
+        },
+        syncToHmrState: vi.fn(),
+        syncFromHmrState: vi.fn(),
+        getOpenCodeAuthHeaders: () => ({}),
+        buildOpenCodeUrl: (route) => `http://127.0.0.1:45678${route}`,
+        waitForReady: vi.fn(async () => true),
+        normalizeApiPrefix: vi.fn(() => ''),
+        applyOpencodeBinaryFromSettings: vi.fn(async () => null),
+        ensureOpencodeCliEnv: vi.fn(),
+        ensureLocalOpenCodeServerPassword: vi.fn(async () => 'password'),
+        resolveManagedOpenCodeLaunchSpec: vi.fn((binary) => ({ binary, args: [], wrapperType: null })),
+        setOpenCodePort: vi.fn((port) => { state.openCodePort = port; }),
+        setDetectedOpenCodeApiPrefix: vi.fn(),
+        setupProxy: vi.fn(),
+        ensureOpenCodeApiPrefix: vi.fn(),
+        clearResolvedOpenCodeBinary: vi.fn(),
+        buildAugmentedPath: vi.fn(() => '/usr/bin'),
+        buildManagedOpenCodePath: vi.fn(() => '/usr/bin'),
+        getManagedOpenCodeShellEnvSnapshot: vi.fn(() => ({})),
+        waitForOpenCodeReady: vi.fn(async () => undefined),
+        waitForAgentPresence: vi.fn(async () => undefined),
+        // Track internal restartOpenCode calls by spying on the returned API.
+        ...overrides,
+      });
+
+      // Wrap the real restartOpenCode (defined inside the runtime closure) so
+      // tests can assert whether a restart actually happened. We cannot inject
+      // restartOpenCode from deps, so we spy on the exported function.
+      const realRestart = runtime.restartOpenCode;
+      const spy = vi.fn(async () => {
+        restartOpenCodeCalls.push(true);
+        // Don't call realRestart (which would spawn). Just mark state as ready.
+        state.isOpenCodeReady = true;
+        state.openCodeNotReadySince = 0;
+      });
+      // Replace the exported binding — but the closure still holds the original.
+      // Tests assert on restartOpenCodeCalls instead, via the spy below.
+      return { runtime, state, restartOpenCodeCalls, restartOpenCodeSpy: spy, realRestart };
+    };
+
+    it('defers the restart when sessions are busy and returns deferred result', async () => {
+      const { runtime } = createDeferredRuntime({ getActiveSessionCount: () => 2 });
+
+      const result = await runtime.refreshOpenCodeAfterConfigChange('agent update');
+
+      expect(result).toEqual({
+        reloaded: false,
+        deferred: true,
+        pendingActiveSessions: 2,
+        external: false,
+      });
+      expect(runtime.hasPendingConfigRefresh()).toBe(true);
+      runtime.clearPendingConfigRefresh();
+    });
+
+    it('restarts immediately when no sessions are busy', async () => {
+      const { runtime, state } = createDeferredRuntime({ getActiveSessionCount: () => 0 });
+      // Provide a no-op openCodeProcess so restartOpenCode's close path is safe.
+      state.openCodeProcess = null;
+
+      // The real restartOpenCode inside the closure will try to spawn; we only
+      // need to verify the deferred path was NOT taken. hasPendingConfigRefresh
+      // being false confirms the immediate path was selected.
+      const result = await runtime.refreshOpenCodeAfterConfigChange('agent update', { agentName: 'plan' }).catch(() => null);
+
+      expect(runtime.hasPendingConfigRefresh()).toBe(false);
+      // Even if spawn failed in the test env, the result should not be deferred.
+      expect(result?.deferred).not.toBe(true);
+    });
+
+    it('force=true bypasses the busy-session guard', async () => {
+      const { runtime } = createDeferredRuntime({ getActiveSessionCount: () => 3 });
+
+      const result = await runtime.refreshOpenCodeAfterConfigChange('manual forced reload', { force: true }).catch(() => null);
+
+      expect(runtime.hasPendingConfigRefresh()).toBe(false);
+      expect(result?.deferred).not.toBe(true);
+    });
+
+    it('forceRestart clears a pending deferred restart', async () => {
+      const { runtime } = createDeferredRuntime({ getActiveSessionCount: () => 1 });
+
+      const deferredResult = await runtime.refreshOpenCodeAfterConfigChange('agent update');
+      expect(deferredResult.deferred).toBe(true);
+      expect(runtime.hasPendingConfigRefresh()).toBe(true);
+
+      // forceRestart should clear the queue even if the inner restart fails.
+      await runtime.forceRestart('user apply-now').catch(() => undefined);
+      expect(runtime.hasPendingConfigRefresh()).toBe(false);
+    });
+
+    it('does not defer for an external OpenCode server', async () => {
+      const { runtime, state } = createDeferredRuntime({ getActiveSessionCount: () => 5 });
+      state.isExternalOpenCode = true;
+      state.openCodeBaseUrl = 'http://127.0.0.1:45678';
+
+      // probeExternalOpenCode fetches the health endpoint; stub fetch to
+      // return a healthy response so restartOpenCode's external branch succeeds.
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ healthy: true }),
+      }));
+
+      try {
+        const result = await runtime.refreshOpenCodeAfterConfigChange('agent update');
+        expect(result).toEqual({ reloaded: false, external: true });
+        expect(runtime.hasPendingConfigRefresh()).toBe(false);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  });
 });

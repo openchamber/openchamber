@@ -120,10 +120,15 @@ export interface AgentConfig {
  * `requiresManualRestart` is true when the change was persisted to disk but the
  * connected (external) OpenCode server could not be reloaded by OpenChamber, so
  * the user must restart that server before the change takes effect.
+ * `deferred` is true when the change was persisted to disk but the managed
+ * OpenCode restart was deferred because other sessions were actively busy. The
+ * restart will run automatically once those sessions drain to idle.
  */
 export interface AgentMutationResult {
   ok: boolean;
   requiresManualRestart?: boolean;
+  deferred?: boolean;
+  pendingActiveSessions?: number;
 }
 
 // Extended Agent type for API properties not in SDK types
@@ -376,6 +381,14 @@ export const useAgentsStore = create<AgentsStore>()(
 
             invalidateAgentsLoadCache(configDirectory);
 
+            // Deferred restart: config saved to disk, OpenCode restart queued
+            // until active sessions finish. Do NOT call refreshAfterOpenCodeRestart
+            // (that would interrupt the active sessions we are protecting). The
+            // form keeps the just-saved values; the UI surfaces a non-blocking toast.
+            if (payload?.deferred) {
+              return { ok: true, deferred: true, pendingActiveSessions: payload.pendingActiveSessions };
+            }
+
             // External OpenCode server: persisted to disk but not reloaded.
             // Skip the reload so the form keeps the just-saved values instead of
             // reverting to the server's stale, startup-cached config.
@@ -447,6 +460,12 @@ export const useAgentsStore = create<AgentsStore>()(
 
             invalidateAgentsLoadCache(configDirectory);
 
+            // Deferred restart: config saved to disk, OpenCode restart queued
+            // until active sessions finish. Do NOT call refreshAfterOpenCodeRestart.
+            if (payload?.deferred) {
+              return { ok: true, deferred: true, pendingActiveSessions: payload.pendingActiveSessions };
+            }
+
             // External OpenCode server: persisted to disk but not reloaded.
             // Skip the reload so the form keeps the just-saved values instead of
             // reverting to the server's stale, startup-cached config.
@@ -508,6 +527,12 @@ export const useAgentsStore = create<AgentsStore>()(
 
             if (get().selectedAgentName === name) {
               set({ selectedAgentName: null });
+            }
+
+            // Deferred restart: config saved to disk, OpenCode restart queued
+            // until active sessions finish. Do NOT call refreshAfterOpenCodeRestart.
+            if (payload?.deferred) {
+              return { ok: true, deferred: true, pendingActiveSessions: payload.pendingActiveSessions };
             }
 
             // External OpenCode server: persisted to disk but not reloaded.

@@ -17,7 +17,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/bootstrap-runtime.js`: base app bootstrap runtime for status/auth/tts/notification/OpenChamber route wiring.
 - `packages/web/server/lib/opencode/network-runtime.js`: OpenCode URL construction, health-probe readiness checks, and API prefix runtime.
 - `packages/web/server/lib/opencode/project-directory-runtime.js`: request-scoped and settings-backed project directory resolution/validation runtime.
-- `packages/web/server/lib/opencode/config-entity-routes.js`: route registration for agent/command/MCP config orchestration and reload semantics.
+- `packages/web/server/lib/opencode/config-entity-routes.js`: route registration for agent/command/MCP config orchestration and reload semantics. Mutation responses carry one of three states via `buildConfigMutationResponse`: `deferred` (restart queued until active sessions drain), `external` (requires manual server restart), or `reloaded` (live now).
 - `packages/web/server/lib/opencode/snippets.js`: opencode-snippets-compatible snippet file CRUD, discovery, and hashtag expansion.
 - `packages/web/server/lib/opencode/cli-options.js`: CLI/environment option parsing for server startup arguments.
 - `packages/web/server/lib/opencode/core-routes.js`: server status/system routes, auth/access guard routes, and settings utility route registration.
@@ -102,13 +102,16 @@ This module provides OpenCode server integration utilities for the web server ru
 - Returned API:
   - `startOpenCode()`
   - `restartOpenCode()`
+  - `forceRestart(reason)`: bypasses the busy-session guard and restarts immediately; also clears any pending deferred config restart. Used by the explicit "Apply now" reload endpoint.
   - `waitForOpenCodeReady(timeoutMs?, intervalMs?)`
   - `waitForAgentPresence(agentName, timeoutMs?, intervalMs?)`
-  - `refreshOpenCodeAfterConfigChange(reason, options?)`
+  - `refreshOpenCodeAfterConfigChange(reason, options?)`: persists-aware restart. When `options.force === false` (default) and the managed OpenCode has active busy sessions, the restart is deferred: the config is already on disk (callers write before calling), `restartOpenCode()` is skipped, and a drain-listener runs the queued restart once active sessions reach idle. Returns `{ reloaded: false, deferred: true, pendingActiveSessions, external: false }` when deferred, `{ reloaded: !external, external }` when applied immediately. A 2-minute staleness fallback (shared with the health-check path) forces the restart if sessions stay "busy" too long, so a stuck session cannot block a config change forever. External OpenCode servers are never deferred (OpenChamber cannot restart them anyway).
   - `bootstrapOpenCodeAtStartup()`
   - `startHealthMonitoring(healthCheckIntervalMs)`
   - `waitForPortRelease(port, timeoutMs, hostname?)`
   - `killProcessOnPort(port)`
+  - `hasPendingConfigRefresh()`: returns `true` when a deferred config restart is queued.
+  - `clearPendingConfigRefresh()`: cancels any queued deferred config restart.
 
 ## Public exports (env-runtime.js)
 - `createOpenCodeEnvRuntime(dependencies)`: creates runtime that owns OpenCode CLI environment and binary discovery state.
@@ -242,7 +245,8 @@ This module provides OpenCode server integration utilities for the web server ru
    - `app.use('/api', ...)` auth/tunnel guard
 - `registerSettingsUtilityRoutes(app, dependencies)`: registers small settings utility endpoints:
   - `GET /api/config/themes`
-  - `POST /api/config/reload`
+  - `POST /api/config/reload` (accepts `?force=true` to bypass the busy-session guard and apply immediately)
+  - `GET /api/config/pending-restart` (reports whether a deferred config restart is queued)
 - `registerCommonRequestMiddleware(app, dependencies)`: registers shared request middleware stack:
   - conditional JSON body parser behavior for `/api/*` vs non-API requests
   - URL-encoded parser setup

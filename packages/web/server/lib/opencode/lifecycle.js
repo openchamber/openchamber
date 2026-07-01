@@ -744,22 +744,171 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     throw new Error(`Agent "${agentName}" not available after OpenCode restart`);
   };
 
+  // ---- Deferred-restart coordination ---------------------------------------
+  //
+  // Saving any OpenCode configuration (agent/command/MCP/plugin/skill/settings
+  // or manual reload) historically triggered an unconditional `restartOpenCode`
+  // which kills the managed `opencode serve` process (SIGTERM 2.5s -> SIGKILL).
+  // If other sessions were actively streaming an LLM generation at that moment,
+  // the restart interrupted their in-flight work with no recovery.
+  //
+  // The `shouldSkipRestartForBusySessions` guard already exists for the
+  // health-check recovery path. We reuse the same predicate here so config
+  // changes are persisted to disk immediately but the restart is deferred until
+  // active sessions drain to idle. A 2-minute staleness fallback (mirroring the
+  // health path) forces the restart if sessions stay "busy" too long, so a
+  // stuck session can never block a config change forever.
+  //
+  // Callers opt out of deferral with `options.force === true` (used by the
+  // explicit "Apply now" reload endpoint).
+  const STALE_BUSY_GRACE_MS = 2 * 60 * 1000;
+  let pendingConfigRefresh = null;
+  let pendingConfigDrainTimer = null;
+  const PENDING_CONFIG_DRAIN_INTERVAL_MS = 2000;
+
+  const clearPendingConfigRefresh = () => {
+    if (pendingConfigDrainTimer) {
+      clearInterval(pendingConfigDrainTimer);
+      pendingConfigDrainTimer = null;
+    }
+    pendingConfigRefresh = null;
+  };
+
+  /**
+   * Shared restart-and-recover sequence used by deferred drain paths and
+   * forceRestart. Restarts OpenCode, waits for readiness, and optionally
+   * verifies agent presence. On failure, sets isOpenCodeReady = false and
+   * re-throws so callers can decide whether to retry or surface the error.
+   */
+  const performRestartAndRecover = async (agentName) => {
+    await restartOpenCode();
+    await waitForOpenCodeReady();
+    state.isOpenCodeReady = true;
+    state.openCodeNotReadySince = 0;
+    if (agentName && !state.isExternalOpenCode) {
+      await waitForAgentPresence(agentName);
+    }
+  };
+
+  const drainPendingConfigRefresh = async () => {
+    const pending = pendingConfigRefresh;
+    if (!pending) return;
+
+    // During shutdown, clear the pending state and stop polling so the
+    // unref'd interval doesn't keep firing until process exit.
+    if (state.isShuttingDown) {
+      clearPendingConfigRefresh();
+      return;
+    }
+
+    if (state.isRestartingOpenCode) return;
+
+    // Staleness fallback: if sessions stayed "busy" for too long, force the
+    // restart so a stuck session cannot block a config change indefinitely.
+    if (Date.now() - pending.queuedAt >= STALE_BUSY_GRACE_MS) {
+      console.warn(
+        `[lifecycle] config change "${pending.reason}" deferred > 2 min while sessions busy — forcing restart`
+      );
+      try {
+        await performRestartAndRecover(pending.agentName);
+        clearPendingConfigRefresh();
+      } catch (error) {
+        state.isOpenCodeReady = false;
+        state.openCodeNotReadySince = Date.now();
+        console.error(`[lifecycle] forced deferred restart failed: ${error.message}`);
+        // Clear the pending state so the interval doesn't retry indefinitely.
+        // The config is already on disk; the health monitor will restart
+        // OpenCode if the process is actually dead.
+        clearPendingConfigRefresh();
+      }
+      return;
+    }
+
+    if (getActiveSessionCount() > 0) return;
+
+    console.log(`[lifecycle] active sessions drained, applying deferred config change "${pending.reason}"`);
+    try {
+      await performRestartAndRecover(pending.agentName);
+      clearPendingConfigRefresh();
+    } catch (error) {
+      state.isOpenCodeReady = false;
+      state.openCodeNotReadySince = Date.now();
+      console.error(`[lifecycle] deferred restart failed: ${error.message}`);
+      clearPendingConfigRefresh();
+    }
+  };
+
+  const schedulePendingConfigDrainCheck = () => {
+    if (pendingConfigDrainTimer || !pendingConfigRefresh) return;
+    pendingConfigDrainTimer = setInterval(() => {
+      void drainPendingConfigRefresh();
+    }, PENDING_CONFIG_DRAIN_INTERVAL_MS);
+    // Don't keep the event loop alive on its own.
+    if (typeof pendingConfigDrainTimer.unref === 'function') {
+      pendingConfigDrainTimer.unref();
+    }
+  };
+
+  /**
+   * Force-apply any pending config restart immediately, bypassing the
+   * busy-session guard. Used by the explicit "Apply now" reload endpoint so
+   * users who want the change live right away can opt in.
+   */
+  const forceRestart = async (reason) => {
+    const pendingAgentName = pendingConfigRefresh?.agentName;
+    clearPendingConfigRefresh();
+    console.log(`[lifecycle] force restart requested (${reason})`);
+    try {
+      await performRestartAndRecover(pendingAgentName);
+    } catch (error) {
+      state.isOpenCodeReady = false;
+      state.openCodeNotReadySince = Date.now();
+      console.error(`[lifecycle] force restart failed: ${error.message}`);
+      throw error;
+    }
+  };
+
   const refreshOpenCodeAfterConfigChange = async (reason, options = {}) => {
-    const { agentName } = options;
+    const { agentName, force = false } = options;
 
     console.log(`Refreshing OpenCode after ${reason}`);
     clearResolvedOpenCodeBinary();
     await applyOpencodeBinaryFromSettings();
 
-    await restartOpenCode();
-
-    // A managed OpenCode process is restarted (and thus re-reads config from
-    // disk) by restartOpenCode(). An external OpenCode server is NOT owned by
-    // OpenChamber: restartOpenCode() only re-probes its health, so the freshly
-    // written config is on disk but the running server keeps serving its old,
-    // startup-cached config until the user restarts it themselves. Report this
-    // honestly so callers don't claim the change is live.
+    // External OpenCode servers are not owned by OpenChamber: restartOpenCode()
+    // only re-probes their health, so there is nothing to defer. Keep the
+    // existing honest-reporting contract for that branch.
     const external = state.isExternalOpenCode === true;
+
+    // Managed-process path: defer the restart while sessions are busy so we
+    // don't interrupt in-flight LLM generations. The config itself is already
+    // on disk (callers write before calling us), so deferring only delays the
+    // moment the running OpenCode re-reads it.
+    if (!external && !force && typeof getActiveSessionCount === 'function' && getActiveSessionCount() > 0) {
+      const activeCount = getActiveSessionCount();
+      console.log(
+        `[lifecycle] ${activeCount} active session(s) — deferring OpenCode restart for "${reason}"`
+      );
+      // Preserve the original queuedAt and agentName when a previous deferred
+      // save is already pending, so the 2-minute staleness fallback fires from
+      // the first save and the first agent is verified after restart. Rapid
+      // successive saves should not reset the staleness timer or lose the
+      // original agent target.
+      const previousQueuedAt = pendingConfigRefresh?.queuedAt;
+      const previousAgentName = pendingConfigRefresh?.agentName;
+      pendingConfigRefresh = {
+        reason,
+        agentName: previousAgentName ?? agentName,
+        queuedAt: previousQueuedAt ?? Date.now(),
+      };
+      schedulePendingConfigDrainCheck();
+      return { reloaded: false, deferred: true, pendingActiveSessions: activeCount, external: false };
+    }
+
+    // Either no active sessions, an external server, or an explicit force:
+    // proceed with the immediate restart.
+    clearPendingConfigRefresh();
+    await restartOpenCode();
 
     try {
       await waitForOpenCodeReady();
@@ -864,7 +1013,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
    * Forces restart if sessions stay "busy" and the server stays unhealthy
    * for over 2 minutes (staleness guard against stuck session state).
    */
-  const STALE_BUSY_GRACE_MS = 2 * 60 * 1000;
   let lastUnhealthyWithBusySessionsAt = 0;
   let consecutiveHealthFailures = 0;
   let healthProbePromise = null;
@@ -984,6 +1132,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     killProcessOnPort,
     startOpenCode,
     restartOpenCode,
+    forceRestart,
     waitForOpenCodeReady,
     waitForAgentPresence,
     refreshOpenCodeAfterConfigChange,
@@ -991,5 +1140,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     startHealthMonitoring,
     triggerHealthCheck,
     waitForPortRelease,
+    clearPendingConfigRefresh,
+    hasPendingConfigRefresh: () => pendingConfigRefresh !== null,
   };
 };

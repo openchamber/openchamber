@@ -379,6 +379,8 @@ export const settingsDict = {
   "settings.agents.page.toast.updateFailed": "Не вдалося оновити агента",
   "settings.agents.page.toast.saveUnexpectedError": "Під час збереження сталася помилка",
   "settings.agents.page.toast.savedManualRestart": "Збережено на диск. Перезапустіть підключений сервер OpenCode, щоб застосувати зміни.",
+  "settings.agents.page.toast.savedDeferredSingle": "Збережено. OpenCode перезавантажиться після завершення активного завдання.",
+  "settings.agents.page.toast.savedDeferredPlural": "Збережено. OpenCode перезавантажиться після завершення {count} активних завдань.",
   "settings.agents.page.empty.title": "Виберіть агента на бічній панелі",
   "settings.agents.page.empty.description": "або створіть нового",
   "settings.agents.page.title.new": "Новий агент",

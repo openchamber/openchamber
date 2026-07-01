@@ -379,6 +379,8 @@ export const settingsDict = {
   'settings.agents.page.toast.updateFailed': '에이전트를 업데이트하지 못했습니다',
   'settings.agents.page.toast.saveUnexpectedError': '저장 중 오류가 발생했습니다',
   'settings.agents.page.toast.savedManualRestart': '디스크에 저장되었습니다. 변경 사항을 적용하려면 연결된 OpenCode 서버를 다시 시작하세요.',
+  'settings.agents.page.toast.savedDeferredSingle': '저장되었습니다. 활성 작업이 완료되면 OpenCode가 다시 로드됩니다.',
+  'settings.agents.page.toast.savedDeferredPlural': '저장되었습니다. {count}개의 활성 작업이 완료되면 OpenCode가 다시 로드됩니다.',
   'settings.agents.page.empty.title': '사이드바에서 에이전트를 선택하세요',
   'settings.agents.page.empty.description': '또는 새로 생성하세요',
   'settings.agents.page.title.new': '새 에이전트',

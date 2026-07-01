@@ -648,6 +648,13 @@ export const AgentsPage: React.FC = () => {
       if (result.ok) {
         if (result.requiresManualRestart) {
           toast.warning(t('settings.agents.page.toast.savedManualRestart'));
+        } else if (result.deferred) {
+          const count = result.pendingActiveSessions ?? 0;
+          toast.info(
+            count === 1
+              ? t('settings.agents.page.toast.savedDeferredSingle')
+              : t('settings.agents.page.toast.savedDeferredPlural', { count })
+          );
         } else {
           toast.success(isNewAgent ? t('settings.agents.page.toast.created') : t('settings.agents.page.toast.updated'));
         }

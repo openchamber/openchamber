@@ -930,6 +930,8 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
 });
 
 const restartOpenCode = (...args) => openCodeLifecycleRuntime.restartOpenCode(...args);
+const forceRestart = (...args) => openCodeLifecycleRuntime.forceRestart(...args);
+const hasPendingConfigRefresh = (...args) => openCodeLifecycleRuntime.hasPendingConfigRefresh(...args);
 const waitForOpenCodeReady = (...args) => openCodeLifecycleRuntime.waitForOpenCodeReady(...args);
 const waitForAgentPresence = (...args) => openCodeLifecycleRuntime.waitForAgentPresence(...args);
 const refreshOpenCodeAfterConfigChange = (...args) => openCodeLifecycleRuntime.refreshOpenCodeAfterConfigChange(...args);
@@ -1240,6 +1242,8 @@ async function main(options = {}) {
     validateDirectoryPath,
     readCustomThemesFromDisk,
     refreshOpenCodeAfterConfigChange,
+    forceRestart,
+    hasPendingConfigRefresh,
     getOpenCodeResolutionSnapshot,
     formatSettingsResponse,
     readSettingsFromDisk,

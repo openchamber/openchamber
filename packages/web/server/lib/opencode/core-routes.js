@@ -667,6 +667,8 @@ export const registerSettingsUtilityRoutes = (app, dependencies) => {
   const {
     readCustomThemesFromDisk,
     refreshOpenCodeAfterConfigChange,
+    forceRestart,
+    hasPendingConfigRefresh,
     clientReloadDelayMs,
   } = dependencies;
 
@@ -680,11 +682,46 @@ export const registerSettingsUtilityRoutes = (app, dependencies) => {
     }
   });
 
-  app.post('/api/config/reload', async (_req, res) => {
+  app.get('/api/config/pending-restart', async (_req, res) => {
     try {
-      console.log('[Server] Manual configuration reload requested');
+      res.json({
+        pending: hasPendingConfigRefresh ? hasPendingConfigRefresh() : false,
+      });
+    } catch (error) {
+      console.error('[Server] Failed to read pending restart state:', error);
+      res.status(500).json({ error: error.message || 'Failed to read pending restart state' });
+    }
+  });
 
-      await refreshOpenCodeAfterConfigChange('manual configuration reload');
+  app.post('/api/config/reload', async (req, res) => {
+    try {
+      const force = req?.query?.force === 'true' || req?.query?.force === '1';
+
+      if (force && typeof forceRestart === 'function') {
+        console.log('[Server] Forced configuration reload requested');
+        await forceRestart('manual forced reload');
+        res.json({
+          success: true,
+          requiresReload: true,
+          message: 'Configuration reloaded successfully. Refreshing interface…',
+          reloadDelayMs: clientReloadDelayMs,
+        });
+        return;
+      }
+
+      console.log('[Server] Manual configuration reload requested');
+      const refreshResult = await refreshOpenCodeAfterConfigChange('manual configuration reload', { force });
+
+      if (refreshResult && refreshResult.deferred) {
+        res.json({
+          success: true,
+          requiresReload: false,
+          deferred: true,
+          pendingActiveSessions: refreshResult.pendingActiveSessions || 0,
+          message: `Configuration saved. OpenCode will reload when ${refreshResult.pendingActiveSessions || 0} active task(s) finish.`,
+        });
+        return;
+      }
 
       res.json({
         success: true,
