@@ -1087,6 +1087,7 @@ export const settingsDict = {
   'settings.page.chat.title': 'Czat',
   'settings.page.commands.title': 'Polecenia',
   'settings.page.git.title': 'Git',
+  'settings.page.integrations.title': 'Integracje',
   'settings.page.magicPrompts.title': 'Magiczne Prompty',
   'settings.page.mcp.title': 'MCP',
   'settings.page.plugins.title': 'Plugins',

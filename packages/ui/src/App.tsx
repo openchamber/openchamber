@@ -13,6 +13,9 @@ import { useSessionStatusBootstrap } from '@/hooks/useSessionStatusBootstrap';
 import { useTraySync } from '@/hooks/useTraySync';
 import { useRouter } from '@/hooks/useRouter';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
+import { useOttoWebSocket } from '@/hooks/useOttoWebSocket';
+import { useMessengerBridgeToasts } from '@/hooks/useMessengerBridgeToasts';
+import { useMessengerProjectChannelSync } from '@/hooks/useMessengerProjectChannelSync';
 import { useWebNotificationStream } from '@/hooks/useWebNotificationStream';
 import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
@@ -701,6 +704,13 @@ function App({ apis }: AppProps) {
   // Session attention now handled by notification-store via SSE events (session.idle/session.error)
 
   usePushVisibilityBeacon({ enabled: embeddedBackgroundWorkEnabled });
+  // Activate the Otto realtime WS so messenger.bridge.* events, approval
+  // decisions and incoming Discord messages reach the UI.
+  useOttoWebSocket();
+  // Surface bridge events as user-visible toasts.
+  useMessengerBridgeToasts();
+  // Mirror UI project add/rename/remove to Discord channels (two-way sync).
+  useMessengerProjectChannelSync();
   useWebNotificationStream({ enabled: embeddedBackgroundWorkEnabled });
   usePwaInstallPrompt();
 

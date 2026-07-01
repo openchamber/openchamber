@@ -40,6 +40,7 @@
   'settings.page.skills.title': 'Skills',
   'settings.page.skillsCatalog.title': 'Skills 目錄',
   'settings.page.git.title': 'Git',
+  'settings.page.integrations.title': '整合',
   'settings.page.appearance.title': '外觀',
   'settings.page.chat.title': '聊天',
   'settings.page.shortcuts.title': '快速鍵',

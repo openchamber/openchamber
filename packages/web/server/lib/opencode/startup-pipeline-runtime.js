@@ -2,6 +2,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
   const {
     createTerminalRuntime,
     createMessageStreamWsRuntime,
+    createOttoEventsWebSocketRuntime,
     createServerStartupRuntime,
   } = dependencies;
 
@@ -85,6 +86,13 @@ export const createStartupPipelineRuntime = (dependencies) => {
       upstreamStallTimeoutMs,
     });
 
+    const ottoEventsWebSocketRuntime = createOttoEventsWebSocketRuntime({
+      server,
+      uiAuthController,
+      isRequestOriginAllowed,
+      rejectWebSocketUpgrade,
+    });
+
     setupProxy(app);
     scheduleOpenCodeApiDetection();
     void bootstrapOpenCodeAtStartup();
@@ -126,6 +134,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
     return {
       terminalRuntime,
       messageStreamRuntime,
+      ottoEventsWebSocketRuntime,
     };
   };
 

@@ -84,6 +84,11 @@ import { createApnsRuntime } from './lib/notifications/apns-runtime.js';
 import { createNotificationTemplateRuntime } from './lib/notifications/template-runtime.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
+import { createMessengerSyncRouter } from './lib/otto-api/messenger-sync.js';
+import {
+  createOttoEventsWebSocketRuntime,
+  broadcast as ottoEventsBroadcast,
+} from './lib/otto-api/websocket.js';
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
 import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
 import { attachRealtimeProxy } from './lib/realtime-proxy.js';
@@ -496,6 +501,7 @@ let runtimeManagedRemoteTunnelToken = '';
 let runtimeManagedRemoteTunnelHostname = '';
 let terminalRuntime = null;
 let messageStreamRuntime = null;
+let ottoEventsWebSocketRuntime = null;
 const userProvidedOpenCodePassword = hmrStateRuntime.getUserProvidedOpenCodePassword(hmrState);
 const initialOpenCodeAuthState = hmrStateRuntime.resolveOpenCodeAuthFromState({
   hmrState,
@@ -899,6 +905,7 @@ const tunnelWiringRuntime = createTunnelWiringRuntime({
 const startupPipelineRuntime = createStartupPipelineRuntime({
   createTerminalRuntime,
   createMessageStreamWsRuntime,
+  createOttoEventsWebSocketRuntime,
   createServerStartupRuntime,
 });
 
@@ -1044,6 +1051,10 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   getMessageStreamRuntime: () => messageStreamRuntime,
   setMessageStreamRuntime: (value) => {
     messageStreamRuntime = value;
+  },
+  getOttoEventsWebSocketRuntime: () => ottoEventsWebSocketRuntime,
+  setOttoEventsWebSocketRuntime: (value) => {
+    ottoEventsWebSocketRuntime = value;
   },
   shouldSkipOpenCodeStop: () => ENV_SKIP_OPENCODE_START || isExternalOpenCode,
   getOpenCodePort: () => openCodePort,
@@ -1295,6 +1306,40 @@ async function main(options = {}) {
     writeSseEvent,
   });
 
+  // Discord messenger bridge routes. The bridge plumbing lets the Discord
+  // listener forward inbound messages to OpenCode and mirror streamed
+  // responses back into the originating channel/thread.
+  const { router: messengerRouter, discordListener } = createMessengerSyncRouter({
+    // Bridge approval button clicks to both the WS clients (UI) and
+    // the global event hub (so the bridge's initApprovalListener can
+    // respond to OpenCode).
+    broadcastEvent: (type, data) => {
+      try { ottoEventsBroadcast(type, data); } catch {}
+      try { globalMessageStreamHub?.publishEvent?.(type, data); } catch {}
+    },
+    globalEventHub: globalMessageStreamHub,
+    buildOpenCodeUrl,
+    getOpenCodeAuthHeaders,
+    listProjects: async () => {
+      const settings = await readSettingsFromDiskMigrated();
+      return sanitizeProjects(settings?.projects || []);
+    },
+    readSettings: readSettingsFromDiskMigrated,
+    persistSettings,
+    sanitizeProjects,
+    // Lets the bridge tell agents how to reach the scheduling API locally.
+    getLocalApiBaseUrl: () => `http://127.0.0.1:${tunnelRuntimeContext.getActivePort() || port}`,
+    // Discord /schedule writes into the SAME per-project scheduler the web
+    // UI's Scheduled-tasks dialog manages, so both stay in sync.
+    projectConfigRuntime,
+    scheduledTasksRuntime,
+    // Mirroring (parts, permissions, questions, todos, title fallback) rides
+    // on the shared global event hub — start it when a listener starts so a
+    // headless server doesn't depend on a browser client connecting first.
+    ensureEventStream: () => ensureGlobalWatcherStarted(),
+  });
+  app.use('/api/otto/messenger', messengerRouter);
+
   const previewProxyRuntime = createPreviewProxyRuntime({
     crypto,
     URL,
@@ -1360,12 +1405,115 @@ async function main(options = {}) {
   });
   terminalRuntime = startupPipelineResult.terminalRuntime;
   messageStreamRuntime = startupPipelineResult.messageStreamRuntime;
+  ottoEventsWebSocketRuntime = startupPipelineResult.ottoEventsWebSocketRuntime;
 
   try {
     await scheduledTasksRuntime.start();
   } catch (error) {
     console.warn('[ScheduledTasks] Failed to start runtime:', error?.message || error);
   }
+
+  // Auto-start Discord Gateway listener if a bot token is saved in settings.
+  // This lets the integration survive server restarts without manual re-start.
+  // The bridge is enabled by default, routing all incoming messages through OpenCode
+  // and streaming responses back into the originating channel/thread.
+  // Includes retry logic and periodic health checks to recover from disconnects.
+  (async () => {
+    const AUTO_START_RETRIES = 5;
+    const AUTO_START_RETRY_DELAY_MS = 3000;
+    const HEALTH_CHECK_INTERVAL_MS = 60_000;
+
+    // Resolve project bindings once, outside the retry loop.
+    let projects = [];
+    try {
+      const settings = await readSettingsFromDiskMigrated();
+      projects = sanitizeProjects(settings?.projects || []);
+    } catch {
+      // ignore — defaults to empty
+    }
+
+    const resolveProject = () => {
+      if (projects.length === 1) {
+        const p = projects[0];
+        return p?.path ? { path: p.path, label: p.label ?? p.path } : null;
+      }
+      return null;
+    };
+
+    // Try auto-start with retries
+    let discordConfig = null;
+    for (let attempt = 1; attempt <= AUTO_START_RETRIES; attempt++) {
+      try {
+        const settings = await readSettingsFromDiskMigrated();
+        discordConfig = settings?.discord;
+        if (discordConfig?.botToken) {
+          const result = discordListener.start(discordConfig.botToken, {
+            guildId: discordConfig.guildId || undefined,
+            autoReply: discordConfig.autoReply !== false,
+            scopeToGuild: Boolean(discordConfig.scopeToGuild),
+            bridgeEnabled: true,
+            resolveProject,
+          });
+          console.log(
+            '[Discord] Listener auto-start:',
+            result?.alreadyRunning ? 'already running' : 'started',
+            '(connected=' + result?.connected + ')'
+          );
+          // The bridge needs the shared global event hub running to mirror
+          // OpenCode output into Discord — don't wait for a browser client.
+          void ensureGlobalWatcherStarted().catch((error) => {
+            console.warn('[Discord] Global event watcher startup failed:', error?.message ?? error);
+          });
+          break; // Success — exit retry loop
+        } else {
+          console.log('[Discord] No bot token in saved config — skipping auto-start');
+          break; // No token, nothing to retry
+        }
+      } catch (err) {
+        const isLastAttempt = attempt === AUTO_START_RETRIES;
+        console.warn(
+          `[Discord] Auto-start attempt ${attempt}/${AUTO_START_RETRIES} failed:`, err?.message ?? err,
+          isLastAttempt ? ' — giving up' : ` — retrying in ${AUTO_START_RETRY_DELAY_MS}ms`,
+        );
+        if (isLastAttempt) break;
+        await new Promise((r) => setTimeout(r, AUTO_START_RETRY_DELAY_MS));
+      }
+    }
+
+    // Periodic health check — reconnects the listener if it became disconnected.
+    // This handles cases where:
+    //   - The gateway connection drops and the built-in reconnect fails
+    //   - The process recovers from a suspend/resume cycle
+    //   - The listener process crashes and the state is stale
+    if (discordConfig?.botToken) {
+      const healthCheckTimer = setInterval(async () => {
+        try {
+          const status = discordListener.status(discordConfig.botToken);
+          if (!status.running || !status.connected) {
+            console.log(
+              '[Discord] Health check: listener not connected (running=' + status.running +
+              ', connected=' + status.connected + ') — restarting...'
+            );
+            discordListener.stop(discordConfig.botToken);
+            const startResult = discordListener.start(discordConfig.botToken, {
+              guildId: discordConfig.guildId || undefined,
+              autoReply: discordConfig.autoReply !== false,
+              scopeToGuild: Boolean(discordConfig.scopeToGuild),
+              bridgeEnabled: true,
+              resolveProject,
+            });
+            console.log(
+              '[Discord] Health check: restart result — running=' + startResult.running +
+              ', connected=' + startResult.connected
+            );
+          }
+        } catch (err) {
+          console.warn('[Discord] Health check error:', err?.message ?? err);
+        }
+      }, HEALTH_CHECK_INTERVAL_MS);
+      healthCheckTimer.unref();
+    }
+  })();
 
   return {
     expressApp: app,

@@ -43,6 +43,7 @@ export const settingsDict = {
   "settings.page.skills.title": "Навички",
   "settings.page.skillsCatalog.title": "Каталог навичок",
   "settings.page.git.title": "Git",
+  "settings.page.integrations.title": "Інтеграції",
   "settings.page.appearance.title": "Зовнішній вигляд",
   "settings.page.chat.title": "Чат",
   "settings.page.shortcuts.title": "Гарячі клавіші",
