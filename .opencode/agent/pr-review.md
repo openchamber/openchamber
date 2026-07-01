@@ -117,11 +117,11 @@ Briefly explain what this PR changes and what problem it is trying to solve.
 - Mention whether prior bot/review comments look addressed, if applicable.
 - Mention the most important risk or state that no concrete issue was found.
 
-<details open><summary><h3>Confidence Score: X/5</h3></summary>
+<details open><summary><h3>Confidence Score: X/5 · Risk Score: Y/5</h3></summary>
 
 Merge signal in plain English: safe to merge, safe after a small fix, or not safe to merge yet.
 
-Explain the reason in a short paragraph. If there are findings, name the files that need attention.
+Explain the reason in a short paragraph. If there are findings, name the files that need attention. The X and Y values here are the same ones applied as `confidence:X` and `risk:Y` labels below.
 </details>
 
 <details><summary><h3>Findings</h3></summary>
@@ -145,3 +145,22 @@ If there are no findings, write: No concrete findings in this pass.
 ```
 
 Keep the comment factual and compact. The reader should understand whether the PR is safe, what must be fixed, and why.
+
+## Scoring and labels
+
+The review produces two 1-5 scores. Both appear in the summary block above and are applied as PR labels.
+
+- **Confidence (1-5):** how confident you are in the merge signal.
+  - 5: very confident, verified end to end.
+  - 3: reasonably confident but an important claim could not be fully verified.
+  - 1: low confidence; could not verify key claims.
+- **Risk (1-5):** how risky the change is to the repository if merged.
+  - 5: touches core paths, security-sensitive code, auth/tokens/secrets, data handling, release scripts, CI, or broad cross-module refactors.
+  - 3: moderate surface area, shared contract, or a path with known historical regressions.
+  - 1: trivial, isolated change with no systemic impact.
+
+After posting the final review comment, apply both scores as labels using the exact same X and Y values shown in the summary:
+
+- `gh pr edit "$PR_NUMBER" --add-label "confidence:X,risk:Y"`
+
+If applying fails because a label does not exist yet, create it first with `gh label create "confidence:X"` or `gh label create "risk:Y"` (no color needed), then retry the `--add-label`. Do not add any other labels, and do not remove or change existing labels. Verify the labels landed by re-reading PR metadata only (e.g. `gh pr view "$PR_NUMBER" --json labels`); never verify by posting another comment.
