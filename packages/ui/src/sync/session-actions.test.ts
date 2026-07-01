@@ -87,6 +87,10 @@ const mockSdk = {
 // Mock opencodeClient singleton
 mock.module("@/lib/opencode/client", () => ({
   opencodeClient: {
+    createSession: mock((params: Record<string, unknown>, directory?: string | null) => {
+      replyCalls.push({ method: "opencodeClient.createSession", params })
+      return Promise.resolve({ id: "session-created", time: { created: 1 }, directory: directory ?? null })
+    }),
     getScopedSdkClient: (directory: string) => {
       scopedClientDirectories.push(directory)
       return mockScopedClient
@@ -125,6 +129,7 @@ mock.module("@/stores/useConfigStore", () => ({
 }))
 
 // Mock useSessionUIStore
+const setCurrentSessionCalls: Array<{ id: string | null; directory?: string | null }> = []
 mock.module("./session-ui-store", () => ({
   useSessionUIStore: {
     getState: () => ({
@@ -133,6 +138,10 @@ mock.module("./session-ui-store", () => ({
         if (sessionId === "session-b") return "/other/project"
         return null
       },
+      setCurrentSession: (id: string | null, directory?: string | null) => {
+        setCurrentSessionCalls.push({ id, directory })
+      },
+      markSessionAsOpenChamberCreated: () => undefined,
     }),
   },
 }))
@@ -758,5 +767,30 @@ describe("dismissOpenQuestionsForSession", () => {
     expect(rejectCalls[0].params.requestID).toBe("q-stale")
     // The stale entry is cleared from the store even though the server reported not-found.
     expect(store.getState().question["session-a"]).toBe(undefined)
+  })
+})
+
+describe("createSession does not set current session", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+    setCurrentSessionCalls.length = 0
+    registeredSessionDirectories.length = 0
+    globalUpsertedSessions.length = 0
+  })
+
+  // Regression: if createSession() calls setCurrentSession internally,
+  // callers that save agent/model selection AFTER will see the agent
+  // indicator flash to the "build" fallback and back (see PR #1925).
+  // Callers own setCurrentSession and must call it AFTER saving selection.
+  test("does not call setCurrentSession — callers own navigation", async () => {
+    const { setActionRefs, createSession } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([]) as unknown as import("./child-store").ChildStoreManager, () => "/test/project")
+
+    const session = await createSession("test session", "/test/project", null)
+
+    expect(session).not.toBeNull()
+    expect(session?.id).toBe("session-created")
+    expect(replyCalls.find((call) => call.method === "opencodeClient.createSession")).toBeTruthy()
+    expect(setCurrentSessionCalls).toHaveLength(0)
   })
 })

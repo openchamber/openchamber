@@ -475,6 +475,8 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
 
     const session = await createSession(undefined, null, null);
     if (session) {
+      // Navigate to the newly created session (see PR #1925).
+      useSessionUIStore.getState().setCurrentSession(session.id, null);
       setPendingInputText(selectedText, 'replace');
     }
 

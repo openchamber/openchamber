@@ -1410,6 +1410,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       return
     }
 
+    get().setCurrentSession(session.id, sessionDirectory)
+
     if (createdWorktree) {
       get().setWorktreeMetadata(session.id, {
         ...createdWorktree,

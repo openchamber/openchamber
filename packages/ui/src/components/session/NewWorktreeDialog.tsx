@@ -877,6 +877,9 @@ export function NewWorktreeDialog({
         onOpenChange(false);
         setIsCreating(false);
 
+        // Navigate to the newly created session (see PR #1925).
+        useSessionUIStore.getState().setCurrentSession(session.id, metadata.path);
+
         void sessionActions.updateSessionTitle(session.id, sessionTitle).catch(() => undefined);
 
         try {
