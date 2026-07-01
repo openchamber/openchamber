@@ -101,6 +101,10 @@ export default defineConfig({
     emptyOutDir: true,
     chunkSizeWarningLimit: 500,
     rollupOptions: {
+      onwarn(warning, warn) {
+        if (warning.message?.includes('onnxruntime-web') || warning.message?.includes('eval in')) return;
+        warn(warning);
+      },
       input: {
         main: path.resolve(__dirname, 'index.html'),
         mobile: path.resolve(__dirname, 'mobile.html'),
