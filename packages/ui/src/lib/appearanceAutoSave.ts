@@ -1,12 +1,12 @@
 import { useUIStore } from '@/stores/useUIStore';
 import { updateDesktopSettings } from '@/lib/persistence';
 import type { DesktopSettings } from '@/lib/desktop';
+import type { ReasoningMode } from '@/lib/api/types';
 import type { MonoFontOption, UiFontOption } from '@/lib/fontOptions';
 import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 
 type AppearanceSlice = {
-  showReasoningTraces: boolean;
-  collapsibleThinkingBlocks: boolean;
+  reasoningMode: ReasoningMode;
   showDeletionDialog: boolean;
   nativeNotificationsEnabled: boolean;
   notificationMode: 'always' | 'hidden-only';
@@ -49,8 +49,7 @@ export const startAppearanceAutoSave = (): void => {
   initialized = true;
 
   let previous: AppearanceSlice = {
-    showReasoningTraces: useUIStore.getState().showReasoningTraces,
-    collapsibleThinkingBlocks: useUIStore.getState().collapsibleThinkingBlocks,
+    reasoningMode: useUIStore.getState().reasoningMode,
     showDeletionDialog: useUIStore.getState().showDeletionDialog,
     nativeNotificationsEnabled: useUIStore.getState().nativeNotificationsEnabled,
     notificationMode: useUIStore.getState().notificationMode,
@@ -100,8 +99,7 @@ export const startAppearanceAutoSave = (): void => {
 
   useUIStore.subscribe((state) => {
     const current: AppearanceSlice = {
-      showReasoningTraces: state.showReasoningTraces,
-      collapsibleThinkingBlocks: state.collapsibleThinkingBlocks,
+      reasoningMode: state.reasoningMode,
       showDeletionDialog: state.showDeletionDialog,
       nativeNotificationsEnabled: state.nativeNotificationsEnabled,
       notificationMode: state.notificationMode,
@@ -131,11 +129,8 @@ export const startAppearanceAutoSave = (): void => {
 
     const diff: Partial<DesktopSettings> = {};
 
-    if (current.showReasoningTraces !== previous.showReasoningTraces) {
-      diff.showReasoningTraces = current.showReasoningTraces;
-    }
-    if (current.collapsibleThinkingBlocks !== previous.collapsibleThinkingBlocks) {
-      diff.collapsibleThinkingBlocks = current.collapsibleThinkingBlocks;
+    if (current.reasoningMode !== previous.reasoningMode) {
+      diff.reasoningMode = current.reasoningMode;
     }
     if (current.showDeletionDialog !== previous.showDeletionDialog) {
       diff.showDeletionDialog = current.showDeletionDialog;

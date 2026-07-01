@@ -10,6 +10,35 @@ import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { sanitizeStarterRefs } from '@/lib/draftStarters';
 import { normalizeMobileKeyboardMode, setStoredMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import type { ReasoningMode } from '@/lib/api/types';
+
+const REASONING_MODE_VALUES = new Set<ReasoningMode>(['off', 'collapsible-hidden', 'collapsible-dynamic', 'full']);
+
+/**
+ * Resolve a `reasoningMode` value from incoming settings, accepting either the
+ * new enum or the legacy boolean pair `showReasoningTraces` /
+ * `collapsibleThinkingBlocks`. Returns `undefined` when no usable signal is
+ * present (caller should leave the existing store value untouched).
+ */
+const resolveReasoningModeFromSettings = (settings: Partial<DesktopSettings>): ReasoningMode | undefined => {
+  if (typeof settings.reasoningMode === 'string' && REASONING_MODE_VALUES.has(settings.reasoningMode as ReasoningMode)) {
+    return settings.reasoningMode as ReasoningMode;
+  }
+
+  const hasTraces = typeof settings.showReasoningTraces === 'boolean';
+  const hasCollapsible = typeof settings.collapsibleThinkingBlocks === 'boolean';
+  if (!hasTraces && !hasCollapsible) {
+    return undefined;
+  }
+
+  // Legacy migration: derive the enum from the previous booleans.
+  const traces = hasTraces ? (settings.showReasoningTraces as boolean) : true;
+  if (!traces) {
+    return 'off';
+  }
+  const collapsible = hasCollapsible ? (settings.collapsibleThinkingBlocks as boolean) : true;
+  return collapsible ? 'collapsible-dynamic' : 'full';
+};
 
 export const applyPersistedHomeDirectoryToWindow = (homeDirectory: string): void => {
   if (typeof window === 'undefined') {
@@ -423,11 +452,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
     : null;
   const queueStore = useMessageQueueStore.getState();
 
-  if (typeof settings.showReasoningTraces === 'boolean' && settings.showReasoningTraces !== store.showReasoningTraces) {
-    store.setShowReasoningTraces(settings.showReasoningTraces);
-  }
-  if (typeof settings.collapsibleThinkingBlocks === 'boolean' && settings.collapsibleThinkingBlocks !== store.collapsibleThinkingBlocks) {
-    store.setCollapsibleThinkingBlocks(settings.collapsibleThinkingBlocks);
+  const resolvedReasoningMode = resolveReasoningModeFromSettings(settings);
+  if (resolvedReasoningMode && resolvedReasoningMode !== store.reasoningMode) {
+    store.setReasoningMode(resolvedReasoningMode);
   }
   if (typeof settings.autoDeleteEnabled === 'boolean' && settings.autoDeleteEnabled !== store.autoDeleteEnabled) {
     store.setAutoDeleteEnabled(settings.autoDeleteEnabled);
@@ -768,11 +795,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (Array.isArray(candidate.draftStarters)) {
     result.draftStarters = sanitizeStarterRefs(candidate.draftStarters);
   }
-  if (typeof candidate.showReasoningTraces === 'boolean') {
-    result.showReasoningTraces = candidate.showReasoningTraces;
-  }
-  if (typeof candidate.collapsibleThinkingBlocks === 'boolean') {
-    result.collapsibleThinkingBlocks = candidate.collapsibleThinkingBlocks;
+  const resolvedReasoning = resolveReasoningModeFromSettings(candidate as Partial<DesktopSettings>);
+  if (resolvedReasoning) {
+    result.reasoningMode = resolvedReasoning;
   }
   if (typeof candidate.autoDeleteEnabled === 'boolean') {
     result.autoDeleteEnabled = candidate.autoDeleteEnabled;

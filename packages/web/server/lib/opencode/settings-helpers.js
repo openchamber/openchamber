@@ -26,6 +26,33 @@ export const createSettingsHelpers = (dependencies) => {
   const SHORTCUT_OVERRIDE_VALUE_MAX_LENGTH = 128;
   const PWA_ORIENTATION_VALUES = new Set(['system', 'portrait', 'landscape']);
   const MOBILE_KEYBOARD_MODE_VALUES = new Set(['native', 'resize-content']);
+  const REASONING_MODE_VALUES = new Set(['off', 'collapsible-hidden', 'collapsible-dynamic', 'full']);
+
+  /**
+   * Resolve a reasoningMode enum from a candidate settings object, accepting
+   * either the new enum or the legacy boolean pair `showReasoningTraces` /
+   * `collapsibleThinkingBlocks`. Returns `undefined` when no usable signal is
+   * present so callers can decide whether to keep the existing value.
+   */
+  const resolveReasoningMode = (candidate) => {
+    if (typeof candidate?.reasoningMode === 'string' && REASONING_MODE_VALUES.has(candidate.reasoningMode)) {
+      return candidate.reasoningMode;
+    }
+
+    const hasTraces = typeof candidate?.showReasoningTraces === 'boolean';
+    const hasCollapsible = typeof candidate?.collapsibleThinkingBlocks === 'boolean';
+    if (!hasTraces && !hasCollapsible) {
+      return undefined;
+    }
+
+    // Legacy migration: derive the enum from the previous booleans.
+    const traces = hasTraces ? candidate.showReasoningTraces : true;
+    if (!traces) {
+      return 'off';
+    }
+    const collapsible = hasCollapsible ? candidate.collapsibleThinkingBlocks : true;
+    return collapsible ? 'collapsible-dynamic' : 'full';
+  };
   const HIDDEN_MODELS_MAX = 1024;
   const RECENT_EFFORTS_MAX_KEYS = 128;
   const RECENT_EFFORTS_MAX_VARIANTS_PER_KEY = 5;
@@ -239,11 +266,9 @@ export const createSettingsHelpers = (dependencies) => {
         result.githubScopes = trimmed;
       }
     }
-    if (typeof candidate.showReasoningTraces === 'boolean') {
-      result.showReasoningTraces = candidate.showReasoningTraces;
-    }
-    if (typeof candidate.collapsibleThinkingBlocks === 'boolean') {
-      result.collapsibleThinkingBlocks = candidate.collapsibleThinkingBlocks;
+    const resolvedReasoning = resolveReasoningMode(candidate);
+    if (resolvedReasoning) {
+      result.reasoningMode = resolvedReasoning;
     }
     if (typeof candidate.showTextJustificationActivity === 'boolean') {
       result.showTextJustificationActivity = candidate.showTextJustificationActivity;
@@ -816,18 +841,10 @@ export const createSettingsHelpers = (dependencies) => {
                 : null,
           }
         : {}),
-      showReasoningTraces:
-        typeof settings.showReasoningTraces === 'boolean'
-          ? settings.showReasoningTraces
-          : typeof sanitized.showReasoningTraces === 'boolean'
-            ? sanitized.showReasoningTraces
-            : false,
-      collapsibleThinkingBlocks:
-        typeof settings.collapsibleThinkingBlocks === 'boolean'
-          ? settings.collapsibleThinkingBlocks
-          : typeof sanitized.collapsibleThinkingBlocks === 'boolean'
-            ? sanitized.collapsibleThinkingBlocks
-            : true,
+      reasoningMode:
+        resolveReasoningMode(settings)
+          ?? resolveReasoningMode(sanitized)
+          ?? 'collapsible-dynamic',
     };
   };
 

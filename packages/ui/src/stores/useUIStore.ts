@@ -8,6 +8,7 @@ import type { DraftStarterRef } from '@/lib/draftStarters';
 import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import type { ReasoningMode } from '@/lib/api/types';
 
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
 export type RightSidebarTab = 'git' | 'files' | 'context';
@@ -559,9 +560,7 @@ interface UIStore {
   settingsRemoteInstancesSelectedId: string | null;
   eventStreamStatus: EventStreamStatus;
   eventStreamHint: string | null;
-  showReasoningTraces: boolean;
-  collapsibleThinkingBlocks: boolean;
-  groupReasoningBlocks: boolean;
+  reasoningMode: ReasoningMode;
   chatRenderMode: ChatRenderMode;
   activityRenderMode: ActivityRenderMode;
   showDeletionDialog: boolean;
@@ -707,8 +706,7 @@ interface UIStore {
   setSettingsProjectsSelectedId: (projectId: string | null) => void;
   setSettingsRemoteInstancesSelectedId: (instanceId: string | null) => void;
   setEventStreamStatus: (status: EventStreamStatus, hint?: string | null) => void;
-  setShowReasoningTraces: (value: boolean) => void;
-  setCollapsibleThinkingBlocks: (value: boolean) => void;
+  setReasoningMode: (value: ReasoningMode) => void;
   setChatRenderMode: (value: ChatRenderMode) => void;
   setActivityRenderMode: (value: ActivityRenderMode) => void;
   setShowDeletionDialog: (value: boolean) => void;
@@ -850,9 +848,7 @@ export const useUIStore = create<UIStore>()(
         settingsRemoteInstancesSelectedId: null,
         eventStreamStatus: 'idle',
         eventStreamHint: null,
-        showReasoningTraces: true,
-        collapsibleThinkingBlocks: true,
-        groupReasoningBlocks: true,
+        reasoningMode: 'collapsible-dynamic',
         chatRenderMode: 'live',
         activityRenderMode: 'summary',
         showDeletionDialog: true,
@@ -1539,16 +1535,11 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
-        setShowReasoningTraces: (value) => {
-          set({ showReasoningTraces: value });
-        },
-
-        setCollapsibleThinkingBlocks: (value) => {
-          set({ collapsibleThinkingBlocks: value });
-        },
-
         setChatRenderMode: (value) => {
           set({ chatRenderMode: value });
+        },
+        setReasoningMode: (value: ReasoningMode) => {
+          set({ reasoningMode: value });
         },
 
         setActivityRenderMode: (value) => {
@@ -2226,8 +2217,7 @@ export const useUIStore = create<UIStore>()(
           settingsRemoteInstancesSelectedId: state.settingsRemoteInstancesSelectedId,
           isSessionCreateDialogOpen: state.isSessionCreateDialogOpen,
           // Note: isSettingsDialogOpen intentionally NOT persisted
-          showReasoningTraces: state.showReasoningTraces,
-          collapsibleThinkingBlocks: state.collapsibleThinkingBlocks,
+          reasoningMode: state.reasoningMode,
           chatRenderMode: state.chatRenderMode,
           activityRenderMode: state.activityRenderMode,
           showDeletionDialog: state.showDeletionDialog,

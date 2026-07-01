@@ -26,6 +26,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { usePwaDetection } from '@/hooks/usePwaDetection';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { CODE_FONT_OPTIONS, DEFAULT_MONO_FONT, DEFAULT_UI_FONT, UI_FONT_OPTIONS, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
+import type { ReasoningMode } from '@/lib/api/types';
 import { useI18n, type Locale } from '@/lib/i18n';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { normalizeMobileKeyboardMode, supportsMobileKeyboardResizeContent, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
@@ -84,6 +85,29 @@ const MERMAID_RENDERING_OPTIONS: Option<'svg' | 'ascii'>[] = [
         id: 'ascii',
         labelKey: 'settings.openchamber.visual.option.mermaidRendering.ascii.label',
         descriptionKey: 'settings.openchamber.visual.option.mermaidRendering.ascii.description',
+    },
+];
+
+const REASONING_MODE_OPTIONS: Option<ReasoningMode>[] = [
+    {
+        id: 'off',
+        labelKey: 'settings.openchamber.visual.option.reasoningMode.off.label',
+        descriptionKey: 'settings.openchamber.visual.option.reasoningMode.off.description',
+    },
+    {
+        id: 'collapsible-hidden',
+        labelKey: 'settings.openchamber.visual.option.reasoningMode.collapsibleHidden.label',
+        descriptionKey: 'settings.openchamber.visual.option.reasoningMode.collapsibleHidden.description',
+    },
+    {
+        id: 'collapsible-dynamic',
+        labelKey: 'settings.openchamber.visual.option.reasoningMode.collapsibleDynamic.label',
+        descriptionKey: 'settings.openchamber.visual.option.reasoningMode.collapsibleDynamic.description',
+    },
+    {
+        id: 'full',
+        labelKey: 'settings.openchamber.visual.option.reasoningMode.full.label',
+        descriptionKey: 'settings.openchamber.visual.option.reasoningMode.full.description',
     },
 ];
 
@@ -259,10 +283,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const { isMobile } = useDeviceInfo();
     const { browserTab } = usePwaDetection();
     const directoryShowHidden = useDirectoryShowHidden();
-    const showReasoningTraces = useUIStore(state => state.showReasoningTraces);
-    const setShowReasoningTraces = useUIStore(state => state.setShowReasoningTraces);
-    const collapsibleThinkingBlocks = useUIStore(state => state.collapsibleThinkingBlocks);
-    const setCollapsibleThinkingBlocks = useUIStore(state => state.setCollapsibleThinkingBlocks);
+    const reasoningMode = useUIStore(state => state.reasoningMode);
+    const setReasoningMode = useUIStore(state => state.setReasoningMode);
 
     const mermaidRenderingMode = useUIStore(state => state.mermaidRenderingMode);
     const setMermaidRenderingMode = useUIStore(state => state.setMermaidRenderingMode);
@@ -473,6 +495,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         setMermaidRenderingMode(mode);
         void updateDesktopSettings({ mermaidRenderingMode: mode });
     }, [setMermaidRenderingMode]);
+
+    const handleReasoningModeChange = React.useCallback((mode: ReasoningMode) => {
+        setReasoningMode(mode);
+        void updateDesktopSettings({ reasoningMode: mode });
+    }, [setReasoningMode]);
 
     const handleShowToolFileIconsChange = React.useCallback((enabled: boolean) => {
         setShowToolFileIcons(enabled);
@@ -1783,50 +1810,35 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                             {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || shouldShow('dotfiles') || shouldShow('fileViewerPreview') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || shouldShow('showTurnChangedFiles') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning')) && (
                                 <section className="p-2 space-y-0.5">
                                     {shouldShow('reasoning') && (
-                                        <div
-                                            data-settings-item="chat.reasoning-traces"
-                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={showReasoningTraces}
-                                            onClick={() => setShowReasoningTraces(!showReasoningTraces)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    setShowReasoningTraces(!showReasoningTraces);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
-                                                checked={showReasoningTraces}
-                                                onChange={setShowReasoningTraces}
-                                                ariaLabel={t('settings.openchamber.visual.field.showReasoningTracesAria')}
-                                            />
-                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.showReasoningTraces')}</span>
-                                        </div>
-                                    )}
-
-                                    {shouldShow('reasoning') && showReasoningTraces && (
-                                        <div
-                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={collapsibleThinkingBlocks}
-                                            onClick={() => setCollapsibleThinkingBlocks(!collapsibleThinkingBlocks)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    setCollapsibleThinkingBlocks(!collapsibleThinkingBlocks);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
-                                                checked={collapsibleThinkingBlocks}
-                                                onChange={setCollapsibleThinkingBlocks}
-                                                ariaLabel={t('settings.openchamber.visual.field.collapsibleThinkingBlocksAria')}
-                                            />
-                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.collapsibleThinkingBlocks')}</span>
-                                        </div>
+                                        <section data-settings-item="chat.reasoning-traces" className="p-2">
+                                            <h4 className="typography-ui-header font-medium text-foreground">{tUnsafe('settings.openchamber.visual.section.reasoningTraces')}</h4>
+                                            <div className="mt-1 flex max-w-[24rem] flex-col gap-2">
+                                                <div role="radiogroup" aria-label={tUnsafe('settings.openchamber.visual.section.reasoningTracesAria')} className="flex flex-wrap items-center gap-1">
+                                                    {REASONING_MODE_OPTIONS.map((option) => {
+                                                        const selected = reasoningMode === option.id;
+                                                        return (
+                                                            <Button
+                                                                key={option.id}
+                                                                variant="chip"
+                                                                size="xs"
+                                                                aria-pressed={selected}
+                                                                aria-label={tUnsafe(`settings.openchamber.visual.option.reasoningMode.${option.id === 'collapsible-hidden' ? 'collapsibleHidden' : option.id === 'collapsible-dynamic' ? 'collapsibleDynamic' : option.id}.aria`)}
+                                                                className={cn('!font-normal', selected ? 'border-[var(--primary-base)] text-[var(--primary-base)] bg-[var(--primary-base)]/10' : 'text-foreground')}
+                                                                onClick={() => handleReasoningModeChange(option.id)}
+                                                            >
+                                                                {tUnsafe(option.labelKey)}
+                                                            </Button>
+                                                        );
+                                                    })}
+                                                </div>
+                                                <span className="typography-meta text-muted-foreground">
+                                                    {(() => {
+                                                        const option = REASONING_MODE_OPTIONS.find((item) => item.id === reasoningMode);
+                                                        return option?.descriptionKey ? tUnsafe(option.descriptionKey) : '';
+                                                    })()}
+                                                </span>
+                                            </div>
+                                        </section>
                                     )}
 
                                     {shouldShow('collapsibleUserMessages') && (
