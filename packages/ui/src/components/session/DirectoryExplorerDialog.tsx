@@ -192,7 +192,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const [pinnedPaths, setPinnedPaths] = React.useState<Set<string>>(new Set());
   const [isPinnedSectionExpanded, setIsPinnedSectionExpanded] = React.useState(true);
   const hasMountedPinnedPersistence = React.useRef(false);
-  const suppressNextPinnedPersistence = React.useRef(false);
+  const pendingExternalPinnedPaths = React.useRef<Set<string> | null>(null);
   const [isCloneMode, setIsCloneMode] = React.useState(false);
   const [cloneRemoteUrl, setCloneRemoteUrl] = React.useState('');
   const [selectedGitIdentityId, setSelectedGitIdentityId] = React.useState<string | null>(null);
@@ -240,9 +240,9 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
       .map((path) => (typeof path === 'string' ? normalizeStoredDirectoryPath(path) : null))
       .filter((path): path is string => Boolean(path));
     const nextPaths = new Set(normalized);
+    pendingExternalPinnedPaths.current = nextPaths;
     setPinnedPaths((previous) => {
       if (arePathSetsEqual(previous, nextPaths)) return previous;
-      suppressNextPinnedPersistence.current = true;
       return nextPaths;
     });
   }, []);
@@ -293,8 +293,9 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
       hasMountedPinnedPersistence.current = true;
       return;
     }
-    if (suppressNextPinnedPersistence.current) {
-      suppressNextPinnedPersistence.current = false;
+    const externalPinnedPaths = pendingExternalPinnedPaths.current;
+    pendingExternalPinnedPaths.current = null;
+    if (externalPinnedPaths && arePathSetsEqual(pinnedPaths, externalPinnedPaths)) {
       return;
     }
     void updateDesktopSettings({ pinnedDirectories: Array.from(pinnedPaths) });
