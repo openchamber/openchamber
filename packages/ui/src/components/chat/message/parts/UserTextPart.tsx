@@ -197,14 +197,16 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
     return (
         <div className="relative" key={part.id || `${messageId}-user-text`}>
             {collapsibleUserMessages && isExpanded && (
-                <button
-                    type="button"
-                    onClick={handleCollapse}
-                    className="absolute top-0 right-0 z-10 flex items-center justify-center rounded-sm bg-[var(--surface-elevated)] p-0.5 text-[var(--surface-mutedForeground)] hover:text-[var(--surface-foreground)] hover:bg-[var(--interactive-hover)] transition-colors"
-                    aria-label={t('chat.message.userText.collapseAria')}
-                >
-                    <Icon name="arrow-up-s" className="h-3.5 w-3.5" />
-                </button>
+                <div className="sticky top-0 z-10 flex justify-end pointer-events-none h-0 overflow-visible">
+                    <button
+                        type="button"
+                        onClick={handleCollapse}
+                        className="pointer-events-auto flex items-center justify-center rounded-sm bg-[var(--surface-elevated)] p-0.5 text-[var(--surface-mutedForeground)] hover:text-[var(--surface-foreground)] hover:bg-[var(--interactive-hover)] transition-colors"
+                        aria-label={t('chat.message.userText.collapseAria')}
+                    >
+                        <Icon name="arrow-up-s" className="h-3.5 w-3.5" />
+                    </button>
+                </div>
             )}
             <div
                 className={cn(
