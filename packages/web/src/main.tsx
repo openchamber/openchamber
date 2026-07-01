@@ -5,6 +5,7 @@ import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
 import { getStoredMobileLayoutPreference } from '@openchamber/ui/lib/mobileLayoutPreference';
 import type { HostedSurface } from '@openchamber/ui/lib/runtimeSurface';
 import '@openchamber/ui/index.css';
+import '@openchamber/ui/styles/katex-css';
 import '@openchamber/ui/styles/fonts';
 
 declare global {
