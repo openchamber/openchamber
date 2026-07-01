@@ -15,15 +15,22 @@ import { sanitizeForTTS } from '@/lib/voice/summarize';
 export interface UseMessageTTSReturn {
     /** Whether TTS is currently playing for this message */
     isPlaying: boolean;
+    /** Whether TTS is currently paused */
+    isPaused: boolean;
     /** Play the message text */
     play: (text: string) => Promise<void>;
     /** Stop playback */
     stop: () => void;
+    /** Pause playback (keeps connection alive) */
+    pause: () => void;
+    /** Resume playback */
+    resume: () => void;
 }
 
 export function useMessageTTS(): UseMessageTTSReturn {
     const [isPlaying, setIsPlaying] = useState(false);
-    
+    const [isPaused, setIsPaused] = useState(false);
+
     const voiceProvider = useConfigStore((state) => state.voiceProvider);
     const speechRate = useConfigStore((state) => state.speechRate);
     const speechPitch = useConfigStore((state) => state.speechPitch);
@@ -41,7 +48,7 @@ export function useMessageTTS(): UseMessageTTSReturn {
     const shouldCheckOpenAIAvailability = showMessageTTSButtons && isServerProvider;
     const shouldCheckSayAvailability = showMessageTTSButtons && voiceProvider === 'say';
 
-    const { speak: speakServerTTS, stop: stopServerTTS, isAvailable: isServerTTSAvailable } = useServerTTS({
+    const { speak: speakServerTTS, stop: stopServerTTS, pause: pauseServerTTS, resume: resumeServerTTS, isAvailable: isServerTTSAvailable } = useServerTTS({
         enabled: shouldCheckOpenAIAvailability,
         availabilityMode: voiceProvider === 'openai-compatible' ? 'openai-compatible' : 'openai',
     });
@@ -51,10 +58,25 @@ export function useMessageTTS(): UseMessageTTSReturn {
     
     const stop = useCallback(() => {
         setIsPlaying(false);
+        setIsPaused(false);
         stopServerTTS();
         stopSayTTS();
         browserVoiceService.cancelSpeech();
     }, [stopServerTTS, stopSayTTS]);
+
+    const pause = useCallback(() => {
+        if (isServerProvider) {
+            pauseServerTTS();
+            setIsPaused(true);
+        }
+    }, [isServerProvider, pauseServerTTS]);
+
+    const resume = useCallback(() => {
+        if (isServerProvider) {
+            resumeServerTTS();
+            setIsPaused(false);
+        }
+    }, [isServerProvider, resumeServerTTS]);
     
     const play = useCallback(async (text: string) => {
         if (!text.trim()) return;
@@ -134,7 +156,10 @@ export function useMessageTTS(): UseMessageTTSReturn {
     
     return {
         isPlaying,
+        isPaused,
         play,
         stop,
+        pause,
+        resume,
     };
 }

@@ -77,20 +77,33 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
       // Historical summarize request fields are intentionally ignored. The
       // model-backed summarization provider is retired.
 
-      const result = await ttsService.generateSpeechStream({
-        text: textToSpeak,
-        voice,
-        model,
-        speed,
-        instructions,
-        apiKey: hasClientKey ? apiKey.trim() : undefined,
-        baseURL: hasCustomBaseURL ? normalizedBaseURL : undefined,
-      });
-
-      res.setHeader('Content-Type', result.contentType);
+      // Stream audio chunks directly to client instead of buffering
+      const contentType = ttsService.getContentType(hasCustomBaseURL ? normalizedBaseURL : undefined);
+      res.setHeader('Content-Type', contentType);
       res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Content-Length', result.buffer.length);
-      res.send(result.buffer);
+      res.setHeader('Transfer-Encoding', 'chunked');
+
+      try {
+        for await (const chunk of ttsService.generateSpeechStreamRaw({
+          text: textToSpeak,
+          voice,
+          model,
+          speed,
+          instructions,
+          apiKey: hasClientKey ? apiKey.trim() : undefined,
+          baseURL: hasCustomBaseURL ? normalizedBaseURL : undefined,
+        })) {
+          res.write(chunk);
+        }
+        res.end();
+      } catch (streamError) {
+        console.error('[TTS] Stream error:', streamError);
+        if (!res.headersSent) {
+          res.status(500).json({ error: streamError.message || 'TTS streaming failed' });
+        } else {
+          res.end();
+        }
+      }
       } catch (error) {
         console.error('[TTS] Error:', error);
         if (!res.headersSent) {
