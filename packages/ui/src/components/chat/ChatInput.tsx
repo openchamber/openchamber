@@ -69,6 +69,7 @@ import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { createWorktreeDraft } from '@/lib/worktreeSessionCreator';
+import { refreshProjectWorktrees } from '@/lib/worktrees/worktreeManager';
 import { buildSessionTargetOptions } from '@/sync/session-worktree-contract';
 import { usePermissionStore } from '@/stores/permissionStore';
 import { extractGitChangedFiles } from './changedFiles';
@@ -3774,6 +3775,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }).filter((option) => option.kind === 'worktree');
     }, [availableWorktreesByProject, newSessionDraft?.bootstrapPendingDirectory, selectedDraftProject, selectedDraftProjectCurrentBranch, selectedDraftProjectPath]);
 
+    const handleBranchSelectorOpenChange = React.useCallback(async (open: boolean) => {
+        if (!open || !selectedDraftProject) return;
+        const projectPath = normalizePath(selectedDraftProject.path) ?? '';
+        if (!projectPath) return;
+        await refreshProjectWorktrees({ id: selectedDraftProject.id, path: projectPath });
+    }, [selectedDraftProject]);
+
     const selectedDraftDirectory = React.useMemo(
         () => normalizePath(newSessionDraft?.bootstrapPendingDirectory ?? null)
             ?? normalizePath(newSessionDraft?.directoryOverride ?? null)
@@ -4252,6 +4260,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             <Select
                                 value={selectedDraftDirectory ?? draftBranchItems[0]?.value ?? normalizePath(selectedDraftProject.path) ?? ''}
                                 onValueChange={handleDraftDirectoryChange}
+                                onOpenChange={handleBranchSelectorOpenChange}
                             >
                                 <SelectTrigger
                                     size="sm"
