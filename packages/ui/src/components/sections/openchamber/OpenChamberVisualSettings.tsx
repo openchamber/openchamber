@@ -1806,37 +1806,31 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     {shouldShow('reasoning') && (
                                         <section data-settings-item="chat.reasoning-traces" className="p-2">
                                             <h4 className="typography-ui-header font-medium text-foreground">{tUnsafe('settings.openchamber.visual.section.reasoningTraces')}</h4>
-                                            <div role="radiogroup" aria-label={tUnsafe('settings.openchamber.visual.section.reasoningTracesAria')} className="mt-1 space-y-0">
-                                                {REASONING_MODE_OPTIONS.map((option) => {
-                                                    const selected = reasoningMode === option.id;
-                                                    const ariaKey = option.id === 'collapsible-hidden'
-                                                        ? 'settings.openchamber.visual.option.reasoningMode.collapsibleHidden.aria'
-                                                        : option.id === 'collapsible-dynamic'
-                                                            ? 'settings.openchamber.visual.option.reasoningMode.collapsibleDynamic.aria'
-                                                            : `settings.openchamber.visual.option.reasoningMode.${option.id}.aria`;
-                                                    return (
-                                                        <div
-                                                            key={option.id}
-                                                            className="flex w-full items-center gap-2 py-0.5"
-                                                        >
-                                                            <Radio
-                                                                checked={selected}
-                                                                onChange={() => handleReasoningModeChange(option.id)}
-                                                                ariaLabel={tUnsafe(ariaKey)}
-                                                            />
-                                                            <div className="flex flex-col">
-                                                                <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
-                                                                    {tUnsafe(option.labelKey)}
-                                                                </span>
-                                                                {option.descriptionKey && (
-                                                                    <span className="typography-meta text-muted-foreground">
-                                                                        {tUnsafe(option.descriptionKey)}
-                                                                    </span>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                    );
-                                                })}
+                                            <div className="mt-1 flex max-w-[24rem] flex-col gap-2">
+                                                <div role="radiogroup" aria-label={tUnsafe('settings.openchamber.visual.section.reasoningTracesAria')} className="flex flex-wrap items-center gap-1">
+                                                    {REASONING_MODE_OPTIONS.map((option) => {
+                                                        const selected = reasoningMode === option.id;
+                                                        return (
+                                                            <Button
+                                                                key={option.id}
+                                                                variant="chip"
+                                                                size="xs"
+                                                                aria-pressed={selected}
+                                                                aria-label={tUnsafe(`settings.openchamber.visual.option.reasoningMode.${option.id === 'collapsible-hidden' ? 'collapsibleHidden' : option.id === 'collapsible-dynamic' ? 'collapsibleDynamic' : option.id}.aria`)}
+                                                                className={cn('!font-normal', selected ? 'border-[var(--primary-base)] text-[var(--primary-base)] bg-[var(--primary-base)]/10' : 'text-foreground')}
+                                                                onClick={() => handleReasoningModeChange(option.id)}
+                                                            >
+                                                                {tUnsafe(option.labelKey)}
+                                                            </Button>
+                                                        );
+                                                    })}
+                                                </div>
+                                                <span className="typography-meta text-muted-foreground">
+                                                    {(() => {
+                                                        const option = REASONING_MODE_OPTIONS.find((item) => item.id === reasoningMode);
+                                                        return option?.descriptionKey ? tUnsafe(option.descriptionKey) : '';
+                                                    })()}
+                                                </span>
                                             </div>
                                         </section>
                                     )}
