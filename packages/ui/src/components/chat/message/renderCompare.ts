@@ -1,5 +1,5 @@
 import type { Message, Part } from '@opencode-ai/sdk/v2';
-import type { TurnActivityGroup, TurnActivityRecord, TurnDiffStats, TurnGroupingContext } from '../lib/turns/types';
+import type { TurnActivityGroup, TurnActivityRecord, TurnChangedFile, TurnDiffStats, TurnGroupingContext } from '../lib/turns/types';
 
 type MessageRecord = {
   info: Message;
@@ -106,7 +106,7 @@ export const areRenderRelevantPartsEqual = (left: Part[], right: Part[]): boolea
   return true;
 };
 
-export const areRenderRelevantMessageInfoEqual = (left: Message, right: Message): boolean => {
+const areRenderRelevantMessageInfoEqual = (left: Message, right: Message): boolean => {
   if (left === right) return true;
 
   return left.id === right.id
@@ -144,6 +144,24 @@ const areTurnDiffStatsEqual = (left?: TurnDiffStats, right?: TurnDiffStats): boo
   return left.additions === right.additions
     && left.deletions === right.deletions
     && left.files === right.files;
+};
+
+const areTurnChangedFilesEqual = (left?: TurnChangedFile[], right?: TurnChangedFile[]): boolean => {
+  if (left === right) return true;
+  if (!left || !right) return !left && !right;
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    const leftFile = left[index];
+    const rightFile = right[index];
+    if (
+      leftFile.file !== rightFile.file
+      || leftFile.additions !== rightFile.additions
+      || leftFile.deletions !== rightFile.deletions
+    ) {
+      return false;
+    }
+  }
+  return true;
 };
 
 const areTurnActivityRecordsEqual = (left: TurnActivityRecord, right: TurnActivityRecord): boolean => {
@@ -298,6 +316,10 @@ export const areRelevantTurnGroupingContextsEqual = (
   }
 
   if ((ownerRelevant || segmentsRelevant) && !areTurnDiffStatsEqual(left.diffStats, right.diffStats)) {
+    return false;
+  }
+
+  if ((ownerRelevant || segmentsRelevant || left.isLastAssistantInTurn || right.isLastAssistantInTurn) && !areTurnChangedFilesEqual(left.changedFiles, right.changedFiles)) {
     return false;
   }
 

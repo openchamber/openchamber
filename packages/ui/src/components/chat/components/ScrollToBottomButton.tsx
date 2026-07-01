@@ -1,7 +1,7 @@
 import React from 'react';
-import { RiArrowDownLine } from '@remixicon/react';
 
 import { Button } from '@/components/ui/button';
+import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 
@@ -26,7 +26,7 @@ const ScrollToBottomButton: React.FC<ScrollToBottomButtonProps> = ({ visible, on
                 className="size-8 rounded-full [corner-shape:round] p-0 shadow-none bg-background/95 hover:bg-interactive-hover"
                 aria-label={t('chat.scrollToBottom.aria')}
             >
-                <RiArrowDownLine className="h-4 w-4" />
+                <Icon name="arrow-down" className="h-4 w-4" />
             </Button>
         </div>
     );

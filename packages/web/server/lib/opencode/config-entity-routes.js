@@ -18,7 +18,37 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
     createMcpConfig,
     updateMcpConfig,
     deleteMcpConfig,
+    listSnippets,
+    getSnippet,
+    createSnippet,
+    updateSnippet,
+    deleteSnippet,
+    expandSnippets,
   } = dependencies;
+
+  // Build the response for a config mutation based on whether OpenCode actually
+  // reloaded the change. When connected to an external OpenCode server that
+  // OpenChamber cannot restart, the change is persisted to disk but the running
+  // server will not serve it until the user restarts that server. We must not
+  // report a clean "reloading" success in that case, otherwise the UI silently
+  // reverts the edit to the stale value on the next refresh.
+  const buildConfigMutationResponse = (refreshResult, { liveMessage, manualRestartMessage }) => {
+    if (refreshResult && refreshResult.external) {
+      return {
+        success: true,
+        requiresReload: false,
+        requiresManualRestart: true,
+        message: manualRestartMessage,
+      };
+    }
+
+    return {
+      success: true,
+      requiresReload: true,
+      message: liveMessage,
+      reloadDelayMs: clientReloadDelayMs,
+    };
+  };
 
   const completeMcpMutation = async (res, action, name, applyChange) => {
     applyChange();
@@ -98,16 +128,14 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       console.log('[Server] Scope:', scope, 'Working directory:', directory);
 
       createAgent(agentName, config, directory, scope);
-      await refreshOpenCodeAfterConfigChange('agent creation', {
+      const refreshResult = await refreshOpenCodeAfterConfigChange('agent creation', {
         agentName
       });
 
-      res.json({
-        success: true,
-        requiresReload: true,
-        message: `Agent ${agentName} created successfully. Reloading interface…`,
-        reloadDelayMs: clientReloadDelayMs,
-      });
+      res.json(buildConfigMutationResponse(refreshResult, {
+        liveMessage: `Agent ${agentName} created successfully. Reloading interface…`,
+        manualRestartMessage: `Agent ${agentName} saved. Restart your connected OpenCode server to apply the change.`,
+      }));
     } catch (error) {
       console.error('Failed to create agent:', error);
       res.status(500).json({ error: error.message || 'Failed to create agent' });
@@ -128,16 +156,14 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       console.log('[Server] Working directory:', directory);
 
       updateAgent(agentName, updates, directory);
-      await refreshOpenCodeAfterConfigChange('agent update');
+      const refreshResult = await refreshOpenCodeAfterConfigChange('agent update');
 
       console.log(`[Server] Agent ${agentName} updated successfully`);
 
-      res.json({
-        success: true,
-        requiresReload: true,
-        message: `Agent ${agentName} updated successfully. Reloading interface…`,
-        reloadDelayMs: clientReloadDelayMs,
-      });
+      res.json(buildConfigMutationResponse(refreshResult, {
+        liveMessage: `Agent ${agentName} updated successfully. Reloading interface…`,
+        manualRestartMessage: `Agent ${agentName} saved. Restart your connected OpenCode server to apply the change.`,
+      }));
     } catch (error) {
       console.error('[Server] Failed to update agent:', error);
       console.error('[Server] Error stack:', error.stack);
@@ -153,15 +179,14 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
         return res.status(400).json({ error });
       }
 
-      deleteAgent(agentName, directory);
-      await refreshOpenCodeAfterConfigChange('agent deletion');
+      const scope = req.body?.scope;
+      deleteAgent(agentName, directory, scope);
+      const refreshResult = await refreshOpenCodeAfterConfigChange('agent deletion');
 
-      res.json({
-        success: true,
-        requiresReload: true,
-        message: `Agent ${agentName} deleted successfully. Reloading interface…`,
-        reloadDelayMs: clientReloadDelayMs,
-      });
+      res.json(buildConfigMutationResponse(refreshResult, {
+        liveMessage: `Agent ${agentName} deleted successfully. Reloading interface…`,
+        manualRestartMessage: `Agent ${agentName} deleted. Restart your connected OpenCode server to apply the change.`,
+      }));
     } catch (error) {
       console.error('Failed to delete agent:', error);
       res.status(500).json({ error: error.message || 'Failed to delete agent' });
@@ -365,6 +390,115 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
     } catch (error) {
       console.error('Failed to delete command:', error);
       res.status(500).json({ error: error.message || 'Failed to delete command' });
+    }
+  });
+
+  app.get('/api/config/snippets', async (req, res) => {
+    try {
+      const { directory, error } = await resolveOptionalProjectDirectory(req);
+      if (error) {
+        return res.status(400).json({ error });
+      }
+      res.json(listSnippets(directory));
+    } catch (error) {
+      console.error('[API:GET /api/config/snippets] Failed:', error);
+      res.status(500).json({ error: error.message || 'Failed to list snippets' });
+    }
+  });
+
+  app.post('/api/config/snippets/expand', async (req, res) => {
+    try {
+      const { directory, error } = await resolveOptionalProjectDirectory(req);
+      if (error) {
+        return res.status(400).json({ error });
+      }
+      res.json({ text: expandSnippets(req.body?.text ?? '', directory) });
+    } catch (error) {
+      console.error('[API:POST /api/config/snippets/expand] Failed:', error);
+      res.status(500).json({ error: error.message || 'Failed to expand snippets' });
+    }
+  });
+
+  app.get('/api/config/snippets/:name', async (req, res) => {
+    try {
+      const name = req.params.name;
+      const { directory, error } = await resolveOptionalProjectDirectory(req);
+      if (error) {
+        return res.status(400).json({ error });
+      }
+      const snippet = getSnippet(name, directory);
+      if (!snippet) {
+        return res.status(404).json({ error: `Snippet "${name}" not found` });
+      }
+      res.json(snippet);
+    } catch (error) {
+      console.error('[API:GET /api/config/snippets/:name] Failed:', error);
+      if (error.message?.includes('Snippet name')) {
+        return res.status(400).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message || 'Failed to get snippet' });
+    }
+  });
+
+  app.post('/api/config/snippets/:name', async (req, res) => {
+    try {
+      const name = req.params.name;
+      const { directory, error } = await resolveOptionalProjectDirectory(req);
+      if (error) {
+        return res.status(400).json({ error });
+      }
+      const snippet = createSnippet(name, req.body || {}, directory, req.body?.scope || 'global');
+      res.json({ success: true, snippet });
+    } catch (error) {
+      console.error('[API:POST /api/config/snippets/:name] Failed:', error);
+      if (error.message?.includes('already exists')) {
+        return res.status(409).json({ error: error.message });
+      }
+      if (error.message?.includes('Snippet name') || error.message?.includes('Project directory')) {
+        return res.status(400).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message || 'Failed to create snippet' });
+    }
+  });
+
+  app.patch('/api/config/snippets/:name', async (req, res) => {
+    try {
+      const name = req.params.name;
+      const { directory, error } = await resolveOptionalProjectDirectory(req);
+      if (error) {
+        return res.status(400).json({ error });
+      }
+      res.json({ success: true, snippet: updateSnippet(name, req.body || {}, directory) });
+    } catch (error) {
+      console.error('[API:PATCH /api/config/snippets/:name] Failed:', error);
+      if (error.message?.includes('not found')) {
+        return res.status(404).json({ error: error.message });
+      }
+      if (error.message?.includes('Snippet name')) {
+        return res.status(400).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message || 'Failed to update snippet' });
+    }
+  });
+
+  app.delete('/api/config/snippets/:name', async (req, res) => {
+    try {
+      const name = req.params.name;
+      const { directory, error } = await resolveOptionalProjectDirectory(req);
+      if (error) {
+        return res.status(400).json({ error });
+      }
+      deleteSnippet(name, directory);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('[API:DELETE /api/config/snippets/:name] Failed:', error);
+      if (error.message?.includes('not found')) {
+        return res.status(404).json({ error: error.message });
+      }
+      if (error.message?.includes('Snippet name')) {
+        return res.status(400).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message || 'Failed to delete snippet' });
     }
   });
 };

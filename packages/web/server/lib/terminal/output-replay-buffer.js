@@ -10,8 +10,20 @@ const trimTerminalOutputChunkToMaxBytes = (data, maxBytes) => {
     return data;
   }
 
-  const trimmedBuffer = Buffer.from(data, 'utf8').subarray(-maxBytes);
-  return trimmedBuffer.toString('utf8');
+  const kept = [];
+  let trimmedBytes = 0;
+  const characters = Array.from(data);
+  for (let index = characters.length - 1; index >= 0; index -= 1) {
+    const character = characters[index];
+    const characterBytes = Buffer.byteLength(character, 'utf8');
+    if (trimmedBytes + characterBytes > maxBytes) {
+      break;
+    }
+    kept.push(character);
+    trimmedBytes += characterBytes;
+  }
+
+  return kept.reverse().join('');
 };
 
 export const createTerminalOutputReplayBuffer = () => ({

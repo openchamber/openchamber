@@ -40,6 +40,13 @@ const buildProxyJsonError = (status: number, error: string): ApiProxyResponsePay
   bodyBase64: base64EncodeUtf8(JSON.stringify({ error })),
 });
 
+const normalizeFsProxyPath = (pathname: string): '/api/fs/stat' | '/api/fs/read' | '/api/fs/raw' | null => {
+  if (pathname === '/api/fs/stat' || pathname === '/fs/stat') return '/api/fs/stat';
+  if (pathname === '/api/fs/read' || pathname === '/fs/read') return '/api/fs/read';
+  if (pathname === '/api/fs/raw' || pathname === '/fs/raw') return '/api/fs/raw';
+  return null;
+};
+
 export const tryHandleLocalFsProxy = async (method: string, requestPath: string): Promise<ApiProxyResponsePayload | null> => {
   let parsed: URL;
   try {
@@ -48,7 +55,8 @@ export const tryHandleLocalFsProxy = async (method: string, requestPath: string)
     return buildProxyJsonError(400, 'Invalid request path');
   }
 
-  if (parsed.pathname !== '/api/fs/stat' && parsed.pathname !== '/api/fs/read' && parsed.pathname !== '/api/fs/raw') {
+  const fsProxyPath = normalizeFsProxyPath(parsed.pathname);
+  if (!fsProxyPath) {
     return null;
   }
 
@@ -57,8 +65,19 @@ export const tryHandleLocalFsProxy = async (method: string, requestPath: string)
   }
 
   const targetPath = parsed.searchParams.get('path') || '';
+  const optional = parsed.searchParams.get('optional') === 'true';
   const resolution: FsReadPathResolution = await resolveFileReadPath(targetPath);
   if (!resolution.ok) {
+    if (fsProxyPath === '/api/fs/stat' && optional && resolution.status === 404) {
+      return {
+        status: 200,
+        headers: {
+          'content-type': 'application/json',
+          'cache-control': 'no-store',
+        },
+        bodyBase64: base64EncodeUtf8(JSON.stringify({ path: targetPath, exists: false })),
+      };
+    }
     return buildProxyJsonError(resolution.status, resolution.error);
   }
 
@@ -68,7 +87,7 @@ export const tryHandleLocalFsProxy = async (method: string, requestPath: string)
       return buildProxyJsonError(400, 'Specified path is not a file');
     }
 
-    if (parsed.pathname === '/api/fs/stat') {
+    if (fsProxyPath === '/api/fs/stat') {
       return {
         status: 200,
         headers: {
@@ -79,11 +98,12 @@ export const tryHandleLocalFsProxy = async (method: string, requestPath: string)
           path: normalizeFsPath(resolution.resolvedPath),
           isFile: true,
           size: stats.size,
+          mtimeMs: stats.mtimeMs,
         })),
       };
     }
 
-    if (parsed.pathname === '/api/fs/read') {
+    if (fsProxyPath === '/api/fs/read') {
       const content = await fs.promises.readFile(resolution.resolvedPath, 'utf8');
       return {
         status: 200,
@@ -107,9 +127,19 @@ export const tryHandleLocalFsProxy = async (method: string, requestPath: string)
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
     if (err?.code === 'ENOENT') {
+      if (fsProxyPath === '/api/fs/stat' && optional) {
+        return {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+            'cache-control': 'no-store',
+          },
+          bodyBase64: base64EncodeUtf8(JSON.stringify({ path: targetPath, exists: false })),
+        };
+      }
       return buildProxyJsonError(404, 'File not found');
     }
-    if (parsed.pathname === '/api/fs/stat') {
+    if (fsProxyPath === '/api/fs/stat') {
       return buildProxyJsonError(500, 'Unable to stat file');
     }
     return buildProxyJsonError(500, 'Unable to read file');

@@ -22,6 +22,8 @@ const parsePushUnsubscribeBody = (body) => {
   return { endpoint: endpoint.trim() };
 };
 
+export const NOTIFICATION_SSE_HEARTBEAT_INTERVAL_MS = 20_000;
+
 export const registerNotificationRoutes = (app, dependencies) => {
   const {
     uiAuthController,
@@ -33,7 +35,10 @@ export const registerNotificationRoutes = (app, dependencies) => {
     writeSettingsToDisk,
     addOrUpdatePushSubscription,
     removePushSubscription,
+    addOrUpdateApnsToken,
+    removeApnsToken,
     updateUiVisibility,
+    clearPendingPushBadge,
     isUiVisible,
     getUiNotificationClients,
     writeSseEvent,
@@ -104,6 +109,7 @@ export const registerNotificationRoutes = (app, dependencies) => {
       }
     }
 
+    const platform = typeof req.body?.platform === 'string' ? req.body.platform : undefined;
     await addOrUpdatePushSubscription(
       uiToken,
       {
@@ -111,7 +117,8 @@ export const registerNotificationRoutes = (app, dependencies) => {
         p256dh: keys.p256dh,
         auth: keys.auth,
       },
-      req.headers['user-agent']
+      req.headers['user-agent'],
+      platform
     );
 
     return res.json({ ok: true });
@@ -136,6 +143,50 @@ export const registerNotificationRoutes = (app, dependencies) => {
     return res.json({ ok: true });
   });
 
+  // Native iOS APNs device token registration (mirrors /api/push/subscribe). The token
+  // is a hex APNs device token from @capacitor/push-notifications, scoped to the UI
+  // session like web-push subscriptions.
+  app.post('/api/push/apns-token', async (req, res) => {
+    await ensureSessionWatcher();
+
+    const uiToken = uiAuthController?.ensureSessionToken
+      ? await uiAuthController.ensureSessionToken(req, res)
+      : getUiSessionTokenFromRequest(req);
+    if (!uiToken) {
+      return res.status(401).json({ error: 'UI session missing' });
+    }
+
+    const deviceToken = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+    if (!deviceToken) {
+      return res.status(400).json({ error: 'Invalid body' });
+    }
+
+    const platform = req.body?.platform === 'android' ? 'android' : 'ios';
+    if (typeof addOrUpdateApnsToken === 'function') {
+      await addOrUpdateApnsToken(uiToken, deviceToken, req.headers['user-agent'], platform);
+    }
+    return res.json({ ok: true });
+  });
+
+  app.delete('/api/push/apns-token', async (req, res) => {
+    const uiToken = uiAuthController?.ensureSessionToken
+      ? await uiAuthController.ensureSessionToken(req, res)
+      : getUiSessionTokenFromRequest(req);
+    if (!uiToken) {
+      return res.status(401).json({ error: 'UI session missing' });
+    }
+
+    const deviceToken = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+    if (!deviceToken) {
+      return res.status(400).json({ error: 'Invalid body' });
+    }
+
+    if (typeof removeApnsToken === 'function') {
+      await removeApnsToken(uiToken, deviceToken);
+    }
+    return res.json({ ok: true });
+  });
+
   app.post('/api/push/visibility', async (req, res) => {
     const uiToken = uiAuthController?.ensureSessionToken
       ? await uiAuthController.ensureSessionToken(req, res)
@@ -144,8 +195,9 @@ export const registerNotificationRoutes = (app, dependencies) => {
       return res.status(401).json({ error: 'UI session missing' });
     }
 
-    const visible = req.body && typeof req.body === 'object' ? req.body.visible : null;
-    updateUiVisibility(uiToken, visible === true);
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const platform = typeof body.platform === 'string' ? body.platform : undefined;
+    updateUiVisibility(uiToken, body.visible === true, platform);
     return res.json({ ok: true });
   });
 
@@ -162,6 +214,8 @@ export const registerNotificationRoutes = (app, dependencies) => {
   });
 
   app.get('/api/notifications/stream', async (req, res) => {
+    await ensureSessionWatcher();
+
     const uiToken = uiAuthController?.ensureSessionToken
       ? await uiAuthController.ensureSessionToken(req, res)
       : getUiSessionTokenFromRequest(req);
@@ -178,17 +232,50 @@ export const registerNotificationRoutes = (app, dependencies) => {
     const clients = getUiNotificationClients();
     clients.add(res);
 
+    let closed = false;
+    let heartbeatTimer = null;
+
+    const cleanup = () => {
+      if (closed) {
+        return;
+      }
+      closed = true;
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
+      clients.delete(res);
+    };
+
+    req.on('close', cleanup);
+    res.on('error', cleanup);
+
+    const flushSse = () => {
+      res.flush?.();
+    };
+
+    heartbeatTimer = setInterval(() => {
+      if (closed || res.writableEnded || res.destroyed) {
+        cleanup();
+        return;
+      }
+      try {
+        res.write(':heartbeat\n\n');
+        flushSse();
+      } catch {
+        cleanup();
+      }
+    }, NOTIFICATION_SSE_HEARTBEAT_INTERVAL_MS);
+
     try {
       writeSseEvent(res, {
         type: 'openchamber:notification-stream-ready',
         properties: { uiToken },
       });
+      flushSse();
     } catch {
+      cleanup();
     }
-
-    req.on('close', () => {
-      clients.delete(res);
-    });
   });
 
   app.get('/api/session-activity', (_req, res) => {
@@ -264,6 +351,10 @@ export const registerNotificationRoutes = (app, dependencies) => {
     const clientId = req.headers['x-client-id'] || req.ip || 'anonymous';
 
     markSessionViewed(sessionId, clientId);
+    // The user is engaging with the app, so the native push badge no longer
+    // applies — reset it here too (not only on the visibility beacon), since
+    // opening the app reliably marks the opened session viewed.
+    if (typeof clearPendingPushBadge === 'function') clearPendingPushBadge();
 
     return res.json({
       success: true,
@@ -289,6 +380,9 @@ export const registerNotificationRoutes = (app, dependencies) => {
     const sessionId = req.params.id;
 
     markUserMessageSent(sessionId);
+    // Sending a message means the user is active in the app; reset the native
+    // push badge so it counts only notifications since this engagement.
+    if (typeof clearPendingPushBadge === 'function') clearPendingPushBadge();
 
     return res.json({
       success: true,

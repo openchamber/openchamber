@@ -1,5 +1,5 @@
 import React from 'react';
-import type { AssistantMessage, Message, Part, ReasoningPart, TextPart, ToolPart } from '@opencode-ai/sdk/v2';
+import type { Message, Part, ReasoningPart, TextPart, ToolPart } from '@opencode-ai/sdk/v2';
 
 import type { MessageStreamPhase } from '@/stores/types/sessionTypes';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -7,7 +7,7 @@ import { useDirectorySync, useSessionPermissions, useSessionQuestions, useSessio
 import { isFullySyntheticMessage } from '@/lib/messages/synthetic';
 import { useCurrentSessionActivity } from './useSessionActivity';
 
-export type AssistantActivity = 'idle' | 'streaming' | 'tooling' | 'cooldown' | 'permission';
+type AssistantActivity = 'idle' | 'streaming' | 'tooling' | 'cooldown' | 'permission';
 
 interface WorkingSummary {
     activity: AssistantActivity;
@@ -41,22 +41,6 @@ export interface AssistantStatusSnapshot {
     working: WorkingSummary;
 }
 
-type AssistantMessageWithState = AssistantMessage & {
-    status?: string;
-    streaming?: boolean;
-    abortedAt?: number;
-};
-
-interface AssistantSessionMessageRecord {
-    info: AssistantMessageWithState;
-    parts: Part[];
-}
-
-type SessionMessageRecord = {
-    info: Message;
-    parts: Part[];
-};
-
 const DEFAULT_WORKING: WorkingSummary = {
     activity: 'idle',
     hasWorkingContext: false,
@@ -81,8 +65,150 @@ const DEFAULT_WORKING: WorkingSummary = {
 
 const EMPTY_MESSAGES: Message[] = [];
 const EMPTY_PARTS: Part[] = [];
-const EMPTY_SESSION_MESSAGES: SessionMessageRecord[] = [];
-const isAssistantMessage = (message: Message): message is AssistantMessageWithState => message.role === 'assistant';
+const STATUS_SIGNATURE_SEPARATOR = '\u0000';
+const EDITING_TOOLS = new Set(['edit', 'write', 'multiedit', 'apply_patch']);
+const TOOL_STATUS_PHRASES: Record<string, string> = {
+    read: 'reading file',
+    write: 'writing file',
+    edit: 'editing file',
+    multiedit: 'editing files',
+    apply_patch: 'applying patch',
+    bash: 'running command',
+    grep: 'searching content',
+    glob: 'finding files',
+    list: 'listing directory',
+    task: 'delegating task',
+    webfetch: 'fetching URL',
+    websearch: 'searching web',
+    codesearch: 'web code search',
+    todowrite: 'updating todos',
+    todoread: 'reading todos',
+    skill: 'learning skill',
+    question: 'asking question',
+    plan_enter: 'switching to planning',
+    plan_exit: 'switching to building',
+};
+const WORKING_PHRASES = [
+    'working',
+    'processing',
+    'preparing',
+    'warming up',
+    'gears turning',
+    'computing',
+    'calculating',
+    'analyzing',
+    'wheels spinning',
+    'calibrating',
+    'synthesizing',
+    'connecting dots',
+    'inspecting logic',
+    'weighing options',
+];
+
+type ParsedStatusResult = {
+    activePartType: 'text' | 'tool' | 'reasoning' | 'editing' | undefined;
+    activeToolName: string | undefined;
+    statusText: string;
+    isGenericStatus: boolean;
+};
+
+const getToolStatusPhrase = (toolName: string): string => {
+    return TOOL_STATUS_PHRASES[toolName] ?? `using ${toolName}`;
+};
+
+const hashString = (value: string): number => {
+    let hash = 0;
+    for (let index = 0; index < value.length; index += 1) {
+        hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
+    }
+    return Math.abs(hash);
+};
+
+const getStableWorkingPhrase = (key: string): string => {
+    return WORKING_PHRASES[hashString(key) % WORKING_PHRASES.length] ?? 'working';
+};
+
+const createParsedStatus = (parts: Part[], genericKey: string): ParsedStatusResult => {
+    let activePartType: ParsedStatusResult['activePartType'] = undefined;
+    let activeToolName: string | undefined = undefined;
+
+    if (!isFullySyntheticMessage(parts)) {
+        for (let index = parts.length - 1; index >= 0; index -= 1) {
+            const part = parts[index];
+            if (!part) continue;
+
+            switch (part.type) {
+                case 'reasoning': {
+                    const time = part.time ?? getPartTimeInfo(part);
+                    const stillRunning = !time || typeof time.end === 'undefined';
+                    if (stillRunning && !activePartType) {
+                        activePartType = 'reasoning';
+                    }
+                    break;
+                }
+                case 'tool': {
+                    const toolStatus = part.state?.status;
+                    if ((toolStatus === 'running' || toolStatus === 'pending') && !activePartType) {
+                        const toolName = getToolDisplayName(part);
+                        if (EDITING_TOOLS.has(toolName)) {
+                            activePartType = 'editing';
+                            activeToolName = toolName;
+                        } else {
+                            activePartType = 'tool';
+                            activeToolName = toolName;
+                        }
+                    }
+                    break;
+                }
+                case 'text': {
+                    const rawContent = getLegacyTextContent(part) ?? '';
+                    if (typeof rawContent === 'string' && rawContent.trim().length > 0) {
+                        const time = getPartTimeInfo(part);
+                        const streamingPart = !time || typeof time.end === 'undefined';
+                        if (streamingPart && !activePartType) {
+                            activePartType = 'text';
+                        }
+                    }
+                    break;
+                }
+                default:
+                    break;
+            }
+        }
+    }
+
+    const isGenericStatus = activePartType === undefined;
+    const statusText = (() => {
+        if (activePartType === 'editing') return activeToolName === 'multiedit' ? getToolStatusPhrase(activeToolName) : 'editing file';
+        if (activePartType === 'tool' && activeToolName) return getToolStatusPhrase(activeToolName);
+        if (activePartType === 'reasoning') return 'thinking';
+        if (activePartType === 'text') return 'composing';
+        return getStableWorkingPhrase(genericKey);
+    })();
+
+    return { activePartType, activeToolName, statusText, isGenericStatus };
+};
+
+const encodeParsedStatus = (status: ParsedStatusResult): string => {
+    return [
+        status.activePartType ?? '',
+        status.activeToolName ?? '',
+        status.statusText,
+        status.isGenericStatus ? '1' : '0',
+    ].join(STATUS_SIGNATURE_SEPARATOR);
+};
+
+const decodeParsedStatus = (signature: string): ParsedStatusResult => {
+    const [activePartType, activeToolName, statusText = 'working', isGenericStatus] = signature.split(STATUS_SIGNATURE_SEPARATOR);
+    return {
+        activePartType: activePartType === 'text' || activePartType === 'tool' || activePartType === 'reasoning' || activePartType === 'editing'
+            ? activePartType
+            : undefined,
+        activeToolName: activeToolName || undefined,
+        statusText,
+        isGenericStatus: isGenericStatus === '1',
+    };
+};
 
 const isReasoningPart = (part: Part): part is ReasoningPart => part.type === 'reasoning';
 
@@ -123,6 +249,7 @@ const getToolDisplayName = (part: ToolPart): string => {
 
 export function useAssistantStatus(): AssistantStatusSnapshot {
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+    const currentSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
 
     const rawSessionMessages = useDirectorySync(
         React.useCallback((state) => {
@@ -130,7 +257,8 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
                 return EMPTY_MESSAGES;
             }
             return state.message[currentSessionId] ?? EMPTY_MESSAGES;
-        }, [currentSessionId])
+        }, [currentSessionId]),
+        currentSessionDirectory ?? undefined,
     );
 
     // Only subscribe to parts for the last assistant message — avoids re-render
@@ -142,28 +270,17 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
         return null;
     }, [rawSessionMessages]);
 
-    const lastAssistantParts = useDirectorySync(
+    const lastAssistantStatusSignature = useDirectorySync(
         React.useCallback((state) => {
-            if (!lastAssistantId) return EMPTY_PARTS;
-            return state.part[lastAssistantId] ?? EMPTY_PARTS;
-        }, [lastAssistantId])
+            const genericKey = `${currentSessionId ?? ''}:${lastAssistantId ?? ''}`;
+            const parts = lastAssistantId ? (state.part[lastAssistantId] ?? EMPTY_PARTS) : EMPTY_PARTS;
+            return encodeParsedStatus(createParsedStatus(parts, genericKey));
+        }, [currentSessionId, lastAssistantId]),
+        currentSessionDirectory ?? undefined,
     );
 
-    const sessionMessages = React.useMemo<SessionMessageRecord[]>(
-        () => {
-            if (rawSessionMessages.length === 0) {
-                return EMPTY_SESSION_MESSAGES;
-            }
-            return rawSessionMessages.map((msg) => ({
-                info: msg,
-                parts: msg.id === lastAssistantId ? lastAssistantParts : EMPTY_PARTS,
-            }));
-        },
-        [lastAssistantParts, rawSessionMessages, lastAssistantId]
-    );
-
-    const sessionPermissionRequests = useSessionPermissions(currentSessionId ?? '');
-    const sessionQuestionRequests = useSessionQuestions(currentSessionId ?? '');
+    const sessionPermissionRequests = useSessionPermissions(currentSessionId ?? '', currentSessionDirectory ?? undefined);
+    const sessionQuestionRequests = useSessionQuestions(currentSessionId ?? '', currentSessionDirectory ?? undefined);
 
     const sessionAbortRecord = useSessionUIStore(
         React.useCallback((state) => {
@@ -176,7 +293,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
 
     const { phase: activityPhase, isWorking: isPhaseWorking } = useCurrentSessionActivity();
 
-    const currentSessionStatus = useSessionStatus(currentSessionId ?? '');
+    const currentSessionStatus = useSessionStatus(currentSessionId ?? '', currentSessionDirectory ?? undefined);
 
     const sessionRetryAttempt = currentSessionStatus?.type === 'retry'
         ? (currentSessionStatus as { type: 'retry'; attempt?: number }).attempt
@@ -186,146 +303,9 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
         ? (currentSessionStatus as { type: 'retry'; next?: number }).next
         : undefined;
 
-    type ParsedStatusResult = {
-        activePartType: 'text' | 'tool' | 'reasoning' | 'editing' | undefined;
-        activeToolName: string | undefined;
-        statusText: string;
-        isGenericStatus: boolean;
-    };
-
     const parsedStatus = React.useMemo<ParsedStatusResult>(() => {
-        if (sessionMessages.length === 0) {
-            return { activePartType: undefined, activeToolName: undefined, statusText: 'working', isGenericStatus: true };
-        }
-
-        const assistantMessages = sessionMessages
-            .filter(
-                (msg): msg is AssistantSessionMessageRecord =>
-                    isAssistantMessage(msg.info) && !isFullySyntheticMessage(msg.parts)
-            );
-
-        if (assistantMessages.length === 0) {
-            return { activePartType: undefined, activeToolName: undefined, statusText: 'working', isGenericStatus: true };
-        }
-
-        const sortedAssistantMessages = [...assistantMessages].sort((a, b) => {
-            const aCreated = typeof a.info.time?.created === 'number' ? a.info.time.created : null;
-            const bCreated = typeof b.info.time?.created === 'number' ? b.info.time.created : null;
-
-            if (aCreated !== null && bCreated !== null && aCreated !== bCreated) {
-                return aCreated - bCreated;
-            }
-
-            return a.info.id.localeCompare(b.info.id);
-        });
-
-        const lastAssistant = sortedAssistantMessages[sortedAssistantMessages.length - 1];
-
-        let activePartType: 'text' | 'tool' | 'reasoning' | 'editing' | undefined = undefined;
-        let activeToolName: string | undefined = undefined;
-
-        const editingTools = new Set(['edit', 'write', 'apply_patch']);
-
-        for (let i = (lastAssistant.parts ?? []).length - 1; i >= 0; i -= 1) {
-            const part = lastAssistant.parts?.[i];
-            if (!part) continue;
-
-            switch (part.type) {
-                case 'reasoning': {
-                    const time = part.time ?? getPartTimeInfo(part);
-                    const stillRunning = !time || typeof time.end === 'undefined';
-                    if (stillRunning && !activePartType) {
-                        activePartType = 'reasoning';
-                    }
-                    break;
-                }
-                case 'tool': {
-                    const toolStatus = part.state?.status;
-                    if ((toolStatus === 'running' || toolStatus === 'pending') && !activePartType) {
-                        const toolName = getToolDisplayName(part);
-                        if (editingTools.has(toolName)) {
-                            activePartType = 'editing';
-                        } else {
-                            activePartType = 'tool';
-                            activeToolName = toolName;
-                        }
-                    }
-                    break;
-                }
-                case 'text': {
-                    const rawContent = getLegacyTextContent(part) ?? '';
-                    if (typeof rawContent === 'string' && rawContent.trim().length > 0) {
-                        const time = getPartTimeInfo(part);
-                        const streamingPart = !time || typeof time.end === 'undefined';
-                        if (streamingPart && !activePartType) {
-                            activePartType = 'text';
-                        }
-                    }
-                    break;
-                }
-                default:
-                    break;
-            }
-        }
-
-        const TOOL_STATUS_PHRASES: Record<string, string> = {
-            read: 'reading file',
-            write: 'writing file',
-            edit: 'editing file',
-            multiedit: 'editing files',
-            apply_patch: 'applying patch',
-            bash: 'running command',
-            grep: 'searching content',
-            glob: 'finding files',
-            list: 'listing directory',
-            task: 'delegating task',
-            webfetch: 'fetching URL',
-            websearch: 'searching web',
-            codesearch: 'web code search',
-            todowrite: 'updating todos',
-            todoread: 'reading todos',
-            skill: 'learning skill',
-            question: 'asking question',
-            plan_enter: 'switching to planning',
-            plan_exit: 'switching to building',
-        };
-
-        const WORKING_PHRASES = [
-            'working',
-            'processing',
-            'preparing',
-            'warming up',
-            'gears turning',
-            'computing',
-            'calculating',
-            'analyzing',
-            'wheels spinning',
-            'calibrating',
-            'synthesizing',
-            'connecting dots',
-            'inspecting logic',
-            'weighing options',
-        ];
-
-        const getToolStatusPhrase = (toolName: string): string => {
-            return TOOL_STATUS_PHRASES[toolName] ?? `using ${toolName}`;
-        };
-
-        const getRandomWorkingPhrase = (): string => {
-            return WORKING_PHRASES[Math.floor(Math.random() * WORKING_PHRASES.length)];
-        };
-
-        const isGenericStatus = activePartType === undefined;
-        const statusText = (() => {
-            if (activePartType === 'editing') return 'editing file';
-            if (activePartType === 'tool' && activeToolName) return getToolStatusPhrase(activeToolName);
-            if (activePartType === 'reasoning') return 'thinking';
-            if (activePartType === 'text') return 'composing';
-            return getRandomWorkingPhrase();
-        })();
-
-        return { activePartType, activeToolName, statusText, isGenericStatus };
-    }, [sessionMessages]);
+        return decodeParsedStatus(lastAssistantStatusSignature);
+    }, [lastAssistantStatusSignature]);
 
     const abortState = React.useMemo(() => {
         const hasActiveAbort = Boolean(sessionAbortRecord && !sessionAbortRecord.acknowledged);
@@ -392,35 +372,9 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
     }, [activityPhase, isPhaseWorking, parsedStatus, abortState, sessionRetryAttempt, sessionRetryNext]);
 
     const forming = React.useMemo<FormingSummary>(() => {
-
         const isActive = isPhaseWorking && parsedStatus.activePartType === 'text';
-
-        if (!isActive || sessionMessages.length === 0) {
-            return { isActive, characterCount: 0 };
-        }
-
-        const assistantMessages = sessionMessages.filter(
-            (msg): msg is AssistantSessionMessageRecord =>
-                isAssistantMessage(msg.info) && !isFullySyntheticMessage(msg.parts)
-        );
-
-        if (assistantMessages.length === 0) {
-            return { isActive, characterCount: 0 };
-        }
-
-        const lastAssistant = assistantMessages[assistantMessages.length - 1];
-        let characterCount = 0;
-
-        (lastAssistant.parts ?? []).forEach((part) => {
-            if (part.type !== 'text') return;
-            const rawContent = getLegacyTextContent(part) ?? '';
-            if (typeof rawContent === 'string' && rawContent.trim().length > 0) {
-                characterCount += rawContent.length;
-            }
-        });
-
-        return { isActive, characterCount };
-    }, [sessionMessages, isPhaseWorking, parsedStatus.activePartType]);
+        return { isActive, characterCount: 0 };
+    }, [isPhaseWorking, parsedStatus.activePartType]);
 
     const working = React.useMemo<WorkingSummary>(() => {
         if (baseWorking.wasAborted || baseWorking.abortActive) {

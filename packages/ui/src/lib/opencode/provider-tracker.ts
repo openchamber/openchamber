@@ -41,7 +41,8 @@ function evictStaleProviders(): void {
 }
 
 if (typeof setInterval !== 'undefined') {
-  setInterval(evictStaleProviders, PROVIDER_EVICTION_INTERVAL_MS)
+  const interval = setInterval(evictStaleProviders, PROVIDER_EVICTION_INTERVAL_MS)
+  ;(interval as unknown as { unref?: () => void }).unref?.()
 }
 
 function getOrCreateProvider(providerID: string): ProviderState {
@@ -89,7 +90,7 @@ function isCircuitBreakerStatus(status?: number): boolean {
   return status !== undefined && RETRYABLE_STATUS_CODES.has(status)
 }
 
-export function isCircuitOpen(providerID: string): boolean {
+function isCircuitOpen(providerID: string): boolean {
   const state = providers.get(providerID)
   if (!state?.circuitOpen) return false
 
@@ -122,12 +123,4 @@ export function assertProviderCircuitClosed(providerID: string): void {
 export function getRetryDelayMs(attempt: number): number {
   const delay = DEFAULT_RETRY_BASE_DELAY_MS * 2 ** attempt
   return Math.min(delay, DEFAULT_RETRY_MAX_DELAY_MS)
-}
-
-export function resetCircuit(providerID: string): void {
-  const state = providers.get(providerID)
-  if (!state) return
-  state.consecutiveErrors = 0
-  state.circuitOpen = false
-  state.circuitCooldownMs = DEFAULT_CIRCUIT_COOLDOWN_MS
 }

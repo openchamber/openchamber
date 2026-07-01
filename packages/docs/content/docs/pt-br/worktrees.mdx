@@ -1,0 +1,36 @@
+---
+title: Sessões de Worktree
+description: Dê a uma sessão seu próprio branch e pasta para manter o trabalho isolado.
+---
+
+# Sessões de Worktree
+
+Uma sessão de worktree roda em sua própria cópia do seu repositório, em seu próprio branch (um worktree do git). Isso impede que sessões paralelas atrapalhem os arquivos umas das outras — uma pode refatorar enquanto outra corrige um bug, sem ficar alternando entre elas.
+
+## Criar uma
+
+1. Abra a caixa de diálogo de novo worktree pelo botão no topo da barra lateral de sessões.
+2. Escolha um ponto de partida:
+   - **novo branch** — nomeie o branch e escolha de qual branch partir
+   - **branch existente** — faça checkout de um branch que você já tem
+3. Confirme a pasta do worktree (o OpenChamber sugere uma a partir do nome do branch).
+4. Crie-a.
+
+O OpenChamber cria o branch, configura a pasta e inicia uma sessão nela. Você também pode iniciar uma direto de uma [tarefa](/pt-br/notes-todos-plans/) ou de uma [issue ou PR do GitHub](/pt-br/github/).
+
+## Trazer o trabalho de volta
+
+Quando o trabalho estiver bom, use **Integrate** na visão de Git para trazer os commits do worktree para outro branch (como `main`). Se uma mudança conflitar, você pode entregar o conflito ao agente para resolver.
+
+## Limpeza
+
+Excluir ou arquivar a sessão pode remover o worktree. Você escolhe se também deve excluir o branch — local, e remoto se houver um. Nada é excluído sem você pedir.
+
+## Se algo parecer errado
+
+Um worktree pode precisar de atenção se sua pasta sumiu, se seu branch está em estado detached ou se um merge ou rebase ficou pela metade. O OpenChamber sinaliza esses casos para você corrigi-los — veja [Worktrees e Git](/pt-br/troubleshooting/worktrees-git/).
+
+## Relacionado
+
+- [Multi-run](/pt-br/multi-run/) — lance muitas sessões de worktree de uma vez
+- [Fluxos de Git e GitHub](/pt-br/git/) — faça commit e integre de dentro do OpenChamber

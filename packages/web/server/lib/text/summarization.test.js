@@ -1,64 +1,39 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { summarizeText } from './summarization.js';
+import { sanitizeForTTS, summarizeText } from './summarization.js';
 
-describe('text summarization zen requests', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
+describe('text summarization stubs', () => {
+  it('removes code from TTS text before stripping markdown punctuation', () => {
+    expect(sanitizeForTTS('Read `const value = 1` aloud')).toBe('Read aloud');
+    expect(sanitizeForTTS('Before\n```js\nconst value = 1\n```\nAfter')).toBe('Before After');
   });
 
-  it('uses responses endpoint for gpt models', async () => {
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        output: [{
-          type: 'message',
-          content: [{ type: 'output_text', text: 'Short summary' }],
-        }],
-      }),
-    }));
-    vi.stubGlobal('fetch', fetchMock);
-
+  it('does not call the retired zen provider', async () => {
     const result = await summarizeText({
-      text: 'Long text '.repeat(30),
+      text: 'The implementation now correctly loads notification templates before dispatching the notification. It also fetches the latest assistant message when the event payload does not include message parts. This should make completion notifications match user settings.',
       threshold: 0,
-      maxLength: 100,
+      maxLength: 80,
       zenModel: 'gpt-5-nano',
       mode: 'notification',
     });
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://opencode.ai/zen/v1/responses',
-      expect.objectContaining({
-        body: expect.stringContaining('"input"'),
-      }),
-    );
-    expect(result.summary).toBe('Short summary');
+    expect(result.summarized).toBe(false);
+    expect(result.reason).toBe('Model summarization provider unavailable');
+    expect(result.summary).toBe('The implementation now correctly loads notification templates before dispatchin…');
   });
 
-  it('uses chat completions endpoint for openai-compatible zen models', async () => {
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        choices: [{ message: { content: 'Chat summary' } }],
-      }),
-    }));
-    vi.stubGlobal('fetch', fetchMock);
-
+  it('returns local note fallback while provider is unavailable', async () => {
     const result = await summarizeText({
-      text: 'Long text '.repeat(30),
+      text: 'First sentence. Second sentence with the useful insight.',
       threshold: 0,
       maxLength: 100,
-      zenModel: 'big-pickle',
-      mode: 'notification',
+      mode: 'note',
     });
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://opencode.ai/zen/v1/chat/completions',
-      expect.objectContaining({
-        body: expect.stringContaining('"messages"'),
-      }),
-    );
-    expect(result.summary).toBe('Chat summary');
+    expect(result).toMatchObject({
+      summary: 'First sentence.',
+      summarized: false,
+      reason: 'Model summarization provider unavailable',
+    });
   });
 });

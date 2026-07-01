@@ -18,11 +18,12 @@ export const createBootstrapRuntime = (dependencies) => {
       serverStartedAt,
       gracefulShutdown,
       getHealthSnapshot,
+      verboseRequestLogs,
       uiPassword,
       tunnelAuthController,
+      remoteClientAuthRuntime,
       readSettingsFromDiskMigrated,
       normalizeTunnelSessionTtlMs,
-      resolveZenModel,
       sayTTSCapability,
       ensurePushInitialized,
       ensureGlobalWatcherStarted,
@@ -31,7 +32,10 @@ export const createBootstrapRuntime = (dependencies) => {
       writeSettingsToDisk,
       addOrUpdatePushSubscription,
       removePushSubscription,
+      addOrUpdateApnsToken,
+      removeApnsToken,
       updateUiVisibility,
+      clearPendingPushBadge,
       isUiVisible,
       getUiNotificationClients,
       writeSseEvent,
@@ -50,6 +54,15 @@ export const createBootstrapRuntime = (dependencies) => {
       setAutoAcceptSession,
     } = options;
 
+    const uiAuthController = createUiAuth({
+      password: uiPassword,
+      readSettingsFromDiskMigrated,
+      clientAuthController: remoteClientAuthRuntime,
+    });
+    if (uiAuthController.enabled) {
+      console.log('UI password protection enabled for browser sessions');
+    }
+
     registerServerStatusRoutes(app, {
       express,
       process,
@@ -58,26 +71,22 @@ export const createBootstrapRuntime = (dependencies) => {
       serverStartedAt,
       gracefulShutdown,
       getHealthSnapshot,
-    });
-
-    registerCommonRequestMiddleware(app, { express });
-
-    const uiAuthController = createUiAuth({
-      password: uiPassword,
-      readSettingsFromDiskMigrated,
-    });
-    if (uiAuthController.enabled) {
-      console.log('UI password protection enabled for browser sessions');
-    }
-
-    registerAuthAndAccessRoutes(app, {
       tunnelAuthController,
       uiAuthController,
+    });
+
+    registerCommonRequestMiddleware(app, { express, verboseRequestLogs });
+
+    registerAuthAndAccessRoutes(app, {
+      express,
+      tunnelAuthController,
+      uiAuthController,
+      remoteClientAuthRuntime,
       readSettingsFromDiskMigrated,
       normalizeTunnelSessionTtlMs,
     });
 
-    registerTtsRoutes(app, { resolveZenModel, sayTTSCapability });
+    registerTtsRoutes(app, { sayTTSCapability });
 
     registerNotificationRoutes(app, {
       uiAuthController,
@@ -89,7 +98,10 @@ export const createBootstrapRuntime = (dependencies) => {
       writeSettingsToDisk,
       addOrUpdatePushSubscription,
       removePushSubscription,
+      addOrUpdateApnsToken,
+      removeApnsToken,
       updateUiVisibility,
+      clearPendingPushBadge,
       isUiVisible,
       getUiNotificationClients,
       writeSseEvent,

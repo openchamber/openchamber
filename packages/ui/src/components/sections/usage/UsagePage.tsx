@@ -11,19 +11,18 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
-import { RiArrowDownSLine, RiArrowRightSLine, RiInformationLine } from '@remixicon/react';
 import type { UsageWindows, QuotaProviderId } from '@/types';
 import { getAllModelFamilies, getDisplayModelName, sortModelFamilies, groupModelsByFamilyWithGetter } from '@/lib/quota/model-families';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
+import { formatTimeForPreference } from '@/lib/timeFormat';
+import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 
-const formatTime = (timestamp: number | null) => {
+const formatTime = (timestamp: number | null, timeFormatPreference: TimeFormatPreference) => {
   if (!timestamp) return '-';
   try {
-    return new Date(timestamp).toLocaleTimeString(undefined, {
-      hour: 'numeric',
-      minute: '2-digit'
-    });
+    return formatTimeForPreference(timestamp, timeFormatPreference, { fallback: '-' });
   } catch {
     return '-';
   }
@@ -36,6 +35,7 @@ interface ModelInfo {
 
 export const UsagePage: React.FC = () => {
   const { t } = useI18n();
+  const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const results = useQuotaStore((state) => state.results);
   const selectedProviderId = useQuotaStore((state) => state.selectedProviderId);
   const setSelectedProvider = useQuotaStore((state) => state.setSelectedProvider);
@@ -56,7 +56,6 @@ export const UsagePage: React.FC = () => {
     void loadSettings();
     void fetchAllQuotas();
   }, [loadSettings, fetchAllQuotas]);
-
 
   React.useEffect(() => {
     if (selectedProviderId) {
@@ -164,14 +163,14 @@ export const UsagePage: React.FC = () => {
               {isLoading ? (
                 <span className="animate-pulse">{t('settings.usage.page.header.refreshing')}</span>
               ) : (
-                t('settings.usage.page.header.lastUpdated', { time: formatTime(lastUpdated) })
+                t('settings.usage.page.header.lastUpdated', { time: formatTime(lastUpdated, timeFormatPreference) })
               )}
             </p>
           </div>
         </div>
 
         {/* Options */}
-        <div className="mb-8 px-2">
+        <div data-settings-item="usage.header-menu" className="mb-8 px-2">
           <div
             className="group flex cursor-pointer items-center gap-2 py-1.5"
             role="button"
@@ -194,7 +193,7 @@ export const UsagePage: React.FC = () => {
               <span className="typography-ui-label text-foreground">{t('settings.usage.page.options.showInHeader')}</span>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                  <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                 </TooltipTrigger>
                 <TooltipContent sideOffset={8} className="max-w-xs">
                   {t('settings.usage.page.options.showInHeaderTooltip')}
@@ -229,7 +228,7 @@ export const UsagePage: React.FC = () => {
 
         {/* Overall Usage Windows */}
         {usage?.windows && Object.keys(usage.windows).length > 0 && (
-          <div className="mb-8">
+          <div data-settings-item="usage.model-quotas" className="mb-8">
             <section className="px-2 pb-2 pt-0">
               <div className="divide-y divide-[var(--surface-subtle)]">
                 {Object.entries(usage.windows).map(([label, window]) => (
@@ -269,9 +268,9 @@ export const UsagePage: React.FC = () => {
                           </span>
                         </div>
                         {isCollapsed ? (
-                          <RiArrowRightSLine className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+                          <Icon name="arrow-right-s" className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
                         ) : (
-                          <RiArrowDownSLine className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+                          <Icon name="arrow-down-s" className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
                         )}
                       </CollapsibleTrigger>
                       <CollapsibleContent>
@@ -322,9 +321,9 @@ export const UsagePage: React.FC = () => {
                           </span>
                         </div>
                         {isCollapsed ? (
-                          <RiArrowRightSLine className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+                          <Icon name="arrow-right-s" className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
                         ) : (
-                          <RiArrowDownSLine className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+                          <Icon name="arrow-down-s" className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
                         )}
                       </CollapsibleTrigger>
                       <CollapsibleContent>

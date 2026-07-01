@@ -2,17 +2,10 @@
 
 import * as React from "react"
 import { Command as CommandPrimitive } from "cmdk"
-import { RiCommandLine, RiArrowUpLine, RiSearchLine } from "@remixicon/react";
 
 import { cn } from "@/lib/utils"
 import { ScrollableOverlay } from "@/components/ui/ScrollableOverlay";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+import { Icon } from "@/components/icon/Icon";
 
 function Command({
   className,
@@ -38,38 +31,6 @@ function Command({
   )
 }
 
-function CommandDialog({
-  title = "Command Palette",
-  description = "Search for a command to run...",
-  children,
-  className,
-  showCloseButton = true,
-  ...props
-}: Omit<React.ComponentProps<typeof Dialog>, "children"> & {
-  title?: string
-  description?: string
-  className?: string
-  showCloseButton?: boolean
-  children?: React.ReactNode
-}) {
-  return (
-    <Dialog {...props}>
-      <DialogHeader className="sr-only">
-        <DialogTitle>{title}</DialogTitle>
-        <DialogDescription>{description}</DialogDescription>
-      </DialogHeader>
-      <DialogContent
-        className={cn("overflow-hidden p-0 transform-gpu will-change-transform", className)}
-        showCloseButton={showCloseButton}
-      >
-        <Command className="[&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group]]:px-2 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-4 [&_[cmdk-input-wrapper]_svg]:w-4 [&_[cmdk-input]]:h-8 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-1.5 [&_[cmdk-item]_svg]:h-4 [&_[cmdk-item]_svg]:w-4 [&_[cmdk-item]]:typography-meta">
-          {children}
-        </Command>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
 const CommandInput = React.forwardRef<
   React.ComponentRef<typeof CommandPrimitive.Input>,
   React.ComponentPropsWithoutRef<typeof CommandPrimitive.Input>
@@ -79,7 +40,7 @@ const CommandInput = React.forwardRef<
        data-slot="command-input-wrapper"
        className="flex h-8 items-center gap-2 border-b px-3"
      >
-       <RiSearchLine className="size-4 shrink-0 opacity-50" />
+       <Icon name="search" className="size-4 shrink-0 opacity-50" />
        <CommandPrimitive.Input
         ref={ref}
         data-slot="command-input"
@@ -189,11 +150,11 @@ function CommandShortcut({
     }
 
     if (normalized === 'cmd' || normalized === '⌘' || normalized === 'command' || normalized === 'meta') {
-      return <RiCommandLine className="size-3.5" />;
+      return <Icon name="command" className="size-3.5" />;
     }
 
     if (normalized === 'shift' || normalized === '⇧') {
-      return <RiArrowUpLine className="size-3.5" />;
+      return <Icon name="arrow-up" className="size-3.5" />;
     }
 
     return (
@@ -232,7 +193,6 @@ function CommandShortcut({
 
 export {
   Command,
-  CommandDialog,
   CommandInput,
   CommandList,
   CommandEmpty,

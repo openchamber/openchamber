@@ -1,4 +1,5 @@
 import React from 'react';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,8 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-
-import { RiAddLine, RiDeleteBinLine, RiRefreshLine, RiDownloadLine, RiStarLine, RiSearchLine } from '@remixicon/react';
+import { Icon } from "@/components/icon/Icon";
 
 import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -51,7 +51,7 @@ const loadSettings = async (): Promise<DesktopSettings | null> => {
       return (result?.settings || {}) as DesktopSettings;
     }
 
-    const response = await fetch('/api/config/settings', {
+    const response = await runtimeFetch('/api/config/settings', {
       method: 'GET',
       headers: { Accept: 'application/json' },
     });
@@ -188,7 +188,7 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
         </div>
 
         {/* Source & Search */}
-        <div className="mb-8">
+        <div data-settings-item="skills.catalog.source" className="mb-8">
           <div className="mb-1 px-1">
             <h3 className="typography-ui-header font-medium text-foreground">{t('settings.skills.catalog.page.section.sourceRepository')}</h3>
           </div>
@@ -200,7 +200,9 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
                 onValueChange={(v) => setSelectedSource(v)}
               >
                 <SelectTrigger className="w-fit">
-                  <SelectValue placeholder={t('settings.skills.catalog.page.field.selectSourcePlaceholder')} />
+                  <SelectValue placeholder={t('settings.skills.catalog.page.field.selectSourcePlaceholder')}>
+                    {selectedSource?.label}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent align="start">
                   {sources.map((src) => (
@@ -225,7 +227,7 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
                 disabled={isLoadingCatalog || isLoadingSource}
                 title={t('settings.skills.catalog.page.actions.refreshTitle')}
               >
-                <RiRefreshLine className={cn("h-3.5 w-3.5", (isLoadingCatalog || isLoadingSource) && "animate-spin")} />
+                <Icon name="refresh" className={cn("h-3.5 w-3.5", (isLoadingCatalog || isLoadingSource) && "animate-spin")} />
               </Button>
 
               {isCustomSource && (
@@ -237,22 +239,23 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
                   disabled={isRemovingCatalog}
                   title={t('settings.skills.catalog.page.actions.removeCatalogTitle')}
                 >
-                  <RiDeleteBinLine className="h-3.5 w-3.5" />
+                  <Icon name="delete-bin" className="h-3.5 w-3.5" />
                 </Button>
               )}
 
               <Button
+                data-settings-item="skills.catalog.add-catalog"
                 size="xs"
                 className="!font-normal gap-1"
                 onClick={() => setAddCatalogOpen(true)}
               >
-                <RiAddLine className="h-3.5 w-3.5" /> {t('settings.skills.catalog.page.actions.addCatalog')}
+                <Icon name="add" className="h-3.5 w-3.5" /> {t('settings.skills.catalog.page.actions.addCatalog')}
               </Button>
             </div>
 
-            <div className="py-1.5">
+            <div data-settings-item="skills.catalog.search" className="py-1.5">
               <div className="relative">
-                <RiSearchLine className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                <Icon name="search" className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                 <Input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
@@ -287,7 +290,7 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
               </div>
             ) : isLoadingSource ? (
               <div className="py-8 text-center text-muted-foreground">
-                <RiRefreshLine className="mx-auto mb-3 h-5 w-5 animate-spin opacity-50" />
+                <Icon name="refresh" className="mx-auto mb-3 h-5 w-5 animate-spin opacity-50" />
                 <p className="typography-meta">{t('settings.skills.catalog.page.loading.skills')}</p>
               </div>
             ) : (
@@ -326,12 +329,12 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
                                 <span>{t('settings.skills.catalog.page.byOwnerPrefix')} <span className="font-medium text-foreground/80">{item.clawdhub.owner}</span></span>
                               )}
                               <span className="flex items-center gap-1">
-                                <RiDownloadLine className="h-3 w-3" />
+                                <Icon name="download" className="h-3 w-3" />
                                 {item.clawdhub.downloads?.toLocaleString() ?? 0}
                               </span>
                               {(item.clawdhub.stars ?? 0) > 0 && (
                                 <span className="flex items-center gap-1">
-                                  <RiStarLine className="h-3 w-3" />
+                                  <Icon name="star" className="h-3 w-3" />
                                   {item.clawdhub.stars}
                                 </span>
                               )}

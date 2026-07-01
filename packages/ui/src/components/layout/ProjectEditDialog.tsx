@@ -10,10 +10,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
-import { PROJECT_ICONS, PROJECT_COLORS, PROJECT_COLOR_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
+import { PROJECT_ICONS, PROJECT_COLORS, PROJECT_COLOR_MAP, ProjectIconImage } from '@/lib/projectMeta';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
+import { Icon } from "@/components/icon/Icon";
 
 interface ProjectEditDialogProps {
   open: boolean;
@@ -145,19 +146,8 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
   const hasCustomIcon = currentIconImage?.source === 'custom';
   const effectiveHasImageIcon = (hasStoredImageIcon && !pendingRemoveImageIcon) || hasPendingUploadImageIcon;
   const hasRemovableImageIcon = effectiveHasImageIcon;
-  const iconPreviewUrl = !previewImageFailed
-    ? (hasPendingUploadImageIcon
-      ? pendingUploadIconPreviewUrl
-      : (hasStoredImageIcon && !pendingRemoveImageIcon
-        ? getProjectIconImageUrl(
-          { id: projectId, iconImage: currentIconImage ?? null },
-          {
-            themeVariant: currentTheme.metadata.variant,
-            iconColor: currentTheme.colors.surface.foreground,
-          },
-        )
-        : null))
-    : null;
+  const showStoredImagePreview = hasStoredImageIcon && !pendingRemoveImageIcon;
+  const showImagePreview = !previewImageFailed && (hasPendingUploadImageIcon || showStoredImagePreview);
 
   React.useEffect(() => {
     setPreviewImageFailed(false);
@@ -329,7 +319,7 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
                 <span className="w-4 h-0.5 bg-muted-foreground/40 rotate-45 rounded-full" />
               </button>
               {PROJECT_ICONS.map((i) => {
-                const IconComponent = i.Icon;
+                const iconName = i.Icon;
                 return (
                   <button
                     key={i.key}
@@ -343,7 +333,7 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
                     )}
                     title={i.label}
                   >
-                    <IconComponent
+                    <Icon name={iconName}
                       className="w-4 h-4"
                       style={currentColorVar ? { color: currentColorVar } : undefined}
                     />
@@ -351,7 +341,7 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
                 );
               })}
             </div>
-            {effectiveHasImageIcon && iconPreviewUrl && (
+            {effectiveHasImageIcon && showImagePreview && (
               <div className="flex items-center gap-2 pt-1">
                 <span className="typography-meta text-muted-foreground">{t('projectEditDialog.field.preview')}</span>
                 <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border/60 bg-[var(--surface-elevated)] p-1">
@@ -359,13 +349,25 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
                     className="inline-flex h-4 w-4 items-center justify-center overflow-hidden rounded-[2px]"
                     style={iconBackground ? { backgroundColor: iconBackground } : undefined}
                   >
-                    <img
-                      src={iconPreviewUrl}
-                      alt=""
-                      className="h-full w-full object-contain"
-                      draggable={false}
-                      onError={() => setPreviewImageFailed(true)}
-                    />
+                    {hasPendingUploadImageIcon && pendingUploadIconPreviewUrl ? (
+                      <img
+                        src={pendingUploadIconPreviewUrl}
+                        alt=""
+                        className="h-full w-full object-contain"
+                        draggable={false}
+                        onError={() => setPreviewImageFailed(true)}
+                      />
+                    ) : (
+                      <ProjectIconImage
+                        project={{ id: projectId, iconImage: currentIconImage }}
+                        options={{
+                          themeVariant: currentTheme.metadata.variant,
+                          iconColor: currentTheme.colors.surface.foreground,
+                        }}
+                        className="h-full w-full object-contain"
+                        onError={() => setPreviewImageFailed(true)}
+                      />
+                    )}
                   </span>
                 </span>
               </div>

@@ -1,6 +1,6 @@
 import React from 'react';
-import { RiRefreshLine, RiServerLine, RiMacbookLine } from '@remixicon/react';
 import { Button } from '@/components/ui/button';
+import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { redactSensitiveUrl } from '@/lib/desktopHosts';
@@ -25,9 +25,9 @@ export type DesktopConnectionRecoveryProps = {
 function getRecoveryIcon(iconKey: 'local' | 'remote'): React.ReactNode {
   switch (iconKey) {
     case 'local':
-      return <RiMacbookLine className="h-8 w-8" />;
+      return <Icon name="macbook" className="h-8 w-8" />;
     case 'remote':
-      return <RiServerLine className="h-8 w-8" />;
+      return <Icon name="server" className="h-8 w-8" />;
   }
 }
 
@@ -50,7 +50,7 @@ export function DesktopConnectionRecovery({
     if (variant === 'remote-unreachable') {
       return { host: t('onboarding.desktopRecovery.placeholders.remoteServer') };
     }
-    if (variant === 'remote-wrong-service') {
+    if (variant === 'remote-wrong-service' || variant === 'remote-incompatible') {
       return { host: t('onboarding.desktopRecovery.placeholders.unknownServer') };
     }
     return undefined;
@@ -84,7 +84,7 @@ export function DesktopConnectionRecovery({
         </div>
 
         {/* Host info if available */}
-        {hostUrl && (variant === 'remote-unreachable' || variant === 'remote-wrong-service') && (
+        {hostUrl && (variant === 'remote-unreachable' || variant === 'remote-wrong-service' || variant === 'remote-incompatible') && (
           <div className="rounded-lg border border-border bg-background/50 p-3">
             <div className="text-xs text-muted-foreground mb-1">{t('onboarding.remoteConnection.field.serverAddress')}</div>
             <div className="font-mono text-sm text-foreground truncate">{redactSensitiveUrl(hostUrl)}</div>
@@ -99,7 +99,7 @@ export function DesktopConnectionRecovery({
               disabled={isRetrying}
               className="w-full"
             >
-              <RiRefreshLine className={cn('h-4 w-4', isRetrying && 'animate-spin')} />
+              <Icon name="refresh" className={cn('h-4 w-4', isRetrying && 'animate-spin')} />
               {isRetrying
                 ? t('onboarding.desktopRecovery.actions.retrying')
                 : t(retryLabelKey)}
@@ -114,7 +114,7 @@ export function DesktopConnectionRecovery({
                 disabled={isRetrying}
                 className="flex-1"
               >
-                <RiMacbookLine className="h-4 w-4" />
+                <Icon name="macbook" className="h-4 w-4" />
                 {t(config.useLocalLabelKey as Parameters<typeof t>[0])}
               </Button>
             )}
@@ -126,7 +126,7 @@ export function DesktopConnectionRecovery({
                 disabled={isRetrying}
                 className="flex-1"
               >
-                <RiServerLine className="h-4 w-4" />
+                <Icon name="server" className="h-4 w-4" />
                 {t(config.useRemoteLabelKey as Parameters<typeof t>[0])}
               </Button>
             )}

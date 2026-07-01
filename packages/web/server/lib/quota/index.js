@@ -12,6 +12,7 @@ export {
   fetchOpenaiQuota,
   fetchGoogleQuota,
   fetchCodexQuota,
+  fetchCursorQuota,
   fetchCopilotQuota,
   fetchCopilotAddonQuota,
   fetchKimiQuota,
@@ -21,5 +22,6 @@ export {
   fetchMinimaxCodingPlanQuota,
   fetchMinimaxCnCodingPlanQuota,
   fetchOllamaCloudQuota,
-  fetchZhipuaiQuota
+  fetchZhipuaiQuota,
+  fetchWaferQuota
 } from './providers/index.js';

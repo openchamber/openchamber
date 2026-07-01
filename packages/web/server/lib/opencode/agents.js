@@ -193,25 +193,23 @@ function getAgentPermissionSource(agentName, workingDirectory, lookupCache = nul
     }
   }
 
-  // Check JSON layers (project > user)
+  // Check JSON layers in effective override order. readConfigLayers merges
+  // user -> project -> custom, so custom wins over project, project over user.
   const layers = readConfigLayers(workingDirectory);
 
-  // Project opencode.json
+  const customJsonPermission = layers.customConfig?.agent?.[agentName]?.permission;
+  if (customJsonPermission !== undefined && layers.paths.customPath) {
+    return { source: 'json', scope: 'custom', path: layers.paths.customPath };
+  }
+
   const projectJsonPermission = layers.projectConfig?.agent?.[agentName]?.permission;
   if (projectJsonPermission !== undefined && layers.paths.projectPath) {
     return { source: 'json', scope: AGENT_SCOPE.PROJECT, path: layers.paths.projectPath };
   }
 
-  // User opencode.json
   const userJsonPermission = layers.userConfig?.agent?.[agentName]?.permission;
   if (userJsonPermission !== undefined) {
     return { source: 'json', scope: AGENT_SCOPE.USER, path: layers.paths.userPath };
-  }
-
-  // Custom config (env var)
-  const customJsonPermission = layers.customConfig?.agent?.[agentName]?.permission;
-  if (customJsonPermission !== undefined && layers.paths.customPath) {
-    return { source: 'json', scope: 'custom', path: layers.paths.customPath };
   }
 
   return { source: null, scope: null, path: null };
@@ -411,7 +409,10 @@ function createAgent(agentName, config, workingDirectory, scope) {
     targetScope = AGENT_SCOPE.USER;
   }
 
-  const { prompt, scope: _scopeFromConfig, ...frontmatter } = config;
+  const { prompt, scope: _scopeFromConfig, ...rawFrontmatter } = config;
+  const frontmatter = Object.fromEntries(
+    Object.entries(rawFrontmatter).filter(([, value]) => value !== null && value !== undefined)
+  );
 
   writeMdFile(targetPath, frontmatter, prompt || '');
   console.log(`Created new agent: ${agentName} (scope: ${targetScope}, path: ${targetPath})`);
@@ -451,6 +452,39 @@ function updateAgent(agentName, updates, workingDirectory) {
 
   for (const [field, value] of Object.entries(updates)) {
     if (field === 'prompt') {
+      if (value === null) {
+        if (mdExists || creatingNewMd) {
+          if (mdData) {
+            mdData.body = '';
+            mdModified = true;
+          }
+          continue;
+        }
+
+        if (isPromptFileReference(jsonSection?.prompt)) {
+          const promptFilePath = resolvePromptFilePath(jsonSection.prompt);
+          if (!promptFilePath) {
+            throw new Error(`Invalid prompt file reference for agent ${agentName}`);
+          }
+          writePromptFile(promptFilePath, '');
+          continue;
+        }
+
+        if (config.agent?.[agentName]) {
+          delete config.agent[agentName].prompt;
+
+          if (Object.keys(config.agent[agentName]).length === 0) {
+            delete config.agent[agentName];
+          }
+          if (Object.keys(config.agent).length === 0) {
+            delete config.agent;
+          }
+
+          jsonModified = true;
+        }
+        continue;
+      }
+
       const normalizedValue = typeof value === 'string' ? value : (value == null ? '' : String(value));
 
       if (mdExists || creatingNewMd) {
@@ -486,19 +520,31 @@ function updateAgent(agentName, updates, workingDirectory) {
       const newPermission = mergePermissionWithNonWildcards(value, permissionSource, agentName);
 
       if (permissionSource.source === 'md') {
-        const existingMdData = parseMdFile(permissionSource.path);
-        existingMdData.frontmatter.permission = newPermission;
-        writeMdFile(permissionSource.path, existingMdData.frontmatter, existingMdData.body);
-        console.log(`Updated permission in .md file: ${permissionSource.path}`);
+        if (mdData && permissionSource.path === targetPath) {
+          mdData.frontmatter.permission = newPermission;
+          mdModified = true;
+        } else {
+          const existingMdData = parseMdFile(permissionSource.path);
+          existingMdData.frontmatter.permission = newPermission;
+          writeMdFile(permissionSource.path, existingMdData.frontmatter, existingMdData.body);
+          console.log(`Updated permission in .md file: ${permissionSource.path}`);
+        }
       } else if (permissionSource.source === 'json') {
-        const existingConfig = readConfigFile(permissionSource.path);
-        if (!existingConfig.agent) existingConfig.agent = {};
-        if (!existingConfig.agent[agentName]) existingConfig.agent[agentName] = {};
-        existingConfig.agent[agentName].permission = newPermission;
-        writeConfig(existingConfig, permissionSource.path);
-        console.log(`Updated permission in JSON: ${permissionSource.path}`);
+        if (permissionSource.path === (jsonTarget.path || CONFIG_FILE)) {
+          if (!config.agent) config.agent = {};
+          if (!config.agent[agentName]) config.agent[agentName] = {};
+          config.agent[agentName].permission = newPermission;
+          jsonModified = true;
+        } else {
+          const existingConfig = readConfigFile(permissionSource.path);
+          if (!existingConfig.agent) existingConfig.agent = {};
+          if (!existingConfig.agent[agentName]) existingConfig.agent[agentName] = {};
+          existingConfig.agent[agentName].permission = newPermission;
+          writeConfig(existingConfig, permissionSource.path);
+          console.log(`Updated permission in JSON: ${permissionSource.path}`);
+        }
       } else {
-        if ((mdExists || creatingNewMd) && mdData) {
+        if (mdExists && mdData) {
           mdData.frontmatter.permission = newPermission;
           mdModified = true;
         } else if (hasJsonFields) {
@@ -507,9 +553,7 @@ function updateAgent(agentName, updates, workingDirectory) {
           config.agent[agentName].permission = newPermission;
           jsonModified = true;
         } else {
-          const writeTarget = workingDirectory
-            ? { config: layers.projectConfig || {}, path: layers.paths.projectPath || layers.paths.userPath }
-            : { config: layers.userConfig || {}, path: layers.paths.userPath };
+          const writeTarget = getJsonWriteTarget(layers, AGENT_SCOPE.USER);
           if (!writeTarget.config.agent) writeTarget.config.agent = {};
           if (!writeTarget.config.agent[agentName]) writeTarget.config.agent[agentName] = {};
           writeTarget.config.agent[agentName].permission = newPermission;
@@ -579,53 +623,71 @@ function updateAgent(agentName, updates, workingDirectory) {
   console.log(`Updated agent: ${agentName} (scope: ${targetScope}, md: ${mdModified}, json: ${jsonModified})`);
 }
 
-function deleteAgent(agentName, workingDirectory) {
-  const lookupCache = createAgentLookupCache();
-  let deleted = false;
+function deleteJsonAgentEntry(config, agentName) {
+  const agentMap = config.agent;
+  if (!agentMap || typeof agentMap !== 'object' || Array.isArray(agentMap) || !agentMap[agentName]) return false;
+  delete agentMap[agentName];
+  if (Object.keys(agentMap).length === 0) {
+    delete config.agent;
+  }
+  return true;
+}
 
-  if (workingDirectory) {
+function deleteAgent(agentName, workingDirectory, scope) {
+  const lookupCache = createAgentLookupCache();
+  const requestedScope = scope === AGENT_SCOPE.PROJECT || scope === AGENT_SCOPE.USER ? scope : null;
+
+  if ((!requestedScope || requestedScope === AGENT_SCOPE.PROJECT) && workingDirectory) {
     const projectPath = getProjectAgentPath(workingDirectory, agentName);
     if (fs.existsSync(projectPath)) {
       fs.unlinkSync(projectPath);
       console.log(`Deleted project-level agent .md file: ${projectPath}`);
-      deleted = true;
+      return;
     }
   }
 
-  const userPath = getUserAgentPath(agentName, lookupCache);
-  if (fs.existsSync(userPath)) {
-    fs.unlinkSync(userPath);
-    console.log(`Deleted user-level agent .md file: ${userPath}`);
-    deleted = true;
+  if (!requestedScope || requestedScope === AGENT_SCOPE.USER) {
+    const userPath = getUserAgentPath(agentName, lookupCache);
+    if (fs.existsSync(userPath)) {
+      fs.unlinkSync(userPath);
+      console.log(`Deleted user-level agent .md file: ${userPath}`);
+      return;
+    }
   }
 
   const layers = readConfigLayers(workingDirectory);
-  const jsonSource = getJsonEntrySource(layers, 'agent', agentName);
-  if (jsonSource.exists && jsonSource.config && jsonSource.path) {
-    if (!jsonSource.config.agent) jsonSource.config.agent = {};
-    delete jsonSource.config.agent[agentName];
-    writeConfig(jsonSource.config, jsonSource.path);
-    console.log(`Removed agent from opencode.json: ${agentName}`);
-    deleted = true;
+
+  if (requestedScope === AGENT_SCOPE.PROJECT) {
+    if (layers.paths.projectPath && deleteJsonAgentEntry(layers.projectConfig, agentName)) {
+      writeConfig(layers.projectConfig, layers.paths.projectPath);
+      console.log(`Removed project-level agent from opencode.json: ${agentName}`);
+      return;
+    }
+    throw new Error(`Project agent ${agentName} not found`);
   }
 
-  if (!deleted) {
-    const jsonTarget = getJsonWriteTarget(layers, workingDirectory ? AGENT_SCOPE.PROJECT : AGENT_SCOPE.USER);
-    const targetConfig = jsonTarget.config || {};
-    if (!targetConfig.agent) targetConfig.agent = {};
-    targetConfig.agent[agentName] = { disable: true };
-    writeConfig(targetConfig, jsonTarget.path || CONFIG_FILE);
-    console.log(`Disabled built-in agent: ${agentName}`);
+  if (requestedScope === AGENT_SCOPE.USER) {
+    const userJsonPath = layers.paths.customPath || layers.paths.userPath;
+    const userJsonConfig = layers.paths.customPath ? layers.customConfig : layers.userConfig;
+    if (userJsonPath && deleteJsonAgentEntry(userJsonConfig, agentName)) {
+      writeConfig(userJsonConfig, userJsonPath);
+      console.log(`Removed user-level agent from opencode.json: ${agentName}`);
+      return;
+    }
+    throw new Error(`User agent ${agentName} not found`);
   }
+
+  const jsonSource = getJsonEntrySource(layers, 'agent', agentName);
+  if (jsonSource.exists && jsonSource.config && jsonSource.path && deleteJsonAgentEntry(jsonSource.config, agentName)) {
+    writeConfig(jsonSource.config, jsonSource.path);
+    console.log(`Removed agent from opencode.json: ${agentName}`);
+    return;
+  }
+
+  throw new Error(`Agent ${agentName} is built-in or not deletable`);
 }
 
 export {
-  ensureProjectAgentDir,
-  getProjectAgentPath,
-  getUserAgentPath,
-  getAgentScope,
-  getAgentWritePath,
-  getAgentPermissionSource,
   getAgentSources,
   getAgentConfig,
   createAgent,

@@ -1,15 +1,23 @@
 import React from 'react';
-import { RiAddLine, RiCloseLine, RiDeleteBinLine, RiInformationLine } from '@remixicon/react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Icon } from "@/components/icon/Icon";
+import type { Session } from '@opencode-ai/sdk/v2';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessions } from '@/sync/sync-context';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useDeviceInfo } from '@/lib/device';
 import { checkIsGitRepository } from '@/lib/gitApi';
-import { getWorktreeSetupCommands, saveWorktreeSetupCommands } from '@/lib/openchamberConfig';
+import {
+  getWorktreeSetupCommands,
+  getWorktreeSetupWaitEnabled,
+  saveWorktreeSetupCommands,
+  saveWorktreeSetupWaitEnabled,
+} from '@/lib/openchamberConfig';
 import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
 import { sessionEvents } from '@/lib/sessionEvents';
 import type { WorktreeMetadata } from '@/types/worktree';
@@ -22,7 +30,8 @@ export interface WorktreeSectionContentProps {
 
 export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ projectRef: projectRefProp = null }) => {
   const { t } = useI18n();
-  const { isMobile } = useDeviceInfo();
+  const { isMobile, isTablet } = useDeviceInfo();
+  const alwaysShowActions = isMobile || isTablet;
   const activeProject = useProjectsStore((state) => state.getActiveProject());
 
   const projectPath = projectRefProp?.path ?? activeProject?.path ?? null;
@@ -32,6 +41,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
 
   const [setupCommands, setSetupCommands] = React.useState<string[]>([]);
+  const [waitForSetupCommands, setWaitForSetupCommands] = React.useState(false);
   const [isLoadingCommands, setIsLoadingCommands] = React.useState(false);
   const [isGitRepoLocal, setIsGitRepoLocal] = React.useState<boolean | null>(null);
   const [availableWorktrees, setAvailableWorktrees] = React.useState<WorktreeMetadata[]>([]);
@@ -126,13 +136,18 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
 
     (async () => {
       try {
-        const commands = await getWorktreeSetupCommands(projectRef);
+        const [commands, waitForSetup] = await Promise.all([
+          getWorktreeSetupCommands(projectRef),
+          getWorktreeSetupWaitEnabled(projectRef),
+        ]);
         if (!cancelled) {
           setSetupCommands(commands.length > 0 ? commands : ['']);
+          setWaitForSetupCommands(waitForSetup);
         }
       } catch {
         if (!cancelled) {
           setSetupCommands(['']);
+          setWaitForSetupCommands(false);
         }
       } finally {
         if (!cancelled) {
@@ -178,6 +193,13 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
     void persistSetupCommands(setupCommands);
   }, [persistSetupCommands, setupCommands]);
 
+  const handleWaitForSetupCommandsChange = React.useCallback((enabled: boolean) => {
+    setWaitForSetupCommands(enabled);
+    if (projectRef) {
+      void saveWorktreeSetupWaitEnabled(projectRef, enabled);
+    }
+  }, [projectRef]);
+
   // Delete worktree handler
   const handleDeleteWorktree = React.useCallback((worktree: WorktreeMetadata) => {
     const normalize = (value: string): string => value.replace(/\\/g, '/').replace(/\/+$/, '');
@@ -208,10 +230,17 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
     // Build a set of session IDs that are directly linked
     const directSessionIds = new Set(directSessions.map((s) => s.id));
 
-    // Find all subsessions recursively
-    const findSubsessions = (parentIds: Set<string>): typeof sessions => {
-      const subsessions = sessions.filter((session) => {
-        const parentID = (session as { parentID?: string | null }).parentID;
+    // Search subsessions across all directories, not just the current sync
+    // context, so subagent sessions created in other worktrees/project roots
+    // are still included in the delete list.
+    const allKnownSessions = [
+      ...useGlobalSessionsStore.getState().activeSessions,
+      ...useGlobalSessionsStore.getState().archivedSessions,
+    ];
+
+    const findSubsessions = (parentIds: Set<string>): Session[] => {
+      const subsessions = allKnownSessions.filter((session) => {
+        const parentID = (session as Session & { parentID?: string | null }).parentID;
         return parentID && parentIds.has(parentID);
       });
       if (subsessions.length === 0) {
@@ -239,8 +268,6 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
       worktree,
     });
   }, [sessions, getWorktreeMetadata]);
-
-
 
   // Refresh worktrees when sessions change (after deletion)
   const sessionsKey = React.useMemo(() => sessions.map(s => s.id).join(','), [sessions]);
@@ -275,7 +302,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
             <h3 className="typography-ui-header font-normal text-foreground">{t('settings.openchamber.worktrees.setup.title')}</h3>
             <Tooltip>
               <TooltipTrigger asChild>
-                <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
               </TooltipTrigger>
               <TooltipContent sideOffset={8} className="max-w-xs">
                 {t('settings.openchamber.worktrees.setup.tooltipPrefix')}
@@ -309,7 +336,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
                     className="flex-shrink-0 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                     aria-label={t('settings.openchamber.worktrees.setup.removeCommandAria')}
                   >
-                  <RiCloseLine className="h-4 w-4" />
+                  <Icon name="close" className="h-4 w-4" />
                 </button>
               </div>
             ))}
@@ -320,9 +347,25 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
               className="!font-normal"
               onClick={handleAddCommand}
             >
-              <RiAddLine className="h-3.5 w-3.5" />
+              <Icon name="add" className="h-3.5 w-3.5" />
               {t('settings.openchamber.worktrees.setup.addCommand')}
             </Button>
+            <label
+              data-settings-item="projects.worktree.setup.wait"
+              className="flex cursor-pointer items-center gap-2 py-1.5"
+            >
+              <Checkbox
+                checked={waitForSetupCommands}
+                onChange={handleWaitForSetupCommandsChange}
+                ariaLabel={t('settings.openchamber.worktrees.setup.waitForCommandsAria')}
+              />
+              <span className={cn(
+                'typography-ui-label font-normal',
+                waitForSetupCommands ? 'text-foreground' : 'text-foreground/60'
+              )}>
+                {t('settings.openchamber.worktrees.setup.waitForCommands')}
+              </span>
+            </label>
           </div>
         )}
       </div>
@@ -334,7 +377,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
             <h3 className="typography-ui-header font-normal text-foreground">{t('settings.openchamber.worktrees.list.title')}</h3>
             <Tooltip>
               <TooltipTrigger asChild>
-                <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
               </TooltipTrigger>
               <TooltipContent sideOffset={8} className="max-w-xs">
                 {t('settings.openchamber.worktrees.list.tooltip')}
@@ -374,11 +417,11 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
                     onClick={() => handleDeleteWorktree(worktree)}
                     className={cn(
                       "flex-shrink-0 flex h-7 w-7 items-center justify-center rounded text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
-                      isMobile ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                      alwaysShowActions ? "opacity-100" : "opacity-0 group-hover:opacity-100"
                     )}
                     aria-label={t('settings.openchamber.worktrees.list.deleteWorktreeAria', { name: worktree.branch || worktree.label || worktree.path })}
                 >
-                  <RiDeleteBinLine className="h-4 w-4" />
+                  <Icon name="delete-bin" className="h-4 w-4" />
                 </button>
               </div>
             ))}

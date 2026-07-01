@@ -1,12 +1,11 @@
 
-
-import type { RuntimeAPIs } from './api/types';
 import * as gitHttp from './gitApiHttp';
 import { opencodeClient } from './opencode/client';
 import { renderMagicPrompt } from './magicPrompts';
-import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useContextStore } from '@/stores/contextStore';
+import { materializeOpenDraftSession, useSessionUIStore } from '@/sync/session-ui-store';
+import { useSelectionStore } from '@/sync/selection-store';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 
 export type {
   GitStatus,
@@ -36,19 +35,11 @@ export type {
   GitMergeResult,
   GitRebaseResult,
   MergeConflictDetails,
+  CommitFileDiffResponse,
 } from './api/types';
 
-declare global {
-  interface Window {
-    __OPENCHAMBER_RUNTIME_APIS__?: RuntimeAPIs;
-  }
-}
-
 const getRuntimeGit = () => {
-  if (typeof window !== 'undefined' && window.__OPENCHAMBER_RUNTIME_APIS__?.git) {
-    return window.__OPENCHAMBER_RUNTIME_APIS__.git;
-  }
-  return null;
+  return getRegisteredRuntimeAPIs()?.git ?? null;
 };
 
 const requestChatForceScrollBottom = (sessionId: string) => {
@@ -56,6 +47,46 @@ const requestChatForceScrollBottom = (sessionId: string) => {
   window.dispatchEvent(new CustomEvent('openchamber:chat-force-scroll-bottom', {
     detail: { sessionId },
   }));
+};
+
+const extractJsonObject = (value: string): Record<string, unknown> | null => {
+  const text = value.trim();
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = (fenced?.[1] ?? text).trim();
+  const starts = [candidate.indexOf('{')].filter((index) => index >= 0);
+
+  for (const start of starts) {
+    for (let end = candidate.length; end > start; end -= 1) {
+      if (candidate[end - 1] !== '}') continue;
+      try {
+        const parsed = JSON.parse(candidate.slice(start, end)) as unknown;
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          return parsed as Record<string, unknown>;
+        }
+      } catch {
+        // Keep scanning; models sometimes wrap JSON with prose or fences.
+      }
+    }
+  }
+
+  return null;
+};
+
+const extractAssistantText = (response: unknown): string => {
+  const data = (response as { data?: { parts?: Array<unknown> } } | null)?.data;
+  const parts = Array.isArray(data?.parts) ? data.parts : [];
+  return parts
+    .map((part) => {
+      const item = part as { type?: unknown; text?: unknown; content?: unknown; value?: unknown };
+      if (item.type !== 'text') return '';
+      if (typeof item.text === 'string') return item.text;
+      if (typeof item.content === 'string') return item.content;
+      if (typeof item.value === 'string') return item.value;
+      return '';
+    })
+    .filter((text) => text.trim().length > 0)
+    .join('\n')
+    .trim();
 };
 
 export async function checkIsGitRepository(directory: string): Promise<boolean> {
@@ -66,8 +97,26 @@ export async function checkIsGitRepository(directory: string): Promise<boolean> 
 
 export async function getGitStatus(directory: string, options?: { mode?: 'light' }): Promise<import('./api/types').GitStatus> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtime.getGitStatus(directory);
+  if (runtime) return runtime.getGitStatus(directory, options);
   return gitHttp.getGitStatus(directory, options);
+}
+
+export async function resolveGitPrimaryRoot(directory: string): Promise<string> {
+  const result = await gitHttp.resolveGitPrimaryRoot(directory);
+  return result.root;
+}
+
+export async function resolveGitTopLevel(directory: string): Promise<string> {
+  const result = await gitHttp.resolveGitTopLevel(directory);
+  return result.root;
+}
+
+export async function getGitCommitSummaries(
+  directory: string,
+  shas: string[]
+): Promise<Array<{ sha: string; short: string; subject: string }>> {
+  const result = await gitHttp.getGitCommitSummaries(directory, shas);
+  return result.commits;
 }
 
 export async function getGitDiff(directory: string, options: import('./api/types').GetGitDiffOptions): Promise<import('./api/types').GitDiffResponse> {
@@ -85,10 +134,56 @@ export async function getGitFileDiff(
   return gitHttp.getGitFileDiff(directory, options);
 }
 
-export async function revertGitFile(directory: string, filePath: string): Promise<void> {
+export async function revertGitFile(
+  directory: string,
+  filePath: string,
+  options?: { scope?: 'all' | 'working' }
+): Promise<void> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtime.revertGitFile(directory, filePath);
-  return gitHttp.revertGitFile(directory, filePath);
+  if (runtime) return runtime.revertGitFile(directory, filePath, options);
+  return gitHttp.revertGitFile(directory, filePath, options);
+}
+
+export async function stageGitFile(directory: string, filePath: string): Promise<void> {
+  const runtime = getRuntimeGit();
+  if (runtime?.stageGitFile) return runtime.stageGitFile(directory, filePath);
+  return gitHttp.stageGitFile(directory, filePath);
+}
+
+export async function stageGitFiles(directory: string, filePaths: string[]): Promise<void> {
+  const runtime = getRuntimeGit();
+  if (runtime?.stageGitFiles) return runtime.stageGitFiles(directory, filePaths);
+  return gitHttp.stageGitFiles(directory, filePaths);
+}
+
+export async function unstageGitFile(directory: string, filePath: string): Promise<void> {
+  const runtime = getRuntimeGit();
+  if (runtime?.unstageGitFile) return runtime.unstageGitFile(directory, filePath);
+  return gitHttp.unstageGitFile(directory, filePath);
+}
+
+export async function unstageGitFiles(directory: string, filePaths: string[]): Promise<void> {
+  const runtime = getRuntimeGit();
+  if (runtime?.unstageGitFiles) return runtime.unstageGitFiles(directory, filePaths);
+  return gitHttp.unstageGitFiles(directory, filePaths);
+}
+
+export async function stageGitHunk(directory: string, filePath: string, patch: string): Promise<void> {
+  const runtime = getRuntimeGit();
+  if (runtime?.stageGitHunk) return runtime.stageGitHunk(directory, filePath, patch);
+  return gitHttp.stageGitHunk(directory, filePath, patch);
+}
+
+export async function unstageGitHunk(directory: string, filePath: string, patch: string): Promise<void> {
+  const runtime = getRuntimeGit();
+  if (runtime?.unstageGitHunk) return runtime.unstageGitHunk(directory, filePath, patch);
+  return gitHttp.unstageGitHunk(directory, filePath, patch);
+}
+
+export async function revertGitHunk(directory: string, filePath: string, patch: string): Promise<void> {
+  const runtime = getRuntimeGit();
+  if (runtime?.revertGitHunk) return runtime.revertGitHunk(directory, filePath, patch);
+  return gitHttp.revertGitHunk(directory, filePath, patch);
 }
 
 export async function isLinkedWorktree(directory: string): Promise<boolean> {
@@ -122,11 +217,7 @@ export async function generateCommitMessage(
 ): Promise<{ message: import('./api/types').GeneratedCommitMessage }> {
   const startedAt = Date.now();
   void options;
-  const generationSession = resolveSessionGenerationContext();
-
-  if (!generationSession) {
-    throw new Error('Select existing session for generation');
-  }
+  const generationSession = await resolveGenerationSessionContext();
 
   console.info('[git-generation][browser] request', {
     transport: 'session',
@@ -150,20 +241,6 @@ export async function generateCommitMessage(
       visiblePrompt,
       hiddenPrompt,
       generationSession,
-      schema: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          subject: { type: 'string', description: 'Conventional commit subject line.' },
-          highlights: {
-            type: 'array',
-            items: { type: 'string', description: 'Short user-facing highlight.' },
-            maxItems: 3,
-            description: 'Optional short user-facing highlights.',
-          },
-        },
-        required: ['subject', 'highlights'],
-      },
       kind: 'commit',
     });
 
@@ -202,10 +279,7 @@ export async function generatePullRequestDescription(
   payload: { base: string; head: string; context?: string; zenModel?: string; providerId?: string; modelId?: string }
 ): Promise<import('./api/types').GeneratedPullRequestDescription> {
   const startedAt = Date.now();
-  const generationSession = resolveSessionGenerationContext();
-  if (!generationSession) {
-    throw new Error('Select existing session for generation');
-  }
+  const generationSession = await resolveGenerationSessionContext();
 
   const commitLog = await getGitLog(directory, {
     from: payload.base,
@@ -271,15 +345,6 @@ export async function generatePullRequestDescription(
       visiblePrompt,
       hiddenPrompt,
       generationSession,
-      schema: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          title: { type: 'string', description: 'Pull request title.' },
-          body: { type: 'string', description: 'Pull request markdown description.' },
-        },
-        required: ['title', 'body'],
-      },
       kind: 'pr',
     });
 
@@ -312,7 +377,50 @@ type SessionGenerationContext = {
   providerID: string;
   modelID: string;
   agent?: string;
+  variant?: string;
 };
+
+const GENERATION_CONFIG_ERROR = 'No default provider or model configured. Please select a provider and model in settings first.';
+
+async function resolveGenerationSessionContext(): Promise<SessionGenerationContext> {
+  const activeSession = resolveSessionGenerationContext();
+  if (activeSession) {
+    return activeSession;
+  }
+
+  const draft = useSessionUIStore.getState().newSessionDraft;
+  if (!draft?.open) {
+    throw new Error('Select existing session for generation');
+  }
+
+  const config = useConfigStore.getState();
+  if (!config.currentProviderId || !config.currentModelId) {
+    throw new Error(GENERATION_CONFIG_ERROR);
+  }
+
+  const createdDraftSession = await materializeOpenDraftSession({
+    providerID: config.currentProviderId,
+    modelID: config.currentModelId,
+    agent: config.currentAgentName || undefined,
+    variant: config.currentVariant || undefined,
+  });
+
+  if (!createdDraftSession) {
+    const retry = resolveSessionGenerationContext();
+    if (retry) {
+      return retry;
+    }
+    throw new Error('Failed to create session for generation');
+  }
+
+  return {
+    sessionId: createdDraftSession.sessionId,
+    providerID: config.currentProviderId,
+    modelID: config.currentModelId,
+    agent: createdDraftSession.agent,
+    variant: config.currentVariant || undefined,
+  };
+}
 
 const resolveSessionGenerationContext = (): SessionGenerationContext | null => {
   const sessionId = useSessionUIStore.getState().currentSessionId;
@@ -320,13 +428,17 @@ const resolveSessionGenerationContext = (): SessionGenerationContext | null => {
     return null;
   }
 
-  const context = useContextStore.getState();
+  const selection = useSelectionStore.getState();
   const config = useConfigStore.getState();
+  const lastChoice = useSessionUIStore.getState().getLastUserChoice(sessionId);
 
-  const agent = context.getSessionAgentSelection(sessionId) || config.currentAgentName || undefined;
-  const sessionModel = context.getSessionModelSelection(sessionId);
-  const agentModel = agent ? context.getAgentModelForSession(sessionId, agent) : null;
-  const selectedModel = agentModel || sessionModel || (config.currentProviderId && config.currentModelId
+  const agent = selection.getSessionAgentSelection(sessionId) || lastChoice?.agent || config.currentAgentName || undefined;
+  const sessionModel = selection.getSessionModelSelection(sessionId);
+  const agentModel = agent ? selection.getAgentModelForSession(sessionId, agent) : null;
+  const lastChoiceModel = lastChoice?.providerID && lastChoice.modelID
+    ? { providerId: lastChoice.providerID, modelId: lastChoice.modelID }
+    : null;
+  const selectedModel = agentModel || sessionModel || lastChoiceModel || (config.currentProviderId && config.currentModelId
     ? { providerId: config.currentProviderId, modelId: config.currentModelId }
     : null);
 
@@ -334,11 +446,25 @@ const resolveSessionGenerationContext = (): SessionGenerationContext | null => {
     return null;
   }
 
+  const selectionVariant = agent
+    ? selection.getAgentModelVariantForSession(sessionId, agent, selectedModel.providerId, selectedModel.modelId)
+    : undefined;
+  const lastChoiceVariant = lastChoiceModel
+    && lastChoiceModel.providerId === selectedModel.providerId
+    && lastChoiceModel.modelId === selectedModel.modelId
+      ? lastChoice?.variant
+      : undefined;
+  const configVariant = config.currentProviderId === selectedModel.providerId && config.currentModelId === selectedModel.modelId
+    ? config.currentVariant
+    : undefined;
+  const variant = selectionVariant || lastChoiceVariant || configVariant || undefined;
+
   return {
     sessionId,
     providerID: selectedModel.providerId,
     modelID: selectedModel.modelId,
     agent,
+    variant,
   };
 };
 
@@ -347,14 +473,12 @@ const runStructuredGenerationInActiveSession = async ({
   visiblePrompt,
   hiddenPrompt,
   generationSession,
-  schema,
   kind,
 }: {
   directory: string;
   visiblePrompt: string;
   hiddenPrompt?: string;
   generationSession: SessionGenerationContext;
-  schema: Record<string, unknown>;
   kind: 'commit' | 'pr';
 }): Promise<Record<string, unknown>> => {
   const requestStartedAt = Date.now();
@@ -365,13 +489,18 @@ const runStructuredGenerationInActiveSession = async ({
     providerID: generationSession.providerID,
     modelID: generationSession.modelID,
     agent: generationSession.agent,
+    variant: generationSession.variant,
   });
   const trimmedDirectory = typeof directory === 'string' ? directory.trim() : '';
   const visiblePromptText = typeof visiblePrompt === 'string' ? visiblePrompt.trim() : '';
   const hiddenPromptText = typeof hiddenPrompt === 'string' ? hiddenPrompt.trim() : '';
   const promptParts: Array<{ type: 'text'; text: string; synthetic?: boolean }> = [];
   if (visiblePromptText) {
-    promptParts.push({ type: 'text', text: visiblePromptText, synthetic: false });
+    promptParts.push({
+      type: 'text',
+      text: hiddenPromptText ? `${visiblePromptText}\n\n` : visiblePromptText,
+      synthetic: false,
+    });
   }
   if (hiddenPromptText) {
     promptParts.push({ type: 'text', text: hiddenPromptText, synthetic: true });
@@ -391,11 +520,7 @@ const runStructuredGenerationInActiveSession = async ({
         modelID: generationSession.modelID,
       },
       ...(generationSession.agent ? { agent: generationSession.agent } : {}),
-      format: {
-        type: 'json_schema',
-        schema,
-        retryCount: 2,
-      },
+      ...(generationSession.variant ? { variant: generationSession.variant } : {}),
       parts: promptParts,
     });
   });
@@ -405,21 +530,23 @@ const runStructuredGenerationInActiveSession = async ({
     throw new Error(responseError?.message || `Failed to generate ${kind} output`);
   }
 
-  const info = response.data.info as { finish?: string; structured_output?: unknown; structured?: unknown; error?: unknown };
-  const structuredOutput = info?.structured_output || info?.structured;
-  if (!structuredOutput || typeof structuredOutput !== 'object' || Array.isArray(structuredOutput)) {
-    console.error('[git-generation][browser] invalid structured output', {
+  const info = response.data.info as { finish?: string; error?: unknown };
+  const assistantText = extractAssistantText(response);
+  const parsedOutput = extractJsonObject(assistantText);
+  if (!parsedOutput) {
+    console.error('[git-generation][browser] invalid JSON output', {
       kind,
       sessionId: generationSession.sessionId,
       elapsedMs: Date.now() - requestStartedAt,
       finish: info?.finish,
+      assistantText,
       messageInfo: response.data.info,
       messageParts: response.data.parts,
     });
-    throw new Error('No structured output returned by session');
+    throw new Error('No JSON output returned by session');
   }
 
-  return structuredOutput as Record<string, unknown>;
+  return parsedOutput;
 };
 
 export async function listGitWorktrees(directory: string): Promise<import('./api/types').GitWorktreeInfo[]> {
@@ -530,7 +657,7 @@ export async function gitPush(
 
 export async function gitPull(
   directory: string,
-  options: { remote?: string; branch?: string } = {}
+  options: import('./api/types').GitPullOptions = {}
 ): Promise<import('./api/types').GitPullResult> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.gitPull(directory, options);
@@ -544,6 +671,42 @@ export async function gitFetch(
   const runtime = getRuntimeGit();
   if (runtime) return runtime.gitFetch(directory, options);
   return gitHttp.gitFetch(directory, options);
+}
+
+export async function listGitStashes(directory: string): Promise<{ stashes: import('./api/types').GitStashEntry[] }> {
+  const runtime = getRuntimeGit();
+  if (runtime) return runtime.listGitStashes(directory);
+  return gitHttp.listGitStashes(directory);
+}
+
+export async function countGitStashFiles(directory: string, refs: string[]): Promise<{ counts: Record<string, number> }> {
+  const runtime = getRuntimeGit();
+  if (runtime) return runtime.countGitStashFiles(directory, refs);
+  return gitHttp.countGitStashFiles(directory, refs);
+}
+
+export async function stashGitChanges(directory: string, options: { message?: string } = {}): Promise<{ success: boolean; created: boolean; message: string; output: string }> {
+  const runtime = getRuntimeGit();
+  if (runtime) return runtime.stashGitChanges(directory, options);
+  return gitHttp.stashGitChanges(directory, options);
+}
+
+export async function applyGitStash(directory: string, options: { ref: string }): Promise<{ success: boolean; ref: string }> {
+  const runtime = getRuntimeGit();
+  if (runtime) return runtime.applyGitStash(directory, options);
+  return gitHttp.applyGitStash(directory, options);
+}
+
+export async function popGitStash(directory: string, options: { ref: string }): Promise<{ success: boolean; ref: string }> {
+  const runtime = getRuntimeGit();
+  if (runtime) return runtime.popGitStash(directory, options);
+  return gitHttp.popGitStash(directory, options);
+}
+
+export async function dropGitStash(directory: string, options: { ref: string }): Promise<{ success: boolean; ref: string }> {
+  const runtime = getRuntimeGit();
+  if (runtime) return runtime.dropGitStash(directory, options);
+  return gitHttp.dropGitStash(directory, options);
 }
 
 export async function checkoutBranch(directory: string, branch: string): Promise<{ success: boolean; branch: string }> {
@@ -588,6 +751,17 @@ export async function getCommitFiles(
   const runtime = getRuntimeGit();
   if (runtime) return runtime.getCommitFiles(directory, hash);
   return gitHttp.getCommitFiles(directory, hash);
+}
+
+export async function getCommitFileDiff(
+  directory: string,
+  hash: string,
+  filePath: string,
+  isBinary: boolean
+): Promise<import('./api/types').CommitFileDiffResponse> {
+  const runtime = getRuntimeGit();
+  if (runtime?.getCommitFileDiff) return runtime.getCommitFileDiff(directory, hash, filePath, isBinary);
+  return gitHttp.getCommitFileDiff(directory, hash, filePath, isBinary);
 }
 
 export async function getGitIdentities(): Promise<import('./api/types').GitIdentityProfile[]> {
@@ -692,6 +866,44 @@ export async function merge(
   return gitHttp.merge(directory, options);
 }
 
+export async function checkoutCommit(
+  directory: string,
+  hash: string
+): Promise<import('./api/types').CheckoutCommitResponse> {
+  const runtime = getRuntimeGit();
+  if (runtime) return runtime.checkoutCommit(directory, hash);
+  return gitHttp.checkoutCommit(directory, hash);
+}
+
+export async function cherryPick(
+  directory: string,
+  hash: string
+): Promise<import('./api/types').CherryPickResponse> {
+  const runtime = getRuntimeGit();
+  if (runtime) return runtime.cherryPick(directory, hash);
+  return gitHttp.cherryPick(directory, hash);
+}
+
+export async function revertCommit(
+  directory: string,
+  hash: string
+): Promise<import('./api/types').RevertCommitResponse> {
+  const runtime = getRuntimeGit();
+  if (runtime) return runtime.revertCommit(directory, hash);
+  return gitHttp.revertCommit(directory, hash);
+}
+
+export async function resetToCommit(
+  directory: string,
+  hash: string,
+  mode: 'soft' | 'mixed' | 'hard',
+  force?: boolean
+): Promise<import('./api/types').ResetToCommitResponse> {
+  const runtime = getRuntimeGit();
+  if (runtime) return runtime.resetToCommit(directory, hash, mode, force);
+  return gitHttp.resetToCommit(directory, hash, mode, force);
+}
+
 export async function abortMerge(directory: string): Promise<{ success: boolean }> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.abortMerge(directory);
@@ -754,7 +966,7 @@ export async function canonicalizeWorktreeState(
   cwd: string | null;
   branch: string | null;
   headState: 'branch' | 'detached' | 'unborn';
-  worktreeStatus: 'ready' | 'missing' | 'invalid' | 'not-a-repo';
+  worktreeStatus: 'pending' | 'ready' | 'missing' | 'invalid' | 'not-a-repo';
   legacy: boolean;
   degraded: boolean;
   attentionReason?: 'merge' | 'rebase' | 'cherry-pick' | 'revert' | 'bisect' | null;

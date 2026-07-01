@@ -1,24 +1,29 @@
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { RiFolderLine, RiInformationLine } from '@remixicon/react';
-import { isDesktopShell, isTauriShell } from '@/lib/desktop';
+import { Icon } from "@/components/icon/Icon";
+import { isDesktopShell, requestFileAccess } from '@/lib/desktop';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 export const OpenCodeCliSettings: React.FC = () => {
   const { t } = useI18n();
   const [value, setValue] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
+  const showOpenCodeUpdateNotifications = useUIStore((state) => state.showOpenCodeUpdateNotifications);
+  const setShowOpenCodeUpdateNotifications = useUIStore((state) => state.setShowOpenCodeUpdateNotifications);
 
   React.useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const response = await fetch('/api/config/settings', {
+        const response = await runtimeFetch('/api/config/settings', {
           method: 'GET',
           headers: { Accept: 'application/json' },
         });
@@ -49,28 +54,19 @@ export const OpenCodeCliSettings: React.FC = () => {
       return;
     }
 
-    if (!isDesktopShell() || !isTauriShell()) {
-      return;
-    }
-
-    const tauri = (window as unknown as { __TAURI__?: { dialog?: { open?: (opts: Record<string, unknown>) => Promise<unknown> } } }).__TAURI__;
-    if (!tauri?.dialog?.open) {
+    if (!isDesktopShell()) {
       return;
     }
 
     try {
-      const selected = await tauri.dialog.open({
-        title: t('settings.openchamber.opencodeCli.dialog.selectBinaryTitle'),
-        multiple: false,
-        directory: false,
-      });
-      if (typeof selected === 'string' && selected.trim().length > 0) {
-        setValue(selected.trim());
+      const selected = await requestFileAccess();
+      if (selected.success && selected.path && selected.path.trim().length > 0) {
+        setValue(selected.path.trim());
       }
     } catch {
       // ignore
     }
-  }, [t]);
+  }, []);
 
   const handleSaveAndReload = React.useCallback(async () => {
     setIsSaving(true);
@@ -86,6 +82,11 @@ export const OpenCodeCliSettings: React.FC = () => {
     }
   }, [t, value]);
 
+  const handleShowUpdateNotificationsChange = React.useCallback((enabled: boolean) => {
+    setShowOpenCodeUpdateNotifications(enabled);
+    void updateDesktopSettings({ showOpenCodeUpdateNotifications: enabled });
+  }, [setShowOpenCodeUpdateNotifications]);
+
   return (
     <div className="mb-8">
       <div className="mb-1 px-1">
@@ -95,7 +96,7 @@ export const OpenCodeCliSettings: React.FC = () => {
           </h3>
           <Tooltip>
             <TooltipTrigger asChild>
-              <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+              <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
             </TooltipTrigger>
             <TooltipContent sideOffset={8} className="max-w-xs">
               {t('settings.openchamber.opencodeCli.tooltipPrefix')}
@@ -108,7 +109,7 @@ export const OpenCodeCliSettings: React.FC = () => {
       </div>
 
       <section className="px-2 pb-2 pt-0 space-y-0.5">
-        <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-3">
+        <div data-settings-item="sessions.opencode-binary" className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-3">
           <div className="flex min-w-0 flex-col shrink-0">
             <span className="typography-ui-label text-foreground">{t('settings.openchamber.opencodeCli.field.binaryPath')}</span>
           </div>
@@ -125,12 +126,12 @@ export const OpenCodeCliSettings: React.FC = () => {
               variant="outline"
               size="xs"
               onClick={handleBrowse}
-              disabled={isLoading || isSaving || !isDesktopShell() || !isTauriShell()}
+              disabled={isLoading || isSaving || !isDesktopShell()}
               className="h-7 w-7 p-0"
               aria-label={t('settings.openchamber.opencodeCli.actions.browseAria')}
               title={t('settings.openchamber.opencodeCli.actions.browse')}
             >
-              <RiFolderLine className="h-4 w-4" />
+              <Icon name="folder" className="h-4 w-4" />
             </Button>
           </div>
         </div>
@@ -147,6 +148,17 @@ export const OpenCodeCliSettings: React.FC = () => {
             {'.'}
           </div>
         </div>
+
+        <label data-settings-item="sessions.opencode-update-notifications" className="flex cursor-pointer items-center gap-2 py-1.5">
+          <Checkbox
+            checked={showOpenCodeUpdateNotifications}
+            onChange={handleShowUpdateNotificationsChange}
+            ariaLabel={t('settings.openchamber.opencodeCli.field.showUpdateNotificationsAria')}
+          />
+          <span className="typography-ui-label text-foreground">
+            {t('settings.openchamber.opencodeCli.field.showUpdateNotifications')}
+          </span>
+        </label>
 
         <div className="flex justify-start py-1.5">
           <Button

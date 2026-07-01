@@ -7,12 +7,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import {
-  RiAddLine,
-  RiCloseLine,
-  RiDeleteBinLine,
-  RiFolderLine,
-} from '@remixicon/react';
+import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import type { SessionFolder } from '@/stores/useSessionFoldersStore';
 import { useI18n } from '@/lib/i18n';
@@ -67,7 +62,7 @@ export const BulkActionBar: React.FC<Props> = ({
                     className={iconButtonClass}
                     aria-label={t('sessions.sidebar.bulkActions.moveToFolder')}
                   >
-                    <RiFolderLine className="h-4 w-4" />
+                    <Icon name="folder" className="h-4 w-4" />
                   </button>
                 </DropdownMenuTrigger>
               </TooltipTrigger>
@@ -87,7 +82,7 @@ export const BulkActionBar: React.FC<Props> = ({
               )}
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={onCreateFolderAndMove}>
-                <RiAddLine className="mr-1 h-4 w-4" />
+                <Icon name="add" className="mr-1 h-4 w-4" />
                 {t('sessions.sidebar.folders.newFolderEllipsis')}
               </DropdownMenuItem>
               {canRemoveFromFolder ? (
@@ -95,7 +90,7 @@ export const BulkActionBar: React.FC<Props> = ({
                   onClick={onRemoveFromFolder}
                   className="text-destructive focus:text-destructive"
                 >
-                  <RiCloseLine className="mr-1 h-4 w-4" />
+                  <Icon name="close" className="mr-1 h-4 w-4" />
                   {t('sessions.sidebar.folders.removeFromFolder')}
                 </DropdownMenuItem>
               ) : null}
@@ -111,7 +106,7 @@ export const BulkActionBar: React.FC<Props> = ({
               className={cn(destructiveIconButtonClass)}
               aria-label={destructiveLabel}
             >
-              <RiDeleteBinLine className="h-4 w-4" />
+              <Icon name="delete-bin" className="h-4 w-4" />
             </button>
           </TooltipTrigger>
           <TooltipContent side="top" sideOffset={4}><p>{destructiveLabel}</p></TooltipContent>
@@ -125,7 +120,7 @@ export const BulkActionBar: React.FC<Props> = ({
               className={iconButtonClass}
               aria-label={t('sessions.sidebar.header.actions.exitSelection')}
             >
-              <RiCloseLine className="h-4 w-4" />
+              <Icon name="close" className="h-4 w-4" />
             </button>
           </TooltipTrigger>
           <TooltipContent side="top" sideOffset={4}><p>{t('sessions.sidebar.header.actions.exitSelection')}</p></TooltipContent>

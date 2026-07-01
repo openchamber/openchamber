@@ -18,7 +18,60 @@ export const createSettingsHelpers = (dependencies) => {
   } = dependencies;
 
   const PWA_APP_NAME_MAX_LENGTH = 64;
+  const STT_SERVER_URL_MAX_LENGTH = 2048;
+  const STT_MODEL_MAX_LENGTH = 256;
+  const STT_LANGUAGE_MAX_LENGTH = 64;
+  const VERSION_STRING_MAX_LENGTH = 128;
+  const SHORTCUT_OVERRIDE_KEY_MAX_LENGTH = 128;
+  const SHORTCUT_OVERRIDE_VALUE_MAX_LENGTH = 128;
   const PWA_ORIENTATION_VALUES = new Set(['system', 'portrait', 'landscape']);
+  const MOBILE_KEYBOARD_MODE_VALUES = new Set(['native', 'resize-content']);
+  const HIDDEN_MODELS_MAX = 1024;
+  const RECENT_EFFORTS_MAX_KEYS = 128;
+  const RECENT_EFFORTS_MAX_VARIANTS_PER_KEY = 5;
+
+  const sanitizeShortcutOverrides = (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null;
+    }
+    const result = {};
+    for (const [rawKey, rawValue] of Object.entries(value)) {
+      const key = typeof rawKey === 'string' ? rawKey.trim() : '';
+      const combo = typeof rawValue === 'string' ? rawValue.trim() : '';
+      if (!key || !combo) continue;
+      result[key.slice(0, SHORTCUT_OVERRIDE_KEY_MAX_LENGTH)] = combo.slice(0, SHORTCUT_OVERRIDE_VALUE_MAX_LENGTH);
+    }
+    return result;
+  };
+
+  const sanitizeRecentEfforts = (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null;
+    }
+    const result = {};
+    const seenKeys = new Set();
+    let count = 0;
+    for (const [rawKey, rawVariants] of Object.entries(value)) {
+      const key = typeof rawKey === 'string' ? rawKey.trim() : '';
+      if (!key || seenKeys.has(key)) continue;
+      if (!Array.isArray(rawVariants)) continue;
+      const variants = [];
+      const seenVariants = new Set();
+      for (const rawVariant of rawVariants) {
+        const variant = typeof rawVariant === 'string' ? rawVariant.trim() : '';
+        if (!variant || seenVariants.has(variant)) continue;
+        seenVariants.add(variant);
+        variants.push(variant);
+        if (variants.length >= RECENT_EFFORTS_MAX_VARIANTS_PER_KEY) break;
+      }
+      if (variants.length === 0) continue;
+      seenKeys.add(key);
+      result[key] = variants;
+      count += 1;
+      if (count >= RECENT_EFFORTS_MAX_KEYS) break;
+    }
+    return count > 0 ? result : null;
+  };
 
   const normalizePwaAppName = (value, fallback = '') => {
     if (typeof value !== 'string') {
@@ -40,6 +93,31 @@ export const createSettingsHelpers = (dependencies) => {
       return normalized;
     }
     return fallback;
+  };
+
+  const normalizeMobileKeyboardMode = (value, fallback = 'native') => {
+    if (typeof value !== 'string') {
+      return fallback;
+    }
+    const normalized = value.trim();
+    if (MOBILE_KEYBOARD_MODE_VALUES.has(normalized)) {
+      return normalized;
+    }
+    return fallback;
+  };
+
+  const normalizeFollowUpBehavior = (value, legacyQueueModeEnabled = null) => {
+    // "immediate" was removed (it was wire-identical to "steer"); collapse it.
+    if (value === 'immediate') {
+      return 'steer';
+    }
+    if (value === 'steer' || value === 'queue') {
+      return value;
+    }
+    if (legacyQueueModeEnabled === false) {
+      return 'steer';
+    }
+    return 'queue';
   };
 
   const sanitizeSettingsUpdate = (payload) => {
@@ -100,6 +178,12 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.desktopLanAccessEnabled === 'boolean') {
       result.desktopLanAccessEnabled = candidate.desktopLanAccessEnabled;
     }
+    if (typeof candidate.desktopKeepAwakeEnabled === 'boolean') {
+      result.desktopKeepAwakeEnabled = candidate.desktopKeepAwakeEnabled;
+    }
+    if (typeof candidate.desktopUiPassword === 'string') {
+      result.desktopUiPassword = candidate.desktopUiPassword.trim();
+    }
     if (Array.isArray(candidate.projects)) {
       const projects = sanitizeProjects(candidate.projects);
       if (projects) {
@@ -110,13 +194,6 @@ export const createSettingsHelpers = (dependencies) => {
       result.activeProjectId = candidate.activeProjectId;
     }
 
-    if (Array.isArray(candidate.approvedDirectories)) {
-      result.approvedDirectories = normalizeStringArray(
-        candidate.approvedDirectories
-          .map((entry) => (typeof entry === 'string' ? normalizePathForPersistence(entry) : entry))
-          .filter((entry) => typeof entry === 'string' && entry.length > 0)
-      );
-    }
     if (Array.isArray(candidate.securityScopedBookmarks)) {
       result.securityScopedBookmarks = normalizeStringArray(candidate.securityScopedBookmarks);
     }
@@ -126,6 +203,21 @@ export const createSettingsHelpers = (dependencies) => {
           .map((entry) => (typeof entry === 'string' ? normalizePathForPersistence(entry) : entry))
           .filter((entry) => typeof entry === 'string' && entry.length > 0)
       );
+    }
+    if (Array.isArray(candidate.draftStarters)) {
+      const seenStarters = new Set();
+      const starters = [];
+      for (const entry of candidate.draftStarters) {
+        if (!entry || typeof entry !== 'object') continue;
+        const type = entry.type === 'command' || entry.type === 'skill' ? entry.type : null;
+        const name = typeof entry.name === 'string' ? entry.name.trim() : '';
+        if (!type || !name) continue;
+        const key = `${type}:${name}`;
+        if (seenStarters.has(key)) continue;
+        seenStarters.add(key);
+        starters.push({ type, name });
+      }
+      result.draftStarters = starters;
     }
 
 
@@ -152,6 +244,9 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.showReasoningTraces === 'boolean') {
       result.showReasoningTraces = candidate.showReasoningTraces;
+    }
+    if (typeof candidate.collapsibleThinkingBlocks === 'boolean') {
+      result.collapsibleThinkingBlocks = candidate.collapsibleThinkingBlocks;
     }
     if (typeof candidate.showTextJustificationActivity === 'boolean') {
       result.showTextJustificationActivity = candidate.showTextJustificationActivity;
@@ -203,6 +298,9 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (candidate.usageDisplayMode === 'usage' || candidate.usageDisplayMode === 'remaining') {
       result.usageDisplayMode = candidate.usageDisplayMode;
+    }
+    if (typeof candidate.usageShowPredValues === 'boolean') {
+      result.usageShowPredValues = candidate.usageShowPredValues;
     }
     if (Array.isArray(candidate.usageDropdownProviders)) {
       result.usageDropdownProviders = normalizeStringArray(candidate.usageDropdownProviders);
@@ -280,8 +378,10 @@ export const createSettingsHelpers = (dependencies) => {
       const trimmed = candidate.defaultGitIdentityId.trim();
       result.defaultGitIdentityId = trimmed.length > 0 ? trimmed : undefined;
     }
-    if (typeof candidate.queueModeEnabled === 'boolean') {
-      result.queueModeEnabled = candidate.queueModeEnabled;
+    if (typeof candidate.followUpBehavior === 'string') {
+      result.followUpBehavior = normalizeFollowUpBehavior(candidate.followUpBehavior);
+    } else if (typeof candidate.queueModeEnabled === 'boolean') {
+      result.followUpBehavior = normalizeFollowUpBehavior(undefined, candidate.queueModeEnabled);
     }
     if (typeof candidate.autoCreateWorktree === 'boolean') {
       result.autoCreateWorktree = candidate.autoCreateWorktree;
@@ -310,6 +410,12 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.pwaOrientation === 'string') {
       result.pwaOrientation = normalizePwaOrientation(candidate.pwaOrientation, undefined);
     }
+    if (typeof candidate.mobileKeyboardMode === 'string') {
+      const mode = normalizeMobileKeyboardMode(candidate.mobileKeyboardMode, null);
+      if (mode) {
+        result.mobileKeyboardMode = mode;
+      }
+    }
     if (typeof candidate.toolCallExpansion === 'string') {
       const mode = candidate.toolCallExpansion.trim();
       if (mode === 'collapsed' || mode === 'activity' || mode === 'detailed' || mode === 'changes') {
@@ -319,8 +425,18 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.inputSpellcheckEnabled === 'boolean') {
       result.inputSpellcheckEnabled = candidate.inputSpellcheckEnabled;
     }
+    if (typeof candidate.showOpenCodeUpdateNotifications === 'boolean') {
+      result.showOpenCodeUpdateNotifications = candidate.showOpenCodeUpdateNotifications;
+    }
+    if (typeof candidate.openCodeUpdateToastDismissedVersion === 'string') {
+      const version = candidate.openCodeUpdateToastDismissedVersion.trim();
+      result.openCodeUpdateToastDismissedVersion = version.slice(0, VERSION_STRING_MAX_LENGTH);
+    }
     if (typeof candidate.showToolFileIcons === 'boolean') {
       result.showToolFileIcons = candidate.showToolFileIcons;
+    }
+    if (typeof candidate.showTurnChangedFiles === 'boolean') {
+      result.showTurnChangedFiles = candidate.showTurnChangedFiles;
     }
     if (typeof candidate.showExpandedBashTools === 'boolean') {
       result.showExpandedBashTools = candidate.showExpandedBashTools;
@@ -373,6 +489,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.stickyUserHeader === 'boolean') {
       result.stickyUserHeader = candidate.stickyUserHeader;
     }
+    if (typeof candidate.expandedEditorToolbar === 'boolean') {
+      result.expandedEditorToolbar = candidate.expandedEditorToolbar;
+    }
     if (typeof candidate.showSplitAssistantMessageActions === 'boolean') {
       result.showSplitAssistantMessageActions = candidate.showSplitAssistantMessageActions;
     }
@@ -392,6 +511,11 @@ export const createSettingsHelpers = (dependencies) => {
       result.inputBarOffset = Math.max(0, Math.min(100, Math.round(candidate.inputBarOffset)));
     }
 
+    const shortcutOverrides = sanitizeShortcutOverrides(candidate.shortcutOverrides);
+    if (shortcutOverrides) {
+      result.shortcutOverrides = shortcutOverrides;
+    }
+
     const favoriteModels = sanitizeModelRefs(candidate.favoriteModels, 64);
     if (favoriteModels) {
       result.favoriteModels = favoriteModels;
@@ -401,16 +525,32 @@ export const createSettingsHelpers = (dependencies) => {
     if (recentModels) {
       result.recentModels = recentModels;
     }
+
+    // Cap at 1024: users with several providers (anthropic, openai, google,
+    // bedrock, azure, etc.) each exposing dozens-to-hundreds of models can
+    // exceed 256 hidden entries quickly. 1024 covers dense multi-provider
+    // setups while still bounding persistence/memory.
+    const hiddenModels = sanitizeModelRefs(candidate.hiddenModels, HIDDEN_MODELS_MAX);
+    if (hiddenModels) {
+      result.hiddenModels = hiddenModels;
+    }
+
+    if (Array.isArray(candidate.collapsedModelProviders)) {
+      result.collapsedModelProviders = normalizeStringArray(candidate.collapsedModelProviders);
+    }
+
+    if (Array.isArray(candidate.recentAgents)) {
+      result.recentAgents = normalizeStringArray(candidate.recentAgents);
+    }
+
+    const recentEfforts = sanitizeRecentEfforts(candidate.recentEfforts);
+    if (recentEfforts) {
+      result.recentEfforts = recentEfforts;
+    }
     if (typeof candidate.diffLayoutPreference === 'string') {
       const mode = candidate.diffLayoutPreference.trim();
       if (mode === 'dynamic' || mode === 'inline' || mode === 'side-by-side') {
         result.diffLayoutPreference = mode;
-      }
-    }
-    if (typeof candidate.diffViewMode === 'string') {
-      const mode = candidate.diffViewMode.trim();
-      if (mode === 'single' || mode === 'stacked') {
-        result.diffViewMode = mode;
       }
     }
     if (typeof candidate.gitChangesViewMode === 'string') {
@@ -581,35 +721,50 @@ export const createSettingsHelpers = (dependencies) => {
       }
     }
 
+    if (typeof candidate.sttProvider === 'string') {
+      const provider = candidate.sttProvider.trim();
+      if (provider === 'browser' || provider === 'server' || provider === 'wasm') {
+        result.sttProvider = provider;
+      }
+    }
+    if (typeof candidate.sttServerUrl === 'string') {
+      const trimmed = candidate.sttServerUrl.trim();
+      if (trimmed.length <= STT_SERVER_URL_MAX_LENGTH) {
+        result.sttServerUrl = trimmed;
+      }
+    }
+    if (typeof candidate.sttModel === 'string') {
+      const trimmed = candidate.sttModel.trim();
+      if (trimmed.length <= STT_MODEL_MAX_LENGTH) {
+        result.sttModel = trimmed;
+      }
+    }
+    if (typeof candidate.wasmSttModel === 'string') {
+      const trimmed = candidate.wasmSttModel.trim();
+      if (trimmed.length <= 256) {
+        result.wasmSttModel = trimmed;
+      }
+    }
+    if (typeof candidate.sttLanguage === 'string') {
+      const trimmed = candidate.sttLanguage.trim();
+      if (trimmed.length <= STT_LANGUAGE_MAX_LENGTH) {
+        result.sttLanguage = trimmed;
+      }
+    }
+    if (typeof candidate.sttSilenceThresholdDb === 'number' && Number.isFinite(candidate.sttSilenceThresholdDb)) {
+      result.sttSilenceThresholdDb = Math.max(-100, Math.min(0, candidate.sttSilenceThresholdDb));
+    }
+    if (typeof candidate.sttSilenceHoldMs === 'number' && Number.isFinite(candidate.sttSilenceHoldMs)) {
+      result.sttSilenceHoldMs = Math.max(250, Math.min(10000, Math.round(candidate.sttSilenceHoldMs)));
+    }
+    if (typeof candidate.sttTranscribeOnStop === 'boolean') {
+      result.sttTranscribeOnStop = candidate.sttTranscribeOnStop;
+    }
+
     return result;
   };
 
   const mergePersistedSettings = (current, changes) => {
-    const baseApproved = Array.isArray(changes.approvedDirectories)
-      ? changes.approvedDirectories
-      : Array.isArray(current.approvedDirectories)
-        ? current.approvedDirectories
-        : [];
-
-    const additionalApproved = [];
-    if (typeof changes.lastDirectory === 'string' && changes.lastDirectory.length > 0) {
-      additionalApproved.push(changes.lastDirectory);
-    }
-    if (typeof changes.homeDirectory === 'string' && changes.homeDirectory.length > 0) {
-      additionalApproved.push(changes.homeDirectory);
-    }
-    const projectEntries = Array.isArray(changes.projects)
-      ? changes.projects
-      : Array.isArray(current.projects)
-        ? current.projects
-        : [];
-    projectEntries.forEach((project) => {
-      if (project && typeof project.path === 'string' && project.path.length > 0) {
-        additionalApproved.push(project.path);
-      }
-    });
-    const approvedSource = [...baseApproved, ...additionalApproved];
-
     const baseBookmarks = Array.isArray(changes.securityScopedBookmarks)
       ? changes.securityScopedBookmarks
       : Array.isArray(current.securityScopedBookmarks)
@@ -626,11 +781,6 @@ export const createSettingsHelpers = (dependencies) => {
     const next = {
       ...current,
       ...changes,
-      approvedDirectories: Array.from(
-        new Set(
-          approvedSource.filter((entry) => typeof entry === 'string' && entry.length > 0)
-        )
-      ),
       securityScopedBookmarks: Array.from(
         new Set(
           baseBookmarks.filter((entry) => typeof entry === 'string' && entry.length > 0)
@@ -645,33 +795,49 @@ export const createSettingsHelpers = (dependencies) => {
   const formatSettingsResponse = (settings) => {
     const sanitized = sanitizeSettingsUpdate(settings);
     delete sanitized.managedRemoteTunnelToken;
-    const approved = normalizeStringArray(settings.approvedDirectories);
     const bookmarks = normalizeStringArray(settings.securityScopedBookmarks);
     const hasManagedRemoteTunnelToken = typeof settings?.managedRemoteTunnelToken === 'string' && settings.managedRemoteTunnelToken.trim().length > 0;
     const pwaAppName = normalizePwaAppName(settings?.pwaAppName, '');
     const pwaOrientation = normalizePwaOrientation(settings?.pwaOrientation, 'system');
+    const mobileKeyboardMode = normalizeMobileKeyboardMode(settings?.mobileKeyboardMode, 'native');
 
     return {
       ...sanitized,
       hasManagedRemoteTunnelToken,
       ...(pwaAppName ? { pwaAppName } : {}),
       pwaOrientation,
-      approvedDirectories: approved,
+      mobileKeyboardMode,
       securityScopedBookmarks: bookmarks,
       pinnedDirectories: normalizeStringArray(settings.pinnedDirectories),
       typographySizes: sanitizeTypographySizesPartial(settings.typographySizes),
+      ...(process.env.OPENCHAMBER_RUNTIME === 'desktop'
+        ? {
+            desktopLanAccessActive: process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_ACTIVE === 'true',
+            desktopLanAccessBlockedReason:
+              process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_BLOCKED_REASON === 'missing-password'
+                ? 'missing-password'
+                : null,
+          }
+        : {}),
       showReasoningTraces:
         typeof settings.showReasoningTraces === 'boolean'
           ? settings.showReasoningTraces
           : typeof sanitized.showReasoningTraces === 'boolean'
             ? sanitized.showReasoningTraces
-            : false
+            : false,
+      collapsibleThinkingBlocks:
+        typeof settings.collapsibleThinkingBlocks === 'boolean'
+          ? settings.collapsibleThinkingBlocks
+          : typeof sanitized.collapsibleThinkingBlocks === 'boolean'
+            ? sanitized.collapsibleThinkingBlocks
+            : true,
     };
   };
 
   return {
     normalizePwaAppName,
     normalizePwaOrientation,
+    normalizeMobileKeyboardMode,
     sanitizeSettingsUpdate,
     mergePersistedSettings,
     formatSettingsResponse,

@@ -12,21 +12,25 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { toast } from '@/components/ui';
-import { RiStackLine, RiToolsLine, RiBrainAi3Line, RiFileImageLine, RiArrowDownSLine, RiCheckLine, RiSearchLine, RiInformationLine, RiEyeLine, RiEyeOffLine } from '@remixicon/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Icon } from "@/components/icon/Icon";
+import type { IconName } from "@/components/icon/icons";
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
 import { cn } from '@/lib/utils';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/url';
 import type { ModelMetadata } from '@/types';
-import { useI18n } from '@/lib/i18n';
+import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
+import { runtimeFetch } from '@/lib/runtime-fetch';
+import { opencodeClient } from '@/lib/opencode/client';
+import { shouldLoadAvailableProviders } from './providerAvailability';
 
-const COMPACT_NUMBER_FORMATTER = new Intl.NumberFormat('en-US', {
+const formatCompactNumber = (value: number) => new Intl.NumberFormat(getCurrentIntlLocale(), {
   notation: 'compact',
   compactDisplay: 'short',
   maximumFractionDigits: 1,
   minimumFractionDigits: 0,
-});
+}).format(value);
 
 const formatTokens = (value?: number | null) => {
   if (typeof value !== 'number' || Number.isNaN(value)) {
@@ -35,7 +39,7 @@ const formatTokens = (value?: number | null) => {
   if (value === 0) {
     return '0';
   }
-  const formatted = COMPACT_NUMBER_FORMATTER.format(value);
+  const formatted = formatCompactNumber(value);
   return formatted.endsWith('.0') ? formatted.slice(0, -2) : formatted;
 };
 
@@ -166,6 +170,7 @@ export const ProvidersPage: React.FC = () => {
   const [providerDropdownOpen, setProviderDropdownOpen] = React.useState(false);
   const [providerSources, setProviderSources] = React.useState<Record<string, ProviderSources>>({});
   const [showAuthPanel, setShowAuthPanel] = React.useState(false);
+  const isAddMode = selectedProviderId === ADD_PROVIDER_ID;
 
   React.useEffect(() => {
     if (!selectedProviderId && providers.length > 0) {
@@ -174,23 +179,21 @@ export const ProvidersPage: React.FC = () => {
   }, [providers, selectedProviderId, setSelectedProvider]);
 
   React.useEffect(() => {
+    if (!isAddMode) {
+      return;
+    }
+
     let isMounted = true;
 
     const loadAuthMethods = async () => {
       setAuthLoading(true);
       try {
-        const response = await fetch('/api/provider/auth', {
-          method: 'GET',
-          headers: { Accept: 'application/json' },
-        });
-
-        if (!response.ok) {
-          throw new Error(`Auth methods request failed (${response.status})`);
+        const result = await opencodeClient.getSdkClient().provider.auth();
+        if (result.error) {
+          throw new Error(`provider.auth failed: ${String(result.error)}`);
         }
-
-        const payload = await response.json().catch(() => ({}));
         if (!isMounted) return;
-        setAuthMethodsByProvider(parseAuthPayload(payload));
+        setAuthMethodsByProvider(parseAuthPayload(result.data));
       } catch (error) {
         if (!isMounted) return;
         console.error('Failed to load provider auth methods:', error);
@@ -207,27 +210,25 @@ export const ProvidersPage: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [t]);
+  }, [isAddMode, t]);
 
   React.useEffect(() => {
+    if (!shouldLoadAvailableProviders(isAddMode)) {
+      return;
+    }
+
     let isMounted = true;
 
     const loadAvailableProviders = async () => {
       setAvailableLoading(true);
       setAvailableError(null);
       try {
-        const response = await fetch('/api/provider', {
-          method: 'GET',
-          headers: { Accept: 'application/json' },
-        });
-
-        if (!response.ok) {
-          throw new Error(`Provider list request failed (${response.status})`);
+        const result = await opencodeClient.getSdkClient().provider.list();
+        if (result.error) {
+          throw new Error(`provider.list failed: ${String(result.error)}`);
         }
-
-        const payload = await response.json().catch(() => ({}));
         if (!isMounted) return;
-        setAvailableProviders(parseProvidersPayload(payload));
+        setAvailableProviders(parseProvidersPayload(result.data));
       } catch (error) {
         if (!isMounted) return;
         console.error('Failed to load available providers:', error);
@@ -244,7 +245,7 @@ export const ProvidersPage: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [t]);
+  }, [isAddMode, t]);
 
   const connectedProviderIds = React.useMemo(
     () => new Set(providers.map((provider) => provider.id)),
@@ -291,7 +292,9 @@ export const ProvidersPage: React.FC = () => {
 
     const loadSources = async () => {
       try {
-        const response = await fetch(`/api/provider/${encodeURIComponent(selectedProviderId)}/source`, {
+        // OpenChamber-only metadata endpoint: the SDK exposes provider data but
+        // not local auth/source-file provenance used by this settings UI.
+        const response = await runtimeFetch(`/api/provider/${encodeURIComponent(selectedProviderId)}/source`, {
           method: 'GET',
           headers: { Accept: 'application/json' },
         });
@@ -336,16 +339,12 @@ export const ProvidersPage: React.FC = () => {
     setAuthBusyKey(busyKey);
 
     try {
-      const response = await fetch(`/api/auth/${encodeURIComponent(providerId)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'api', key: apiKey }),
+      const result = await opencodeClient.getSdkClient().auth.set({
+        providerID: providerId,
+        auth: { type: 'api', key: apiKey },
       });
-
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        const message = payload?.error || t('settings.providers.page.toast.apiKeySaveFailed');
-        throw new Error(message);
+      if (result.error) {
+        throw new Error(t('settings.providers.page.toast.apiKeySaveFailed'));
       }
 
       toast.success(t('settings.providers.page.toast.apiKeySaved'));
@@ -365,20 +364,17 @@ export const ProvidersPage: React.FC = () => {
     setAuthBusyKey(busyKey);
 
     try {
-      const response = await fetch(`/api/provider/${encodeURIComponent(providerId)}/oauth/authorize`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ method: methodIndex }),
+      const result = await opencodeClient.getSdkClient().provider.oauth.authorize({
+        providerID: providerId,
+        method: methodIndex,
       });
-
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        const message = payload?.error || t('settings.providers.page.toast.oauthStartFailed');
-        throw new Error(message);
+      if (result.error) {
+        throw new Error(t('settings.providers.page.toast.oauthStartFailed'));
       }
 
-      const payloadRecord = isRecord(payload) ? payload : {};
-      const dataRecord = isRecord(payloadRecord.data) ? payloadRecord.data : payloadRecord;
+      const payloadRecord: Record<string, unknown> = isRecord(result.data) ? result.data : {};
+      const nestedData = payloadRecord.data;
+      const dataRecord: Record<string, unknown> = isRecord(nestedData) ? nestedData : payloadRecord;
       const urlCandidate =
         (typeof dataRecord.url === 'string' && dataRecord.url) ||
         (typeof dataRecord.verification_uri_complete === 'string' && dataRecord.verification_uri_complete) ||
@@ -434,16 +430,13 @@ export const ProvidersPage: React.FC = () => {
         requestBody.code = code;
       }
 
-      const response = await fetch(`/api/provider/${encodeURIComponent(providerId)}/oauth/callback`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
+      const result = await opencodeClient.getSdkClient().provider.oauth.callback({
+        providerID: providerId,
+        method: requestBody.method,
+        code: requestBody.code,
       });
-
-      const responsePayload = await response.json().catch(() => null);
-      if (!response.ok) {
-        const message = responsePayload?.error || t('settings.providers.page.toast.oauthCompleteFailed');
-        throw new Error(message);
+      if (result.error) {
+        throw new Error(t('settings.providers.page.toast.oauthCompleteFailed'));
       }
 
       toast.success(t('settings.providers.page.toast.oauthCompleted'));
@@ -484,15 +477,14 @@ export const ProvidersPage: React.FC = () => {
     setAuthBusyKey(busyKey);
 
     try {
-      const response = await fetch(`/api/provider/${encodeURIComponent(providerId)}/auth?scope=all`, {
+      const response = await runtimeFetch(`/api/provider/${encodeURIComponent(providerId)}/auth?scope=all`, {
         method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { Accept: 'application/json' },
       });
 
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
-        const message = payload?.error || t('settings.providers.page.toast.providerDisconnectFailed');
-        throw new Error(message);
+        throw new Error(payload?.error || t('settings.providers.page.toast.providerDisconnectFailed'));
       }
 
       toast.success(t('settings.providers.page.toast.providerDisconnected'));
@@ -505,13 +497,11 @@ export const ProvidersPage: React.FC = () => {
     }
   };
 
-  const isAddMode = selectedProviderId === ADD_PROVIDER_ID;
-
   if (!isAddMode && providers.length === 0) {
     return (
       <div className="flex h-full items-center justify-center">
         <div className="text-center text-muted-foreground">
-          <RiStackLine className="mx-auto mb-3 h-12 w-12 opacity-50" />
+          <Icon name="stack" className="mx-auto mb-3 h-12 w-12 opacity-50" />
           <p className="typography-body">{t('settings.providers.page.empty.noProvidersDetected')}</p>
           <p className="typography-meta mt-1 opacity-75">{t('settings.providers.page.empty.checkOpenCodeConfiguration')}</p>
         </div>
@@ -523,7 +513,7 @@ export const ProvidersPage: React.FC = () => {
     return (
       <ScrollableOverlay outerClassName="h-full" className="w-full">
         <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8">
-          <div className="mb-4">
+          <div data-settings-item="providers.connect" className="mb-4">
             <h1 className="typography-ui-header font-semibold text-foreground">{t('settings.providers.page.connect.title')}</h1>
           </div>
 
@@ -561,7 +551,7 @@ export const ProvidersPage: React.FC = () => {
                                 : t('settings.providers.page.connect.selectProviderPlaceholder')}
                             </span>
                           </span>
-                          <RiArrowDownSLine className="h-4 w-4 flex-shrink-0 text-muted-foreground/50" />
+                          <Icon name="arrow-down-s" className="h-4 w-4 flex-shrink-0 text-muted-foreground/50" />
                         </button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent
@@ -573,7 +563,7 @@ export const ProvidersPage: React.FC = () => {
                           className="flex items-center gap-2 border-b border-[var(--surface-subtle)] px-3 py-2"
                           onKeyDown={(e) => e.stopPropagation()}
                         >
-                          <RiSearchLine className="h-4 w-4 text-muted-foreground" />
+                          <Icon name="search" className="h-4 w-4 text-muted-foreground" />
                           <input
                             type="text"
                             value={providerSearchQuery}
@@ -608,7 +598,7 @@ export const ProvidersPage: React.FC = () => {
                                   <span className="truncate">{provider.name || provider.id}</span>
                                 </span>
                                 {candidateProviderId === provider.id && (
-                                  <RiCheckLine className="h-4 w-4 text-[var(--primary-base)]" />
+                                  <Icon name="check" className="h-4 w-4 text-[var(--primary-base)]" />
                                 )}
                               </DropdownMenuItem>
                             ));
@@ -622,7 +612,7 @@ export const ProvidersPage: React.FC = () => {
           </div>
 
           {candidateProviderId && (
-            <div className="mb-8">
+            <div data-settings-item="providers.auth" className="mb-8">
               <div className="mb-1 px-1">
                 <h2 className="typography-ui-header font-medium text-foreground">{t('settings.providers.page.auth.title')}</h2>
               </div>
@@ -636,7 +626,7 @@ export const ProvidersPage: React.FC = () => {
                       {t('settings.providers.page.auth.apiKeyLabel')}
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                          <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                         </TooltipTrigger>
                         <TooltipContent sideOffset={8} className="max-w-xs">
                           {t('settings.providers.page.auth.apiKeyTooltip')}
@@ -772,7 +762,7 @@ export const ProvidersPage: React.FC = () => {
     return (
       <div className="flex h-full items-center justify-center">
         <div className="text-center text-muted-foreground">
-          <RiStackLine className="mx-auto mb-3 h-12 w-12 opacity-50" />
+          <Icon name="stack" className="mx-auto mb-3 h-12 w-12 opacity-50" />
           <p className="typography-body">{t('settings.providers.page.empty.selectProviderFromSidebar')}</p>
           <p className="typography-meta mt-1 opacity-75">{t('settings.providers.page.empty.reviewDetailsAndConfigureAuth')}</p>
         </div>
@@ -810,7 +800,7 @@ export const ProvidersPage: React.FC = () => {
         </div>
 
         {/* Authentication */}
-        <div className="mb-8">
+        <div data-settings-item="providers.auth" className="mb-8">
           <div className="mb-1 px-1 flex items-center justify-between gap-2">
             <h3 className="typography-ui-header font-medium text-foreground">{t('settings.providers.page.auth.title')}</h3>
             <Button
@@ -826,7 +816,7 @@ export const ProvidersPage: React.FC = () => {
           <section className="px-2 pb-2 pt-0">
             {!showAuthPanel ? (
               <div className="flex items-center gap-1.5 py-1.5">
-                <RiCheckLine className="w-4 h-4 text-[var(--status-success)] shrink-0" />
+                <Icon name="check" className="w-4 h-4 text-[var(--status-success)] shrink-0" />
                 <span className="typography-ui-label text-foreground">{t('settings.providers.page.auth.connected')}</span>
                 <span className="typography-meta text-muted-foreground ml-1">{t('settings.providers.page.auth.useReconnectHint')}</span>
               </div>
@@ -839,7 +829,7 @@ export const ProvidersPage: React.FC = () => {
                     {t('settings.providers.page.auth.apiKeyLabel')}
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                        <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                       </TooltipTrigger>
                       <TooltipContent sideOffset={8} className="max-w-xs">
                         {t('settings.providers.page.auth.apiKeyTooltip')}
@@ -957,7 +947,7 @@ export const ProvidersPage: React.FC = () => {
         </div>
 
         {/* Connection Details */}
-        <div className="mb-8">
+        <div data-settings-item="providers.connection-details" className="mb-8">
           <div className="mb-1 px-1">
             <h3 className="typography-ui-header font-medium text-foreground">{t('settings.providers.page.connectionDetails.title')}</h3>
           </div>
@@ -994,7 +984,7 @@ export const ProvidersPage: React.FC = () => {
         </div>
 
         {/* Models */}
-        <div className="mb-8">
+        <div data-settings-item="providers.models" className="mb-8">
           <div className="mb-1 px-1 flex items-center justify-between gap-2">
             <h3 className="typography-ui-header font-medium text-foreground">
               {t('settings.providers.page.models.title')}
@@ -1031,7 +1021,7 @@ export const ProvidersPage: React.FC = () => {
 
           <section className="px-2 pb-2 pt-0">
             <div className="relative mb-2">
-              <RiSearchLine className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Icon name="search" className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
               <Input
                 value={modelQuery}
                 onChange={(event) => setModelQuery(event.target.value)}
@@ -1055,10 +1045,10 @@ export const ProvidersPage: React.FC = () => {
                   const contextTokens = formatTokens(metadata?.limit?.context);
                   const outputTokens = formatTokens(metadata?.limit?.output);
 
-                  const capabilityIcons: Array<{ key: string; icon: typeof RiToolsLine; label: string }> = [];
-                  if (metadata?.tool_call) capabilityIcons.push({ key: 'tools', icon: RiToolsLine, label: t('settings.providers.page.models.capability.toolCalling') });
-                  if (metadata?.reasoning) capabilityIcons.push({ key: 'reasoning', icon: RiBrainAi3Line, label: t('settings.providers.page.models.capability.reasoning') });
-                  if (metadata?.attachment) capabilityIcons.push({ key: 'image', icon: RiFileImageLine, label: t('settings.providers.page.models.capability.imageInput') });
+                  const capabilityIcons: Array<{ key: string; icon: IconName; label: string }> = [];
+                  if (metadata?.tool_call) capabilityIcons.push({ key: 'tools', icon: "tools", label: t('settings.providers.page.models.capability.toolCalling') });
+                  if (metadata?.reasoning) capabilityIcons.push({ key: 'reasoning', icon: "brain-ai-3", label: t('settings.providers.page.models.capability.reasoning') });
+                  if (metadata?.attachment) capabilityIcons.push({ key: 'image', icon: "file-image", label: t('settings.providers.page.models.capability.imageInput') });
 
                   return (
                     <div key={modelId} className="py-1.5">
@@ -1081,14 +1071,14 @@ export const ProvidersPage: React.FC = () => {
                         )}
                         {capabilityIcons.length > 0 && (
                           <div className="flex items-center gap-1 flex-shrink-0">
-                            {capabilityIcons.map(({ key, icon: Icon, label }) => (
+                            {capabilityIcons.map(({ key, icon: iconName, label }) => (
                               <span
                                 key={key}
                                 className="flex h-5 w-5 rounded items-center justify-center text-muted-foreground bg-[var(--surface-muted)]"
                                 title={label}
                                 aria-label={label}
                               >
-                                <Icon className="h-3 w-3" />
+                                <Icon name={iconName} className="h-3 w-3" />
                               </span>
                             ))}
                           </div>
@@ -1100,7 +1090,7 @@ export const ProvidersPage: React.FC = () => {
                           title={isHidden ? t('settings.providers.page.models.actions.showModelInSelectors') : t('settings.providers.page.models.actions.hideModelFromSelectors')}
                           aria-label={isHidden ? t('settings.providers.page.models.actions.showModel') : t('settings.providers.page.models.actions.hideModel')}
                         >
-                          {isHidden ? <RiEyeOffLine className="h-3.5 w-3.5" /> : <RiEyeLine className="h-3.5 w-3.5" />}
+                          {isHidden ? <Icon name="eye-off" className="h-3.5 w-3.5" /> : <Icon name="eye" className="h-3.5 w-3.5" />}
                         </button>
                       </div>
                       </div>

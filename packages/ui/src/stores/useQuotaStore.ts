@@ -7,6 +7,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { getDefaultModels } from '@/lib/quota/model-families';
 import { updateDesktopSettings } from '@/lib/persistence';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 const DEFAULT_REFRESH_INTERVAL_MS = 60000;
 
@@ -14,6 +15,7 @@ interface QuotaSettingsState {
   autoRefresh: boolean;
   refreshIntervalMs: number;
   displayMode: 'usage' | 'remaining';
+  showPredValues: boolean;
   dropdownProviderIds: QuotaProviderId[];
   selectedModels: Record<string, string[]>;  // Map of providerId -> selected model names
   expandedFamilies: Record<string, string[]>;  // Map of providerId -> EXPANDED family IDs (header dropdown - inverted)
@@ -34,6 +36,7 @@ interface QuotaStore extends QuotaSettingsState {
   setAutoRefresh: (enabled: boolean) => void;
   setRefreshInterval: (intervalMs: number) => void;
   setDisplayMode: (mode: 'usage' | 'remaining') => void;
+  setShowPredValues: (enabled: boolean) => void;
   setDropdownProviderIds: (providerIds: QuotaProviderId[]) => void;
   setSelectedModels: (providerId: string, modelNames: string[]) => void;
   toggleModelSelected: (providerId: string, modelName: string) => void;
@@ -53,6 +56,9 @@ const parseSettings = (data: Record<string, unknown> | null): QuotaSettingsState
       : DEFAULT_REFRESH_INTERVAL_MS;
 
   const displayMode = data?.usageDisplayMode === 'remaining' ? 'remaining' : 'usage';
+  const showPredValues = typeof data?.usageShowPredValues === 'boolean'
+    ? data.usageShowPredValues
+    : false;
   const rawDropdownProviders = Array.isArray(data?.usageDropdownProviders)
     ? data?.usageDropdownProviders
     : null;
@@ -88,6 +94,7 @@ const parseSettings = (data: Record<string, unknown> | null): QuotaSettingsState
     autoRefresh,
     refreshIntervalMs,
     displayMode,
+    showPredValues,
     dropdownProviderIds,
     selectedModels,
     expandedFamilies,
@@ -107,7 +114,7 @@ const loadSettingsFromRuntime = async (): Promise<QuotaSettingsState> => {
   }
 
   if (!isVSCodeRuntime()) {
-    const response = await fetch('/api/config/settings', {
+    const response = await runtimeFetch('/api/config/settings', {
       method: 'GET',
       headers: { Accept: 'application/json' }
     });
@@ -121,6 +128,7 @@ const loadSettingsFromRuntime = async (): Promise<QuotaSettingsState> => {
     autoRefresh: false,
     refreshIntervalMs: DEFAULT_REFRESH_INTERVAL_MS,
     displayMode: 'usage',
+    showPredValues: false,
     dropdownProviderIds: QUOTA_PROVIDERS.map((provider) => provider.id),
     selectedModels: {},
     expandedFamilies: {},
@@ -139,6 +147,7 @@ export const useQuotaStore = create<QuotaStore>()(
       autoRefresh: false,
       refreshIntervalMs: DEFAULT_REFRESH_INTERVAL_MS,
       displayMode: 'usage',
+      showPredValues: false,
       dropdownProviderIds: QUOTA_PROVIDERS.map((provider) => provider.id),
       selectedModels: {},
       expandedFamilies: {},
@@ -174,7 +183,7 @@ export const useQuotaStore = create<QuotaStore>()(
           isFetchingProvider: { ...state.isFetchingProvider, [providerId]: true }
         }));
         try {
-          const response = await fetch(`/api/quota/${encodeURIComponent(providerId)}`);
+          const response = await runtimeFetch(`/api/quota/${encodeURIComponent(providerId)}`);
           const payload = await response.json().catch(() => null);
           if (!response.ok) {
             throw new Error(payload?.error || 'Failed to fetch quota');
@@ -216,6 +225,7 @@ export const useQuotaStore = create<QuotaStore>()(
         set({ refreshIntervalMs: clamped });
       },
       setDisplayMode: (mode) => set({ displayMode: mode }),
+      setShowPredValues: (enabled) => set({ showPredValues: enabled }),
       setDropdownProviderIds: (providerIds) => set({ dropdownProviderIds: providerIds }),
 
       setSelectedModels: (providerId, modelNames) => {

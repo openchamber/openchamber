@@ -2,24 +2,655 @@
   "sections": [
     {
       "label": "Start here",
+      "translations": {
+        "uk": "Почніть тут",
+        "zh-CN": "从这里开始",
+        "es": "Empieza aquí",
+        "pt-BR": "Comece aqui",
+        "ko": "여기서 시작",
+        "pl": "Zacznij tutaj",
+        "fr": "Commencer ici",
+        "ja": "ここから開始"
+      },
       "items": [
-        { "label": "Overview", "link": "/" },
-        { "label": "Install", "link": "/install/" },
-        { "label": "Quickstart", "link": "/quickstart/" },
-        { "label": "Tunnels", "link": "/tunnels/" }
+        {
+          "label": "Overview",
+          "link": "/",
+          "translations": {
+            "uk": "Огляд",
+            "zh-CN": "概览",
+            "es": "Visión general",
+            "pt-BR": "Visão geral",
+            "ko": "개요",
+            "pl": "Przegląd",
+            "fr": "Vue d’ensemble",
+            "ja": "概要"
+          }
+        },
+        {
+          "label": "Install",
+          "link": "/install/",
+          "translations": {
+            "uk": "Встановлення",
+            "zh-CN": "安装",
+            "es": "Instalación",
+            "pt-BR": "Instalação",
+            "ko": "설치",
+            "pl": "Instalacja",
+            "fr": "Installation",
+            "ja": "インストール"
+          }
+        },
+        {
+          "label": "Quickstart",
+          "link": "/quickstart/",
+          "translations": {
+            "uk": "Швидкий старт",
+            "zh-CN": "快速开始",
+            "es": "Inicio rápido",
+            "pt-BR": "Início rápido",
+            "ko": "빠른 시작",
+            "pl": "Szybki start",
+            "fr": "Démarrage rapide",
+            "ja": "クイックスタート"
+          }
+        },
+        {
+          "label": "OpenCode Server",
+          "link": "/opencode-server/",
+          "translations": {
+            "uk": "Сервер OpenCode",
+            "zh-CN": "OpenCode 服务器",
+            "es": "Servidor OpenCode",
+            "pt-BR": "Servidor OpenCode",
+            "ko": "OpenCode 서버",
+            "pl": "Serwer OpenCode",
+            "fr": "Serveur OpenCode",
+            "ja": "OpenCode サーバー"
+          }
+        },
+        {
+          "label": "Environment Variables",
+          "link": "/environment/",
+          "translations": {
+            "uk": "Змінні середовища",
+            "zh-CN": "环境变量",
+            "es": "Variables de entorno",
+            "pt-BR": "Variáveis de ambiente",
+            "ko": "환경 변수",
+            "pl": "Zmienne środowiskowe",
+            "fr": "Variables d’environnement",
+            "ja": "環境変数"
+          }
+        }
+      ]
+    },
+    {
+      "label": "Workflows",
+      "translations": {
+        "uk": "Робочі процеси",
+        "zh-CN": "工作流",
+        "es": "Flujos de trabajo",
+        "pt-BR": "Fluxos de trabalho",
+        "ko": "워크플로",
+        "pl": "Przepływy pracy",
+        "fr": "Workflows",
+        "ja": "ワークフロー"
+      },
+      "items": [
+        {
+          "label": "Projects",
+          "link": "/projects/",
+          "translations": {
+            "uk": "Проєкти",
+            "zh-CN": "项目",
+            "es": "Proyectos",
+            "pt-BR": "Projetos",
+            "ko": "프로젝트",
+            "pl": "Projekty",
+            "fr": "Projets",
+            "ja": "プロジェクト"
+          }
+        },
+        {
+          "label": "Context",
+          "link": "/context/",
+          "translations": {
+            "uk": "Контекст",
+            "zh-CN": "上下文",
+            "es": "Contexto",
+            "pt-BR": "Contexto",
+            "ko": "컨텍스트",
+            "pl": "Kontekst",
+            "fr": "Contexte",
+            "ja": "コンテキスト"
+          }
+        },
+        {
+          "label": "Notes, Todos & Plans",
+          "link": "/notes-todos-plans/",
+          "translations": {
+            "uk": "Нотатки, справи та плани",
+            "zh-CN": "笔记、待办与计划",
+            "es": "Notas, tareas y planes",
+            "pt-BR": "Notas, tarefas e planos",
+            "ko": "메모, 할 일, 계획",
+            "pl": "Notatki, zadania i plany",
+            "fr": "Notes, todos et plans",
+            "ja": "メモ、Todo、計画"
+          }
+        },
+        {
+          "label": "Scheduled Tasks",
+          "link": "/scheduled-tasks/",
+          "translations": {
+            "uk": "Заплановані задачі",
+            "zh-CN": "计划任务",
+            "es": "Tareas programadas",
+            "pt-BR": "Tarefas agendadas",
+            "ko": "예약 작업",
+            "pl": "Zaplanowane zadania",
+            "fr": "Tâches planifiées",
+            "ja": "スケジュールタスク"
+          }
+        },
+        {
+          "label": "Project Actions",
+          "link": "/project-actions/",
+          "translations": {
+            "uk": "Дії проєкту",
+            "zh-CN": "项目操作",
+            "es": "Acciones del proyecto",
+            "pt-BR": "Ações do projeto",
+            "ko": "프로젝트 작업",
+            "pl": "Akcje projektu",
+            "fr": "Actions de projet",
+            "ja": "プロジェクトアクション"
+          }
+        },
+        {
+          "label": "Preview & Dev Servers",
+          "link": "/preview/",
+          "translations": {
+            "uk": "Перегляд і dev-сервери",
+            "zh-CN": "预览与开发服务器",
+            "es": "Vista previa y servidores de desarrollo",
+            "pt-BR": "Pré-visualização e servidores de desenvolvimento",
+            "ko": "미리보기 및 개발 서버",
+            "pl": "Podgląd i serwery deweloperskie",
+            "fr": "Aperçu et serveurs de dev",
+            "ja": "プレビューと開発サーバー"
+          }
+        },
+        {
+          "label": "Worktree Sessions",
+          "link": "/worktrees/",
+          "translations": {
+            "uk": "Сесії worktree",
+            "zh-CN": "Worktree 会话",
+            "es": "Sesiones de worktree",
+            "pt-BR": "Sessões de worktree",
+            "ko": "Worktree 세션",
+            "pl": "Sesje worktree",
+            "fr": "Sessions worktree",
+            "ja": "Worktree セッション"
+          }
+        },
+        {
+          "label": "Multi-run",
+          "link": "/multi-run/",
+          "translations": {
+            "fr": "Multi-run",
+            "ja": "Multi-run"
+          }
+        },
+        {
+          "label": "Git & GitHub",
+          "link": "/git/",
+          "translations": {
+            "fr": "Git et GitHub",
+            "ja": "Git と GitHub"
+          }
+        },
+        {
+          "label": "GitHub Issues & PRs",
+          "link": "/github/",
+          "translations": {
+            "uk": "Завдання та PR GitHub",
+            "zh-CN": "GitHub 工单与 PR",
+            "es": "Issues y PRs de GitHub",
+            "pt-BR": "Issues e PRs do GitHub",
+            "ko": "GitHub 이슈 및 PR",
+            "pl": "Zgłoszenia i PR-y GitHub",
+            "fr": "Issues et PR GitHub",
+            "ja": "GitHub Issues と PR"
+          }
+        },
+        {
+          "label": "Magic Prompts",
+          "link": "/magic-prompts/",
+          "translations": {
+            "uk": "Магічні підказки",
+            "zh-CN": "魔法提示词",
+            "es": "Prompts mágicos",
+            "pt-BR": "Prompts mágicos",
+            "ko": "매직 프롬프트",
+            "pl": "Magiczne prompty",
+            "fr": "Magic Prompts",
+            "ja": "マジックプロンプト"
+          }
+        },
+        {
+          "label": "Git Identities",
+          "link": "/git-identities/",
+          "translations": {
+            "uk": "Git-ідентичності",
+            "zh-CN": "Git 身份",
+            "es": "Identidades de Git",
+            "pt-BR": "Identidades do Git",
+            "ko": "Git 아이덴티티",
+            "pl": "Tożsamości Git",
+            "fr": "Identités Git",
+            "ja": "Git ID"
+          }
+        }
+      ]
+    },
+    {
+      "label": "OpenCode setup",
+      "translations": {
+        "uk": "Налаштування OpenCode",
+        "zh-CN": "OpenCode 设置",
+        "es": "Configuración de OpenCode",
+        "pt-BR": "Configuração do OpenCode",
+        "ko": "OpenCode 설정",
+        "pl": "Konfiguracja OpenCode",
+        "fr": "Configuration OpenCode",
+        "ja": "OpenCode 設定"
+      },
+      "items": [
+        {
+          "label": "Providers, Models & Agents",
+          "link": "/providers/",
+          "translations": {
+            "uk": "Провайдери, моделі та агенти",
+            "zh-CN": "提供商、模型与智能体",
+            "es": "Proveedores, modelos y agentes",
+            "pt-BR": "Provedores, modelos e agentes",
+            "ko": "공급자, 모델, 에이전트",
+            "pl": "Dostawcy, modele i agenci",
+            "fr": "Fournisseurs, modèles et agents",
+            "ja": "プロバイダー、モデル、エージェント"
+          }
+        },
+        {
+          "label": "MCP Servers",
+          "link": "/mcp/",
+          "translations": {
+            "uk": "Сервери MCP",
+            "zh-CN": "MCP 服务器",
+            "es": "Servidores MCP",
+            "pt-BR": "Servidores MCP",
+            "ko": "MCP 서버",
+            "pl": "Serwery MCP",
+            "fr": "Serveurs MCP",
+            "ja": "MCP サーバー"
+          }
+        },
+        {
+          "label": "Skills",
+          "link": "/skills/",
+          "translations": {
+            "uk": "Навички",
+            "zh-CN": "技能",
+            "es": "Habilidades",
+            "pt-BR": "Habilidades",
+            "ko": "스킬",
+            "pl": "Umiejętności",
+            "fr": "Skills",
+            "ja": "スキル"
+          }
+        },
+        {
+          "label": "Skills Catalog",
+          "link": "/skills-catalog/",
+          "translations": {
+            "uk": "Каталог навичок",
+            "zh-CN": "技能目录",
+            "es": "Catálogo de habilidades",
+            "pt-BR": "Catálogo de habilidades",
+            "ko": "스킬 카탈로그",
+            "pl": "Katalog umiejętności",
+            "fr": "Catalogue de skills",
+            "ja": "スキルカタログ"
+          }
+        },
+        {
+          "label": "Commands & Snippets",
+          "link": "/commands-snippets/",
+          "translations": {
+            "uk": "Команди та сніпети",
+            "zh-CN": "命令与代码片段",
+            "es": "Comandos y fragmentos",
+            "pt-BR": "Comandos e trechos",
+            "ko": "명령 및 스니펫",
+            "pl": "Polecenia i fragmenty",
+            "fr": "Commandes et snippets",
+            "ja": "コマンドとスニペット"
+          }
+        },
+        {
+          "label": "Usage & Quotas",
+          "link": "/usage/",
+          "translations": {
+            "uk": "Використання та квоти",
+            "zh-CN": "用量与配额",
+            "es": "Uso y cuotas",
+            "pt-BR": "Uso e cotas",
+            "ko": "사용량 및 할당량",
+            "pl": "Zużycie i limity",
+            "fr": "Utilisation et quotas",
+            "ja": "使用量とクォータ"
+          }
+        }
+      ]
+    },
+    {
+      "label": "Remote access",
+      "translations": {
+        "uk": "Віддалений доступ",
+        "zh-CN": "远程访问",
+        "es": "Acceso remoto",
+        "pt-BR": "Acesso remoto",
+        "ko": "원격 접속",
+        "pl": "Dostęp zdalny",
+        "fr": "Accès distant",
+        "ja": "リモートアクセス"
+      },
+      "items": [
+        {
+          "label": "Tunnels",
+          "link": "/tunnels/",
+          "translations": {
+            "uk": "Тунелі",
+            "zh-CN": "隧道",
+            "es": "Túneles",
+            "pt-BR": "Túneis",
+            "ko": "터널",
+            "pl": "Tunele",
+            "fr": "Tunnels",
+            "ja": "トンネル"
+          }
+        },
+        {
+          "label": "Reverse Proxy",
+          "link": "/reverse-proxy/",
+          "translations": {
+            "uk": "Зворотний проксі",
+            "zh-CN": "反向代理",
+            "es": "Proxy inverso",
+            "pt-BR": "Proxy reverso",
+            "ko": "리버스 프록시",
+            "pl": "Reverse proxy",
+            "fr": "Reverse proxy",
+            "ja": "リバースプロキシ"
+          }
+        },
+        {
+          "label": "PWA & Mobile",
+          "link": "/mobile/",
+          "translations": {
+            "uk": "PWA та мобільний доступ",
+            "zh-CN": "PWA 与移动端",
+            "es": "PWA y móvil",
+            "pt-BR": "PWA e celular",
+            "ko": "PWA 및 모바일",
+            "pl": "PWA i urządzenia mobilne",
+            "fr": "PWA et mobile",
+            "ja": "PWA とモバイル"
+          }
+        },
+        {
+          "label": "Security",
+          "link": "/security/",
+          "translations": {
+            "uk": "Безпека",
+            "zh-CN": "安全",
+            "es": "Seguridad",
+            "pt-BR": "Segurança",
+            "ko": "보안",
+            "pl": "Bezpieczeństwo",
+            "fr": "Sécurité",
+            "ja": "セキュリティ"
+          }
+        }
       ]
     },
     {
       "label": "Customize",
+      "translations": {
+        "uk": "Налаштування",
+        "zh-CN": "自定义",
+        "es": "Personalizar",
+        "pt-BR": "Personalizar",
+        "ko": "맞춤 설정",
+        "pl": "Dostosuj",
+        "fr": "Personnaliser",
+        "ja": "カスタマイズ"
+      },
       "items": [
-        { "label": "Themes", "link": "/themes/" }
+        {
+          "label": "Themes",
+          "link": "/themes/",
+          "translations": {
+            "uk": "Теми",
+            "zh-CN": "主题",
+            "es": "Temas",
+            "pt-BR": "Temas",
+            "ko": "테마",
+            "pl": "Motywy",
+            "fr": "Thèmes",
+            "ja": "テーマ"
+          }
+        },
+        {
+          "label": "Notifications",
+          "link": "/notifications/",
+          "translations": {
+            "uk": "Сповіщення",
+            "zh-CN": "通知",
+            "es": "Notificaciones",
+            "pt-BR": "Notificações",
+            "ko": "알림",
+            "pl": "Powiadomienia",
+            "fr": "Notifications",
+            "ja": "通知"
+          }
+        },
+        {
+          "label": "Voice Mode",
+          "link": "/voice/",
+          "translations": {
+            "uk": "Голосовий режим",
+            "zh-CN": "语音模式",
+            "es": "Modo de voz",
+            "pt-BR": "Modo de voz",
+            "ko": "음성 모드",
+            "pl": "Tryb głosowy",
+            "fr": "Mode vocal",
+            "ja": "音声モード"
+          }
+        },
+        {
+          "label": "Project Icons",
+          "link": "/project-icons/",
+          "translations": {
+            "uk": "Іконки проєктів",
+            "zh-CN": "项目图标",
+            "es": "Iconos de proyecto",
+            "pt-BR": "Ícones de projeto",
+            "ko": "프로젝트 아이콘",
+            "pl": "Ikony projektów",
+            "fr": "Icônes de projet",
+            "ja": "プロジェクトアイコン"
+          }
+        }
+      ]
+    },
+    {
+      "label": "Desktop",
+      "translations": {
+        "uk": "Десктоп",
+        "zh-CN": "桌面端",
+        "es": "Escritorio",
+        "pt-BR": "Desktop",
+        "ko": "데스크톱",
+        "pl": "Pulpit",
+        "fr": "Desktop",
+        "ja": "デスクトップ"
+      },
+      "items": [
+        {
+          "label": "Remote Instances",
+          "link": "/remote-instances/",
+          "translations": {
+            "uk": "Віддалені інстанси",
+            "zh-CN": "远程实例",
+            "es": "Instancias remotas",
+            "pt-BR": "Instâncias remotas",
+            "ko": "원격 인스턴스",
+            "pl": "Zdalne instancje",
+            "fr": "Instances distantes",
+            "ja": "リモートインスタンス"
+          }
+        },
+        {
+          "label": "Desktop Browser",
+          "link": "/desktop-browser/",
+          "translations": {
+            "uk": "Десктопний браузер",
+            "zh-CN": "桌面浏览器",
+            "es": "Navegador de escritorio",
+            "pt-BR": "Navegador desktop",
+            "ko": "데스크톱 브라우저",
+            "pl": "Przeglądarka na pulpicie",
+            "fr": "Navigateur desktop",
+            "ja": "デスクトップブラウザ"
+          }
+        },
+        {
+          "label": "Desktop Tunnels",
+          "link": "/desktop-tunnels/",
+          "translations": {
+            "uk": "Десктопні тунелі",
+            "zh-CN": "桌面端隧道",
+            "es": "Túneles de escritorio",
+            "pt-BR": "Túneis no desktop",
+            "ko": "데스크톱 터널",
+            "pl": "Tunele w aplikacji desktopowej",
+            "fr": "Tunnels desktop",
+            "ja": "デスクトップトンネル"
+          }
+        },
+        {
+          "label": "SSH Hosts & Proxying",
+          "link": "/ssh-hosts-proxying/",
+          "translations": {
+            "uk": "SSH-хости та проксі",
+            "zh-CN": "SSH 主机与代理",
+            "es": "Hosts SSH y proxy",
+            "pt-BR": "Hosts SSH e proxy",
+            "ko": "SSH 호스트 및 프록시",
+            "pl": "Hosty SSH i proxy",
+            "fr": "Hosts SSH et proxy",
+            "ja": "SSH ホストとプロキシ"
+          }
+        },
+        {
+          "label": "Updates",
+          "link": "/updates/",
+          "translations": {
+            "uk": "Оновлення",
+            "zh-CN": "更新",
+            "es": "Actualizaciones",
+            "pt-BR": "Atualizações",
+            "ko": "업데이트",
+            "pl": "Aktualizacje",
+            "fr": "Mises à jour",
+            "ja": "更新"
+          }
+        }
       ]
     },
     {
       "label": "Help",
+      "translations": {
+        "uk": "Допомога",
+        "zh-CN": "帮助",
+        "es": "Ayuda",
+        "pt-BR": "Ajuda",
+        "ko": "도움말",
+        "pl": "Pomoc",
+        "fr": "Aide",
+        "ja": "ヘルプ"
+      },
       "items": [
-        { "label": "Reverse Proxy", "link": "/reverse-proxy/" },
-        { "label": "Troubleshooting", "link": "/troubleshooting/" }
+        {
+          "label": "Troubleshooting",
+          "link": "/troubleshooting/",
+          "translations": {
+            "uk": "Усунення несправностей",
+            "zh-CN": "问题排查",
+            "es": "Resolución de problemas",
+            "pt-BR": "Solução de problemas",
+            "ko": "문제 해결",
+            "pl": "Rozwiązywanie problemów",
+            "fr": "Dépannage",
+            "ja": "トラブルシューティング"
+          }
+        },
+        {
+          "label": "OpenCode Connection",
+          "link": "/troubleshooting/opencode-connection/",
+          "translations": {
+            "uk": "Підключення до OpenCode",
+            "zh-CN": "OpenCode 连接",
+            "es": "Conexión con OpenCode",
+            "pt-BR": "Conexão com o OpenCode",
+            "ko": "OpenCode 연결",
+            "pl": "Połączenie z OpenCode",
+            "fr": "Connexion à OpenCode",
+            "ja": "OpenCode 接続"
+          }
+        },
+        {
+          "label": "Worktrees & Git",
+          "link": "/troubleshooting/worktrees-git/",
+          "translations": {
+            "uk": "Worktree та Git",
+            "zh-CN": "Worktree 与 Git",
+            "es": "Worktrees y Git",
+            "pt-BR": "Worktrees e Git",
+            "ko": "Worktree 및 Git",
+            "pl": "Worktree i Git",
+            "fr": "Worktrees et Git",
+            "ja": "Worktrees と Git"
+          }
+        },
+        {
+          "label": "Remote Access",
+          "link": "/troubleshooting/remote-access/",
+          "translations": {
+            "uk": "Віддалений доступ",
+            "zh-CN": "远程访问",
+            "es": "Acceso remoto",
+            "pt-BR": "Acesso remoto",
+            "ko": "원격 접속",
+            "pl": "Dostęp zdalny",
+            "fr": "Accès distant",
+            "ja": "リモートアクセス"
+          }
+        }
       ]
     }
   ]

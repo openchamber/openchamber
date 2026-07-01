@@ -1,0 +1,42 @@
+---
+title: リモートインスタンス
+description: デスクトップアプリを SSH 経由で別マシン上の OpenChamber に接続します。
+---
+
+# リモートインスタンス
+
+デスクトップアプリは、作業サーバー、クラウドマシン、ホームラボなど、別マシン上で動く OpenChamber に SSH 経由で接続し、その UI をローカルのように画面へ表示できます。**Settings → Remote Instances** で設定します。
+
+> リモートインスタンスは**デスクトップ専用**機能です。Web または VS Code では、代わりに [OpenCode サーバー](/opencode-server/) の環境変数を使ってリモートサーバーに接続します。
+
+## リモートインスタンスを追加する
+
+1. **Settings → Remote Instances** を開き、追加します。
+2. そのマシンに接続するために普段使う SSH コマンドと、ニックネームを入力します。
+3. そこで OpenChamber をどう実行するか選びます。
+   - **managed** — OpenChamber がリモートマシンに自分自身をインストールして起動します
+   - **external** — すでに実行中の OpenChamber に接続します
+4. 接続します。
+
+OpenChamber は接続確認、リモートのセットアップ、サーバー起動、ポート転送の各ステップを進め、現在の段階を表示します。**ready** に到達すると、リモート UI がローカルに読み込まれます。
+
+## 認証情報
+
+SSH と UI のパスワードを保存するか、毎回入力するかを選べます。接続が落ちた場合、OpenChamber はどのステップで失敗したかを表示するため、修正できます。[リモートアクセス](/troubleshooting/remote-access/) を参照してください。
+
+## 直接接続リンク
+
+リモートマシンですでに OpenChamber が実行されている場合は、そこで接続リンクを作成し、**Settings → Remote Instances → Server links** でインポートします。
+
+```bash
+openchamber connect-url --port 3000 --server http://your-host:3000 --qr
+```
+
+`connect-url` は、そのポートで何も実行されていなければ先にサーバーを起動します。ヘッドレスサーバーには `--api-only`、起動時に LAN にバインドするには `--lan`、ブラウザアクセスを保護するには `--ui-password`、保存接続にラベルを付けるには `--name` を追加します。
+
+生成されたリンクには OpenChamber アプリ用のクライアントトークンが含まれます。このトークンはブラウザ UI パスワードとは別で、取り消すか削除するまでサーバー再起動後も残ります。
+
+## 関連
+
+- [OpenCode サーバー](/opencode-server/) — Web または VS Code でリモートサーバーに接続する
+- [リモートアクセス](/troubleshooting/remote-access/) — 接続が完了しない場合

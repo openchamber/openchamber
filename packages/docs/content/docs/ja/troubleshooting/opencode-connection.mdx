@@ -1,0 +1,34 @@
+---
+title: OpenCode 接続
+description: OpenChamber が OpenCode サーバーへ接続できない問題を修正します。
+---
+
+# OpenCode 接続
+
+OpenChamber は読み込まれるのに "OpenCode is restarting" から進まない、またはチャットが応答しない場合、接続先サーバーに到達できていません。次を順に確認してください。
+
+## "OpenCode is restarting" のまま止まっている
+
+- 起動直後は少し待ってください。サーバー起動中はこの状態が正常です
+- `openchamber status` でサーバーが生きているか確認します
+- `openchamber restart` で再起動します
+- `openchamber logs` で起動詳細を確認します
+
+## 自分のサーバーへ接続している
+
+既存サーバーを使うよう OpenChamber を設定した場合は、[OpenCode サーバー](/opencode-server/) の設定を再確認してください。
+
+- `OPENCODE_HOST` はポートを含み、パスを含まない必要があります。例: `http://localhost:4096`
+- `OPENCODE_SKIP_START=true` を設定し、OpenChamber が自分のサーバーも起動しないようにします
+- アドレスが無効な場合、OpenChamber はそれを無視して自分のサーバーを起動します。ログの `[config]` 警告を探してください
+
+## まだ失敗する場合
+
+- Node.js がバージョン `20` 以上であることを確認します
+- 最新の CLI を再インストールします
+- トンネルやリモートリンクを試す前に、`http://localhost:3000` を直接開きます
+
+## 関連
+
+- [OpenCode サーバー](/opencode-server/) — OpenChamber がサーバーを見つけて管理する方法
+- [トラブルシューティング](/troubleshooting/) — その他のよくある問題

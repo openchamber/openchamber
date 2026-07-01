@@ -90,6 +90,56 @@ function shouldPreserveExistingPart(previous: Part, next: Part): boolean {
   return false
 }
 
+function areSessionStatusesEqual(left: SessionStatus | undefined, right: SessionStatus): boolean {
+  if (left === right) return true
+  if (!left || left.type !== right.type) return false
+  if (left.type === "retry") {
+    return right.type === "retry"
+      && left.attempt === right.attempt
+      && left.message === right.message
+      && left.next === right.next
+  }
+  return true
+}
+
+function areJsonEquivalent(left: unknown, right: unknown): boolean {
+  if (left === right) return true
+  if (left === undefined || right === undefined) return left === right
+  try {
+    return JSON.stringify(left) === JSON.stringify(right)
+  } catch {
+    return false
+  }
+}
+
+function areMessageUpdateFieldsEqual(existing: Message, next: Message): boolean {
+  if (existing.role !== next.role) return false
+  if ((existing as { finish?: unknown }).finish !== (next as { finish?: unknown }).finish) return false
+  if ((existing.time as { completed?: number })?.completed !== (next.time as { completed?: number })?.completed) return false
+
+  const fields: Array<keyof Message | "structured" | "summary" | "tokens" | "error" | "cost" | "model" | "tools" | "format" | "variant" | "agent" | "system"> = [
+    "summary",
+    "error",
+    "cost",
+    "tokens",
+    "structured",
+    "model",
+    "tools",
+    "format",
+    "variant",
+    "agent",
+    "system",
+  ]
+
+  for (const field of fields) {
+    if (!areJsonEquivalent((existing as Record<string, unknown>)[field], (next as Record<string, unknown>)[field])) {
+      return false
+    }
+  }
+
+  return true
+}
+
 // ---------------------------------------------------------------------------
 // Global events
 // ---------------------------------------------------------------------------
@@ -100,6 +150,36 @@ export type GlobalEventResult = {
   type: "project"
   project: Project
 } | null
+
+export type SessionMaterializationReason =
+  | "missing-owning-message"
+  | "orphan-delta"
+  | "missing-delta-part"
+  | "empty-assistant-message"
+  | "child-session-idle"
+  | "child-session-discovered"
+  | "ensure-session-messages"
+  | "stream-reconnect"
+  | "transport-switch"
+  | "stale-status-resync"
+
+export type DirectoryEventResult = boolean | {
+  changed: boolean
+  materialization: {
+    type: "incomplete-session-snapshot"
+    reason: SessionMaterializationReason
+    sessionID?: string
+    messageID: string
+    partID?: string
+  }
+}
+
+function hasMessage(draft: State, sessionID: string | undefined, messageID: string): boolean {
+  if (!sessionID) return false
+  const messages = draft.message[sessionID]
+  if (!messages) return false
+  return Binary.search(messages, messageID, (message) => message.id).found
+}
 
 export function reduceGlobalEvent(event: Event): GlobalEventResult {
   if (event.type === "global.disposed" || event.type === "server.connected") {
@@ -135,7 +215,7 @@ export function applyDirectoryEvent(
     onLoadLsp?: () => void
     onSetSessionTodo?: (sessionID: string, todos: Todo[] | undefined) => void
   },
-): boolean {
+): DirectoryEventResult {
   switch (event.type) {
     case "server.instance.disposed": {
       callbacks?.onRefresh?.("")
@@ -202,19 +282,30 @@ export function applyDirectoryEvent(
 
     case "session.status": {
       const props = event.properties as { sessionID: string; status: SessionStatus }
+      if (areSessionStatusesEqual(draft.session_status[props.sessionID], props.status)) {
+        return false
+      }
       draft.session_status[props.sessionID] = props.status
       return true
     }
 
     case "session.idle": {
       const props = event.properties as { sessionID: string }
-      draft.session_status[props.sessionID] = { type: "idle" }
+      const status = { type: "idle" } as const
+      if (areSessionStatusesEqual(draft.session_status[props.sessionID], status)) {
+        return false
+      }
+      draft.session_status[props.sessionID] = status
       return true
     }
 
     case "session.error": {
       const props = event.properties as { sessionID: string }
-      draft.session_status[props.sessionID] = { type: "idle" }
+      const status = { type: "idle" } as const
+      if (areSessionStatusesEqual(draft.session_status[props.sessionID], status)) {
+        return false
+      }
+      draft.session_status[props.sessionID] = status
       return true
     }
 
@@ -229,9 +320,7 @@ export function applyDirectoryEvent(
       if (result.found) {
         // Skip message replacement if unchanged — preserves reference, avoids re-render
         const existing = messages[result.index]
-        const unchanged = existing.role === info.role
-          && (existing as { finish?: unknown }).finish === (info as { finish?: unknown }).finish
-          && (existing.time as { completed?: number })?.completed === (info.time as { completed?: number })?.completed
+        const unchanged = areMessageUpdateFieldsEqual(existing, info)
         if (unchanged) {
           syncDebug.reducer.messageUpdatedUnchanged(info.sessionID, info.id, info.role, (info as { finish?: unknown }).finish, (info.time as { completed?: number })?.completed)
           return false
@@ -263,17 +352,26 @@ export function applyDirectoryEvent(
     }
 
     case "message.part.updated": {
-      const part = (event.properties as { part: Part }).part
+      const props = event.properties as { sessionID?: string; part: Part }
+      const part = props.part
       if (SKIP_PARTS.has(part.type)) {
         syncDebug.reducer.partSkipped((part as { messageID: string }).messageID, part.id, part.type)
         return false
       }
-      const messageID = (part as { messageID: string }).messageID
+      const messageID = (part as { messageID?: string }).messageID
+      const sessionID = props.sessionID ?? (part as { sessionID?: string }).sessionID
+      if (!messageID) return false
+      const missingOwningMessage = !hasMessage(draft, sessionID, messageID)
       const parts = draft.part[messageID]
       if (!parts) {
         syncDebug.reducer.partUpdatedNoExistingParts(messageID, part.id, part.type)
         draft.part[messageID] = [part]
-        return true
+        return missingOwningMessage
+          ? {
+            changed: true,
+            materialization: { type: "incomplete-session-snapshot", reason: "missing-owning-message", sessionID, messageID, partID: part.id },
+          }
+          : true
       }
       const next = [...parts]
       const result = Binary.search(next, part.id, (p) => p.id)
@@ -302,7 +400,12 @@ export function applyDirectoryEvent(
         next.splice(insertResult.index, 0, part)
       }
       draft.part[messageID] = next
-      return true
+      return missingOwningMessage
+        ? {
+          changed: true,
+          materialization: { type: "incomplete-session-snapshot", reason: "missing-owning-message", sessionID, messageID, partID: part.id },
+        }
+        : true
     }
 
     case "message.part.removed": {
@@ -325,6 +428,7 @@ export function applyDirectoryEvent(
 
     case "message.part.delta": {
       const props = event.properties as {
+        sessionID?: string
         messageID: string
         partID: string
         field: string
@@ -333,12 +437,18 @@ export function applyDirectoryEvent(
       const parts = draft.part[props.messageID]
       if (!parts) {
         syncDebug.reducer.partDeltaNoParts(props.messageID, props.partID)
-        return false
+        return {
+          changed: false,
+          materialization: { type: "incomplete-session-snapshot", reason: "orphan-delta", sessionID: props.sessionID, messageID: props.messageID, partID: props.partID },
+        }
       }
       const result = Binary.search(parts, props.partID, (p) => p.id)
       if (!result.found) {
         syncDebug.reducer.partDeltaNotFound(props.messageID, props.partID)
-        return false
+        return {
+          changed: false,
+          materialization: { type: "incomplete-session-snapshot", reason: "missing-delta-part", sessionID: props.sessionID, messageID: props.messageID, partID: props.partID },
+        }
       }
       const existing = parts[result.index] as Record<string, unknown>
       const existingValue = existing[props.field] as string | undefined
@@ -365,13 +475,14 @@ export function applyDirectoryEvent(
     case "permission.asked": {
       const permission = event.properties as PermissionRequest
       const permissions = draft.permission[permission.sessionID] ?? []
-      draft.permission[permission.sessionID] = permissions
-      const result = Binary.search(permissions, permission.id, (p) => p.id)
+      const next = [...permissions]
+      const result = Binary.search(next, permission.id, (p) => p.id)
       if (result.found) {
-        permissions[result.index] = permission
+        next[result.index] = permission
       } else {
-        permissions.splice(result.index, 0, permission)
+        next.splice(result.index, 0, permission)
       }
+      draft.permission[permission.sessionID] = next
       return true
     }
 
@@ -381,7 +492,9 @@ export function applyDirectoryEvent(
       if (!permissions) return false
       const result = Binary.search(permissions, props.requestID, (p) => p.id)
       if (result.found) {
-        permissions.splice(result.index, 1)
+        const next = [...permissions]
+        next.splice(result.index, 1)
+        draft.permission[props.sessionID] = next
         return true
       }
       return false
@@ -390,13 +503,14 @@ export function applyDirectoryEvent(
     case "question.asked": {
       const question = event.properties as QuestionRequest
       const questions = draft.question[question.sessionID] ?? []
-      draft.question[question.sessionID] = questions
-      const result = Binary.search(questions, question.id, (q) => q.id)
+      const next = [...questions]
+      const result = Binary.search(next, question.id, (q) => q.id)
       if (result.found) {
-        questions[result.index] = question
+        next[result.index] = question
       } else {
-        questions.splice(result.index, 0, question)
+        next.splice(result.index, 0, question)
       }
+      draft.question[question.sessionID] = next
       return true
     }
 
@@ -407,7 +521,9 @@ export function applyDirectoryEvent(
       if (!questions) return false
       const result = Binary.search(questions, props.requestID, (q) => q.id)
       if (result.found) {
-        questions.splice(result.index, 1)
+        const next = [...questions]
+        next.splice(result.index, 1)
+        draft.question[props.sessionID] = next
         return true
       }
       return false

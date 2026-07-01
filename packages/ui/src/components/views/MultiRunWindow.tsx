@@ -1,8 +1,8 @@
 import React from 'react';
 import { Dialog } from '@base-ui/react/dialog';
-import { RiCloseLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { MultiRunLauncher } from '@/components/multirun';
+import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 
 interface MultiRunWindowProps {
@@ -65,7 +65,7 @@ export const MultiRunWindow: React.FC<MultiRunWindowProps> = ({
                 aria-label={t('multiRun.window.actions.closeAria')}
                 className="inline-flex h-7 w-7 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
-                <RiCloseLine className="h-5 w-5" />
+                <Icon name="close" className="h-5 w-5" />
               </button>
             </div>
             <Dialog.Description id={descriptionId} className="sr-only">

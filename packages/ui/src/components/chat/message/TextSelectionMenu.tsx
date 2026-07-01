@@ -5,14 +5,13 @@ import { useSessions } from '@/sync/sync-context';
 import { useInputStore } from '@/sync/input-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { RiBookletLine, RiChatNewLine, RiAddLine, RiFileCopyLine, RiLoader4Line } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { toast } from '@/components/ui';
-import { getProjectNotesAndTodos, saveProjectNotesAndTodos } from '@/lib/openchamberConfig';
+import { Icon } from "@/components/icon/Icon";
+import { OPENCHAMBER_PROJECT_NOTES_MAX_LENGTH, getProjectNotesAndTodos, saveProjectNotesAndTodos } from '@/lib/openchamberConfig';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
-import { summarizeText } from '@/lib/voice/summarize';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 
@@ -32,9 +31,8 @@ interface SelectionPayload {
   rect: DOMRect;
 }
 
-
 const appendDistilledInsightToNotes = (existingNotes: string, insight: string): string => {
-  const trimmedInsight = insight.trim().replace(/^[-*+]\s+/, '');
+  const trimmedInsight = insight.trim().replace(/^[-*+]\s+/, '').slice(0, OPENCHAMBER_PROJECT_NOTES_MAX_LENGTH);
   if (!trimmedInsight) {
     return existingNotes;
   }
@@ -218,6 +216,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
   const menuWidthRef = React.useRef(DESKTOP_MENU_FALLBACK_WIDTH_PX);
   const pendingSelectionRef = React.useRef<SelectionPayload | null>(null);
   const openRafRef = React.useRef<number | null>(null);
+  const mouseUpTimeoutRef = React.useRef<number | null>(null);
   const isMenuVisibleRef = React.useRef(false);
   const createSession = useSessionUIStore((state) => state.createSession);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
@@ -237,6 +236,10 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
       if (openRafRef.current !== null) {
         window.cancelAnimationFrame(openRafRef.current);
         openRafRef.current = null;
+      }
+      if (mouseUpTimeoutRef.current !== null) {
+        window.clearTimeout(mouseUpTimeoutRef.current);
+        mouseUpTimeoutRef.current = null;
       }
     };
   }, []);
@@ -408,8 +411,12 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
       isDraggingRef.current = false;
       // Check if we have a pending selection to show
       if (pendingSelectionRef.current) {
+        if (mouseUpTimeoutRef.current !== null) {
+          window.clearTimeout(mouseUpTimeoutRef.current);
+        }
         // Small delay to ensure selection is finalized
-        setTimeout(() => {
+        mouseUpTimeoutRef.current = window.setTimeout(() => {
+          mouseUpTimeoutRef.current = null;
           const selection = window.getSelection();
           if (selection && selection.toString().trim()) {
             showMenu();
@@ -440,6 +447,10 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     document.addEventListener('mousedown', handleClickOutside);
 
     return () => {
+      if (mouseUpTimeoutRef.current !== null) {
+        window.clearTimeout(mouseUpTimeoutRef.current);
+        mouseUpTimeoutRef.current = null;
+      }
       document.removeEventListener('selectionchange', handleSelectionChange);
       container.removeEventListener('mousedown', handleMouseDown);
       document.removeEventListener('mouseup', handleMouseUp);
@@ -507,18 +518,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
 
     try {
       setIsAddingToNotes(true);
-      let noteText = selectedText;
-      let usedSummaryFallback = false;
-      try {
-        noteText = await summarizeText(selectedText, {
-          threshold: 0,
-          maxLength: 100,
-          mode: 'note',
-        });
-      } catch (summaryError) {
-        usedSummaryFallback = true;
-        console.warn('[AddToNotes] Summary failed, saving selected text:', summaryError);
-      }
+      const noteText = selectedTextMarkdown || selectedText;
       const projectData = await getProjectNotesAndTodos(currentProjectRef);
       const nextNotes = appendDistilledInsightToNotes(projectData.notes, noteText);
       const saved = await saveProjectNotesAndTodos(currentProjectRef, {
@@ -532,11 +532,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
       window.dispatchEvent(new CustomEvent('openchamber:project-notes-updated', {
         detail: { projectId: currentProjectRef.id },
       }));
-      if (usedSummaryFallback) {
-        toast.warning(t('chat.textSelection.toast.addToNotesSummaryFailed'));
-      } else {
-        toast.success(t('chat.textSelection.toast.addToNotesSuccess'));
-      }
+      toast.success(t('chat.textSelection.toast.addToNotesSuccess'));
       hideMenu();
       window.getSelection()?.removeAllRanges();
     } catch (error) {
@@ -545,7 +541,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     } finally {
       setIsAddingToNotes(false);
     }
-  }, [currentProjectRef, hideMenu, selectedText, t]);
+  }, [currentProjectRef, hideMenu, selectedText, selectedTextMarkdown, t]);
 
   if (!position.show) return null;
 
@@ -579,7 +575,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
             title={t('chat.textSelection.title.addToCurrentChat')}
             type="button"
           >
-            <RiAddLine className="h-5 w-5 flex-shrink-0" />
+            <Icon name="add" className="h-5 w-5 flex-shrink-0" />
             <span className="min-w-0 whitespace-normal">{t('chat.textSelection.actions.addToChat')}</span>
           </button>
 
@@ -595,7 +591,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
             title={t('chat.textSelection.title.newSessionWithSelection')}
             type="button"
           >
-            <RiChatNewLine className="h-5 w-5 flex-shrink-0" />
+            <Icon name="chat-new" className="h-5 w-5 flex-shrink-0" />
             <span className="min-w-0 whitespace-normal">{t('chat.textSelection.actions.newSession')}</span>
           </button>
 
@@ -611,7 +607,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
             title={t('chat.textSelection.actions.copy')}
             type="button"
           >
-            <RiFileCopyLine className="h-5 w-5 flex-shrink-0" />
+            <Icon name="file-copy" className="h-5 w-5 flex-shrink-0" />
             <span className="min-w-0 whitespace-normal">{t('chat.textSelection.actions.copy')}</span>
           </button>
 
@@ -629,7 +625,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
               title={t('chat.textSelection.title.saveInsightToNotes')}
               type="button"
             >
-              {isAddingToNotes ? <RiLoader4Line className="h-5 w-5 flex-shrink-0 animate-spin" /> : <RiBookletLine className="h-5 w-5 flex-shrink-0" />}
+              {isAddingToNotes ? <Icon name="loader-4" className="h-5 w-5 flex-shrink-0 animate-spin" /> : <Icon name="booklet" className="h-5 w-5 flex-shrink-0" />}
               <span className="min-w-0 whitespace-normal">{t('chat.textSelection.actions.addToNotes')}</span>
             </button>
           ) : null}
@@ -672,7 +668,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
           title={t('chat.textSelection.title.addToCurrentChat')}
           type="button"
         >
-          <RiAddLine className="h-4 w-4" />
+          <Icon name="add" className="h-4 w-4" />
           <span className="whitespace-nowrap">{t('chat.textSelection.actions.addToChat')}</span>
         </button>
       
@@ -690,7 +686,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
           title={t('chat.textSelection.title.newSessionWithSelection')}
           type="button"
         >
-          <RiChatNewLine className="h-4 w-4" />
+          <Icon name="chat-new" className="h-4 w-4" />
           <span className="whitespace-nowrap">{t('chat.textSelection.actions.newSession')}</span>
         </button>
 
@@ -711,7 +707,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
               title={t('chat.textSelection.title.saveInsightToNotes')}
               type="button"
             >
-              {isAddingToNotes ? <RiLoader4Line className="h-4 w-4 animate-spin" /> : <RiBookletLine className="h-4 w-4" />}
+              {isAddingToNotes ? <Icon name="loader-4" className="h-4 w-4 animate-spin" /> : <Icon name="booklet" className="h-4 w-4" />}
               <span className="whitespace-nowrap">{t('chat.textSelection.actions.addToNotes')}</span>
             </button>
           </>
@@ -721,5 +717,3 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     document.body
   );
 };
-
-export default TextSelectionMenu;

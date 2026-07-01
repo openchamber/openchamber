@@ -1,5 +1,10 @@
 const DEFAULT_TARGET_TTL_MS = 30 * 60 * 1000;
 const TOKEN_COOKIE_NAME = 'oc_preview_token';
+const TOKEN_QUERY_PARAM = 'oc_preview_token';
+const CLIENT_TOKEN_QUERY_PARAM = 'oc_client_token';
+const URL_AUTH_TOKEN_QUERY_PARAM = 'oc_url_token';
+const PREVIEW_PASSTHROUGH_REQUEST_HEADERS = ['x-inertia', 'x-inertia-version'];
+const PREVIEW_PASSTHROUGH_RESPONSE_HEADERS = ['x-inertia', 'x-inertia-location'];
 
 const LOOPBACK_HOSTS = new Set([
   'localhost',
@@ -11,6 +16,184 @@ const LOOPBACK_HOSTS = new Set([
 
 const PREVIEW_BRIDGE_SCRIPT_ID = 'openchamber-preview-bridge';
 
+const parsePreviewResourcePath = (url) => {
+  try {
+    const parsed = new URL(String(url || ''), 'http://localhost');
+    const match = parsed.pathname.match(/^\/api\/preview\/proxy\/[a-f0-9]{16,64}(\/.*)?$/i);
+    const path = match ? (match[1] || '/') : parsed.pathname;
+    return path + parsed.search;
+  } catch {
+    return String(url || '');
+  }
+};
+
+const readHeader = (headers, name) => {
+  if (!headers || typeof headers !== 'object') return undefined;
+  const direct = headers[name];
+  if (direct !== undefined) return direct;
+  const lowerName = name.toLowerCase();
+  const key = Object.keys(headers).find((entry) => entry.toLowerCase() === lowerName);
+  return key ? headers[key] : undefined;
+};
+
+export const applyPreviewPassthroughRequestHeaders = (req, proxyReq) => {
+  for (const headerName of PREVIEW_PASSTHROUGH_REQUEST_HEADERS) {
+    const value = readHeader(req?.headers, headerName);
+    if (value !== undefined) {
+      proxyReq.setHeader(headerName, value);
+    }
+  }
+};
+
+export const applyPreviewPassthroughResponseHeaders = (proxyRes, res) => {
+  if (!res || res.headersSent || typeof res.setHeader !== 'function') return;
+  for (const headerName of PREVIEW_PASSTHROUGH_RESPONSE_HEADERS) {
+    const value = readHeader(proxyRes?.headers, headerName);
+    if (value !== undefined) {
+      res.setHeader(headerName, value);
+    }
+  }
+};
+
+const previewResourceNoiseRuleSets = [
+  {
+    name: 'vite',
+    suppress: ({ lower, path, tag }) => path === '/@vite/client'
+      || path === '/@react-refresh'
+      || path.startsWith('/@id/__x00__vite/')
+      || lower.includes('/node_modules/.vite/')
+      || lower.includes('/vite/dist/client/')
+      || (tag === 'script' && lower.includes('/@id/')),
+  },
+  {
+    name: 'astro',
+    suppress: ({ lower, path, tag }) => path.startsWith('/@id/astro:')
+      || lower.includes('/astro/dist/runtime/client/dev-toolbar/')
+      || (tag === 'script' && lower.includes('.astro?') && lower.includes('type=script'))
+      || (tag === 'script' && (
+        lower.endsWith('.css')
+        || lower.includes('.css?')
+        || lower.includes('type=style')
+        || lower.includes('lang.css')
+      )),
+  },
+  {
+    name: 'next',
+    suppress: ({ lower, path, tag }) => tag === 'script' && (
+      path === '/_next/webpack-hmr'
+      || lower.includes('/_next/static/webpack/')
+      || lower.includes('/_next/static/chunks/webpack')
+      || lower.includes('/_next/static/chunks/react-refresh')
+      || lower.includes('/_next/static/development/')
+    ),
+  },
+  {
+    name: 'sveltekit',
+    suppress: ({ lower, tag }) => tag === 'script' && (
+      lower.includes('/@id/__x00__virtual:')
+      || lower.includes('/@id/virtual:')
+      || lower.includes('/.svelte-kit/generated/')
+      || lower.includes('/node_modules/.vite/deps/')
+    ),
+  },
+  {
+    name: 'remix',
+    suppress: ({ lower, tag }) => tag === 'script' && (
+      lower.includes('/@remix-run/dev/')
+      || lower.includes('/__manifest')
+      || lower.includes('/__hmr')
+    ),
+  },
+  {
+    name: 'nuxt',
+    suppress: ({ lower, tag }) => tag === 'script' && (
+      lower.includes('/_nuxt/@vite/client')
+      || lower.includes('/_nuxt/@id/')
+      || lower.includes('/_nuxt/node_modules/.vite/')
+      || lower.includes('/__nuxt_error')
+      || lower.includes('/__nuxt_vite_node__')
+    ),
+  },
+  {
+    name: 'webpack',
+    suppress: ({ lower, path, tag }) => tag === 'script' && (
+      path === '/sockjs-node/info'
+      || lower.includes('/webpack-dev-server/')
+      || lower.includes('/webpack/hot/')
+      || lower.includes('/__webpack_hmr')
+      || lower.includes('/ws') && lower.includes('webpack')
+    ),
+  },
+];
+
+export const classifyPreviewResourceError = ({ tagName, url }) => {
+  const tag = typeof tagName === 'string' ? tagName.toLowerCase() : '';
+  if (tag !== 'script' && tag !== 'link') return 'report';
+
+  const pathAndSearch = parsePreviewResourcePath(url);
+  const lower = pathAndSearch.toLowerCase();
+  const path = pathAndSearch.split('?', 1)[0] || '';
+  const context = { tag, path, pathAndSearch, lower };
+
+  if (previewResourceNoiseRuleSets.some((ruleSet) => ruleSet.suppress(context))) return 'suppress';
+
+  return 'report';
+};
+
+export const classifyPreviewNavigation = ({ url, currentUrl, targetOrigin }) => {
+  let parsed;
+  try {
+    parsed = new URL(String(url || ''), currentUrl || 'http://localhost/');
+  } catch {
+    return { action: 'allow', url: String(url || '') };
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return { action: 'allow', url: parsed.toString() };
+  }
+
+  let current;
+  try {
+    current = new URL(currentUrl || 'http://localhost/');
+  } catch {
+    current = null;
+  }
+
+  if (current
+    && parsed.origin === current.origin
+    && parsed.pathname === current.pathname
+    && parsed.search === current.search
+    && parsed.hash
+  ) {
+    return { action: 'allow', url: parsed.toString() };
+  }
+
+  const path = parsed.pathname || '/';
+  const proxyMatch = current?.pathname?.match(/^(\/api\/preview\/proxy\/[a-f0-9]{16,64})(?:\/|$)/i);
+  if (parsed.origin === current?.origin && path.startsWith('/api/preview/proxy/')) {
+    return { action: 'allow', url: parsed.toString() };
+  }
+
+  if (proxyMatch && parsed.origin === current?.origin && path.startsWith('/') && !path.startsWith(proxyMatch[1])) {
+    try {
+      if (targetOrigin) {
+        const upstreamUrl = new URL(`${parsed.pathname}${parsed.search}${parsed.hash}`, targetOrigin);
+        return { action: 'proxy', url: upstreamUrl.toString() };
+      }
+    } catch {
+      // fall through to the default policy
+    }
+  }
+
+  const host = parsed.hostname;
+  const isLoopback = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1' || host === '[::1]';
+  if (isLoopback || (parsed.origin === current?.origin && path.startsWith('/'))) {
+    return { action: 'proxy', url: parsed.toString() };
+  }
+
+  return { action: 'external', url: parsed.toString() };
+};
+
 const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
   if (window.__openchamberPreviewBridgeInstalled) return;
   window.__openchamberPreviewBridgeInstalled = true;
@@ -19,15 +202,31 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
   const VERSION = 1;
   const MAX_TEXT = 500;
   const MAX_ARG = 1000;
+  const TARGET_ORIGIN = typeof window.__openchamberPreviewTargetOrigin === 'string' ? window.__openchamberPreviewTargetOrigin : '';
   let inspectMode = false;
   let lastHoverKey = '';
   let pendingHover = null;
+  let previewColorScheme = null;
+  let nativeMatchMedia = null;
+  const colorSchemeListeners = new Set();
+
+  const parentOrigin = (() => {
+    try {
+      const ancestorOrigins = window.location && window.location.ancestorOrigins;
+      const ancestorOrigin = ancestorOrigins && ancestorOrigins.length > 0 ? ancestorOrigins[0] : '';
+      if (ancestorOrigin && ancestorOrigin !== 'null') return ancestorOrigin;
+      const origin = document.referrer ? new URL(document.referrer).origin : '';
+      return origin && origin !== 'null' ? origin : '';
+    } catch {
+      return '';
+    }
+  })();
 
   const post = (payload) => {
     try {
-      if (window.parent && typeof window.parent.postMessage === 'function') {
+      if (parentOrigin && window.parent && typeof window.parent.postMessage === 'function') {
         const message = Object.assign({ source: SOURCE, version: VERSION }, payload || {});
-        window.parent.postMessage(message, window.location.origin);
+        window.parent.postMessage(message, parentOrigin);
       }
     } catch {}
   };
@@ -45,6 +244,94 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
     } catch {
       return clip(String(value), MAX_ARG);
     }
+  };
+
+  const normalizeColorScheme = (value) => value === 'dark' ? 'dark' : value === 'light' ? 'light' : null;
+
+  const mediaQueryColorScheme = (query) => {
+    const normalized = String(query || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    if (normalized === '(prefers-color-scheme: dark)') return 'dark';
+    if (normalized === '(prefers-color-scheme: light)') return 'light';
+    return null;
+  };
+
+  const mediaQueryMatchesPreviewScheme = (query) => {
+    const scheme = mediaQueryColorScheme(query);
+    if (!scheme || !previewColorScheme) return null;
+    return previewColorScheme === scheme;
+  };
+
+  const notifyColorSchemeListeners = () => {
+    for (const listener of Array.from(colorSchemeListeners)) {
+      try {
+        const matches = mediaQueryMatchesPreviewScheme(listener.media);
+        if (matches === null) continue;
+        const event = { matches, media: listener.media, type: 'change', target: listener.mql, currentTarget: listener.mql };
+        listener.callback.call(listener.mql, event);
+      } catch {}
+    }
+  };
+
+  const installColorSchemeMatchMediaPatch = () => {
+    if (window.__openchamberPreviewColorSchemePatched || typeof window.matchMedia !== 'function') return;
+    window.__openchamberPreviewColorSchemePatched = true;
+    nativeMatchMedia = window.matchMedia.bind(window);
+    window.matchMedia = function(query) {
+      const nativeMql = nativeMatchMedia(query);
+      if (!mediaQueryColorScheme(query)) return nativeMql;
+      const listenersForMql = new Map();
+      const mql = Object.create(nativeMql);
+      Object.defineProperty(mql, 'matches', { get: () => mediaQueryMatchesPreviewScheme(query) ?? nativeMql.matches });
+      Object.defineProperty(mql, 'media', { get: () => nativeMql.media });
+      mql.addEventListener = function(type, callback, options) {
+        if (type !== 'change' || typeof callback !== 'function') return nativeMql.addEventListener?.(type, callback, options);
+        const entry = { media: query, mql, callback };
+        listenersForMql.set(callback, entry);
+        colorSchemeListeners.add(entry);
+      };
+      mql.removeEventListener = function(type, callback, options) {
+        if (type !== 'change' || typeof callback !== 'function') return nativeMql.removeEventListener?.(type, callback, options);
+        const entry = listenersForMql.get(callback);
+        if (entry) colorSchemeListeners.delete(entry);
+        listenersForMql.delete(callback);
+      };
+      mql.addListener = function(callback) { mql.addEventListener('change', callback); };
+      mql.removeListener = function(callback) { mql.removeEventListener('change', callback); };
+      return mql;
+    };
+  };
+
+  const shouldSyncDataTheme = () => {
+    try {
+      const root = document.documentElement;
+      if (!root) return false;
+      if (root.hasAttribute('data-theme')) return true;
+      if (document.querySelector('starlight-theme-select, starlight-menu-button')) return true;
+      const generator = document.querySelector('meta[name="generator"]');
+      const generatorContent = generator && typeof generator.getAttribute === 'function' ? generator.getAttribute('content') || '' : '';
+      if (generatorContent.toLowerCase().indexOf('starlight') >= 0) return true;
+      const styles = window.getComputedStyle(root);
+      return Boolean(styles.getPropertyValue('--sl-color-bg').trim()
+        || styles.getPropertyValue('--sl-color-text').trim()
+        || styles.getPropertyValue('--sl-color-accent').trim());
+    } catch {
+      return false;
+    }
+  };
+
+  const applyPreviewColorScheme = (scheme) => {
+    const next = normalizeColorScheme(scheme);
+    if (!next || previewColorScheme === next) return;
+    previewColorScheme = next;
+    try {
+      const root = document.documentElement;
+      root.style.colorScheme = next;
+      root.dataset.openchamberPreviewColorScheme = next;
+      if (shouldSyncDataTheme()) {
+        root.dataset.theme = next;
+      }
+    } catch {}
+    notifyColorSchemeListeners();
   };
 
   const readElementUrl = (element) => {
@@ -76,41 +363,90 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
     const tag = element && element.tagName && typeof element.tagName.toLowerCase === 'function' ? element.tagName.toLowerCase() : '';
     if (tag !== 'script' && tag !== 'link') return false;
     if (tag === 'script' && typeof element.hasAttribute === 'function' && element.hasAttribute('data-cf-beacon')) return true;
-    const path = upstreamPathForUrl(value);
     const pathAndSearch = upstreamPathAndSearchForUrl(value);
-    return path === '/@vite/client'
+    const lower = pathAndSearch.toLowerCase();
+    const path = pathAndSearch.split('?', 1)[0] || '';
+
+    const viteNoise = path === '/@vite/client'
       || path === '/@react-refresh'
-      || path.indexOf('/@id/astro:') === 0
-      || path.startsWith('/@id/__x00__vite/')
-      || path.includes('/node_modules/.vite/')
-      || path.includes('/vite/dist/client/')
-      || path.includes('/astro/dist/runtime/client/dev-toolbar/')
-      || (pathAndSearch.indexOf('/node_modules/') >= 0 && pathAndSearch.indexOf('.astro?') >= 0 && pathAndSearch.indexOf('type=script') >= 0);
+      || path.indexOf('/@id/__x00__vite/') === 0
+      || lower.indexOf('/node_modules/.vite/') >= 0
+      || lower.indexOf('/vite/dist/client/') >= 0
+      || (tag === 'script' && lower.indexOf('/@id/') >= 0);
+    const astroNoise = path.indexOf('/@id/astro:') === 0
+      || lower.indexOf('/astro/dist/runtime/client/dev-toolbar/') >= 0
+      || (tag === 'script' && lower.indexOf('.astro?') >= 0 && lower.indexOf('type=script') >= 0)
+      || (tag === 'script' && (
+        lower.endsWith('.css')
+        || lower.indexOf('.css?') >= 0
+        || lower.indexOf('type=style') >= 0
+        || lower.indexOf('lang.css') >= 0
+      ));
+    const nextNoise = tag === 'script' && (
+      path === '/_next/webpack-hmr'
+      || lower.indexOf('/_next/static/webpack/') >= 0
+      || lower.indexOf('/_next/static/chunks/webpack') >= 0
+      || lower.indexOf('/_next/static/chunks/react-refresh') >= 0
+      || lower.indexOf('/_next/static/development/') >= 0
+    );
+    const svelteKitNoise = tag === 'script' && (
+      lower.indexOf('/@id/__x00__virtual:') >= 0
+      || lower.indexOf('/@id/virtual:') >= 0
+      || lower.indexOf('/.svelte-kit/generated/') >= 0
+      || lower.indexOf('/node_modules/.vite/deps/') >= 0
+    );
+    const remixNoise = tag === 'script' && (
+      lower.indexOf('/@remix-run/dev/') >= 0
+      || lower.indexOf('/__manifest') >= 0
+      || lower.indexOf('/__hmr') >= 0
+    );
+    const nuxtNoise = tag === 'script' && (
+      lower.indexOf('/_nuxt/@vite/client') >= 0
+      || lower.indexOf('/_nuxt/@id/') >= 0
+      || lower.indexOf('/_nuxt/node_modules/.vite/') >= 0
+      || lower.indexOf('/__nuxt_error') >= 0
+      || lower.indexOf('/__nuxt_vite_node__') >= 0
+    );
+    const webpackNoise = tag === 'script' && (
+      path === '/sockjs-node/info'
+      || lower.indexOf('/webpack-dev-server/') >= 0
+      || lower.indexOf('/webpack/hot/') >= 0
+      || lower.indexOf('/__webpack_hmr') >= 0
+      || (lower.indexOf('/ws') >= 0 && lower.indexOf('webpack') >= 0)
+    );
+
+    if (viteNoise || astroNoise || nextNoise || svelteKitNoise || remixNoise || nuxtNoise || webpackNoise) return true;
+    return false;
   };
 
-  const toLoopbackHttpUrl = (value) => {
+  installColorSchemeMatchMediaPatch();
+
+  const classifyNavigation = (value) => {
     try {
       const parsed = new URL(value, window.location.href);
-      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
-      const host = parsed.hostname;
-      if (host !== 'localhost' && host !== '127.0.0.1' && host !== '0.0.0.0' && host !== '::1' && host !== '[::1]') {
-        return null;
-      }
-      return parsed.toString();
-    } catch {
-      return null;
-    }
-  };
-
-  const shouldParentHandleNavigation = (url) => {
-    if (!url) return false;
-    try {
-      const parsed = new URL(url);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return { action: 'allow', url: parsed.toString() };
       const current = new URL(window.location.href);
-      if (parsed.origin !== current.origin) return true;
-      return !parsed.pathname.startsWith('/api/preview/proxy/');
+      const proxyMatch = current.pathname.match(/^(\/api\/preview\/proxy\/[a-f0-9]{16,64})(?:\/|$)/i);
+      if (parsed.origin === current.origin && parsed.pathname === current.pathname && parsed.search === current.search && parsed.hash) {
+        return { action: 'allow', url: parsed.toString() };
+      }
+      if (parsed.origin === current.origin && parsed.pathname.startsWith('/api/preview/proxy/')) {
+        return { action: 'allow', url: parsed.toString() };
+      }
+      if (proxyMatch && parsed.origin === current.origin && parsed.pathname.startsWith('/') && parsed.pathname.indexOf(proxyMatch[1]) !== 0 && TARGET_ORIGIN) {
+        try {
+          const upstreamUrl = new URL(parsed.pathname + parsed.search + parsed.hash, TARGET_ORIGIN);
+          return { action: 'proxy', url: upstreamUrl.toString() };
+        } catch {}
+      }
+      const host = parsed.hostname;
+      const isLoopback = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1' || host === '[::1]';
+      if (isLoopback || (parsed.origin === current.origin && parsed.pathname.startsWith('/'))) {
+        return { action: 'proxy', url: parsed.toString() };
+      }
+      return { action: 'external', url: parsed.toString() };
     } catch {
-      return false;
+      return { action: 'allow', url: String(value || '') };
     }
   };
 
@@ -144,6 +480,9 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
     const proxyMatch = window.location.pathname.match(/^(\/api\/preview\/proxy\/[a-f0-9]{16,64})(?:\/|$)/i);
     if (!proxyMatch) return;
     const proxyBase = proxyMatch[1] + '/';
+    const currentSearchParams = new URL(window.location.href).searchParams;
+    const previewToken = currentSearchParams.get('oc_preview_token') || '';
+    const urlAuthToken = currentSearchParams.get('oc_url_token') || '';
     let reloadTimer = 0;
 
     const schedulePreviewReload = () => {
@@ -163,8 +502,11 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
       try {
         const parsed = new URL(String(url), window.location.href);
         if (parsed.host !== window.location.host) return url;
-        if (parsed.pathname.indexOf(proxyBase) === 0) return url;
-        parsed.pathname = proxyBase;
+        if (parsed.pathname.indexOf(proxyBase) !== 0) {
+          parsed.pathname = proxyBase;
+        }
+        if (previewToken) parsed.searchParams.set('oc_preview_token', previewToken);
+        if (urlAuthToken) parsed.searchParams.set('oc_url_token', urlAuthToken);
         return parsed.toString();
       } catch {
         return url;
@@ -205,6 +547,23 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
     const proxyMatch = window.location.pathname.match(/^(\/api\/preview\/proxy\/[a-f0-9]{16,64})(?:\/|$)/i);
     if (!proxyMatch) return;
     const proxyBase = proxyMatch[1];
+    const currentSearchParams = new URL(window.location.href).searchParams;
+    const previewToken = currentSearchParams.get('oc_preview_token') || '';
+    const urlAuthToken = currentSearchParams.get('oc_url_token') || '';
+
+    const withProxyAuth = (value) => {
+      if (typeof value !== 'string' || value.indexOf(proxyBase) !== 0) return value;
+      if (!previewToken && !urlAuthToken) return value;
+      try {
+        const parsed = new URL(value, window.location.origin);
+        parsed.searchParams.delete('oc_client_token');
+        if (previewToken) parsed.searchParams.set('oc_preview_token', previewToken);
+        if (urlAuthToken) parsed.searchParams.set('oc_url_token', urlAuthToken);
+        return parsed.pathname + parsed.search + parsed.hash;
+      } catch {
+        return value;
+      }
+    };
 
     const shouldProxyPath = (pathname) => {
       if (typeof pathname !== 'string' || !pathname.startsWith('/') || pathname.startsWith('//')) return false;
@@ -213,10 +572,72 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
     };
 
     const proxiedUrl = (value) => {
-      if (typeof value !== 'string' || !value.startsWith('/')) return value;
-      if (!shouldProxyPath(value)) return value;
-      return proxyBase + value;
+      if (typeof value !== 'string') return value;
+      if (value.startsWith('/')) {
+        if (value.indexOf(proxyBase) === 0) return withProxyAuth(value);
+        if (!shouldProxyPath(value)) return value;
+        return withProxyAuth(proxyBase + value);
+      }
+
+      try {
+        const parsed = new URL(value, window.location.href);
+        if (parsed.origin === window.location.origin && shouldProxyPath(parsed.pathname)) {
+          return withProxyAuth(proxyBase + parsed.pathname + parsed.search + parsed.hash);
+        }
+      } catch {}
+
+      return value;
     };
+
+    const proxiedWebSocketUrl = (value) => {
+      if (typeof value !== 'string') return value;
+      try {
+        const parsed = new URL(value, window.location.href);
+        const current = new URL(window.location.href);
+        const sameHost = parsed.host === current.host;
+        const isWebSocketProtocol = parsed.protocol === 'ws:' || parsed.protocol === 'wss:';
+        if (sameHost && isWebSocketProtocol && shouldProxyPath(parsed.pathname)) {
+          parsed.pathname = proxyBase + parsed.pathname;
+          parsed.searchParams.delete('oc_client_token');
+          if (previewToken) parsed.searchParams.set('oc_preview_token', previewToken);
+          if (urlAuthToken) parsed.searchParams.set('oc_url_token', urlAuthToken);
+          return parsed.toString();
+        }
+      } catch {}
+      return value;
+    };
+
+    const proxiedNavigationUrl = (value) => {
+      if (typeof value !== 'string') return value;
+      try {
+        const parsed = new URL(value, window.location.href);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return value;
+        if (parsed.origin === window.location.origin && parsed.pathname.indexOf(proxyBase) === 0) {
+          return withProxyAuth(parsed.pathname + parsed.search + parsed.hash);
+        }
+        const host = parsed.hostname;
+        const isLoopback = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1' || host === '[::1]';
+        if (!isLoopback && parsed.origin !== window.location.origin) return value;
+        if (!shouldProxyPath(parsed.pathname)) return value;
+        return withProxyAuth(proxyBase + parsed.pathname + parsed.search + parsed.hash);
+      } catch {
+        return proxiedUrl(value);
+      }
+    };
+
+    if (window.history && typeof window.history.pushState === 'function') {
+      const nativePushState = window.history.pushState.bind(window.history);
+      window.history.pushState = function(state, unused, url) {
+        return nativePushState(state, unused, url === undefined ? url : proxiedNavigationUrl(String(url)));
+      };
+    }
+
+    if (window.history && typeof window.history.replaceState === 'function') {
+      const nativeReplaceState = window.history.replaceState.bind(window.history);
+      window.history.replaceState = function(state, unused, url) {
+        return nativeReplaceState(state, unused, url === undefined ? url : proxiedNavigationUrl(String(url)));
+      };
+    }
 
     if (typeof window.fetch === 'function') {
       const nativeFetch = window.fetch.bind(window);
@@ -228,7 +649,7 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
           try {
             const parsed = new URL(input.url);
             if (parsed.origin === window.location.origin && shouldProxyPath(parsed.pathname)) {
-              const nextUrl = proxyBase + parsed.pathname + parsed.search + parsed.hash;
+              const nextUrl = withProxyAuth(proxyBase + parsed.pathname + parsed.search + parsed.hash);
               return nativeFetch(new Request(nextUrl, input), init);
             }
           } catch {}
@@ -257,6 +678,20 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
       Object.setPrototypeOf(OpenChamberPreviewEventSource, NativeEventSource);
       Object.defineProperty(OpenChamberPreviewEventSource, 'name', { value: 'EventSource' });
       window.EventSource = OpenChamberPreviewEventSource;
+    }
+
+    if (typeof window.WebSocket === 'function') {
+      const NativeWebSocket = window.WebSocket;
+      function OpenChamberPreviewAppWebSocket(url, protocols) {
+        const nextUrl = proxiedWebSocketUrl(String(url));
+        return arguments.length === 1
+          ? new NativeWebSocket(nextUrl)
+          : new NativeWebSocket(nextUrl, protocols);
+      }
+      OpenChamberPreviewAppWebSocket.prototype = NativeWebSocket.prototype;
+      Object.setPrototypeOf(OpenChamberPreviewAppWebSocket, NativeWebSocket);
+      Object.defineProperty(OpenChamberPreviewAppWebSocket, 'name', { value: 'WebSocket' });
+      window.WebSocket = OpenChamberPreviewAppWebSocket;
     }
   };
 
@@ -429,6 +864,9 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
     if (data.type === 'set-inspect-mode') {
       setInspectMode(data.enabled === true);
     }
+    if (data.type === 'set-color-scheme') {
+      applyPreviewColorScheme(data.scheme);
+    }
   });
 
   window.addEventListener('mousemove', sendHover, true);
@@ -440,11 +878,11 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
   window.addEventListener('click', (event) => {
     const anchor = event.target && typeof event.target.closest === 'function' ? event.target.closest('a[href]') : null;
     if (anchor && !inspectMode) {
-      const nextUrl = toLoopbackHttpUrl(anchor.href);
-      if (shouldParentHandleNavigation(nextUrl)) {
+      const navigation = classifyNavigation(anchor.href);
+      if (navigation.action === 'proxy' || navigation.action === 'external') {
         event.preventDefault();
         event.stopPropagation();
-        post({ type: 'navigate-preview', url: nextUrl, ts: Date.now() });
+        post({ type: 'navigate-preview', url: navigation.url, navigation: navigation.action, ts: Date.now() });
         return;
       }
     }
@@ -505,7 +943,44 @@ const buildCookie = ({
   return chunks.join('; ');
 };
 
-const normalizeLoopbackUrl = (rawUrl) => {
+// SSRF guard for the `allowExternal` path: refuse to proxy private, loopback and
+// reserved addresses (incl. cloud-metadata 169.254.169.254). Operates on the
+// WHATWG-normalized hostname, so decimal/hex/octal IPv4 forms are already canonical
+// dotted-decimal here. NOTE: this blocks IP *literals* only — a hostname that
+// resolves to a private IP (DNS rebinding) is not caught and would need
+// resolve-time IP pinning. Loopback for local preview goes through the non-external
+// path (allowExternal=false), which is unaffected.
+const isBlockedExternalHost = (hostname) => {
+  if (!hostname) return true;
+  let host = hostname.toLowerCase();
+  if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
+
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) return true;
+
+  const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (v4) {
+    const a = Number(v4[1]);
+    const b = Number(v4[2]);
+    if (a === 0 || a === 127 || a === 10) return true;          // this-host / loopback / private
+    if (a === 169 && b === 254) return true;                    // link-local incl. cloud metadata
+    if (a === 172 && b >= 16 && b <= 31) return true;           // private
+    if (a === 192 && b === 168) return true;                    // private
+    if (a === 100 && b >= 64 && b <= 127) return true;          // carrier-grade NAT
+    return false;
+  }
+
+  if (host.includes(':')) {
+    if (host === '::1' || host === '::') return true;           // loopback / unspecified
+    if (host.startsWith('fe80')) return true;                   // link-local
+    if (host.startsWith('fc') || host.startsWith('fd')) return true; // unique local fc00::/7
+    if (host.includes('::ffff:')) return true;                       // IPv4-mapped (dotted or hex form)
+    return false;
+  }
+
+  return false;
+};
+
+export const normalizeProxyTargetUrl = (rawUrl, { allowExternal = false } = {}) => {
   let url;
   try {
     url = new URL(rawUrl);
@@ -518,8 +993,12 @@ const normalizeLoopbackUrl = (rawUrl) => {
   }
 
   const hostname = url.hostname;
-  if (!LOOPBACK_HOSTS.has(hostname)) {
-    return { ok: false, error: 'Only loopback hosts are supported' };
+  if (!allowExternal) {
+    if (!LOOPBACK_HOSTS.has(hostname)) {
+      return { ok: false, error: 'Only loopback hosts are supported' };
+    }
+  } else if (isBlockedExternalHost(hostname)) {
+    return { ok: false, error: 'Refusing to proxy private or reserved addresses' };
   }
 
   const port = url.port ? Number.parseInt(url.port, 10) : (url.protocol === 'https:' ? 443 : 80);
@@ -529,12 +1008,179 @@ const normalizeLoopbackUrl = (rawUrl) => {
 
   // Normalize common loopback hostnames to IPv4 to avoid environments where
   // `localhost` resolves to ::1 but the dev server only binds IPv4.
-  if (hostname === '0.0.0.0' || hostname === 'localhost' || hostname === '::1' || hostname === '[::1]') {
+  if (LOOPBACK_HOSTS.has(hostname) && (hostname === '0.0.0.0' || hostname === 'localhost' || hostname === '::1' || hostname === '[::1]')) {
     url.hostname = '127.0.0.1';
   }
 
   // Only keep origin here; the proxy path is preserved on the OpenChamber side.
   return { ok: true, origin: url.origin };
+};
+
+const appendProxyAuthToProxyUrl = (value, { previewToken = '', urlAuthToken = '' } = {}) => {
+  if (typeof value !== 'string' || !value) return value;
+  const needsQueryRewrite = previewToken
+    || urlAuthToken
+    || value.includes(CLIENT_TOKEN_QUERY_PARAM)
+    || value.includes(URL_AUTH_TOKEN_QUERY_PARAM);
+  if (!needsQueryRewrite) return value;
+  try {
+    const parsed = new URL(value, 'http://openchamber-preview.local');
+    parsed.searchParams.delete(CLIENT_TOKEN_QUERY_PARAM);
+    parsed.searchParams.delete(URL_AUTH_TOKEN_QUERY_PARAM);
+    if (previewToken) parsed.searchParams.set(TOKEN_QUERY_PARAM, previewToken);
+    if (urlAuthToken) parsed.searchParams.set(URL_AUTH_TOKEN_QUERY_PARAM, urlAuthToken);
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return value;
+  }
+};
+
+const normalizeLoopbackUrl = (rawUrl) => normalizeProxyTargetUrl(rawUrl, { allowExternal: false });
+
+export const rewritePreviewBody = ({ bodyText, proxyBasePath, targetOrigin, kind, previewToken = '', urlAuthToken = '' }) => {
+  if (typeof bodyText !== 'string' || bodyText.length === 0) {
+    return bodyText;
+  }
+
+  const prefix = proxyBasePath.endsWith('/') ? proxyBasePath.slice(0, -1) : proxyBasePath;
+  const target = targetOrigin ? new URL(targetOrigin) : null;
+  const isSameTargetOrigin = (url) => {
+    if (!target) return false;
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    if (url.origin === target.origin) return true;
+
+    const host = url.hostname;
+    if (host !== 'localhost' && host !== '127.0.0.1' && host !== '0.0.0.0' && host !== '::1' && host !== '[::1]') {
+      return false;
+    }
+    return url.port === target.port;
+  };
+  const rewriteResourceUrl = (value) => {
+    if (typeof value !== 'string' || value.length === 0) return value;
+    if (value.startsWith('/') && !value.startsWith('//')) {
+      if (value.startsWith('/api/preview/proxy/')) return appendProxyAuthToProxyUrl(value, { previewToken, urlAuthToken });
+      return appendProxyAuthToProxyUrl(`${prefix}${value}`, { previewToken, urlAuthToken });
+    }
+    try {
+      const parsed = new URL(value);
+      if (isSameTargetOrigin(parsed)) {
+        return appendProxyAuthToProxyUrl(`${prefix}${parsed.pathname}${parsed.search}${parsed.hash}`, { previewToken, urlAuthToken });
+      }
+    } catch {
+      return value;
+    }
+    return value;
+  };
+  const stripPreviewCspMeta = (text) => text
+    .replace(/<meta\b(?=[^>]*\bhttp-equiv\s*=\s*(['"])content-security-policy\1)[^>]*>/gi, '')
+    .replace(/<meta\b(?=[^>]*\bhttp-equiv\s*=\s*content-security-policy\b)[^>]*>/gi, '');
+  const rewriteCss = (text) => text
+    .replace(/url\((['"]?)([^)'"]*)\1\)/gi, (_match, quote, value) => {
+      const q = quote || '';
+      return `url(${q}${rewriteResourceUrl(value)}${q})`;
+    })
+    .replace(/@import\s+(['"])\/(?!\/)([^'"]*)\1/gi, (_match, quote, path) => {
+      return `@import ${quote}${rewriteResourceUrl(`/${path}`)}${quote}`;
+    });
+  const rewriteJavaScript = (text) => text
+    .replace(/\bfrom\s+(['"])\/(?!\/)([^'"]*)\1/gi, (_match, quote, path) => {
+      return `from ${quote}${rewriteResourceUrl(`/${path}`)}${quote}`;
+    })
+    .replace(/\bimport\s+(['"])\/(?!\/)([^'"]*)\1/gi, (_match, quote, path) => {
+      return `import ${quote}${rewriteResourceUrl(`/${path}`)}${quote}`;
+    })
+    .replace(/\bimport\(\s*(['"])\/(?!\/)([^'"]*)\1\s*\)/gi, (_match, quote, path) => {
+      return `import(${quote}${rewriteResourceUrl(`/${path}`)}${quote})`;
+    });
+  const rewriteInlineModuleScripts = (text) => text.replace(
+    /<script\b([^>]*)>([\s\S]*?)<\/script>/gi,
+    (match, attrs, scriptBody) => {
+      if (/\bsrc\s*=/i.test(attrs)) return match;
+
+      const typeMatch = String(attrs || '').match(/\btype\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+      const type = String(typeMatch?.[1] ?? typeMatch?.[2] ?? typeMatch?.[3] ?? '').trim().toLowerCase();
+      if (type !== 'module') return match;
+
+      const rewrittenScriptBody = rewriteJavaScript(scriptBody);
+      if (rewrittenScriptBody === scriptBody) return match;
+      return `<script${attrs}>${rewrittenScriptBody}</script>`;
+    },
+  );
+  const rewriteHtml = (text) => rewriteInlineModuleScripts(text
+    .replace(/\b(src|href|action)=(['"])([^'"]*)\2/gi, (_match, attr, quote, value) => {
+      return `${attr}=${quote}${rewriteResourceUrl(value)}${quote}`;
+    })
+    .replace(/\bsrcset=(['"])([^'"]*)\1/gi, (_match, quote, value) => {
+      const rewritten = String(value).split(',').map((part) => {
+        const trimmed = part.trim();
+        if (!trimmed) return trimmed;
+        const segments = trimmed.split(/\s+/);
+        const url = segments[0] || '';
+        segments[0] = rewriteResourceUrl(url);
+        return segments.join(' ');
+      }).join(', ');
+      return `srcset=${quote}${rewritten}${quote}`;
+    }));
+
+  if (kind === 'html') return stripPreviewCspMeta(rewriteHtml(bodyText));
+  if (kind === 'css') return rewriteCss(bodyText);
+  if (kind === 'javascript') return rewriteJavaScript(bodyText);
+  return bodyText;
+};
+
+// Rewrite a dev server's CSP so the injected preview bridge can run via a
+// per-response nonce, while keeping the dev server's own script restrictions.
+// frame-ancestors is dropped (it blocks embedding) and require-trusted-types-for
+// is dropped (it can block the bridge's DOM use); everything else is preserved.
+export const rewritePreviewCspHeader = (cspValue, nonce) => {
+  if (typeof cspValue !== 'string' || cspValue.length === 0) return cspValue;
+  const nonceSource = nonce ? `'nonce-${nonce}'` : '';
+  const directives = cspValue
+    .split(';')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const tokens = part.split(/\s+/);
+      return { name: (tokens[0] || '').toLowerCase(), tokens };
+    })
+    .filter((directive) => directive.name !== 'frame-ancestors' && directive.name !== 'require-trusted-types-for');
+
+  if (nonceSource) {
+    const byName = new Map(directives.map((directive) => [directive.name, directive]));
+    const allowNonce = (directive) => {
+      // Drop a lone 'none' so the nonce takes effect, then add our nonce.
+      directive.tokens = directive.tokens.filter((token) => token.toLowerCase() !== "'none'");
+      if (!directive.tokens.includes(nonceSource)) directive.tokens.push(nonceSource);
+    };
+    const scriptElem = byName.get('script-src-elem');
+    const scriptSrc = byName.get('script-src');
+    if (scriptElem) allowNonce(scriptElem);
+    if (scriptSrc) allowNonce(scriptSrc);
+    if (!scriptElem && !scriptSrc && byName.has('default-src')) {
+      const base = byName.get('default-src').tokens.slice(1).filter((token) => token.toLowerCase() !== "'none'");
+      directives.push({ name: 'script-src', tokens: ['script-src', ...base, nonceSource] });
+    }
+  }
+
+  const rebuilt = directives.map((directive) => directive.tokens.join(' '));
+  return rebuilt.length > 0 ? rebuilt.join('; ') : null;
+};
+
+export const rewritePreviewRedirectLocation = ({ location, proxyBasePath, targetOrigin, previewToken = '', urlAuthToken = '' }) => {
+  if (typeof location !== 'string' || !location) return location;
+  const prefix = proxyBasePath.endsWith('/') ? proxyBasePath.slice(0, -1) : proxyBasePath;
+  const target = targetOrigin ? new URL(targetOrigin) : null;
+  if (!target) return location;
+  try {
+    const parsed = new URL(location, target);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return location;
+    const host = parsed.hostname;
+    const isLoopback = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1' || host === '[::1]';
+    if (!isLoopback || parsed.port !== target.port) return location;
+    return appendProxyAuthToProxyUrl(`${prefix}${parsed.pathname}${parsed.search}${parsed.hash}`, { previewToken, urlAuthToken });
+  } catch {
+    return location;
+  }
 };
 
 export const createPreviewProxyRuntime = ({
@@ -599,7 +1245,7 @@ export const createPreviewProxyRuntime = ({
     }
 
     const cookies = parseCookieHeader(req.headers?.cookie);
-    const token = cookies.get(TOKEN_COOKIE_NAME) || '';
+    const token = parsed.searchParams.get(TOKEN_QUERY_PARAM) || cookies.get(TOKEN_COOKIE_NAME) || '';
     if (!token || token !== entry.token) {
       return { ok: false, status: 403, error: 'Preview token missing' };
     }
@@ -628,31 +1274,9 @@ export const createPreviewProxyRuntime = ({
     return parts.length > 0 ? `?${parts.join('&')}` : '';
   };
 
-  // Strip the `frame-ancestors` directive from a CSP header value while
-  // preserving every other directive. Returns null if no directives remain.
-  const removeFrameAncestorsDirective = (cspValue) => {
-    if (typeof cspValue !== 'string' || cspValue.length === 0) {
-      return cspValue;
-    }
-    const directives = cspValue
-      .split(';')
-      .map((part) => part.trim())
-      .filter((part) => part.length > 0);
-
-    const filtered = directives.filter((directive) => {
-      const name = directive.split(/\s+/, 1)[0]?.toLowerCase() ?? '';
-      return name !== 'frame-ancestors';
-    });
-
-    if (filtered.length === 0) {
-      return null;
-    }
-    return filtered.join('; ');
-  };
-
-  // Drop response headers that prevent the dev server from being framed.
-  // The proxy itself is same-origin, so embedding is otherwise safe.
-  const stripFrameBustingHeaders = (headers) => {
+  // Drop only CSP directives that prevent framing or the injected preview bridge.
+  // Preview targets are restricted to loopback dev servers.
+  const stripFrameBustingHeaders = (headers, bridgeNonce) => {
     if (!headers || typeof headers !== 'object') {
       return;
     }
@@ -668,7 +1292,7 @@ export const createPreviewProxyRuntime = ({
         const original = headers[key];
         const values = Array.isArray(original) ? original : [original];
         const rewritten = values
-          .map((value) => removeFrameAncestorsDirective(value))
+          .map((value) => rewritePreviewCspHeader(value, bridgeNonce))
           .filter((value) => typeof value === 'string' && value.length > 0);
         if (rewritten.length === 0) {
           delete headers[key];
@@ -688,82 +1312,14 @@ export const createPreviewProxyRuntime = ({
   }) => {
     ensureSweeper();
 
-    const rewritePreviewBody = (bodyText, proxyBasePath, targetOrigin) => {
-      if (typeof bodyText !== 'string' || bodyText.length === 0) {
-        return bodyText;
-      }
-
-      const prefix = proxyBasePath.endsWith('/') ? proxyBasePath.slice(0, -1) : proxyBasePath;
-      const target = targetOrigin ? new URL(targetOrigin) : null;
-      const isSameLoopbackTarget = (url) => {
-        if (!target) return false;
-        if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
-        const host = url.hostname;
-        if (host !== 'localhost' && host !== '127.0.0.1' && host !== '0.0.0.0' && host !== '::1' && host !== '[::1]') {
-          return false;
-        }
-        return url.port === target.port;
-      };
-      const rewriteRootPath = (value) => {
-        if (typeof value !== 'string' || value.length === 0) {
-          return value;
-        }
-        if (value.startsWith('/') && !value.startsWith('//')) {
-          if (value.startsWith('/api/preview/proxy/')) {
-            return value;
-          }
-          return `${prefix}${value}`;
-        }
-        try {
-          const parsed = new URL(value);
-          if (isSameLoopbackTarget(parsed)) {
-            return `${prefix}${parsed.pathname}${parsed.search}${parsed.hash}`;
-          }
-        } catch {
-          return value;
-        }
-        return value;
-      };
-
-      return bodyText
-        .replace(/\b(src|href|action)=(["'])([^"']*)\2/gi, (_match, attr, quote, value) => {
-          return `${attr}=${quote}${rewriteRootPath(value)}${quote}`;
-        })
-        .replace(/\bsrcset=(["'])([^"']*)\1/gi, (_match, quote, value) => {
-          const rewritten = String(value).split(',').map((part) => {
-            const trimmed = part.trim();
-            if (!trimmed) return trimmed;
-            const segments = trimmed.split(/\s+/);
-            const url = segments[0] || '';
-            segments[0] = rewriteRootPath(url);
-            return segments.join(' ');
-          }).join(', ');
-          return `srcset=${quote}${rewritten}${quote}`;
-        })
-        .replace(/url\((['"]?)([^)'"]*)\1\)/gi, (_match, quote, value) => {
-          const q = quote || '';
-          return `url(${q}${rewriteRootPath(value)}${q})`;
-        })
-        .replace(/@import\s+(["'])\/(?!\/)([^"']*)\1/gi, (_match, quote, path) => {
-          return `@import ${quote}${rewriteRootPath(`/${path}`)}${quote}`;
-        })
-        .replace(/\bfrom\s+(["'])\/(?!\/)([^"']*)\1/gi, (_match, quote, path) => {
-          return `from ${quote}${rewriteRootPath(`/${path}`)}${quote}`;
-        })
-        .replace(/\bimport\s+(["'])\/(?!\/)([^"']*)\1/gi, (_match, quote, path) => {
-          return `import ${quote}${rewriteRootPath(`/${path}`)}${quote}`;
-        })
-        .replace(/\bimport\(\s*(["'])\/(?!\/)([^"']*)\1\s*\)/gi, (_match, quote, path) => {
-          return `import(${quote}${rewriteRootPath(`/${path}`)}${quote})`;
-        });
-    };
-
-    const injectPreviewBridge = (bodyText) => {
+    const injectPreviewBridge = (bodyText, targetOrigin, bridgeNonce) => {
       if (typeof bodyText !== 'string' || bodyText.includes(PREVIEW_BRIDGE_SCRIPT_ID)) {
         return bodyText;
       }
 
-      const script = `<script id="${PREVIEW_BRIDGE_SCRIPT_ID}">${PREVIEW_BRIDGE_SCRIPT}</script>`;
+      const nonceAttr = bridgeNonce ? ` nonce="${bridgeNonce}"` : '';
+      const targetOriginScript = `<script${nonceAttr}>window.__openchamberPreviewTargetOrigin=${JSON.stringify(targetOrigin || '')};</script>`;
+      const script = `${targetOriginScript}<script id="${PREVIEW_BRIDGE_SCRIPT_ID}"${nonceAttr}>${PREVIEW_BRIDGE_SCRIPT}</script>`;
       if (/<head(?:\s[^>]*)?>/i.test(bodyText)) {
         return bodyText.replace(/<head(\s[^>]*)?>/i, (match) => `${match}${script}`);
       }
@@ -812,7 +1368,10 @@ export const createPreviewProxyRuntime = ({
         }
 
         const ttlMs = typeof req.body?.ttlMs === 'number' ? req.body.ttlMs : DEFAULT_TARGET_TTL_MS;
-        const normalized = normalizeLoopbackUrl(rawUrl);
+        const allowExternal = req.body?.allowExternal === true;
+        const normalized = allowExternal
+          ? normalizeProxyTargetUrl(rawUrl, { allowExternal: true })
+          : normalizeLoopbackUrl(rawUrl);
         if (!normalized.ok) {
           return res.status(400).json({ error: normalized.error });
         }
@@ -831,6 +1390,7 @@ export const createPreviewProxyRuntime = ({
         return res.json({
           id: target.id,
           proxyBasePath: cookiePath,
+          previewToken: target.token,
           expiresAt: target.expiresAt,
         });
       } catch (error) {
@@ -875,21 +1435,47 @@ export const createPreviewProxyRuntime = ({
         const parsed = new URL(req.originalUrl || req.url || '', 'http://localhost');
         // Never forward our auth cookie token to the dev server.
         const strippedPath = stripProxyPrefix(parsed.pathname, resolved.id);
-        return `${strippedPath}${removeRawQueryParam(parsed.search, 'ocPreview')}`;
+        const withoutReloadParam = removeRawQueryParam(parsed.search, 'ocPreview');
+        const withoutPreviewToken = removeRawQueryParam(withoutReloadParam, TOKEN_QUERY_PARAM);
+        const withoutClientToken = removeRawQueryParam(withoutPreviewToken, CLIENT_TOKEN_QUERY_PARAM);
+        const withoutUrlAuthToken = removeRawQueryParam(withoutClientToken, URL_AUTH_TOKEN_QUERY_PARAM);
+        return `${strippedPath}${withoutUrlAuthToken}`;
       },
       on: {
-        proxyReq: (proxyReq) => {
+        proxyReq: (proxyReq, req) => {
+          applyPreviewPassthroughRequestHeaders(req, proxyReq);
           // Keep local dev servers from receiving OpenChamber credentials.
           proxyReq.removeHeader('cookie');
           proxyReq.removeHeader('authorization');
           proxyReq.removeHeader('x-openchamber-ui-session');
           proxyReq.setHeader('accept-encoding', 'identity');
         },
-        proxyRes: responseInterceptor(async (responseBuffer, proxyRes, req) => {
+        proxyRes: responseInterceptor(async (responseBuffer, proxyRes, req, res) => {
+          applyPreviewPassthroughResponseHeaders(proxyRes, res);
+          // Per-response nonce lets the injected bridge run under the dev
+          // server's CSP without dropping its script restrictions wholesale.
+          const bridgeNonce = crypto.randomBytes(16).toString('base64');
           // Allow the dev server response to be framed inside OpenChamber even
           // if it normally sets X-Frame-Options or a CSP frame-ancestors rule.
           // The proxy is same-origin so embedding is otherwise safe.
-          stripFrameBustingHeaders(proxyRes.headers);
+          stripFrameBustingHeaders(proxyRes.headers, bridgeNonce);
+
+          const resolved = resolveTargetFromRequest(req);
+          if (!resolved.ok) {
+            return responseBuffer;
+          }
+
+          const proxyBasePath = `/api/preview/proxy/${resolved.id}`;
+          const urlAuthToken = resolved.parsed.searchParams.get(URL_AUTH_TOKEN_QUERY_PARAM) || '';
+          if (typeof proxyRes.headers?.location === 'string') {
+            proxyRes.headers.location = rewritePreviewRedirectLocation({
+              location: proxyRes.headers.location,
+              proxyBasePath,
+              targetOrigin: resolved.entry.origin,
+              previewToken: resolved.entry.token,
+              urlAuthToken,
+            });
+          }
 
           const contentType = String(proxyRes.headers?.['content-type'] || '').toLowerCase();
           const isHtml = contentType.includes('text/html');
@@ -905,20 +1491,28 @@ export const createPreviewProxyRuntime = ({
           delete proxyRes.headers.etag;
           delete proxyRes.headers['last-modified'];
 
-          const resolved = resolveTargetFromRequest(req);
-          if (!resolved.ok) {
-            return responseBuffer;
-          }
-
-          const proxyBasePath = `/api/preview/proxy/${resolved.id}`;
           const parsed = new URL(req.originalUrl || req.url || '', 'http://localhost');
           const upstreamPath = stripProxyPrefix(parsed.pathname, resolved.id);
           if (isJavaScript && upstreamPath === '/@vite/client') {
-            return rewritePreviewBody(rewriteViteClientHmr(responseBuffer.toString('utf8'), proxyBasePath), proxyBasePath, resolved.entry.origin);
+            return rewritePreviewBody({
+              bodyText: rewriteViteClientHmr(responseBuffer.toString('utf8'), proxyBasePath),
+              proxyBasePath,
+              targetOrigin: resolved.entry.origin,
+              kind: 'javascript',
+              previewToken: resolved.entry.token,
+              urlAuthToken,
+            });
           }
 
-          const rewrittenBody = rewritePreviewBody(responseBuffer.toString('utf8'), proxyBasePath, resolved.entry.origin);
-          return isHtml ? injectPreviewBridge(rewrittenBody) : rewrittenBody;
+          const rewrittenBody = rewritePreviewBody({
+            bodyText: responseBuffer.toString('utf8'),
+            proxyBasePath,
+            targetOrigin: resolved.entry.origin,
+            kind: isHtml ? 'html' : isCss ? 'css' : 'javascript',
+            previewToken: resolved.entry.token,
+            urlAuthToken,
+          });
+          return isHtml ? injectPreviewBridge(rewrittenBody, resolved.entry.origin, bridgeNonce) : rewrittenBody;
         }),
         error: (err, _req, res) => {
           const isDev = typeof process !== 'undefined'
@@ -971,12 +1565,6 @@ export const createPreviewProxyRuntime = ({
       const handleUpgrade = async () => {
         try {
           if (uiAuthController?.enabled) {
-            const sessionToken = await uiAuthController?.ensureSessionToken?.(req, null);
-            if (!sessionToken) {
-              rejectWebSocketUpgrade(socket, 401, 'UI authentication required');
-              return;
-            }
-
             const originAllowed = await isRequestOriginAllowed(req);
             if (!originAllowed) {
               rejectWebSocketUpgrade(socket, 403, 'Invalid origin');
@@ -989,6 +1577,10 @@ export const createPreviewProxyRuntime = ({
           req.originalUrl = rawUrl;
           const parsed = new URL(rawUrl, 'http://localhost');
           const nextPath = stripProxyPrefix(parsed.pathname, resolved.id);
+          parsed.searchParams.delete('ocPreview');
+          parsed.searchParams.delete(TOKEN_QUERY_PARAM);
+          parsed.searchParams.delete(CLIENT_TOKEN_QUERY_PARAM);
+          parsed.searchParams.delete(URL_AUTH_TOKEN_QUERY_PARAM);
           const search = parsed.searchParams.toString();
           req.url = `${nextPath}${search ? `?${search}` : ''}`;
           proxy.upgrade(req, socket, head);

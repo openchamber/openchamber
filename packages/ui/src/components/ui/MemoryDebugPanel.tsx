@@ -1,5 +1,4 @@
 import React from 'react';
-import { RiBarChartBoxLine, RiCloseLine, RiDatabase2Line, RiFileCopyLine, RiPulseLine, RiRefreshLine } from '@remixicon/react';
 
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useViewportStore } from '@/sync/viewport-store';
@@ -12,6 +11,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 
 interface DebugPanelProps {
@@ -99,7 +99,7 @@ const PerfSection: React.FC<{ title: string; snapshot: StreamPerfSnapshot; empty
   );
 };
 
-export const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
+const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
   const { t } = useI18n();
   const [activeTab, setActiveTab] = React.useState<DebugTab>('memory');
   const [copyState, setCopyState] = React.useState<'idle' | 'copied' | 'error'>('idle');
@@ -149,22 +149,43 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
     return () => window.clearTimeout(timeoutId);
   }, [copyState]);
 
-  const totalMessages = React.useMemo(() => {
+  const messageRoleCounts = React.useMemo(() => {
+    let assistant = 0;
     let total = 0;
+    let user = 0;
     for (const sessionId of Object.keys(messageRecord)) {
-      total += messageRecord[sessionId]?.length ?? 0;
+      const messages = messageRecord[sessionId] ?? [];
+      total += messages.length;
+      for (const message of messages) {
+        if (message.role === 'user') {
+          user += 1;
+        } else if (message.role === 'assistant') {
+          assistant += 1;
+        }
+      }
     }
-    return total;
+    return { assistant, total, user };
   }, [messageRecord]);
 
   const sessionStats = React.useMemo(() => {
     return sessions.map(session => {
-      const messageCount = messageRecord[session.id]?.length || 0;
+      const messages = messageRecord[session.id] ?? [];
+      let assistantMessageCount = 0;
+      let userMessageCount = 0;
+      for (const message of messages) {
+        if (message.role === 'user') {
+          userMessageCount += 1;
+        } else if (message.role === 'assistant') {
+          assistantMessageCount += 1;
+        }
+      }
       const memoryState = sessionMemoryState.get(session.id);
       return {
         id: session.id,
         title: session.title || t('memoryDebugPanel.common.untitled'),
-        messageCount,
+        assistantMessageCount,
+        messageCount: messages.length,
+        userMessageCount,
         isStreaming: memoryState?.isStreaming || false,
         isZombie: memoryState?.isZombie || false,
         backgroundCount: memoryState?.backgroundMessageCount || 0,
@@ -198,9 +219,9 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
       <div className="mb-3 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           {activeTab === 'memory' ? (
-            <RiDatabase2Line className="h-4 w-4 text-[var(--surface-foreground)]" />
+            <Icon name="database-2" className="h-4 w-4 text-[var(--surface-foreground)]" />
           ) : (
-            <RiBarChartBoxLine className="h-4 w-4 text-[var(--surface-foreground)]" />
+            <Icon name="bar-chart-box" className="h-4 w-4 text-[var(--surface-foreground)]" />
           )}
           <h3 className="typography-ui-label font-semibold text-[var(--surface-foreground)]">{t('memoryDebugPanel.title')}</h3>
         </div>
@@ -208,7 +229,7 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
           {activeTab === 'streaming' ? (
             <>
               <Button size="xs" variant="ghost" onClick={handleCopyStreamingDebug}>
-                <RiFileCopyLine className="h-3.5 w-3.5" />
+                <Icon name="file-copy" className="h-3.5 w-3.5" />
               </Button>
               <Button
                 size="xs"
@@ -219,13 +240,13 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
                   setVsCodeStreamSnapshot(getVsCodeStreamPerfSnapshot());
                 }}
               >
-                <RiRefreshLine className="h-3.5 w-3.5" />
+                <Icon name="refresh" className="h-3.5 w-3.5" />
               </Button>
             </>
           ) : null}
           {onClose ? (
             <Button size="icon" variant="ghost" className="h-6 w-6" onClick={onClose}>
-              <RiCloseLine className="h-4 w-4" />
+              <Icon name="close" className="h-4 w-4" />
             </Button>
           ) : null}
         </div>
@@ -256,8 +277,10 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
       {activeTab === 'memory' ? (
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-2 typography-meta">
-            <MetricCard label={t('memoryDebugPanel.metric.totalMessages')} value={totalMessages} />
+            <MetricCard label={t('memoryDebugPanel.metric.totalMessages')} value={messageRoleCounts.total} />
             <MetricCard label={t('memoryDebugPanel.metric.cachedSessions')} value={`${cachedSessionCount} / ${MEMORY_LIMITS.MAX_SESSIONS}`} />
+            <MetricCard label={t('memoryDebugPanel.metric.userMessages')} value={messageRoleCounts.user} />
+            <MetricCard label={t('memoryDebugPanel.metric.assistantMessages')} value={messageRoleCounts.assistant} />
           </div>
 
           <div className="typography-meta space-y-1 border-t border-[var(--interactive-border)] pt-2">
@@ -290,10 +313,16 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
                 >
                   <div className="flex min-w-0 flex-1 items-center gap-2">
                     <span className="truncate text-[var(--surface-foreground)]">{stat.title}</span>
-                    {stat.isStreaming ? <RiPulseLine className="h-3 w-3 animate-pulse text-[var(--status-info)]" /> : null}
+                    {stat.isStreaming ? <Icon name="pulse" className="h-3 w-3 animate-pulse text-[var(--status-info)]" /> : null}
                     {stat.isZombie ? <span className="text-[var(--status-warning)]">!</span> : null}
                   </div>
                   <div className="flex items-center gap-2">
+                    <span className="font-mono text-[var(--surface-muted-foreground)]">
+                      {t('memoryDebugPanel.metric.roleMsgsValue', {
+                        assistant: stat.assistantMessageCount,
+                        user: stat.userMessageCount,
+                      })}
+                    </span>
                     <span className="font-mono text-[var(--surface-foreground)]">
                       {t('memoryDebugPanel.metric.msgsValue', { count: stat.messageCount })}
                     </span>
@@ -318,6 +347,14 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
                       sessions: sessions.map(s => ({ id: s.id, title: s.title })),
                       currentSessionId,
                       cachedSessions: Object.keys(messageRecord),
+                      messageRoleCounts,
+                      sessionMessageRoleCounts: sessionStats.map(stat => ({
+                        id: stat.id,
+                        title: stat.title,
+                        total: stat.messageCount,
+                        user: stat.userMessageCount,
+                        assistant: stat.assistantMessageCount,
+                      })),
                       memoryStates: Object.fromEntries(sessionMemoryState),
                     });
                   }}

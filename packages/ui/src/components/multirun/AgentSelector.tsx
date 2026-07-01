@@ -8,6 +8,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
+import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useI18n } from '@/lib/i18n';
 
@@ -22,6 +23,8 @@ export interface AgentSelectorProps {
   disabled?: boolean;
   /** ID for accessibility */
   id?: string;
+  /** Portal menu to body instead of nearest dialog. */
+  portalToBody?: boolean;
 }
 
 /**
@@ -34,6 +37,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
   className,
   disabled,
   id,
+  portalToBody,
 }) => {
   const { t } = useI18n();
   const getVisibleAgents = useConfigStore((state) => state.getVisibleAgents);
@@ -41,14 +45,14 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
   const defaultAgentName = useConfigStore((state) => state.currentAgentName);
   const agents = getVisibleAgents();
   const selectableAgents = React.useMemo(
-    () => agents.filter((agent) => agent.mode !== 'subagent'),
+    () => agents.filter((agent) => isPrimaryMode(agent.mode)),
     [agents]
   );
 
   // Load agents on mount
   React.useEffect(() => {
-    loadAgents();
-  }, [loadAgents]);
+    if (agents.length === 0) void loadAgents();
+  }, [agents.length, loadAgents]);
 
   // Ensure we always have a valid selection (defaults to current default agent, then first selectable agent).
   React.useEffect(() => {
@@ -95,7 +99,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
       >
         <SelectValue placeholder={t('multirun.agentSelector.placeholder')} />
       </SelectTrigger>
-      <SelectContent fitContent>
+      <SelectContent fitContent portalToBody={portalToBody}>
         {selectableAgents.length > 0 && (
           <SelectGroup>
             {selectableAgents.map((agent) => (

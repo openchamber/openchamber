@@ -7,6 +7,9 @@ import { getWebviewHtml } from './webviewHtml';
 import { openSseProxy } from './sseProxy';
 import { resolveWebviewDevServerUrl } from './webviewDevServer';
 import { normalizeWindowsDriveLetter } from './pathUtils';
+import { resolveWorkspaceFolders } from './workspaceResolver';
+
+const t = vscode.l10n.t;
 
 export class AgentManagerPanelProvider {
   public static readonly viewType = 'openchamber.agentManager';
@@ -40,7 +43,7 @@ export class AgentManagerPanelProvider {
     // Create new panel
     this._panel = vscode.window.createWebviewPanel(
       AgentManagerPanelProvider.viewType,
-      'Agent Manager',
+      t('Agent Manager'),
       vscode.ViewColumn.One,
       {
         enableScripts: true,
@@ -97,6 +100,10 @@ export class AgentManagerPanelProvider {
         context: this._context,
       });
       this._panel?.webview.postMessage(response);
+
+      if (message.type === 'api:config/settings:save' && response.success) {
+        void vscode.commands.executeCommand('openchamber.internal.settingsSynced', response.data);
+      }
     }, null, this._context.subscriptions);
   }
 
@@ -121,6 +128,30 @@ export class AgentManagerPanelProvider {
     this._sendCachedState();
   }
 
+  public notifySettingsSynced(settings: unknown): void {
+    if (!this._panel) {
+      return;
+    }
+
+    this._panel.webview.postMessage({
+      type: 'command',
+      command: 'settingsSynced',
+      payload: settings,
+    });
+  }
+
+  public notifyWindowFocusChanged(focused: boolean): void {
+    if (!this._panel) {
+      return;
+    }
+
+    this._panel.webview.postMessage({
+      type: 'command',
+      command: 'windowFocusChanged',
+      payload: { focused },
+    });
+  }
+
   private _sendCachedState() {
     if (!this._panel) {
       return;
@@ -131,6 +162,7 @@ export class AgentManagerPanelProvider {
       status: this._cachedStatus,
       error: this._cachedError,
     });
+    this.notifyWindowFocusChanged(vscode.window.state.focused);
   }
 
   private _buildSseHeaders(extra?: Record<string, string>): Record<string, string> {
@@ -225,12 +257,14 @@ export class AgentManagerPanelProvider {
     const workspaceFolder = normalizeWindowsDriveLetter(
       vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || ''
     );
+    const workspaceFolders = resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []);
     const cliAvailable = this._openCodeManager?.isCliAvailable() ?? false;
 
     return getWebviewHtml({
       webview,
       extensionUri: this._extensionUri,
       workspaceFolder,
+      workspaceFolders,
       initialStatus: this._cachedStatus,
       cliAvailable,
       panelType: 'agentManager',

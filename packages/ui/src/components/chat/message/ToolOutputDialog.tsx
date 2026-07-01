@@ -1,8 +1,7 @@
 import React from 'react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
-import { RiArrowLeftSLine, RiArrowRightSLine, RiBrainAi3Line, RiCloseLine, RiFileImageLine, RiFileList2Line, RiFilePdfLine, RiFileSearchLine, RiFolder6Line, RiGitBranchLine, RiGlobalLine, RiListCheck3, RiLoader4Line, RiPencilAiLine, RiSearchLine, RiTaskLine, RiTerminalBoxLine, RiToolsLine } from '@remixicon/react';
 import { File as PierreFile, PatchDiff } from '@pierre/diffs/react';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
 import { createPortal } from 'react-dom';
 
 import { cn } from '@/lib/utils';
@@ -26,12 +25,13 @@ import type { ToolPopupContent, DiffViewMode } from './types';
 import { DiffViewToggle } from './DiffViewToggle';
 import { VirtualizedCodeBlock, type CodeLine } from './parts/VirtualizedCodeBlock';
 import { JsonTreeView } from '@/components/ui/JsonTreeView';
+import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 interface ToolOutputDialogProps {
     popup: ToolPopupContent;
     onOpenChange: (open: boolean) => void;
-    syntaxTheme: { [key: string]: React.CSSProperties };
     isMobile: boolean;
 }
 
@@ -40,54 +40,54 @@ const getToolIcon = (toolName: string) => {
     const tool = toolName.toLowerCase();
 
     if (tool === 'reasoning') {
-        return <RiBrainAi3Line className={iconClass} />;
+        return <Icon name="brain-ai-3" className={iconClass} />;
     }
     if (tool === 'image-preview') {
-        return <RiFileImageLine className={iconClass} />;
+        return <Icon name="file-image" className={iconClass} />;
     }
     if (tool === 'mermaid-preview') {
-        return <RiFileList2Line className={iconClass} />;
+        return <Icon name="file-list-2" className={iconClass} />;
     }
     if (tool === 'edit' || tool === 'multiedit' || tool === 'apply_patch' || tool === 'str_replace' || tool === 'str_replace_based_edit_tool') {
-        return <RiPencilAiLine className={iconClass} />;
+        return <Icon name="pencil-ai" className={iconClass} />;
     }
     if (tool === 'write' || tool === 'create' || tool === 'file_write') {
-        return <RiFilePdfLine className={iconClass} />;
+        return <Icon name="file-pdf" className={iconClass} />;
     }
     if (tool === 'read' || tool === 'view' || tool === 'file_read' || tool === 'cat') {
-        return <RiFilePdfLine className={iconClass} />;
+        return <Icon name="file-pdf" className={iconClass} />;
     }
     if (tool === 'bash' || tool === 'shell' || tool === 'cmd' || tool === 'terminal') {
-        return <RiTerminalBoxLine className={iconClass} />;
+        return <Icon name="terminal-box" className={iconClass} />;
     }
     if (tool === 'list' || tool === 'ls' || tool === 'dir' || tool === 'list_files') {
-        return <RiFolder6Line className={iconClass} />;
+        return <Icon name="folder-6" className={iconClass} />;
     }
     if (tool === 'search' || tool === 'grep' || tool === 'find' || tool === 'ripgrep') {
-        return <RiSearchLine className={iconClass} />;
+        return <Icon name="search" className={iconClass} />;
     }
     if (tool === 'glob') {
-        return <RiFileSearchLine className={iconClass} />;
+        return <Icon name="file-search" className={iconClass} />;
     }
     if (tool === 'fetch' || tool === 'curl' || tool === 'wget' || tool === 'webfetch') {
-        return <RiGlobalLine className={iconClass} />;
+        return <Icon name="global" className={iconClass} />;
     }
     if (tool === 'web-search' || tool === 'websearch' || tool === 'search_web' || tool === 'google' || tool === 'bing' || tool === 'duckduckgo') {
-        return <RiSearchLine className={iconClass} />;
+        return <Icon name="search" className={iconClass} />;
     }
     if (tool === 'todowrite' || tool === 'todoread') {
-        return <RiListCheck3 className={iconClass} />;
+        return <Icon name="list-check-3" className={iconClass} />;
     }
     if (tool === 'plan_enter') {
-        return <RiFileList2Line className={iconClass} />;
+        return <Icon name="file-list-2" className={iconClass} />;
     }
     if (tool === 'plan_exit') {
-        return <RiTaskLine className={iconClass} />;
+        return <Icon name="task" className={iconClass} />;
     }
     if (tool.startsWith('git')) {
-        return <RiGitBranchLine className={iconClass} />;
+        return <Icon name="git-branch" className={iconClass} />;
     }
-    return <RiToolsLine className={iconClass} />;
+    return <Icon name="tools" className={iconClass} />;
 };
 
 const PREVIEW_ANIMATION_MS = 150;
@@ -118,7 +118,7 @@ const TOOL_DIFF_METRICS = {
     lineHeight: 24,
     diffHeaderHeight: 44,
     hunkSeparatorHeight: 24,
-    fileGap: 0,
+    spacing: 0,
 };
 
 const usePierreThemeConfig = (): PierreThemeConfig => {
@@ -442,7 +442,7 @@ const ImagePreviewDialog: React.FC<{
                         className="absolute left-3 top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-black/40 text-foreground/90 hover:bg-black/55 focus:outline-none focus:ring-2 focus:ring-primary/60"
                         aria-label={t('chat.toolOutputDialog.image.previousAria')}
                     >
-                        <RiArrowLeftSLine className="h-6 w-6" />
+                        <Icon name="arrow-left-s" className="h-6 w-6" />
                     </button>
                     <button
                         type="button"
@@ -451,7 +451,7 @@ const ImagePreviewDialog: React.FC<{
                         className="absolute right-3 top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-black/40 text-foreground/90 hover:bg-black/55 focus:outline-none focus:ring-2 focus:ring-primary/60"
                         aria-label={t('chat.toolOutputDialog.image.nextAria')}
                     >
-                        <RiArrowRightSLine className="h-6 w-6" />
+                        <Icon name="arrow-right-s" className="h-6 w-6" />
                     </button>
                 </>
             )}
@@ -480,7 +480,7 @@ const ImagePreviewDialog: React.FC<{
                             onClick={() => onOpenChange(false)}
                             aria-label={t('chat.toolOutputDialog.image.closeAria')}
                         >
-                            <RiCloseLine className="h-4 w-4" />
+                            <Icon name="close" className="h-4 w-4" />
                         </button>
                     </div>
 
@@ -549,9 +549,8 @@ DialogUnifiedDiff.displayName = 'DialogUnifiedDiff';
 
 const DialogReadContent: React.FC<{
     popup: ToolPopupContent;
-    syntaxTheme: Record<string, React.CSSProperties>;
     pierreThemeConfig: PierreThemeConfig;
-}> = React.memo(({ popup, syntaxTheme, pierreThemeConfig }) => {
+}> = React.memo(({ popup, pierreThemeConfig }) => {
     const parsedReadOutput = React.useMemo(() => parseReadToolOutput(popup.content), [popup.content]);
 
     const inputMeta = popup.metadata?.input;
@@ -626,7 +625,6 @@ const DialogReadContent: React.FC<{
         <VirtualizedCodeBlock
             lines={codeLines}
             language={detectedLanguage}
-            syntaxTheme={syntaxTheme}
             maxHeight="70vh"
         />
     );
@@ -739,7 +737,7 @@ const MermaidPreviewDialog: React.FC<{
             if (!normalizedPath) {
                 sourcePromise = Promise.reject(new Error('Invalid local file path for Mermaid preview.'));
             } else {
-                sourcePromise = fetch(`/api/fs/raw?path=${encodeURIComponent(normalizedPath)}`)
+                sourcePromise = runtimeFetch('/api/fs/raw', { query: { path: normalizedPath } })
                     .then((response) => {
                         if (!response.ok) {
                             return Promise.reject(new Error(`Failed to read diagram file (${response.status})`));
@@ -927,7 +925,7 @@ const MermaidPreviewDialog: React.FC<{
                             onClick={() => onOpenChange(false)}
                             aria-label={t('chat.toolOutputDialog.mermaid.closeAria')}
                         >
-                            <RiCloseLine className="h-4 w-4" />
+                            <Icon name="close" className="h-4 w-4" />
                         </button>
                     </div>
                     <div
@@ -937,7 +935,7 @@ const MermaidPreviewDialog: React.FC<{
                         <div className="h-full overflow-hidden">
                             {status === 'loading' && (
                                 <div className="h-full min-h-28 flex items-center justify-center gap-2 text-muted-foreground typography-meta">
-                                    <RiLoader4Line className="h-4 w-4 animate-spin" />
+                                    <Icon name="loader-4" className="h-4 w-4 animate-spin" />
                                     <span>{t('chat.toolOutputDialog.mermaid.loading')}</span>
                                 </div>
                             )}
@@ -971,6 +969,7 @@ const MermaidPreviewDialog: React.FC<{
                                         allowMermaidWheelZoom
                                         className="markdown-mermaid-fullscreen h-full [&_[data-markdown='mermaid-block']_button]:hidden"
                                         mermaidControls={MERMAID_CONTROLS}
+                                        enableFileReferences={false}
                                     />
                                 </div>
                             )}
@@ -984,7 +983,7 @@ const MermaidPreviewDialog: React.FC<{
     return createPortal(content, document.body);
 };
 
-const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange, syntaxTheme, isMobile }) => {
+const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange, isMobile }) => {
     const { t } = useI18n();
     const [diffViewMode, setDiffViewMode] = React.useState<DiffViewMode>('unified');
     const pierreThemeConfig = usePierreThemeConfig();
@@ -1016,7 +1015,7 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                 <div className="flex-shrink-0 pb-1">
                     <div className="flex items-start gap-2 text-foreground typography-ui-header font-semibold">
                         {popup.metadata?.tool ? getToolIcon(popup.metadata.tool as string) : (
-                            <RiToolsLine className="h-3.5 w-3.5 text-foreground flex-shrink-0" />
+                            <Icon name="tools" className="h-3.5 w-3.5 text-foreground flex-shrink-0" />
                         )}
                         <span className="break-words flex-1 leading-tight">{popup.title}</span>
                         {popup.isDiff && (
@@ -1053,16 +1052,13 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                                     </div>
                                     {meta.tool === 'bash' && getInputValue('command') ? (
                                         <div className="tool-input-surface bg-transparent rounded-xl border border-border/20 mx-3">
-                                            <SyntaxHighlighter
-                                                style={syntaxTheme}
+                                            <WorkerHighlightedCode
                                                 language="bash"
-                                                PreTag="div"
-                                                customStyle={toolDisplayStyles.getPopupStyles()}
-                                                codeTagProps={DIALOG_CODE_TAG_PROPS}
-                                                wrapLongLines
-                                            >
-                                                {getInputValue('command')!}
-                                            </SyntaxHighlighter>
+                                                code={getInputValue('command')!}
+                                                style={toolDisplayStyles.getPopupStyles()}
+                                                codeStyle={DIALOG_CODE_TAG_PROPS.style}
+                                                wrap
+                                            />
                                         </div>
                                     ) : meta.tool === 'task' && getInputValue('prompt') ? (
                                         <div
@@ -1122,16 +1118,13 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                                             completed: t('chat.todo.completed'),
                                             cancelled: t('chat.todo.cancelled'),
                                         }) || (
-                                            <SyntaxHighlighter
-                                                style={syntaxTheme}
+                                            <WorkerHighlightedCode
                                                 language="json"
-                                                PreTag="div"
-                                                wrapLongLines
-                                                customStyle={toolDisplayStyles.getPopupContainerStyles()}
-                                                codeTagProps={DIALOG_CODE_TAG_PROPS}
-                                            >
-                                                {popup.content}
-                                            </SyntaxHighlighter>
+                                                code={popup.content}
+                                                style={toolDisplayStyles.getPopupContainerStyles()}
+                                                codeStyle={DIALOG_CODE_TAG_PROPS.style}
+                                                wrap
+                                            />
                                         )
                                     );
                                 }
@@ -1176,23 +1169,20 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
 
                                 if (tool === 'web-search' || tool === 'websearch' || tool === 'search_web') {
                                     return (
-                                        renderWebSearchOutput(popup.content, syntaxTheme) || (
-                                            <SyntaxHighlighter
-                                                style={syntaxTheme}
+                                        renderWebSearchOutput(popup.content) || (
+                                            <WorkerHighlightedCode
                                                 language="text"
-                                                PreTag="div"
-                                                wrapLongLines
-                                                customStyle={toolDisplayStyles.getPopupContainerStyles()}
-                                                codeTagProps={DIALOG_CODE_TAG_PROPS}
-                                            >
-                                                {popup.content}
-                                            </SyntaxHighlighter>
+                                                code={popup.content}
+                                                style={toolDisplayStyles.getPopupContainerStyles()}
+                                                codeStyle={DIALOG_CODE_TAG_PROPS.style}
+                                                wrap
+                                            />
                                         )
                                     );
                                 }
 
                                 if (tool === 'read') {
-                                    return <DialogReadContent popup={popup} syntaxTheme={syntaxTheme} pierreThemeConfig={pierreThemeConfig} />;
+                                    return <DialogReadContent popup={popup} pierreThemeConfig={pierreThemeConfig} />;
                                 }
 
                                 // JSON tree viewer for generic JSON outputs
@@ -1208,16 +1198,13 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                                 }
 
                                 return (
-                                    <SyntaxHighlighter
-                                        style={syntaxTheme}
+                                    <WorkerHighlightedCode
                                         language={popup.language || 'text'}
-                                        PreTag="div"
-                                        wrapLongLines
-                                        customStyle={toolDisplayStyles.getPopupContainerStyles()}
-                                        codeTagProps={DIALOG_CODE_TAG_PROPS}
-                                    >
-                                        {popup.content}
-                                    </SyntaxHighlighter>
+                                        code={popup.content}
+                                        style={toolDisplayStyles.getPopupContainerStyles()}
+                                        codeStyle={DIALOG_CODE_TAG_PROPS.style}
+                                        wrap
+                                    />
                                 );
                             })()}
                         </div>

@@ -4,12 +4,13 @@ import {
   DialogContent,
 } from '@/components/ui/dialog';
 import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
-import { RiDiscordFill, RiGithubFill, RiTwitterXFill } from '@remixicon/react';
 import { debugUtils } from '@/lib/debug';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
+import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { getDesktopAppVersion } from '@/lib/desktopNative';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 interface AboutDialogProps {
   open: boolean;
@@ -21,13 +22,16 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
   onOpenChange,
 }) => {
   const { t } = useI18n();
+  const showDiagnostics = import.meta.env.DEV;
   const [version, setVersion] = React.useState<string | null>(null);
+  const [openCodeVersion, setOpenCodeVersion] = React.useState<string | null>(null);
   const [isCopyingDiagnostics, setIsCopyingDiagnostics] = React.useState(false);
   const [copiedDiagnostics, setCopiedDiagnostics] = React.useState(false);
   const [diagnosticsReport, setDiagnosticsReport] = React.useState<string | null>(null);
   const [isPreparingDiagnostics, setIsPreparingDiagnostics] = React.useState(false);
 
   const handleCopyDiagnostics = React.useCallback(async () => {
+    if (!showDiagnostics) return;
     if (isCopyingDiagnostics) return;
     setIsCopyingDiagnostics(true);
     setCopiedDiagnostics(false);
@@ -54,14 +58,14 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
     } finally {
       setIsCopyingDiagnostics(false);
     }
-  }, [diagnosticsReport, isCopyingDiagnostics, t]);
+  }, [diagnosticsReport, isCopyingDiagnostics, showDiagnostics, t]);
 
   React.useEffect(() => {
     if (!open) return;
 
     const fetchVersion = async () => {
       try {
-        const response = await fetch('/api/system/info');
+        const response = await runtimeFetch('/api/system/info');
         if (response.ok) {
           const data = await response.json();
           if (typeof data.openchamberVersion === 'string' && data.openchamberVersion.trim()) {
@@ -80,7 +84,33 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
   }, [open]);
 
   React.useEffect(() => {
-    if (!open) {
+    if (!open) return;
+
+    let cancelled = false;
+    const fetchOpenCodeVersion = async () => {
+      try {
+        const response = await runtimeFetch('/api/opencode/upgrade-status', {
+          headers: { Accept: 'application/json' },
+        });
+        if (!response.ok) return;
+        const data = await response.json().catch(() => null) as null | { currentVersion?: unknown };
+        const currentVersion = typeof data?.currentVersion === 'string' ? data.currentVersion.trim() : '';
+        if (!cancelled && currentVersion) {
+          setOpenCodeVersion(currentVersion);
+        }
+      } catch {
+        // OpenCode version is best-effort in About.
+      }
+    };
+
+    void fetchOpenCodeVersion();
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  React.useEffect(() => {
+    if (!open || !showDiagnostics) {
       setDiagnosticsReport(null);
       setIsPreparingDiagnostics(false);
       return;
@@ -106,7 +136,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, showDiagnostics]);
 
   const displayVersion = version;
 
@@ -118,65 +148,68 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
 
           <div className="space-y-1">
             <h2 className="text-lg font-semibold">OpenChamber</h2>
-            {displayVersion && (
-              <p className="typography-meta text-muted-foreground">
-                {t('aboutDialog.versionLabel', { version: displayVersion })}
-              </p>
-            )}
+            <div className="space-y-0.5 typography-meta text-muted-foreground">
+              {displayVersion && (
+                <p>{t('aboutDialog.openChamberVersionLabel', { version: displayVersion })}</p>
+              )}
+              {openCodeVersion && (
+                <p>{t('aboutDialog.openCodeVersionLabel', { version: openCodeVersion })}</p>
+              )}
+            </div>
           </div>
 
-          <p className="typography-meta text-muted-foreground">
-            {t('aboutDialog.tagline')}
-          </p>
+          {showDiagnostics && (
+            <div className="flex flex-col items-center gap-2 pt-2">
+              <button
+                onClick={handleCopyDiagnostics}
+                disabled={isCopyingDiagnostics || isPreparingDiagnostics || !diagnosticsReport}
+                className={cn(
+                  'typography-meta text-muted-foreground hover:text-foreground',
+                  'underline-offset-2 hover:underline',
+                  'disabled:opacity-50 disabled:cursor-not-allowed'
+                )}
+              >
+                {copiedDiagnostics
+                  ? t('aboutDialog.actions.diagnosticsCopied')
+                  : isPreparingDiagnostics
+                    ? t('aboutDialog.actions.preparingDiagnostics')
+                    : t('aboutDialog.actions.copyDiagnostics')}
+              </button>
+              <p className="typography-micro text-muted-foreground">
+                {t('aboutDialog.diagnosticsDescription')}
+              </p>
+            </div>
+          )}
 
           <div className="flex flex-col items-center gap-2 pt-2">
-            <button
-              onClick={handleCopyDiagnostics}
-              disabled={isCopyingDiagnostics || isPreparingDiagnostics || !diagnosticsReport}
-              className={cn(
-                'typography-meta text-muted-foreground hover:text-foreground',
-                'underline-offset-2 hover:underline',
-                'disabled:opacity-50 disabled:cursor-not-allowed'
-              )}
-            >
-              {copiedDiagnostics
-                ? t('aboutDialog.actions.diagnosticsCopied')
-                : isPreparingDiagnostics
-                  ? t('aboutDialog.actions.preparingDiagnostics')
-                  : t('aboutDialog.actions.copyDiagnostics')}
-            </button>
-            <p className="typography-micro text-muted-foreground">
-              {t('aboutDialog.diagnosticsDescription')}
-            </p>
-          </div>
-
-          <div className="flex items-center gap-4 pt-2">
+            <div className="flex items-center justify-center gap-4">
+              <a
+                href="https://github.com/btriapitsyn/openchamber"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 typography-meta text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <Icon name="github-fill" className="h-4 w-4" />
+                <span>GitHub</span>
+              </a>
+              <a
+                href="https://discord.gg/ZYRSdnwwKA"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 typography-meta text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <Icon name="discord-fill" className="h-4 w-4" />
+                <span>Discord</span>
+              </a>
+            </div>
             <a
-              href="https://github.com/btriapitsyn/openchamber"
+              href="https://x.com/openchamber_dev"
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-1.5 typography-meta text-muted-foreground hover:text-foreground transition-colors"
             >
-              <RiGithubFill className="h-4 w-4" />
-              <span>GitHub</span>
-            </a>
-            <a
-              href="https://discord.gg/ZYRSdnwwKA"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 typography-meta text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <RiDiscordFill className="h-4 w-4" />
-              <span>Discord</span>
-            </a>
-            <a
-              href="https://x.com/btriapitsyn"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 typography-meta text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <RiTwitterXFill className="h-4 w-4" />
-              <span>@btriapitsyn</span>
+              <Icon name="twitter-xfill" className="h-4 w-4" />
+              <span>@openchamber_dev</span>
             </a>
           </div>
 

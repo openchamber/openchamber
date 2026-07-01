@@ -3,6 +3,12 @@
 @import "./styles/design-system.css";
 @import "./styles/typography.css";
 @import "./styles/mobile.css";
+/* Load KaTeX styles eagerly with the main bundle. Importing them inside the
+   lazy MarkdownRendererImpl chunk meant a stylesheet was injected late on the
+   first markdown render of a session; that late injection triggered a style
+   recalc during which the layered `.chat-message-column` width clamp briefly
+   lost, flashing message text to full width before it snapped back. */
+@import "katex/dist/katex.min.css";
 @source "./**/*.{ts,tsx,css}";
 
 /* KaTeX theme overrides for light/dark mode */
@@ -29,8 +35,8 @@
 /* Buttons should never look selectable. */
 button,
 [role="button"] {
-  user-select: none;
-  -webkit-user-select: none;
+  user-select: none !important;
+  -webkit-user-select: none !important;
 }
 
 :root.oc-theme-switching *,
@@ -38,6 +44,69 @@ button,
 :root.oc-theme-switching *::after {
   transition: none !important;
   animation: none !important;
+}
+
+[data-settings-search-highlight="true"] {
+  border-radius: 0.25rem;
+  background: color-mix(in srgb, var(--primary-base) 7%, transparent);
+  transition: background-color 180ms ease;
+}
+
+/* ── macOS vibrancy ───────────────────────────────────────────────────────
+   The window is created transparent with a native 'sidebar' NSVisualEffectView
+   behind it. We keep the whole app opaque (bg-background covers the window)
+   EXCEPT the left sidebar, which is the only translucent surface that lets the
+   native vibrancy show through. `data-oc-vibrancy` = vibrancy active;
+   `data-oc-vibrancy-ready` = native layer has settled (set from the main
+   process after show/restore) — until then the sidebar stays solid to avoid a
+   flash of raw transparency. */
+html[data-oc-vibrancy] body,
+html[data-oc-vibrancy] #root {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+html[data-oc-vibrancy] .main-content-safe-area {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* Left sidebar: solid until the native layer is ready, then a translucent
+   overlay so the vibrancy frosts through. */
+html[data-oc-vibrancy] .oc-vibrancy-surface {
+  background: var(--sidebar) !important;
+}
+
+html[data-oc-vibrancy][data-oc-vibrancy-ready] .oc-vibrancy-surface {
+  background: var(--sidebar-vibrancy-overlay) !important;
+}
+
+/* Inner bg-sidebar elements inside the vibrant surface must not re-paint an
+   opaque fill, or they'd cover the frosted effect. */
+html[data-oc-vibrancy] .oc-vibrancy-surface .bg-sidebar {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* Project-actions pill over the open sidebar: drop its opaque surface so it
+   frosts to the exact same level as the sidebar (border keeps its outline). */
+html[data-oc-vibrancy] .oc-vibrancy-pill {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* Accessibility: drop translucency when the OS asks for reduced transparency. */
+@media (prefers-reduced-transparency: reduce) {
+  html[data-oc-vibrancy] body,
+  html[data-oc-vibrancy] #root,
+  html[data-oc-vibrancy] .main-content-safe-area {
+    background: var(--surface-background) !important;
+  }
+
+  html[data-oc-vibrancy] .oc-vibrancy-surface,
+  html[data-oc-vibrancy][data-oc-vibrancy-ready] .oc-vibrancy-surface {
+    background: var(--sidebar) !important;
+  }
 }
 
 /* Suppress WebKit-specific hover/focus adornments on the chat textarea */
@@ -711,22 +780,38 @@ html:not(.dark) .chat-scroll {
   font-size: inherit !important;
 }
 
-/* Model/agent controls: agent label hides before model label. */
+/* Model/agent controls: progressively collapse labels to icon-only as the row narrows.
+   Hide priority (most aggressive first → most resilient last): agent, variant, model. */
+
+/* Desktop (non-VSCode): pick thresholds that fire BEFORE the per-label `max-w-[Xpx]`
+   constraints would truncate text with an ellipsis. */
+@container model-controls (max-width: 22rem) {
+  :root:not(.vscode-runtime) .model-controls__agent-label {
+    display: none;
+  }
+}
+
+@container model-controls (max-width: 14rem) {
+  :root:not(.vscode-runtime) .model-controls__variant-label {
+    display: none;
+  }
+}
+
+@container model-controls (max-width: 10rem) {
+  :root:not(.vscode-runtime) .model-controls__model-label {
+    display: none;
+  }
+}
+
+/* VS Code side panel: tighter thresholds since the panel is narrow and labels are smaller. */
 @container model-controls (max-width: 11rem) {
-  .model-controls__agent-label {
-    display: none;
-  }
-}
-
-@container model-controls (max-width: 9rem) {
-  .model-controls__model-label {
-    display: none;
-  }
-}
-
-/* VS Code side panel: collapse earlier to save horizontal space. */
-@container model-controls (max-width: 9rem) {
   :root.vscode-runtime .model-controls__agent-label {
+    display: none;
+  }
+}
+
+@container model-controls (max-width: 9rem) {
+  :root.vscode-runtime .model-controls__variant-label {
     display: none;
   }
 }
@@ -740,6 +825,12 @@ html:not(.dark) .chat-scroll {
 /* Commit actions: collapse labels when narrow. */
 @container commit-actions (max-width: 21rem) {
   .commit-actions__label--long {
+    display: none;
+  }
+}
+
+@container commit-actions (max-width: 22rem) {
+  .commit-actions__label--push {
     display: none;
   }
 }
@@ -772,6 +863,20 @@ html:not(.dark) .chat-scroll {
   }
 }
 
+/* Diff toolbar: drop low-priority labels only when the context panel is genuinely tight. */
+@container diff-toolbar (max-width: 28rem) {
+  .diff-toolbar__scope-count,
+  .diff-toolbar__review-label,
+  .diff-toolbar__expand-label {
+    display: none;
+  }
+
+  .diff-toolbar__review-button,
+  .diff-toolbar__expand-button {
+    padding-inline: 0.5rem;
+  }
+}
+
 /* Status row: collapse optional text when narrow to keep both sides in one line. */
 @container status-row (max-width: 30rem) {
   .status-row__active-todo {
@@ -785,8 +890,8 @@ html:not(.dark) .chat-scroll {
   }
 }
 
-/* Assistant message footer: collapse text labels to icons when narrow. */
-@container message-footer (max-width: 24rem) {
+/* Assistant message footer: collapse text labels only on very narrow layouts. */
+@container message-footer (max-width: 16rem) {
   .message-footer__label {
     display: none;
   }
@@ -833,6 +938,30 @@ html:not(.dark) .chat-scroll {
   line-height: inherit;
 }
 
+/* Restore paragraph block spacing inside markdown content. The
+   --markdown-paragraph-spacing token existed but was never wired, so Tailwind
+   preflight's zeroed <p> margins left adjacent paragraphs collapsed into one
+   visual line. */
+.markdown-content p {
+  margin: 0 0 var(--markdown-paragraph-spacing) 0;
+}
+
+/* The markdown renderer wraps each block in a display:contents [data-md-block]
+   element, so the message-level [&_.markdown-content>*:last-child]:mb-0
+   nullifiers target the wrapper (where margin is ignored), not the paragraph.
+   Drop the trailing margin on the last paragraph of the last block directly so
+   messages don't gain extra space at the bottom. */
+.markdown-content > [data-md-block]:last-child p:last-child {
+  margin-bottom: 0;
+}
+
+/* Tool cards (code size) and reasoning (meta size, dimmed) are intentionally
+   compact — keep their paragraphs tight, matching prior behavior. */
+.markdown-content.markdown-tool p,
+.markdown-content.markdown-reasoning p {
+  margin-bottom: 0;
+}
+
 /* Tool markdown should render at code size to match tool card typography. */
 .markdown-content.markdown-tool {
   font-size: var(--text-code) !important;
@@ -840,7 +969,7 @@ html:not(.dark) .chat-scroll {
 
 /* Reasoning markdown renders at meta size, dimmed. */
 .markdown-content.markdown-reasoning {
-  font-size: var(--text-meta);
+  font-size: var(--text-markdown);
   color: var(--surface-muted-foreground);
   --markdown-heading1: inherit;
   --markdown-heading2: inherit;
@@ -976,10 +1105,23 @@ html:not(.dark) .chat-scroll {
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 2px;
+  user-select: text !important;
+  -webkit-user-select: text !important;
 }
 
 .markdown-content [data-openchamber-file-link="true"]:hover {
   color: var(--markdown-link-hover, var(--primary));
+}
+
+/* Agent/skill mentions use the primary accent, not the markdown link color */
+.markdown-content a[data-openchamber-agent-mention="true"],
+.markdown-content a[data-skill-name] {
+  color: var(--primary);
+}
+
+.markdown-content a[data-openchamber-agent-mention="true"]:hover,
+.markdown-content a[data-skill-name]:hover {
+  color: var(--primary);
 }
 
 /* Markdown blockquote - use theme colors */
@@ -1261,45 +1403,6 @@ html:not(.dark) .chat-scroll {
   background: transparent;
 }
 
-/* Hide system caret in terminal - targets both Ghostty internal input and our custom touch input */
-.terminal-viewport-container textarea,
-.terminal-viewport-container input {
-  caret-color: transparent !important;
-}
-
-.terminal-viewport-container [contenteditable="true"][aria-label="Terminal input"] {
-  caret-color: transparent !important;
-  outline: none !important;
-}
-
-[contenteditable="true"][aria-label="Terminal input"] {
-  caret-color: transparent !important;
-  outline: none !important;
-}
-
-/* Keep Ghostty's internal focus textarea fully non-painting on desktop. */
-.terminal-viewport-container textarea:not([data-terminal-hidden-input="true"]) {
-  opacity: 0 !important;
-  font-size: 0 !important;
-  line-height: 0 !important;
-  color: transparent !important;
-  -webkit-text-fill-color: transparent !important;
-  background: transparent !important;
-  border: 0 !important;
-  outline: none !important;
-  box-shadow: none !important;
-  text-shadow: none !important;
-}
-
-textarea[aria-label="Terminal input"],
-input[aria-label="Terminal input"] {
-  caret-color: transparent !important;
-  color: transparent !important;
-  -webkit-text-fill-color: transparent !important;
-  opacity: 0 !important;
-  outline: none !important;
-}
-
 /* Terminal touch input is portaled to document.body; keep it fully non-painting across engines. */
 input[data-terminal-hidden-input="true"],
 textarea[data-terminal-hidden-input="true"] {
@@ -1324,6 +1427,45 @@ textarea[data-terminal-hidden-input="true"]::selection {
 input[data-terminal-hidden-input="true"]::placeholder,
 textarea[data-terminal-hidden-input="true"]::placeholder {
   color: transparent !important;
+}
+
+/* Hide browser/system caret for Ghostty's own input surfaces.
+   Terminal cursor is rendered by the canvas renderer. */
+.terminal-viewport-container [contenteditable="true"][aria-label="Terminal input"] {
+  caret-color: transparent !important;
+  outline: none !important;
+}
+
+textarea[aria-label="Terminal input"],
+input[aria-label="Terminal input"] {
+  caret-color: transparent !important;
+  outline: none !important;
+}
+
+/* When touch terminal input uses the portaled overlay, keep Ghostty's
+   internal editable surfaces fully non-painting to avoid duplicate cursors. */
+.terminal-viewport-container[data-hidden-input-overlay-active="true"] textarea:not([data-terminal-hidden-input="true"]),
+.terminal-viewport-container[data-hidden-input-overlay-active="true"] input:not([data-terminal-hidden-input="true"]),
+.terminal-viewport-container[data-hidden-input-overlay-active="true"] [contenteditable="true"] {
+  caret-color: transparent !important;
+  color: transparent !important;
+  -webkit-text-fill-color: transparent !important;
+  background: transparent !important;
+  border: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+
+.terminal-viewport-container[data-hidden-input-overlay-active="true"] textarea:not([data-terminal-hidden-input="true"]),
+.terminal-viewport-container[data-hidden-input-overlay-active="true"] input:not([data-terminal-hidden-input="true"]),
+.terminal-viewport-container[data-hidden-input-overlay-active="true"] [contenteditable="true"] {
+  opacity: 0 !important;
+  font-size: 0 !important;
+  line-height: 0 !important;
+  pointer-events: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
 }
 
 /* Mobile Terminal Optimizations */
@@ -1418,6 +1560,23 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   100% { transform: translateX(-100%); }
 }
 
+@keyframes open-file-name-marquee-scroll {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.open-file-name-marquee-track {
+  display: inline-flex;
+  min-width: max-content;
+  animation: open-file-name-marquee-scroll var(--open-file-name-marquee-duration, 14s) linear infinite;
+  will-change: transform;
+}
+
+.open-file-name-marquee-item {
+  flex-shrink: 0;
+  padding-right: 2rem;
+}
+
 .marquee-text {
   display: inline-block;
   white-space: nowrap;
@@ -1435,19 +1594,52 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
 
 @media (prefers-reduced-motion: reduce) {
   .marquee-text--auto,
+  .open-file-name-marquee-track,
   .group:hover .marquee-text--active,
   .marquee-text--active:hover {
     animation: none;
+  }
+
+  .open-file-name-marquee-track {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    will-change: auto;
+  }
+
+  .open-file-name-marquee-track .open-file-name-marquee-item {
+    display: inline;
+    padding-right: 0;
+  }
+
+  .open-file-name-marquee-track .open-file-name-marquee-item[aria-hidden="true"] {
+    display: none;
   }
 
   .animate-busy-pulse {
     animation: none;
   }
 
-
 }
 
 /* Settings dialog: hide the overlay scrollbar; wheel/keyboard scroll still works. */
 [data-settings-view="true"] .overlay-scrollbar {
   display: none;
+}
+
+/* Desktop app shell (Electron/native window): native apps use the arrow cursor
+   for clickable controls, not the web's hand/pointer. Neutralize pointer
+   cursors under the desktop runtime only — web in a browser keeps them.
+   Resize/grab/text cursors are untouched. */
+html.desktop-runtime
+  :where(button, [role="button"], a[href], summary, label[for]):not(:disabled):not([aria-disabled="true"]) {
+  cursor: default;
+}
+html.desktop-runtime [class*="cursor-pointer"] {
+  cursor: default !important;
+}
+html.desktop-runtime .markdown-content [data-openchamber-file-link="true"] {
+  cursor: default;
 }

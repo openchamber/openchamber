@@ -1,15 +1,16 @@
 import { create } from "zustand";
-import { devtools, persist, createJSONStorage } from "zustand/middleware";
+import { devtools, persist } from "zustand/middleware";
 import type { Session } from "@opencode-ai/sdk/v2/client";
 import {
     autoRespondsPermission,
     type PermissionAutoAcceptMap,
 } from "./utils/permissionAutoAccept";
-import { getSafeStorage } from "./utils/safeStorage";
+import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
 import { getAllSyncSessions, getSyncChildStores } from "@/sync/sync-refs";
 import { opencodeClient } from "@/lib/opencode/client";
 import { respondToPermission } from "@/sync/session-actions";
 import { useSessionUIStore } from "@/sync/session-ui-store";
+import { runtimeFetch } from "@/lib/runtime-fetch";
 
 interface PermissionState {
     autoAccept: PermissionAutoAcceptMap;
@@ -107,14 +108,13 @@ const normalizeDirectoryCandidate = (value: unknown): string | null => {
     return trimmed.length > 0 ? trimmed : null;
 };
 
-const collectPendingFromSyncStores = (sessionScope: Set<string>): Array<{ id: string; sessionID: string }> => {
+const collectPendingFromSyncStores = (): Array<{ id: string; sessionID: string }> => {
     try {
         const stores = getSyncChildStores();
         const pending: Array<{ id: string; sessionID: string }> = [];
         for (const store of stores.children.values()) {
             const permissionMap = store.getState().permission ?? {};
             for (const [sessionId, entries] of Object.entries(permissionMap)) {
-                if (!sessionScope.has(sessionId)) continue;
                 for (const permission of entries ?? []) {
                     if (!permission?.id) continue;
                     pending.push({ id: permission.id, sessionID: permission.sessionID || sessionId });
@@ -125,6 +125,68 @@ const collectPendingFromSyncStores = (sessionScope: Set<string>): Array<{ id: st
     } catch {
         return [];
     }
+};
+
+const sessionBelongsToScope = async (
+    sessionID: string,
+    rootSessionID: string,
+    knownSessions: Session[],
+    directories: string[],
+): Promise<boolean> => {
+    if (sessionID === rootSessionID) {
+        return true;
+    }
+
+    const knownById = new Map<string, Session>();
+    for (const session of knownSessions) {
+        knownById.set(session.id, session);
+    }
+
+    const fetchedById = new Map<string, Session>();
+    const fetchSession = async (id: string): Promise<Session | null> => {
+        const known = knownById.get(id) ?? fetchedById.get(id);
+        if (known) return known;
+
+        for (const directory of directories) {
+            try {
+                const result = await opencodeClient.getScopedSdkClient(directory).session.get({
+                    sessionID: id,
+                    directory,
+                });
+                if (result.data) {
+                    fetchedById.set(id, result.data);
+                    return result.data;
+                }
+            } catch {
+                // Try the next known project directory.
+            }
+        }
+
+        try {
+            const result = await opencodeClient.getSdkClient().session.get({ sessionID: id });
+            if (result.data) {
+                fetchedById.set(id, result.data);
+                return result.data;
+            }
+        } catch {
+            // Missing session metadata means we cannot safely inherit the parent setting.
+        }
+
+        return null;
+    };
+
+    const seen = new Set<string>();
+    let current: string | undefined = sessionID;
+    while (current && !seen.has(current)) {
+        if (current === rootSessionID) {
+            return true;
+        }
+        seen.add(current);
+        const session = await fetchSession(current);
+        current = session?.parentID ?? undefined;
+    }
+
+    return false;
 };
 
 const autoRespondsPermissionBySession = (
@@ -139,7 +201,7 @@ const autoRespondsPermissionBySession = (
     });
 };
 
-const getStorage = () => createJSONStorage(() => getSafeStorage());
+const getStorage = () => createDeferredSafeJSONStorage();
 
 export const usePermissionStore = create<PermissionStore>()(
     devtools(
@@ -169,20 +231,24 @@ export const usePermissionStore = create<PermissionStore>()(
                         return { autoAccept };
                     });
 
-                    // Mirror state to the server so it can suppress permission
-                    // notifications at the source (otherwise the 500ms debounce
-                    // races with the client's auto-response and can leak).
-                    void fetch('/api/notifications/auto-accept', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ sessionId, enabled }),
-                    }).catch(() => { /* best-effort */ });
+                    const sessionScope = resolveSessionScope(sessionId, sessions);
+
+                    // Mirror inherited state to the server so it can suppress
+                    // permission notifications before the client auto-response
+                    // round-trip. Send known descendants too; server-side
+                    // ancestry lookup can lag OpenCode session indexing.
+                    for (const scopedSessionId of sessionScope) {
+                        void runtimeFetch('/api/notifications/auto-accept', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ sessionId: scopedSessionId, enabled }),
+                        }).catch(() => { /* best-effort */ });
+                    }
 
                     if (!enabled) {
                         return;
                     }
 
-                    const sessionScope = resolveSessionScope(sessionId, sessions);
                     const sessionDirectory = useSessionUIStore.getState().getDirectoryForSession(sessionId);
                     const directories = new Set<string>();
                     const currentDirectory = normalizeDirectoryCandidate(opencodeClient.getDirectory());
@@ -200,19 +266,34 @@ export const usePermissionStore = create<PermissionStore>()(
                         }
                     }
 
-                    const pendingFromStores = collectPendingFromSyncStores(sessionScope);
-                    const pendingFromApi = await opencodeClient.listPendingPermissions({ directories: Array.from(directories) });
+                    const directoryList = Array.from(directories);
+                    const pendingFromStores = collectPendingFromSyncStores();
+                    // Best-effort: if listPendingPermissions throws (transient fetch failure),
+                    // proceed with whatever sync-store snapshots gave us. The next SSE event
+                    // or reconnect resync will auto-accept anything we missed.
+                    const pendingFromApi = await opencodeClient
+                      .listPendingPermissions({ directories: Array.from(directories) })
+                      .catch(() => []);
                     const mergedPending = new Map<string, { id: string; sessionID: string }>();
 
                     for (const permission of pendingFromStores) {
-                        mergedPending.set(permission.id, permission);
+                        if (sessionScope.has(permission.sessionID)) {
+                            mergedPending.set(permission.id, permission);
+                            continue;
+                        }
+                        if (await sessionBelongsToScope(permission.sessionID, sessionId, sessions, directoryList)) {
+                            mergedPending.set(permission.id, permission);
+                        }
                     }
                     for (const permission of pendingFromApi) {
                         if (!permission?.id || !permission?.sessionID) {
                             continue;
                         }
                         if (!sessionScope.has(permission.sessionID)) {
-                            continue;
+                            const belongsToScope = await sessionBelongsToScope(permission.sessionID, sessionId, sessions, directoryList);
+                            if (!belongsToScope) {
+                                continue;
+                            }
                         }
                         mergedPending.set(permission.id, { id: permission.id, sessionID: permission.sessionID });
                     }
@@ -276,7 +357,7 @@ export const usePermissionStore = create<PermissionStore>()(
                     // survives page reloads / server restarts.
                     for (const [sid, enabled] of Object.entries(state.autoAccept || {})) {
                         if (enabled === true) {
-                            void fetch('/api/notifications/auto-accept', {
+                            void runtimeFetch('/api/notifications/auto-accept', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ sessionId: sid, enabled: true }),

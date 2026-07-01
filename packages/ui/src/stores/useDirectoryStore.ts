@@ -2,10 +2,11 @@ import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { opencodeClient } from '@/lib/opencode/client';
 import { getDesktopHomeDirectory, isVSCodeRuntime } from '@/lib/desktop';
+import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { streamDebugEnabled } from '@/stores/utils/streamDebug';
-import { getSafeStorage } from './utils/safeStorage';
+import { getDeferredSafeStorage } from './utils/safeStorage';
 
 interface DirectoryStore {
 
@@ -26,7 +27,8 @@ interface DirectoryStore {
 }
 
 let cachedHomeDirectory: string | null = null;
-const safeStorage = getSafeStorage();
+let homeResolveGeneration = 0;
+const safeStorage = getDeferredSafeStorage();
 const persistedLastDirectory = safeStorage.getItem('lastDirectory');
 const initialHasPersistedDirectory =
   typeof persistedLastDirectory === 'string' && persistedLastDirectory.length > 0;
@@ -436,5 +438,17 @@ export const useDirectoryStore = create<DirectoryStore>()(
 if (typeof window !== 'undefined') {
   initializeHomeDirectory().then((home) => {
     useDirectoryStore.getState().synchronizeHomeDirectory(home);
+  });
+
+  // Host switches happen in place (no page reload), so the home directory
+  // must be re-resolved from the new runtime's authoritative source instead
+  // of keeping the previous host's value cached.
+  subscribeRuntimeEndpointChanged(() => {
+    cachedHomeDirectory = null;
+    const generation = ++homeResolveGeneration;
+    initializeHomeDirectory().then((home) => {
+      if (generation !== homeResolveGeneration) return;
+      useDirectoryStore.getState().synchronizeHomeDirectory(home);
+    });
   });
 }

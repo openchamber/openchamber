@@ -13,12 +13,16 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { NumberInput } from '@/components/ui/number-input';
-import { RiPlayLine, RiStopLine, RiCloseLine, RiAppleLine, RiInformationLine } from '@remixicon/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Icon } from "@/components/icon/Icon";
 import { browserVoiceService } from '@/lib/voice/browserVoiceService';
 import { audioStreamService } from '@/lib/voice/audioStreamService';
+import { wasmSttService, WASM_MODELS } from '@/lib/voice/wasmSttService';
+import type { WasmModelStatus } from '@/lib/voice/wasmSttService';
 import { cn } from '@/lib/utils';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useI18n } from '@/lib/i18n';
+import { disposePreviewAudio } from './voicePreviewAudio';
 const LANGUAGE_OPTIONS = [
     { value: 'en-US', label: 'English' },
     { value: 'es-ES', label: 'Español' },
@@ -31,6 +35,82 @@ const LANGUAGE_OPTIONS = [
     { value: 'ko-KR', label: '한국어' },
     { value: 'uk-UA', label: 'Українська' },
 ];
+
+const WasmModelStatusIndicator = ({ modelId }: { modelId: string }) => {
+    const { t } = useI18n();
+    const [status, setStatus] = useState<WasmModelStatus>(wasmSttService.getModelStatus());
+    const [loading, setLoading] = useState(false);
+
+    useEffect(() => {
+        const handler = (s: WasmModelStatus) => setStatus(s);
+        wasmSttService.onModelStatusChange = handler;
+        return () => { wasmSttService.onModelStatusChange = null; };
+    }, []);
+
+    const currentModelId = wasmSttService.getCurrentModelId();
+    const isLoadingOrDownloading = status.state === 'downloading' || status.state === 'loading';
+
+    // Reset local loading state when model finishes loading or errors
+    useEffect(() => {
+        if (status.state !== 'downloading' && status.state !== 'loading') {
+            setLoading(false);
+        }
+    }, [status.state]);
+
+    const handleDownload = async () => {
+        setLoading(true);
+        try {
+            await wasmSttService.loadModel(modelId);
+        } catch {
+            // Error is shown via status indicator
+        }
+    };
+
+    if (status.state === 'ready' && currentModelId === modelId) {
+        return (
+            <div className="flex items-center gap-2">
+                <span className="typography-ui-compact text-green-600 dark:text-green-400">
+                    {t('settings.voice.page.stt.wasmLoaded')}
+                </span>
+            </div>
+        );
+    }
+
+    if (isLoadingOrDownloading) {
+        const progress = status.state === 'downloading' ? Math.round(status.progress) : undefined;
+        return (
+            <div className="flex items-center gap-2">
+                <span className="typography-ui-compact text-muted-foreground">
+                    {status.state === 'downloading' ? t('settings.voice.page.stt.wasmDownloading') : t('settings.voice.page.stt.wasmLoading')}
+                    {progress !== undefined ? ` (${progress}%)` : ''}
+                </span>
+            </div>
+        );
+    }
+
+    if (status.state === 'error') {
+        // Partial download (cached progress): show retry button.
+        return (
+            <div className="flex items-center gap-2">
+                <span className="typography-ui-compact text-destructive">{status.error}</span>
+                <Button variant="chip" size="xs" disabled={loading} onClick={handleDownload}>
+                    {t('settings.voice.page.stt.wasmRetry')}
+                </Button>
+            </div>
+        );
+    }
+
+    return (
+        <div className="flex items-center gap-2">
+            <span className="typography-ui-compact text-muted-foreground">
+                {t('settings.voice.page.stt.wasmNotLoaded')}
+            </span>
+            <Button variant="chip" size="xs" disabled={loading} onClick={handleDownload}>
+                {t('settings.voice.page.stt.wasmDownload')}
+            </Button>
+        </div>
+    );
+};
 
 const OPENAI_VOICE_OPTIONS = [
     { value: 'alloy', label: 'Alloy' },
@@ -74,35 +154,37 @@ export const VoiceSettings: React.FC = () => {
     const setOpenaiApiKey = useConfigStore((state) => state.setOpenaiApiKey);
     const openaiCompatibleUrl = useConfigStore((state) => state.openaiCompatibleUrl);
     const setOpenaiCompatibleUrl = useConfigStore((state) => state.setOpenaiCompatibleUrl);
+    const openaiCompatibleApiKey = useConfigStore((state) => state.openaiCompatibleApiKey);
+    const setOpenaiCompatibleApiKey = useConfigStore((state) => state.setOpenaiCompatibleApiKey);
     const openaiCompatibleVoice = useConfigStore((state) => state.openaiCompatibleVoice);
     const setOpenaiCompatibleVoice = useConfigStore((state) => state.setOpenaiCompatibleVoice);
     const openaiCompatibleTtsModel = useConfigStore((state) => state.openaiCompatibleTtsModel);
     const setOpenaiCompatibleTtsModel = useConfigStore((state) => state.setOpenaiCompatibleTtsModel);
     const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
+    const ttsInputMode = useConfigStore((state) => state.ttsInputMode);
+    const setTtsInputMode = useConfigStore((state) => state.setTtsInputMode);
     // STT settings
     const sttProvider = useConfigStore((state) => state.sttProvider);
     const setSttProvider = useConfigStore((state) => state.setSttProvider);
     const sttServerUrl = useConfigStore((state) => state.sttServerUrl);
     const setSttServerUrl = useConfigStore((state) => state.setSttServerUrl);
+    const sttApiKey = useConfigStore((state) => state.sttApiKey);
+    const setSttApiKey = useConfigStore((state) => state.setSttApiKey);
     const sttModel = useConfigStore((state) => state.sttModel);
     const setSttModel = useConfigStore((state) => state.setSttModel);
+    const wasmSttModel = useConfigStore((state) => state.wasmSttModel);
+    const setWasmSttModel = useConfigStore((state) => state.setWasmSttModel);
     const sttLanguage = useConfigStore((state) => state.sttLanguage);
     const setSttLanguage = useConfigStore((state) => state.setSttLanguage);
     const sttSilenceThresholdDb = useConfigStore((state) => state.sttSilenceThresholdDb);
     const setSttSilenceThresholdDb = useConfigStore((state) => state.setSttSilenceThresholdDb);
     const sttSilenceHoldMs = useConfigStore((state) => state.sttSilenceHoldMs);
     const setSttSilenceHoldMs = useConfigStore((state) => state.setSttSilenceHoldMs);
+    const sttTranscribeOnStop = useConfigStore((state) => state.sttTranscribeOnStop);
+    const setSttTranscribeOnStop = useConfigStore((state) => state.setSttTranscribeOnStop);
     const setShowMessageTTSButtons = useConfigStore((state) => state.setShowMessageTTSButtons);
     const voiceModeEnabled = useConfigStore((state) => state.voiceModeEnabled);
     const setVoiceModeEnabled = useConfigStore((state) => state.setVoiceModeEnabled);
-    const summarizeMessageTTS = useConfigStore((state) => state.summarizeMessageTTS);
-    const setSummarizeMessageTTS = useConfigStore((state) => state.setSummarizeMessageTTS);
-    const summarizeVoiceConversation = useConfigStore((state) => state.summarizeVoiceConversation);
-    const setSummarizeVoiceConversation = useConfigStore((state) => state.setSummarizeVoiceConversation);
-    const summarizeCharacterThreshold = useConfigStore((state) => state.summarizeCharacterThreshold);
-    const setSummarizeCharacterThreshold = useConfigStore((state) => state.setSummarizeCharacterThreshold);
-    const summarizeMaxLength = useConfigStore((state) => state.summarizeMaxLength);
-    const setSummarizeMaxLength = useConfigStore((state) => state.setSummarizeMaxLength);
 
     const [isSayAvailable, setIsSayAvailable] = useState(false);
     const [sayVoices, setSayVoices] = useState<Array<{ name: string; locale: string }>>([]);
@@ -199,7 +281,7 @@ export const VoiceSettings: React.FC = () => {
 
         const checkOpenAIAvailability = async () => {
             try {
-                const response = await fetch('/api/tts/status');
+                const response = await runtimeFetch('/api/tts/status');
                 const data = await response.json();
                 const hasServerKey = data.available;
                 const hasSettingsKey = openaiApiKey.trim().length > 0;
@@ -219,7 +301,7 @@ export const VoiceSettings: React.FC = () => {
             return;
         }
 
-        fetch('/api/tts/say/status')
+        runtimeFetch('/api/tts/say/status')
             .then(res => res.json())
             .then(data => {
                 setIsSayAvailable(data.available);
@@ -239,16 +321,16 @@ export const VoiceSettings: React.FC = () => {
 
     const previewVoice = useCallback(async () => {
         if (previewAudio) {
-            previewAudio.pause();
-            previewAudio.currentTime = 0;
+            disposePreviewAudio(previewAudio);
             setPreviewAudio(null);
             setIsPreviewPlaying(false);
             return;
         }
 
         setIsPreviewPlaying(true);
+        let audio: HTMLAudioElement | null = null;
         try {
-            const response = await fetch('/api/tts/say/speak', {
+            const response = await runtimeFetch('/api/tts/say/speak', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -262,16 +344,16 @@ export const VoiceSettings: React.FC = () => {
 
             const blob = await response.blob();
             const url = URL.createObjectURL(blob);
-            const audio = new Audio(url);
+            audio = new Audio(url);
 
             audio.onended = () => {
-                URL.revokeObjectURL(url);
+                disposePreviewAudio(audio);
                 setPreviewAudio(null);
                 setIsPreviewPlaying(false);
             };
 
             audio.onerror = () => {
-                URL.revokeObjectURL(url);
+                disposePreviewAudio(audio);
                 setPreviewAudio(null);
                 setIsPreviewPlaying(false);
             };
@@ -279,30 +361,30 @@ export const VoiceSettings: React.FC = () => {
             setPreviewAudio(audio);
             await audio.play();
         } catch {
+            disposePreviewAudio(audio);
+            setPreviewAudio(null);
             setIsPreviewPlaying(false);
         }
     }, [sayVoice, speechRate, previewAudio, t]);
 
     useEffect(() => {
         return () => {
-            if (previewAudio) {
-                previewAudio.pause();
-            }
+            disposePreviewAudio(previewAudio);
         };
     }, [previewAudio]);
 
     const previewOpenAIVoice = useCallback(async () => {
         if (openaiPreviewAudio) {
-            openaiPreviewAudio.pause();
-            openaiPreviewAudio.currentTime = 0;
+            disposePreviewAudio(openaiPreviewAudio);
             setOpenaiPreviewAudio(null);
             setIsOpenAIPreviewPlaying(false);
             return;
         }
 
         setIsOpenAIPreviewPlaying(true);
+        let audio: HTMLAudioElement | null = null;
         try {
-            const response = await fetch('/api/tts/speak', {
+            const response = await runtimeFetch('/api/tts/speak', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -320,16 +402,16 @@ export const VoiceSettings: React.FC = () => {
 
             const blob = await response.blob();
             const url = URL.createObjectURL(blob);
-            const audio = new Audio(url);
+            audio = new Audio(url);
 
             audio.onended = () => {
-                URL.revokeObjectURL(url);
+                disposePreviewAudio(audio);
                 setOpenaiPreviewAudio(null);
                 setIsOpenAIPreviewPlaying(false);
             };
 
             audio.onerror = () => {
-                URL.revokeObjectURL(url);
+                disposePreviewAudio(audio);
                 setOpenaiPreviewAudio(null);
                 setIsOpenAIPreviewPlaying(false);
             };
@@ -337,22 +419,21 @@ export const VoiceSettings: React.FC = () => {
             setOpenaiPreviewAudio(audio);
             await audio.play();
         } catch {
+            disposePreviewAudio(audio);
+            setOpenaiPreviewAudio(null);
             setIsOpenAIPreviewPlaying(false);
         }
     }, [openaiVoice, speechRate, openaiPreviewAudio, openaiApiKey, t]);
 
     useEffect(() => {
         return () => {
-            if (openaiPreviewAudio) {
-                openaiPreviewAudio.pause();
-            }
+            disposePreviewAudio(openaiPreviewAudio);
         };
     }, [openaiPreviewAudio]);
 
     const previewCompatibleVoice = useCallback(async () => {
         if (compatiblePreviewAudio) {
-            compatiblePreviewAudio.pause();
-            compatiblePreviewAudio.currentTime = 0;
+            disposePreviewAudio(compatiblePreviewAudio);
             setCompatiblePreviewAudio(null);
             setIsCompatiblePreviewPlaying(false);
             return;
@@ -361,8 +442,9 @@ export const VoiceSettings: React.FC = () => {
         if (!openaiCompatibleUrl.trim()) return;
 
         setIsCompatiblePreviewPlaying(true);
+        let audio: HTMLAudioElement | null = null;
         try {
-            const response = await fetch('/api/tts/speak', {
+            const response = await runtimeFetch('/api/tts/speak', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -371,6 +453,7 @@ export const VoiceSettings: React.FC = () => {
                     model: openaiCompatibleTtsModel || undefined,
                     speed: speechRate,
                     baseURL: openaiCompatibleUrl,
+                    apiKey: openaiCompatibleApiKey || undefined,
                 }),
             });
 
@@ -381,16 +464,16 @@ export const VoiceSettings: React.FC = () => {
 
             const blob = await response.blob();
             const url = URL.createObjectURL(blob);
-            const audio = new Audio(url);
+            audio = new Audio(url);
 
             audio.onended = () => {
-                URL.revokeObjectURL(url);
+                disposePreviewAudio(audio);
                 setCompatiblePreviewAudio(null);
                 setIsCompatiblePreviewPlaying(false);
             };
 
             audio.onerror = () => {
-                URL.revokeObjectURL(url);
+                disposePreviewAudio(audio);
                 setCompatiblePreviewAudio(null);
                 setIsCompatiblePreviewPlaying(false);
             };
@@ -398,15 +481,15 @@ export const VoiceSettings: React.FC = () => {
             setCompatiblePreviewAudio(audio);
             await audio.play();
         } catch {
+            disposePreviewAudio(audio);
+            setCompatiblePreviewAudio(null);
             setIsCompatiblePreviewPlaying(false);
         }
-    }, [openaiCompatibleUrl, openaiCompatibleVoice, openaiCompatibleTtsModel, speechRate, compatiblePreviewAudio, t]);
+    }, [openaiCompatibleUrl, openaiCompatibleVoice, openaiCompatibleTtsModel, openaiCompatibleApiKey, speechRate, compatiblePreviewAudio, t]);
 
     useEffect(() => {
         return () => {
-            if (compatiblePreviewAudio) {
-                compatiblePreviewAudio.pause();
-            }
+            disposePreviewAudio(compatiblePreviewAudio);
         };
     }, [compatiblePreviewAudio]);
 
@@ -416,7 +499,7 @@ export const VoiceSettings: React.FC = () => {
         <div className="space-y-8">
 
             {/* Voice Setup */}
-            <div className="mb-8">
+            <div data-settings-item="voice.voice-setup" className="mb-8">
                 <div className="mb-1 px-1">
                     <h3 className="typography-ui-header font-medium text-foreground">
                         {t('settings.voice.page.section.voiceSetup')}
@@ -445,7 +528,7 @@ export const VoiceSettings: React.FC = () => {
                                         <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.provider')}</span>
                                         <Tooltip>
                                             <TooltipTrigger asChild>
-                                                <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                                                <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                                             </TooltipTrigger>
                                             <TooltipContent sideOffset={8} className="max-w-xs">
                                                 <ul className="space-y-1">
@@ -493,7 +576,7 @@ export const VoiceSettings: React.FC = () => {
                                                 onClick={() => setVoiceProvider('say')}
                                                 className="!font-normal"
                                             >
-                                                <RiAppleLine className="w-3.5 h-3.5 mr-0.5" />
+                                                <Icon name="apple" className="w-3.5 h-3.5 mr-0.5" />
                                                 {t('settings.voice.page.provider.say')}
                                             </Button>
                                         )}
@@ -528,7 +611,7 @@ export const VoiceSettings: React.FC = () => {
                                                 onClick={() => setOpenaiApiKey('')}
                                                 className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                                             >
-                                                <RiCloseLine className="w-3.5 h-3.5" />
+                                                <Icon name="close" className="w-3.5 h-3.5" />
                                             </button>
                                         )}
                                     </div>
@@ -559,7 +642,31 @@ export const VoiceSettings: React.FC = () => {
                                                     onClick={() => setOpenaiCompatibleUrl('')}
                                                     className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                                                 >
-                                                    <RiCloseLine className="w-3.5 h-3.5" />
+                                                    <Icon name="close" className="w-3.5 h-3.5" />
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <span className="typography-ui-label text-foreground">API Key</span>
+                                        <span className="typography-meta ml-2 text-muted-foreground">
+                                            Optional
+                                        </span>
+                                        <div className="relative mt-1.5 max-w-xs">
+                                            <input
+                                                type="password"
+                                                value={openaiCompatibleApiKey}
+                                                onChange={(e) => setOpenaiCompatibleApiKey(e.target.value)}
+                                                placeholder="sk-..."
+                                                className="w-full h-7 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/70"
+                                            />
+                                            {openaiCompatibleApiKey && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setOpenaiCompatibleApiKey('')}
+                                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                                >
+                                                    <Icon name="close" className="w-3.5 h-3.5" />
                                                 </button>
                                             )}
                                         </div>
@@ -592,7 +699,7 @@ export const VoiceSettings: React.FC = () => {
                                                 />
                                             </div>
                                             <Button size="xs" variant="ghost" onClick={previewCompatibleVoice} title={t('settings.voice.page.actions.preview')} disabled={!openaiCompatibleUrl.trim()}>
-                                                {isCompatiblePreviewPlaying ? <RiStopLine className="w-3.5 h-3.5" /> : <RiPlayLine className="w-3.5 h-3.5" />}
+                                                {isCompatiblePreviewPlaying ? <Icon name="stop" className="w-3.5 h-3.5" /> : <Icon name="play" className="w-3.5 h-3.5" />}
                                             </Button>
                                         </div>
                                     </div>
@@ -616,7 +723,7 @@ export const VoiceSettings: React.FC = () => {
                                                 </SelectContent>
                                             </Select>
                                             <Button size="xs" variant="ghost" onClick={previewOpenAIVoice} title={t('settings.voice.page.actions.preview')}>
-                                                {isOpenAIPreviewPlaying ? <RiStopLine className="w-3.5 h-3.5" /> : <RiPlayLine className="w-3.5 h-3.5" />}
+                                                {isOpenAIPreviewPlaying ? <Icon name="stop" className="w-3.5 h-3.5" /> : <Icon name="play" className="w-3.5 h-3.5" />}
                                             </Button>
                                         </>
                                     )}
@@ -638,26 +745,26 @@ export const VoiceSettings: React.FC = () => {
                                                 </SelectContent>
                                             </Select>
                                             <Button size="xs" variant="ghost" onClick={previewVoice} title={t('settings.voice.page.actions.preview')}>
-                                                {isPreviewPlaying ? <RiStopLine className="w-3.5 h-3.5" /> : <RiPlayLine className="w-3.5 h-3.5" />}
+                                                {isPreviewPlaying ? <Icon name="stop" className="w-3.5 h-3.5" /> : <Icon name="play" className="w-3.5 h-3.5" />}
                                             </Button>
                                         </>
                                     )}
 
                                     {voiceProvider === 'browser' && filteredBrowserVoices.length > 0 && (
                                         <>
-                                            <Select value={browserVoice || '__auto__'} onValueChange={(value) => setBrowserVoice(value === '__auto__' ? '' : value)}>
+                                            <Select value={browserVoice || '$auto'} onValueChange={(value) => setBrowserVoice(value === '$auto' ? '' : value)}>
                                                 <SelectTrigger className="w-fit max-w-[200px]">
                                                     <SelectValue placeholder={t('settings.voice.page.field.auto')} />
                                                 </SelectTrigger>
                                                 <SelectContent>
-                                                    <SelectItem value="__auto__">{t('settings.voice.page.field.auto')}</SelectItem>
+                                                    <SelectItem value="$auto">{t('settings.voice.page.field.auto')}</SelectItem>
                                                     {filteredBrowserVoices.map((v) => (
                                                         <SelectItem key={v.name} value={v.name}>{v.name} ({v.lang})</SelectItem>
                                                     ))}
                                                 </SelectContent>
                                             </Select>
                                             <Button size="xs" variant="ghost" onClick={previewBrowserVoice} title={t('settings.voice.page.actions.preview')}>
-                                                {isBrowserPreviewPlaying ? <RiStopLine className="w-3.5 h-3.5" /> : <RiPlayLine className="w-3.5 h-3.5" />}
+                                                {isBrowserPreviewPlaying ? <Icon name="stop" className="w-3.5 h-3.5" /> : <Icon name="play" className="w-3.5 h-3.5" />}
                                             </Button>
                                         </>
                                     )}
@@ -720,7 +827,7 @@ export const VoiceSettings: React.FC = () => {
 
             {/* Speech Recognition */}
             {voiceModeEnabled && (
-                <div className="mb-8">
+                <div data-settings-item="voice.speech-recognition" className="mb-8">
                     <div className="mb-1 px-1">
                         <h3 className="typography-ui-header font-medium text-foreground">
                             {t('settings.voice.page.section.speechRecognition')}
@@ -734,7 +841,7 @@ export const VoiceSettings: React.FC = () => {
                                     <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.provider')}</span>
                                     <Tooltip>
                                         <TooltipTrigger asChild>
-                                            <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                                            <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                                         </TooltipTrigger>
                                         <TooltipContent sideOffset={8} className="max-w-xs">
                                             <ul className="space-y-1">
@@ -763,12 +870,33 @@ export const VoiceSettings: React.FC = () => {
                                     >
                                         {t('settings.voice.page.provider.server')}
                                     </Button>
+                                    <Button
+                                        variant="chip"
+                                        size="xs"
+                                        aria-pressed={sttProvider === 'wasm'}
+                                        onClick={() => setSttProvider('wasm')}
+                                        className="!font-normal"
+                                    >
+                                        {t('settings.voice.page.provider.wasm')}
+                                    </Button>
                                 </div>
                             </div>
                         </div>
 
                         {sttProvider === 'server' && (
                             <div className="py-1.5 space-y-2">
+                                <div
+                                    className="group flex cursor-pointer items-center gap-2 py-1.5"
+                                    role="button"
+                                    tabIndex={0}
+                                    aria-pressed={sttTranscribeOnStop}
+                                    onClick={() => setSttTranscribeOnStop(!sttTranscribeOnStop)}
+                                    onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setSttTranscribeOnStop(!sttTranscribeOnStop); } }}
+                                >
+                                    <Checkbox checked={sttTranscribeOnStop} onChange={setSttTranscribeOnStop} ariaLabel={t('settings.voice.page.field.transcribeOnStopAria')} />
+                                    <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.transcribeOnStop')}</span>
+                                </div>
+
                                 {!audioStreamService.isSupported() && (
                                     <p className="typography-meta text-[var(--status-error)]">
                                         {t('settings.voice.page.field.sttBrowserSupportError')}
@@ -795,7 +923,31 @@ export const VoiceSettings: React.FC = () => {
                                                 onClick={() => setSttServerUrl('')}
                                                 className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                                             >
-                                                <RiCloseLine className="w-3.5 h-3.5" />
+                                                <Icon name="close" className="w-3.5 h-3.5" />
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                                <div>
+                                    <span className="typography-ui-label text-foreground">API Key</span>
+                                    <span className="typography-meta ml-2 text-muted-foreground">
+                                        Optional
+                                    </span>
+                                    <div className="relative mt-1.5 max-w-xs">
+                                        <input
+                                            type="password"
+                                            value={sttApiKey}
+                                            onChange={(e) => setSttApiKey(e.target.value)}
+                                            placeholder="sk-..."
+                                            className="w-full h-7 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/70"
+                                        />
+                                        {sttApiKey && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setSttApiKey('')}
+                                                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                            >
+                                                <Icon name="close" className="w-3.5 h-3.5" />
                                             </button>
                                         )}
                                     </div>
@@ -846,12 +998,44 @@ export const VoiceSettings: React.FC = () => {
                                 </div>
                             </div>
                         )}
+
+                        {sttProvider === 'wasm' && (
+                            <div className="py-1.5 space-y-2">
+                                <div>
+                                    <span className="typography-ui-label text-muted-foreground">
+                                        {t('settings.voice.page.stt.wasmModel')}
+                                    </span>
+                                    <Select value={wasmSttModel} onValueChange={setWasmSttModel}>
+                                        <SelectTrigger className="mt-0.5">
+                                            <SelectValue placeholder={t('settings.voice.page.stt.wasmModel')} />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {WASM_MODELS.map((m) => (
+                                                <SelectItem key={m.id} value={m.id}>
+                                                    <div className="flex flex-col">
+                                                        <span>{m.name}</span>
+                                                        <span className="typography-ui-compact text-muted-foreground">
+                                                            {m.size} · {m.languages}
+                                                        </span>
+                                                    </div>
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    <p className="typography-ui-compact text-muted-foreground mt-0.5">
+                                        {WASM_MODELS.find((m) => m.id === wasmSttModel)?.description}
+                                    </p>
+                                </div>
+                                {/* Model status indicator */}
+                                <WasmModelStatusIndicator modelId={wasmSttModel} />
+                            </div>
+                        )}
                     </section>
                 </div>
             )}
 
             {/* Playback & Summarization */}
-            <div className="mb-8">
+            <div data-settings-item="voice.playback" className="mb-8">
                 <div className="mb-1 px-1">
                     <h3 className="typography-ui-header font-medium text-foreground">
                         {t('settings.voice.page.section.playbackAndSummary')}
@@ -871,51 +1055,36 @@ export const VoiceSettings: React.FC = () => {
                         <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.messageReadAloudButton')}</span>
                     </div>
 
-                    <div
-                        className="group flex cursor-pointer items-center gap-2 py-1.5"
-                        role="button"
-                        tabIndex={0}
-                        aria-pressed={summarizeMessageTTS}
-                        onClick={() => setSummarizeMessageTTS(!summarizeMessageTTS)}
-                        onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setSummarizeMessageTTS(!summarizeMessageTTS); } }}
-                    >
-                        <Checkbox checked={summarizeMessageTTS} onChange={setSummarizeMessageTTS} ariaLabel={t('settings.voice.page.field.summarizeBeforePlaybackAria')} />
-                        <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.summarizeBeforePlayback')}</span>
+                    <div className="pb-1.5 pt-0.5">
+                        <div className="flex min-w-0 flex-col gap-1.5">
+                            <div className="flex items-center gap-1.5">
+                                <span className="typography-ui-label text-foreground">
+                                    {t('settings.voice.page.field.ttsInputMode')}
+                                </span>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-1">
+                                <Button
+                                    variant="chip"
+                                    size="xs"
+                                    aria-pressed={ttsInputMode === 'sanitized'}
+                                    onClick={() => setTtsInputMode('sanitized')}
+                                    className="!font-normal"
+                                >
+                                    {t('settings.voice.page.field.ttsInputModeSanitized')}
+                                </Button>
+                                <Button
+                                    variant="chip"
+                                    size="xs"
+                                    aria-pressed={ttsInputMode === 'raw'}
+                                    onClick={() => setTtsInputMode('raw')}
+                                    className="!font-normal"
+                                >
+                                    {t('settings.voice.page.field.ttsInputModeRaw')}
+                                </Button>
+                            </div>
+                        </div>
                     </div>
 
-                    {voiceModeEnabled && (
-                        <div
-                            className="group flex cursor-pointer items-center gap-2 py-1.5"
-                            role="button"
-                            tabIndex={0}
-                            aria-pressed={summarizeVoiceConversation}
-                            onClick={() => setSummarizeVoiceConversation(!summarizeVoiceConversation)}
-                            onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setSummarizeVoiceConversation(!summarizeVoiceConversation); } }}
-                        >
-                            <Checkbox checked={summarizeVoiceConversation} onChange={setSummarizeVoiceConversation} ariaLabel={t('settings.voice.page.field.summarizeVoiceModeResponsesAria')} />
-                            <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.summarizeVoiceModeResponses')}</span>
-                        </div>
-                    )}
-
-                    {(summarizeMessageTTS || summarizeVoiceConversation) && (
-                        <>
-                            <div className="flex items-center gap-8 py-1.5">
-                                <span className="typography-ui-label text-foreground sm:w-56 shrink-0">{t('settings.voice.page.field.summarizationThreshold')}</span>
-                                <div className="flex items-center gap-2 w-fit">
-                                    {!isMobile && <input type="range" min={50} max={2000} step={50} value={summarizeCharacterThreshold} onChange={(e) => setSummarizeCharacterThreshold(Number(e.target.value))} className={sliderClass} />}
-                                    <NumberInput value={summarizeCharacterThreshold} onValueChange={setSummarizeCharacterThreshold} min={50} max={2000} step={50} className="w-16 tabular-nums" />
-                                </div>
-                            </div>
-
-                            <div className="flex items-center gap-8 py-1.5">
-                                <span className="typography-ui-label text-foreground sm:w-56 shrink-0">{t('settings.voice.page.field.summaryMaxLength')}</span>
-                                <div className="flex items-center gap-2 w-fit">
-                                    {!isMobile && <input type="range" min={50} max={2000} step={50} value={summarizeMaxLength} onChange={(e) => setSummarizeMaxLength(Number(e.target.value))} className={sliderClass} />}
-                                    <NumberInput value={summarizeMaxLength} onValueChange={setSummarizeMaxLength} min={50} max={2000} step={50} className="w-16 tabular-nums" />
-                                </div>
-                            </div>
-                        </>
-                    )}
                 </section>
 
                 {voiceModeEnabled && isSupported && (

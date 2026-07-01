@@ -14,6 +14,10 @@ const requireDirectory = (id: string, type: string, directory?: string): BridgeR
   return null;
 };
 
+const isValidCommitHash = (hash: string | undefined): hash is string => (
+  typeof hash === 'string' && /^[0-9a-fA-F]{7,40}$/.test(hash)
+);
+
 export async function handleStandardGitBridgeMessage(message: BridgeMessageInput): Promise<BridgeResponse | null> {
   const { id, type, payload } = message;
 
@@ -35,10 +39,10 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
     }
 
     case 'api:git/status': {
-      const { directory } = (payload || {}) as { directory?: string };
+      const { directory, mode } = (payload || {}) as { directory?: string; mode?: 'light' };
       const dirError = requireDirectory(id, type, directory);
       if (dirError) return dirError;
-      const status = await gitService.getGitStatus(directory!);
+      const status = await gitService.getGitStatus(directory!, mode === 'light' ? { mode } : undefined);
       return { id, type, success: true, data: status };
     }
 
@@ -217,25 +221,65 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
     }
 
     case 'api:git/revert': {
-      const { directory, path: filePath } = (payload || {}) as { directory?: string; path?: string };
+      const { directory, path: filePath, scope } = (payload || {}) as { directory?: string; path?: string; scope?: 'all' | 'working' };
       if (!directory || !filePath) {
         return { id, type, success: false, error: 'Directory and path are required' };
       }
-      await gitService.revertGitFile(directory, filePath);
+      await gitService.revertGitFile(directory, filePath, { scope });
+      return { id, type, success: true, data: { success: true } };
+    }
+
+    case 'api:git/stage': {
+      const { directory, path: filePath, paths } = (payload || {}) as { directory?: string; path?: string; paths?: string[] };
+      const filePaths = (Array.isArray(paths) ? paths : [filePath])
+        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+      if (!directory || filePaths.length === 0) {
+        return { id, type, success: false, error: 'Directory and path are required' };
+      }
+      await gitService.stageGitFiles(directory, filePaths);
+      return { id, type, success: true, data: { success: true } };
+    }
+
+    case 'api:git/unstage': {
+      const { directory, path: filePath, paths } = (payload || {}) as { directory?: string; path?: string; paths?: string[] };
+      const filePaths = (Array.isArray(paths) ? paths : [filePath])
+        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+      if (!directory || filePaths.length === 0) {
+        return { id, type, success: false, error: 'Directory and path are required' };
+      }
+      await gitService.unstageGitFiles(directory, filePaths);
+      return { id, type, success: true, data: { success: true } };
+    }
+
+    case 'api:git/apply-hunk': {
+      const { directory, path: filePath, patch, action } = (payload || {}) as {
+        directory?: string;
+        path?: string;
+        patch?: string;
+        action?: 'stage' | 'unstage' | 'discard';
+      };
+      if (!directory || !filePath || typeof patch !== 'string' || !patch.trim()) {
+        return { id, type, success: false, error: 'Directory, path, and patch are required' };
+      }
+      if (action !== 'stage' && action !== 'unstage' && action !== 'discard') {
+        return { id, type, success: false, error: 'action must be stage, unstage, or discard' };
+      }
+      await gitService.applyGitHunk(directory, filePath, patch, action);
       return { id, type, success: true, data: { success: true } };
     }
 
     case 'api:git/commit': {
-      const { directory, message, addAll, files } = (payload || {}) as {
+      const { directory, message, addAll, files, stageFiles } = (payload || {}) as {
         directory?: string;
         message?: string;
         addAll?: boolean;
         files?: string[];
+        stageFiles?: string[];
       };
       if (!directory || !message) {
         return { id, type, success: false, error: 'Directory and message are required' };
       }
-      const result = await gitService.createGitCommit(directory, message, { addAll, files });
+      const result = await gitService.createGitCommit(directory, message, { addAll, files, stageFiles });
       return { id, type, success: true, data: result };
     }
 
@@ -253,14 +297,15 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
     }
 
     case 'api:git/pull': {
-      const { directory, remote, branch } = (payload || {}) as {
+      const { directory, remote, branch, rebase } = (payload || {}) as {
         directory?: string;
         remote?: string;
         branch?: string;
+        rebase?: boolean;
       };
       const dirError = requireDirectory(id, type, directory);
       if (dirError) return dirError;
-      const result = await gitService.gitPull(directory!, { remote, branch });
+      const result = await gitService.gitPull(directory!, { remote, branch, rebase });
       return { id, type, success: true, data: result };
     }
 
@@ -274,6 +319,42 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       if (dirError) return dirError;
       const result = await gitService.gitFetch(directory!, { remote, branch });
       return { id, type, success: true, data: result };
+    }
+
+    case 'api:git/stashes': {
+      const { directory } = (payload || {}) as { directory?: string };
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      return { id, type, success: true, data: { stashes: await gitService.listGitStashes(directory!) } };
+    }
+
+    case 'api:git/stashes/file-counts': {
+      const { directory, refs } = (payload || {}) as { directory?: string; refs?: string[] };
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      return { id, type, success: true, data: { counts: await gitService.countGitStashFiles(directory!, refs ?? []) } };
+    }
+
+    case 'api:git/stash': {
+      const { directory, message } = (payload || {}) as { directory?: string; message?: string };
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      return { id, type, success: true, data: await gitService.stashGitChanges(directory!, { message }) };
+    }
+
+    case 'api:git/stash/apply':
+    case 'api:git/stash/pop':
+    case 'api:git/stash/drop': {
+      const { directory, ref } = (payload || {}) as { directory?: string; ref?: string };
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      const stashRef = ref || 'stash@{0}';
+      const data = type === 'api:git/stash/apply'
+        ? await gitService.applyGitStash(directory!, { ref: stashRef })
+        : type === 'api:git/stash/pop'
+          ? await gitService.popGitStash(directory!, { ref: stashRef })
+          : await gitService.dropGitStash(directory!, { ref: stashRef });
+      return { id, type, success: true, data };
     }
 
     case 'api:git/remotes': {
@@ -356,37 +437,70 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       return { id, type, success: true, data: result };
     }
 
-    case 'api:git/stash': {
-      const { directory, message, includeUntracked } = (payload || {}) as {
-        directory?: string;
-        message?: string;
-        includeUntracked?: boolean;
-      };
+    case 'api:git/checkout-commit': {
+      const { directory, hash } = (payload || {}) as { directory?: string; hash?: string };
       const dirError = requireDirectory(id, type, directory);
       if (dirError) return dirError;
-      const result = await gitService.stash(directory!, { message, includeUntracked });
+      if (!isValidCommitHash(hash)) {
+        return { id, type, success: false, error: 'Invalid commit hash' };
+      }
+      const result = await gitService.checkoutCommit(directory!, hash);
       return { id, type, success: true, data: result };
     }
 
-    case 'api:git/stash/pop': {
-      const { directory } = (payload || {}) as { directory?: string };
+    case 'api:git/cherry-pick': {
+      const { directory, hash } = (payload || {}) as { directory?: string; hash?: string };
       const dirError = requireDirectory(id, type, directory);
       if (dirError) return dirError;
-      const result = await gitService.stashPop(directory!);
+      if (!isValidCommitHash(hash)) {
+        return { id, type, success: false, error: 'Invalid commit hash' };
+      }
+      const result = await gitService.cherryPick(directory!, hash);
+      return { id, type, success: true, data: result };
+    }
+
+    case 'api:git/revert-commit': {
+      const { directory, hash } = (payload || {}) as { directory?: string; hash?: string };
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      if (!isValidCommitHash(hash)) {
+        return { id, type, success: false, error: 'Invalid commit hash' };
+      }
+      const result = await gitService.revertCommit(directory!, hash);
+      return { id, type, success: true, data: result };
+    }
+
+    case 'api:git/reset-to-commit': {
+      const { directory, hash, mode, force } = (payload || {}) as {
+        directory?: string;
+        hash?: string;
+        mode?: 'soft' | 'mixed' | 'hard';
+        force?: boolean;
+      };
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      if (!isValidCommitHash(hash)) {
+        return { id, type, success: false, error: 'Invalid commit hash' };
+      }
+      if (!mode || !['soft', 'mixed', 'hard'].includes(mode)) {
+        return { id, type, success: false, error: 'mode must be soft, mixed, or hard' };
+      }
+      const result = await gitService.resetToCommit(directory!, hash, mode, force);
       return { id, type, success: true, data: result };
     }
 
     case 'api:git/log': {
-      const { directory, maxCount, from, to, file } = (payload || {}) as {
+      const { directory, maxCount, from, to, file, all } = (payload || {}) as {
         directory?: string;
         maxCount?: number;
         from?: string;
         to?: string;
         file?: string;
+        all?: boolean;
       };
       const dirError = requireDirectory(id, type, directory);
       if (dirError) return dirError;
-      const result = await gitService.getGitLog(directory!, { maxCount, from, to, file });
+      const result = await gitService.getGitLog(directory!, { maxCount, from, to, file, all });
       return { id, type, success: true, data: result };
     }
 
@@ -399,13 +513,32 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       return { id, type, success: true, data: result };
     }
 
+    case 'api:git/commit-file-diff': {
+      const { directory, hash, path: filePath, binary } = (payload || {}) as {
+        directory?: string;
+        hash?: string;
+        path?: string;
+        binary?: boolean;
+      };
+      if (!directory || !hash || !filePath) {
+        return { id, type, success: false, error: 'Directory, hash, and path are required' };
+      }
+      if (!/^[0-9a-fA-F]{7,40}$/.test(hash)) {
+        return { id, type, success: false, error: 'hash must be a valid commit SHA' };
+      }
+      const result = await gitService.getCommitFileDiff(directory, hash, filePath, Boolean(binary));
+      return { id, type, success: true, data: result };
+    }
+
     case 'api:git/identity': {
-      const { directory, method, userName, userEmail, sshKey } = (payload || {}) as {
+      const { directory, method, userName, userEmail, sshKey, signCommits, signingKey } = (payload || {}) as {
         directory?: string;
         method?: string;
         userName?: string;
         userEmail?: string;
         sshKey?: string | null;
+        signCommits?: boolean;
+        signingKey?: string | null;
       };
       const dirError = requireDirectory(id, type, directory);
       if (dirError) return dirError;
@@ -421,7 +554,14 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
         if (!userName || !userEmail) {
           return { id, type, success: false, error: 'userName and userEmail are required' };
         }
-        const result = await gitService.setGitIdentity(directory!, userName, userEmail, sshKey);
+        const result = await gitService.setGitIdentity(
+          directory!,
+          userName,
+          userEmail,
+          sshKey,
+          signCommits === true,
+          signingKey ?? null
+        );
         return { id, type, success: true, data: result };
       }
 

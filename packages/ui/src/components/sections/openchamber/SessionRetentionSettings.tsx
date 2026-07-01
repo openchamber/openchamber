@@ -1,10 +1,10 @@
 import React from 'react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { RiInformationLine, RiRestartLine } from '@remixicon/react';
 import { toast } from '@/components/ui';
 import { NumberInput } from '@/components/ui/number-input';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Icon } from "@/components/icon/Icon";
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionAutoCleanup } from '@/hooks/useSessionAutoCleanup';
 import { useI18n } from '@/lib/i18n';
@@ -65,7 +65,7 @@ export const SessionRetentionSettings: React.FC = () => {
           </h3>
           <Tooltip>
             <TooltipTrigger asChild>
-              <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+              <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
             </TooltipTrigger>
             <TooltipContent sideOffset={8} className="max-w-xs">
               {t('settings.openchamber.sessionRetention.tooltip')}
@@ -76,6 +76,7 @@ export const SessionRetentionSettings: React.FC = () => {
 
       <section className="px-2 pb-2 pt-0 space-y-0.5">
         <div
+          data-settings-item="sessions.auto-cleanup"
           className="group flex cursor-pointer items-center gap-2 py-1.5"
           role="button"
           tabIndex={0}
@@ -96,7 +97,7 @@ export const SessionRetentionSettings: React.FC = () => {
           <span className="typography-ui-label text-foreground">{t('settings.openchamber.sessionRetention.field.enableAutoCleanup')}</span>
         </div>
 
-        <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
+        <div data-settings-item="sessions.retention-period" className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
           <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
             <span className="typography-ui-label text-foreground">{t('settings.openchamber.sessionRetention.field.retentionPeriod')}</span>
           </div>
@@ -120,12 +121,12 @@ export const SessionRetentionSettings: React.FC = () => {
               aria-label={t('settings.openchamber.sessionRetention.actions.resetRetentionAria')}
               title={t('settings.common.actions.reset')}
             >
-              <RiRestartLine className="h-3.5 w-3.5" />
+              <Icon name="restart" className="h-3.5 w-3.5" />
             </Button>
           </div>
         </div>
 
-        <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
+        <div data-settings-item="sessions.retention-action" className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
           <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
             <span className="typography-ui-label text-foreground">{t('settings.openchamber.sessionRetention.field.whenSessionsExpire')}</span>
           </div>

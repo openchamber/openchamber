@@ -3,20 +3,15 @@ import { summarizeText as summarizeSharedText } from '../text/summarization.js';
 export const createNotificationTemplateRuntime = (deps) => {
   const {
     readSettingsFromDisk,
-    persistSettings,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
     resolveGitBinaryForSpawn,
   } = deps;
 
   const NOTIFICATION_BODY_MAX_CHARS = 1000;
-  const ZEN_DEFAULT_MODEL = 'gpt-5-nano';
-  const ZEN_MODELS_CACHE_TTL = 5 * 60 * 1000;
   const SESSION_INFO_CACHE_TTL_MS = 60 * 1000;
 
-  let validatedZenFallback = null;
-  let cachedZenModels = null;
-  let cachedZenModelsTimestamp = 0;
+  const cachedZenModels = { models: [] };
 
   const sessionTitleCache = new Map();
   const sessionInfoCache = new Map();
@@ -62,116 +57,18 @@ export const createNotificationTemplateRuntime = (deps) => {
     return true;
   };
 
-  const fetchFreeZenModels = async () => {
-    const now = Date.now();
-    if (cachedZenModels && now - cachedZenModelsTimestamp < ZEN_MODELS_CACHE_TTL) {
-      return cachedZenModels.models;
-    }
-
-    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const timeout = controller ? setTimeout(() => controller.abort(), 8000) : null;
-    try {
-      const [zenResponse, metadataResponse] = await Promise.all([
-        fetch('https://opencode.ai/zen/v1/models', {
-          signal: controller?.signal,
-          headers: { Accept: 'application/json' },
-        }),
-        fetch('https://models.dev/api.json', {
-          signal: controller?.signal,
-          headers: { Accept: 'application/json' },
-        }),
-      ]);
-      if (!zenResponse.ok) {
-        throw new Error(`zen/v1/models responded with status ${zenResponse.status}`);
-      }
-      if (!metadataResponse.ok) {
-        throw new Error(`models.dev responded with status ${metadataResponse.status}`);
-      }
-
-      const data = await zenResponse.json();
-      const metadata = await metadataResponse.json();
-      const metadataModels = metadata?.opencode?.models && typeof metadata.opencode.models === 'object'
-        ? metadata.opencode.models
-        : {};
-      const allModels = Array.isArray(data?.data) ? data.data : [];
-      const freeModels = allModels
-        .filter((model) => {
-          const id = typeof model?.id === 'string' ? model.id.trim() : '';
-          const cost = id ? metadataModels[id]?.cost : null;
-          return id && cost?.input === 0 && cost?.output === 0;
-        })
-        .map((model) => ({ id: model.id.trim(), owned_by: model.owned_by }));
-
-      cachedZenModels = { models: freeModels };
-      cachedZenModelsTimestamp = Date.now();
-      return freeModels;
-    } finally {
-      if (timeout) clearTimeout(timeout);
-    }
-  };
+  const fetchFreeZenModels = async () => [];
 
   const resolveZenModel = async (override) => {
     const overrideModel = typeof override === 'string' ? override.trim() : '';
-    let settingsModel = '';
-    try {
-      const settings = await readSettingsFromDisk();
-      if (typeof settings?.zenModel === 'string' && settings.zenModel.trim().length > 0) {
-        settingsModel = settings.zenModel.trim();
-      }
-    } catch {
-    }
-
-    const candidate = overrideModel || settingsModel;
-    try {
-      const models = await fetchFreeZenModels();
-      const modelIds = models.map((model) => model.id);
-      if (candidate && modelIds.includes(candidate)) {
-        return candidate;
-      }
-      if (modelIds.includes(ZEN_DEFAULT_MODEL)) {
-        return ZEN_DEFAULT_MODEL;
-      }
-      if (modelIds.length > 0) {
-        return modelIds[0];
-      }
-    } catch {
-      if (candidate) {
-        return candidate;
-      }
-    }
-
-    return validatedZenFallback || ZEN_DEFAULT_MODEL;
+    if (overrideModel) return overrideModel;
+    const settings = await readSettingsFromDisk().catch(() => ({}));
+    return typeof settings?.zenModel === 'string' && settings.zenModel.trim().length > 0
+      ? settings.zenModel.trim()
+      : '';
   };
 
-  const validateZenModelAtStartup = async () => {
-    try {
-      const freeModels = await fetchFreeZenModels();
-      const freeModelIds = freeModels.map((model) => model.id);
-
-      if (freeModelIds.length > 0) {
-        validatedZenFallback = freeModelIds[0];
-
-        const settings = await readSettingsFromDisk();
-        const storedModel = typeof settings?.zenModel === 'string' ? settings.zenModel.trim() : '';
-
-        if (!storedModel || !freeModelIds.includes(storedModel)) {
-          const fallback = freeModelIds[0];
-          console.log(
-            storedModel
-              ? `[zen] Stored model "${storedModel}" not found in free models, falling back to "${fallback}"`
-              : `[zen] No model configured, setting default to "${fallback}"`
-          );
-          await persistSettings({ zenModel: fallback });
-        } else {
-          console.log(`[zen] Stored model "${storedModel}" verified as available`);
-        }
-      } else {
-        console.warn('[zen] No free models returned from API, skipping validation');
-      }
-    } catch (error) {
-      console.warn('[zen] Startup model validation failed (non-blocking):', error?.message || error);
-    }
-  };
+  const validateZenModelAtStartup = async () => {};
 
   const summarizeText = async (text, targetLength, zenModel) => {
     if (!text || typeof text !== 'string' || text.trim().length === 0) return text;
@@ -179,7 +76,7 @@ export const createNotificationTemplateRuntime = (deps) => {
       text,
       threshold: 0,
       maxLength: targetLength,
-      zenModel: zenModel || ZEN_DEFAULT_MODEL,
+        zenModel,
       mode: 'notification',
     });
     return typeof result?.summary === 'string' && result.summary.trim().length > 0
@@ -187,11 +84,17 @@ export const createNotificationTemplateRuntime = (deps) => {
       : text;
   };
 
+  const isNotificationTextPart = (part) => {
+    if (!part || typeof part !== 'object') return false;
+    if (part.type !== 'text') return false;
+    return typeof part.text === 'string' || typeof part.content === 'string';
+  };
+
   const extractTextFromParts = (parts, maxLength = NOTIFICATION_BODY_MAX_CHARS) => {
     if (!Array.isArray(parts) || parts.length === 0) return '';
 
     const textParts = parts
-      .filter((part) => part && (part.type === 'text' || typeof part.text === 'string' || typeof part.content === 'string'))
+      .filter(isNotificationTextPart)
       .map((part) => part.text || part.content || '')
       .filter(Boolean);
 
@@ -215,7 +118,7 @@ export const createNotificationTemplateRuntime = (deps) => {
     const content = info.content;
     if (Array.isArray(content)) {
       const textContent = content
-        .filter((entry) => entry && (entry.type === 'text' || typeof entry.text === 'string'))
+        .filter(isNotificationTextPart)
         .map((entry) => entry.text || '')
         .filter(Boolean);
       if (textContent.length > 0) {

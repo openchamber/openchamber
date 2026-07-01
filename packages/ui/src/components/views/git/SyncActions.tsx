@@ -1,11 +1,4 @@
 import React from 'react';
-import {
-  RiRefreshLine,
-  RiArrowDownLine,
-  RiArrowUpLine,
-  RiCloseLine,
-  RiLoader4Line,
-} from '@remixicon/react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
@@ -14,142 +7,108 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Icon } from "@/components/icon/Icon";
 import type { GitRemote } from '@/lib/gitApi';
 import { useI18n } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
 
-type SyncAction = 'fetch' | 'pull' | 'push' | null;
+type SyncAction = 'fetch' | 'pull' | 'push' | 'sync' | null;
 
 interface SyncActionsProps {
   syncAction: SyncAction;
   remotes: GitRemote[];
   onFetch: (remote: GitRemote) => void;
-  onPull: (remote: GitRemote) => void;
-  onPush: () => void;
+  onSync: (remote: GitRemote) => void;
   onRemoveRemote?: (remote: GitRemote) => void;
   disabled: boolean;
   removingRemoteName?: string | null;
   iconOnly?: boolean;
   aheadCount?: number;
   behindCount?: number;
+  trackingRemoteName?: string;
+  hasUncommittedChanges?: boolean;
 }
 
 export const SyncActions: React.FC<SyncActionsProps> = ({
   syncAction,
   remotes = [],
   onFetch,
-  onPull,
-  onPush,
+  onSync,
   onRemoveRemote,
   disabled,
   removingRemoteName = null,
-  iconOnly = false,
   aheadCount = 0,
   behindCount = 0,
+  trackingRemoteName,
+  hasUncommittedChanges = false,
 }) => {
   const { t } = useI18n();
   const skipRemoteSelectRef = React.useRef(false);
-  const hasNoRemotes = remotes.length === 0;
   const isRemovingRemote = Boolean(removingRemoteName);
-  const isDisabled = disabled || syncAction !== null || isRemovingRemote || hasNoRemotes;
-  const hasMultipleRemotes = remotes.length > 1;
+  const trackingRemote = remotes.find((remote) => remote.name === trackingRemoteName) ?? remotes[0];
+  const blocksRebaseSync = behindCount > 0 && hasUncommittedChanges;
+  const isPrimaryDisabled = disabled || syncAction !== null || isRemovingRemote || !trackingRemote || blocksRebaseSync;
+  const isDropdownDisabled = disabled || syncAction !== null || isRemovingRemote || remotes.length === 0;
+  const hasKnownSyncWork = aheadCount > 0 || behindCount > 0;
+  const primaryLabel = [
+    t('gitView.sync.sync'),
+    behindCount > 0 ? `↓${behindCount}` : null,
+    aheadCount > 0 ? `↑${aheadCount}` : null,
+  ].filter(Boolean).join(' ');
+  const tooltipLabel = blocksRebaseSync
+    ? t('gitView.sync.commitOrStashTooltip')
+    : trackingRemote
+    ? hasKnownSyncWork
+      ? t('gitView.sync.syncChangesTooltip', { ahead: aheadCount, behind: behindCount })
+      : t('gitView.sync.syncChanges')
+    : t('gitView.sync.noRemoteTooltip');
 
-  const handleFetch = () => {
-    const remote = remotes[0];
-    if (remotes.length === 1 && remote) {
-      onFetch(remote);
+  const handleSync = () => {
+    if (!trackingRemote) {
+      return;
     }
+    onSync(trackingRemote);
   };
 
-  const handlePull = () => {
-    const remote = remotes[0];
-    if (remotes.length === 1 && remote) {
-      onPull(remote);
-    }
-  };
-
-  const handlePush = () => {
-    if (remotes.length >= 1) {
-      onPush();
-    }
-  };
-
-  const renderButton = (
-    action: SyncAction,
-    icon: React.ReactNode,
-    loadingIcon: React.ReactNode,
-    label: string,
-    onClick: () => void,
-    tooltipText: string,
-    counter?: number
-  ) => {
-    const button = (
-      <Button
-        variant="ghost"
-        size="sm"
-        className={iconOnly ? 'relative h-8 w-8 px-0' : 'h-8 px-2'}
-        onClick={onClick}
-        disabled={isDisabled}
-      >
-        {syncAction === action ? loadingIcon : icon}
-        {!iconOnly && <span className="git-header-label">{label}</span>}
-        {!iconOnly && typeof counter === 'number' && counter > 0 ? (
-          <span className="rounded-sm bg-interactive-selection/40 px-1 text-[10px] leading-4 text-foreground tabular-nums">
-            {counter}
-          </span>
-        ) : null}
-        {iconOnly && typeof counter === 'number' && counter > 0 ? (
-          <span className="absolute -right-1 -top-1 min-w-[1rem] rounded-full bg-interactive-selection px-1 text-[10px] leading-4 text-interactive-selection-foreground tabular-nums">
-            {counter}
-          </span>
-        ) : null}
-      </Button>
-    );
-
-    return (
+  return (
+    <div className="inline-flex items-center rounded-[9px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] border border-border/60 bg-[var(--surface-elevated)] overflow-hidden">
       <Tooltip>
-        <TooltipTrigger asChild>{button}</TooltipTrigger>
-        <TooltipContent sideOffset={8}>{tooltipText}</TooltipContent>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={handleSync}
+            disabled={isPrimaryDisabled}
+            className={cn(
+              'inline-flex h-7 items-center gap-1.5 px-2 typography-ui-label font-medium text-foreground',
+              'transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50'
+            )}
+            aria-label={t('gitView.sync.syncChanges')}
+          >
+            {syncAction === 'sync' ? (
+              <Icon name="loader-4" className="size-4 animate-spin" />
+            ) : (
+              <Icon name="refresh" className="size-4" />
+            )}
+            <span className="whitespace-nowrap tabular-nums">{primaryLabel}</span>
+          </button>
+        </TooltipTrigger>
+        <TooltipContent sideOffset={8}>{tooltipLabel}</TooltipContent>
       </Tooltip>
-    );
-  };
 
-  const renderDropdownButton = (
-    action: SyncAction,
-    icon: React.ReactNode,
-    loadingIcon: React.ReactNode,
-    label: string,
-    onSelect: (remote: GitRemote) => void,
-    tooltipText: string,
-    counter?: number
-  ) => {
-    return (
       <DropdownMenu>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className={iconOnly ? 'relative h-8 w-8 px-0' : 'h-8 px-2'}
-                disabled={isDisabled}
-              >
-                {syncAction === action ? loadingIcon : icon}
-                {!iconOnly && <span className="git-header-label">{label}</span>}
-                {!iconOnly && typeof counter === 'number' && counter > 0 ? (
-                  <span className="rounded-sm bg-interactive-selection/40 px-1 text-[10px] leading-4 text-foreground tabular-nums">
-                    {counter}
-                  </span>
-                ) : null}
-                {iconOnly && typeof counter === 'number' && counter > 0 ? (
-                  <span className="absolute -right-1 -top-1 min-w-[1rem] rounded-full bg-interactive-selection px-1 text-[10px] leading-4 text-interactive-selection-foreground tabular-nums">
-                    {counter}
-                  </span>
-                ) : null}
-              </Button>
-            </DropdownMenuTrigger>
-          </TooltipTrigger>
-          <TooltipContent sideOffset={8}>{tooltipText}</TooltipContent>
-        </Tooltip>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className={cn(
+              'inline-flex h-7 w-6 items-center justify-center border-l border-[var(--interactive-border)] text-muted-foreground',
+              'transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50'
+            )}
+            disabled={isDropdownDisabled}
+            aria-label={t('gitView.sync.moreActionsAria')}
+          >
+            <Icon name="arrow-down-s" className="size-4" />
+          </button>
+        </DropdownMenuTrigger>
         <DropdownMenuContent align="start" alignOffset={-40} className="w-[min(360px,calc(100vw-2rem))] max-h-[320px] overflow-y-auto">
           {remotes.map((remote) => (
             <DropdownMenuItem
@@ -160,21 +119,22 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
                   skipRemoteSelectRef.current = false;
                   return;
                 }
-                onSelect(remote);
+                onFetch(remote);
               }}
             >
               <div className="flex w-full items-center gap-2">
+                <Icon name="refresh" className="size-4 text-muted-foreground" />
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-col">
                     <span className="typography-ui-label text-foreground">
-                      {remote.name}
+                      {t('gitView.sync.fetchFromRemote', { name: remote.name })}
                     </span>
                     <span className="typography-meta text-muted-foreground truncate">
                       {remote.fetchUrl}
                     </span>
                   </div>
                 </div>
-                {onRemoveRemote ? (
+                {onRemoveRemote && remote.name !== trackingRemoteName ? (
                   <Button
                     type="button"
                     variant="destructive"
@@ -196,9 +156,9 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
                     title={t('gitView.header.removeRemoteTitle', { name: remote.name })}
                   >
                     {removingRemoteName === remote.name ? (
-                      <RiLoader4Line className="size-3.5 animate-spin" />
+                      <Icon name="loader-4" className="size-3.5 animate-spin" />
                     ) : (
-                      <RiCloseLine className="size-3.5" />
+                      <Icon name="close" className="size-3.5" />
                     )}
                   </Button>
                 ) : null}
@@ -207,64 +167,6 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
-    );
-  };
-
-  return (
-    <div className="flex items-center gap-0.5">
-      {hasMultipleRemotes
-        ? renderDropdownButton(
-            'fetch',
-            <RiRefreshLine className="size-4" />,
-            <RiLoader4Line className="size-4 animate-spin" />,
-            t('gitView.sync.fetch'),
-            onFetch,
-            t('gitView.sync.fetchTooltip')
-          )
-        : renderButton(
-            'fetch',
-            <RiRefreshLine className="size-4" />,
-            <RiLoader4Line className="size-4 animate-spin" />,
-            t('gitView.sync.fetch'),
-            handleFetch,
-            t('gitView.sync.fetchTooltip')
-          )}
-
-      {hasMultipleRemotes
-        ? renderDropdownButton(
-            'pull',
-            <RiArrowDownLine className="size-4" />,
-            <RiLoader4Line className="size-4 animate-spin" />,
-            t('gitView.sync.pull'),
-            onPull,
-            behindCount > 0
-              ? t('gitView.sync.pullTooltipBehind', { count: behindCount })
-              : t('gitView.sync.pullTooltip'),
-            behindCount
-          )
-        : renderButton(
-            'pull',
-            <RiArrowDownLine className="size-4" />,
-            <RiLoader4Line className="size-4 animate-spin" />,
-            t('gitView.sync.pull'),
-            handlePull,
-            behindCount > 0
-              ? t('gitView.sync.pullTooltipBehind', { count: behindCount })
-              : t('gitView.sync.pullTooltip'),
-            behindCount
-          )}
-
-      {renderButton(
-        'push',
-        <RiArrowUpLine className="size-4" />,
-        <RiLoader4Line className="size-4 animate-spin" />,
-        t('gitView.sync.push'),
-        handlePush,
-        aheadCount > 0
-          ? t('gitView.sync.pushTooltipAhead', { count: aheadCount })
-          : t('gitView.sync.pushTooltip'),
-        aheadCount
-      )}
     </div>
   );
 };

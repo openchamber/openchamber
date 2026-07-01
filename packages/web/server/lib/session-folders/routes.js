@@ -43,13 +43,19 @@ export const registerSessionFoldersRoutes = (app, dependencies) => {
     if (Buffer.byteLength(serialized, 'utf8') > MAX_BODY_BYTES) {
       return res.status(413).json({ error: 'Payload too large' });
     }
+    let tmp;
+    let saved = false;
     try {
       await ensureDir();
-      const tmp = `${filePath}.tmp`;
+      tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
       await fsPromises.writeFile(tmp, serialized, 'utf8');
       await fsPromises.rename(tmp, filePath);
+      saved = true;
       return res.json({ success: true });
     } catch (error) {
+      if (tmp && !saved) {
+        await fsPromises.unlink(tmp).catch(() => {});
+      }
       const message = error instanceof Error ? error.message : 'Failed to write session folders';
       return res.status(500).json({ error: message });
     }

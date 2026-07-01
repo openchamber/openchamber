@@ -14,18 +14,34 @@ const __dirname = path.dirname(__filename);
 
 function fixHttpProxyDeprecation() {
   try {
-    // Find the http-proxy package in node_modules
-    const httpProxyDir = path.join(__dirname, 'node_modules', 'http-proxy', 'lib', 'http-proxy');
-    const indexPath = path.join(httpProxyDir, 'index.js');
-    const commonPath = path.join(httpProxyDir, 'common.js');
-    
-    if (!fs.existsSync(indexPath) || !fs.existsSync(commonPath)) {
-      return;
+    const candidateDirs = [
+      path.join(__dirname, 'node_modules', 'http-proxy', 'lib', 'http-proxy'),
+    ];
+
+    const bunStoreDir = path.join(__dirname, 'node_modules', '.bun');
+    if (fs.existsSync(bunStoreDir)) {
+      for (const entry of fs.readdirSync(bunStoreDir, { withFileTypes: true })) {
+        if (!entry.isDirectory() || !entry.name.startsWith('http-proxy@')) continue;
+        candidateDirs.push(path.join(bunStoreDir, entry.name, 'node_modules', 'http-proxy', 'lib', 'http-proxy'));
+      }
     }
-    
-    // Patch index.js
-    let needsPatch = false;
-    
+
+    for (const httpProxyDir of candidateDirs) {
+      patchHttpProxyDir(httpProxyDir);
+    }
+  } catch {
+    // Silently handle errors - functionality is not affected
+  }
+}
+
+function patchHttpProxyDir(httpProxyDir) {
+  const indexPath = path.join(httpProxyDir, 'index.js');
+  const commonPath = path.join(httpProxyDir, 'common.js');
+
+  if (!fs.existsSync(indexPath) || !fs.existsSync(commonPath)) {
+    return;
+  }
+
     if (fs.existsSync(indexPath)) {
       let content = fs.readFileSync(indexPath, 'utf8');
       
@@ -49,11 +65,9 @@ function fixHttpProxyDeprecation() {
       
       if (indexPatched) {
         fs.writeFileSync(indexPath, content, 'utf8');
-        needsPatch = true;
       }
     }
-    
-    // Patch common.js
+
     if (fs.existsSync(commonPath)) {
       let content = fs.readFileSync(commonPath, 'utf8');
       
@@ -69,12 +83,8 @@ function fixHttpProxyDeprecation() {
       
       if (commonPatched) {
         fs.writeFileSync(commonPath, content, 'utf8');
-        needsPatch = true;
       }
     }
-  } catch (error) {
-    // Silently handle errors - functionality is not affected
-  }
 }
 
 // Run the fix

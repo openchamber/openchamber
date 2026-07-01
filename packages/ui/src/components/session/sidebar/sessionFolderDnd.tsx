@@ -10,7 +10,7 @@ import {
   useDroppable,
   type DragEndEvent,
 } from '@dnd-kit/core';
-import { RiStickyNoteLine } from '@remixicon/react';
+import { Icon } from "@/components/icon/Icon";
 
 export const DraggableSessionRow: React.FC<{
   sessionId: string;
@@ -122,7 +122,7 @@ export const SessionFolderDndScope: React.FC<{
             }}
             className="flex items-center rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] px-2.5 py-1 shadow-none pointer-events-none"
           >
-            <RiStickyNoteLine className="h-4 w-4 text-muted-foreground mr-2 flex-shrink-0" />
+            <Icon name="sticky-note" className="h-4 w-4 text-muted-foreground mr-2 flex-shrink-0" />
             <div className="min-w-0 flex-1 truncate typography-ui-label font-normal text-foreground">
               {activeDragTitle}
             </div>

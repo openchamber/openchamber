@@ -17,7 +17,7 @@ import { shell } from '@codemirror/legacy-modes/mode/shell';
 
 const shellLanguage = StreamLanguage.define(shell);
 
-function codeBlockLanguageResolver(info: string): Language | LanguageDescription | null {
+export function codeBlockLanguageResolver(info: string): Language | LanguageDescription | null {
   const normalized = info.trim().toLowerCase();
 
   switch (normalized) {
@@ -49,6 +49,11 @@ function codeBlockLanguageResolver(info: string): Language | LanguageDescription
     case 'py':
     case 'python':
       return python().language;
+    case 'md':
+    case 'markdown':
+    case 'mdown':
+    case 'mkd':
+      return markdown().language;
     case 'heex':
     case 'eex':
     case 'leex':
@@ -123,6 +128,9 @@ export function languageByExtension(filePath: string): Extension | null {
       return css();
     case 'html':
     case 'htm':
+    case 'xml':
+    case 'drawio':
+    case 'dio':
       return html();
     case 'md':
     case 'mdx':

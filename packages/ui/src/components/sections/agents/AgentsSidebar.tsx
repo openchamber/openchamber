@@ -17,7 +17,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { RiAddLine, RiAiAgentFill, RiAiAgentLine, RiDeleteBinLine, RiFileCopyLine, RiMore2Line, RiRobot2Line, RiRobotLine, RiRestartLine, RiEditLine } from '@remixicon/react';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { useAgentsStore, isAgentBuiltIn, isAgentHidden, type AgentScope, type AgentDraft } from '@/stores/useAgentsStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/lib/utils';
@@ -25,6 +25,7 @@ import type { Agent } from '@opencode-ai/sdk/v2';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
 import { SidebarGroup } from '@/components/sections/shared/SidebarGroup';
+import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 
 interface AgentsSidebarProps {
@@ -180,19 +181,33 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
     }
 
     setIsConfirmActionPending(true);
-    const success = await deleteAgent(confirmActionAgent.name);
+    try {
+      const result = await deleteAgent(confirmActionAgent.name, (confirmActionAgent as Agent & { scope?: AgentScope }).scope);
 
-    if (success) {
-      if (confirmActionType === 'delete') {
-        toast.success(t('settings.agents.sidebar.toast.agentDeleted', { name: confirmActionAgent.name }));
+      if (result.ok) {
+        if (result.requiresManualRestart) {
+          toast.warning(t('settings.agents.page.toast.savedManualRestart'));
+        } else if (confirmActionType === 'delete') {
+          toast.success(t('settings.agents.sidebar.toast.agentDeleted', { name: confirmActionAgent.name }));
+        } else {
+          toast.success(t('settings.agents.sidebar.toast.agentReset', { name: confirmActionAgent.name }));
+        }
+        closeConfirmActionDialog();
+      } else if (confirmActionType === 'delete') {
+        toast.error(t('settings.agents.sidebar.toast.deleteFailed'));
       } else {
-        toast.success(t('settings.agents.sidebar.toast.agentReset', { name: confirmActionAgent.name }));
+        toast.error(t('settings.agents.sidebar.toast.resetFailed'));
       }
-      closeConfirmActionDialog();
-    } else if (confirmActionType === 'delete') {
-      toast.error(t('settings.agents.sidebar.toast.deleteFailed'));
-    } else {
-      toast.error(t('settings.agents.sidebar.toast.resetFailed'));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      const definitionMissing = /built-in|not deletable|not found/i.test(message);
+      if (confirmActionType === 'delete') {
+        toast.error(definitionMissing
+          ? t('settings.agents.sidebar.toast.definitionNotFound')
+          : t('settings.agents.sidebar.toast.deleteFailed'));
+      } else {
+        toast.error(t('settings.agents.sidebar.toast.resetFailed'));
+      }
     }
 
     setIsConfirmActionPending(false);
@@ -219,6 +234,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
       scope: extAgent.scope || 'user',
       description: agent.description,
       model: modelStr,
+      variant: agent.variant,
       temperature: agent.temperature,
       top_p: agent.topP,
       prompt: agent.prompt,
@@ -227,7 +243,6 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
       disable: draftAgent.disable,
     });
     setSelectedAgent(newName);
-
 
   };
 
@@ -261,10 +276,11 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
       ? `${renameDialogAgent.model.providerID}/${renameDialogAgent.model.modelID}`
       : null;
     const renameExt = renameDialogAgent as Agent & { scope?: AgentScope; disable?: boolean };
-    const success = await createAgent({
+    const createResult = await createAgent({
       name: sanitizedName,
       description: renameDialogAgent.description,
       model: renameModelStr,
+      variant: renameDialogAgent.variant,
       temperature: renameDialogAgent.temperature,
       top_p: renameDialogAgent.topP,
       prompt: renameDialogAgent.prompt,
@@ -274,11 +290,15 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
       scope: renameExt.scope,
     });
 
-    if (success) {
+    if (createResult.ok) {
       // Delete old agent
-      const deleteSuccess = await deleteAgent(renameDialogAgent.name);
-      if (deleteSuccess) {
-        toast.success(`Agent renamed to "${sanitizedName}"`);
+      const deleteResult = await deleteAgent(renameDialogAgent.name, renameExt.scope);
+      if (deleteResult.ok) {
+        if (createResult.requiresManualRestart || deleteResult.requiresManualRestart) {
+          toast.warning(t('settings.agents.page.toast.savedManualRestart'));
+        } else {
+          toast.success(t('settings.agents.sidebar.toast.agentRenamed', { name: sanitizedName }));
+        }
         setSelectedAgent(sanitizedName);
       } else {
         toast.error(t('settings.agents.sidebar.toast.removeOldAfterRenameFailed'));
@@ -293,11 +313,11 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
   const getAgentModeIcon = (mode?: string) => {
     switch (mode) {
       case 'primary':
-        return <RiAiAgentLine className="h-3 w-3 text-primary" />;
+        return <Icon name="ai-agent" className="h-3 w-3 text-primary" />;
       case 'all':
-        return <RiAiAgentFill className="h-3 w-3 text-primary" />;
+        return <Icon name="ai-agent-fill" className="h-3 w-3 text-primary" />;
       case 'subagent':
-        return <RiRobotLine className="h-3 w-3 text-primary" />;
+        return <Icon name="robot" className="h-3 w-3 text-primary" />;
       default:
         return null;
     }
@@ -335,11 +355,12 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
         <div className="flex items-center justify-between gap-2">
           <span className="typography-meta text-muted-foreground">{t('settings.agents.sidebar.total', { count: visibleAgents.length })}</span>
           <Button size="sm"
+            data-settings-item="agents.create"
             variant="ghost"
             className="h-7 w-7 px-0 -my-1 text-muted-foreground"
             onClick={handleCreateNew}
           >
-            <RiAddLine className="h-3.5 w-3.5" />
+            <Icon name="add" className="h-3.5 w-3.5" />
           </Button>
         </div>
       </div>
@@ -347,7 +368,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
       <ScrollableOverlay outerClassName="flex-1 min-h-0" className="space-y-1 px-3 py-2 overflow-x-hidden">
         {visibleAgents.length === 0 ? (
           <div className="py-12 px-4 text-center text-muted-foreground">
-            <RiRobot2Line className="mx-auto mb-3 h-10 w-10 opacity-50" />
+            <Icon name="robot-2" className="mx-auto mb-3 h-10 w-10 opacity-50" />
             <p className="typography-ui-label font-medium">{t('settings.agents.sidebar.empty.title')}</p>
             <p className="typography-meta mt-1 opacity-75">{t('settings.agents.sidebar.empty.description')}</p>
           </div>
@@ -537,18 +558,37 @@ const AgentListItem: React.FC<AgentListItemProps> = ({
   const { t } = useI18n();
   const extAgent = agent as Agent & { scope?: AgentScope };
   const isMobile = isMobileDeviceViaCSS();
+  const [isContextMenuOpen, setIsContextMenuOpen] = React.useState(false);
+  const renderMenuItems = (Item: React.ElementType) => (
+    <>
+      {onRename && (
+        <Item onClick={(e: React.MouseEvent) => { e.stopPropagation(); onRename(); }}>
+          <Icon name="edit" className="h-4 w-4 mr-px" />
+          {t('settings.common.actions.rename')}
+        </Item>
+      )}
+      <Item onClick={(e: React.MouseEvent) => { e.stopPropagation(); onDuplicate(); }}>
+        <Icon name="file-copy" className="h-4 w-4 mr-px" />
+        {t('settings.common.actions.duplicate')}
+      </Item>
+      {onReset && (
+        <Item onClick={(e: React.MouseEvent) => { e.stopPropagation(); onReset(); }}>
+          <Icon name="restart" className="h-4 w-4 mr-px" />
+          {t('settings.common.actions.reset')}
+        </Item>
+      )}
+      {onDelete && (
+        <Item onClick={(e: React.MouseEvent) => { e.stopPropagation(); onDelete(); }} className="text-destructive focus:text-destructive">
+          <Icon name="delete-bin" className="h-4 w-4 mr-px" />
+          {t('settings.common.actions.delete')}
+        </Item>
+      )}
+    </>
+  );
   
   return (
-    <div
-      className={cn(
-        'group relative flex items-center rounded-md px-1.5 py-1 transition-all duration-200 select-none',
-        isSelected ? 'bg-interactive-selection' : 'hover:bg-interactive-hover'
-      )}
-      onContextMenu={!isMobile ? (e) => {
-        e.preventDefault();
-        onMenuOpenChange(true);
-      } : undefined}
-    >
+    <ContextMenu open={isContextMenuOpen} onOpenChange={setIsContextMenuOpen}>
+      <ContextMenuTrigger render={<div className={cn('group relative flex items-center rounded-md px-1.5 py-1 transition-all duration-200 select-none', isSelected ? 'bg-interactive-selection' : 'hover:bg-interactive-hover')} onContextMenu={!isMobile ? (e) => { e.preventDefault(); setIsContextMenuOpen(true); } : undefined} />}>
       <div className="flex min-w-0 flex-1 items-center">
         <button
           onClick={onSelect}
@@ -574,65 +614,24 @@ const AgentListItem: React.FC<AgentListItemProps> = ({
           )}
         </button>
 
-        <DropdownMenu open={isMenuOpen} onOpenChange={onMenuOpenChange}>
+        <DropdownMenu open={isMenuOpen} onOpenChange={(open) => { if (open) setIsContextMenuOpen(false); onMenuOpenChange(open); }}>
           <DropdownMenuTrigger asChild>
             <Button size="sm"
               variant="ghost"
               className="h-6 w-6 px-0 flex-shrink-0 -mr-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100"
             >
-              <RiMore2Line className="h-3.5 w-3.5" />
+              <Icon name="more-2" className="h-3.5 w-3.5" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-fit min-w-20">
-            {onRename && (
-              <DropdownMenuItem
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRename();
-                }}
-              >
-                <RiEditLine className="h-4 w-4 mr-px" />
-                {t('settings.common.actions.rename')}
-              </DropdownMenuItem>
-            )}
-
-            <DropdownMenuItem
-              onClick={(e) => {
-                e.stopPropagation();
-                onDuplicate();
-              }}
-            >
-              <RiFileCopyLine className="h-4 w-4 mr-px" />
-              {t('settings.common.actions.duplicate')}
-            </DropdownMenuItem>
-
-            {onReset && (
-              <DropdownMenuItem
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onReset();
-                }}
-              >
-                <RiRestartLine className="h-4 w-4 mr-px" />
-                {t('settings.common.actions.reset')}
-              </DropdownMenuItem>
-            )}
-
-            {onDelete && (
-              <DropdownMenuItem
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDelete();
-                }}
-                className="text-destructive focus:text-destructive"
-              >
-                <RiDeleteBinLine className="h-4 w-4 mr-px" />
-                {t('settings.common.actions.delete')}
-              </DropdownMenuItem>
-            )}
+            {renderMenuItems(DropdownMenuItem)}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-    </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-fit min-w-20">
+        {renderMenuItems(ContextMenuItem)}
+      </ContextMenuContent>
+    </ContextMenu>
   );
 };

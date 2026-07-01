@@ -1,6 +1,10 @@
 /**
  * Event Pipeline — transport connection, event coalescing, and batched flush.
  *
+ * This module must not make state-dependent decisions about event validity.
+ * For example, deciding whether a delta is already represented by a full part
+ * snapshot belongs in the reducer, which has access to the current state.
+ *
  * Plain closure API:
  *   const { cleanup } = createEventPipeline({ sdk, onEvent })
  *
@@ -8,16 +12,11 @@
  * Abort controller created once at init, cleaned up via returned cleanup fn.
  */
 
-import type { Event, OpencodeClient } from "@opencode-ai/sdk/v2/client"
+import type { Event, OpencodeClient, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import { opencodeClient } from "@/lib/opencode/client"
+import { getRuntimeUrlResolver } from "@/lib/runtime-url"
+import { clearRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from "@/lib/runtime-auth"
 import { syncDebug } from "./debug"
-
-export type QueuedEvent = {
-  directory: string
-  payload: Event
-}
-
-export type FlushHandler = (events: QueuedEvent[]) => void
 
 const FLUSH_FRAME_MS = 33
 const BACKPRESSURE_FLUSH_FRAME_MS = 200
@@ -27,8 +26,16 @@ const DEFAULT_RECONNECT_DELAY_MS = 250
 const DEFAULT_HEARTBEAT_TIMEOUT_MS = 30_000
 const WS_FALLBACK_WINDOW_MS = 60_000
 const DEFAULT_WS_READY_TIMEOUT_MS = 2_000
-const ABSOLUTE_URL_PATTERN = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//
-
+// Retry pacing. Visible+online tabs probe quickly so the user sees connection
+// recovery in under a second of real outage; hidden/offline tabs back off
+// further so a backgrounded PWA on a flaky link doesn't burn battery probing
+// a dead network every few seconds. The browser would throttle hidden-tab
+// timers anyway, but this keeps the intent explicit and shrinks server load
+// from idle tabs.
+const RETRY_BACKOFF_BASE_MS = 250
+const RETRY_BACKOFF_CAP_VISIBLE_MS = 5_000
+const RETRY_BACKOFF_CAP_HIDDEN_OR_OFFLINE_MS = 60_000
+const RETRY_BACKOFF_MAX_EXPONENT = 8
 export type EventPipelineInput = {
   sdk: OpencodeClient
   onEvent: (directory: string, payload: Event) => void
@@ -45,6 +52,11 @@ export type EventPipelineInput = {
   wsReadyTimeoutMs?: number
 }
 
+export type EventPipeline = {
+  cleanup: () => void
+  reconnect: (reason?: string) => void
+}
+
 type MessageStreamWsFrame = {
   type: "ready" | "event" | "error" | "backpressure"
   payload?: unknown
@@ -54,7 +66,70 @@ type MessageStreamWsFrame = {
   scope?: "global" | "directory"
 }
 
+const normalizeOpenChamberSessionStatus = (payload: Event): Event | null => {
+  const record = payload as unknown as {
+    id?: unknown
+    type?: unknown
+    properties?: {
+      sessionID?: unknown
+      sessionId?: unknown
+      status?: unknown
+      metadata?: {
+        attempt?: unknown
+        message?: unknown
+        next?: unknown
+      }
+    }
+  }
+
+  if (record.type !== "openchamber:session-status") return null
+
+  const sessionID = typeof record.properties?.sessionID === "string" && record.properties.sessionID.length > 0
+    ? record.properties.sessionID
+    : typeof record.properties?.sessionId === "string" && record.properties.sessionId.length > 0
+      ? record.properties.sessionId
+      : ""
+  const rawStatus = typeof record.properties?.status === "string" ? record.properties.status : ""
+  if (!sessionID || !rawStatus) return null
+
+  let status: SessionStatus | null = null
+  if (rawStatus === "idle" || rawStatus === "busy") {
+    status = { type: rawStatus }
+  } else if (rawStatus === "retry") {
+    const metadata = record.properties?.metadata
+    if (
+      typeof metadata?.attempt === "number"
+      && typeof metadata.message === "string"
+      && typeof metadata.next === "number"
+    ) {
+      status = {
+        type: "retry",
+        attempt: metadata.attempt,
+        message: metadata.message,
+        next: metadata.next,
+      }
+    }
+  }
+  if (!status) return null
+
+  return {
+    id: typeof record.id === "string" && record.id.length > 0
+      ? record.id
+      : `openchamber-status-${sessionID}-${Date.now()}`,
+    type: "session.status",
+    properties: {
+      sessionID,
+      status,
+    },
+  } as Event
+}
+
 const normalizeEventType = (payload: Event): Event => {
+  const normalizedOpenChamberStatus = normalizeOpenChamberSessionStatus(payload)
+  if (normalizedOpenChamberStatus) {
+    return normalizedOpenChamberStatus
+  }
+
   const type = (payload as { type?: unknown }).type
   if (typeof type !== "string") {
     return payload
@@ -86,8 +161,21 @@ function resolveEventDirectory(event: unknown, payload: Event): string {
       ? (payload.properties as Record<string, unknown>)
       : null
   const propertyDirectory = typeof properties?.directory === "string" ? properties.directory : null
+  if (propertyDirectory && propertyDirectory.length > 0) {
+    return propertyDirectory
+  }
 
-  return propertyDirectory && propertyDirectory.length > 0 ? propertyDirectory : "global"
+  // session.created / session.updated carry directory inside properties.info
+  const info =
+    typeof properties?.info === "object" && properties.info !== null
+      ? (properties.info as Record<string, unknown>)
+      : null
+  const infoDirectory = typeof info?.directory === "string" ? info.directory : null
+  if (infoDirectory && infoDirectory.length > 0) {
+    return infoDirectory
+  }
+
+  return "global"
 }
 
 function resolveEventPayload(payload: unknown): Event | null {
@@ -107,58 +195,37 @@ function resolveEventPayload(payload: unknown): Event | null {
   return null
 }
 
-function resolveAbsoluteUrl(candidate: string): string {
-  const normalized = typeof candidate === "string" && candidate.trim().length > 0 ? candidate.trim() : "/api"
-  if (ABSOLUTE_URL_PATTERN.test(normalized)) {
-    return normalized
-  }
-
-  if (typeof window === "undefined") {
-    return normalized
-  }
-
-  const baseReference = window.location?.href || window.location?.origin
-  if (!baseReference) {
-    return normalized
-  }
-
-  return new URL(normalized, baseReference).toString()
-}
-
-function toWebSocketUrl(candidate: string): string {
-  const url = new URL(resolveAbsoluteUrl(candidate))
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
-  return url.toString()
-}
-
 function buildGlobalEventWsUrl(lastEventId?: string): string {
-  const baseUrl = opencodeClient.getBaseUrl()
-  const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`
-  const httpUrl = new URL("global/event/ws", resolveAbsoluteUrl(normalizedBase))
-  if (lastEventId && lastEventId.length > 0) {
-    httpUrl.searchParams.set("lastEventId", lastEventId)
+  let baseUrl = "/api"
+  try {
+    const client = opencodeClient as { getBaseUrl?: () => string }
+    if (typeof client.getBaseUrl === "function") {
+      baseUrl = client.getBaseUrl()
+    }
+  } catch {
+    baseUrl = "/api"
   }
-  return toWebSocketUrl(httpUrl.toString())
+  const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`
+  return getRuntimeUrlResolver().websocket(
+    `${normalizedBase}global/event/ws`,
+    lastEventId && lastEventId.length > 0 ? { lastEventId } : undefined,
+  )
 }
 
 type DirectoryQueue = {
   queue: Event[]
   buffer: Event[]
   coalesced: Map<string, number>
-  staleDeltas: Set<string>
   timer: ReturnType<typeof setTimeout> | undefined
   last: number
 }
 
 type AttemptAbortReason =
   | "pipeline_stopped"
-  | "ws_heartbeat_timeout"
-  | "sse_heartbeat_timeout"
-  | "ws_system_resume"
-  | "sse_system_resume"
+  | `${"ws" | "sse"}_${string}`
   | null
 
-export function createEventPipeline(input: EventPipelineInput) {
+export function createEventPipeline(input: EventPipelineInput): EventPipeline {
   const {
     sdk,
     onEvent,
@@ -185,7 +252,6 @@ export function createEventPipeline(input: EventPipelineInput) {
       queue: [],
       buffer: [],
       coalesced: new Map(),
-      staleDeltas: new Set(),
       timer: undefined,
       last: 0,
     }
@@ -198,12 +264,12 @@ export function createEventPipeline(input: EventPipelineInput) {
       const props = payload.properties as { sessionID: string }
       return `session.status:${props.sessionID}`
     }
+    if (payload.type === "session.updated") {
+      const props = payload.properties as { info?: { id?: string } }
+      return props.info?.id ? `session.updated:${props.info.id}` : undefined
+    }
     if (payload.type === "lsp.updated") {
       return "lsp.updated"
-    }
-    if (payload.type === "message.part.updated") {
-      const part = (payload.properties as { part: { messageID: string; id: string } }).part
-      return `message.part.updated:${part.messageID}:${part.id}`
     }
     if (payload.type === "message.part.delta") {
       const props = payload.properties as { messageID: string; partID: string; field: string }
@@ -211,8 +277,6 @@ export function createEventPipeline(input: EventPipelineInput) {
     }
     return undefined
   }
-
-  const deltaKey = (messageID: string, partID: string, field: string) => `${messageID}:${partID}:${field}`
 
   const flushDir = (directory: string) => {
     const d = directories.get(directory)
@@ -224,22 +288,14 @@ export function createEventPipeline(input: EventPipelineInput) {
     if (d.queue.length === 0) return
 
     const events = d.queue
-    const staleDeltas = d.staleDeltas.size > 0 ? new Set(d.staleDeltas) : undefined
     d.queue = d.buffer
     d.buffer = events
     d.queue.length = 0
     d.coalesced.clear()
-    d.staleDeltas.clear()
 
     d.last = Date.now()
     syncDebug.pipeline.flush(events.length)
     for (const payload of events) {
-      if (staleDeltas && payload.type === "message.part.delta") {
-        const props = payload.properties as { messageID: string; partID: string; field: string }
-        if (staleDeltas.has(deltaKey(props.messageID, props.partID, props.field))) {
-          continue
-        }
-      }
       onEvent(directory, payload)
     }
 
@@ -264,6 +320,93 @@ export function createEventPipeline(input: EventPipelineInput) {
   const isAbortError = (error: unknown): boolean =>
     error instanceof DOMException && error.name === "AbortError" ||
     (typeof error === "object" && error !== null && (error as { name?: string }).name === "AbortError")
+
+  const isOffline = (): boolean =>
+    typeof navigator === "object" && navigator !== null && navigator.onLine === false
+
+  const isHidden = (): boolean =>
+    typeof document !== "undefined" && document.visibilityState !== "visible"
+
+  // Extract an HTTP status code from anywhere it might be hiding on the
+  // error object. The SDK's unwrap pattern stashes it on `.status`; raw
+  // fetch failures may carry `.response.status`; some SDKs also use `.code`.
+  const extractStatus = (error: unknown): number | undefined => {
+    if (!error || typeof error !== "object") return undefined
+    const direct = (error as { status?: unknown }).status
+    if (typeof direct === "number") return direct
+    const fromResponse = (error as { response?: { status?: unknown } }).response?.status
+    if (typeof fromResponse === "number") return fromResponse
+    return undefined
+  }
+
+  // 4xx errors don't recover from blind retry — wrong path, expired auth,
+  // bad request body. Keep retrying anyway (a remote reconfigure or reauth
+  // can fix the underlying problem) but at the long cap so we're not
+  // hammering the server at 5s intervals indefinitely. 408 (timeout) and
+  // 429 (rate limit) are retryable in spirit — let them through to the
+  // normal exponential path.
+  const isPermanentHttpStatus = (status: number): boolean => {
+    if (status < 400 || status >= 500) return false
+    if (status === 408 || status === 429) return false
+    return true
+  }
+
+  /**
+   * Wait between reconnect attempts. Resolves early when:
+   *   - the browser fires `online` (network came back — probe immediately),
+   *   - the tab becomes visible (user came back — probe immediately),
+   *   - the pipeline is being torn down (cleanup aborts).
+   * Otherwise resolves after `ms` like a plain timer.
+   */
+  const waitForRetry = (ms: number) => new Promise<void>((resolve) => {
+    if (ms <= 0 || abort.signal.aborted) {
+      resolve()
+      return
+    }
+
+    const cleanup = () => {
+      if (timer !== undefined) {
+        clearTimeout(timer)
+        timer = undefined
+      }
+      if (typeof globalThis.window !== "undefined") {
+        globalThis.window.removeEventListener("online", onInterrupt)
+      }
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibilityInterrupt)
+      }
+      abort.signal.removeEventListener("abort", onInterrupt)
+    }
+    const onInterrupt = () => {
+      cleanup()
+      resolve()
+    }
+    const onVisibilityInterrupt = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        onInterrupt()
+      }
+    }
+
+    let timer: ReturnType<typeof setTimeout> | undefined = setTimeout(onInterrupt, ms)
+    if (typeof globalThis.window !== "undefined") {
+      globalThis.window.addEventListener("online", onInterrupt, { once: true })
+    }
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisibilityInterrupt)
+    }
+    abort.signal.addEventListener("abort", onInterrupt, { once: true })
+  })
+
+  const computeRetryDelay = (failures: number): number => {
+    if (failures <= 0) return 0
+    // Offline: don't spin probing a dead network. Use the long cap and rely on
+    // waitForRetry to resolve early when the `online` event fires. The cap is
+    // also a fallback for browsers that miss `online`.
+    if (isOffline()) return RETRY_BACKOFF_CAP_HIDDEN_OR_OFFLINE_MS
+    const cap = isHidden() ? RETRY_BACKOFF_CAP_HIDDEN_OR_OFFLINE_MS : RETRY_BACKOFF_CAP_VISIBLE_MS
+    const exponent = Math.min(failures - 1, RETRY_BACKOFF_MAX_EXPONENT)
+    return Math.min(cap, RETRY_BACKOFF_BASE_MS * 2 ** exponent)
+  }
 
   let streamErrorLogged = false
   let attempt: AbortController | undefined
@@ -297,6 +440,26 @@ export function createEventPipeline(input: EventPipelineInput) {
     const normalizedPayload = normalizeEventType(payload)
     const routedDirectory = routeDirectory?.(directory, normalizedPayload) || directory
     const d = getOrCreateDir(routedDirectory)
+
+    // A full part snapshot is a coalescing barrier for that part's deltas:
+    // drop its pending delta coalescing keys so a delta arriving after the
+    // snapshot starts a fresh queue entry instead of merging into a delta
+    // queued before the snapshot, which the snapshot would then overwrite and
+    // drop the later delta's text. The already-queued delta event stays.
+    if (normalizedPayload.type === "message.part.updated") {
+      const part = (normalizedPayload.properties as { part?: { id?: unknown; messageID?: unknown } }).part
+      const messageID = typeof part?.messageID === "string" ? part.messageID : undefined
+      const partID = typeof part?.id === "string" ? part.id : undefined
+      if (messageID && partID) {
+        const deltaPrefix = `message.part.delta:${messageID}:${partID}:`
+        for (const coalesceKey of d.coalesced.keys()) {
+          if (coalesceKey.startsWith(deltaPrefix)) {
+            d.coalesced.delete(coalesceKey)
+          }
+        }
+      }
+    }
+
     const k = key(normalizedPayload)
     if (k) {
       const i = d.coalesced.get(k)
@@ -313,11 +476,6 @@ export function createEventPipeline(input: EventPipelineInput) {
           } as unknown as Event
         } else {
           d.queue[i] = normalizedPayload
-          if (normalizedPayload.type === "message.part.updated") {
-            const part = (normalizedPayload.properties as { part: { messageID: string; id: string } }).part
-            d.staleDeltas.add(deltaKey(part.messageID, part.id, "text"))
-            d.staleDeltas.add(deltaKey(part.messageID, part.id, "output"))
-          }
         }
         syncDebug.pipeline.coalesced(normalizedPayload.type, k)
         return
@@ -385,6 +543,28 @@ export function createEventPipeline(input: EventPipelineInput) {
   }
 
   const runWsAttempt = async (signal: AbortSignal) => {
+    // A WebSocket upgrade can't carry an Authorization header, so it
+    // authenticates purely via the oc_url_token query param. The sync token
+    // getter returns "" while the token is unminted or inside its expiry skew
+    // window, which would open the socket WITHOUT credentials — the server then
+    // rejects it ("HTTP Authentication failed; no valid credentials available")
+    // and the resulting reconnect storm churns the sync store (transient
+    // status-missing → idle flicker). Mint/await a valid token BEFORE
+    // connecting. (SSE avoids this: the SDK fetch sends the bearer header.)
+    try {
+      await refreshRuntimeUrlAuthToken()
+    } catch (error) {
+      const wrapped = error instanceof Error ? error : new Error("Message stream WebSocket auth token unavailable")
+      if (transport === "auto") {
+        wsFallbackUntil = Date.now() + WS_FALLBACK_WINDOW_MS
+        ;(wrapped as Error & { code?: string }).code = "WS_FALLBACK"
+      }
+      ;(wrapped as Error & { reason?: string }).reason = "ws_auth_token_unavailable"
+      throw wrapped
+    }
+    if (signal.aborted) {
+      throw new DOMException("Aborted", "AbortError")
+    }
     await new Promise<void>((resolve, reject) => {
       let settled = false
       let opened = false
@@ -533,6 +713,14 @@ export function createEventPipeline(input: EventPipelineInput) {
           ? `ws_closed:code=${event?.code ?? "?"}`
           : "ws_closed_before_ready"
 
+        // Closed before the socket ever opened → the server rejected the
+        // upgrade, typically an auth failure on the oc_url_token. Drop the
+        // cached token so the next attempt mints a fresh one instead of
+        // replaying a token the server won't accept (which would loop).
+        if (!opened) {
+          clearRuntimeUrlAuthToken()
+        }
+
         // If the WS stream connects (ready) but then drops quickly, prefer SSE for a while.
         // This avoids tight reconnect loops with repeated console spam.
         const livedMs = readyAt > 0 ? Date.now() - readyAt : 0
@@ -581,10 +769,8 @@ export function createEventPipeline(input: EventPipelineInput) {
         if (currentTransport === "ws" && code === "WS_FALLBACK") {
           retryDelayMs = 0
           // Transport switch (WS → SSE fallback), not a real disconnection.
-          // No events were lost — the next attempt will use SSE and carry
-          // lastEventId for gapless replay. Notify consumer so it can set
-          // isConnected, but do NOT treat this as a disconnection requiring
-          // a full directory resync.
+          // The consumer still gets a hook so it can resync authoritative
+          // state; real networks can lose/buffer events around transport flips.
           onTransportSwitch?.()
         } else if (!isAbortError(error)) {
           consecutiveFailures += 1
@@ -609,9 +795,24 @@ export function createEventPipeline(input: EventPipelineInput) {
               : `${currentTransport}_error:unknown`
           notifyDisconnected(reason)
 
-          // Backoff so a hard-down server doesn't spin the browser event loop.
-          // Cap at 5s; reset occurs in markConnected().
-          retryDelayMs = Math.min(5_000, Math.max(retryDelayMs, 250) * (consecutiveFailures <= 1 ? 1 : 2))
+          // Exponential backoff so a hard-down server / dead network doesn't
+          // spin the event loop. Caps lower (5s) when the user is foreground
+          // and the browser thinks it's online; caps higher (60s) when hidden
+          // or offline so a backgrounded PWA on a flaky link doesn't burn
+          // battery. waitForRetry below resolves early on `online` or
+          // visibility-visible so recovery is still under a second.
+          //
+          // Override for permanent 4xx errors: stuck-path / bad-auth scenarios
+          // won't recover from blind retry. Use the long cap immediately so
+          // the client doesn't pound the server log at 12 reqs/min. The
+          // waitForRetry interrupters still apply, so a fix on the other end
+          // followed by `online`/visibility recovery probes promptly.
+          const status = extractStatus(error)
+          if (status !== undefined && isPermanentHttpStatus(status)) {
+            retryDelayMs = RETRY_BACKOFF_CAP_HIDDEN_OR_OFFLINE_MS
+          } else {
+            retryDelayMs = computeRetryDelay(consecutiveFailures)
+          }
         }
       } finally {
         abort.signal.removeEventListener("abort", onAbort)
@@ -626,7 +827,7 @@ export function createEventPipeline(input: EventPipelineInput) {
         attemptAbortReason = null
       }
       if (retryDelayMs > 0) {
-        await wait(retryDelayMs)
+        await waitForRetry(retryDelayMs)
       }
     }
   })().finally(flushAll)
@@ -651,6 +852,29 @@ export function createEventPipeline(input: EventPipelineInput) {
     attempt?.abort()
   }
 
+  // Browser told us the network is back. If we're already in a disconnected
+  // cycle, abort the (stale) attempt and let the loop probe immediately;
+  // waitForRetry also resolves early on `online`, so any inter-attempt sleep
+  // ends now. Guard on `disconnected` so a spurious `online` from the browser
+  // doesn't disrupt a healthy connection.
+  const onOnline = () => {
+    if (!disconnected) return
+    attempt?.abort()
+  }
+
+  // Browser told us we're offline. Abort the current attempt — its socket /
+  // fetch will throw soon anyway, this just stops sooner. computeRetryDelay
+  // then returns the long cap so we wait for `online` instead of hammering
+  // a dead network.
+  const onOffline = () => {
+    attempt?.abort()
+  }
+
+  const reconnect = (reason = "manual") => {
+    attemptAbortReason = `${activeTransport}_${reason}`
+    attempt?.abort()
+  }
+
   if (typeof document !== "undefined") {
     document.addEventListener("visibilitychange", onVisibility)
     window.addEventListener("pageshow", onPageShow)
@@ -660,6 +884,8 @@ export function createEventPipeline(input: EventPipelineInput) {
   // test environments can replace globalThis.window with a stub.
   if (typeof globalThis.window !== "undefined") {
     globalThis.window.addEventListener("openchamber:system-resume", onSystemResume)
+    globalThis.window.addEventListener("online", onOnline)
+    globalThis.window.addEventListener("offline", onOffline)
   }
 
   const cleanup = () => {
@@ -669,10 +895,12 @@ export function createEventPipeline(input: EventPipelineInput) {
     }
     if (typeof globalThis.window !== "undefined") {
       globalThis.window.removeEventListener("openchamber:system-resume", onSystemResume)
+      globalThis.window.removeEventListener("online", onOnline)
+      globalThis.window.removeEventListener("offline", onOffline)
     }
     abort.abort()
     flushAll()
   }
 
-  return { cleanup }
+  return { cleanup, reconnect }
 }

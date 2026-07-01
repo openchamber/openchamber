@@ -29,9 +29,10 @@ export const createOpenCodeNetworkRuntime = (deps) => {
   const waitForReady = async (url, timeoutMs = 10000) => {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
+      let timeout = null;
       try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 3000);
+        timeout = setTimeout(() => controller.abort(), 3000);
         const response = await fetch(`${url.replace(/\/+$/, '')}/global/health`, {
           method: 'GET',
           headers: {
@@ -41,6 +42,7 @@ export const createOpenCodeNetworkRuntime = (deps) => {
           signal: controller.signal,
         });
         clearTimeout(timeout);
+        timeout = null;
 
         if (response.ok) {
           const body = await response.json().catch(() => null);
@@ -49,6 +51,10 @@ export const createOpenCodeNetworkRuntime = (deps) => {
           }
         }
       } catch {
+      } finally {
+        if (timeout) {
+          clearTimeout(timeout);
+        }
       }
       await new Promise((resolve) => setTimeout(resolve, 100));
     }

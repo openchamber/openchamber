@@ -1,16 +1,20 @@
-export type Locale = 'en' | 'zh-CN' | 'uk' | 'es' | 'pt-BR' | 'ko';
+export type Locale = 'en' | 'fr' | 'zh-CN' | 'zh-TW' | 'uk' | 'es' | 'pt-BR' | 'ko' | 'pl' | 'ja';
 
-export const LOCALES = ['en', 'zh-CN', 'uk', 'es', 'pt-BR', 'ko'] as const satisfies readonly Locale[];
+export const LOCALES = ['en', 'fr', 'zh-CN', 'zh-TW', 'uk', 'es', 'pt-BR', 'ko', 'pl', 'ja'] as const satisfies readonly Locale[];
 
 export const DEFAULT_LOCALE: Locale = 'en';
 
-export const LOCALE_LABEL_KEYS: Record<Locale, 'common.language.english' | 'common.language.simplifiedChinese' | 'common.language.ukrainian' | 'common.language.spanish' | 'common.language.brazilianPortuguese' | 'common.language.korean'> = {
+export const LOCALE_LABEL_KEYS: Record<Locale, 'common.language.english' | 'common.language.french' | 'common.language.simplifiedChinese' | 'common.language.traditionalChinese' | 'common.language.ukrainian' | 'common.language.spanish' | 'common.language.brazilianPortuguese' | 'common.language.korean' | 'common.language.polish' | 'common.language.japanese'> = {
   en: 'common.language.english',
+  fr: 'common.language.french',
   'zh-CN': 'common.language.simplifiedChinese',
+  'zh-TW': 'common.language.traditionalChinese',
   uk: 'common.language.ukrainian',
   es: 'common.language.spanish',
   'pt-BR': 'common.language.brazilianPortuguese',
   ko: 'common.language.korean',
+  pl: 'common.language.polish',
+  ja: 'common.language.japanese',
 };
 
 export const LOCALE_STORAGE_KEY = 'openchamber.i18n.v1';
@@ -28,11 +32,17 @@ export function normalizeLocale(value: string | undefined | null): Locale {
   if (normalized === 'zh-cn' || normalized === 'zh-hans' || normalized.startsWith('zh-hans-')) {
     return 'zh-CN';
   }
+  if (normalized === 'zh-tw' || normalized === 'zh-hant' || normalized.startsWith('zh-hant-')) {
+    return 'zh-TW';
+  }
   if (normalized.startsWith('zh')) {
     return 'zh-CN';
   }
   if (normalized.startsWith('en')) {
     return 'en';
+  }
+  if (normalized === 'fr' || normalized.startsWith('fr-')) {
+    return 'fr';
   }
   if (normalized === 'uk' || normalized.startsWith('uk-') || normalized === 'ua' || normalized.startsWith('ua-')) {
     return 'uk';
@@ -46,10 +56,16 @@ export function normalizeLocale(value: string | undefined | null): Locale {
   if (normalized === 'ko' || normalized.startsWith('ko-')) {
     return 'ko';
   }
+  if (normalized === 'ja' || normalized.startsWith('ja-')) {
+    return 'ja';
+  }
+  if (normalized === 'pl' || normalized.startsWith('pl-')) {
+    return 'pl';
+  }
   return DEFAULT_LOCALE;
 }
 
-export function readStoredLocale(): Locale | undefined {
+function readStoredLocale(): Locale | undefined {
   if (typeof window === 'undefined') {
     return undefined;
   }

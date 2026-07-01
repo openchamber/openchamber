@@ -1,12 +1,4 @@
 import React from 'react';
-import {
-  RiGitMergeLine,
-  RiGitBranchLine,
-  RiLoader4Line,
-  RiArrowDownSLine,
-  RiCheckLine,
-  RiCloseLine,
-} from '@remixicon/react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -31,6 +23,7 @@ import {
   CommandSeparator,
 } from '@/components/ui/command';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 
@@ -53,6 +46,7 @@ interface BranchIntegrationSectionProps {
   operationLogs?: OperationLogEntry[];
   onOperationComplete?: () => void;
   mode?: 'dialog' | 'inline';
+  defaultTargetBranch?: string;
 }
 
 export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> = ({
@@ -66,6 +60,7 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
   operationLogs = [],
   onOperationComplete,
   mode = 'dialog',
+  defaultTargetBranch,
 }) => {
   const { t } = useI18n();
   const [dialogOpen, setDialogOpen] = React.useState(false);
@@ -94,10 +89,15 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
   // Filter branches based on search
   const filteredLocal = React.useMemo(() => {
     const term = branchSearch.toLowerCase();
-    const filtered = localBranches.filter((b) => b !== currentBranch);
+    const remoteBranchNames = new Set(
+      remoteBranches
+        .map((branch) => branch.slice(branch.indexOf('/') + 1))
+        .filter(Boolean)
+    );
+    const filtered = localBranches.filter((branch) => branch !== currentBranch && !remoteBranchNames.has(branch));
     if (!term) return filtered;
     return filtered.filter((b) => b.toLowerCase().includes(term));
-  }, [branchSearch, localBranches, currentBranch]);
+  }, [branchSearch, localBranches, currentBranch, remoteBranches]);
 
   const filteredRemote = React.useMemo(() => {
     const term = branchSearch.toLowerCase();
@@ -105,9 +105,16 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
     return remoteBranches.filter((b) => b.toLowerCase().includes(term));
   }, [branchSearch, remoteBranches]);
 
+  const resolveDefaultBranch = React.useCallback(() => {
+    if (!defaultTargetBranch) return null;
+    if (remoteBranches.includes(defaultTargetBranch)) return defaultTargetBranch;
+    if (localBranches.includes(defaultTargetBranch)) return defaultTargetBranch;
+    return null;
+  }, [defaultTargetBranch, localBranches, remoteBranches]);
+
   const handleOpenDialog = () => {
     setDialogOpen(true);
-    setSelectedBranch(null);
+    setSelectedBranch(resolveDefaultBranch());
     setOperation('merge');
     setBranchSearch('');
   };
@@ -158,6 +165,11 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
     }
   }, [branchDropdownOpen]);
 
+  React.useEffect(() => {
+    if (mode !== 'inline' || selectedBranch) return;
+    setSelectedBranch(resolveDefaultBranch());
+  }, [mode, resolveDefaultBranch, selectedBranch]);
+
   const renderOperating = () => (
     <div className="space-y-3">
       <div
@@ -169,13 +181,13 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
             <div key={index} className="flex items-start gap-2">
               <div className="mt-0.5 shrink-0">
                 {log.status === 'running' && (
-                  <RiLoader4Line className="size-3.5 animate-spin text-primary" />
+                  <Icon name="loader-4" className="size-3.5 animate-spin text-primary" />
                 )}
                 {log.status === 'done' && (
-                  <RiCheckLine className="size-3.5 text-success" />
+                  <Icon name="check" className="size-3.5 text-success" />
                 )}
                 {log.status === 'error' && (
-                  <RiCloseLine className="size-3.5 text-destructive" />
+                  <Icon name="close" className="size-3.5 text-destructive" />
                 )}
                 {log.status === 'pending' && (
                   <div className="size-3.5 rounded-full border border-muted-foreground/30" />
@@ -232,7 +244,7 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
             )}
           >
             <div className="flex items-center gap-2">
-              <RiGitMergeLine
+              <Icon name="git-merge"
                 className={cn('size-4', operation === 'merge' ? 'text-primary' : 'text-muted-foreground')}
               />
               <span
@@ -260,7 +272,7 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
             )}
           >
             <div className="flex items-center gap-2">
-              <RiGitBranchLine
+              <Icon name="git-branch"
                 className={cn('size-4', operation === 'rebase' ? 'text-primary' : 'text-muted-foreground')}
               />
               <span
@@ -292,7 +304,7 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
               <span className={cn('truncate', !selectedBranch && 'text-muted-foreground')}>
                 {selectedBranch || t('gitView.branch.selectBranch')}
               </span>
-              <RiArrowDownSLine className="size-4 opacity-60 shrink-0" />
+              <Icon name="arrow-down-s" className="size-4 opacity-60 shrink-0" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent
@@ -306,6 +318,7 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
                 placeholder={t('gitView.branch.searchPlaceholder')}
                 value={branchSearch}
                 onValueChange={setBranchSearch}
+                onKeyDown={(event) => event.stopPropagation()}
               />
               <CommandList className="h-full min-h-0" disableHorizontal>
                 <CommandEmpty>{t('gitView.branch.empty')}</CommandEmpty>
@@ -368,12 +381,12 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
           >
             {operation === 'merge' ? (
               <>
-                <RiGitMergeLine className="size-4" />
+                <Icon name="git-merge" className="size-4" />
                 {t('gitView.operation.merge')}
               </>
             ) : (
               <>
-                <RiGitBranchLine className="size-4" />
+                <Icon name="git-branch" className="size-4" />
                 {t('gitView.operation.rebase')}
               </>
             )}
@@ -424,9 +437,9 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
             disabled={isDisabled}
           >
             {isOperating ? (
-              <RiLoader4Line className="size-4 animate-spin" />
+              <Icon name="loader-4" className="size-4 animate-spin" />
             ) : (
-              <RiGitMergeLine className="size-4" />
+              <Icon name="git-merge" className="size-4" />
             )}
             <span>{t('gitView.branch.mergeRebase')}</span>
           </Button>

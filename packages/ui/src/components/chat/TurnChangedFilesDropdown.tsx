@@ -1,5 +1,4 @@
 import React from 'react';
-import { RiFileEditLine, RiArrowDownSLine, RiArrowUpSLine } from '@remixicon/react';
 import type { ToolPart } from '@opencode-ai/sdk/v2';
 import { Popover } from '@base-ui/react/popover';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -17,7 +16,9 @@ import {
 import { ChangedFilesList } from './ChangedFilesList';
 import { changedFilesPopoverClassName, changedFilesPopoverStyle } from './changedFilesPopover';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Icon } from "@/components/icon/Icon";
 import type { TurnActivityRecord } from './lib/turns/types';
+import { toAbsoluteFilePath } from '@/lib/path-utils';
 
 interface TurnChangedFilesDropdownProps {
     activityParts: TurnActivityRecord[] | undefined;
@@ -57,9 +58,7 @@ export const TurnChangedFilesDropdown: React.FC<TurnChangedFilesDropdownProps> =
         if (!currentDirectory) return;
         if (isGitFile(file)) return;
 
-        const absolutePath = file.path.startsWith('/')
-            ? file.path
-            : (currentDirectory.endsWith('/') ? currentDirectory : currentDirectory + '/') + file.path;
+        const absolutePath = toAbsoluteFilePath(currentDirectory, file.path);
 
         const editor = runtime?.editor;
         if (editor) {
@@ -96,12 +95,12 @@ export const TurnChangedFilesDropdown: React.FC<TurnChangedFilesDropdownProps> =
                                 onPointerDownCapture={syncPortalContainer}
                                 onFocusCapture={syncPortalContainer}
                             >
-                                <RiFileEditLine className="h-3.5 w-3.5" />
+                                <Icon name="file-edit" className="h-3.5 w-3.5" />
                                 <span className="message-footer__label">{label}</span>
                                 {isExpanded ? (
-                                    <RiArrowUpSLine className="h-3.5 w-3.5" />
+                                    <Icon name="arrow-up-s" className="h-3.5 w-3.5" />
                                 ) : (
-                                    <RiArrowDownSLine className="h-3.5 w-3.5" />
+                                    <Icon name="arrow-down-s" className="h-3.5 w-3.5" />
                                 )}
                             </button>
                         }

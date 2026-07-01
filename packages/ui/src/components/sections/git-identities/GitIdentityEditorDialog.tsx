@@ -1,5 +1,6 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
 import {
@@ -11,18 +12,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Icon } from "@/components/icon/Icon";
+import type { IconName } from "@/components/icon/icons";
 import { useGitIdentitiesStore, type GitIdentityProfile, type GitIdentityAuthType } from '@/stores/useGitIdentitiesStore';
-import {
-  RiDeleteBinLine,
-  RiGitBranchLine,
-  RiBriefcaseLine,
-  RiHomeLine,
-  RiGraduationCapLine,
-  RiCodeLine,
-  RiInformationLine,
-  RiKeyLine,
-  RiLock2Line,
-} from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 
@@ -34,12 +26,12 @@ const PROFILE_COLORS = [
   { key: 'type', label: 'Yellow', cssVar: 'var(--syntax-type)' },
 ];
 
-const PROFILE_ICONS = [
-  { key: 'branch', Icon: RiGitBranchLine, label: 'Branch' },
-  { key: 'briefcase', Icon: RiBriefcaseLine, label: 'Work' },
-  { key: 'house', Icon: RiHomeLine, label: 'Personal' },
-  { key: 'graduation', Icon: RiGraduationCapLine, label: 'School' },
-  { key: 'code', Icon: RiCodeLine, label: 'Code' },
+const PROFILE_ICONS: Array<{ key: string; Icon: IconName; label: string }> = [
+  { key: 'branch', Icon: 'git-branch', label: 'Branch' },
+  { key: 'briefcase', Icon: 'briefcase', label: 'Work' },
+  { key: 'house', Icon: 'home', label: 'Personal' },
+  { key: 'graduation', Icon: 'graduation-cap', label: 'School' },
+  { key: 'code', Icon: 'code', label: 'Code' },
 ];
 
 interface GitIdentityEditorDialogProps {
@@ -75,6 +67,8 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
   const [userEmail, setUserEmail] = React.useState('');
   const [authType, setAuthType] = React.useState<GitIdentityAuthType>('ssh');
   const [sshKey, setSshKey] = React.useState('');
+  const [signCommits, setSignCommits] = React.useState(false);
+  const [signingKey, setSigningKey] = React.useState('');
   const [host, setHost] = React.useState('');
   const [color, setColor] = React.useState('keyword');
   const [icon, setIcon] = React.useState('branch');
@@ -92,6 +86,8 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
       setUserEmail('');
       setAuthType('token');
       setSshKey('');
+      setSignCommits(false);
+      setSigningKey('');
       setHost(importData.host);
       setColor('string');
       setIcon('code');
@@ -101,6 +97,8 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
       setUserEmail('');
       setAuthType('ssh');
       setSshKey('');
+      setSignCommits(false);
+      setSigningKey('');
       setHost('');
       setColor('keyword');
       setIcon('branch');
@@ -110,6 +108,8 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
       setUserEmail(selectedProfile.userEmail);
       setAuthType(selectedProfile.authType || 'ssh');
       setSshKey(selectedProfile.sshKey || '');
+      setSignCommits(selectedProfile.signCommits === true);
+      setSigningKey(selectedProfile.signingKey || '');
       setHost(selectedProfile.host || '');
       setColor(selectedProfile.color || 'keyword');
       setIcon(selectedProfile.icon || 'branch');
@@ -121,6 +121,8 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
         setUserEmail(global.userEmail);
         setAuthType(global.authType || 'ssh');
         setSshKey(global.sshKey || '');
+        setSignCommits(false);
+        setSigningKey('');
         setHost(global.host || '');
         setColor(global.color || 'keyword');
         setIcon(global.icon || 'branch');
@@ -137,6 +139,10 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
       toast.error(t('settings.gitIdentities.editor.toast.hostRequiredForToken'));
       return;
     }
+    if (signCommits && !signingKey.trim()) {
+      toast.error(t('settings.gitIdentities.editor.toast.signingKeyRequired'));
+      return;
+    }
 
     setIsSaving(true);
     try {
@@ -146,6 +152,8 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
         userEmail: userEmail.trim(),
         authType,
         sshKey: authType === 'ssh' ? (sshKey.trim() || null) : null,
+        signCommits,
+        signingKey: signingKey.trim() || null,
         host: authType === 'token' ? (host.trim() || null) : null,
         color,
         icon,
@@ -261,7 +269,7 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                   <span className="typography-ui-label text-foreground">{t('settings.gitIdentities.editor.field.icon')}</span>
                   <div className="flex gap-1.5">
                     {PROFILE_ICONS.map((i) => {
-                      const IconComponent = i.Icon;
+                      const iconName = i.Icon;
                       return (
                         <button
                           key={i.key}
@@ -275,7 +283,7 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                           )}
                           title={i.label}
                         >
-                          <IconComponent
+                          <Icon name={iconName}
                             className="w-3.5 h-3.5"
                             style={{ color: icon === i.key ? currentColorValue : 'var(--surface-muted-foreground)' }}
                           />
@@ -298,7 +306,7 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                   {!isGlobalProfile && <span className="text-[var(--status-error)] text-xs">*</span>}
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                      <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                     </TooltipTrigger>
                     <TooltipContent sideOffset={8} className="max-w-xs">
                       {t('settings.gitIdentities.editor.field.userNameTooltip')}
@@ -322,7 +330,7 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                   {!isGlobalProfile && <span className="text-[var(--status-error)] text-xs">*</span>}
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                      <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                     </TooltipTrigger>
                     <TooltipContent sideOffset={8} className="max-w-xs">
                       {t('settings.gitIdentities.editor.field.emailAddressTooltip')}
@@ -356,7 +364,7 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                         aria-pressed={authType === 'ssh'}
                         onClick={() => setAuthType('ssh')}
                       >
-                        <RiLock2Line className="w-3.5 h-3.5 mr-1" /> SSH
+                        <Icon name="lock-2" className="w-3.5 h-3.5 mr-1" /> SSH
                       </Button>
                       <Button size="sm"
                         type="button"
@@ -364,7 +372,7 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                         aria-pressed={authType === 'token'}
                         onClick={() => setAuthType('token')}
                       >
-                        <RiKeyLine className="w-3.5 h-3.5 mr-1" /> {t('settings.gitIdentities.editor.field.authToken')}
+                        <Icon name="key" className="w-3.5 h-3.5 mr-1" /> {t('settings.gitIdentities.editor.field.authToken')}
                       </Button>
                     </div>
                   </div>
@@ -375,7 +383,7 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                         <label className="typography-ui-label text-foreground">{t('settings.gitIdentities.editor.field.sshKeyPath')}</label>
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                            <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                           </TooltipTrigger>
                           <TooltipContent sideOffset={8} className="max-w-xs">
                             {t('settings.gitIdentities.editor.field.sshKeyPathTooltip')}
@@ -391,6 +399,39 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                     </div>
                   )}
 
+                  <div className="border-t border-border/40 pt-3 space-y-3">
+                    <div className="flex items-start gap-2">
+                      <Checkbox
+                        checked={signCommits}
+                        onChange={setSignCommits}
+                        ariaLabel={t('settings.gitIdentities.editor.field.signCommits')}
+                      />
+                      <div className="min-w-0">
+                        <div className="typography-ui-label text-foreground">
+                          {t('settings.gitIdentities.editor.field.signCommits')}
+                        </div>
+                        <div className="typography-micro text-muted-foreground/70">
+                          {t('settings.gitIdentities.editor.section.commitSigning')}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center gap-1.5 mb-1.5">
+                        <label className="typography-ui-label text-foreground">
+                          {t('settings.gitIdentities.editor.field.signingKey')}
+                        </label>
+                      </div>
+                      <Input
+                        value={signingKey}
+                        onChange={(e) => setSigningKey(e.target.value)}
+                        placeholder={t('settings.gitIdentities.editor.field.signingKeyPlaceholder')}
+                        disabled={!signCommits}
+                        className="h-8 font-mono text-xs"
+                      />
+                    </div>
+                  </div>
+
                   {authType === 'token' && (
                     <div>
                       <div className="flex items-center gap-1.5 mb-1.5">
@@ -398,7 +439,7 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                         <span className="text-[var(--status-error)] text-xs">*</span>
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                            <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                           </TooltipTrigger>
                           <TooltipContent sideOffset={8} className="max-w-xs">
                             {t('settings.gitIdentities.editor.field.hostTooltip')}
@@ -427,7 +468,7 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                 onClick={() => setIsDeleteDialogOpen(true)}
                 className="text-[var(--status-error)] hover:text-[var(--status-error)] border-[var(--status-error)]/30 hover:bg-[var(--status-error)]/10 mr-auto"
               >
-                <RiDeleteBinLine className="w-3.5 h-3.5 mr-1" /> {t('settings.common.actions.delete')}
+                <Icon name="delete-bin" className="w-3.5 h-3.5 mr-1" /> {t('settings.common.actions.delete')}
               </Button>
             )}
             <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)} className="text-foreground hover:bg-interactive-hover hover:text-foreground">

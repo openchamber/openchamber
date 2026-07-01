@@ -10,14 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { toast } from '@/components/ui';
-import {
-  RiCheckboxBlankLine,
-  RiCheckboxLine,
-  RiExternalLinkLine,
-  RiGithubLine,
-  RiLoader4Line,
-  RiSearchLine,
-} from '@remixicon/react';
+import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -26,14 +19,14 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useContextStore } from '@/stores/contextStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
-import { opencodeClient } from '@/lib/opencode/client';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
+import { useDeviceInfo } from '@/lib/device';
 import { createWorktreeSessionForNewBranch } from '@/lib/worktreeSessionCreator';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import type { GitHubIssue, GitHubIssueComment, GitHubIssuesListResult, GitHubIssueSummary, GitHubRepoSelector } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 
@@ -87,6 +80,8 @@ export function GitHubIssuePickerDialog({
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const isMobile = useUIStore((state) => state.isMobile);
+  const { isTablet } = useDeviceInfo();
+  const alwaysShowActions = isMobile || isTablet;
   const activeProject = useProjectsStore((state) => state.getActiveProject());
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
 
@@ -104,6 +99,10 @@ export function GitHubIssuePickerDialog({
   const [isLoading, setIsLoading] = React.useState(false);
   const [isLoadingMore, setIsLoadingMore] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
+  const directNumber = React.useMemo(() => parseIssueNumber(query), [query]);
+  const debouncedQuery = useDebouncedValue(query, 350);
+  const isTextSearch = debouncedQuery.trim().length > 0 && !directNumber;
 
   const refresh = React.useCallback(async () => {
     if (!projectDirectory) {
@@ -143,6 +142,38 @@ export function GitHubIssuePickerDialog({
     }
   }, [github, githubAuthChecked, githubAuthStatus, projectDirectory, t]);
 
+  React.useEffect(() => {
+    if (!open || !projectDirectory) return;
+    if (githubAuthChecked && githubAuthStatus?.connected === false) return;
+    if (!github?.issuesList) return;
+    if (!debouncedQuery.trim() || directNumber) {
+      void refresh();
+      return;
+    }
+
+    const controller = new AbortController();
+    setIsLoading(true);
+    setError(null);
+
+    github.issuesList(projectDirectory, { page: 1, query: debouncedQuery.trim() })
+      .then((next) => {
+        if (controller.signal.aborted) return;
+        setResult(next);
+        setIssues(next.issues ?? []);
+        setPage(next.page ?? 1);
+        setHasMore(Boolean(next.hasMore));
+      })
+      .catch((e) => {
+        if (controller.signal.aborted) return;
+        setError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setIsLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [open, projectDirectory, github, githubAuthChecked, githubAuthStatus, debouncedQuery, directNumber, refresh, t]);
+
   const loadMore = React.useCallback(async () => {
     if (!projectDirectory) return;
     if (!github?.issuesList) return;
@@ -152,7 +183,9 @@ export function GitHubIssuePickerDialog({
     setIsLoadingMore(true);
     try {
       const nextPage = page + 1;
-      const next = await github.issuesList(projectDirectory, { page: nextPage });
+      const next = isTextSearch
+        ? await github.issuesList(projectDirectory, { page: nextPage, query: debouncedQuery.trim() })
+        : await github.issuesList(projectDirectory, { page: nextPage });
       setResult(next);
       setIssues((prev) => [...prev, ...(next.issues ?? [])]);
       setPage(next.page ?? nextPage);
@@ -163,7 +196,7 @@ export function GitHubIssuePickerDialog({
     } finally {
       setIsLoadingMore(false);
     }
-  }, [github, hasMore, isLoading, isLoadingMore, page, projectDirectory, t]);
+  }, [github, hasMore, isLoading, isLoadingMore, isTextSearch, debouncedQuery, page, projectDirectory, t]);
 
   React.useEffect(() => {
     if (!open) {
@@ -199,17 +232,6 @@ export function GitHubIssuePickerDialog({
     setSettingsPage('github');
     setSettingsDialogOpen(true);
   }, [setSettingsDialogOpen, setSettingsPage]);
-
-  const filtered = React.useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return issues;
-    return issues.filter((issue) => {
-      if (String(issue.number) === q.replace(/^#/, '')) return true;
-      return issue.title.toLowerCase().includes(q);
-    });
-  }, [issues, query]);
-
-  const directNumber = React.useMemo(() => parseIssueNumber(query), [query]);
 
   const resolveDefaultAgentName = React.useCallback((): string | undefined => {
     const configState = useConfigStore.getState();
@@ -252,9 +274,9 @@ export function GitHubIssuePickerDialog({
   const resolveDefaultVariant = React.useCallback((providerID: string, modelID: string): string | undefined => {
     const configState = useConfigStore.getState();
     const settingsDefaultVariant = configState.settingsDefaultVariant;
-    if (!settingsDefaultVariant) {
-      return undefined;
-    }
+    const currentVariant = configState.currentProviderId === providerID && configState.currentModelId === modelID
+      ? configState.currentVariant
+      : undefined;
 
     const provider = configState.providers.find((p) => p.id === providerID);
     const model = provider?.models.find((m: Record<string, unknown>) => (m as { id?: string }).id === modelID) as
@@ -262,12 +284,15 @@ export function GitHubIssuePickerDialog({
       | undefined;
     const variants = model?.variants;
     if (!variants) {
-      return undefined;
+      return settingsDefaultVariant || currentVariant || undefined;
     }
-    if (!Object.prototype.hasOwnProperty.call(variants, settingsDefaultVariant)) {
-      return undefined;
+    if (settingsDefaultVariant && Object.prototype.hasOwnProperty.call(variants, settingsDefaultVariant)) {
+      return settingsDefaultVariant;
     }
-    return settingsDefaultVariant;
+    if (currentVariant && Object.prototype.hasOwnProperty.call(variants, currentVariant)) {
+      return currentVariant;
+    }
+    return undefined;
   }, []);
 
   const startSession = React.useCallback(async (issueNumber: number, sourceRepo?: GitHubRepoSelector | null) => {
@@ -370,24 +395,26 @@ export function GitHubIssuePickerDialog({
 
       const sessionTitle = `#${issue.number} ${issue.title}`.trim();
 
-      const sessionId = await (async () => {
+      const { sessionId } = await (async () => {
         if (createInWorktree) {
           const preferred = `issue-${issue.number}-${generateBranchSlug()}`;
           const created = await createWorktreeSessionForNewBranch(
             projectDirectory,
-            preferred
+            preferred,
+            undefined,
+            { returnAfterDirectoryCreated: true }
           );
           if (!created?.id) {
             throw new Error('Failed to create worktree session');
           }
-          return created.id;
+          return { sessionId: created.id, sessionDirectory: created.path };
         }
 
         const session = await sessionActions.createSession(sessionTitle, projectDirectory, null);
         if (!session?.id) {
           throw new Error('Failed to create session');
         }
-        return session.id;
+        return { sessionId: session.id, sessionDirectory: session.directory ?? projectDirectory };
       })();
 
       // Ensure worktree-based sessions also get the issue title.
@@ -416,63 +443,27 @@ export function GitHubIssuePickerDialog({
 
       const variant = resolveDefaultVariant(providerID, modelID);
 
-      try {
-        useContextStore.getState().saveSessionModelSelection(sessionId, providerID, modelID);
-      } catch {
-        // ignore
-      }
-
-      if (agentName) {
-        try {
-          configState.setAgent(agentName);
-        } catch {
-          // ignore
-        }
-
-        try {
-          useContextStore.getState().saveSessionAgentSelection(sessionId, agentName);
-        } catch {
-          // ignore
-        }
-
-        try {
-          useContextStore.getState().saveAgentModelForSession(sessionId, agentName, providerID, modelID);
-        } catch {
-          // ignore
-        }
-
-        if (variant !== undefined) {
-          try {
-            configState.setCurrentVariant(variant);
-          } catch {
-            // ignore
-          }
-          try {
-            useContextStore.getState().saveAgentModelVariantForSession(sessionId, agentName, providerID, modelID, variant);
-          } catch {
-            // ignore
-          }
-        }
-      }
-
       const visiblePromptText = await renderMagicPrompt('github.issue.review.visible', {
         issue_number: String(issue.number),
       });
       const instructionsText = await renderMagicPrompt('github.issue.review.instructions');
       const contextText = buildIssueContextText({ repo: issueRes.repo, issue, comments });
 
-      void opencodeClient.sendMessage({
-        id: sessionId,
+      void useSessionUIStore.getState().sendMessage(
+        visiblePromptText,
         providerID,
         modelID,
-        agent: agentName,
-        variant,
-        text: visiblePromptText,
-        additionalParts: [
+        agentName,
+        undefined,
+        undefined,
+        [
           { text: instructionsText, synthetic: true },
           { text: contextText, synthetic: true },
         ],
-      }).catch((e) => {
+        variant,
+        undefined,
+        { sessionId },
+      ).catch((e) => {
         const message = e instanceof Error ? e.message : String(e);
         toast.error(t('session.githubIssuePicker.toast.sendContextFailed'), {
           description: message,
@@ -496,7 +487,7 @@ export function GitHubIssuePickerDialog({
   const content = (
     <>
       <div className="relative mt-2">
-        <RiSearchLine className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Icon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
           placeholder={t('session.githubIssuePicker.searchPlaceholder')}
           value={query}
@@ -516,7 +507,7 @@ export function GitHubIssuePickerDialog({
 
           {isLoading ? (
             <div className="text-center text-muted-foreground py-8 flex items-center justify-center gap-2">
-              <RiLoader4Line className="h-4 w-4 animate-spin" />
+              <Icon name="loader-4" className="h-4 w-4 animate-spin" />
               {t('session.githubIssuePicker.loading.issues')}
             </div>
           ) : null}
@@ -550,17 +541,17 @@ export function GitHubIssuePickerDialog({
               </p>
               <div className="flex-shrink-0 h-5 flex items-center mr-2">
                 {startingIssueNumber === directNumber ? (
-                  <RiLoader4Line className="h-4 w-4 animate-spin text-muted-foreground" />
+                  <Icon name="loader-4" className="h-4 w-4 animate-spin text-muted-foreground" />
                 ) : null}
               </div>
             </div>
           ) : null}
 
-          {filtered.length === 0 && !isLoading && connected && github && projectDirectory ? (
-            <div className="text-center text-muted-foreground py-8">{query ? t('session.githubIssuePicker.empty.noIssuesFound') : t('session.githubIssuePicker.empty.noOpenIssuesFound')}</div>
+          {issues.length === 0 && !isLoading && connected && github && projectDirectory ? (
+            <div className="text-center text-muted-foreground py-8">{debouncedQuery.trim() ? t('session.githubIssuePicker.empty.noIssuesFound') : t('session.githubIssuePicker.empty.noOpenIssuesFound')}</div>
           ) : null}
 
-          {filtered.map((issue) => (
+          {issues.map((issue) => (
             <div
               key={`${issue.sourceRepo?.owner ?? ''}-${issue.sourceRepo?.repo ?? ''}-${issue.number}`}
               className={cn(
@@ -585,17 +576,20 @@ export function GitHubIssuePickerDialog({
 
               <div className="flex-shrink-0 h-5 flex items-center mr-2">
                 {startingIssueNumber === issue.number ? (
-                  <RiLoader4Line className="h-4 w-4 animate-spin text-muted-foreground" />
+                  <Icon name="loader-4" className="h-4 w-4 animate-spin text-muted-foreground" />
                 ) : (
                   <a
                     href={issue.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="hidden group-hover:flex h-5 w-5 items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+                    className={cn(
+                      "h-5 w-5 items-center justify-center text-muted-foreground hover:text-foreground transition-colors",
+                      alwaysShowActions ? "flex" : "hidden group-hover:flex"
+                    )}
                     onClick={(e) => e.stopPropagation()}
                     aria-label={t('session.githubIssuePicker.actions.openInGitHubAria')}
                   >
-                    <RiExternalLinkLine className="h-4 w-4" />
+                    <Icon name="external-link" className="h-4 w-4" />
                   </a>
                 )}
               </div>
@@ -615,7 +609,7 @@ export function GitHubIssuePickerDialog({
               >
                 {isLoadingMore ? (
                   <span className="inline-flex items-center gap-2">
-                    <RiLoader4Line className="h-4 w-4 animate-spin" />
+                    <Icon name="loader-4" className="h-4 w-4 animate-spin" />
                     {t('session.githubIssuePicker.loading.more')}
                   </span>
                 ) : (
@@ -654,9 +648,9 @@ export function GitHubIssuePickerDialog({
                 className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
                 {createInWorktree ? (
-                  <RiCheckboxLine className="h-4 w-4 text-primary" />
+                  <Icon name="checkbox" className="h-4 w-4 text-primary" />
                 ) : (
-                  <RiCheckboxBlankLine className="h-4 w-4" />
+                  <Icon name="checkbox-blank" className="h-4 w-4" />
                 )}
               </button>
               <span className="typography-meta text-muted-foreground">{t('session.githubIssuePicker.actions.createInWorktree')}</span>
@@ -667,7 +661,7 @@ export function GitHubIssuePickerDialog({
               {repoUrl ? (
                 <Button variant="outline" size="sm" asChild>
                   <a href={repoUrl} target="_blank" rel="noopener noreferrer">
-                    <RiExternalLinkLine className="size-4" />
+                    <Icon name="external-link" className="size-4" />
                     {t('session.githubIssuePicker.actions.openRepo')}
                   </a>
                 </Button>
@@ -708,7 +702,7 @@ export function GitHubIssuePickerDialog({
       <DialogContent className="max-w-2xl max-h-[70vh] flex flex-col">
         <DialogHeader className="flex-shrink-0">
           <DialogTitle className="flex items-center gap-2">
-            <RiGithubLine className="h-5 w-5" />
+            <Icon name="github" className="h-5 w-5" />
             {title}
           </DialogTitle>
           <DialogDescription>

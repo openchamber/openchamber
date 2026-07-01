@@ -4,7 +4,7 @@ import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 
-export const SIDEBAR_CONTENT_WIDTH = 280;
+const SIDEBAR_CONTENT_WIDTH = 280;
 const SIDEBAR_MIN_WIDTH = 280;
 const SIDEBAR_MAX_WIDTH = 500;
 
@@ -13,9 +13,11 @@ interface SidebarProps {
     isMobile: boolean;
     children: React.ReactNode;
     className?: string;
+    /** Fixed strip rendered above the scrollable content (e.g. toggle + project actions). */
+    topBar?: React.ReactNode;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, className }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, className, topBar }) => {
     const { t } = useI18n();
     const sidebarWidth = useUIStore((state) => state.sidebarWidth);
     const setSidebarWidth = useUIStore((state) => state.setSidebarWidth);
@@ -36,6 +38,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
             return;
         }
 
+        sidebar.style.width = `${nextWidth}px`;
+        sidebar.style.minWidth = `${nextWidth}px`;
+        sidebar.style.maxWidth = `${nextWidth}px`;
         sidebar.style.setProperty('--oc-left-sidebar-width', `${nextWidth}px`);
     }, []);
 
@@ -56,10 +61,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
         return null;
     }
 
-    const appliedWidth = isOpen ? Math.min(
+    const openWidth = Math.min(
         SIDEBAR_MAX_WIDTH,
         Math.max(SIDEBAR_MIN_WIDTH, sidebarWidth || SIDEBAR_CONTENT_WIDTH)
-    ) : 0;
+    );
+    const appliedWidth = isOpen ? openWidth : 0;
 
     const handlePointerDown = (event: React.PointerEvent) => {
         if (!isOpen) {
@@ -114,22 +120,26 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
         setSidebarWidth(finalWidth);
     };
 
+    const currentWidth = isResizing ? (resizingWidthRef.current ?? appliedWidth) : appliedWidth;
+
     return (
         <aside
             ref={sidebarRef}
             className={cn(
-                'relative flex h-full overflow-hidden border-r border-border/40',
-                'bg-sidebar',
-                isResizing ? 'transition-none' : 'transition-[width] duration-300 ease-in-out',
+                'relative flex h-full overflow-hidden border-r border-border/40 will-change-[width] motion-reduce:transition-none',
+                'bg-sidebar oc-vibrancy-surface',
                 !isOpen && 'border-r-0',
                 className,
             )}
             style={{
-                width: 'var(--oc-left-sidebar-width)',
-                minWidth: 'var(--oc-left-sidebar-width)',
-                maxWidth: 'var(--oc-left-sidebar-width)',
-                ['--oc-left-sidebar-width' as string]: `${isResizing ? (resizingWidthRef.current ?? appliedWidth) : appliedWidth}px`,
+                width: `${currentWidth}px`,
+                minWidth: `${currentWidth}px`,
+                maxWidth: `${currentWidth}px`,
+                ['--oc-left-sidebar-width' as string]: `${isResizing ? currentWidth : openWidth}px`,
                 overflowX: 'clip',
+                transitionProperty: isResizing ? 'none' : 'width, min-width, max-width',
+                transitionDuration: '200ms',
+                transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
             }}
             aria-hidden={!isOpen || appliedWidth === 0}
         >
@@ -150,14 +160,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
             )}
             <div
                 className={cn(
-                    'relative z-10 flex h-full flex-col transition-opacity duration-300 ease-in-out',
+                    'relative z-10 flex h-full shrink-0 flex-col transition-opacity duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
                     isResizing && 'pointer-events-none',
                     !isOpen && 'pointer-events-none select-none opacity-0'
                 )}
                 style={{ width: 'var(--oc-left-sidebar-width)', overflowX: 'hidden' }}
                 aria-hidden={!isOpen}
             >
-                <div className="flex-1 overflow-y-auto">
+                {topBar}
+                <div className="min-h-0 flex-1 overflow-y-auto">
                     <ErrorBoundary>{children}</ErrorBoundary>
                 </div>
             </div>

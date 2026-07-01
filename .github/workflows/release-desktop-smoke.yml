@@ -1,0 +1,224 @@
+name: Desktop Release Build Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: Repository to checkout, for example openchamber/openchamber or daveotero/openchamber
+        required: false
+        default: openchamber/openchamber
+        type: string
+      ref:
+        description: Git ref to build (branch, tag, or sha)
+        required: true
+        default: feat/windows-desktop-app
+        type: string
+      build_macos:
+        description: Build signed/notarized macOS Electron artifacts
+        required: false
+        default: true
+        type: boolean
+      build_windows:
+        description: Build Windows Electron installer artifacts
+        required: false
+        default: true
+        type: boolean
+      retention_days:
+        description: Artifact retention days
+        required: false
+        default: "7"
+        type: choice
+        options:
+          - "1"
+          - "3"
+          - "7"
+          - "14"
+
+permissions:
+  contents: read
+
+jobs:
+  build-macos-electron:
+    if: ${{ inputs.build_macos }}
+    name: Build macOS Electron (${{ matrix.arch }})
+    runs-on: macos-26
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            arch: arm64
+            platform: darwin-aarch64
+          - target: x86_64-apple-darwin
+            arch: x64
+            platform: darwin-x86_64
+    steps:
+      - name: Checkout selected ref
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: ${{ inputs.repository || github.repository }}
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install Apple Certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/electron-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          echo "$APPLE_CERTIFICATE" | base64 --decode > $RUNNER_TEMP/certificate.p12
+          security import $RUNNER_TEMP/certificate.p12 \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+      - name: Build Electron app
+        working-directory: packages/electron
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ELECTRON_BUILDER_ARCH: ${{ matrix.arch }}
+        run: |
+          bun run build:web-assets
+          bun run bundle:main
+          # npmRebuild=false in package.json, so electron-builder won't
+          # recompile native deps on its own. Rebuild against the target
+          # Electron ABI before packaging, matching the release workflow.
+          bun run rebuild:native
+          bunx electron-builder --mac --${{ matrix.arch }} --publish=never
+
+      - name: Verify signature + entitlements + notarization
+        run: |
+          set -euo pipefail
+
+          APP_DIR="packages/electron/dist/mac"
+          [ -d "packages/electron/dist/mac-arm64" ] && APP_DIR="packages/electron/dist/mac-arm64"
+
+          APP_PATH=$(find "$APP_DIR" -maxdepth 2 -name "*.app" -print -quit)
+          if [ -z "$APP_PATH" ]; then
+            echo "Error: .app not found under packages/electron/dist/mac*"
+            ls -la packages/electron/dist/
+            exit 1
+          fi
+
+          echo "Verifying $APP_PATH"
+          codesign -vv --deep --strict "$APP_PATH"
+
+          CS_INFO=$(codesign -dv --verbose=4 "$APP_PATH" 2>&1)
+          echo "$CS_INFO"
+          if ! echo "$CS_INFO" | grep -q "flags=.*runtime"; then
+            echo "Error: hardened runtime flag missing"
+            exit 1
+          fi
+
+          xcrun stapler validate "$APP_PATH"
+
+          ENTITLEMENTS=$(codesign -d --entitlements :- "$APP_PATH" 2>&1 || true)
+          if echo "$ENTITLEMENTS" | grep -q "com.apple.security.app-sandbox"; then
+            echo "Error: app sandbox entitlement is present"
+            exit 1
+          fi
+          for key in \
+            com.apple.security.cs.allow-jit \
+            com.apple.security.cs.allow-unsigned-executable-memory \
+            com.apple.security.cs.disable-library-validation
+          do
+            if ! echo "$ENTITLEMENTS" | grep -q "<key>$key</key>"; then
+              echo "Error: required entitlement missing: $key"
+              exit 1
+            fi
+          done
+
+      - name: Upload macOS installable artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-release-smoke-macos-${{ matrix.arch }}
+          path: |
+            packages/electron/dist/*.dmg
+            packages/electron/dist/*.zip
+            packages/electron/dist/*.blockmap
+            packages/electron/dist/latest-mac.yml
+          if-no-files-found: error
+          retention-days: ${{ fromJSON(inputs.retention_days) }}
+
+  build-windows-electron:
+    if: ${{ inputs.build_windows }}
+    name: Build Windows Electron (x64)
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            target: x86_64-pc-windows-msvc
+            platform: win32-x64
+    steps:
+      - name: Checkout selected ref
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: ${{ inputs.repository || github.repository }}
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build web assets
+        working-directory: packages/electron
+        run: bun run build:web-assets
+
+      - name: Bundle main process
+        working-directory: packages/electron
+        run: bun run bundle:main
+
+      - name: Rebuild native modules
+        working-directory: packages/electron
+        shell: bash
+        # npmRebuild=false in package.json, so electron-builder won't
+        # recompile native deps on its own. Rebuild against the target
+        # Electron ABI before packaging, matching the release workflow.
+        run: node ./scripts/rebuild-native.mjs
+
+      - name: Build Windows app
+        working-directory: packages/electron
+        shell: bash
+        run: node ./scripts/package.mjs --win --${{ matrix.arch }} --publish=never
+
+      - name: Upload Windows installable artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-release-smoke-windows-${{ matrix.arch }}
+          path: |
+            packages/electron/dist/*.exe
+            packages/electron/dist/*.blockmap
+            packages/electron/dist/latest.yml
+          if-no-files-found: error
+          retention-days: ${{ fromJSON(inputs.retention_days) }}

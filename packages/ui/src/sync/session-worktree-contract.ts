@@ -1,32 +1,25 @@
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { SessionWorktreeAttachment } from '@/stores/types/sessionTypes';
 
-export type ResolveSessionWorktreeStateInput = {
+type ResolveSessionWorktreeStateInput = {
   sessionDirectory: string | null;
   metadata: WorktreeMetadata | null;
   cwdExists?: boolean;
   runtimeResolution?: SessionWorktreeAttachment | null;
 };
 
-export type WorktreeDirectoryValidation = {
-  valid: boolean;
-  insideWorktreeRoot: boolean;
-  resolvedWorktreeRoot: string | null;
-  resolvedCwd: string | null;
-};
-
-export type WorktreeCanonicalizationResult = {
+type WorktreeCanonicalizationResult = {
   worktreeRoot: string | null;
   cwd: string | null;
   branch: string | null;
   headState: 'branch' | 'detached' | 'unborn';
-  worktreeStatus: 'ready' | 'missing' | 'invalid' | 'not-a-repo';
+  worktreeStatus: 'pending' | 'ready' | 'missing' | 'invalid' | 'not-a-repo';
   legacy: boolean;
   degraded: boolean;
   attentionReason?: 'merge' | 'rebase' | 'cherry-pick' | 'revert' | 'bisect' | null;
 };
 
-export type SessionWorktreeCanonicalizationOptions = {
+type SessionWorktreeCanonicalizationOptions = {
   existingAttachment?: SessionWorktreeAttachment | null;
   fallbackDirectory?: string | null;
   worktreeSource?: SessionWorktreeAttachment['worktreeSource'];
@@ -39,7 +32,7 @@ const normalizePath = (value: string): string => {
   return replaced.replace(/\/+$/, '') || replaced;
 };
 
-export function isWithinWorktreeRoot(candidate: string | null, worktreeRoot: string | null): boolean {
+function isWithinWorktreeRoot(candidate: string | null, worktreeRoot: string | null): boolean {
   if (!candidate || !worktreeRoot) return false;
   const c = normalizePath(candidate);
   const r = normalizePath(worktreeRoot);
@@ -104,7 +97,7 @@ export function resolveSessionWorktreeState(
       branch: runtimeResolution.branch ?? metadata?.branch ?? null,
       headState: runtimeResolution.headState ?? 'branch',
       worktreeStatus: runtimeResolution.worktreeStatus ?? 'ready',
-      worktreeSource: runtimeResolution.worktreeSource ?? metadata?.source === 'sdk' ? 'created-for-session' : 'existing',
+      worktreeSource: runtimeResolution.worktreeSource ?? (metadata?.source === 'sdk' ? 'created-for-session' : 'existing'),
       legacy: false,
       degraded: runtimeResolution.degraded,
       attentionReason: runtimeResolution.attentionReason ?? null,
@@ -143,8 +136,12 @@ export function resolveSessionWorktreeState(
   };
 }
 
-export function formatSessionWorktreeBadge(attachment: SessionWorktreeAttachment): string {
+export function formatSessionWorktreeBadge(
+  attachment: SessionWorktreeAttachment,
+  labels?: { pending?: string }
+): string {
   if (attachment.legacy) return 'Legacy session';
+  if (attachment.worktreeStatus === 'pending') return labels?.pending ?? 'Needs attention';
   if (attachment.worktreeStatus === 'missing') return 'Worktree missing';
   if (attachment.worktreeStatus === 'not-a-repo') return 'Not a repo';
   if (attachment.worktreeStatus === 'invalid') return 'Needs attention';

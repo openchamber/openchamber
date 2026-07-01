@@ -2,6 +2,7 @@ import os from 'os';
 import path from 'path';
 
 export const TUNNEL_PROVIDER_CLOUDFLARE = 'cloudflare';
+export const TUNNEL_PROVIDER_NGROK = 'ngrok';
 
 export const TUNNEL_MODE_QUICK = 'quick';
 export const TUNNEL_MODE_MANAGED_REMOTE = 'managed-remote';
@@ -9,7 +10,7 @@ export const TUNNEL_MODE_MANAGED_LOCAL = 'managed-local';
 
 export const TUNNEL_INTENT_EPHEMERAL_PUBLIC = 'ephemeral-public';
 export const TUNNEL_INTENT_PERSISTENT_PUBLIC = 'persistent-public';
-export const TUNNEL_INTENT_PRIVATE_NETWORK = 'private-network';
+const TUNNEL_INTENT_PRIVATE_NETWORK = 'private-network';
 
 const SUPPORTED_TUNNEL_INTENTS = new Set([
   TUNNEL_INTENT_EPHEMERAL_PUBLIC,
@@ -34,7 +35,47 @@ export class TunnelServiceError extends Error {
 
 const SUPPORTED_TUNNEL_PROVIDERS = new Set([
   TUNNEL_PROVIDER_CLOUDFLARE,
+  TUNNEL_PROVIDER_NGROK,
 ]);
+
+const getPathApiForPlatform = (platform) => (platform === 'win32' ? path.win32 : path);
+
+export function isPathWithinDirectory(candidatePath, directoryPath, platform = process.platform) {
+  if (typeof candidatePath !== 'string' || typeof directoryPath !== 'string') {
+    return false;
+  }
+
+  const pathApi = getPathApiForPlatform(platform);
+  const resolvedCandidate = pathApi.resolve(candidatePath);
+  const resolvedDirectory = pathApi.resolve(directoryPath);
+  const comparableCandidate = platform === 'win32' ? resolvedCandidate.toLowerCase() : resolvedCandidate;
+  const comparableDirectory = platform === 'win32' ? resolvedDirectory.toLowerCase() : resolvedDirectory;
+  const directoryPrefix = comparableDirectory.endsWith(pathApi.sep)
+    ? comparableDirectory
+    : `${comparableDirectory}${pathApi.sep}`;
+
+  return comparableCandidate === comparableDirectory || comparableCandidate.startsWith(directoryPrefix);
+}
+
+export function resolveTunnelConfigPath(value, home = os.homedir(), platform = process.platform) {
+  const pathApi = getPathApiForPlatform(platform);
+  let resolved;
+  if (value === '~') {
+    resolved = home;
+  } else if (value.startsWith('~/') || value.startsWith('~\\')) {
+    resolved = pathApi.join(home, value.slice(2));
+  } else {
+    resolved = pathApi.resolve(value);
+  }
+
+  if (!isPathWithinDirectory(resolved, home, platform)) {
+    throw new TunnelServiceError(
+      'validation_error',
+      `Config path must be within the home directory (${home}). Got: ${resolved}`
+    );
+  }
+  return resolved;
+}
 
 export function normalizeTunnelProvider(value) {
   if (typeof value !== 'string') {
@@ -67,7 +108,7 @@ export function normalizeTunnelMode(value) {
   return TUNNEL_MODE_QUICK;
 }
 
-export function normalizeTunnelIntent(value) {
+function normalizeTunnelIntent(value) {
   if (typeof value !== 'string') {
     return undefined;
   }
@@ -109,22 +150,7 @@ export function normalizeOptionalPath(value) {
   if (!trimmed) {
     return null;
   }
-  let resolved;
-  if (trimmed === '~') {
-    resolved = os.homedir();
-  } else if (trimmed.startsWith('~/') || trimmed.startsWith('~\\')) {
-    resolved = path.join(os.homedir(), trimmed.slice(2));
-  } else {
-    resolved = path.resolve(trimmed);
-  }
-  const home = os.homedir();
-  if (resolved !== home && !resolved.startsWith(home + path.sep)) {
-    throw new TunnelServiceError(
-      'validation_error',
-      `Config path must be within the home directory (${home}). Got: ${resolved}`
-    );
-  }
-  return resolved;
+  return resolveTunnelConfigPath(trimmed);
 }
 
 export function isSupportedTunnelMode(mode) {

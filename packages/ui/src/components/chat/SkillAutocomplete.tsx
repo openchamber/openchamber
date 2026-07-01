@@ -6,6 +6,7 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 interface SkillInfo {
   name: string;
   scope: string;
+  source?: string;
   description?: string;
 }
 
@@ -28,6 +29,8 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
 }, ref) => {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const [selectedIndex, setSelectedIndex] = React.useState(0);
+  const selectedIndexRef = React.useRef(0);
+  const keyboardNavigationRef = React.useRef(false);
   const [filteredSkills, setFilteredSkills] = React.useState<SkillInfo[]>([]);
   const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
   const skills = useSkillsStore((s) => s.skills);
@@ -56,8 +59,11 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
   }, [skills, searchQuery]);
 
   React.useEffect(() => {
+    selectedIndexRef.current = selectedIndex;
+  }, [selectedIndex]);
+
+  React.useEffect(() => {
     itemRefs.current[selectedIndex]?.scrollIntoView({
-      behavior: 'smooth',
       block: 'nearest',
     });
   }, [selectedIndex]);
@@ -91,26 +97,30 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
       }
 
       if (key === 'ArrowDown') {
+        keyboardNavigationRef.current = true;
         setSelectedIndex((prev) => (prev + 1) % filteredSkills.length);
         return;
       }
 
       if (key === 'ArrowUp') {
+        keyboardNavigationRef.current = true;
         setSelectedIndex((prev) => (prev - 1 + filteredSkills.length) % filteredSkills.length);
         return;
       }
 
       if (key === 'Enter' || key === 'Tab') {
-        const skill = filteredSkills[selectedIndex];
+        const safeIndex = ((selectedIndexRef.current % filteredSkills.length) + filteredSkills.length) % filteredSkills.length;
+        const skill = filteredSkills[safeIndex];
         if (skill) {
           onSkillSelect(skill.name);
         }
       }
     },
-  }), [filteredSkills, onSkillSelect, onClose, selectedIndex]);
+  }), [filteredSkills, onSkillSelect, onClose]);
 
   const renderSkill = (skill: SkillInfo, index: number) => {
     const isProject = skill.scope === 'project';
+    const source = skill.source || 'opencode';
     return (
       <div
         key={`${skill.name}-${skill.scope}`}
@@ -120,9 +130,12 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
           className={cn(
             'flex items-start gap-2 px-3 py-1.5 cursor-pointer rounded-lg typography-ui-label',
           index === selectedIndex && 'bg-interactive-selection'
-          )}
+        )}
         onClick={() => onSkillSelect(skill.name)}
-        onMouseEnter={() => setSelectedIndex(index)}
+        onMouseMove={() => {
+          keyboardNavigationRef.current = false;
+          setSelectedIndex(index);
+        }}
       >
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -134,6 +147,9 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
                 : "bg-[var(--status-success-background)] text-[var(--status-success)] border-[var(--status-success-border)]"
             )}>
               {skill.scope}
+            </span>
+            <span className="text-[10px] leading-none uppercase font-bold tracking-tight px-1.5 py-1 rounded border flex-shrink-0 bg-[var(--surface-muted)] text-muted-foreground border-[var(--interactive-border)]/60">
+              {source}
             </span>
           </div>
           {skill.description && (
@@ -149,10 +165,10 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
   return (
     <div
       ref={containerRef}
-      className="absolute z-[100] min-w-0 w-full max-w-[360px] max-h-60 bg-background border-2 border-border/60 rounded-xl shadow-none bottom-full mb-2 left-0 flex flex-col"
+      className="absolute z-[100] min-w-0 w-full max-w-[450px] max-h-60 bg-background border-2 border-border/60 rounded-xl shadow-none bottom-full mb-2 left-0 flex flex-col"
       style={style}
     >
-      <ScrollableOverlay outerClassName="flex-1 min-h-0" className="px-0 pb-2" fillContainer={false}>
+      <ScrollableOverlay outerClassName="flex-1 min-h-0" className="px-0 pb-2">
         {filteredSkills.length ? (
           <div>
             {filteredSkills.map((skill, index) => renderSkill(skill, index))}

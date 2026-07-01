@@ -2,10 +2,12 @@ import { useUIStore } from '@/stores/useUIStore';
 
 export interface AppearancePreferences {
   showReasoningTraces?: boolean;
+  collapsibleThinkingBlocks?: boolean;
 }
 
 type RawAppearancePayload = {
   showReasoningTraces?: unknown;
+  collapsibleThinkingBlocks?: unknown;
 };
 
 const sanitizePreferences = (payload?: RawAppearancePayload | null): AppearancePreferences | null => {
@@ -19,6 +21,10 @@ const sanitizePreferences = (payload?: RawAppearancePayload | null): AppearanceP
     result.showReasoningTraces = payload.showReasoningTraces;
   }
 
+  if (typeof payload.collapsibleThinkingBlocks === 'boolean') {
+    result.collapsibleThinkingBlocks = payload.collapsibleThinkingBlocks;
+  }
+
   return Object.keys(result).length > 0 ? result : null;
 };
 
@@ -30,22 +36,10 @@ const extractRawAppearance = (data: unknown): RawAppearancePayload | null => {
   const candidate = data as Record<string, unknown>;
   const payload: RawAppearancePayload = {
     showReasoningTraces: candidate.showReasoningTraces,
+    collapsibleThinkingBlocks: candidate.collapsibleThinkingBlocks,
   };
 
   return payload;
-};
-
-export const saveAppearancePreferences = (preferences: AppearancePreferences): boolean => {
-  if (typeof window === 'undefined') {
-    return false;
-  }
-
-  try {
-    localStorage.setItem('appearance-preferences', JSON.stringify(preferences));
-    return true;
-  } catch {
-    return false;
-  }
 };
 
 export const applyAppearancePreferences = (preferences: AppearancePreferences): void => {
@@ -53,6 +47,10 @@ export const applyAppearancePreferences = (preferences: AppearancePreferences): 
 
   if (typeof preferences.showReasoningTraces === 'boolean') {
     store.setShowReasoningTraces(preferences.showReasoningTraces);
+  }
+
+  if (typeof preferences.collapsibleThinkingBlocks === 'boolean') {
+    store.setCollapsibleThinkingBlocks(preferences.collapsibleThinkingBlocks);
   }
 };
 

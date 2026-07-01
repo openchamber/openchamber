@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { type DiscoveredSkill, type SkillScope, type SkillSource } from './opencodeConfig';
+import { BUILT_IN_SKILL_LOCATION, type DiscoveredSkill, type SkillScope, type SkillSource } from './opencodeConfig';
 import type { BridgeContext } from './bridge';
 
 const SETTINGS_KEY = 'openchamber.settings';
@@ -129,8 +129,19 @@ export const fetchOpenCodeSkillsFromApi = async (
         const name = typeof item?.name === 'string' ? item.name.trim() : '';
         const location = typeof item?.location === 'string' ? item.location : '';
         const description = typeof item?.description === 'string' ? item.description : '';
+        const content = typeof item?.content === 'string' ? item.content : '';
         if (!name || !location) {
           return null;
+        }
+        if (location === BUILT_IN_SKILL_LOCATION) {
+          return {
+            name,
+            path: location,
+            scope: 'user',
+            source: 'opencode',
+            description,
+            content,
+          } as DiscoveredSkill;
         }
         const inferred = inferSkillScopeAndSourceFromLocation(location, workingDirectory);
         return {
@@ -139,6 +150,7 @@ export const fetchOpenCodeSkillsFromApi = async (
           scope: inferred.scope,
           source: inferred.source,
           description,
+          content,
         } as DiscoveredSkill;
       })
       .filter((item): item is DiscoveredSkill => item !== null);
@@ -289,6 +301,10 @@ export const persistSettings = async (changes: Record<string, unknown>, ctx?: Br
 
   if (typeof restChanges.usageAutoRefresh !== 'boolean') {
     delete restChanges.usageAutoRefresh;
+  }
+
+  if (typeof restChanges.usageShowPredValues !== 'boolean') {
+    delete restChanges.usageShowPredValues;
   }
 
   if (typeof restChanges.usageRefreshIntervalMs === 'number' && Number.isFinite(restChanges.usageRefreshIntervalMs)) {

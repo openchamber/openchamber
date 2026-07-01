@@ -34,9 +34,9 @@ declare global {
 }
 
 // Callback types
-export type SpeechResultCallback = (text: string, isFinal: boolean) => void;
-export type SpeechEndCallback = () => void;
-export type ErrorCallback = (error: string) => void;
+type SpeechResultCallback = (text: string, isFinal: boolean) => void;
+type SpeechEndCallback = () => void;
+type ErrorCallback = (error: string) => void;
 
 /**
  * Browser Voice Service class
@@ -234,7 +234,7 @@ class BrowserVoiceService {
       this.isListening = true;
       this.restartOnEnd = true;
     };
-    
+
     this.recognition.onaudiostart = () => {
       console.log('[BrowserVoiceService] Audio recording started');
     };
@@ -282,8 +282,10 @@ class BrowserVoiceService {
       const errorMessage = this.getErrorMessage(event.error);
       this.onErrorCallback?.(errorMessage);
 
-      // Don't restart on certain errors
-      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+      // Don't restart on fatal / unrecoverable errors.
+      // "network" in Electron/Chromium means Google's speech servers are unreachable;
+      // auto-restarting immediately creates an infinite error → end → start → error loop.
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed' || event.error === 'network') {
         this.restartOnEnd = false;
         this.isListening = false;
       }
@@ -292,12 +294,13 @@ class BrowserVoiceService {
     this.recognition.onend = () => {
       this.isListening = false;
       
-      // Auto-restart if still supposed to be listening and not speaking
+      // Auto-restart if still supposed to be listening and not speaking.
+      // Only restart when we have a valid recognition instance and restartOnEnd is set.
       if (this.restartOnEnd && this.recognition && !this.isSpeaking) {
         try {
           this.recognition.start();
         } catch {
-          // Ignore restart errors
+          // Ignore restart errors — onerror / onend will fire if it's fatal.
         }
       }
     };
@@ -649,6 +652,3 @@ class BrowserVoiceService {
 
 // Export singleton instance
 export const browserVoiceService = new BrowserVoiceService();
-
-// Also export the class for testing/customization
-export { BrowserVoiceService };

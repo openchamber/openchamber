@@ -1,0 +1,36 @@
+---
+title: 语音模式
+description: 对 OpenChamber 说话，并听它朗读回复。
+---
+
+# 语音模式
+
+语音模式让你可以口述消息，并让回复朗读给你听。在 **Settings → OpenChamber → Voice** 中开启它。
+
+## 朗读回复（文本转语音）
+
+选择回复如何被朗读：
+
+- **browser** — 你浏览器的内置语音，无需设置
+- **OpenAI** — OpenAI 的语音；粘贴你的 API 密钥并选择一种语音
+- **OpenAI-compatible** — 任何使用 OpenAI 格式的服务；输入它的 URL，以及（如有需要）一个 API 密钥
+- **macOS say** — 内置的 `say` 命令，在拥有它的 Mac 上
+
+开启后，你会在消息上看到一个播放按钮，可以听它们被朗读出来。
+
+## 口述消息（语音转文本）
+
+选择你的语音如何被转写：
+
+- **browser** — 你浏览器的内置识别，无需设置
+- **server** — 一个 OpenAI 兼容的转写服务；输入它的 URL，以及（如有需要）一个 API 密钥
+- **on-device** — 一个在你浏览器中运行的语音模型，首次使用时会下载
+
+## 给手机的提示
+
+要在手机上朗读回复，OpenAI 或 OpenAI-compatible 选项最可靠 — 移动浏览器会限制内置语音。
+
+## 相关内容
+
+- [通知](/zh-cn/notifications/) — 改为收到提醒而不是聆听
+- [提供商、模型与智能体](/zh-cn/providers/) — 你的 OpenAI 密钥可能已经存放在这里

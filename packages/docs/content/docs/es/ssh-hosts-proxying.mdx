@@ -1,0 +1,48 @@
+---
+title: Hosts SSH y proxy
+description: Importa hosts SSH guardados y agrega reenvíos de puertos SSH extra en la app de escritorio.
+---
+
+# Hosts SSH y proxy
+
+Usa **Settings → Remote Instances** en la app de escritorio para importar hosts SSH guardados, conectarte a una máquina remota y hacer que otros puertos estén disponibles por la misma conexión SSH.
+
+> Los hosts SSH y el proxy por SSH son funciones **solo de escritorio**. Usan el cliente SSH de tu computadora.
+
+## Importa un host SSH
+
+OpenChamber puede leer hosts desde tu SSH config local, el mismo lugar que usan comandos como `ssh work-server`.
+
+1. Abre **Settings → Remote Instances**.
+2. Elige un host en **Saved SSH hosts**.
+3. Si el host es un patrón, escribe el destino real, como `deploy@app.example.com`.
+4. Guarda y conecta.
+
+OpenChamber crea una remote instance con ese comando SSH. Cuando llega a **ready**, la UI remota de OpenChamber se abre en la app de escritorio.
+
+## Agrega reenvíos de puertos extra
+
+Cada remote instance tiene una sección **Port Forwards**. Úsala cuando algo en un lado de la conexión SSH necesita llegar a un puerto del otro lado.
+
+OpenChamber soporta tres tipos de reenvío:
+
+- **Local (-L)** — abre un puerto en tu computadora que conecta con algo en la máquina remota.
+- **Remote (-R)** — abre un puerto en la máquina remota que conecta de vuelta con tu computadora.
+- **Dynamic (-D)** — abre un SOCKS proxy local por la conexión SSH.
+
+Para la mayoría de previews de apps y dashboards que corren en la máquina remota, usa **Local (-L)**.
+
+## Usa el SOCKS proxy
+
+Elige **Dynamic (-D)** cuando quieras que otras herramientas de tu computadora naveguen a través de la máquina remota. OpenChamber abre un puerto SOCKS proxy local para esa conexión SSH.
+
+Cuando la conexión esté ready, copia o usa la dirección proxy local desde la fila del reenvío. Configura tu navegador o herramienta para usarla como SOCKS5 proxy.
+
+## Manténlo privado
+
+Usa `127.0.0.1` o `localhost` como local bind host, salvo que quieras que otros dispositivos de tu red lleguen al puerto reenviado.
+
+## Relacionado
+
+- [Instancias remotas](/es/remote-instances/) — conecta la app de escritorio a OpenChamber en otra máquina
+- [Acceso remoto](/es/troubleshooting/remote-access/) — cuando SSH o el acceso remoto no conectan

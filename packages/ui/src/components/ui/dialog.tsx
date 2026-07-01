@@ -1,9 +1,9 @@
 import * as React from "react"
 import { Dialog as BaseDialog } from "@base-ui/react/dialog"
-import { RiCloseLine } from '@remixicon/react';
 
 import { cn } from "@/lib/utils"
 import { useI18n } from '@/lib/i18n'
+import { Icon } from "@/components/icon/Icon";
 
 let openDialogCount = 0;
 
@@ -41,15 +41,6 @@ function DialogPortal({
   return <BaseDialog.Portal {...props} />
 }
 
-function DialogClose({
-  asChild,
-  children,
-  ...props
-}: React.ComponentProps<typeof BaseDialog.Close> & AsChildProps) {
-  const r = renderFromAsChild(asChild, children);
-  return <BaseDialog.Close data-slot="dialog-close" {...props} {...r} />
-}
-
 const DialogOverlay = React.forwardRef<
   HTMLDivElement,
   React.ComponentPropsWithoutRef<typeof BaseDialog.Backdrop>
@@ -84,20 +75,14 @@ DialogOverlay.displayName = "DialogOverlay";
 type DialogContentProps = Omit<React.ComponentProps<typeof BaseDialog.Popup>, "children"> & {
   showCloseButton?: boolean
   children?: React.ReactNode
-  onOpenAutoFocus?: (event: Event) => void
-  onCloseAutoFocus?: (event: Event) => void
 }
 
 function DialogContent({
   className,
   children,
   showCloseButton = true,
-  onOpenAutoFocus,
-  onCloseAutoFocus,
   ...props
 }: DialogContentProps) {
-  void onOpenAutoFocus
-  void onCloseAutoFocus
   const { t } = useI18n()
 
   return (
@@ -122,7 +107,7 @@ function DialogContent({
             data-slot="dialog-close"
             className="ring-offset-background focus:ring-ring data-[open]:bg-interactive-active data-[open]:text-foreground absolute top-2 right-2 rounded-lg opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none text-muted-foreground hover:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
           >
-            <RiCloseLine/>
+            <Icon name="close"/>
             <span className="sr-only">{t('dialog.common.actions.close')}</span>
           </BaseDialog.Close>
         )}
@@ -183,13 +168,10 @@ function DialogDescription({
 
 export {
   Dialog,
-  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
-  DialogOverlay,
-  DialogPortal,
   DialogTitle,
   DialogTrigger,
 }

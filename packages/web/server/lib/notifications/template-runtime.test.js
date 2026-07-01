@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createNotificationTemplateRuntime } from './template-runtime.js';
 
+const originalFetch = globalThis.fetch;
+
 const createRuntime = (settings = {}) => createNotificationTemplateRuntime({
   readSettingsFromDisk: async () => settings,
   persistSettings: vi.fn(async () => {}),
@@ -12,77 +14,71 @@ const createRuntime = (settings = {}) => createNotificationTemplateRuntime({
 
 describe('notification template runtime zen models', () => {
   afterEach(() => {
-    vi.unstubAllGlobals();
+    globalThis.fetch = originalFetch;
   });
 
-  it('uses zen models with zero-cost metadata as selectable', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url) => {
-      if (String(url).includes('models.dev')) {
-        return {
-          ok: true,
-          json: async () => ({
-            opencode: {
-              models: {
-                'big-pickle': { cost: { input: 0, output: 0 } },
-                'gpt-5-nano': { cost: { input: 0, output: 0 } },
-                'gpt-5.5': { cost: { input: 5, output: 30 } },
-                'hy3-preview-free': { cost: { input: 0, output: 0 } },
-              },
-            },
-          }),
-        };
-      }
-      return {
-        ok: true,
-        json: async () => ({
-          data: [
-            { id: 'big-pickle', owned_by: 'opencode' },
-            { id: 'gpt-5-nano', owned_by: 'opencode' },
-            { id: 'gpt-5.5', owned_by: 'opencode' },
-            { id: 'hy3-preview-free', owned_by: 'opencode' },
-          ],
-        }),
-      };
-    }));
-
+  it('returns no selectable zen models after provider retirement', async () => {
     const runtime = createRuntime();
     const models = await runtime.fetchFreeZenModels();
 
-    expect(models.map((model) => model.id)).toEqual([
-      'big-pickle',
-      'gpt-5-nano',
-      'hy3-preview-free',
-    ]);
+    expect(models).toEqual([]);
   });
 
-  it('falls back to a valid unauthenticated model when stored zen model is stale', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url) => {
-      if (String(url).includes('models.dev')) {
-        return {
-          ok: true,
-          json: async () => ({
-            opencode: {
-              models: {
-                'big-pickle': { cost: { input: 0, output: 0 } },
-                'gpt-5-nano': { cost: { input: 0, output: 0 } },
-              },
-            },
-          }),
-        };
-      }
-      return {
-        ok: true,
-        json: async () => ({
-          data: [
-            { id: 'big-pickle', owned_by: 'opencode' },
-            { id: 'gpt-5-nano', owned_by: 'opencode' },
-          ],
-        }),
-      };
-    }));
-
+  it('preserves stored zen model value for compatibility without validation', async () => {
     const runtime = createRuntime({ zenModel: 'trinity-large-preview-free' });
 
-    await expect(runtime.resolveZenModel()).resolves.toBe('gpt-5-nano');
+    await expect(runtime.resolveZenModel()).resolves.toBe('trinity-large-preview-free');
+  });
+});
+
+describe('notification template message extraction', () => {
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('excludes reasoning parts from payload message text', () => {
+    const runtime = createRuntime();
+
+    expect(runtime.extractLastMessageText({
+      properties: {
+        info: {
+          parts: [
+            { type: 'reasoning', text: 'private chain of thought' },
+            { type: 'text', text: 'final answer' },
+          ],
+        },
+      },
+    })).toBe('final answer');
+  });
+
+  it('ignores untyped parts even when they contain text', () => {
+    const runtime = createRuntime();
+
+    expect(runtime.extractLastMessageText({
+      properties: {
+        info: {
+          parts: [
+            { text: 'untyped text' },
+            { content: 'untyped content' },
+            { type: 'text', text: 'typed final answer' },
+          ],
+        },
+      },
+    })).toBe('typed final answer');
+  });
+
+  it('excludes reasoning parts when fetching assistant messages', async () => {
+    const runtime = createRuntime();
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify([
+      {
+        info: { id: 'msg-1', role: 'assistant', finish: 'stop' },
+        parts: [
+          { type: 'reasoning', text: 'private chain of thought' },
+          { type: 'text', text: 'final answer' },
+        ],
+      },
+    ])));
+
+    await expect(runtime.fetchLastAssistantMessageText('session-1', 'msg-1')).resolves.toBe('final answer');
   });
 });

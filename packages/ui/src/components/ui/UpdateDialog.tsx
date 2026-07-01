@@ -6,12 +6,13 @@ import {
 } from '@/components/ui/dialog';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
-import { RiCheckLine, RiClipboardLine, RiDownloadCloudLine, RiDownloadLine, RiExternalLinkLine, RiLoaderLine, RiRestartLine, RiTerminalLine } from '@remixicon/react';
+import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import type { UpdateInfo, UpdateProgress } from '@/lib/desktop';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/url';
-import { useI18n } from '@/lib/i18n';
+import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 type WebUpdateState = 'idle' | 'updating' | 'restarting' | 'reconnecting' | 'error';
 
@@ -56,7 +57,7 @@ function formatIsoDateForUI(isoDate: string): string {
   if (Number.isNaN(d.getTime())) {
     return isoDate;
   }
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(getCurrentIntlLocale(), {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
@@ -109,7 +110,6 @@ function parseChangelogSections(body: string): ChangelogSection[] {
   });
 }
 
-
 type InstallWebUpdateResult = {
   success: boolean;
   error?: string;
@@ -121,7 +121,7 @@ const WEB_UPDATE_MAX_WAIT_MS = 10 * 60 * 1000;
 
 async function installWebUpdate(): Promise<InstallWebUpdateResult> {
   try {
-    const response = await fetch('/api/openchamber/update-install', {
+    const response = await runtimeFetch('/api/openchamber/update-install', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     });
@@ -143,7 +143,7 @@ async function installWebUpdate(): Promise<InstallWebUpdateResult> {
 
 async function isServerReachable(): Promise<boolean> {
   try {
-    const response = await fetch('/health', {
+    const response = await runtimeFetch('/health', {
       method: 'GET',
       headers: { Accept: 'application/json' },
     });
@@ -160,7 +160,7 @@ async function waitForUpdateApplied(
 ): Promise<boolean> {
   for (let i = 0; i < maxAttempts; i++) {
     try {
-      const response = await fetch('/api/openchamber/update-check', {
+      const response = await runtimeFetch('/api/openchamber/update-check', {
         method: 'GET',
         headers: { Accept: 'application/json' },
       });
@@ -305,7 +305,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
         {/* Header Section */}
         <div className="flex items-center mb-1">
           <DialogTitle className="flex items-center gap-2.5">
-            <RiDownloadCloudLine className="h-5 w-5 text-[var(--primary-base)]" />
+            <Icon name="download-cloud" className="h-5 w-5 text-[var(--primary-base)]" />
             <span className="text-lg font-semibold text-foreground">
               {webUpdateState === 'restarting' || webUpdateState === 'reconnecting'
                 ? t('updateDialog.header.updating')
@@ -336,7 +336,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
           {isWebRuntime && isWebUpdating && (
             <div className="rounded-lg bg-[var(--surface-elevated)]/30 p-5 border border-[var(--surface-subtle)]">
               <div className="flex items-center gap-3">
-                <RiLoaderLine className="h-5 w-5 animate-spin text-[var(--primary-base)]" />
+                <Icon name="loader" className="h-5 w-5 animate-spin text-[var(--primary-base)]" />
                 <div className="typography-ui-label text-foreground">
                   {webUpdateState === 'updating' && t('updateDialog.status.installingUpdate')}
                   {webUpdateState === 'restarting' && t('updateDialog.status.serverRestarting')}
@@ -358,7 +358,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
               >
                 {changelog.kind === 'raw' ? (
                   <div
-                    className="p-4 typography-markdown-body text-foreground leading-relaxed break-words [&_a]:!text-[var(--primary-base)] [&_a]:!no-underline hover:[&_a]:!underline"
+                    className="p-4 typography-markdown-body text-foreground leading-relaxed break-words [&_a]:!text-[var(--primary-base)] [&_a]:!no-underline [&_a:hover]:!underline"
                     onClickCapture={(e) => {
                       const target = e.target as HTMLElement;
                       const a = target.closest('a');
@@ -369,12 +369,12 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                       }
                     }}
                   >
-                    <SimpleMarkdownRenderer content={changelog.content} disableLinkSafety={true} />
+                    <SimpleMarkdownRenderer content={changelog.content} disableLinkSafety={true} enableFileReferences={false} />
                   </div>
                 ) : (
                   <div className="divide-y divide-[var(--surface-subtle)]">
                     {changelog.sections.map((section) => (
-                      <div key={section.version} className="p-4 hover:bg-background/40 transition-colors">
+                      <div key={section.version} className="p-4">
                         <div className="flex items-center gap-3 mb-3">
                           <span className="typography-ui-label font-mono text-[var(--primary-base)] bg-[var(--primary-base)]/10 px-1.5 py-0.5 rounded">
                             v{section.version}
@@ -384,7 +384,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                           </span>
                         </div>
                         <div
-                          className="typography-markdown-body text-foreground leading-relaxed break-words [&_a]:!text-[var(--primary-base)] [&_a]:!no-underline hover:[&_a]:!underline"
+                          className="typography-markdown-body text-foreground leading-relaxed break-words [&_a]:!text-[var(--primary-base)] [&_a]:!no-underline [&_a:hover]:!underline"
                           onClickCapture={(e) => {
                             const target = e.target as HTMLElement;
                             const a = target.closest('a');
@@ -395,7 +395,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                             }
                           }}
                         >
-                          <SimpleMarkdownRenderer content={section.content} disableLinkSafety={true} />
+                          <SimpleMarkdownRenderer content={section.content} disableLinkSafety={true} enableFileReferences={false} />
                         </div>
                       </div>
                     ))}
@@ -409,7 +409,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
           {isWebRuntime && webUpdateState === 'error' && (
             <div className="space-y-2 mt-4">
               <div className="flex items-center gap-2 typography-meta text-muted-foreground">
-                <RiTerminalLine className="h-4 w-4" />
+                <Icon name="terminal" className="h-4 w-4" />
                 <span>{t('updateDialog.fallback.updateViaTerminal')}</span>
               </div>
               <div className="flex items-center gap-2 p-1 pl-3 bg-[var(--surface-elevated)]/50 rounded-md border border-[var(--surface-subtle)]">
@@ -427,9 +427,9 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                   title={copied ? t('updateDialog.actions.copied') : t('updateDialog.actions.copyCommand')}
                 >
                   {copied ? (
-                    <RiCheckLine className="h-4 w-4" />
+                    <Icon name="check" className="h-4 w-4" />
                   ) : (
-                    <RiClipboardLine className="h-4 w-4" />
+                    <Icon name="clipboard" className="h-4 w-4" />
                   )}
                 </button>
               </div>
@@ -468,7 +468,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
             rel="noopener noreferrer"
             className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0"
           >
-            <RiExternalLinkLine className="h-4 w-4" />
+            <Icon name="external-link" className="h-4 w-4" />
             GitHub
           </a>
 
@@ -479,7 +479,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                 onClick={onDownload}
                 className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--primary-base)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity"
               >
-                <RiDownloadLine className="h-4 w-4" />
+                <Icon name="download" className="h-4 w-4" />
                 {t('updateDialog.actions.downloadUpdate')}
               </button>
             )}
@@ -489,7 +489,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                 disabled
                 className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--primary-base)]/50 text-[var(--primary-foreground)] cursor-not-allowed"
               >
-                <RiLoaderLine className="h-4 w-4 animate-spin" />
+                <Icon name="loader" className="h-4 w-4 animate-spin" />
                 {t('updateDialog.status.downloading')}
               </button>
             )}
@@ -499,7 +499,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                 onClick={onRestart}
                 className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--status-success)] text-white hover:opacity-90 transition-opacity"
               >
-                <RiRestartLine className="h-4 w-4" />
+                <Icon name="restart" className="h-4 w-4" />
                 {t('updateDialog.actions.restartToUpdate')}
               </button>
             )}
@@ -510,7 +510,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                 onClick={handleWebUpdate}
                 className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--primary-base)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity"
               >
-                <RiDownloadLine className="h-4 w-4" />
+                <Icon name="download" className="h-4 w-4" />
                 {t('updateDialog.actions.updateNow')}
               </button>
             )}
@@ -520,7 +520,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                 disabled
                 className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--primary-base)]/50 text-[var(--primary-foreground)] cursor-not-allowed"
               >
-                <RiLoaderLine className="h-4 w-4 animate-spin" />
+                <Icon name="loader" className="h-4 w-4 animate-spin" />
                 {t('updateDialog.status.updating')}
               </button>
             )}

@@ -1,6 +1,5 @@
 import { substituteCommandVariables } from '@/lib/openchamberConfig';
 import type { WorktreeMetadata } from '@/types/worktree';
-import { execCommand } from '@/lib/execCommands';
 import {
   deleteRemoteBranch,
   git,
@@ -8,9 +7,13 @@ import {
 import {
   clearWorktreeBootstrapState,
   markWorktreeBootstrapPending,
+  setWorktreeBootstrapState,
+  startWorktreeBootstrapWatcher,
 } from '@/lib/worktrees/worktreeBootstrap';
+import { invalidateResolvedProjectRootCache, resolveProjectRoot } from '@/lib/worktrees/worktreeStatus';
 import type {
   CreateGitWorktreePayload,
+  GitWorktreeBootstrapStatus,
   GitWorktreeValidationResult,
 } from '@/lib/api/types';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -54,66 +57,6 @@ const normalizePath = (value: string): string => {
   return replaced.length > 1 ? replaced.replace(/\/+$/, '') : replaced;
 };
 
-const toAbsolutePath = (baseDir: string, maybeRelativePath: string): string => {
-  const normalizedBase = normalizePath(baseDir);
-  const normalizedInput = normalizePath(maybeRelativePath);
-  if (!normalizedInput) return normalizedBase;
-  if (normalizedInput.startsWith('/')) return normalizedInput;
-
-  const stack = normalizedBase.split('/').filter(Boolean);
-  const parts = normalizedInput.split('/').filter(Boolean);
-  for (const part of parts) {
-    if (part === '.') continue;
-    if (part === '..') {
-      stack.pop();
-      continue;
-    }
-    stack.push(part);
-  }
-  return `/${stack.join('/')}`;
-};
-
-const derivePrimaryWorktreeRootFromGitDir = (gitDir: string): string | null => {
-  const normalized = normalizePath(gitDir);
-  if (!normalized) return null;
-  if (normalized.endsWith('/.git')) {
-    return normalized.slice(0, -'/.git'.length) || null;
-  }
-  const worktreesMarker = '/.git/worktrees/';
-  const markerIndex = normalized.indexOf(worktreesMarker);
-  if (markerIndex > 0) {
-    return normalized.slice(0, markerIndex) || null;
-  }
-  return null;
-};
-
-const resolvePrimaryWorktreeDirectory = async (directory: string): Promise<string> => {
-  const normalizedDirectory = normalizePath(directory);
-
-  const absoluteGitDirResult = await execCommand('git rev-parse --absolute-git-dir', normalizedDirectory);
-  const absoluteGitDir = normalizePath((absoluteGitDirResult.stdout || '').trim());
-  if (absoluteGitDirResult.success && absoluteGitDir) {
-    const rootFromAbsoluteGitDir = derivePrimaryWorktreeRootFromGitDir(absoluteGitDir);
-    if (rootFromAbsoluteGitDir) {
-      return rootFromAbsoluteGitDir;
-    }
-  }
-
-  const commonDirResult = await execCommand('git rev-parse --git-common-dir', normalizedDirectory);
-  const rawCommonDir = normalizePath((commonDirResult.stdout || '').trim());
-  if (!commonDirResult.success || !rawCommonDir) {
-    return normalizedDirectory;
-  }
-
-  const commonDir = toAbsolutePath(normalizedDirectory, rawCommonDir);
-  const rootFromCommonDir = derivePrimaryWorktreeRootFromGitDir(commonDir);
-  if (rootFromCommonDir) {
-    return rootFromCommonDir;
-  }
-
-  return normalizedDirectory;
-};
-
 const slugifyWorktreeName = (value: string): string => {
   return value
     .trim()
@@ -137,13 +80,90 @@ const normalizeBranchName = (value: string): string => {
     .replace(/^\/+|\/+$/g, '');
 };
 
+const setStoredWorktreeStatus = (directory: string, status: NonNullable<WorktreeMetadata['worktreeStatus']>): void => {
+  const target = normalizePath(directory);
+  if (!target) {
+    return;
+  }
+
+  useSessionUIStore.setState((state) => {
+    let changed = false;
+
+    const applyStatus = (metadata: WorktreeMetadata): WorktreeMetadata => {
+      if (normalizePath(metadata.path) !== target || metadata.worktreeStatus === status) {
+        return metadata;
+      }
+      changed = true;
+      return { ...metadata, worktreeStatus: status };
+    };
+
+    let availableWorktrees = state.availableWorktrees;
+    let availableWorktreesChanged = false;
+    const nextAvailableWorktrees = state.availableWorktrees.map((metadata) => {
+      const next = applyStatus(metadata);
+      if (next !== metadata) {
+        availableWorktreesChanged = true;
+      }
+      return next;
+    });
+    if (availableWorktreesChanged) {
+      availableWorktrees = nextAvailableWorktrees;
+    }
+    let availableWorktreesByProject = state.availableWorktreesByProject;
+    for (const [projectKey, entries] of state.availableWorktreesByProject) {
+      let projectChanged = false;
+      const nextEntries = entries.map((metadata) => {
+        const next = applyStatus(metadata);
+        if (next !== metadata) {
+          projectChanged = true;
+        }
+        return next;
+      });
+      if (projectChanged) {
+        if (availableWorktreesByProject === state.availableWorktreesByProject) {
+          availableWorktreesByProject = new Map(state.availableWorktreesByProject);
+        }
+        availableWorktreesByProject.set(projectKey, nextEntries);
+      }
+    }
+
+    let worktreeMetadata = state.worktreeMetadata;
+    for (const [sessionId, metadata] of state.worktreeMetadata) {
+      const next = applyStatus(metadata);
+      if (next !== metadata) {
+        if (worktreeMetadata === state.worktreeMetadata) {
+          worktreeMetadata = new Map(state.worktreeMetadata);
+        }
+        worktreeMetadata.set(sessionId, next);
+      }
+    }
+
+    if (!changed) {
+      return {};
+    }
+
+    return {
+      availableWorktrees,
+      availableWorktreesByProject,
+      worktreeMetadata,
+    };
+  });
+};
+
+const getWorktreeStatusFromBootstrap = (status?: GitWorktreeBootstrapStatus): WorktreeMetadata['worktreeStatus'] => {
+  if (status?.status === 'pending') {
+    return 'pending';
+  }
+  return status?.status === 'failed' ? 'invalid' : 'ready';
+};
+
 const deriveSdkWorktreeNameFromDirectory = (directory: string): string => {
   const normalized = normalizePath(directory);
   const parts = normalized.split('/').filter(Boolean);
   return parts[parts.length - 1] ?? normalized;
 };
 
-export const buildSdkStartCommand = (args: {
+const buildSdkStartCommand = (args: {
   projectDirectory: string;
   setupCommands: string[];
 }): string | undefined => {
@@ -174,6 +194,7 @@ const toCreatePayload = (args: {
   upstreamBranch?: string;
   ensureRemoteName?: string;
   ensureRemoteUrl?: string;
+  returnAfterDirectoryCreated?: boolean;
 }, projectDirectory: string): CreateGitWorktreePayload => {
   const mode = args.mode === 'existing' ? 'existing' : 'new';
 
@@ -204,13 +225,73 @@ const toCreatePayload = (args: {
     ...(args.upstreamBranch ? { upstreamBranch: args.upstreamBranch } : {}),
     ...(args.ensureRemoteName ? { ensureRemoteName: args.ensureRemoteName } : {}),
     ...(args.ensureRemoteUrl ? { ensureRemoteUrl: args.ensureRemoteUrl } : {}),
+    ...(args.returnAfterDirectoryCreated ? { returnAfterDirectoryCreated: true } : {}),
   };
 };
 
 // Cache worktree listings to avoid repeated git worktree list + rev-parse calls
 const _worktreeListCache = new Map<string, { value: WorktreeMetadata[]; at: number }>();
 const _worktreeListInflight = new Map<string, Promise<WorktreeMetadata[]>>();
+const _worktreeListGeneration = new Map<string, number>();
 const WORKTREE_LIST_CACHE_TTL = 30_000; // 30 seconds
+
+const getWorktreeListGeneration = (projectDirectory: string): number => {
+  return _worktreeListGeneration.get(projectDirectory) ?? 0;
+};
+
+const invalidateWorktreeList = (projectDirectory: string): void => {
+  _worktreeListGeneration.set(projectDirectory, getWorktreeListGeneration(projectDirectory) + 1);
+  _worktreeListCache.delete(projectDirectory);
+};
+
+const readProjectWorktrees = async (projectDirectory: string): Promise<WorktreeMetadata[]> => {
+  const metadataProjectDirectory = await resolveProjectRoot(projectDirectory).catch(() => projectDirectory);
+  const normalizedProjectDirectory = normalizePath(projectDirectory);
+
+  const worktrees = await git.worktree.list(projectDirectory).catch(() => []);
+  const results: WorktreeMetadata[] = worktrees
+    .filter((entry) => typeof entry.path === 'string' && entry.path.trim().length > 0)
+    .map((entry) => {
+      const worktreePath = normalizePath(entry.path);
+      const branch = (entry.branch || '').replace(/^refs\/heads\//, '').trim();
+      const name = (entry.name || '').trim();
+
+      // Derive canonical worktree metadata from worktree list entry
+      const canonical = deriveCanonicalWorktreeFields(entry, worktreePath);
+
+      return {
+        source: 'sdk' as const,
+        name: name || deriveSdkWorktreeNameFromDirectory(worktreePath),
+        path: worktreePath,
+        projectDirectory: metadataProjectDirectory,
+        branch: branch,
+        label: branch || name || deriveSdkWorktreeNameFromDirectory(worktreePath),
+        worktreeRoot: canonical.worktreeRoot,
+        worktreeStatus: canonical.worktreeStatus,
+        headState: canonical.headState,
+        worktreeSource: canonical.worktreeSource,
+      };
+    })
+    .filter((entry) => normalizePath(entry.path) !== normalizedProjectDirectory);
+
+  return results.sort((a, b) => {
+    const aLabel = (a.label || a.branch || a.path).toLowerCase();
+    const bLabel = (b.label || b.branch || b.path).toLowerCase();
+    return aLabel.localeCompare(bLabel);
+  });
+};
+
+const readStableProjectWorktrees = async (projectDirectory: string): Promise<WorktreeMetadata[]> => {
+  while (true) {
+    const generation = getWorktreeListGeneration(projectDirectory);
+    const worktrees = await readProjectWorktrees(projectDirectory);
+
+    if (generation === getWorktreeListGeneration(projectDirectory)) {
+      _worktreeListCache.set(projectDirectory, { value: worktrees, at: Date.now() });
+      return worktrees;
+    }
+  }
+};
 
 export async function listProjectWorktrees(project: ProjectRef): Promise<WorktreeMetadata[]> {
   const projectDirectory = normalizePath(project.path);
@@ -225,46 +306,10 @@ export async function listProjectWorktrees(project: ProjectRef): Promise<Worktre
   const inflight = _worktreeListInflight.get(projectDirectory);
   if (inflight) return inflight;
 
-  const promise = (async (): Promise<WorktreeMetadata[]> => {
-    const metadataProjectDirectory = await resolvePrimaryWorktreeDirectory(projectDirectory).catch(() => projectDirectory);
-    const normalizedProjectDirectory = normalizePath(projectDirectory);
-
-    const worktrees = await git.worktree.list(projectDirectory).catch(() => []);
-    const results: WorktreeMetadata[] = worktrees
-      .filter((entry) => typeof entry.path === 'string' && entry.path.trim().length > 0)
-      .map((entry) => {
-        const worktreePath = normalizePath(entry.path);
-        const branch = (entry.branch || '').replace(/^refs\/heads\//, '').trim();
-        const name = (entry.name || '').trim();
-
-        // Derive canonical worktree metadata from worktree list entry
-        const canonical = deriveCanonicalWorktreeFields(entry, worktreePath);
-
-        return {
-          source: 'sdk' as const,
-          name: name || deriveSdkWorktreeNameFromDirectory(worktreePath),
-          path: worktreePath,
-          projectDirectory: metadataProjectDirectory,
-          branch: branch,
-          label: branch || name || deriveSdkWorktreeNameFromDirectory(worktreePath),
-          worktreeRoot: canonical.worktreeRoot,
-          worktreeStatus: canonical.worktreeStatus,
-          headState: canonical.headState,
-          worktreeSource: canonical.worktreeSource,
-        };
-      })
-      .filter((entry) => normalizePath(entry.path) !== normalizedProjectDirectory);
-
-    const sorted = results.sort((a, b) => {
-      const aLabel = (a.label || a.branch || a.path).toLowerCase();
-      const bLabel = (b.label || b.branch || b.path).toLowerCase();
-      return aLabel.localeCompare(bLabel);
-    });
-
-    _worktreeListCache.set(projectDirectory, { value: sorted, at: Date.now() });
-    return sorted;
-  })().finally(() => {
-    _worktreeListInflight.delete(projectDirectory);
+  const promise = readStableProjectWorktrees(projectDirectory).finally(() => {
+    if (_worktreeListInflight.get(projectDirectory) === promise) {
+      _worktreeListInflight.delete(projectDirectory);
+    }
   });
 
   _worktreeListInflight.set(projectDirectory, promise);
@@ -284,11 +329,12 @@ export type CreateWorktreeArgs = {
   upstreamBranch?: string;
   ensureRemoteName?: string;
   ensureRemoteUrl?: string;
+  returnAfterDirectoryCreated?: boolean;
 };
 
 export async function createWorktree(project: ProjectRef, args: CreateWorktreeArgs): Promise<WorktreeMetadata> {
   const projectDirectory = normalizePath(project.path);
-  const metadataProjectDirectory = await resolvePrimaryWorktreeDirectory(projectDirectory).catch(() => projectDirectory);
+  const metadataProjectDirectory = await resolveProjectRoot(projectDirectory).catch(() => projectDirectory);
   const payload = toCreatePayload(args, projectDirectory);
 
   const created = await git.worktree.create(projectDirectory, payload);
@@ -308,14 +354,25 @@ export async function createWorktree(project: ProjectRef, args: CreateWorktreeAr
     branch: returnedBranch,
     label: returnedBranch || returnedName,
     worktreeRoot: normalizePath(returnedPath),
-    worktreeStatus: 'ready',
+    worktreeStatus: getWorktreeStatusFromBootstrap(created?.bootstrapStatus),
     headState: returnedBranch ? 'branch' : 'unborn',
     worktreeSource: 'created-for-session',
   };
 
-  markWorktreeBootstrapPending(metadata.path);
+  if (created?.bootstrapStatus) {
+    setWorktreeBootstrapState(metadata.path, created.bootstrapStatus);
+  } else {
+    markWorktreeBootstrapPending(metadata.path);
+  }
+  startWorktreeBootstrapWatcher(metadata.path, {
+    onFailed: () => setStoredWorktreeStatus(metadata.path, 'invalid'),
+    onReady: () => setStoredWorktreeStatus(metadata.path, 'ready'),
+  });
 
-  _worktreeListCache.delete(projectDirectory);
+  invalidateWorktreeList(projectDirectory);
+  // The new worktree changes the repo's worktree topology; drop cached root
+  // resolutions so root-branch lookups re-resolve against the new layout.
+  invalidateResolvedProjectRootCache();
 
   // Update sidebar store so new worktree appears immediately
   const sidebarProjectKey = projectDirectory;
@@ -357,7 +414,10 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
 
   clearWorktreeBootstrapState(worktree.path);
 
-  _worktreeListCache.delete(normalizePath(project.path));
+  invalidateWorktreeList(normalizePath(project.path));
+  // Removing a worktree changes the repo's worktree topology; drop cached root
+  // resolutions so root-branch lookups re-resolve against the new layout.
+  invalidateResolvedProjectRootCache();
 
   // Update sidebar store so removed worktree disappears immediately
   const normalizedWorktreePath = normalizePath(worktree.path);

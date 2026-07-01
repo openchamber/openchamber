@@ -2,7 +2,7 @@
 <html lang="en" class="h-full">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
 
     <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
@@ -28,7 +28,9 @@
       const defaultShortName = 'OpenChamber';
       const pwaNameStorageKey = 'openchamber.pwaName';
       const pwaOrientationStorageKey = 'openchamber.pwaOrientation';
+      const mobileKeyboardModeStorageKey = 'openchamber.mobileKeyboardMode';
       const pwaRecentSessionsStorageKey = 'openchamber.pwaRecentSessions';
+      const viewportBaseContent = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover';
 
       const normalizePwaName = (value, fallback) => {
         if (typeof value !== 'string') {
@@ -54,6 +56,40 @@
         }
         return fallback;
       };
+
+      const normalizeMobileKeyboardMode = (value, fallback = 'resize-content') => {
+        if (value === 'native' || value === 'resize-content') {
+          return value;
+        }
+        return fallback;
+      };
+
+      const getViewportContentForMobileKeyboardMode = (value) => {
+        const mode = normalizeMobileKeyboardMode(value, 'resize-content');
+        return mode === 'resize-content'
+          ? `${viewportBaseContent}, interactive-widget=resizes-content`
+          : viewportBaseContent;
+      };
+
+      const applyStoredMobileKeyboardMode = () => {
+        let mode = 'resize-content';
+        try {
+          mode = normalizeMobileKeyboardMode(localStorage.getItem(mobileKeyboardModeStorageKey), 'resize-content');
+          if (mode === 'resize-content') {
+            localStorage.removeItem(mobileKeyboardModeStorageKey);
+          }
+        } catch {
+          mode = 'resize-content';
+        }
+
+        document.documentElement.setAttribute('data-oc-mobile-keyboard-mode', mode);
+        const viewportMeta = document.querySelector('meta[name="viewport"]');
+        if (viewportMeta) {
+          viewportMeta.setAttribute('content', getViewportContentForMobileKeyboardMode(mode));
+        }
+      };
+
+      applyStoredMobileKeyboardMode();
 
       const getStoredInstallName = () => {
         try {

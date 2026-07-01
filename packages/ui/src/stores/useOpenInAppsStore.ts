@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 
-import { fetchDesktopInstalledApps, isDesktopLocalOriginActive, isTauriShell, type DesktopSettings, type InstalledDesktopAppInfo } from '@/lib/desktop';
-import { OPEN_IN_APPS, DEFAULT_OPEN_IN_APP_ID, OPEN_IN_ALWAYS_AVAILABLE_APP_IDS, getOpenInAppById, type OpenInApp } from '@/lib/openInApps';
+import { fetchDesktopInstalledApps, isDesktopLocalOriginActive, isDesktopShell, type DesktopSettings, type InstalledDesktopAppInfo } from '@/lib/desktop';
+import { OPEN_IN_APPS, DEFAULT_OPEN_IN_APP_ID, OPEN_IN_ALWAYS_AVAILABLE_APP_IDS, getOpenInAppById, getPlatformOpenInApp, type OpenInApp } from '@/lib/openInApps';
 import { updateDesktopSettings } from '@/lib/persistence';
 
 export type OpenInAppOption = OpenInApp & {
@@ -22,7 +22,7 @@ type OpenInAppsState = {
 const getAlwaysAvailableApps = (): OpenInAppOption[] => {
   return OPEN_IN_APPS
     .filter((app) => OPEN_IN_ALWAYS_AVAILABLE_APP_IDS.has(app.id))
-    .map((app) => ({ ...app }));
+    .map((app) => ({ ...getPlatformOpenInApp(app) }));
 };
 
 const getStoredAppId = (): string => {
@@ -64,9 +64,9 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
     }
     initialized = true;
 
-    const applyInstalledApps = (installed: InstalledDesktopAppInfo[]) => {
+    const applyInstalledApps = (installed: InstalledDesktopAppInfo[], hasLoadedApps = true) => {
       if (!Array.isArray(installed) || installed.length === 0) {
-        set({ availableApps: getAlwaysAvailableApps(), hasLoadedApps: false });
+        set({ availableApps: getAlwaysAvailableApps(), hasLoadedApps });
         return;
       }
 
@@ -78,7 +78,7 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
       );
 
       const withIcons = filtered.map((app) => ({
-        ...app,
+        ...getPlatformOpenInApp(app),
         iconDataUrl: iconMap.get(app.appName),
       }));
 
@@ -86,7 +86,7 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
     };
 
     const loadInstalledApps = async (force?: boolean) => {
-      if (!isTauriShell() || !isDesktopLocalOriginActive()) {
+      if (!isDesktopShell() || !isDesktopLocalOriginActive()) {
         return;
       }
 
@@ -118,11 +118,13 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
           isCacheStale,
         } = await fetchDesktopInstalledApps(appNames, force);
 
+        const shouldRetryEmptyScan = success && !hasCache && installed.length === 0 && retryAttempt < 3;
+
         set({ isCacheStale: hasCache ? isCacheStale : false });
-        applyInstalledApps(installed);
+        applyInstalledApps(installed, success ? !shouldRetryEmptyScan : false);
 
         if (success) {
-          if (!hasCache && installed.length === 0 && retryAttempt < 3) {
+          if (shouldRetryEmptyScan) {
             const delays = [800, 1600, 3200];
             const delay = delays[retryAttempt] ?? 3200;
             retryAttempt += 1;
@@ -211,7 +213,7 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
       get().initialize();
     }
 
-    if (!isTauriShell() || !isDesktopLocalOriginActive()) {
+    if (!isDesktopShell() || !isDesktopLocalOriginActive()) {
       return;
     }
 

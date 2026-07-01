@@ -85,6 +85,16 @@
     min-width: 36px;
   }
 
+  /* Composer footer action buttons (sessions / attach / auto-accept): hug the
+     icon so the group stays tight. The container only renders in the mobile
+     JSX, so no pointer/runtime gating is needed; !important overrides both the
+     w-8 utility and the global mobile touch-target min-width regardless of
+     cascade layer or specificity. */
+  .composer-mobile-actions button {
+    width: 1.5rem !important;
+    min-width: 0 !important;
+  }
+
   /* Improve input field touch targets */
   :root.mobile-pointer:not(.desktop-runtime) input,
   :root.mobile-pointer:not(.desktop-runtime) textarea,
@@ -223,7 +233,9 @@
 
 /* iOS safe area defaults (applies to PWA + Safari) */
 @supports (-webkit-touch-callout: none) {
-  :root.device-mobile:not(.desktop-runtime) {
+  :root.device-mobile:not(.desktop-runtime),
+  :root.device-tablet:not(.desktop-runtime),
+  :root.mobile-pointer:not(.desktop-runtime) {
     --oc-safe-area-top: env(safe-area-inset-top, 0);
     --oc-safe-area-right: env(safe-area-inset-right, 0);
     --oc-safe-area-bottom: env(safe-area-inset-bottom, 0);
@@ -231,7 +243,9 @@
     --oc-safe-area-left: env(safe-area-inset-left, 0);
   }
 
-  :root.device-mobile:not(.desktop-runtime) .header-safe-area {
+  :root.device-mobile:not(.desktop-runtime) .header-safe-area,
+  :root.device-tablet:not(.desktop-runtime) .header-safe-area,
+  :root.mobile-pointer:not(.desktop-runtime) .header-safe-area {
     padding-top: var(--oc-safe-area-top);
   }
 }
@@ -241,7 +255,9 @@
   /* iOS-specific safe area handling with CSS variable support */
   @supports (-webkit-touch-callout: none) {
     /* Safe area handling for fixed positioned elements */
-    :root.device-mobile:not(.desktop-runtime) {
+    :root.device-mobile:not(.desktop-runtime),
+    :root.device-tablet:not(.desktop-runtime),
+    :root.mobile-pointer:not(.desktop-runtime) {
       --oc-safe-area-top: env(safe-area-inset-top, 0);
       --oc-safe-area-right: env(safe-area-inset-right, 0);
       --oc-safe-area-bottom: env(safe-area-inset-bottom, 0);
@@ -249,11 +265,15 @@
       --oc-safe-area-left: env(safe-area-inset-left, 0);
     }
 
-    :root.device-mobile:not(.desktop-runtime) .header-safe-area {
+    :root.device-mobile:not(.desktop-runtime) .header-safe-area,
+    :root.device-tablet:not(.desktop-runtime) .header-safe-area,
+    :root.mobile-pointer:not(.desktop-runtime) .header-safe-area {
       padding-top: var(--oc-safe-area-top);
     }
 
-    :root.device-mobile:not(.desktop-runtime) .main-content-safe-area {
+    :root.device-mobile:not(.desktop-runtime) .main-content-safe-area,
+    :root.device-tablet:not(.desktop-runtime) .main-content-safe-area,
+    :root.mobile-pointer:not(.desktop-runtime) .main-content-safe-area {
       padding-top: 0;
       padding-bottom: 0;
       padding-left: var(--oc-safe-area-left);
@@ -261,35 +281,47 @@
     }
 
     /* Safe area for bottom fixed/bottom-0 elements */
-    :root.device-mobile:not(.desktop-runtime) .bottom-safe-area {
+    :root.device-mobile:not(.desktop-runtime) .bottom-safe-area,
+    :root.device-tablet:not(.desktop-runtime) .bottom-safe-area,
+    :root.mobile-pointer:not(.desktop-runtime) .bottom-safe-area {
       padding-bottom: var(--oc-safe-area-bottom-visual) !important;
     }
 
     /* Drawer safe area - top already offset by header height */
-    :root.device-mobile:not(.desktop-runtime) .drawer-safe-area {
+    :root.device-mobile:not(.desktop-runtime) .drawer-safe-area,
+    :root.device-tablet:not(.desktop-runtime) .drawer-safe-area,
+    :root.mobile-pointer:not(.desktop-runtime) .drawer-safe-area {
       padding-top: 0;
       padding-bottom: var(--oc-safe-area-bottom-visual);
     }
 
     /* Fix iOS viewport issues */
-    :root.device-mobile:not(.desktop-runtime) .flex.flex-col.h-screen {
+    :root.device-mobile:not(.desktop-runtime) .flex.flex-col.h-screen,
+    :root.device-tablet:not(.desktop-runtime) .flex.flex-col.h-screen,
+    :root.mobile-pointer:not(.desktop-runtime) .flex.flex-col.h-screen {
       min-height: 100vh;
       min-height: -webkit-fill-available;
     }
 
     /* Prevent content overlap in iOS */
-    :root.device-mobile:not(.desktop-runtime) .flex-1.overflow-hidden {
+    :root.device-mobile:not(.desktop-runtime) .flex-1.overflow-hidden,
+    :root.device-tablet:not(.desktop-runtime) .flex-1.overflow-hidden,
+    :root.mobile-pointer:not(.desktop-runtime) .flex-1.overflow-hidden {
       position: relative;
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
     }
 
     /* Update header height for iOS */
-    :root.device-mobile:not(.desktop-runtime) .header-safe-area {
+    :root.device-mobile:not(.desktop-runtime) .header-safe-area,
+    :root.device-tablet:not(.desktop-runtime) .header-safe-area,
+    :root.mobile-pointer:not(.desktop-runtime) .header-safe-area {
       --header-height: 4.5rem;
     }
 
-    :root.device-mobile:not(.desktop-runtime) .mobile-sidebar-top {
+    :root.device-mobile:not(.desktop-runtime) .mobile-sidebar-top,
+    :root.device-tablet:not(.desktop-runtime) .mobile-sidebar-top,
+    :root.mobile-pointer:not(.desktop-runtime) .mobile-sidebar-top {
       --header-height: 4.5rem;
     }
 
@@ -326,7 +358,9 @@
 
   /* Fallback for non-iOS standalone mode */
   @supports not (-webkit-touch-callout: none) {
-    :root.device-mobile:not(.desktop-runtime) {
+    :root.device-mobile:not(.desktop-runtime),
+    :root.device-tablet:not(.desktop-runtime),
+    :root.mobile-pointer:not(.desktop-runtime) {
       --oc-safe-area-top: env(safe-area-inset-top, 0);
       --oc-safe-area-right: env(safe-area-inset-right, 0);
       --oc-safe-area-bottom: env(safe-area-inset-bottom, 0);
@@ -334,18 +368,24 @@
       --oc-safe-area-left: env(safe-area-inset-left, 0);
     }
 
-    :root.device-mobile:not(.desktop-runtime) .header-safe-area {
+    :root.device-mobile:not(.desktop-runtime) .header-safe-area,
+    :root.device-tablet:not(.desktop-runtime) .header-safe-area,
+    :root.mobile-pointer:not(.desktop-runtime) .header-safe-area {
       padding-top: var(--oc-safe-area-top);
     }
 
-    :root.device-mobile:not(.desktop-runtime) .main-content-safe-area {
+    :root.device-mobile:not(.desktop-runtime) .main-content-safe-area,
+    :root.device-tablet:not(.desktop-runtime) .main-content-safe-area,
+    :root.mobile-pointer:not(.desktop-runtime) .main-content-safe-area {
       padding-top: 0;
       padding-bottom: 0;
       padding-left: var(--oc-safe-area-left);
       padding-right: var(--oc-safe-area-right);
     }
 
-    :root.device-mobile:not(.desktop-runtime) .bottom-safe-area {
+    :root.device-mobile:not(.desktop-runtime) .bottom-safe-area,
+    :root.device-tablet:not(.desktop-runtime) .bottom-safe-area,
+    :root.mobile-pointer:not(.desktop-runtime) .bottom-safe-area {
       padding-bottom: var(--oc-safe-area-bottom-visual) !important;
     }
   }
@@ -355,11 +395,24 @@
 @media (display-mode: standalone) and (max-width: 768px) {
   .pwa-dialog-content {
     --pwa-dialog-padding: clamp(0.75rem, 3vw, 1.25rem);
-    top: calc(50% + (var(--oc-safe-area-top, 0px) * 0.22));
-    max-height: calc(100vh - var(--oc-safe-area-top, 0px) - var(--oc-safe-area-bottom-visual, 0px) - 20px);
+    top: auto;
+    /* Browsers that don't understand dvh ignore the second declaration and
+       keep the vh-based fallback. Newer browsers use 100dvh so Android
+       Chrome's collapsible URL bar doesn't push the dialog footer off-screen. */
+    max-height: calc(
+      100vh
+      - var(--oc-safe-area-top, 0px)
+      - var(--oc-safe-area-bottom-visual, 0px)
+      - 20px
+    );
+    max-height: calc(
+      100dvh
+      - var(--oc-safe-area-top, 0px)
+      - var(--oc-safe-area-bottom-visual, 0px)
+      - 20px
+    );
     padding: var(--pwa-dialog-padding);
     padding-top: calc(var(--pwa-dialog-padding) + (var(--oc-safe-area-top, 0px) * 0.35));
-    --tw-translate-y: calc(-50% + (var(--oc-safe-area-top, 0px) * 0.6));
     row-gap: clamp(0.75rem, 2vw, 1.25rem);
   }
 
@@ -396,8 +449,7 @@
   }
 
   .pwa-overlay-panel {
-    margin-bottom: max(var(--oc-safe-area-bottom-visual, 0px), 12px);
-    padding-bottom: calc(var(--oc-safe-area-bottom-visual, 0px) * 0.4);
+    margin-bottom: 0;
   }
 
   .pwa-overlay-panel .pwa-overlay-scroll {
@@ -407,7 +459,9 @@
 
 @media (display-mode: standalone) {
   /* Home indicator overlay */
-  :root.device-mobile:not(.desktop-runtime) body::after {
+  :root.device-mobile:not(.desktop-runtime) body::after,
+  :root.device-tablet:not(.desktop-runtime) body::after,
+  :root.mobile-pointer:not(.desktop-runtime) body::after {
     content: '';
     position: fixed;
     bottom: 0;
@@ -428,7 +482,9 @@
 
   /* Fallback for browsers without rgba(from ...) support */
   @supports not (color: rgba(from white r g b / 0.5)) {
-    :root.device-mobile:not(.desktop-runtime) body::after {
+    :root.device-mobile:not(.desktop-runtime) body::after,
+    :root.device-tablet:not(.desktop-runtime) body::after,
+    :root.mobile-pointer:not(.desktop-runtime) body::after {
       background: linear-gradient(
         to top,
         var(--background) 0%,
@@ -451,4 +507,89 @@
       );
     }
   }
+}
+
+/* Small app-wide bottom safe area for the native shell. The phone's rounded hardware
+   corners clip controls flush against the bottom edge, and the PWA's own safe-area
+   padding is gated behind display-mode: standalone — which the Capacitor WebView does
+   not match — so nothing reserves bottom room in the native app. Expose it as a token
+   so any native surface can consume it; the chat shell does so below. */
+:root.oc-capacitor-app {
+  --oc-app-bottom-safe: max(16px, calc(env(safe-area-inset-bottom, 0px) * 0.5));
+}
+
+/* Paint the document canvas with the theme background in the native app — the same
+   thing .desktop-runtime does for body/#root, which the Capacitor shell never got.
+   The status bar is overlaid (transparent), and in dark mode `color-scheme: dark`
+   makes the bare UA canvas dark, so any sliver not covered by content (notably the
+   area behind the status bar) bled through as a dark band at the top. It only showed
+   in dark mode, which is why it tracked the system theme. */
+:root.oc-capacitor-app,
+:root.oc-capacitor-app body,
+:root.oc-capacitor-app #root {
+  background: var(--background) !important;
+  background-color: var(--background) !important;
+}
+
+/* Native (Capacitor) keyboard handling.
+   The Keyboard plugin runs in `resize: 'none'` mode so the WebView keeps its full
+   height; instead we shrink the app shell by the keyboard frame height, exposed as
+   --oc-keyboard-inset and set once from `keyboardWillShow` (see useNativeMobileChrome).
+   Scoped to .oc-capacitor-app so the browser PWA keeps its dvh / interactive-widget
+   behaviour untouched.
+
+   `keyboardWillShow` fires at the start of the iOS keyboard animation, so the inset
+   is set once and the transition carries the rise. The duration/curve are tuned to
+   mimic the native iOS keyboard (≈0.25s, cubic-bezier(0.38, 0.7, 0.125, 1)) so our
+   layout and the keyboard move together. (visualViewport live-tracking would be exact
+   but doesn't report under WKWebView's `resize: 'none'`, so this is the best signal.) */
+:root.oc-capacitor-app .oc-mobile-app-shell {
+  height: calc(100dvh - var(--oc-keyboard-inset, 0px));
+  /* Reserve the bottom safe area only while the keyboard is down — when it's up the
+     inset cancels it out (the home indicator is hidden and the composer should sit
+     flush above the keyboard). The shell keeps its own bg behind this padding. */
+  padding-bottom: max(0px, calc(var(--oc-app-bottom-safe, 0px) - var(--oc-keyboard-inset, 0px)));
+  transition: height 0.25s cubic-bezier(0.38, 0.7, 0.125, 1),
+              padding-bottom 0.25s cubic-bezier(0.38, 0.7, 0.125, 1);
+}
+
+/* Android resizes the window for the keyboard natively (no manual --oc-keyboard-inset),
+   so 100dvh changes instantly. Animating height against that instant resize makes the
+   header/content bounce on keyboard open — disable the transition on Android. */
+:root.oc-capacitor-app.oc-platform-android .oc-mobile-app-shell {
+  transition: none;
+}
+
+/* Portal surfaces (bottom sheets, overlay panels) render at <body> level, outside
+   the app shell, so they don't inherit the shell's keyboard inset. They're full-
+   height `fixed inset-0` scrims with a bottom-anchored (`mt-auto`) sheet, so raising
+   their bottom edge by the keyboard height shrinks scrim + sheet together and lifts
+   any input above the keyboard instead of hiding it underneath. The opacity term
+   preserves the scrim's enter fade (Tailwind's `transition-opacity` would otherwise
+   be overridden by this rule's `transition` shorthand). */
+:root.oc-capacitor-app .oc-keyboard-inset-surface {
+  bottom: var(--oc-keyboard-inset, 0px);
+  transition: bottom 0.25s cubic-bezier(0.38, 0.7, 0.125, 1), opacity 0.2s ease-out;
+}
+
+/* Full-screen scroll views (e.g. the connect/login screen) live outside the app
+   shell, so shrink them by the keyboard height the same way the shell does. Capping
+   the height (instead of min-height: 100dvh) is what makes overflow-y-auto actually
+   scroll, so a field near the bottom lifts above the keyboard rather than staying
+   hidden behind it. min-height: 0 neutralises the Tailwind min-h-dvh baseline. */
+:root.oc-capacitor-app .oc-keyboard-fill-screen {
+  height: calc(100dvh - var(--oc-keyboard-inset, 0px));
+  min-height: 0;
+  transition: height 0.25s cubic-bezier(0.38, 0.7, 0.125, 1);
+}
+
+/* The composer keeps its 1rem bottom padding while the keyboard is down (breathing
+   room above the home indicator), but that gap looks artificial sitting above the
+   keyboard's accessory bar — so tighten it while the keyboard is open. Animated to
+   match the keyboard motion. */
+:root.oc-capacitor-app .oc-mobile-composer {
+  transition: padding-bottom 0.25s cubic-bezier(0.38, 0.7, 0.125, 1);
+}
+:root.oc-capacitor-app.oc-keyboard-open .oc-mobile-composer {
+  padding-bottom: 6px;
 }

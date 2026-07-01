@@ -1,7 +1,7 @@
 import React from 'react';
-import { RiInformationLine, RiQuestionLine, RiSettings3Line } from '@remixicon/react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 
 type Props = {
@@ -32,7 +32,7 @@ export function SidebarFooter({
           <Tooltip>
             <TooltipTrigger asChild>
               <button type="button" onClick={onOpenSettings} className={footerButtonClassName} aria-label={t('sessions.sidebar.footer.actions.settings')}>
-                <RiSettings3Line className="h-4.5 w-4.5" />
+                <Icon name="settings-3" className="h-4.5 w-4.5" />
               </button>
             </TooltipTrigger>
             <TooltipContent side="top" sideOffset={4}><p>{t('sessions.sidebar.footer.actions.settings')}</p></TooltipContent>
@@ -40,7 +40,7 @@ export function SidebarFooter({
           <Tooltip>
             <TooltipTrigger asChild>
               <button type="button" onClick={onOpenShortcuts} className={footerButtonClassName} aria-label={t('sessions.sidebar.footer.actions.shortcuts')}>
-                <RiQuestionLine className="h-4.5 w-4.5" />
+                <Icon name="question" className="h-4.5 w-4.5" />
               </button>
             </TooltipTrigger>
             <TooltipContent side="top" sideOffset={4}><p>{t('sessions.sidebar.footer.actions.shortcuts')}</p></TooltipContent>
@@ -48,7 +48,7 @@ export function SidebarFooter({
           <Tooltip>
             <TooltipTrigger asChild>
               <button type="button" onClick={onOpenAbout} className={footerButtonClassName} aria-label={t('sessions.sidebar.footer.actions.aboutOpenChamber')}>
-                <RiInformationLine className="h-4.5 w-4.5" />
+                <Icon name="information" className="h-4.5 w-4.5" />
               </button>
             </TooltipTrigger>
             <TooltipContent side="top" sideOffset={4}><p>{t('sessions.sidebar.footer.actions.aboutOpenChamber')}</p></TooltipContent>

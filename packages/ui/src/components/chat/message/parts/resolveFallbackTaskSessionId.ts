@@ -29,8 +29,6 @@ export interface ResolveFallbackParams {
   parentSessionId: string | undefined;
   /** When the task tool started (ms timestamp) */
   taskStartTime: number | undefined;
-  /** True when the task tool is finalized (completed/error/etc.) */
-  isTaskFinalized?: boolean;
   /** Sessions from the directory store */
   sessions: Session[];
   /** Session status map from the sync store */
@@ -45,8 +43,8 @@ export interface ResolveFallbackParams {
  *
  * Returns `undefined` when:
  * - Not a task tool
- * - Task is finalized
  * - Parent session is unknown
+ * - Task start time is unknown
  * - No unambiguous match found
  */
 export function resolveFallbackTaskSessionId(params: ResolveFallbackParams): string | undefined {
@@ -54,29 +52,34 @@ export function resolveFallbackTaskSessionId(params: ResolveFallbackParams): str
     isTaskTool,
     parentSessionId,
     taskStartTime,
-    isTaskFinalized = false,
     sessions,
     sessionStatusMap,
     hasRetried = false,
   } = params;
 
-  if (!isTaskTool || isTaskFinalized || !parentSessionId || typeof taskStartTime !== 'number') {
+  if (!isTaskTool || !parentSessionId) {
     return undefined;
   }
 
-  const windowMs = hasRetried ? TASK_SESSION_MATCH_WINDOW_WIDE_MS : TASK_SESSION_MATCH_WINDOW_MS;
-  const latestAllowed = taskStartTime + windowMs;
+  if (typeof taskStartTime !== 'number') {
+    return undefined;
+  }
 
-  // Filter candidate sessions: parentID matches and created shortly after task start.
-  const candidates = sessions.filter((session) => {
+  // Filter candidate sessions: parentID matches the current session.
+  let candidates = sessions.filter((session) => {
     if (!session?.id || session.parentID !== parentSessionId) {
       return false;
     }
+    return true;
+  });
+
+  // Apply the time window even while running. Without it, a newly rendered task
+  // can briefly bind to the previous child session before its own child exists.
+  const windowMs = hasRetried ? TASK_SESSION_MATCH_WINDOW_WIDE_MS : TASK_SESSION_MATCH_WINDOW_MS;
+  const latestAllowed = taskStartTime + windowMs;
+  candidates = candidates.filter((session) => {
     const created = session.time?.created;
-    if (typeof created !== 'number') {
-      return false;
-    }
-    return created >= taskStartTime && created <= latestAllowed;
+    return typeof created === 'number' && created >= taskStartTime && created <= latestAllowed;
   });
 
   if (candidates.length === 0) {

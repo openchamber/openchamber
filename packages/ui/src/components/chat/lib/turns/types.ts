@@ -5,7 +5,7 @@ export interface ChatMessageEntry {
     parts: Part[];
 }
 
-export type TurnActivityKind = 'tool' | 'reasoning' | 'justification';
+type TurnActivityKind = 'tool' | 'reasoning' | 'justification';
 
 export interface TurnMessageRecord {
     messageId: string;
@@ -32,6 +32,12 @@ export interface TurnDiffStats {
     additions: number;
     deletions: number;
     files: number;
+}
+
+export interface TurnChangedFile {
+    file: string;
+    additions: number;
+    deletions: number;
 }
 
 export interface TurnActivityGroup {
@@ -70,13 +76,14 @@ export interface TurnRecord {
     hasTools: boolean;
     hasReasoning: boolean;
     diffStats?: TurnDiffStats;
+    changedFiles?: TurnChangedFile[];
     stream: TurnStreamState;
     startedAt?: number;
     completedAt?: number;
     durationMs?: number;
 }
 
-export interface TurnMessageMeta {
+interface TurnMessageMeta {
     turnId: string;
     messageId: string;
     userMessageId: string;
@@ -115,6 +122,7 @@ export interface TurnGroupingContext {
     hasTools: boolean;
     hasReasoning: boolean;
     diffStats?: TurnDiffStats;
+    changedFiles?: TurnChangedFile[];
     userMessageCreatedAt?: number;
     userMessageVariant?: string;
     isWorking: boolean;

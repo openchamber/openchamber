@@ -23,6 +23,7 @@ type SaveProjectPlanDialogProps = {
 export function SaveProjectPlanDialog(props: SaveProjectPlanDialogProps) {
   const { t } = useI18n();
   const { open, onOpenChange, initialTitle, sourceText, saving = false, onSave } = props;
+  const titleInputId = React.useId();
   const [title, setTitle] = React.useState(initialTitle);
 
   React.useEffect(() => {
@@ -43,8 +44,9 @@ export function SaveProjectPlanDialog(props: SaveProjectPlanDialogProps) {
 
         <div className="space-y-3">
           <div className="space-y-1.5">
-            <label className="typography-ui-label font-medium text-foreground">{t('saveProjectPlanDialog.field.title')}</label>
+            <label htmlFor={titleInputId} className="typography-ui-label font-medium text-foreground">{t('saveProjectPlanDialog.field.title')}</label>
             <Input
+              id={titleInputId}
               value={title}
               onChange={(event) => setTitle(event.target.value)}
               placeholder={t('saveProjectPlanDialog.field.titlePlaceholder')}

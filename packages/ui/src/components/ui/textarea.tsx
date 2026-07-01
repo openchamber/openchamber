@@ -11,6 +11,8 @@ type TextareaProps = React.ComponentProps<"textarea"> & {
   useScrollShadow?: boolean;
   scrollShadowSize?: number;
   hasError?: boolean;
+  resizedHeight?: number | null;
+  onResizeHeightChange?: (height: number) => void;
   /**
    * AlignUI "simple" mode: render a bare textarea (no compound wrapper).
    * Used for chat composer or anywhere the textarea is embedded inside an
@@ -68,6 +70,8 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
       useScrollShadow = false,
       scrollShadowSize,
       hasError,
+      resizedHeight: controlledResizedHeight,
+      onResizeHeightChange,
       disabled,
       simple,
       endSlot,
@@ -79,6 +83,7 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
     const wrapperRef = React.useRef<HTMLDivElement>(null);
     const dragStateRef = React.useRef<{ startY: number; startHeight: number } | null>(null);
     const [resizedHeight, setResizedHeight] = React.useState<number | null>(null);
+    const effectiveResizedHeight = controlledResizedHeight ?? resizedHeight;
 
     const handleResizeStart = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
       const wrapper = wrapperRef.current;
@@ -94,7 +99,12 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
         const state = dragStateRef.current;
         if (!state) return;
         const next = state.startHeight + (moveEvent.clientY - state.startY);
-        setResizedHeight(Math.max(82, next));
+        const nextHeight = Math.max(82, next);
+        if (onResizeHeightChange) {
+          onResizeHeightChange(nextHeight);
+        } else {
+          setResizedHeight(nextHeight);
+        }
       };
       const onUp = () => {
         dragStateRef.current = null;
@@ -106,7 +116,7 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
       target.addEventListener('pointerup', onUp);
       target.addEventListener('pointercancel', onUp);
       event.preventDefault();
-    }, []);
+    }, [onResizeHeightChange]);
 
     const focusInnerTextarea = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
       // Clicking the wrapper chrome (below/around the textarea) should focus it.
@@ -152,7 +162,7 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
       <div
         ref={wrapperRef}
         onPointerDown={focusInnerTextarea}
-        style={resizedHeight !== null ? { height: `${resizedHeight}px` } : undefined}
+        style={effectiveResizedHeight !== null ? { height: `${effectiveResizedHeight}px` } : undefined}
         className={cn(
           "group/textarea relative flex w-full flex-col rounded-[var(--radius-xl)] bg-[var(--surface-elevated)] pb-2.5",
           "ring-1 ring-inset ring-border/60 transition duration-200 ease-out",
@@ -203,29 +213,4 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
 
 Textarea.displayName = "Textarea"
 
-function TextareaCharCounter({
-  current,
-  max,
-  className,
-}: {
-  current?: number;
-  max?: number;
-  className?: string;
-}) {
-  if (current === undefined || max === undefined) return null;
-  const isError = current > max;
-  return (
-    <span
-      className={cn(
-        "typography-meta text-muted-foreground",
-        "group-has-[[disabled]]/textarea:text-muted-foreground/60",
-        isError && "text-[var(--status-error)]",
-        className,
-      )}
-    >
-      {current}/{max}
-    </span>
-  );
-}
-
-export { Textarea, TextareaCharCounter }
+export { Textarea }

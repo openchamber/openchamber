@@ -10,6 +10,7 @@ export type SettingsPageSlug =
   | 'behavior'
   | 'commands'
   | 'mcp'
+  | 'plugins'
   | 'skills.installed'
   | 'skills.catalog'
   | 'git'
@@ -18,11 +19,13 @@ export type SettingsPageSlug =
   | 'shortcuts'
   | 'sessions'
   | 'magic-prompts'
+  | 'snippets'
   | 'notifications'
   | 'voice'
-  | 'tunnel';
+  | 'tunnel'
+  | 'about';
 
-export type SettingsPageGroup =
+type SettingsPageGroup =
   | 'appearance'
   | 'projects'
   | 'general'
@@ -36,6 +39,7 @@ export interface SettingsRuntimeContext {
   isVSCode: boolean;
   isWeb: boolean;
   isDesktop: boolean;
+  isMobile: boolean;
 }
 
 export interface SettingsPageMeta {
@@ -47,17 +51,6 @@ export interface SettingsPageMeta {
   keywords?: string[];
   isAvailable?: (ctx: SettingsRuntimeContext) => boolean;
 }
-
-export const SETTINGS_GROUP_LABELS: Record<SettingsPageGroup, string> = {
-  appearance: 'Appearance',
-  projects: 'Projects',
-  general: 'General',
-  opencode: 'OpenCode',
-  git: 'Git',
-  skills: 'Skills',
-  usage: 'Usage',
-  advanced: 'Advanced',
-};
 
 export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
   {
@@ -79,9 +72,9 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     slug: 'remote-instances',
     title: 'Remote Instances',
     group: 'projects',
-    kind: 'split',
+    kind: 'single',
     keywords: ['ssh', 'remote', 'instances', 'tunnels', 'forwarding', 'connection'],
-    isAvailable: (ctx) => ctx.isDesktop && !ctx.isWeb && !ctx.isVSCode,
+    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     slug: 'providers',
@@ -126,6 +119,13 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     keywords: ['mcp', 'model context protocol', 'servers', 'tools', 'remote', 'stdio'],
   },
   {
+    slug: 'plugins',
+    title: 'Plugins',
+    group: 'opencode',
+    kind: 'split',
+    keywords: ['plugin', 'plugins', 'extensions', 'addons', 'npm', 'opencode-wakatime'],
+  },
+  {
     slug: 'skills.installed',
     title: 'Skills',
     group: 'skills',
@@ -152,7 +152,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Appearance',
     group: 'appearance',
     kind: 'single',
-    keywords: ['theme', 'font', 'spacing', 'padding', 'corner radius', 'radius', 'input bar', 'terminal', 'pwa', 'install name', 'app shortcuts'],
+    keywords: ['theme', 'font', 'spacing', 'padding', 'corner radius', 'radius', 'input bar', 'keyboard', 'viewport', 'mobile', 'terminal', 'pwa', 'install name', 'app shortcuts'],
   },
   {
     slug: 'chat',
@@ -184,13 +184,21 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     keywords: ['prompts', 'templates', 'git', 'github', 'review', 'commit', 'pull request'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
+  {
+    slug: 'snippets',
+    title: 'Snippets',
+    group: 'general',
+    kind: 'split',
+    keywords: ['prompt', 'templates', 'multi-run', 'strategy', 'approach'],
+  },
 
   { slug: 'notifications', title: 'Notifications', group: 'general', kind: 'single', keywords: ['alerts', 'native', 'summary', 'summarization'], },
   { slug: 'voice', title: 'Voice', group: 'advanced', kind: 'single', keywords: ['tts', 'speech', 'voice'], isAvailable: (ctx) => !ctx.isVSCode },
   { slug: 'tunnel', title: 'Remote Tunnel', group: 'advanced', kind: 'single', keywords: ['tunnel', 'cloudflare', 'qr', 'remote', 'mobile', 'share'], isAvailable: (ctx) => !ctx.isVSCode },
+  { slug: 'about', title: 'About', group: 'advanced', kind: 'single', keywords: ['about', 'version', 'updates', 'release', 'changelog'], isAvailable: (ctx) => ctx.isMobile },
 ] as const;
 
-export const LEGACY_SIDEBAR_SECTION_TO_SETTINGS_SLUG: Record<SidebarSection, SettingsPageSlug> = {
+const LEGACY_SIDEBAR_SECTION_TO_SETTINGS_SLUG: Record<SidebarSection, SettingsPageSlug> = {
   sessions: 'sessions',
   agents: 'agents',
   commands: 'commands',

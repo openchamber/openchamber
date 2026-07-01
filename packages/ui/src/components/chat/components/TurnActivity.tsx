@@ -4,7 +4,7 @@ import ProgressiveGroup from '../message/parts/ProgressiveGroup';
 import type { TurnActivityRecord } from '../lib/turns/types';
 import type { ToolPopupContent } from '../message/types';
 import type { StreamPhase } from '../message/types';
-import type { ContentChangeReason } from '@/hooks/useChatScrollManager';
+import type { ContentChangeReason } from '@/hooks/useChatAutoFollow';
 
 interface DiffStats {
     additions: number;
@@ -17,7 +17,6 @@ interface TurnActivityProps {
     isExpanded: boolean;
     collapsedPreviewCount?: number;
     onToggle: () => void;
-    syntaxTheme: Record<string, React.CSSProperties>;
     isMobile: boolean;
     expandedTools: Set<string>;
     onToggleTool: (toolId: string) => void;

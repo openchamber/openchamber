@@ -18,6 +18,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 interface ServerTTSStatusCache {
   available: boolean;
@@ -45,7 +46,7 @@ async function getServerTTSStatus(): Promise<boolean> {
 
   serverTTSStatusRequest = (async () => {
     try {
-      const response = await fetch('/api/tts/status');
+      const response = await runtimeFetch('/api/tts/status');
       if (!response.ok) {
         serverTTSStatusCache = { available: false, checkedAt: Date.now() };
         return false;
@@ -83,7 +84,7 @@ export interface UseServerTTSReturn {
   unlockAudio: () => Promise<void>;
 }
 
-export interface SpeakOptions {
+interface SpeakOptions {
   /** Voice to use (defaults to coral) */
   voice?: string;
   /** Model to use (defaults to gpt-4o-mini-tts) */
@@ -134,14 +135,12 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
   const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   
-  // Get current model, threshold, and max length from config store for summarization
+  // Get current model and API settings from config store.
   const currentProviderId = useConfigStore((state) => state.currentProviderId);
   const currentModelId = useConfigStore((state) => state.currentModelId);
-  const summarizeCharacterThreshold = useConfigStore((state) => state.summarizeCharacterThreshold);
-  const summarizeMaxLength = useConfigStore((state) => state.summarizeMaxLength);
   const openaiApiKey = useConfigStore((state) => state.openaiApiKey);
   const openaiCompatibleUrl = useConfigStore((state) => state.openaiCompatibleUrl);
-  const settingsZenModel = useConfigStore((state) => state.settingsZenModel);
+  const openaiCompatibleApiKey = useConfigStore((state) => state.openaiCompatibleApiKey);
 
   // Check if server TTS is available
   const checkAvailability = useCallback(async (): Promise<boolean> => {
@@ -264,7 +263,7 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
       console.log('[useServerTTS] Speaking with voice:', voice, 'options:', options);
 
       // Fetch audio from server
-      const response = await fetch('/api/tts/speak', {
+      const response = await runtimeFetch('/api/tts/speak', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -275,19 +274,14 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
           model: options?.model || undefined,
           speed: options?.speed || 0.9,
           instructions: options?.instructions,
-          summarize: options?.summarize ?? true, // Summarize by default for voice output
+          summarize: false,
           // Use provided provider/model, or fall back to current chat model
           providerId: options?.providerId || currentProviderId || undefined,
           modelId: options?.modelId || currentModelId || undefined,
-          // Use provided threshold, or fall back to user setting, or default to 200
-          threshold: options?.threshold ?? summarizeCharacterThreshold ?? 200,
-          // Max character length for summaries
-          maxLength: summarizeMaxLength ?? 500,
           // Send API key from settings if available
-          apiKey: openaiApiKey || undefined,
+          apiKey: options?.baseURL ? (openaiCompatibleApiKey || undefined) : (openaiApiKey || undefined),
           // Send custom base URL for OpenAI-compatible servers
           baseURL: options?.baseURL || undefined,
-          ...(settingsZenModel ? { zenModel: settingsZenModel } : {}),
         }),
         signal: abortControllerRef.current.signal,
       });
@@ -350,7 +344,7 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
       options?.onError?.(errorMsg);
       setIsPlaying(false);
     }
-  }, [stop, currentProviderId, currentModelId, summarizeCharacterThreshold, summarizeMaxLength, openaiApiKey, settingsZenModel]);
+  }, [stop, currentProviderId, currentModelId, openaiApiKey, openaiCompatibleApiKey]);
 
   // Cleanup on unmount
   useEffect(() => {

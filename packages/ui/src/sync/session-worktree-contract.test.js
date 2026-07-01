@@ -238,6 +238,7 @@ describe('resolveSessionWorktreeState', () => {
 
     expect(result.legacy).toBe(false);
     expect(result.worktreeRoot).toBe('/repo/worktrees/feat-a');
+    expect(result.worktreeSource).toBe('existing');
     expect(result.degraded).toBe(false);
   });
 
@@ -657,4 +658,3 @@ describe('getMutationBlockingReasons', () => {
     expect(reasons[0]).toEqual({ reason: 'dirty' });
   });
 });
-

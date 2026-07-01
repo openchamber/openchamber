@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { Message, SessionStatus } from "@opencode-ai/sdk/v2/client"
+import type { Message, Part, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type { Session } from "@opencode-ai/sdk/v2"
 import { getReconnectCandidateSessionIds } from "./reconnect-recovery"
 
@@ -21,6 +21,10 @@ function createAssistantMessage(id: string, sessionID: string, completed?: numbe
     time: completed ? { created: 1, updated: 1, completed } : { created: 1, updated: 1 },
     parts: [],
   } as unknown as Message
+}
+
+function createPart(id: string, messageID: string): Part {
+  return { id, messageID, sessionID: "active", type: "text", text: "done" } as Part
 }
 
 describe("getReconnectCandidateSessionIds", () => {
@@ -48,10 +52,24 @@ describe("getReconnectCandidateSessionIds", () => {
       message: {
         active: [createAssistantMessage("m-1", "active", 1)],
       },
+      part: {
+        "m-1": [createPart("p-1", "m-1")],
+      },
     }, {
       directory: "/repo",
       viewedSession: { directory: "/repo", sessionId: "active" },
     }).sort()).toContain("active")
+  })
+
+  test("includes completed assistant sessions when the latest assistant parts are missing", () => {
+    expect(getReconnectCandidateSessionIds({
+      session: [createSession("blank")],
+      session_status: { blank: { type: "idle" } as SessionStatus },
+      message: {
+        blank: [createAssistantMessage("m-1", "blank", 1)],
+      },
+      part: {},
+    })).toEqual(["blank"])
   })
 
   test("does not include a viewed session from another directory", () => {
@@ -60,6 +78,9 @@ describe("getReconnectCandidateSessionIds", () => {
       session_status: { active: { type: "idle" } as SessionStatus },
       message: {
         active: [createAssistantMessage("m-1", "active", 1)],
+      },
+      part: {
+        "m-1": [createPart("p-1", "m-1")],
       },
     }, {
       directory: "/repo-a",

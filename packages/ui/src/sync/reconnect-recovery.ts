@@ -1,23 +1,25 @@
-import type { SessionStatus, Message } from "@opencode-ai/sdk/v2/client"
+import type { SessionStatus, Message, Part } from "@opencode-ai/sdk/v2/client"
 import type { Session } from "@opencode-ai/sdk/v2"
+import { getSessionMaterializationStatus } from "./materialization"
 
-type ReconnectRecoveryState = {
+type ReconnectMaterializationState = {
   session: Session[]
   session_status?: Record<string, SessionStatus>
   message?: Record<string, Message[]>
+  part?: Record<string, Part[]>
 }
 
-export type ViewedSessionRecoveryTarget = {
+type ViewedSessionMaterializationTarget = {
   directory: string
   sessionId: string
 }
 
 type ReconnectCandidateOptions = {
   directory?: string
-  viewedSession?: ViewedSessionRecoveryTarget | null
+  viewedSession?: ViewedSessionMaterializationTarget | null
 }
 
-export function getReconnectCandidateSessionIds(state: ReconnectRecoveryState, options?: ReconnectCandidateOptions) {
+export function getReconnectCandidateSessionIds(state: ReconnectMaterializationState, options?: ReconnectCandidateOptions) {
   const ids = new Set<string>()
 
   for (const [sessionId, status] of Object.entries(state.session_status ?? {})) {
@@ -31,6 +33,8 @@ export function getReconnectCandidateSessionIds(state: ReconnectRecoveryState, o
       && lastMessage.role === "assistant"
       && typeof (lastMessage as { time?: { completed?: number } }).time?.completed !== "number"
     ) {
+      ids.add(sessionId)
+    } else if (!getSessionMaterializationStatus({ message: state.message ?? {}, part: state.part ?? {} }, sessionId).renderable) {
       ids.add(sessionId)
     }
   }

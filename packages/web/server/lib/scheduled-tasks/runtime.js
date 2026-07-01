@@ -1,6 +1,7 @@
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import { DateTime } from 'luxon';
 import parser from 'cron-parser';
+import { expandSnippets } from '../opencode/snippets.js';
 
 const DEFAULT_GLOBAL_CONCURRENCY = 4;
 const DEFAULT_PROJECT_CONCURRENCY = 2;
@@ -272,6 +273,10 @@ export const createScheduledTasksRuntime = (deps) => {
     const taskKey = buildTaskKey(projectID, taskID);
     clearTimerForKey(taskKey);
 
+    if (!started) {
+      return;
+    }
+
     if (!Number.isFinite(nextRunAt) || nextRunAt <= 0) {
       return;
     }
@@ -401,7 +406,7 @@ export const createScheduledTasksRuntime = (deps) => {
     return projectRunning < maxProjectConcurrency;
   };
 
-  const buildPromptAsyncPayload = (task) => ({
+  const buildPromptAsyncPayload = (task, projectPath) => ({
     model: {
       providerID: task.execution.providerID,
       modelID: task.execution.modelID,
@@ -411,7 +416,7 @@ export const createScheduledTasksRuntime = (deps) => {
     parts: [
       {
         type: 'text',
-        text: task.execution.prompt,
+        text: expandSnippets(task.execution.prompt, projectPath),
       },
     ],
   });
@@ -426,7 +431,7 @@ export const createScheduledTasksRuntime = (deps) => {
         'content-type': 'application/json',
         accept: 'application/json',
       },
-      body: JSON.stringify(buildPromptAsyncPayload(task)),
+      body: JSON.stringify(buildPromptAsyncPayload(task, projectPath)),
     });
 
     if (!response.ok) {

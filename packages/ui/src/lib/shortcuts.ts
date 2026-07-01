@@ -1,8 +1,8 @@
 import { isMacOS } from '@/lib/utils';
-import { isTauriShell } from '@/lib/desktop';
+import { isDesktopShell } from '@/lib/desktop';
 
-export type ShortcutModifier = 'mod' | 'shift' | 'alt' | 'option' | 'ctrl';
-export type ShortcutKey = string;
+type ShortcutModifier = 'mod' | 'shift' | 'alt' | 'option' | 'ctrl';
+type ShortcutKey = string;
 export type ShortcutCombo = string;
 
 export const UNASSIGNED_SHORTCUT: ShortcutCombo = '__unassigned__';
@@ -15,7 +15,7 @@ export interface ShortcutAction {
   customizable?: boolean;
 }
 
-export interface ParsedShortcut {
+interface ParsedShortcut {
   modifiers: Set<ShortcutModifier>;
   key: ShortcutKey;
 }
@@ -32,7 +32,7 @@ const MODIFIER_KEY_MAP: Record<string, ShortcutModifier> = {
 };
 
 const DISPLAY_LABEL_MAP: Record<ShortcutModifier, string> = {
-  'mod': isMacOS() && isTauriShell() ? '⌘' : 'Ctrl',
+  'mod': isMacOS() && isDesktopShell() ? '⌘' : 'Ctrl',
   'shift': '⇧',
   'alt': '⌥',
   'option': '⌥',
@@ -166,6 +166,13 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     customizable: true,
   },
   {
+    id: 'open_timeline_dialog',
+    defaultCombo: 'mod+t',
+    label: 'Open conversation timeline',
+    description: 'Search and navigate within current conversation',
+    customizable: true,
+  },
+  {
     id: 'toggle_right_sidebar',
     defaultCombo: 'mod+b',
     label: 'Toggle right sidebar',
@@ -205,6 +212,13 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     defaultCombo: 'mod+shift+n',
     label: 'New worktree draft',
     description: 'Create a new worktree and open a draft in it',
+    customizable: true,
+  },
+  {
+    id: 'new_mini_chat',
+    defaultCombo: 'mod+alt+n',
+    label: 'New Mini Chat window',
+    description: 'Open a new Mini Chat draft window',
     customizable: true,
   },
   {
@@ -277,12 +291,20 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     defaultCombo: 'mod+shift+m',
     label: 'Open model selector',
     description: 'Open model selector while in chat',
+    customizable: true,
   },
   {
     id: 'cycle_thinking_variant',
     defaultCombo: 'mod+shift+t',
     label: 'Cycle thinking variant',
     description: 'Cycle thinking variant while in chat',
+  },
+  {
+    id: 'cycle_agent',
+    defaultCombo: 'tab',
+    label: 'Cycle agent',
+    description: 'Cycle agent while the model selector is open',
+    customizable: true,
   },
   {
     id: 'cycle_favorite_model_forward',
@@ -396,7 +418,7 @@ export function normalizeCombo(combo: ShortcutCombo): ShortcutCombo {
   return [...orderedModifiers, key].filter(Boolean).join('+');
 }
 
-export function isValidShortcutCombo(combo: ShortcutCombo): boolean {
+function isValidShortcutCombo(combo: ShortcutCombo): boolean {
   if (isUnassignedShortcut(combo)) {
     return true;
   }
@@ -405,7 +427,7 @@ export function isValidShortcutCombo(combo: ShortcutCombo): boolean {
   return parsed.key.trim().length > 0;
 }
 
-export function parseShortcut(combo: ShortcutCombo): ParsedShortcut {
+function parseShortcut(combo: ShortcutCombo): ParsedShortcut {
   if (isUnassignedShortcut(combo)) {
     return { modifiers: new Set<ShortcutModifier>(), key: UNASSIGNED_SHORTCUT };
   }
@@ -458,10 +480,6 @@ export function getShortcutAction(id: string): ShortcutAction | undefined {
   return SHORTCUT_ACTIONS.find((action) => action.id === id);
 }
 
-export function getAllShortcutActions(): ReadonlyArray<ShortcutAction> {
-  return SHORTCUT_ACTIONS;
-}
-
 export function getCustomizableShortcutActions(): ReadonlyArray<ShortcutAction> {
   return SHORTCUT_ACTIONS.filter((action) => action.customizable === true);
 }
@@ -494,17 +512,6 @@ export function getEffectiveShortcutCombo(
   return action.defaultCombo;
 }
 
-export function getEffectiveShortcutLabel(
-  actionId: string,
-  overrides?: Record<string, ShortcutCombo>
-): string {
-  const combo = getEffectiveShortcutCombo(actionId, overrides);
-  if (!combo) {
-    return '';
-  }
-  return formatShortcutForDisplay(combo);
-}
-
 export function isRiskyBrowserShortcut(combo: ShortcutCombo): boolean {
   if (isUnassignedShortcut(combo)) {
     return false;
@@ -535,7 +542,7 @@ export function eventMatchesShortcut(
   const expectedShift = parsed.modifiers.has('shift');
   const expectedAlt = parsed.modifiers.has('alt');
   const expectedCtrl = parsed.modifiers.has('ctrl');
-  const isDesktopMac = isMacOS() && isTauriShell();
+  const isDesktopMac = isMacOS() && isDesktopShell();
   const isMac = isMacOS();
 
   const modMatches = isDesktopMac
@@ -586,14 +593,6 @@ export function eventMatchesShortcut(
   return eventKey === expectedKey;
 }
 
-export function getShortcutLabel(id: string): string {
-  const action = getShortcutAction(id);
-  if (!action) return '';
-
-  const displayCombo = formatShortcutForDisplay(action.defaultCombo);
-  return `${displayCombo} - ${action.label}`;
-}
-
 export function getModifierLabel(): string {
-  return isMacOS() && isTauriShell() ? '⌘' : 'Ctrl';
+  return isMacOS() && isDesktopShell() ? '⌘' : 'Ctrl';
 }

@@ -8,11 +8,11 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 
-import { RiAlertLine, RiLoader4Line, RiChat1Line, RiAddLine } from '@remixicon/react';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { toast } from '@/components/ui';
+import { Icon } from "@/components/icon/Icon";
 import { getConflictDetails, type MergeConflictDetails } from '@/lib/gitApi';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { useI18n } from '@/lib/i18n';
@@ -173,7 +173,7 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
         <div className="flex flex-col gap-4 overflow-hidden">
           <DialogHeader>
             <div className="flex items-center gap-2">
-              <RiAlertLine className="size-5 shrink-0 text-[var(--status-warning)]" />
+              <Icon name="alert" className="size-5 shrink-0 text-[var(--status-warning)]" />
               <DialogTitle>{t('gitView.conflict.detectedTitle', { operation: operationLabel })}</DialogTitle>
             </div>
             <DialogDescription>
@@ -183,7 +183,7 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
 
           {isLoading && (
             <div className="flex items-center justify-center gap-2 py-4 text-muted-foreground">
-              <RiLoader4Line className="size-4 animate-spin" />
+              <Icon name="loader-4" className="size-4 animate-spin" />
               <span className="typography-meta">{t('gitView.conflict.loading')}</span>
             </div>
           )}
@@ -237,9 +237,9 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
               className="w-full gap-2"
             >
               {isLoading ? (
-                <RiLoader4Line className="size-4 animate-spin" />
+                <Icon name="loader-4" className="size-4 animate-spin" />
               ) : (
-                <RiAddLine className="size-4" />
+                <Icon name="add" className="size-4" />
               )}
               {t('gitView.conflict.resolveNewSession')}
             </Button>
@@ -250,9 +250,9 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
               className="w-full gap-2"
             >
               {isLoading ? (
-                <RiLoader4Line className="size-4 animate-spin" />
+                <Icon name="loader-4" className="size-4 animate-spin" />
               ) : (
-                <RiChat1Line className="size-4" />
+                <Icon name="chat-1" className="size-4" />
               )}
               {t('gitView.conflict.resolveCurrentSession')}
             </Button>

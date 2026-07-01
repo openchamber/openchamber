@@ -40,7 +40,7 @@ export interface WorktreeMetadata {
   worktreeRoot?: string;
 
   /** Operational status of this worktree. */
-  worktreeStatus?: 'ready' | 'missing' | 'invalid' | 'not-a-repo';
+  worktreeStatus?: 'pending' | 'ready' | 'missing' | 'invalid' | 'not-a-repo';
 
   /** Git HEAD state classification. */
   headState?: 'branch' | 'detached' | 'unborn';
@@ -48,5 +48,3 @@ export interface WorktreeMetadata {
   /** How this worktree was attached to a session. */
   worktreeSource?: 'existing' | 'created-for-session';
 }
-
-export type WorktreeMap = Map<string, WorktreeMetadata>;

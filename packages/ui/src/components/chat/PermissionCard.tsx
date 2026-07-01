@@ -1,14 +1,12 @@
 import React from 'react';
-import { RiCheckLine, RiCloseLine, RiFileEditLine, RiGlobalLine, RiPencilAiLine, RiQuestionLine, RiTerminalBoxLine, RiTimeLine, RiToolsLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import type { PermissionRequest, PermissionResponse } from '@/types/permission';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessions } from '@/sync/sync-context';
 import * as sessionActions from '@/sync/session-actions';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { useThemeSystem } from '@/contexts/useThemeSystem';
-import { generateSyntaxTheme } from '@/lib/theme/syntaxThemeGenerator';
+import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { Icon } from "@/components/icon/Icon";
 import { DiffPreview, WritePreview } from './DiffPreview';
 import { useI18n } from '@/lib/i18n';
 
@@ -52,22 +50,22 @@ const getToolIcon = (toolName: string) => {
   const tool = toolName.toLowerCase();
 
   if (tool === 'edit' || tool === 'multiedit' || tool === 'str_replace' || tool === 'str_replace_based_edit_tool') {
-    return <RiPencilAiLine className={iconClass} />;
+    return <Icon name="pencil-ai" className={iconClass} />;
   }
 
   if (tool === 'write' || tool === 'create' || tool === 'file_write') {
-    return <RiFileEditLine className={iconClass} />;
+    return <Icon name="file-edit" className={iconClass} />;
   }
 
   if (tool === 'bash' || tool === 'shell' || tool === 'cmd' || tool === 'terminal' || tool === 'shell_command') {
-    return <RiTerminalBoxLine className={iconClass} />;
+    return <Icon name="terminal-box" className={iconClass} />;
   }
 
   if (tool === 'webfetch' || tool === 'fetch' || tool === 'curl' || tool === 'wget') {
-    return <RiGlobalLine className={iconClass} />;
+    return <Icon name="global" className={iconClass} />;
   }
 
-  return <RiToolsLine className={iconClass} />;
+  return <Icon name="tools" className={iconClass} />;
 };
 
 const getToolDisplayName = (toolName: string): string => {
@@ -104,8 +102,6 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
     const sourceSession = sessions.find((session) => session.id === permission.sessionID);
     return Boolean(sourceSession?.parentID && sourceSession.parentID === currentSessionId);
   }, [permission.sessionID, currentSessionId, sessions]);
-  const { currentTheme } = useThemeSystem();
-  const syntaxTheme = React.useMemo(() => generateSyntaxTheme(currentTheme), [currentTheme]);
 
   const handleResponse = async (response: PermissionResponse) => {
     setIsResponding(true);
@@ -168,16 +164,13 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
           {}
           {command && (
             <div>
-              <SyntaxHighlighter
+              <WorkerHighlightedCode
                 language="bash"
-                style={syntaxTheme}
-                PreTag="div"
-                customStyle={PERMISSION_BASH_CUSTOM_STYLE}
-                codeTagProps={PERMISSION_BASH_CODE_TAG_PROPS}
-                wrapLongLines={true}
-              >
-                {command}
-              </SyntaxHighlighter>
+                code={command}
+                style={PERMISSION_BASH_CUSTOM_STYLE}
+                codeStyle={PERMISSION_BASH_CODE_TAG_PROPS.style}
+                wrap
+              />
             </div>
           )}
         </>
@@ -198,7 +191,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
           )}
           {changes && (
             <ScrollableOverlay outerClassName="max-h-[60vh]" className="tool-output-surface p-1 rounded-xl border border-border/20 bg-transparent">
-              <DiffPreview diff={changes} syntaxTheme={syntaxTheme} filePath={filePath} />
+              <DiffPreview diff={changes} filePath={filePath} />
             </ScrollableOverlay>
           )}
         </>
@@ -212,7 +205,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
       if (content) {
         return (
           <ScrollableOverlay outerClassName="max-h-[60vh]" className="tool-output-surface p-1 rounded-xl border border-border/20 bg-transparent">
-            <WritePreview content={content} syntaxTheme={syntaxTheme} filePath={filePath} />
+            <WritePreview content={content} filePath={filePath} />
           </ScrollableOverlay>
         );
       }
@@ -247,14 +240,12 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
             <div className="mb-2">
               <div className="typography-meta text-muted-foreground mb-1">{t('chat.permissionCard.headers')}</div>
               <ScrollableOverlay outerClassName="max-h-24" className="p-0">
-                <SyntaxHighlighter
+                <WorkerHighlightedCode
                   language="json"
-                  style={syntaxTheme}
-                  customStyle={PERMISSION_JSON_CUSTOM_STYLE}
-                  wrapLongLines={true}
-                >
-                  {JSON.stringify(headers, null, 2)}
-                </SyntaxHighlighter>
+                  code={JSON.stringify(headers, null, 2)}
+                  style={PERMISSION_JSON_CUSTOM_STYLE}
+                  wrap
+                />
               </ScrollableOverlay>
             </div>
           )}
@@ -262,14 +253,12 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
             <div className="mb-2">
               <div className="typography-meta text-muted-foreground mb-1">{t('chat.permissionCard.body')}</div>
               <ScrollableOverlay outerClassName="max-h-32" className="p-0">
-                <SyntaxHighlighter
+                <WorkerHighlightedCode
                   language={typeof body === 'object' ? 'json' : 'text'}
-                  style={syntaxTheme}
-                  customStyle={PERMISSION_JSON_CUSTOM_STYLE}
-                  wrapLongLines={true}
-                >
-                  {typeof body === 'object' ? JSON.stringify(body, null, 2) : String(body)}
-                </SyntaxHighlighter>
+                  code={typeof body === 'object' ? JSON.stringify(body, null, 2) : String(body)}
+                  style={PERMISSION_JSON_CUSTOM_STYLE}
+                  wrap
+                />
               </ScrollableOverlay>
             </div>
           )}
@@ -325,7 +314,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
           <div className="px-2 py-1.5 border-b border-border/20 bg-muted/5">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <RiQuestionLine className="h-3.5 w-3.5 text-[var(--status-warning)]" />
+                <Icon name="question" className="h-3.5 w-3.5 text-[var(--status-warning)]" />
                 <span className="typography-meta font-medium text-muted-foreground">
                   Permission Required
                 </span>
@@ -376,7 +365,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
                 e.currentTarget.style.backgroundColor = 'rgb(var(--status-success) / 0.1)';
               }}
             >
-              <RiCheckLine className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
+              <Icon name="check" className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
               Allow Once
             </button>
 
@@ -399,7 +388,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
                   e.currentTarget.style.backgroundColor = 'rgb(var(--muted) / 0.5)';
                 }}
               >
-                <RiTimeLine className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
+                <Icon name="time" className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
                 {(() => {
                   const always = (permission.always as string[]) || (permission.metadata.always as string[]) || [];
                   if (always.length === 0) return "Always Allow";
@@ -432,7 +421,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
                   e.currentTarget.style.backgroundColor = 'rgb(var(--muted) / 0.5)';
                 }}
               >
-                <RiTimeLine className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
+                <Icon name="time" className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
                 Always Allow
               </button>
             )}
@@ -455,7 +444,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
                 e.currentTarget.style.backgroundColor = 'rgb(var(--status-error) / 0.1)';
               }}
             >
-              <RiCloseLine className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
+              <Icon name="close" className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
               Deny
             </button>
 

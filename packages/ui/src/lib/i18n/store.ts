@@ -15,6 +15,11 @@ type I18nState = {
 
 const dictionaries = new Map<Locale, I18nDictionary>([[DEFAULT_LOCALE, enDict]]);
 
+export function resetI18nDictionaryCacheForTests(): void {
+  dictionaries.clear();
+  dictionaries.set(DEFAULT_LOCALE, enDict);
+}
+
 async function loadDictionary(locale: Locale): Promise<I18nDictionary> {
   const cached = dictionaries.get(locale);
   if (cached) {
@@ -23,15 +28,23 @@ async function loadDictionary(locale: Locale): Promise<I18nDictionary> {
 
   const mod = locale === 'zh-CN'
     ? await import('./messages/zh-CN') as { dict: I18nDictionary }
-    : locale === 'es'
-      ? await import('./messages/es') as { dict: I18nDictionary }
-    : locale === 'pt-BR'
-      ? await import('./messages/pt-BR') as { dict: I18nDictionary }
-    : locale === 'uk'
-      ? await import('./messages/uk') as { dict: I18nDictionary }
-    : locale === 'ko'
-      ? await import('./messages/ko') as { dict: I18nDictionary }
-      : { dict: enDict };
+    : locale === 'fr'
+      ? await import('./messages/fr') as { dict: I18nDictionary }
+    : locale === 'zh-TW'
+      ? await import('./messages/zh-TW') as { dict: I18nDictionary }
+      : locale === 'es'
+        ? await import('./messages/es') as { dict: I18nDictionary }
+        : locale === 'pt-BR'
+          ? await import('./messages/pt-BR') as { dict: I18nDictionary }
+          : locale === 'uk'
+            ? await import('./messages/uk') as { dict: I18nDictionary }
+            : locale === 'ko'
+              ? await import('./messages/ko') as { dict: I18nDictionary }
+              : locale === 'pl'
+                ? await import('./messages/pl') as { dict: I18nDictionary }
+                : locale === 'ja'
+                  ? await import('./messages/ja') as { dict: I18nDictionary }
+                  : { dict: enDict };
   dictionaries.set(locale, mod.dict);
   return mod.dict;
 }
@@ -42,13 +55,13 @@ export const useI18nStore = create<I18nState>()((set, get) => ({
   loadingLocale: null,
   setLocale: (locale) => {
     const current = get();
-    if (current.locale === locale && current.loadingLocale !== locale) {
+    const cached = dictionaries.get(locale);
+    if (current.locale === locale && current.loadingLocale !== locale && cached) {
       return;
     }
 
     writeStoredLocale(locale);
 
-    const cached = dictionaries.get(locale);
     set({
       locale,
       dictionary: cached ?? current.dictionary,

@@ -1,10 +1,10 @@
 import React from 'react';
 
-export type ChatHashTarget =
+type ChatHashTarget =
     | { kind: 'turn'; id: string }
     | { kind: 'message'; id: string };
 
-export const parseChatHashTarget = (hashValue: string): ChatHashTarget | null => {
+const parseChatHashTarget = (hashValue: string): ChatHashTarget | null => {
     const value = hashValue.startsWith('#') ? hashValue.slice(1) : hashValue;
     if (!value) {
         return null;
@@ -28,7 +28,7 @@ type TurnOffsetTarget =
     | { kind: 'resume' }
     | { kind: 'turn'; turnId: string };
 
-export const resolveTurnOffsetTarget = (
+const resolveTurnOffsetTarget = (
     turnIds: string[],
     activeTurnId: string | null,
     offset: number,

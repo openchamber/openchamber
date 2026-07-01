@@ -10,7 +10,7 @@ import {
 
 export const providerId = 'openrouter';
 export const providerName = 'OpenRouter';
-export const aliases = ['openrouter'];
+const aliases = ['openrouter'];
 
 export const isConfigured = () => {
   const auth = readAuthFile();
@@ -59,14 +59,14 @@ export const fetchQuota = async () => {
     const remaining = totalCredits !== null && totalUsage !== null
       ? Math.max(0, totalCredits - totalUsage)
       : null;
-    const usedPercent = totalCredits && totalUsage !== null
-      ? Math.max(0, Math.min(100, (totalUsage / totalCredits) * 100))
-      : null;
-    const valueLabel = remaining !== null ? `$${formatMoney(remaining)} remaining` : null;
+    let valueLabel = null;
+    if (remaining !== null && totalUsage !== null) {
+      valueLabel = `$${formatMoney(remaining)} left · $${formatMoney(totalUsage)} spent`;
+    }
 
     const windows = {
       credits: toUsageWindow({
-        usedPercent,
+        usedPercent: null,
         windowSeconds: null,
         resetAt: null,
         valueLabel

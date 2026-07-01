@@ -1,9 +1,9 @@
 import React from 'react';
-import { RiErrorWarningLine, RiRestartLine } from '@remixicon/react';
 import { Button } from './button';
 import { Card, CardContent, CardHeader, CardTitle } from './card';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
+import { Icon } from "@/components/icon/Icon";
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -81,7 +81,7 @@ class InnerErrorBoundary extends React.Component<InnerErrorBoundaryProps, ErrorB
           <Card className="w-full max-w-md">
             <CardHeader className="text-center">
               <CardTitle className="flex items-center justify-center gap-2 text-destructive">
-                <RiErrorWarningLine className="h-5 w-5" />
+                <Icon name="error-warning" className="h-5 w-5" />
                 {strings.title}
               </CardTitle>
             </CardHeader>
@@ -102,7 +102,7 @@ class InnerErrorBoundary extends React.Component<InnerErrorBoundaryProps, ErrorB
 
               <div className="flex gap-2">
                 <Button onClick={this.handleReset} variant="outline" className="flex-1">
-                  <RiRestartLine className="h-4 w-4 mr-2" />
+                  <Icon name="restart" className="h-4 w-4 mr-2" />
                   {strings.tryAgain}
                 </Button>
                 <Button onClick={this.handleCopy} variant="outline" className="flex-1">

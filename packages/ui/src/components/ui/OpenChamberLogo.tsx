@@ -82,6 +82,7 @@ export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
   className = '',
   width = 70,
   height = 70,
+  isAnimated = false,
 }) => {
   const { t } = useI18n();
   const themeContext = useOptionalThemeSystem();
@@ -193,6 +194,9 @@ export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
       role="img"
       aria-label={t('openChamberLogo.aria.logo')}
     >
+      {isAnimated ? (
+        <style>{`@keyframes oc-logo-glow{0%,100%{filter:drop-shadow(0 0 0 transparent)}50%{filter:drop-shadow(0 0 4px var(--oc-glow-color))}}.oc-logo-glow{animation:oc-logo-glow 1.8s ease-in-out infinite}@media (prefers-reduced-motion:reduce){.oc-logo-glow{animation:none}}`}</style>
+      ) : null}
       {/* Left face - base fill */}
       <path
         d={`M${center.x} ${center.y} L${left.x} ${left.y} L${bottomLeft.x} ${bottomLeft.y} L${bottom.x} ${bottom.y} Z`}
@@ -241,8 +245,12 @@ export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
       />
       
       {/* OpenCode logo on top face */}
-      <g opacity={1}>
-        {/* 
+      <g
+        opacity={1}
+        className={isAnimated ? 'oc-logo-glow' : undefined}
+        style={isAnimated ? ({ '--oc-glow-color': strokeColor } as React.CSSProperties) : undefined}
+      >
+        {/*
           Isometric transform for top face:
           OpenCode logo (32x40 viewBox) centered and projected to isometric plane
         */}

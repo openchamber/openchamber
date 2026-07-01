@@ -4,7 +4,6 @@ import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import yaml from 'yaml';
-import AdmZip from 'adm-zip';
 
 import { discoverSkills } from './opencodeConfig';
 
@@ -34,7 +33,7 @@ type SkillFrontmatter = {
   [key: string]: unknown;
 };
 
-export type ClawdHubSkillMetadata = {
+type ClawdHubSkillMetadata = {
   slug: string;
   version: string;
   displayName?: string;
@@ -43,7 +42,7 @@ export type ClawdHubSkillMetadata = {
   stars?: number;
 };
 
-export type SkillsCatalogItem = {
+type SkillsCatalogItem = {
   repoSource: string;
   repoSubpath?: string;
   skillDir: string;
@@ -76,7 +75,7 @@ type SkillsInstallResult =
   | { ok: true; installed: Array<{ skillName: string; scope: SkillScope; source?: SkillInstallSource }>; skipped: Array<{ skillName: string; reason: string }> }
   | { ok: false; error: SkillsRepoError };
 
-export const CURATED_SOURCES: CuratedSource[] = [
+const CURATED_SOURCES: CuratedSource[] = [
   {
     id: 'anthropic',
     label: 'Anthropic',
@@ -222,172 +221,6 @@ async function scanClawdHub(): Promise<SkillsRepoScanResult> {
   }
 }
 
-async function downloadClawdHubSkill(slug: string, version: string): Promise<Buffer> {
-  const url = `${CLAWDHUB_API_BASE}/download?slug=${encodeURIComponent(slug)}&version=${encodeURIComponent(version)}`;
-  const response = await clawdhubFetch(url, { headers: { Accept: 'application/zip' } });
-
-  if (!response.ok) {
-    throw new Error(`ClawdHub download error: ${response.status}`);
-  }
-
-  const arrayBuffer = await response.arrayBuffer();
-  return Buffer.from(arrayBuffer);
-}
-
-type ClawdHubSkillInfoResponse = {
-  skill?: { tags?: { latest?: string } };
-  latestVersion?: { version?: string };
-};
-
-async function fetchClawdHubSkillInfo(slug: string): Promise<ClawdHubSkillInfoResponse> {
-  const url = `${CLAWDHUB_API_BASE}/skills/${encodeURIComponent(slug)}`;
-  const response = await clawdhubFetch(url);
-
-  if (!response.ok) {
-    throw new Error(`ClawdHub skill error: ${response.status}`);
-  }
-
-  return response.json() as Promise<ClawdHubSkillInfoResponse>;
-}
-
-export async function installSkillsFromClawdHub(options: {
-  scope: SkillScope;
-  targetSource?: SkillInstallSource;
-  workingDirectory?: string;
-  selections: Array<{ skillDir: string; clawdhub?: { slug: string; version: string } }>;
-  conflictPolicy?: 'prompt' | 'skipAll' | 'overwriteAll';
-  conflictDecisions?: Record<string, 'skip' | 'overwrite'>;
-}): Promise<SkillsInstallResult> {
-  if (options.scope === 'project' && !options.workingDirectory) {
-    return { ok: false, error: { kind: 'invalidSource', message: 'Project installs require a directory parameter' } };
-  }
-
-  const userSkillDir = getUserSkillBaseDir();
-  const targetSource: SkillInstallSource = options.targetSource === 'agents' ? 'agents' : 'opencode';
-  const requestedSkills = options.selections || [];
-
-  if (requestedSkills.length === 0) {
-    return { ok: false, error: { kind: 'invalidSource', message: 'No skills selected for installation' } };
-  }
-
-  // Check for conflicts
-  const conflicts: Array<{ skillName: string; scope: SkillScope; source?: SkillInstallSource }> = [];
-  for (const sel of requestedSkills) {
-    const slug = sel.clawdhub?.slug || sel.skillDir;
-    if (!validateSkillName(slug)) continue;
-
-    const targetDir = options.scope === 'user'
-      ? (targetSource === 'agents'
-        ? path.join(os.homedir(), '.agents', 'skills', slug)
-        : path.join(userSkillDir, slug))
-      : (targetSource === 'agents'
-        ? path.join(options.workingDirectory as string, '.agents', 'skills', slug)
-        : path.join(options.workingDirectory as string, '.opencode', 'skills', slug));
-
-    if (fs.existsSync(targetDir)) {
-      const decision = options.conflictDecisions?.[slug];
-      const hasAutoPolicy = options.conflictPolicy === 'skipAll' || options.conflictPolicy === 'overwriteAll';
-      if (!decision && !hasAutoPolicy) {
-        conflicts.push({ skillName: slug, scope: options.scope, source: targetSource });
-      }
-    }
-  }
-
-  if (conflicts.length > 0) {
-    return { ok: false, error: { kind: 'conflicts', message: 'Some skills already exist in the selected scope', conflicts } };
-  }
-
-  const installed: Array<{ skillName: string; scope: SkillScope; source?: SkillInstallSource }> = [];
-  const skipped: Array<{ skillName: string; reason: string }> = [];
-
-  for (const sel of requestedSkills) {
-    const slug = sel.clawdhub?.slug || sel.skillDir;
-    let version = sel.clawdhub?.version || 'latest';
-
-    if (!validateSkillName(slug)) {
-      skipped.push({ skillName: slug, reason: 'Invalid skill name' });
-      continue;
-    }
-
-    try {
-      // Resolve 'latest' version
-    if (version === 'latest') {
-      try {
-        const info = await fetchClawdHubSkillInfo(slug);
-        const latest = info.skill?.tags?.latest || info.latestVersion?.version || null;
-        if (latest) {
-          version = latest;
-        }
-      } catch {
-        // ignore
-      }
-
-      if (version === 'latest') {
-        skipped.push({ skillName: slug, reason: 'Unable to resolve latest version' });
-        continue;
-      }
-    }
-
-      const targetDir = options.scope === 'user'
-        ? (targetSource === 'agents'
-          ? path.join(os.homedir(), '.agents', 'skills', slug)
-          : path.join(userSkillDir, slug))
-        : (targetSource === 'agents'
-          ? path.join(options.workingDirectory as string, '.agents', 'skills', slug)
-          : path.join(options.workingDirectory as string, '.opencode', 'skills', slug));
-
-      const exists = fs.existsSync(targetDir);
-      let decision = options.conflictDecisions?.[slug] || null;
-      if (!decision) {
-        if (exists && options.conflictPolicy === 'skipAll') decision = 'skip';
-        if (exists && options.conflictPolicy === 'overwriteAll') decision = 'overwrite';
-        if (!exists) decision = 'overwrite';
-      }
-
-      if (exists && decision === 'skip') {
-        skipped.push({ skillName: slug, reason: 'Already installed (skipped)' });
-        continue;
-      }
-
-      if (exists && decision === 'overwrite') {
-        await safeRm(targetDir);
-      }
-
-      // Download and extract
-      const zipBuffer = await downloadClawdHubSkill(slug, version);
-      const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), `clawdhub-${slug}-`));
-
-      try {
-        const zip = new AdmZip(zipBuffer);
-        zip.extractAllTo(tempDir, true);
-
-        // Verify SKILL.md exists
-        const skillMdPath = path.join(tempDir, 'SKILL.md');
-        if (!fs.existsSync(skillMdPath)) {
-          skipped.push({ skillName: slug, reason: 'SKILL.md not found in downloaded package' });
-          continue;
-        }
-
-        // Move to target directory
-        await fs.promises.mkdir(path.dirname(targetDir), { recursive: true });
-        await fs.promises.rename(tempDir, targetDir);
-
-        installed.push({ skillName: slug, scope: options.scope, source: targetSource });
-      } catch (extractError) {
-        await safeRm(tempDir);
-        throw extractError;
-      }
-    } catch (error) {
-      skipped.push({
-        skillName: slug,
-        reason: error instanceof Error ? error.message : 'Failed to download or extract skill',
-      });
-    }
-  }
-
-  return { ok: true, installed, skipped };
-}
-
 function validateSkillName(skillName: string): boolean {
   if (skillName.length < 1 || skillName.length > 64) return false;
   return SKILL_NAME_PATTERN.test(skillName);
@@ -438,33 +271,44 @@ function parseSkillRepoSource(input: string, subpath?: string) {
   if (!raw) {
     return { ok: false as const, error: { kind: 'invalidSource' as const, message: 'Repository source is required' } };
   }
+  const urlFormat = raw.startsWith('https://') ? 'https' : raw.startsWith('git@') ? 'ssh' : 'shorthand';
+  const gitHost = urlFormat === 'https' ? raw.split('/')[2] : urlFormat === 'ssh' ? raw.split('@')[1].split(':')[0] : null;
+
+  if (gitHost === null && urlFormat !== 'shorthand') {
+    return { ok: false as const, error: { kind: 'invalidSource' as const, message: 'Unsupported repository source format'} };
+  }
+
+  const pathSegments = urlFormat === 'https'
+    ? raw.split('/').slice(3).filter(Boolean)
+    : urlFormat === 'ssh'
+      ? (raw.split('@')[1].split(':')[1] ?? '').split('/').filter(Boolean)
+      : null;
+
+  const repoName = pathSegments && pathSegments.length > 0
+    ? pathSegments[pathSegments.length - 1].replace(/\.git$/i, '')
+    : null;
+
+  const gitOwner = pathSegments && pathSegments.length > 1
+    ? pathSegments.slice(0, -1).join('/')
+    : (pathSegments && pathSegments.length === 1 ? pathSegments[0] : null);
 
   const explicitSubpath = subpath?.trim() ? subpath.trim() : null;
 
-  const sshMatch = raw.match(/^git@github\.com:([^/\s]+)\/([^\s#]+)$/i);
-  if (sshMatch) {
-    const owner = sshMatch[1];
-    const repo = sshMatch[2].replace(/\.git$/i, '');
-    return {
-      ok: true as const,
-      normalizedRepo: `${owner}/${repo}`,
-      cloneUrlHttps: `https://github.com/${owner}/${repo}.git`,
-      cloneUrlSsh: `git@github.com:${owner}/${repo}.git`,
-      effectiveSubpath: explicitSubpath,
-    };
-  }
+  if (urlFormat === 'ssh' || urlFormat === 'https') {
+    const owner = (gitOwner || '').trim();
+    const repo = (repoName || '').trim();
 
-  const httpsMatch = raw.match(/^https?:\/\/github\.com\/([^/\s]+)\/([^\s#]+)$/i);
-  if (httpsMatch) {
-    const owner = httpsMatch[1];
-    const repo = httpsMatch[2].replace(/\.git$/i, '');
+    if (!owner || !repo) {
+      return { ok: false as const, error: { kind: 'invalidSource' as const, message: `Invalid ${urlFormat} repository format.` } };
+    }
+
     return {
       ok: true as const,
       normalizedRepo: `${owner}/${repo}`,
-      cloneUrlHttps: `https://github.com/${owner}/${repo}.git`,
-      cloneUrlSsh: `git@github.com:${owner}/${repo}.git`,
+      cloneUrlHttps: `https://${gitHost}/${owner}/${repo}.git`,
+      cloneUrlSsh: `git@${gitHost}:${owner}/${repo}.git`,
       effectiveSubpath: explicitSubpath,
-    };
+    }
   }
 
   const shorthandMatch = raw.match(/^([^/\s]+)\/([^/\s]+)(?:\/(.+))?$/);
@@ -946,5 +790,3 @@ export async function getSkillsCatalog(
 
   return { ok: true as const, sources, itemsBySource };
 }
-
-export { isClawdHubSource };

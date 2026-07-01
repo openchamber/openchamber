@@ -11,14 +11,21 @@ vi.mock('node:child_process', () => ({
 const { createOpenCodeLifecycleRuntime } = await import('./lifecycle.js');
 
 const originalOpencodeBinary = process.env.OPENCODE_BINARY;
+const originalPath = process.env.PATH;
 
 afterEach(() => {
   spawnMock.mockReset();
   if (typeof originalOpencodeBinary === 'string') {
     process.env.OPENCODE_BINARY = originalOpencodeBinary;
-    return;
+  } else {
+    delete process.env.OPENCODE_BINARY;
   }
-  delete process.env.OPENCODE_BINARY;
+
+  if (typeof originalPath === 'string') {
+    process.env.PATH = originalPath;
+  } else {
+    delete process.env.PATH;
+  }
 });
 
 const createMockChild = () => {
@@ -78,8 +85,6 @@ const createRuntime = (overrides = {}) => {
     applyOpencodeBinaryFromSettings: vi.fn(async () => null),
     ensureOpencodeCliEnv: vi.fn(),
     ensureLocalOpenCodeServerPassword: vi.fn(async () => 'password'),
-    buildWslExecArgs: vi.fn((args) => args),
-    resolveWslExecutablePath: vi.fn(),
     resolveManagedOpenCodeLaunchSpec: vi.fn((binary) => ({ binary, args: [], wrapperType: null })),
     setOpenCodePort: vi.fn((port) => {
       state.openCodePort = port;
@@ -147,7 +152,6 @@ describe('OpenCode lifecycle', () => {
 
   it('falls back to process.env.PATH when neither build function is provided', async () => {
     delete process.env.OPENCODE_BINARY;
-    const originalPath = process.env.PATH;
     process.env.PATH = '/usr/bin:/bin';
     const child = createMockChild();
     spawnMock.mockImplementationOnce(() => {
@@ -165,12 +169,11 @@ describe('OpenCode lifecycle', () => {
     const [, , options] = spawnMock.mock.calls[0];
 
     expect(options.env.PATH).toBe('/usr/bin:/bin');
-    process.env.PATH = originalPath;
 
     await server.close();
   });
 
-  it('reports the exit signal when managed OpenCode exits before becoming ready', async () => {
+  it('reports the binary when managed OpenCode exits before becoming ready', async () => {
     delete process.env.OPENCODE_BINARY;
     const firstChild = createMockChild();
     const secondChild = createMockChild();
@@ -189,8 +192,24 @@ describe('OpenCode lifecycle', () => {
 
     const runtime = createRuntime();
 
-    await expect(runtime.startOpenCode()).rejects.toThrow('OpenCode exited with signal SIGTERM. No stdout/stderr captured');
+    await expect(runtime.startOpenCode()).rejects.toThrow('OpenCode process exited before serving with signal SIGTERM. Binary used: opencode. No stdout/stderr captured');
     expect(spawnMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry managed startup when the configured OpenCode binary is invalid', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const error = new Error('Configured OpenCode binary not found: /missing/opencode');
+    error.code = 'OPENCODE_BINARY_INVALID';
+    const applyOpencodeBinaryFromSettings = vi.fn(async () => {
+      throw error;
+    });
+
+    const runtime = createRuntime({ applyOpencodeBinaryFromSettings });
+
+    await expect(runtime.startOpenCode()).rejects.toThrow('Configured OpenCode binary not found: /missing/opencode');
+    expect(applyOpencodeBinaryFromSettings).toHaveBeenCalledTimes(1);
+    expect(applyOpencodeBinaryFromSettings).toHaveBeenCalledWith({ strict: true });
+    expect(spawnMock).not.toHaveBeenCalled();
   });
 
   it('retries managed OpenCode startup once after a pre-ready exit', async () => {

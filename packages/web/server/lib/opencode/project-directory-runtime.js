@@ -1,3 +1,13 @@
+import { createRealpathCache } from '../path-realpath-cache.js';
+
+// Browser transport percent-encodes directory hints and marks them explicitly.
+// Only marked values are decoded so literal percent sequences from direct API
+// clients are preserved.
+const safeDecodeMarkedURIComponent = (value, encoding) => {
+  if (encoding !== 'uri') return value;
+  try { return decodeURIComponent(value); } catch { return value; }
+};
+
 export const createProjectDirectoryRuntime = (dependencies) => {
   const {
     fsPromises,
@@ -7,6 +17,9 @@ export const createProjectDirectoryRuntime = (dependencies) => {
     getReadSettingsFromDiskMigrated,
     sanitizeProjects,
   } = dependencies;
+  const realpathCache = createRealpathCache({
+    realpath: fsPromises.realpath.bind(fsPromises),
+  });
 
   const resolveDirectoryCandidate = (value) => {
     if (typeof value !== 'string') {
@@ -30,7 +43,8 @@ export const createProjectDirectoryRuntime = (dependencies) => {
       if (!stats.isDirectory()) {
         return { ok: false, error: 'Specified path is not a directory' };
       }
-      return { ok: true, directory: resolved };
+      const realPath = await realpathCache.resolve(resolved);
+      return { ok: true, directory: realPath };
     } catch (error) {
       const err = error;
       if (err && typeof err === 'object' && err.code === 'ENOENT') {
@@ -44,18 +58,24 @@ export const createProjectDirectoryRuntime = (dependencies) => {
   };
 
   const resolveProjectDirectory = async (req) => {
-    const headerDirectory = typeof req.get === 'function' ? req.get('x-opencode-directory') : null;
+    const rawHeaderDirectory = typeof req.get === 'function' ? req.get('x-opencode-directory') : null;
+    const headerEncoding = typeof req.get === 'function' ? req.get('x-opencode-directory-encoding') : null;
+    const headerDirectory = rawHeaderDirectory ? safeDecodeMarkedURIComponent(rawHeaderDirectory, headerEncoding) : null;
     const queryDirectory = Array.isArray(req.query?.directory)
       ? req.query.directory[0]
       : req.query?.directory;
-    const requested = headerDirectory || queryDirectory || null;
+    const requested = [headerDirectory, queryDirectory].filter(Boolean);
 
-    if (requested) {
-      const validated = await validateDirectoryPath(requested);
-      if (!validated.ok) {
-        return { directory: null, error: validated.error };
+    if (requested.length > 0) {
+      let lastError = null;
+      for (const candidate of requested) {
+        const validated = await validateDirectoryPath(candidate);
+        if (validated.ok) {
+          return { directory: validated.directory, error: null };
+        }
+        lastError = validated.error;
       }
-      return { directory: validated.directory, error: null };
+      return { directory: null, error: lastError };
     }
 
     const readSettings = typeof getReadSettingsFromDiskMigrated === 'function'
@@ -97,22 +117,27 @@ export const createProjectDirectoryRuntime = (dependencies) => {
   };
 
   const resolveOptionalProjectDirectory = async (req) => {
-    const headerDirectory = typeof req.get === 'function' ? req.get('x-opencode-directory') : null;
+    const rawHeaderDirectory = typeof req.get === 'function' ? req.get('x-opencode-directory') : null;
+    const headerEncoding = typeof req.get === 'function' ? req.get('x-opencode-directory-encoding') : null;
+    const headerDirectory = rawHeaderDirectory ? safeDecodeMarkedURIComponent(rawHeaderDirectory, headerEncoding) : null;
     const queryDirectory = Array.isArray(req.query?.directory)
       ? req.query.directory[0]
       : req.query?.directory;
-    const requested = headerDirectory || queryDirectory || null;
+    const requested = [headerDirectory, queryDirectory].filter(Boolean);
 
-    if (!requested) {
+    if (requested.length === 0) {
       return { directory: null, error: null };
     }
 
-    const validated = await validateDirectoryPath(requested);
-    if (!validated.ok) {
-      return { directory: null, error: validated.error };
+    let lastError = null;
+    for (const candidate of requested) {
+      const validated = await validateDirectoryPath(candidate);
+      if (validated.ok) {
+        return { directory: validated.directory, error: null };
+      }
+      lastError = validated.error;
     }
-
-    return { directory: validated.directory, error: null };
+    return { directory: null, error: lastError };
   };
 
   return {

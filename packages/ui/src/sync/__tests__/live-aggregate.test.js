@@ -3,10 +3,11 @@ import { describe, expect, it } from 'bun:test'
 import {
   aggregateLiveSessions,
   aggregateLiveSessionStatuses,
+  areStatusMapsEquivalent,
   findLiveSession,
   findLiveSessionStatus,
 } from '../live-aggregate.ts'
-import { deriveLiveActiveNowSessions } from '../../components/session/sidebar/activitySections.ts'
+import { deriveRecentSessions, RECENT_SESSION_MAX_AGE_MS } from '../../components/session/sidebar/activitySections.ts'
 
 const session = (id, directory, updated, extra = {}) => ({
   id,
@@ -79,21 +80,33 @@ describe('live aggregate', () => {
     expect(findLiveSessionStatus(states, 'ses-1')?.type).toBe('idle')
   })
 
-  it('derives active-now sessions from live statuses instead of persisted history', () => {
+  it('detects retry metadata changes in status maps', () => {
+    const retryStatus = { type: 'retry', message: 'retrying|server|message', attempt: 1, next: 100 }
+
+    expect(areStatusMapsEquivalent(
+      { 'ses-1': retryStatus },
+      { 'ses-1': { ...retryStatus } },
+    )).toBe(true)
+
+    expect(areStatusMapsEquivalent(
+      { 'ses-1': retryStatus },
+      { 'ses-1': { ...retryStatus, attempt: 2, next: 200 } },
+    )).toBe(false)
+  })
+
+  it('derives recent sessions from the 48h window, excluding archived/subtasks', () => {
+    const now = 1_000_000_000
     const sessions = [
-      session('ses-1', '/a', 20),
-      session('ses-2', '/b', 30),
-      session('ses-3', '/c', 10, { time: { created: 9, updated: 10, archived: 50 } }),
-      session('ses-4', '/d', 40, { parentID: 'ses-parent' }),
+      session('ses-1', '/a', now - 1_000),
+      session('ses-2', '/b', now - 500),
+      session('ses-3', '/c', now - 10, { time: { created: now - 11, updated: now - 10, archived: now - 5 } }),
+      session('ses-4', '/d', now - 200, { parentID: 'ses-parent' }),
+      session('ses-5', '/e', now - RECENT_SESSION_MAX_AGE_MS - 1),
     ]
 
-    const activeNow = deriveLiveActiveNowSessions(sessions, {
-      'ses-1': { type: 'busy' },
-      'ses-2': { type: 'retry', message: 'retrying' },
-      'ses-3': { type: 'busy' },
-      'ses-4': { type: 'busy' },
-    })
+    const recent = deriveRecentSessions(sessions, now)
 
-    expect(activeNow.map((item) => item.id)).toEqual(['ses-2', 'ses-1'])
+    // ses-3 archived, ses-4 subtask, ses-5 older than 48h -> excluded; rest newest-first
+    expect(recent.map((item) => item.id)).toEqual(['ses-2', 'ses-1'])
   })
 })

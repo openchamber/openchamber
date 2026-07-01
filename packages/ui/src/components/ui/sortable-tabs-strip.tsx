@@ -15,11 +15,12 @@ import {
   useSortable,
 } from '@dnd-kit/sortable';
 import { CSS as DndCSS } from '@dnd-kit/utilities';
-import { RiCloseLine } from '@remixicon/react';
 
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
+import { useDeviceInfo } from '@/lib/device';
+import { Icon } from "@/components/icon/Icon";
 
 export type SortableTabsStripItem = {
   id: string;
@@ -41,6 +42,7 @@ type SortableTabsStripProps = {
   activePillInsetClassName?: string;
   activePillButtonClassName?: string;
   inactiveTabsIconOnly?: boolean;
+  iconOnlyActiveTab?: boolean;
   animateActivePill?: boolean;
   activePillLowercase?: boolean;
   className?: string;
@@ -93,12 +95,15 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   activePillInsetClassName,
   activePillButtonClassName,
   inactiveTabsIconOnly = false,
+  iconOnlyActiveTab = false,
   animateActivePill,
   activePillLowercase = true,
   className,
 }) => {
   const { t } = useI18n();
   const isMobile = useUIStore((state) => state.isMobile);
+  const { isTablet } = useDeviceInfo();
+  const alwaysShowCloseControls = isMobile || isTablet;
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const [overflow, setOverflow] = React.useState<{ left: boolean; right: boolean }>({ left: false, right: false });
   const itemIDs = React.useMemo(() => items.map((item) => item.id), [items]);
@@ -116,7 +121,6 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   const Wrapper = reorderEnabled ? SortableTabWrapper : StaticTabWrapper;
   const tabRefs = React.useRef<Map<string, HTMLElement>>(new Map());
   const [pillRect, setPillRect] = React.useState<{ left: number; top: number; width: number; height: number } | null>(null);
-
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -251,8 +255,6 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
     updateActivePillRect();
   });
 
-
-
   React.useEffect(() => {
     if (!isScrollable || !activeId) {
       return;
@@ -364,6 +366,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
           const isActive = item.id === activeId;
           const showInactiveIconOnly = inactiveTabsIconOnly && usesActivePillIndicator && !isActive && Boolean(item.icon);
           const shouldShowLabel = !showInactiveIconOnly;
+          const shouldShowIcon = Boolean(item.icon) && (!iconOnlyActiveTab || isActive);
           const useIntrinsicActiveTab = inactiveTabsIconOnly && usesActivePillIndicator && isActive && !isScrollable && !useIntrinsicPillSizing;
           const closable = item.closable !== false && Boolean(onClose);
           const closeReplacesIcon = closable && Boolean(item.icon);
@@ -374,12 +377,33 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                 ? 'flex-none basis-auto'
                 : (isMobile ? 'flex-1 basis-0 min-w-0' : 'flex-1 basis-0 min-w-fit'))
               : 'min-w-0 flex-1 basis-0';
+          const handleAuxClick = closable
+            ? (event: React.MouseEvent<HTMLDivElement>) => {
+                // Middle-click (button === 1) closes the tab. Matches browser tab behavior.
+                if (event.button !== 1) {
+                  return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                onClose?.(item.id);
+              }
+            : undefined;
+          const handleMouseDown = closable
+            ? (event: React.MouseEvent<HTMLDivElement>) => {
+                // Prevent the browser's middle-click autoscroll affordance.
+                if (event.button === 1) {
+                  event.preventDefault();
+                }
+              }
+            : undefined;
           return (
             <Wrapper key={item.id} id={item.id} className={wrapperClassName}>
               <div
                 ref={(element) => setTabRef(item.id, element)}
+                onAuxClick={handleAuxClick}
+                onMouseDown={handleMouseDown}
                 className={cn(
-                  'group flex h-full items-center',
+                  'group flex h-full min-w-0 flex-nowrap items-center',
                   (isScrollable || useIntrinsicPillSizing)
                     ? 'shrink-0'
                     : usesActivePillIndicator
@@ -400,8 +424,8 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                   onClick={() => onSelect(item.id)}
                   className={cn(
                     usesActivePillIndicator
-                      ? 'animated-tabs__button pill-tabs__button relative z-10 flex flex-1 items-center justify-center rounded-[9px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] text-sm font-medium transition-colors duration-150 !min-h-0'
-                      : 'flex h-full min-w-0 items-center typography-micro',
+                      ? 'animated-tabs__button pill-tabs__button relative z-10 flex flex-1 min-w-0 flex-nowrap items-center justify-center rounded-[9px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] text-sm font-medium transition-colors duration-150 !min-h-0'
+                      : 'flex h-full min-w-0 flex-nowrap items-center typography-micro',
                     usesActivePillIndicator && activePillLowercase ? 'lowercase' : null,
                     usesActivePillIndicator && (showInactiveIconOnly ? 'gap-0' : 'gap-1.5'),
                     usesActivePillIndicator
@@ -433,14 +457,14 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                 >
                   {usesActivePillIndicator ? (
                     <>
-                      {item.icon ? (
+                      {shouldShowIcon ? (
                         <span className="relative flex h-4 w-4 shrink-0 items-center justify-center">
-                          <span className={cn('flex items-center justify-center transition-opacity', closeReplacesIcon && (isMobile ? 'opacity-0' : 'group-hover:opacity-0'))}>{item.icon}</span>
+                          <span className={cn('flex items-center justify-center transition-opacity', closeReplacesIcon && (alwaysShowCloseControls ? 'opacity-0' : 'group-hover:opacity-0'))}>{item.icon}</span>
                           {closeReplacesIcon ? (
                             <span
                               role="button"
                               tabIndex={-1}
-                              className={cn('absolute inset-0 z-20 flex items-center justify-center rounded-sm text-muted-foreground transition-opacity hover:text-foreground', isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}
+                              className={cn('absolute inset-0 z-20 flex !min-h-0 !min-w-0 items-center justify-center rounded-sm text-muted-foreground transition-opacity hover:text-foreground', alwaysShowCloseControls ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}
                               onPointerDown={(event) => {
                                 event.stopPropagation();
                               }}
@@ -451,7 +475,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                               aria-label={item.closeLabel ?? `Close ${item.label} tab`}
                               title={item.closeLabel ?? `Close ${item.label} tab`}
                             >
-                              <RiCloseLine className="h-3.5 w-3.5" />
+                              <Icon name="close" className="h-3.5 w-3.5" />
                             </span>
                           ) : null}
                         </span>
@@ -459,20 +483,20 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                       {shouldShowLabel ? <span className="animated-tabs__label truncate">{item.label}</span> : null}
                     </>
                   ) : (
-                    <span className={cn('flex min-w-0 items-center gap-1.5', !isScrollable && 'justify-center')}>
-                      {item.icon ? (
+                    <span className={cn('flex min-w-0 flex-nowrap items-center gap-1.5', !isScrollable && 'justify-center')}>
+                      {shouldShowIcon ? (
                         <span
                           className={cn(
                             'relative flex h-4 w-4 shrink-0 items-center justify-center transition-colors duration-200 ease-out',
                             isActive ? 'text-[var(--primary-base)]' : 'text-muted-foreground'
                           )}
                         >
-                          <span className={cn('flex items-center justify-center transition-opacity', closeReplacesIcon && (isMobile ? 'opacity-0' : 'group-hover:opacity-0'))}>{item.icon}</span>
+                          <span className={cn('flex items-center justify-center transition-opacity', closeReplacesIcon && (alwaysShowCloseControls ? 'opacity-0' : 'group-hover:opacity-0'))}>{item.icon}</span>
                           {closeReplacesIcon ? (
                             <span
                               role="button"
                               tabIndex={-1}
-                              className={cn('absolute inset-0 z-20 flex items-center justify-center rounded-sm text-muted-foreground transition-opacity hover:text-foreground', isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}
+                              className={cn('absolute inset-0 z-20 flex !min-h-0 !min-w-0 items-center justify-center rounded-sm text-muted-foreground transition-opacity hover:text-foreground', alwaysShowCloseControls ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}
                               onPointerDown={(event) => {
                                 event.stopPropagation();
                               }}
@@ -483,7 +507,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                               aria-label={item.closeLabel ?? `Close ${item.label} tab`}
                               title={item.closeLabel ?? `Close ${item.label} tab`}
                             >
-                              <RiCloseLine className="h-3.5 w-3.5" />
+                              <Icon name="close" className="h-3.5 w-3.5" />
                             </span>
                           ) : null}
                         </span>
@@ -518,7 +542,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                     aria-label={item.closeLabel ?? `Close ${item.label} tab`}
                     title={item.closeLabel ?? `Close ${item.label} tab`}
                   >
-                    <RiCloseLine className="h-3 w-3" />
+                    <Icon name="close" className="h-3 w-3" />
                   </button>
                 ) : null}
               </div>

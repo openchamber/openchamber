@@ -1,20 +1,22 @@
 import React from 'react';
-import { RiArrowDownSLine, RiArrowRightSLine, RiEditLine, RiGitCommitLine, RiLoader4Line, RiTextWrap } from '@remixicon/react';
 
 import { useUIStore } from '@/stores/useUIStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
-import { useGitStore, useGitStatus, useIsGitRepo, useGitFileCount, useGitLoadingStatus } from '@/stores/useGitStore';
+import { useGitStore, useGitStatus, useIsGitRepo, useGitLoadingStatus } from '@/stores/useGitStore';
 import { cn } from '@/lib/utils';
 import type { GitStatus } from '@/lib/api/types';
 import {
     DropdownMenu,
     DropdownMenuContent,
-    DropdownMenuLabel,
     DropdownMenuRadioGroup,
     DropdownMenuRadioItem,
-    DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+    Tooltip,
+    TooltipContent,
+    TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 
@@ -23,18 +25,29 @@ import { getLanguageFromExtension, isImageFile } from '@/lib/toolHelpers';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { DiffViewToggle } from '@/components/chat/message/DiffViewToggle';
 import type { DiffViewMode } from '@/components/chat/message/types';
+import { ReviewFlowDialog, type ReviewFlowExecution } from '@/components/session/ReviewFlowDialog';
 import { PierreDiffViewer } from './PierreDiffViewer';
 import { useDeviceInfo } from '@/lib/device';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
+import { Icon } from "@/components/icon/Icon";
 import { getContextFileOpenFailureMessage, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
+import { toAbsoluteFilePath } from '@/lib/path-utils';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { useI18n } from '@/lib/i18n';
 import type { I18nKey } from '@/lib/i18n/store';
+import { fileDiffFromPatch } from '@/lib/diff/patchFileDiff';
+import { isVSCodeRuntime } from '@/lib/desktop';
+import { startReviewFlow } from '@/lib/reviewFlow';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import type { FileDiffMetadata } from '@pierre/diffs';
 
 // Minimum width for side-by-side diff view (px)
 const SIDE_BY_SIDE_MIN_WIDTH = 1100;
 const DIFF_REQUEST_TIMEOUT_MS = 15000;
 const LARGE_DIFF_CHANGED_LINES = 500;
+const STACKED_DIFF_MOUNT_MARGIN = 300;
+const FULL_CONTEXT_DIFF_LINES = 1_000_000;
+const DEFAULT_CONTEXT_DIFF_LINES = 3;
 
 // Perf: limit concurrent expanded diffs in stacked view.
 // Expanding many diffs mounts many Pierre instances + lots of DOM.
@@ -51,7 +64,16 @@ type FileEntry = GitStatus['files'][number] & {
     isNew: boolean;
 };
 
-type DiffData = { original: string; modified: string; isBinary?: boolean };
+type DiffContextMode = 'patch' | 'full';
+type DiffData = {
+    original: string;
+    modified: string;
+    isBinary?: boolean;
+    patch?: string;
+    fileDiff?: FileDiffMetadata;
+    contextMode?: DiffContextMode;
+};
+type DiffScope = 'all' | 'staged' | 'working';
 
 const BinaryDiffPlaceholder = React.memo(() => {
     const { t } = useI18n();
@@ -61,8 +83,6 @@ const BinaryDiffPlaceholder = React.memo(() => {
         </div>
     );
 });
-
-type DiffTabViewMode = 'single' | 'stacked';
 
 type ChangeDescriptor = {
     code: string;
@@ -80,23 +100,6 @@ const CHANGE_DESCRIPTORS: Record<string, ChangeDescriptor> = {
 };
 
 const DEFAULT_CHANGE_DESCRIPTOR = CHANGE_DESCRIPTORS.M;
-
-const DIFF_VIEW_MODE_OPTIONS: Array<{
-    value: DiffTabViewMode;
-    labelKey: I18nKey;
-    descriptionKey: I18nKey;
-}> = [
-    {
-        value: 'single',
-        labelKey: 'diffView.mode.single.label',
-        descriptionKey: 'diffView.mode.single.description',
-    },
-    {
-        value: 'stacked',
-        labelKey: 'diffView.mode.stacked.label',
-        descriptionKey: 'diffView.mode.stacked.description',
-    },
-];
 
 const getChangeSymbol = (file: GitStatus['files'][number]): string => {
     const indexCode = file.index?.trim();
@@ -118,18 +121,18 @@ const isNewStatusFile = (file: GitStatus['files'][number]): boolean => {
     return index === 'A' || workingDir === 'A' || index === '?' || workingDir === '?';
 };
 
-const isAbsolutePath = (value: string): boolean => {
-    return value.startsWith('/') || value.startsWith('//') || /^[A-Za-z]:\//.test(value);
+const isStagedStatusFile = (file: GitStatus['files'][number]): boolean => {
+    const indexCode = file.index?.trim();
+    return Boolean(indexCode && indexCode !== '?');
+};
+
+const isWorkingStatusFile = (file: GitStatus['files'][number]): boolean => {
+    const workingCode = file.working_dir?.trim();
+    return Boolean(workingCode) || file.index === '?';
 };
 
 const toAbsolutePath = (directory: string, filePath: string): string => {
-    const normalizedDirectory = directory.replace(/\\/g, '/').replace(/\/+$/g, '');
-    const normalizedFilePath = filePath.replace(/\\/g, '/');
-    if (isAbsolutePath(normalizedFilePath)) {
-        return normalizedFilePath;
-    }
-    const trimmedFilePath = normalizedFilePath.replace(/^\/+/, '');
-    return normalizedDirectory ? `${normalizedDirectory}/${trimmedFilePath}` : trimmedFilePath;
+    return toAbsoluteFilePath(directory, filePath);
 };
 
 const normalizePath = (value?: string | null): string =>
@@ -175,143 +178,99 @@ const getFirstVisibleModifiedLineFromPatch = (patch: string): number | null => {
     return parsed;
 };
 
-const formatDiffTotals = (insertions?: number, deletions?: number) => {
+const isBinaryPatch = (patch: string): boolean =>
+    /^Binary files .+ differ$/m.test(patch) || /^GIT binary patch$/m.test(patch);
+
+const createTextDiffDataFromPatch = (filePath: string, patch: string, contextMode: DiffContextMode): DiffData => {
+    if (isBinaryPatch(patch)) {
+        return { original: '', modified: '', isBinary: true, patch, contextMode };
+    }
+
+    return {
+        original: '',
+        modified: '',
+        patch,
+        fileDiff: fileDiffFromPatch(filePath, patch),
+        contextMode,
+    };
+};
+
+const formatDiffTotals = (
+    insertions?: number,
+    deletions?: number,
+    options?: { shrink?: boolean; className?: string },
+) => {
     const added = insertions ?? 0;
     const removed = deletions ?? 0;
     if (!added && !removed) return null;
     return (
-        <span className="typography-meta flex flex-shrink-0 items-center gap-1 text-xs whitespace-nowrap">
+        <span
+            className={cn(
+                'typography-meta flex items-center gap-1 text-xs whitespace-nowrap',
+                options?.shrink ? 'min-w-0 overflow-hidden' : 'flex-shrink-0',
+                options?.className,
+            )}
+        >
             {added ? <span style={{ color: 'var(--status-success)' }}>+{added}</span> : null}
             {removed ? <span style={{ color: 'var(--status-error)' }}>-{removed}</span> : null}
         </span>
     );
 };
 
-interface FileSelectorProps {
-    changedFiles: FileEntry[];
-    selectedFile: string | null;
-    selectedFileEntry: FileEntry | null;
-    onSelectFile: (path: string) => void;
-    isMobile: boolean;
-    showModeSelector?: boolean;
-    mode?: DiffTabViewMode;
-    onModeChange?: (mode: DiffTabViewMode) => void;
+interface ChangeScopeSelectorProps {
+    scope: Extract<DiffScope, 'working' | 'staged'>;
+    workingCount: number;
+    stagedCount: number;
+    onScopeChange?: (scope: Extract<DiffScope, 'working' | 'staged'>) => void;
 }
 
-const FileSelector = React.memo<FileSelectorProps>(({
-    changedFiles,
-    selectedFile,
-    selectedFileEntry,
-    onSelectFile,
-    isMobile,
-    showModeSelector = false,
-    mode,
-    onModeChange,
+const ChangeScopeSelector = React.memo<ChangeScopeSelectorProps>(({
+    scope,
+    workingCount,
+    stagedCount,
+    onScopeChange,
 }) => {
     const { t } = useI18n();
-    const getLabel = React.useCallback((path: string) => {
-        if (!isMobile) return path;
-        const lastSlash = path.lastIndexOf('/');
-        return lastSlash >= 0 ? path.slice(lastSlash + 1) : path;
-    }, [isMobile]);
-
-    if (changedFiles.length === 0) return null;
+    const [open, setOpen] = React.useState(false);
+    const currentCount = scope === 'staged' ? stagedCount : workingCount;
+    const currentLabel = scope === 'staged' ? t('diffView.scope.staged') : t('diffView.scope.changed');
 
     return (
-        <DropdownMenu>
+        <DropdownMenu open={open} onOpenChange={setOpen}>
             <DropdownMenuTrigger asChild>
-                <button className="flex h-7 items-center gap-2 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground outline-none hover:bg-interactive-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
-                    {selectedFileEntry ? (
-                        <div className="flex min-w-0 items-center gap-3">
-                            <FileTypeIcon filePath={selectedFileEntry.path} className="h-3.5 w-3.5 flex-shrink-0" />
-                            <span className="min-w-0 flex-1 truncate typography-meta">
-                                {getLabel(selectedFileEntry.path)}
-                            </span>
-                            {formatDiffTotals(selectedFileEntry.insertions, selectedFileEntry.deletions)}
-                        </div>
-                    ) : (
-                        <span className="text-muted-foreground">{t('diffView.selector.selectFile')}</span>
-                    )}
-                    <RiArrowDownSLine className="size-4 opacity-50" />
-                </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="max-h-[70vh] min-w-[320px] overflow-y-auto">
-                {showModeSelector && mode && onModeChange ? (
-                    <>
-                        <DropdownMenuLabel className="typography-meta text-muted-foreground">
-                            {t('diffView.selector.viewMode')}
-                        </DropdownMenuLabel>
-                        <DropdownMenuRadioGroup
-                            value={mode}
-                            onValueChange={(value) => onModeChange(value as DiffTabViewMode)}
-                        >
-                            {DIFF_VIEW_MODE_OPTIONS.map((option) => (
-                                <DropdownMenuRadioItem
-                                    key={option.value}
-                                    value={option.value}
-                                    className="items-center"
-                                >
-                                    <span className="typography-meta text-foreground">
-                                        {t(option.labelKey)}
-                                    </span>
-                                </DropdownMenuRadioItem>
-                            ))}
-                        </DropdownMenuRadioGroup>
-                        <DropdownMenuSeparator />
-                    </>
-                ) : null}
-                <DropdownMenuRadioGroup value={selectedFile ?? ''} onValueChange={onSelectFile}>
-                    {changedFiles.map((file) => (
-                        <DropdownMenuRadioItem key={file.path} value={file.path}>
-                            <div className="flex w-full min-w-0 items-center gap-3">
-                                <FileTypeIcon filePath={file.path} className="h-3.5 w-3.5 flex-shrink-0" />
-                                <span className="min-w-0 flex-1 truncate typography-meta">
-                                    {getLabel(file.path)}
-                                </span>
-                                <span className="ml-auto">
-                                    {formatDiffTotals(file.insertions, file.deletions)}
-                                </span>
-                            </div>
-                        </DropdownMenuRadioItem>
-                    ))}
-                </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-        </DropdownMenu>
-    );
-});
-
-interface DiffViewModeSelectorProps {
-    mode: DiffTabViewMode;
-    onModeChange: (mode: DiffTabViewMode) => void;
-}
-
-const DiffViewModeSelector = React.memo<DiffViewModeSelectorProps>(({ mode, onModeChange }) => {
-    const { t } = useI18n();
-    const currentOption =
-        DIFF_VIEW_MODE_OPTIONS.find((option) => option.value === mode) ?? DIFF_VIEW_MODE_OPTIONS[0];
-
-    return (
-        <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-                <button className="flex h-7 items-center gap-2 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground outline-none hover:bg-interactive-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
-                    <span className="min-w-0 truncate typography-meta">
-                        {t(currentOption.labelKey)}
-                    </span>
-                    <RiArrowDownSLine className="size-4 opacity-50" />
-                </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="min-w-[140px]">
-                <DropdownMenuRadioGroup
-                    value={mode}
-                    onValueChange={(value) => onModeChange(value as DiffTabViewMode)}
+                <button
+                    type="button"
+                    className="flex h-7 flex-shrink-0 items-center gap-1.5 rounded-md px-2 typography-ui-label font-semibold text-foreground outline-none hover:bg-interactive-hover focus-visible:ring-2 focus-visible:ring-ring"
+                    aria-label={t('diffView.scope.selectorAria')}
                 >
-                    {DIFF_VIEW_MODE_OPTIONS.map((option) => (
-                        <DropdownMenuRadioItem key={option.value} value={option.value}>
-                            <span className="typography-meta text-foreground">
-                                {t(option.labelKey)}
-                            </span>
-                        </DropdownMenuRadioItem>
-                    ))}
+                    <span className="whitespace-nowrap">
+                        {currentLabel}<span className="diff-toolbar__scope-count">: {currentCount}</span>
+                    </span>
+                    <Icon name="arrow-down-s" className="size-4 flex-shrink-0 opacity-60" />
+                </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-40">
+                <DropdownMenuRadioGroup
+                    value={scope}
+                    onValueChange={(value) => {
+                        if (value === 'working' || value === 'staged') {
+                            onScopeChange?.(value);
+                            setOpen(false);
+                        }
+                    }}
+                >
+                    <DropdownMenuRadioItem value="working">
+                        <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
+                            <span>{t('diffView.scope.changed')}</span>
+                            <span className="typography-meta text-muted-foreground">{workingCount}</span>
+                        </span>
+                    </DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="staged">
+                        <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
+                            <span>{t('diffView.scope.staged')}</span>
+                            <span className="typography-meta text-muted-foreground">{stagedCount}</span>
+                        </span>
+                    </DropdownMenuRadioItem>
                 </DropdownMenuRadioGroup>
             </DropdownMenuContent>
         </DropdownMenu>
@@ -378,68 +337,6 @@ const FileList = React.memo<FileListProps>(({
 });
 
 // Image diff viewer for binary image files
-interface ImageDiffViewerProps {
-    filePath: string;
-    diff: DiffData;
-    isVisible: boolean;
-    renderSideBySide: boolean;
-}
-
-const ImageDiffViewer = React.memo<ImageDiffViewerProps>(({
-    filePath,
-    diff,
-    isVisible,
-    renderSideBySide,
-}) => {
-    const { t } = useI18n();
-    const hasOriginal = diff.original.length > 0;
-    const hasModified = diff.modified.length > 0;
-
-    if (!isVisible) {
-        return <div className="absolute inset-0 hidden" />;
-    }
-
-    // Render side-by-side or stacked based on preference
-    const containerClass = renderSideBySide
-        ? 'flex flex-row gap-6 items-start justify-center h-full'
-        : 'flex flex-col gap-4 items-center';
-
-    const imageContainerClass = renderSideBySide
-        ? 'flex flex-col items-center gap-2 flex-1 min-w-0 h-full'
-        : 'flex flex-col items-center gap-2';
-
-    return (
-        <div className="absolute inset-0 overflow-auto p-4" style={{ contain: 'size layout' }}>
-            <div className={containerClass}>
-                {hasOriginal && (
-                    <div className={imageContainerClass}>
-                        <span className="typography-meta text-muted-foreground font-medium">{t('diffView.image.original')}</span>
-                        <img
-                            src={diff.original}
-                            alt={t('diffView.image.originalAlt', { path: filePath })}
-                            className={renderSideBySide ? "max-w-full max-h-[calc(100%-2rem)] object-contain" : "max-w-full object-contain"}
-                            style={{ imageRendering: 'auto' }}
-                        />
-                    </div>
-                )}
-                {hasModified && (
-                    <div className={imageContainerClass}>
-                        <span className="typography-meta text-muted-foreground font-medium">
-                            {hasOriginal ? t('diffView.image.modified') : t('diffView.image.new')}
-                        </span>
-                        <img
-                            src={diff.modified}
-                            alt={t('diffView.image.modifiedAlt', { path: filePath })}
-                            className={renderSideBySide ? "max-w-full max-h-[calc(100%-2rem)] object-contain" : "max-w-full object-contain"}
-                            style={{ imageRendering: 'auto' }}
-                        />
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-});
-
 interface InlineImageDiffViewerProps {
     filePath: string;
     diff: DiffData;
@@ -496,132 +393,162 @@ const InlineImageDiffViewer = React.memo<InlineImageDiffViewerProps>(({
 });
 
 interface InlineDiffViewerProps {
-    filePath: string;
-    diff: DiffData;
-    renderSideBySide: boolean;
-    wrapLines: boolean;
+  filePath: string;
+  diff: DiffData;
+  renderSideBySide: boolean;
+  wrapLines: boolean;
 }
 
-const InlineDiffViewer = React.memo<InlineDiffViewerProps>(({ 
-    filePath,
-    diff,
-    renderSideBySide,
-    wrapLines,
+const InlineDiffViewer = React.memo<InlineDiffViewerProps>(({
+  filePath,
+  diff,
+  renderSideBySide,
+  wrapLines,
 }) => {
-    const language = React.useMemo(
-        () => getLanguageFromExtension(filePath) || 'text',
-        [filePath]
-    );
+  const language = React.useMemo(
+    () => getLanguageFromExtension(filePath) || 'text',
+    [filePath]
+  );
 
-    if (diff.isBinary) {
-        return <BinaryDiffPlaceholder />;
-    }
+  if (diff.isBinary) {
+    return <BinaryDiffPlaceholder />;
+  }
 
-    if (isImageFile(filePath)) {
-        return (
+  if (isImageFile(filePath)) {
+    return (
             <InlineImageDiffViewer
                 filePath={filePath}
                 diff={diff}
                 renderSideBySide={renderSideBySide}
             />
-        );
-    }
+    );
+  }
 
+  return (
+    <div className="w-full" style={{ contain: 'layout' }}>
+      <PierreDiffViewer
+        original={diff.original}
+        modified={diff.modified}
+        fileDiff={diff.fileDiff}
+        language={language}
+        fileName={filePath}
+        renderSideBySide={renderSideBySide}
+        wrapLines={wrapLines}
+        layout="inline"
+      />
+    </div>
+  );
+});
+
+type FileDiffAction = 'stage' | 'unstage' | 'discard';
+
+interface FileDiffActionsProps {
+    filePath: string;
+    staged: boolean;
+    busyAction: FileDiffAction | null;
+    disabled: boolean;
+    onAction: (action: FileDiffAction) => void;
+}
+
+const FileDiffActions = React.memo<FileDiffActionsProps>(({
+    filePath,
+    staged,
+    busyAction,
+    disabled,
+    onAction,
+}) => {
+    const { t } = useI18n();
     return (
-        <div className="w-full" style={{ contain: 'layout' }}>
-            <PierreDiffViewer
-                original={diff.original}
-                modified={diff.modified}
-                language={language}
-                fileName={filePath}
-                renderSideBySide={renderSideBySide}
-                wrapLines={wrapLines}
-                layout="inline"
-            />
+        <div className="flex items-center gap-0.5 rounded-full border border-[var(--interactive-border)]/45 bg-[var(--surface-background)]/95 px-1 py-0.5 shadow-lg backdrop-blur-md">
+            {staged ? (
+                <FileDiffActionButton
+                    label={t('gitView.changes.unstageFileAria', { path: filePath })}
+                    icon="arrow-go-back"
+                    loading={busyAction === 'unstage'}
+                    disabled={disabled}
+                    onClick={() => onAction('unstage')}
+                />
+            ) : (
+                <>
+                    <FileDiffActionButton
+                        label={t('gitView.changes.revertFileAria', { path: filePath })}
+                        icon="arrow-go-back"
+                        loading={busyAction === 'discard'}
+                        disabled={disabled}
+                        tone="failure"
+                        onClick={() => onAction('discard')}
+                    />
+                    <FileDiffActionButton
+                        label={t('gitView.changes.stageFileAria', { path: filePath })}
+                        icon="add"
+                        loading={busyAction === 'stage'}
+                        disabled={disabled}
+                        tone="success"
+                        onClick={() => onAction('stage')}
+                    />
+                </>
+            )}
         </div>
     );
 });
 
-// Single diff viewer instance
-interface SingleDiffViewerProps {
-    filePath: string;
-    diff: DiffData;
-    isVisible: boolean;
-    renderSideBySide: boolean;
-    wrapLines: boolean;
+interface FileDiffActionButtonProps {
+    label: string;
+    icon: 'add' | 'arrow-go-back';
+    loading: boolean;
+    disabled: boolean;
+    tone?: 'failure' | 'success';
+    onClick: () => void;
 }
 
-const SingleDiffViewer = React.memo<SingleDiffViewerProps>(({ 
-    filePath,
-    diff,
-    isVisible,
-    renderSideBySide,
-    wrapLines,
-}) => {
-    const language = React.useMemo(
-        () => getLanguageFromExtension(filePath) || 'text',
-        [filePath]
-    );
-
-    if (diff.isBinary) {
-        return <BinaryDiffPlaceholder />;
-    }
-
-    // Don't render if not visible (memory optimization)
-    if (!isVisible) {
-        return null;
-    }
-
-    // Check if this is an image file
-    if (isImageFile(filePath)) {
-        return (
-            <ImageDiffViewer
-                filePath={filePath}
-                diff={diff}
-                isVisible={isVisible}
-                renderSideBySide={renderSideBySide}
-            />
-        );
-    }
-
-    return (
-        <ScrollableOverlay
-            outerClassName="absolute inset-0"
-            disableHorizontal={false}
-            observeMutations={false}
-            preventOverscroll
-            data-diff-virtual-root
-            data-diff-virtual-content
-        >
-            <PierreDiffViewer
-                original={diff.original}
-                modified={diff.modified}
-                language={language}
-                fileName={filePath}
-                renderSideBySide={renderSideBySide}
-                wrapLines={wrapLines}
-                layout="inline"
-            />
-        </ScrollableOverlay>
-    );
-});
+const FileDiffActionButton: React.FC<FileDiffActionButtonProps> = ({
+    label,
+    icon,
+    loading,
+    disabled,
+    tone,
+    onClick,
+}) => (
+    <Button
+        variant="ghost"
+        size="sm"
+        className={cn(
+            'h-6 w-6 rounded-none bg-transparent p-0 text-muted-foreground opacity-70 hover:bg-transparent hover:text-foreground hover:opacity-100',
+            tone === 'failure' && 'text-[var(--status-error)] hover:text-[var(--status-error)]',
+            tone === 'success' && 'text-[var(--status-success)] hover:text-[var(--status-success)]'
+        )}
+        disabled={disabled}
+        title={label}
+        aria-label={label}
+        onClick={(event) => {
+            event.stopPropagation();
+            onClick();
+        }}
+    >
+        {loading ? (
+            <Icon name="loader-4" className="size-3.5 animate-spin" />
+        ) : (
+            <Icon name={icon} className={icon === 'add' ? 'size-4' : 'size-3.5'} />
+        )}
+    </Button>
+);
 
 interface MultiFileDiffEntryProps {
     directory: string;
     file: FileEntry;
     layout: 'inline' | 'side-by-side';
     wrapLines: boolean;
-    scrollRootRef: React.RefObject<HTMLElement | null>;
     isSelected: boolean;
+    isExpanded: boolean;
+    isMounted: boolean;
     onSelect: (path: string) => void;
+    onExpandedChange: (path: string, expanded: boolean) => void;
     registerSectionRef: (path: string, node: HTMLDivElement | null) => void;
-    /** Start collapsed to reduce memory with many files */
-    defaultCollapsed?: boolean;
-    expandRequestPath?: string | null;
-    expandRequestNonce?: number;
     showOpenInEditorAction?: boolean;
     isOpeningInEditor?: boolean;
     onOpenInEditor?: (filePath: string, diffData: DiffData | null) => void;
+    staged?: boolean;
+    loadFullFiles?: boolean;
 }
 
 const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
@@ -629,16 +556,17 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     file,
     layout,
     wrapLines,
-    scrollRootRef,
     isSelected,
+    isExpanded,
+    isMounted,
     onSelect,
+    onExpandedChange,
     registerSectionRef,
-    defaultCollapsed = false,
-    expandRequestPath = null,
-    expandRequestNonce = 0,
     showOpenInEditorAction = false,
     isOpeningInEditor = false,
     onOpenInEditor,
+    staged = false,
+    loadFullFiles = false,
 }) => {
     const { t } = useI18n();
     const { git } = useRuntimeAPIs();
@@ -648,24 +576,32 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         }, [directory, file.path])
     );
     const setDiff = useGitStore((state) => state.setDiff);
+    const fetchStatus = useGitStore((state) => state.fetchStatus);
     const setDiffFileLayout = useUIStore((state) => state.setDiffFileLayout);
 
-    const [isExpanded, setIsExpanded] = React.useState(!defaultCollapsed);
-    const [hasBeenVisible, setHasBeenVisible] = React.useState(false);
     const [diffRetryNonce, setDiffRetryNonce] = React.useState(0);
     const [diffLoadError, setDiffLoadError] = React.useState<string | null>(null);
     const [isLoading, setIsLoading] = React.useState(false);
+    const [fileAction, setFileAction] = React.useState<FileDiffAction | null>(null);
     const [forceRenderLarge, setForceRenderLarge] = React.useState(false);
+    const [localDiffData, setLocalDiffData] = React.useState<DiffData | null>(null);
+    const [stagedDiffData, setStagedDiffData] = React.useState<DiffData | null>(null);
     const lastDiffRequestRef = React.useRef<string | null>(null);
     const sectionRef = React.useRef<HTMLDivElement | null>(null);
 
     const descriptor = React.useMemo(() => describeChange(file), [file]);
     const renderSideBySide = layout === 'side-by-side';
+    const desiredContextMode: DiffContextMode = loadFullFiles ? 'full' : 'patch';
+    const fileStatusKey = `${file.index}:${file.working_dir}:${file.insertions}:${file.deletions}`;
 
     const diffData = React.useMemo<DiffData | null>(() => {
+        if (staged) return stagedDiffData;
+        if (localDiffData) return localDiffData;
         if (!cachedDiff) return null;
-        return { original: cachedDiff.original, modified: cachedDiff.modified, isBinary: cachedDiff.isBinary };
-    }, [cachedDiff]);
+        return { original: cachedDiff.original, modified: cachedDiff.modified, isBinary: cachedDiff.isBinary, contextMode: 'full' };
+    }, [cachedDiff, localDiffData, staged, stagedDiffData]);
+
+    const diffDataMatchesContextMode = diffData?.contextMode === desiredContextMode;
 
     const setSectionRef = React.useCallback((node: HTMLDivElement | null) => {
         sectionRef.current = node;
@@ -673,58 +609,33 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     }, [file.path, registerSectionRef]);
 
     const handleOpenChange = React.useCallback((open: boolean) => {
-        setIsExpanded(open);
-        if (open) {
-            setHasBeenVisible(true);
-        }
-    }, []);
+        onExpandedChange(file.path, open);
+    }, [file.path, onExpandedChange]);
 
     const handleSelect = React.useCallback(() => {
         onSelect(file.path);
     }, [file.path, onSelect]);
 
     React.useEffect(() => {
-        if (!isExpanded || hasBeenVisible) return;
-        const target = sectionRef.current;
-        if (!target) return;
-
-        if (!scrollRootRef.current || typeof IntersectionObserver === 'undefined') {
-            setHasBeenVisible(true);
-            return;
+        if (!staged) {
+            setLocalDiffData(null);
+        } else {
+            setStagedDiffData(null);
         }
 
-        const observer = new IntersectionObserver(
-            (entries) => {
-                if (entries.some((entry) => entry.isIntersecting)) {
-                    setHasBeenVisible(true);
-                    observer.disconnect();
-                }
-            },
-            { root: scrollRootRef.current, rootMargin: '200px 0px', threshold: 0.1 }
-        );
-
-        observer.observe(target);
-        return () => observer.disconnect();
-    }, [hasBeenVisible, isExpanded, scrollRootRef]);
+        setDiffLoadError(null);
+        lastDiffRequestRef.current = null;
+    }, [fileStatusKey, staged]);
 
     React.useEffect(() => {
-        if (expandRequestNonce <= 0 || expandRequestPath !== file.path) {
-            return;
-        }
-
-        setIsExpanded(true);
-        setHasBeenVisible(true);
-    }, [expandRequestNonce, expandRequestPath, file.path]);
-
-    React.useEffect(() => {
-        if (!isExpanded || !hasBeenVisible) return;
-        if (!directory || diffData) {
+        if (!isExpanded || !isMounted) return;
+        if (!directory || (diffData && diffDataMatchesContextMode)) {
             lastDiffRequestRef.current = null;
             setIsLoading(false);
             return;
         }
 
-        const requestKey = `${directory}::${file.path}::${diffRetryNonce}`;
+        const requestKey = `${directory}::${file.path}::${staged ? 'staged' : 'unstaged'}::${fileStatusKey}::${desiredContextMode}::${diffRetryNonce}`;
         if (lastDiffRequestRef.current === requestKey) {
             return;
         }
@@ -733,7 +644,10 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         setIsLoading(true);
 
         let cancelled = false;
-        const fetchPromise = git.getGitFileDiff(directory, { path: file.path });
+        const contextLines = loadFullFiles ? FULL_CONTEXT_DIFF_LINES : DEFAULT_CONTEXT_DIFF_LINES;
+        const fetchPromise = isImageFile(file.path)
+            ? git.getGitFileDiff(directory, { path: file.path, staged })
+            : git.getGitDiff(directory, { path: file.path, staged, contextLines });
         const timeoutMs = DIFF_REQUEST_TIMEOUT_MS;
         const timeoutPromise = new Promise<never>((_, reject) => {
             setTimeout(() => reject(new Error(`Timed out after ${timeoutMs}ms`)), timeoutMs);
@@ -743,11 +657,26 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
             .then((response) => {
                 if (cancelled) return;
 
-                setDiff(directory, file.path, {
-                    original: response.original ?? '',
-                    modified: response.modified ?? '',
-                    isBinary: response.isBinary,
-                });
+                if ('diff' in response) {
+                    const nextDiff = createTextDiffDataFromPatch(file.path, response.diff, desiredContextMode);
+                    if (staged) {
+                        setStagedDiffData(nextDiff);
+                    } else {
+                        setLocalDiffData(nextDiff);
+                    }
+                } else {
+                    const nextDiff = {
+                        original: response.original ?? '',
+                        modified: response.modified ?? '',
+                        isBinary: response.isBinary,
+                        contextMode: 'full' as const,
+                    };
+                    if (staged) {
+                        setStagedDiffData(nextDiff);
+                    } else {
+                        setDiff(directory, file.path, nextDiff);
+                    }
+                }
                 setIsLoading(false);
             })
             .catch((error) => {
@@ -763,34 +692,70 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                 lastDiffRequestRef.current = null;
             }
         };
-    }, [directory, diffData, diffRetryNonce, file.path, git, hasBeenVisible, isExpanded, setDiff]);
+    }, [desiredContextMode, diffData, diffDataMatchesContextMode, diffRetryNonce, directory, file.path, fileStatusKey, git, isExpanded, isMounted, loadFullFiles, setDiff, staged]);
 
     const handleToggle = React.useCallback(() => {
         handleOpenChange(!isExpanded);
         handleSelect();
     }, [handleOpenChange, handleSelect, isExpanded]);
 
+    const handleFileAction = React.useCallback(async (action: FileDiffAction) => {
+        if (!directory || fileAction !== null) {
+            return;
+        }
+
+        setFileAction(action);
+        try {
+            if (action === 'stage') {
+                await git.stageGitFile(directory, file.path);
+            } else if (action === 'unstage') {
+                await git.unstageGitFile(directory, file.path);
+            } else {
+                await git.revertGitFile(directory, file.path, { scope: 'working' });
+            }
+            setDiffRetryNonce((nonce) => nonce + 1);
+            await fetchStatus(directory, git);
+        } catch (error) {
+            const fallbackKey = action === 'unstage'
+                ? 'gitView.toast.unstageFileFailed'
+                : action === 'stage'
+                    ? 'gitView.toast.stageFileFailed'
+                    : 'gitView.toast.revertFailed';
+            toast.error(error instanceof Error ? error.message : t(fallbackKey));
+        } finally {
+            setFileAction((current) => (current === action ? null : current));
+        }
+    }, [directory, fetchStatus, file.path, fileAction, git, t]);
+
     return (
-        <div ref={setSectionRef} className="scroll-mt-4">
-            <div className="sticky top-0 z-10 bg-background">
-                <button
-                    type="button"
+        <div ref={setSectionRef} className="scroll-mt-9 border-b border-[var(--interactive-border)]/40 last:border-b-0">
+            <div className="sticky top-0 z-30 border-b border-[var(--interactive-border)]/35 bg-[var(--surface-elevated)]/90 backdrop-blur-md supports-[backdrop-filter]:bg-[var(--surface-elevated)]/80">
+                <div
+                    role="button"
+                    tabIndex={0}
                     onClick={handleToggle}
+                    onKeyDown={(event) => {
+                        if (event.target !== event.currentTarget) return;
+                        if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            handleToggle();
+                        }
+                    }}
                     className={cn(
-                        'group/header relative flex w-full items-center gap-2 px-3 py-1.5 rounded-t-xl border border-border/60 overflow-hidden',
-                        'bg-background',
-                        isExpanded ? 'rounded-b-none' : 'rounded-b-xl',
+                        'cursor-pointer',
+                        'group/header relative grid min-h-9 w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 overflow-hidden px-3 py-2',
+                        'bg-transparent',
                         'text-muted-foreground hover:text-foreground',
-                        isSelected ? 'ring-1 ring-inset ring-[var(--interactive-selection)]' : null
+                        isSelected ? 'bg-[var(--interactive-selection)]/35' : null
                     )}
                 >
-                    <div className="absolute inset-0 pointer-events-none group-hover/header:bg-interactive-hover" />
+                    <div className="absolute inset-0 pointer-events-none group-hover/header:bg-[var(--interactive-hover)]/50" />
                     <div className="relative flex min-w-0 flex-1 items-center gap-2">
                         <span className="flex size-5 items-center justify-center opacity-70 group-hover/header:opacity-100">
                             {isExpanded ? (
-                                <RiArrowDownSLine className="size-4" />
+                                <Icon name="arrow-down-s" className="size-4" />
                             ) : (
-                                <RiArrowRightSLine className="size-4" />
+                                <Icon name="arrow-right-s" className="size-4" />
                             )}
                         </span>
                         <span
@@ -841,7 +806,7 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                             </span>
                         </span>
                     </div>
-                    <div className="relative flex items-center gap-2">
+                    <div className="relative flex shrink-0 items-center justify-self-end gap-2">
                         {formatDiffTotals(file.insertions, file.deletions)}
                         {showOpenInEditorAction && onOpenInEditor ? (
                             <Button
@@ -856,9 +821,9 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                                 disabled={isOpeningInEditor}
                             >
                                 {isOpeningInEditor ? (
-                                    <RiLoader4Line className="size-3.5 animate-spin" />
+                                    <Icon name="loader-4" className="size-3.5 animate-spin" />
                                 ) : (
-                                    <RiEditLine className="size-3.5" />
+                                    <Icon name="edit" className="size-3.5" />
                                 )}
                             </Button>
                         ) : null}
@@ -872,14 +837,17 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                             className="opacity-70"
                         />
                     </div>
-                </button>
+                </div>
             </div>
             {isExpanded && (
-                <div className="relative border border-t-0 border-border/60 bg-background rounded-b-xl overflow-hidden">
+                <div className="relative bg-background overflow-hidden">
+                    {!isMounted && !diffLoadError ? (
+                        <div className="h-40 border border-border/40 bg-background/40" />
+                    ) : null}
                     {diffLoadError ? (
                         <div className="flex flex-col items-center gap-2 px-4 py-8 text-sm text-muted-foreground">
                             <div className="typography-ui-label font-semibold text-foreground">
-                                Failed to load diff
+                                {t('diffView.state.failedToLoadDiff')}
                             </div>
                             <div className="typography-meta text-muted-foreground max-w-[32rem] text-center">
                                 {diffLoadError}
@@ -889,40 +857,53 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                                 className="typography-ui-label text-primary hover:underline"
                                 onClick={() => setDiffRetryNonce((nonce) => nonce + 1)}
                             >
-                                Retry
+                                {t('diffView.actions.retry')}
                             </button>
                         </div>
                     ) : null}
-                    {isLoading && !diffData && !diffLoadError ? (
+                    {isMounted && isLoading && !diffData && !diffLoadError ? (
                         <div className="flex items-center justify-center gap-2 px-4 py-8 text-sm text-muted-foreground">
-                            <RiLoader4Line size={16} className="animate-spin" />
-                            Loading diff…
+                            <Icon name="loader-4" className="size-4 animate-spin" />
+                            {t('diffView.state.loadingDiff')}
                         </div>
                     ) : null}
-                    {diffData && !forceRenderLarge && (file.insertions + file.deletions) > LARGE_DIFF_CHANGED_LINES ? (
+                    {isMounted && diffData && !forceRenderLarge && (file.insertions + file.deletions) > LARGE_DIFF_CHANGED_LINES ? (
                         <div className="flex flex-col items-center gap-2 px-4 py-8 text-sm text-muted-foreground">
                             <div className="typography-ui-label font-semibold text-foreground">
-                                Large diff ({file.insertions + file.deletions} changed lines)
+                                {t('diffView.state.largeDiff', { count: file.insertions + file.deletions })}
                             </div>
                             <div className="typography-meta text-muted-foreground">
-                                Rendering may be slow. You can still view the diff by clicking below.
+                                {t('diffView.state.largeDiffDescription')}
                             </div>
                             <button
                                 type="button"
                                 className="typography-ui-label text-primary hover:underline"
                                 onClick={() => setForceRenderLarge(true)}
                             >
-                                Render anyway
+                                {t('diffView.actions.renderAnyway')}
                             </button>
                         </div>
                     ) : null}
-                    {diffData && (forceRenderLarge || (file.insertions + file.deletions) <= LARGE_DIFF_CHANGED_LINES) ? (
-                        <InlineDiffViewer
-                            filePath={file.path}
-                            diff={diffData}
-                            renderSideBySide={renderSideBySide}
-                            wrapLines={wrapLines}
-                        />
+                    {isMounted && diffData && (forceRenderLarge || (file.insertions + file.deletions) <= LARGE_DIFF_CHANGED_LINES) ? (
+                        <>
+                            <InlineDiffViewer
+                                filePath={file.path}
+                                diff={diffData}
+                                renderSideBySide={renderSideBySide}
+                                wrapLines={wrapLines}
+                            />
+                            <div className="pointer-events-none absolute bottom-3 right-3 z-20">
+                                <div className="pointer-events-auto">
+                                    <FileDiffActions
+                                        filePath={file.path}
+                                        staged={staged}
+                                        busyAction={fileAction}
+                                        disabled={fileAction !== null}
+                                        onAction={handleFileAction}
+                                    />
+                                </div>
+                            </div>
+                        </>
                     ) : null}
                 </div>
             )}
@@ -933,17 +914,24 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
 interface DiffViewProps {
     hideStackedFileSidebar?: boolean;
     stackedDefaultCollapsedAll?: boolean;
-    hideFileSelector?: boolean;
     pinSelectedFileHeaderToTopOnNavigate?: boolean;
     showOpenInEditorAction?: boolean;
+    diffScope?: DiffScope;
+    onDiffScopeChange?: (scope: Extract<DiffScope, 'working' | 'staged'>) => void;
+    targetFilePath?: string | null;
+    /** Render diff content flush with the container edges (no outer padding). */
+    flushContent?: boolean;
 }
 
 export const DiffView: React.FC<DiffViewProps> = ({
     hideStackedFileSidebar = false,
     stackedDefaultCollapsedAll = false,
-    hideFileSelector = false,
     pinSelectedFileHeaderToTopOnNavigate = false,
     showOpenInEditorAction = false,
+    diffScope = 'all',
+    onDiffScopeChange,
+    targetFilePath = null,
+    flushContent = false,
 }) => {
     const { t } = useI18n();
     const { git, files } = useRuntimeAPIs();
@@ -957,137 +945,73 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const ensureStatus = useGitStore((state) => state.ensureStatus);
     const fetchStatus = useGitStore((state) => state.fetchStatus);
     const setDiff = useGitStore((state) => state.setDiff);
-	 
-    const [selectedFile, setSelectedFile] = React.useState<string | null>(null);
-    const [stackedExpandTarget, setStackedExpandTarget] = React.useState<string | null>(null);
-    const [stackedExpandRequestNonce, setStackedExpandRequestNonce] = React.useState(0);
+    const [displayFile, setDisplayFile] = React.useState<string | null>(null);
+    const [displayFileStaged, setDisplayFileStaged] = React.useState(false);
     const [pinnedStackedTarget, setPinnedStackedTarget] = React.useState<string | null>(null);
-    const [diffRetryNonce, setDiffRetryNonce] = React.useState(0);
-    const [diffLoadError, setDiffLoadError] = React.useState<string | null>(null);
-    const lastDiffRequestRef = React.useRef<string | null>(null);
+    const [expandedFiles, setExpandedFiles] = React.useState<Set<string>>(() => new Set());
+    const [mountedStackedFiles, setMountedStackedFiles] = React.useState<Set<string>>(() => new Set());
+    const [loadFullFiles, setLoadFullFiles] = React.useState(false);
+    const [scrollRequestNonce, setScrollRequestNonce] = React.useState(0);
+    const [reviewDialogOpen, setReviewDialogOpen] = React.useState(false);
+    const [reviewFlowSubmitting, setReviewFlowSubmitting] = React.useState(false);
 
     const pendingDiffFile = useUIStore((state) => state.pendingDiffFile);
+    const pendingDiffStaged = useUIStore((state) => state.pendingDiffStaged);
     const setPendingDiffFile = useUIStore((state) => state.setPendingDiffFile);
     const diffLayoutPreference = useUIStore((state) => state.diffLayoutPreference);
     const diffFileLayout = useUIStore((state) => state.diffFileLayout);
     const setDiffFileLayout = useUIStore((state) => state.setDiffFileLayout);
     const diffWrapLinesStore = useUIStore((state) => state.diffWrapLines);
     const setDiffWrapLines = useUIStore((state) => state.setDiffWrapLines);
-    const diffViewMode = useUIStore((state) => state.diffViewMode);
-    const setDiffViewMode = useUIStore((state) => state.setDiffViewMode);
     const openContextFileAtLine = useUIStore((state) => state.openContextFileAtLine);
+    const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
     const diffWrapLines = diffWrapLinesStore;
+    const forcedStaged = diffScope === 'staged' ? true : diffScope === 'working' ? false : null;
+    const activeDiffStaged = forcedStaged ?? displayFileStaged;
 
-    const isStackedView = diffViewMode === 'stacked';
     const isMobileLayout = isMobile || screenWidth <= 768;
+    const showReviewAction = Boolean(currentSessionId) && !isMobileLayout && !isVSCodeRuntime();
     const showFileSidebar = !hideStackedFileSidebar && !isMobileLayout && screenWidth >= 1024;
     const diffScrollRef = React.useRef<HTMLElement | null>(null);
     const fileSectionRefs = React.useRef(new Map<string, HTMLDivElement | null>());
     const pendingScrollTargetRef = React.useRef<string | null>(null);
     const pendingScrollFrameRef = React.useRef<number | null>(null);
     const shouldPinAfterAlignRef = React.useRef(false);
+    const visibleSyncFrameRef = React.useRef<number | null>(null);
+    const stackedStateScopeRef = React.useRef<string | null>(null);
 
-
-    React.useEffect(() => {
-        if (!pinSelectedFileHeaderToTopOnNavigate || !isStackedView || !pinnedStackedTarget) {
-            return;
+    const cancelPendingScrollAlignment = React.useCallback(() => {
+        pendingScrollTargetRef.current = null;
+        shouldPinAfterAlignRef.current = false;
+        setPinnedStackedTarget(null);
+        if (pendingScrollFrameRef.current !== null) {
+            window.cancelAnimationFrame(pendingScrollFrameRef.current);
+            pendingScrollFrameRef.current = null;
         }
+    }, []);
 
-        const scrollRoot = diffScrollRef.current;
-        if (!scrollRoot) {
-            return;
-        }
-
-        let rafId: number | null = null;
-        let cancelled = false;
-        let stableFrames = 0;
-        const stopAt = Date.now() + 1200;
-        let ignoreNextScrollEvents = 0;
-
-        const stop = () => {
-            if (cancelled) {
-                return;
+    const expandStackedFile = React.useCallback((path: string) => {
+        setExpandedFiles((previous) => {
+            if (previous.has(path)) {
+                return previous;
             }
-            cancelled = true;
-            setPinnedStackedTarget(null);
-        };
-
-        const cancelOnUserInput = () => {
-            stop();
-        };
-
-        const cancelOnScroll = () => {
-            if (ignoreNextScrollEvents > 0) {
-                ignoreNextScrollEvents -= 1;
-                return;
-            }
-            stop();
-        };
-
-        window.addEventListener('wheel', cancelOnUserInput, { passive: true, capture: true });
-        window.addEventListener('touchstart', cancelOnUserInput, { passive: true, capture: true });
-        window.addEventListener('pointerdown', cancelOnUserInput, { capture: true });
-        window.addEventListener('keydown', cancelOnUserInput, { capture: true });
-        scrollRoot.addEventListener('scroll', cancelOnScroll, { passive: true });
-
-        const tick = () => {
-            if (cancelled || Date.now() > stopAt) {
-                stop();
-                return;
-            }
-
-            const currentScrollRoot = diffScrollRef.current;
-            const node = fileSectionRefs.current.get(pinnedStackedTarget);
-            if (!currentScrollRoot || !node) {
-                stop();
-                return;
-            }
-
-            const rootRect = currentScrollRoot.getBoundingClientRect();
-            const nodeRect = node.getBoundingClientRect();
-            const delta = nodeRect.top - rootRect.top;
-
-            if (Math.abs(delta) <= 1) {
-                stableFrames += 1;
-                if (stableFrames >= 2) {
-                    stop();
-                    return;
-                }
-            } else {
-                stableFrames = 0;
-                const maxTop = Math.max(0, currentScrollRoot.scrollHeight - currentScrollRoot.clientHeight);
-                const nextTop = Math.min(maxTop, Math.max(0, currentScrollRoot.scrollTop + delta));
-                if (Math.abs(nextTop - currentScrollRoot.scrollTop) <= 0.5) {
-                    stop();
-                    return;
-                }
-                ignoreNextScrollEvents += 1;
-                currentScrollRoot.scrollTop = nextTop;
-            }
-
-            rafId = window.requestAnimationFrame(tick);
-        };
-
-        rafId = window.requestAnimationFrame(tick);
-
-        return () => {
-            cancelled = true;
-            if (rafId !== null) {
-                window.cancelAnimationFrame(rafId);
-            }
-            window.removeEventListener('wheel', cancelOnUserInput, true);
-            window.removeEventListener('touchstart', cancelOnUserInput, true);
-            window.removeEventListener('pointerdown', cancelOnUserInput, true);
-            window.removeEventListener('keydown', cancelOnUserInput, true);
-            scrollRoot.removeEventListener('scroll', cancelOnScroll);
-        };
-    }, [isStackedView, pinSelectedFileHeaderToTopOnNavigate, pinnedStackedTarget]);
+            const next = new Set(previous);
+            next.add(path);
+            return next;
+        });
+    }, []);
 
     const changedFiles: FileEntry[] = React.useMemo(() => {
         if (!status?.files) return [];
         const diffStats = status.diffStats ?? {};
+        const includeFile = diffScope === 'staged'
+            ? isStagedStatusFile
+            : diffScope === 'working'
+                ? isWorkingStatusFile
+                : () => true;
 
         return status.files
+            .filter(includeFile)
             .map((file) => ({
                 ...file,
                 insertions: diffStats[file.path]?.insertions ?? 0,
@@ -1095,12 +1019,120 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 isNew: isNewStatusFile(file),
             }))
             .sort((a, b) => a.path.localeCompare(b.path));
+    }, [diffScope, status]);
+
+    const workingFileCount = React.useMemo(() => {
+        if (!status?.files) return 0;
+        return status.files.filter(isWorkingStatusFile).length;
     }, [status]);
 
-    const selectedFileEntry = React.useMemo(() => {
-        if (!selectedFile) return null;
-        return changedFiles.find((file) => file.path === selectedFile) ?? null;
-    }, [changedFiles, selectedFile]);
+    const stagedFileCount = React.useMemo(() => {
+        if (!status?.files) return 0;
+        return status.files.filter(isStagedStatusFile).length;
+    }, [status]);
+
+    const changedFilePathsKey = React.useMemo(
+        () => changedFiles.map((file) => file.path).join('\0'),
+        [changedFiles],
+    );
+
+    React.useEffect(() => {
+        const paths = changedFilePathsKey ? changedFilePathsKey.split('\0') : [];
+        const pathSet = new Set(paths);
+        const scopeKey = `${effectiveDirectory ?? ''}:${diffScope}:${stackedDefaultCollapsedAll ? 'collapsed' : 'default'}`;
+        const shouldInitialize = stackedStateScopeRef.current !== scopeKey;
+        stackedStateScopeRef.current = scopeKey;
+
+        setExpandedFiles((previous) => {
+            if (shouldInitialize) {
+                const defaultExpandedCount = stackedDefaultCollapsedAll
+                    ? 0
+                    : getStackedViewDefaultExpandedCount(paths.length);
+                return new Set(paths.slice(0, defaultExpandedCount));
+            }
+
+            let changed = false;
+            const next = new Set<string>();
+            for (const path of previous) {
+                if (!pathSet.has(path)) {
+                    changed = true;
+                    continue;
+                }
+                next.add(path);
+            }
+            return changed ? next : previous;
+        });
+
+        setMountedStackedFiles((previous) => {
+            if (shouldInitialize) {
+                return new Set();
+            }
+
+            let changed = false;
+            const next = new Set<string>();
+            for (const path of previous) {
+                if (!pathSet.has(path)) {
+                    changed = true;
+                    continue;
+                }
+                next.add(path);
+            }
+            return changed ? next : previous;
+        });
+    }, [changedFilePathsKey, diffScope, effectiveDirectory, stackedDefaultCollapsedAll]);
+
+    const syncVisibleStackedFiles = React.useCallback(() => {
+        visibleSyncFrameRef.current = null;
+        const scrollRoot = diffScrollRef.current;
+        if (!scrollRoot) return;
+
+        const rootRect = scrollRoot.getBoundingClientRect();
+        const top = rootRect.top - STACKED_DIFF_MOUNT_MARGIN;
+        const bottom = rootRect.bottom + STACKED_DIFF_MOUNT_MARGIN;
+        const next: Record<string, boolean> = {};
+
+        for (const [path, node] of fileSectionRefs.current) {
+            if (!node || !expandedFiles.has(path)) continue;
+            const rect = node.getBoundingClientRect();
+            if (rect.bottom < top || rect.top > bottom) continue;
+            next[path] = true;
+        }
+
+        setMountedStackedFiles((previous) => {
+            let changed = false;
+            const mounted = new Set(previous);
+            for (const path of Object.keys(next)) {
+                if (mounted.has(path)) continue;
+                mounted.add(path);
+                changed = true;
+            }
+            return changed ? mounted : previous;
+        });
+    }, [expandedFiles]);
+
+    const queueVisibleStackedFilesSync = React.useCallback(() => {
+        if (typeof window === 'undefined') return;
+        if (visibleSyncFrameRef.current !== null) return;
+        visibleSyncFrameRef.current = window.requestAnimationFrame(syncVisibleStackedFiles);
+    }, [syncVisibleStackedFiles]);
+
+    React.useEffect(() => {
+        const scrollRoot = diffScrollRef.current;
+        if (!scrollRoot) return;
+
+        queueVisibleStackedFilesSync();
+        scrollRoot.addEventListener('scroll', queueVisibleStackedFilesSync, { passive: true });
+        window.addEventListener('resize', queueVisibleStackedFilesSync);
+
+        return () => {
+            scrollRoot.removeEventListener('scroll', queueVisibleStackedFilesSync);
+            window.removeEventListener('resize', queueVisibleStackedFilesSync);
+            if (visibleSyncFrameRef.current !== null) {
+                window.cancelAnimationFrame(visibleSyncFrameRef.current);
+                visibleSyncFrameRef.current = null;
+            }
+        };
+    }, [changedFiles, expandedFiles, queueVisibleStackedFilesSync]);
 
     const getLayoutForFile = React.useCallback((file: FileEntry): 'inline' | 'side-by-side' => {
         const override = diffFileLayout[file.path];
@@ -1122,10 +1154,12 @@ export const DiffView: React.FC<DiffViewProps> = ({
         return 'side-by-side';
     }, [diffFileLayout, diffLayoutPreference, screenWidth]);
 
-    const currentLayoutForSelectedFile = React.useMemo<'inline' | 'side-by-side' | null>(() => {
-        if (!selectedFileEntry) return null;
-        return getLayoutForFile(selectedFileEntry);
-    }, [getLayoutForFile, selectedFileEntry]);
+    const currentLayoutForAllFiles = React.useMemo<'inline' | 'side-by-side' | null>(() => {
+        if (changedFiles.length === 0) return null;
+        return changedFiles.every((file) => getLayoutForFile(file) === 'side-by-side')
+            ? 'side-by-side'
+            : 'inline';
+    }, [changedFiles, getLayoutForFile]);
 
     // Ensure git status on mount
     React.useEffect(() => {
@@ -1150,34 +1184,51 @@ export const DiffView: React.FC<DiffViewProps> = ({
 
     // Handle pending diff file from external navigation
     React.useEffect(() => {
+        if (diffScope !== 'all') {
+            return;
+        }
+
         if (pendingDiffFile) {
-            setSelectedFile(pendingDiffFile);
+            setDisplayFile(pendingDiffFile);
+            setDisplayFileStaged(pendingDiffStaged);
             setPendingDiffFile(null);
-            if (isStackedView) {
-                shouldPinAfterAlignRef.current = true;
-                pendingScrollTargetRef.current = pendingDiffFile;
-                setStackedExpandTarget(pendingDiffFile);
-                setStackedExpandRequestNonce((nonce) => nonce + 1);
-            }
+            shouldPinAfterAlignRef.current = true;
+            pendingScrollTargetRef.current = pendingDiffFile;
+            expandStackedFile(pendingDiffFile);
+            setScrollRequestNonce((value) => value + 1);
         }
-    }, [isStackedView, pendingDiffFile, setPendingDiffFile]);
+    }, [diffScope, expandStackedFile, pendingDiffFile, pendingDiffStaged, setPendingDiffFile]);
 
-    // Auto-select first file (skip if we have a pending file to consume)
     React.useEffect(() => {
-        if (!selectedFile && !pendingDiffFile && changedFiles.length > 0) {
-            setSelectedFile(changedFiles[0].path);
+        if (diffScope === 'all') {
+            return;
         }
-    }, [changedFiles, selectedFile, pendingDiffFile]);
 
-    // Clear selection if file no longer exists
-    React.useEffect(() => {
-        if (selectedFile && changedFiles.length > 0) {
-            const stillExists = changedFiles.some((f) => f.path === selectedFile);
-            if (!stillExists) {
-                setSelectedFile(changedFiles[0]?.path ?? null);
-            }
+        const normalizedTarget = targetFilePath?.trim();
+        if (!normalizedTarget) {
+            return;
         }
-    }, [changedFiles, selectedFile]);
+
+        setDisplayFile(normalizedTarget);
+        setDisplayFileStaged(diffScope === 'staged');
+
+        shouldPinAfterAlignRef.current = true;
+        pendingScrollTargetRef.current = normalizedTarget;
+        expandStackedFile(normalizedTarget);
+        setScrollRequestNonce((value) => value + 1);
+    }, [diffScope, expandStackedFile, targetFilePath]);
+
+    React.useEffect(() => {
+        if (!displayFile) {
+            return;
+        }
+
+        const stillExists = changedFiles.some((file) => file.path === displayFile);
+        if (!stillExists) {
+            setDisplayFile(null);
+            setDisplayFileStaged(false);
+        }
+    }, [changedFiles, displayFile]);
 
     const registerSectionRef = React.useCallback((path: string, node: HTMLDivElement | null) => {
         const map = fileSectionRefs.current;
@@ -1186,112 +1237,115 @@ export const DiffView: React.FC<DiffViewProps> = ({
         } else {
             map.delete(path);
         }
-    }, []);
+        queueVisibleStackedFilesSync();
+    }, [queueVisibleStackedFilesSync]);
 
-    type ScrollToFileResult = {
-        ok: boolean;
-        aligned: boolean;
-        didMove: boolean;
-        atScrollLimit: boolean;
-        delta: number;
-    };
+    const handleStackedEntryExpandedChange = React.useCallback((path: string, expanded: boolean) => {
+        cancelPendingScrollAlignment();
+        setExpandedFiles((previous) => {
+            const hasPath = previous.has(path);
+            if (expanded === hasPath) {
+                return previous;
+            }
+            const next = new Set(previous);
+            if (expanded) {
+                next.add(path);
+            } else {
+                next.delete(path);
+            }
+            return next;
+        });
+        if (!expanded) {
+            setMountedStackedFiles((previous) => {
+                if (!previous.has(path)) return previous;
+                const next = new Set(previous);
+                next.delete(path);
+                return next;
+            });
+        }
+        queueVisibleStackedFilesSync();
+    }, [cancelPendingScrollAlignment, queueVisibleStackedFilesSync]);
 
-    const scrollToFile = React.useCallback((path: string): ScrollToFileResult => {
+    const handleExpandOrCollapseAll = React.useCallback(() => {
+        cancelPendingScrollAlignment();
+        setExpandedFiles((previous) => {
+            if (previous.size > 0) {
+                return new Set();
+            }
+            return new Set(changedFiles.map((file) => file.path));
+        });
+        setMountedStackedFiles(new Set());
+        queueVisibleStackedFilesSync();
+    }, [cancelPendingScrollAlignment, changedFiles, queueVisibleStackedFilesSync]);
+
+    const handleStartReviewFlow = React.useCallback(async (execution: ReviewFlowExecution) => {
+        if (!currentSessionId) return;
+        const directory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || effectiveDirectory || '';
+        if (!directory) {
+            toast.error(t('diffView.reviewDialog.toast.noSessionDirectory'));
+            return;
+        }
+
+        setReviewFlowSubmitting(true);
+        try {
+            await startReviewFlow({
+                originalSessionID: currentSessionId,
+                directory,
+                providerID: execution.providerID,
+                modelID: execution.modelID,
+                agent: execution.agent || undefined,
+                variant: execution.variant || undefined,
+                generateHandoff: execution.generateHandoff,
+                returnAfterHandoffRequest: execution.generateHandoff,
+                autoReview: execution.autoReview,
+            });
+            setReviewDialogOpen(false);
+        } catch (error) {
+            console.error('[review-flow] failed to start review flow', error);
+            toast.error(error instanceof Error ? error.message : t('diffView.reviewDialog.toast.startFailed'));
+        } finally {
+            setReviewFlowSubmitting(false);
+        }
+    }, [currentSessionId, effectiveDirectory, t]);
+
+    const scrollToFile = React.useCallback((path: string): boolean => {
         const node = fileSectionRefs.current.get(path);
         const scrollRoot = diffScrollRef.current;
         if (!node || !scrollRoot) {
-            return { ok: false, aligned: false, didMove: false, atScrollLimit: false, delta: 0 };
+            return false;
         }
 
         const rootRect = scrollRoot.getBoundingClientRect();
         const nodeRect = node.getBoundingClientRect();
         const delta = nodeRect.top - rootRect.top;
-
         const maxTop = Math.max(0, scrollRoot.scrollHeight - scrollRoot.clientHeight);
-        const desiredTop = scrollRoot.scrollTop + delta;
-        const nextTop = Math.min(maxTop, Math.max(0, desiredTop));
-        const didMove = Math.abs(nextTop - scrollRoot.scrollTop) > 0.5;
-        scrollRoot.scrollTop = nextTop;
-
-        const aligned = Math.abs(delta) <= 1;
-        const atScrollLimit = nextTop <= 0.5 || nextTop >= maxTop - 0.5;
-
-        return { ok: true, aligned, didMove, atScrollLimit, delta };
+        scrollRoot.scrollTop = Math.min(maxTop, Math.max(0, scrollRoot.scrollTop + delta));
+        return true;
     }, []);
 
     React.useEffect(() => {
-        if (!isStackedView) {
-            pendingScrollTargetRef.current = null;
-            shouldPinAfterAlignRef.current = false;
-            if (pendingScrollFrameRef.current !== null) {
-                window.cancelAnimationFrame(pendingScrollFrameRef.current);
-                pendingScrollFrameRef.current = null;
-            }
-            return;
-        }
-
         const target = pendingScrollTargetRef.current;
         if (!target) return;
 
         let attempts = 0;
-        const maxAttempts = 120;
+        const maxAttempts = 20;
         let cancelled = false;
-        let ignoreNextScrollEvents = 0;
-        let didRemoveListeners = false;
-        let stallFrames = 0;
-        const stopAt = Date.now() + 2000;
-
-        const removeListeners = () => {
-            if (didRemoveListeners) {
-                return;
-            }
-            didRemoveListeners = true;
-            window.removeEventListener('wheel', cancelOnUserInput, true);
-            window.removeEventListener('touchstart', cancelOnUserInput, true);
-            window.removeEventListener('pointerdown', cancelOnUserInput, true);
-            window.removeEventListener('keydown', cancelOnUserInput, true);
-            scrollRoot?.removeEventListener('scroll', cancelOnScroll);
-        };
 
         const cancelPending = () => {
             if (cancelled) {
                 return;
             }
             cancelled = true;
-            removeListeners();
             pendingScrollTargetRef.current = null;
             shouldPinAfterAlignRef.current = false;
+            setPinnedStackedTarget(null);
             if (pendingScrollFrameRef.current !== null) {
                 window.cancelAnimationFrame(pendingScrollFrameRef.current);
                 pendingScrollFrameRef.current = null;
             }
         };
 
-        const cancelOnUserInput = () => {
-            cancelPending();
-        };
-
-        const cancelOnScroll = () => {
-            if (ignoreNextScrollEvents > 0) {
-                ignoreNextScrollEvents -= 1;
-                return;
-            }
-            cancelPending();
-        };
-
-        const scrollRoot = diffScrollRef.current;
-        window.addEventListener('wheel', cancelOnUserInput, { passive: true, capture: true });
-        window.addEventListener('touchstart', cancelOnUserInput, { passive: true, capture: true });
-        window.addEventListener('pointerdown', cancelOnUserInput, { capture: true });
-        window.addEventListener('keydown', cancelOnUserInput, { capture: true });
-        scrollRoot?.addEventListener('scroll', cancelOnScroll, { passive: true });
-
         const tryAlign = () => {
-            if (Date.now() > stopAt) {
-                cancelPending();
-                pendingScrollFrameRef.current = null;
-                return;
-            }
             if (cancelled) {
                 pendingScrollFrameRef.current = null;
                 return;
@@ -1303,10 +1357,8 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 return;
             }
 
-            ignoreNextScrollEvents += 1;
             const result = scrollToFile(currentTarget);
-            if (!result.ok) {
-                ignoreNextScrollEvents = Math.max(0, ignoreNextScrollEvents - 1);
+            if (!result) {
                 attempts += 1;
                 if (attempts < maxAttempts) {
                     pendingScrollFrameRef.current = window.requestAnimationFrame(tryAlign);
@@ -1315,25 +1367,6 @@ export const DiffView: React.FC<DiffViewProps> = ({
                     pendingScrollFrameRef.current = null;
                 }
                 return;
-            }
-
-            if (!result.aligned) {
-                attempts += 1;
-                if (!result.didMove) {
-                    stallFrames += 1;
-                    // If we're clamped (e.g. target is near bottom) give layout a few frames to settle
-                    // (diff expansion / highlight can change scrollHeight), but don't fight user input.
-                    if (stallFrames < 6 && (result.atScrollLimit || Math.abs(result.delta) > 1)) {
-                        pendingScrollFrameRef.current = window.requestAnimationFrame(tryAlign);
-                        return;
-                    }
-                } else {
-                    stallFrames = 0;
-                    if (attempts < maxAttempts) {
-                        pendingScrollFrameRef.current = window.requestAnimationFrame(tryAlign);
-                        return;
-                    }
-                }
             }
 
             if (pinSelectedFileHeaderToTopOnNavigate && shouldPinAfterAlignRef.current) {
@@ -1346,74 +1379,37 @@ export const DiffView: React.FC<DiffViewProps> = ({
 
         return () => {
             cancelled = true;
-            removeListeners();
             if (pendingScrollFrameRef.current !== null) {
                 window.cancelAnimationFrame(pendingScrollFrameRef.current);
                 pendingScrollFrameRef.current = null;
             }
         };
-    }, [isStackedView, pinSelectedFileHeaderToTopOnNavigate, scrollToFile, selectedFile, stackedExpandRequestNonce]);
+    }, [pinSelectedFileHeaderToTopOnNavigate, scrollRequestNonce, scrollToFile]);
 
     const handleSelectFile = React.useCallback((value: string) => {
-        setSelectedFile(value);
+        void value;
     }, []);
 
     const handleSelectFileAndScroll = React.useCallback((value: string) => {
-        if (pendingScrollFrameRef.current !== null) {
-            window.cancelAnimationFrame(pendingScrollFrameRef.current);
-            pendingScrollFrameRef.current = null;
-        }
-        pendingScrollTargetRef.current = null;
+        cancelPendingScrollAlignment();
 
-        setSelectedFile(value);
-
-        if (!isStackedView) {
-            shouldPinAfterAlignRef.current = false;
-            return;
-        }
-
+        setDisplayFile(value);
+        setDisplayFileStaged(false);
         shouldPinAfterAlignRef.current = true;
         pendingScrollTargetRef.current = value;
+        expandStackedFile(value);
+        setScrollRequestNonce((nonce) => nonce + 1);
         scrollToFile(value);
-    }, [isStackedView, scrollToFile]);
-
-    const handleDiffViewModeChange = React.useCallback((mode: DiffTabViewMode) => {
-        setDiffViewMode(mode);
-        if (mode === 'stacked' && selectedFile) {
-            const result = scrollToFile(selectedFile);
-            if (!result.aligned) {
-                pendingScrollTargetRef.current = selectedFile;
-            }
-        }
-    }, [scrollToFile, selectedFile, setDiffViewMode]);
+    }, [cancelPendingScrollAlignment, expandStackedFile, scrollToFile]);
 
     const handleHeaderLayoutChange = React.useCallback((mode: DiffViewMode) => {
         const nextLayout: 'inline' | 'side-by-side' =
             mode === 'side-by-side' ? 'side-by-side' : 'inline';
 
-        if (isStackedView) {
-            changedFiles.forEach((file) => {
-                setDiffFileLayout(file.path, nextLayout);
-            });
-            return;
-        }
-
-        if (!selectedFileEntry) return;
-        setDiffFileLayout(selectedFileEntry.path, nextLayout);
-    }, [changedFiles, isStackedView, selectedFileEntry, setDiffFileLayout]);
-
-    const renderSideBySide = (currentLayoutForSelectedFile ?? 'side-by-side') === 'side-by-side';
-    const showFileSelector = !hideFileSelector && (!isStackedView || !showFileSidebar);
-
-    const selectedCachedDiff = useGitStore(React.useCallback((state) => {
-        if (!effectiveDirectory || !selectedFile) return null;
-        return state.directories.get(effectiveDirectory)?.diffCache.get(selectedFile) ?? null;
-    }, [effectiveDirectory, selectedFile]));
-
-    const selectedDiffData = React.useMemo<DiffData | null>(() => {
-        if (!selectedCachedDiff) return null;
-        return { original: selectedCachedDiff.original, modified: selectedCachedDiff.modified, isBinary: selectedCachedDiff.isBinary };
-    }, [selectedCachedDiff]);
+        changedFiles.forEach((file) => {
+            setDiffFileLayout(file.path, nextLayout);
+        });
+    }, [changedFiles, setDiffFileLayout]);
 
     const [openingEditorFilePath, setOpeningEditorFilePath] = React.useState<string | null>(null);
 
@@ -1434,6 +1430,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 try {
                     const patchResponse = await git.getGitDiff(effectiveDirectory, {
                         path: filePath,
+                        staged: activeDiffStaged,
                         contextLines: 3,
                     });
                     targetLine = getFirstVisibleModifiedLineFromPatch(patchResponse.diff);
@@ -1444,13 +1441,15 @@ export const DiffView: React.FC<DiffViewProps> = ({
 
             let diffForNavigation = cachedDiffData;
             if (targetLine === null || !diffForNavigation) {
-                const response = await git.getGitFileDiff(effectiveDirectory, { path: filePath });
+                const response = await git.getGitFileDiff(effectiveDirectory, { path: filePath, staged: activeDiffStaged });
                 diffForNavigation = {
                     original: response.original ?? '',
                     modified: response.modified ?? '',
                     isBinary: response.isBinary,
                 };
-                setDiff(effectiveDirectory, filePath, diffForNavigation);
+                if (!activeDiffStaged) {
+                    setDiff(effectiveDirectory, filePath, diffForNavigation);
+                }
             }
 
             const resolvedTargetLine = targetLine ?? ((diffForNavigation.isBinary || isImageFile(filePath))
@@ -1473,99 +1472,20 @@ export const DiffView: React.FC<DiffViewProps> = ({
         } finally {
             setOpeningEditorFilePath((current) => (current === filePath ? null : current));
         }
-    }, [effectiveDirectory, files, git, openContextFileAtLine, setDiff]);
-
-    const openSelectedFileInEditorAtChange = React.useCallback(async () => {
-        if (!selectedFile) {
-            return;
-        }
-
-        await openFileInEditorAtChange(selectedFile, selectedDiffData);
-    }, [openFileInEditorAtChange, selectedDiffData, selectedFile]);
-
-    const isOpeningSelectedInEditor = Boolean(selectedFile && openingEditorFilePath === selectedFile);
-
-    const hasCurrentDiff = !!selectedCachedDiff;
-    const isCurrentFileLoading = !isStackedView && !!selectedFile && !hasCurrentDiff;
-
-    React.useEffect(() => {
-        if (isStackedView) {
-            return;
-        }
-
-        setDiffLoadError(null);
-
-        if (!effectiveDirectory || !selectedFile) {
-            lastDiffRequestRef.current = null;
-            return;
-        }
-
-        if (selectedCachedDiff) {
-            lastDiffRequestRef.current = null;
-            return;
-        }
-
-        const requestKey = `${effectiveDirectory}::${selectedFile}::${diffRetryNonce}`;
-        if (lastDiffRequestRef.current === requestKey) {
-            return;
-        }
-        lastDiffRequestRef.current = requestKey;
-
-        let cancelled = false;
-        const fetchPromise = git.getGitFileDiff(effectiveDirectory, { path: selectedFile });
-        const timeoutMs = DIFF_REQUEST_TIMEOUT_MS;
-        const timeoutPromise = new Promise<never>((_, reject) => {
-            setTimeout(() => reject(new Error(`Timed out after ${timeoutMs}ms`)), timeoutMs);
-        });
-
-        void Promise.race([fetchPromise, timeoutPromise])
-            .then((response) => {
-                if (cancelled) return;
-
-                setDiff(effectiveDirectory, selectedFile, {
-                    original: response.original ?? '',
-                    modified: response.modified ?? '',
-                    isBinary: response.isBinary,
-                });
-            })
-            .catch((error) => {
-                if (cancelled) return;
-                const message = error instanceof Error ? error.message : String(error);
-                setDiffLoadError(message);
-            });
-
-        return () => {
-            cancelled = true;
-            if (lastDiffRequestRef.current === requestKey) {
-                // Allow a retry if this request was cancelled due to directory/path churn.
-                lastDiffRequestRef.current = null;
-            }
-        };
-    }, [effectiveDirectory, isStackedView, selectedFile, selectedCachedDiff, git, setDiff, diffRetryNonce]);
-
-    // Render only the selected diff viewer to prevent memory bloat with many files
-    const renderSelectedDiffViewer = () => {
-        if (!effectiveDirectory || !selectedFile || !selectedDiffData) return null;
-
-        return (
-            <SingleDiffViewer
-                key={selectedFile}
-                filePath={selectedFile}
-                diff={selectedDiffData}
-                isVisible={true}
-                renderSideBySide={renderSideBySide}
-                wrapLines={diffWrapLines}
-            />
-        );
-    };
+    }, [activeDiffStaged, effectiveDirectory, files, git, openContextFileAtLine, setDiff]);
 
     const renderStackedDiffView = () => {
         if (!effectiveDirectory) return null;
 
-        const defaultExpandedCount = getStackedViewDefaultExpandedCount(changedFiles.length);
+        const getFileStaged = (path: string) => {
+            if (forcedStaged !== null) {
+                return forcedStaged;
+            }
+            return displayFileStaged && path === displayFile;
+        };
 
         return (
-            <div className="flex flex-1 min-h-0 h-full gap-3 px-3 pb-3 pt-2">
+            <div className={cn('flex min-w-0 flex-1 min-h-0 h-full', flushContent ? 'gap-0' : 'gap-3 px-3 pb-3 pt-2')}>
                 {showFileSidebar && (
                     <section className="hidden lg:flex w-72 flex-col rounded-xl border border-border/60 bg-background/70 overflow-hidden">
                         <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/40">
@@ -1574,45 +1494,47 @@ export const DiffView: React.FC<DiffViewProps> = ({
                         </div>
                         <FileList
                             changedFiles={changedFiles}
-                            selectedFile={selectedFile}
+                            selectedFile={null}
                             onSelectFile={handleSelectFileAndScroll}
                         />
                     </section>
                 )}
-                <ScrollableOverlay
-                    ref={diffScrollRef}
-                    outerClassName="flex-1 min-h-0 h-full"
-                    className="pr-2"
-                    disableHorizontal
-                    observeMutations={false}
-                    preventOverscroll
-                    data-diff-virtual-root
-                    data-diff-virtual-content
-                >
-                    <div className="flex flex-col gap-3">
-                        {changedFiles.map((file, index) => (
-                            <MultiFileDiffEntry
-                                key={file.path}
-                                directory={effectiveDirectory}
-                                file={file}
-                                layout={getLayoutForFile(file)}
-                                wrapLines={diffWrapLines}
-                                scrollRootRef={diffScrollRef}
-                                isSelected={file.path === selectedFile}
-                                onSelect={handleSelectFile}
-                                registerSectionRef={registerSectionRef}
-                                defaultCollapsed={stackedDefaultCollapsedAll ? true : index >= defaultExpandedCount}
-                                expandRequestPath={stackedExpandTarget}
-                                expandRequestNonce={stackedExpandRequestNonce}
-                                showOpenInEditorAction={showOpenInEditorAction}
-                                isOpeningInEditor={openingEditorFilePath === file.path}
-                                onOpenInEditor={(filePath, diffData) => {
-                                    void openFileInEditorAtChange(filePath, diffData);
-                                }}
-                            />
-                        ))}
-                    </div>
-                </ScrollableOverlay>
+                <div className="relative flex-1 min-w-0 min-h-0 h-full">
+                    <ScrollableOverlay
+                        ref={diffScrollRef}
+                        outerClassName="min-h-0 h-full"
+                        className="[overflow-anchor:none] pb-16"
+                        disableHorizontal
+                        observeMutations={false}
+                        preventOverscroll
+                        data-diff-virtual-root
+                    >
+                        <div className="flex flex-col [overflow-anchor:none]" data-diff-virtual-content>
+                            {changedFiles.map((file) => (
+                                <MultiFileDiffEntry
+                                    key={file.path}
+                                    directory={effectiveDirectory}
+                                    file={file}
+                                    layout={getLayoutForFile(file)}
+                                    wrapLines={diffWrapLines}
+                                    isSelected={false}
+                                    isExpanded={expandedFiles.has(file.path)}
+                                    isMounted={mountedStackedFiles.has(file.path) || file.path === pinnedStackedTarget}
+                                    onSelect={handleSelectFile}
+                                    onExpandedChange={handleStackedEntryExpandedChange}
+                                    registerSectionRef={registerSectionRef}
+                                    showOpenInEditorAction={showOpenInEditorAction}
+                                    isOpeningInEditor={openingEditorFilePath === file.path}
+                                    onOpenInEditor={(filePath, diffData) => {
+                                        void openFileInEditorAtChange(filePath, diffData);
+                                    }}
+                                    staged={getFileStaged(file.path)}
+                                    loadFullFiles={loadFullFiles}
+                                />
+                            ))}
+                        </div>
+                    </ScrollableOverlay>
+                </div>
             </div>
         );
     };
@@ -1630,7 +1552,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
         if (isLoadingStatus && !status) {
             return (
                 <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
-                    <RiLoader4Line size={16} className="animate-spin" />
+                    <Icon name="loader-4" className="size-4 animate-spin" />
                     {t('diffView.state.loadingRepositoryStatus')}
                 </div>
             );
@@ -1652,78 +1574,94 @@ export const DiffView: React.FC<DiffViewProps> = ({
             );
         }
 
-        if (isStackedView) {
-            return renderStackedDiffView();
-        }
-
-        return (
-            <div className="flex flex-1 min-h-0 overflow-hidden px-3 py-3 relative" data-diff-virtual-root data-diff-virtual-content>
-                {renderSelectedDiffViewer()}
-                {isCurrentFileLoading && !hasCurrentDiff && (
-                    <div className="absolute inset-0 flex items-center justify-center gap-2 text-sm text-muted-foreground">
-                        {diffLoadError ? (
-                            <div className="flex flex-col items-center gap-2">
-                                <div className="typography-ui-label font-semibold text-foreground">
-                                    {t('diffView.state.failedToLoadDiff')}
-                                </div>
-                                <div className="typography-meta text-muted-foreground max-w-[32rem] text-center">
-                                    {diffLoadError}
-                                </div>
-                                <button
-                                    type="button"
-                                    className="typography-ui-label text-primary hover:underline"
-                                    onClick={() => {
-                                        setDiffLoadError(null);
-                                        setDiffRetryNonce((n) => n + 1);
-                                    }}
-                                >
-                                    {t('diffView.actions.retry')}
-                                </button>
-                            </div>
-                        ) : (
-                            <>
-                                <RiLoader4Line size={16} className="animate-spin" />
-                                {t('diffView.state.loadingDiff')}
-                            </>
-                        )}
-                    </div>
-                )}
-            </div>
-        );
+        return renderStackedDiffView();
     };
 
     return (
         <div className="flex h-full flex-col overflow-hidden bg-background">
-            <div className="flex items-center gap-3 px-3 py-2 bg-background">
+            <div className="@container/diff-toolbar flex min-w-0 items-center gap-2 px-3 py-2 bg-background">
                 {!isMobile && (
-                    <div className="flex items-center gap-1 rounded-md px-2 py-1 text-muted-foreground shrink-0">
-                        <RiGitCommitLine size={16} />
-                        <span className="typography-ui-label font-semibold text-foreground">
-                            {isLoadingStatus && !status
-                                ? t('diffView.state.loadingChanges')
-                                : (changedFiles.length === 1
-                                    ? t('diffView.summary.changedFilesSingle', { count: changedFiles.length })
-                                    : t('diffView.summary.changedFilesPlural', { count: changedFiles.length }))}
+                    diffScope === 'working' || diffScope === 'staged' ? (
+                        <ChangeScopeSelector
+                            scope={diffScope}
+                            workingCount={workingFileCount}
+                            stagedCount={stagedFileCount}
+                            onScopeChange={onDiffScopeChange}
+                        />
+                    ) : (
+                        <div className="flex items-center gap-1 rounded-md px-2 py-1 text-muted-foreground shrink-0">
+                            <span className="typography-ui-label font-semibold text-foreground">
+                                {isLoadingStatus && !status
+                                    ? t('diffView.state.loadingChanges')
+                                    : (changedFiles.length === 1
+                                        ? t('diffView.summary.changedFilesSingle', { count: changedFiles.length })
+                                        : t('diffView.summary.changedFilesPlural', { count: changedFiles.length }))}
+                            </span>
+                        </div>
+                    )
+                )}
+                {changedFiles.length > 0 && (
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleExpandOrCollapseAll}
+                        className={cn(
+                            'diff-toolbar__expand-button h-7 flex-shrink-0 gap-1 px-1.5 text-muted-foreground hover:text-foreground',
+                            'ml-auto',
+                        )}
+                        title={expandedFiles.size > 0 ? t('diffView.actions.collapseAll') : t('diffView.actions.expandAll')}
+                    >
+                        <Icon
+                            name="expand-up-down"
+                            className="size-4"
+                        />
+                        <span className="diff-toolbar__expand-label typography-ui-label">
+                            {expandedFiles.size > 0 ? t('diffView.actions.collapseAll') : t('diffView.actions.expandAll')}
                         </span>
-                    </div>
+                    </Button>
                 )}
-                {!isMobileLayout && (
-                    <DiffViewModeSelector mode={diffViewMode} onModeChange={handleDiffViewModeChange} />
+                {changedFiles.length > 0 && showReviewAction && (
+                    <Button
+                        variant="default"
+                        size="sm"
+                        onClick={() => setReviewDialogOpen(true)}
+                        disabled={reviewFlowSubmitting}
+                        className="diff-toolbar__review-button h-7 flex-shrink-0 gap-1.5 px-2"
+                        aria-label={t('diffView.actions.reviewAria')}
+                    >
+                        {reviewFlowSubmitting ? (
+                            <Icon name="loader-4" className="size-4 animate-spin" />
+                        ) : (
+                            <Icon name="search-eye" className="size-4" />
+                        )}
+                        <span className="diff-toolbar__review-label typography-ui-label">
+                            {t('diffView.actions.review')}
+                        </span>
+                    </Button>
                 )}
-                {showFileSelector && (
-                    <FileSelector
-                        changedFiles={changedFiles}
-                        selectedFile={selectedFile}
-                        selectedFileEntry={selectedFileEntry}
-                        onSelectFile={handleSelectFileAndScroll}
-                        isMobile={isMobileLayout}
-                        showModeSelector={isMobileLayout}
-                        mode={diffViewMode}
-                        onModeChange={handleDiffViewModeChange}
-                    />
+                {changedFiles.length > 0 && (
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setLoadFullFiles((value) => !value)}
+                                aria-pressed={loadFullFiles}
+                                aria-label={loadFullFiles ? t('diffView.actions.disableFullFiles') : t('diffView.actions.loadFullFiles')}
+                                className={cn(
+                                    'h-7 w-7 flex-shrink-0 p-0 text-muted-foreground hover:text-foreground',
+                                    loadFullFiles && 'bg-interactive-selection text-interactive-selection-foreground',
+                                )}
+                            >
+                                <Icon name="file-download" className="size-4" />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                            <p>{loadFullFiles ? t('diffView.actions.disableFullFiles') : t('diffView.actions.loadFullFiles')}</p>
+                        </TooltipContent>
+                    </Tooltip>
                 )}
-                <div className="flex-1" />
-                {selectedFileEntry && (
+                {changedFiles.length > 0 && (
                     <Button
                         variant="ghost"
                         size="sm"
@@ -1734,55 +1672,26 @@ export const DiffView: React.FC<DiffViewProps> = ({
                         )}
                         title={diffWrapLines ? t('diffView.actions.disableLineWrap') : t('diffView.actions.enableLineWrap')}
                     >
-                        <RiTextWrap className="size-4" />
+                        <Icon name="text-wrap" className="size-4" />
                     </Button>
                 )}
-                {showOpenInEditorAction && selectedFileEntry && !isStackedView && (
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-5 w-5 p-0 opacity-70 hover:opacity-100"
-                        onClick={() => {
-                            void openSelectedFileInEditorAtChange();
-                        }}
-                        disabled={isOpeningSelectedInEditor}
-                        title={t('diffView.actions.openFileAtFirstChangedLine')}
-                    >
-                        {isOpeningSelectedInEditor ? (
-                            <RiLoader4Line className="size-3.5 animate-spin" />
-                        ) : (
-                            <RiEditLine className="size-3.5" />
-                        )}
-                    </Button>
-                )}
-                {selectedFileEntry && currentLayoutForSelectedFile && (
+                {currentLayoutForAllFiles && (
                     <DiffViewToggle
-                        mode={currentLayoutForSelectedFile === 'side-by-side' ? 'side-by-side' : 'unified'}
+                        mode={currentLayoutForAllFiles === 'side-by-side' ? 'side-by-side' : 'unified'}
                         onModeChange={handleHeaderLayoutChange}
                     />
                 )}
             </div>
 
+            <ReviewFlowDialog
+                open={reviewDialogOpen}
+                onOpenChange={setReviewDialogOpen}
+                projectDirectory={effectiveDirectory ?? null}
+                submitting={reviewFlowSubmitting}
+                onConfirm={handleStartReviewFlow}
+            />
+
             {renderContent()}
         </div>
     );
-};
-
-// eslint-disable-next-line react-refresh/only-export-components
-export const useDiffFileCount = (): number => {
-    const { git } = useRuntimeAPIs();
-    const effectiveDirectory = useEffectiveDirectory();
-
-    const setActiveDirectory = useGitStore((state) => state.setActiveDirectory);
-    const ensureStatus = useGitStore((state) => state.ensureStatus);
-    const fileCount = useGitFileCount(effectiveDirectory ?? null);
-
-    React.useEffect(() => {
-        if (effectiveDirectory) {
-            setActiveDirectory(effectiveDirectory);
-            void ensureStatus(effectiveDirectory, git);
-        }
-    }, [effectiveDirectory, setActiveDirectory, ensureStatus, git]);
-
-    return fileCount;
 };

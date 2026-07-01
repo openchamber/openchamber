@@ -11,18 +11,15 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { toast } from '@/components/ui';
-import {
-  RiGithubLine,
-  RiLoader4Line,
-  RiSearchLine,
-  RiExternalLinkLine,
-} from '@remixicon/react';
+import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
+import { useDeviceInfo } from '@/lib/device';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import type { GitHubPullRequestContextResult, GitHubPullRequestSummary, GitHubPullRequestsListResult, GitHubRepoSelector } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 
@@ -75,6 +72,8 @@ export function GitHubPrPickerDialog({
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const isMobile = useUIStore((state) => state.isMobile);
+  const { isTablet } = useDeviceInfo();
+  const alwaysShowActions = isMobile || isTablet;
   const activeProject = useProjectsStore((state) => state.getActiveProject());
 
   const projectDirectory = activeProject?.path ?? null;
@@ -89,6 +88,10 @@ export function GitHubPrPickerDialog({
   const [isLoading, setIsLoading] = React.useState(false);
   const [isLoadingMore, setIsLoadingMore] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
+  const directNumber = React.useMemo(() => parsePrNumber(query), [query]);
+  const debouncedQuery = useDebouncedValue(query, 350);
+  const isTextSearch = debouncedQuery.trim().length > 0 && !directNumber;
 
   const refresh = React.useCallback(async () => {
     if (!projectDirectory) {
@@ -128,6 +131,38 @@ export function GitHubPrPickerDialog({
     }
   }, [github, githubAuthChecked, githubAuthStatus, projectDirectory, t]);
 
+  React.useEffect(() => {
+    if (!open || !projectDirectory) return;
+    if (githubAuthChecked && githubAuthStatus?.connected === false) return;
+    if (!github?.prsList) return;
+    if (!debouncedQuery.trim() || directNumber) {
+      void refresh();
+      return;
+    }
+
+    const controller = new AbortController();
+    setIsLoading(true);
+    setError(null);
+
+    github.prsList(projectDirectory, { page: 1, query: debouncedQuery.trim() })
+      .then((next) => {
+        if (controller.signal.aborted) return;
+        setResult(next);
+        setPrs(next.prs ?? []);
+        setPage(next.page ?? 1);
+        setHasMore(Boolean(next.hasMore));
+      })
+      .catch((e) => {
+        if (controller.signal.aborted) return;
+        setError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setIsLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [open, projectDirectory, github, githubAuthChecked, githubAuthStatus, debouncedQuery, directNumber, refresh, t]);
+
   const loadMore = React.useCallback(async () => {
     if (!projectDirectory) return;
     if (!github?.prsList) return;
@@ -137,7 +172,9 @@ export function GitHubPrPickerDialog({
     setIsLoadingMore(true);
     try {
       const nextPage = page + 1;
-      const next = await github.prsList(projectDirectory, { page: nextPage });
+      const next = isTextSearch
+        ? await github.prsList(projectDirectory, { page: nextPage, query: debouncedQuery.trim() })
+        : await github.prsList(projectDirectory, { page: nextPage });
       setResult(next);
       setPrs((prev) => [...prev, ...(next.prs ?? [])]);
       setPage(next.page ?? nextPage);
@@ -148,7 +185,7 @@ export function GitHubPrPickerDialog({
     } finally {
       setIsLoadingMore(false);
     }
-  }, [github, hasMore, isLoading, isLoadingMore, page, projectDirectory, t]);
+  }, [github, hasMore, isLoading, isLoadingMore, isTextSearch, debouncedQuery, page, projectDirectory, t]);
 
   React.useEffect(() => {
     if (!open) {
@@ -183,17 +220,6 @@ export function GitHubPrPickerDialog({
     setSettingsPage('github');
     setSettingsDialogOpen(true);
   }, [setSettingsDialogOpen, setSettingsPage]);
-
-  const filtered = React.useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return prs;
-    return prs.filter((pr) => {
-      if (String(pr.number) === q.replace(/^#/, '')) return true;
-      return pr.title.toLowerCase().includes(q);
-    });
-  }, [prs, query]);
-
-  const directNumber = React.useMemo(() => parsePrNumber(query), [query]);
 
   const attachPr = React.useCallback(async (prNumber: number, sourceRepo?: GitHubRepoSelector | null) => {
     if (!projectDirectory) {
@@ -266,7 +292,7 @@ export function GitHubPrPickerDialog({
     <>
       <div className="mt-2 flex items-center gap-3">
         <div className="relative flex-1 min-w-0">
-          <RiSearchLine className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Icon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder={t('session.githubPrPicker.searchPlaceholder')}
             value={query}
@@ -303,7 +329,7 @@ export function GitHubPrPickerDialog({
 
           {isLoading ? (
             <div className="text-center text-muted-foreground py-8 flex items-center justify-center gap-2">
-              <RiLoader4Line className="h-4 w-4 animate-spin" />
+              <Icon name="loader-4" className="h-4 w-4 animate-spin" />
               {t('session.githubPrPicker.loading.pullRequests')}
             </div>
           ) : null}
@@ -337,17 +363,17 @@ export function GitHubPrPickerDialog({
               </p>
               <div className="flex-shrink-0 h-5 flex items-center mr-2">
                 {loadingPrNumber === directNumber ? (
-                  <RiLoader4Line className="h-4 w-4 animate-spin text-muted-foreground" />
+                  <Icon name="loader-4" className="h-4 w-4 animate-spin text-muted-foreground" />
                 ) : null}
               </div>
             </div>
           ) : null}
 
-          {filtered.length === 0 && !isLoading && connected && github && projectDirectory ? (
-            <div className="text-center text-muted-foreground py-8">{query ? t('session.githubPrPicker.empty.noPullRequestsFound') : t('session.githubPrPicker.empty.noOpenPullRequestsFound')}</div>
+          {prs.length === 0 && !isLoading && connected && github && projectDirectory ? (
+            <div className="text-center text-muted-foreground py-8">{debouncedQuery.trim() ? t('session.githubPrPicker.empty.noPullRequestsFound') : t('session.githubPrPicker.empty.noOpenPullRequestsFound')}</div>
           ) : null}
 
-          {filtered.map((pr) => (
+          {prs.map((pr) => (
             <div
               key={`${pr.sourceRepo?.owner ?? ''}-${pr.sourceRepo?.repo ?? ''}-${pr.number}`}
               className={cn(
@@ -371,17 +397,20 @@ export function GitHubPrPickerDialog({
 
               <div className="flex-shrink-0 h-5 flex items-center mr-2">
                 {loadingPrNumber === pr.number ? (
-                  <RiLoader4Line className="h-4 w-4 animate-spin text-muted-foreground" />
+                  <Icon name="loader-4" className="h-4 w-4 animate-spin text-muted-foreground" />
                 ) : (
                   <a
                     href={pr.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="hidden group-hover:flex h-5 w-5 items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+                    className={cn(
+                      "h-5 w-5 items-center justify-center text-muted-foreground hover:text-foreground transition-colors",
+                      alwaysShowActions ? "flex" : "hidden group-hover:flex"
+                    )}
                     onClick={(e) => e.stopPropagation()}
                     aria-label={t('session.githubPrPicker.actions.openInGitHubAria')}
                   >
-                    <RiExternalLinkLine className="h-4 w-4" />
+                    <Icon name="external-link" className="h-4 w-4" />
                   </a>
                 )}
               </div>
@@ -401,7 +430,7 @@ export function GitHubPrPickerDialog({
               >
                 {isLoadingMore ? (
                   <span className="inline-flex items-center gap-2">
-                    <RiLoader4Line className="h-4 w-4 animate-spin" />
+                    <Icon name="loader-4" className="h-4 w-4 animate-spin" />
                     {t('session.githubPrPicker.loading.more')}
                   </span>
                 ) : (
@@ -440,7 +469,7 @@ export function GitHubPrPickerDialog({
       <DialogContent className="max-w-2xl max-h-[70vh] flex flex-col">
         <DialogHeader className="flex-shrink-0">
           <DialogTitle className="flex items-center gap-2">
-            <RiGithubLine className="h-5 w-5" />
+            <Icon name="github" className="h-5 w-5" />
             {title}
           </DialogTitle>
           <DialogDescription>

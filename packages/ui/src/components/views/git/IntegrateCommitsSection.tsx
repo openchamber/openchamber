@@ -1,5 +1,4 @@
 import * as React from 'react';
-import { RiArrowDownSLine, RiLoader4Line, RiSplitCellsHorizontal, RiSparklingLine } from '@remixicon/react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,10 +14,11 @@ import {
   CommandList,
 } from '@/components/ui/command';
 import { toast } from '@/components/ui';
+import { Icon } from "@/components/icon/Icon";
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
 import { useUIStore } from '@/stores/useUIStore';
-import { execCommand } from '@/lib/execCommands';
+import { getGitCommitSummaries } from '@/lib/gitApi';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import {
   abortIntegrate,
@@ -143,18 +143,7 @@ export const IntegrateCommitsSection: React.FC<{
           const max = 50;
           // Show newest -> oldest.
           const subset = plan.commits.slice(-max).reverse();
-          const quoted = subset.map((s) => JSON.stringify(s)).join(' ');
-          const result = await execCommand(
-            `git show -s --format=%H%x09%h%x09%s ${quoted}`,
-            repoRoot
-          );
-          const lines = (result.stdout || '').split(/\r?\n/).filter(Boolean);
-          const parsed: Array<{ sha: string; short: string; subject: string }> = [];
-          for (const line of lines) {
-            const [sha, short, subject] = line.split('\t');
-            if (!sha || !short) continue;
-            parsed.push({ sha, short, subject: subject || '' });
-          }
+          const parsed = await getGitCommitSummaries(repoRoot, subset);
           if (!cancelled) {
             setCommitSummaries(parsed);
             setShowAllCommits(false);
@@ -344,7 +333,7 @@ export const IntegrateCommitsSection: React.FC<{
     <section className={containerClassName}>
       <div className={headerClassName}>
         <div className="flex items-center gap-2 min-w-0">
-          <RiSplitCellsHorizontal className="size-4 text-muted-foreground" />
+          <Icon name="split-cells-horizontal" className="size-4 text-muted-foreground" />
           <h3 className="typography-ui-header font-semibold text-foreground truncate">{t('gitView.integrate.title')}</h3>
           {ui.kind === 'ready' && ui.plan.commits.length > 0 ? (
             <span className="typography-meta text-muted-foreground truncate">
@@ -354,7 +343,7 @@ export const IntegrateCommitsSection: React.FC<{
         </div>
         <div className="flex items-center gap-2">
           {ui.kind === 'loading' || ui.kind === 'running' ? (
-            <RiLoader4Line className="size-4 animate-spin text-muted-foreground" />
+            <Icon name="loader-4" className="size-4 animate-spin text-muted-foreground" />
           ) : null}
         </div>
       </div>
@@ -375,7 +364,7 @@ export const IntegrateCommitsSection: React.FC<{
                 <Button variant="outline" size="sm" className="gap-1.5">
                   {t('gitView.integrate.target')}
                   <span className="max-w-[160px] truncate font-mono text-xs text-muted-foreground">{targetBranch}</span>
-                  <RiArrowDownSLine className="size-4 opacity-60" />
+                  <Icon name="arrow-down-s" className="size-4 opacity-60" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent
@@ -383,7 +372,11 @@ export const IntegrateCommitsSection: React.FC<{
                 className="w-72 p-0 max-h-[var(--available-height)] flex flex-col overflow-hidden"
               >
                 <Command className="h-full min-h-0">
-                  <CommandInput ref={searchInputRef} placeholder={t('gitView.branch.searchPlaceholder')} />
+                  <CommandInput
+                    ref={searchInputRef}
+                    placeholder={t('gitView.branch.searchPlaceholder')}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  />
                   <CommandList
                     className="h-full min-h-0"
                     scrollbarClassName="overlay-scrollbar--flush overlay-scrollbar--dense overlay-scrollbar--zero"
@@ -495,7 +488,7 @@ export const IntegrateCommitsSection: React.FC<{
                   disabled={!currentSessionId}
                   onClick={() => void handleResolveWithAi({ state: ui.state, details: ui.details }, false)}
                 >
-                  <RiSparklingLine className="size-3.5" />
+                  <Icon name="sparkling" className="size-3.5" />
                   {t('gitView.integrate.currentSession')}
                 </Button>
                 <Button
@@ -504,7 +497,7 @@ export const IntegrateCommitsSection: React.FC<{
                   className="typography-meta gap-1"
                   onClick={() => void handleResolveWithAi({ state: ui.state, details: ui.details }, true)}
                 >
-                  <RiSparklingLine className="size-3.5" />
+                  <Icon name="sparkling" className="size-3.5" />
                   {t('gitView.integrate.newSession')}
                 </Button>
                 <Button size="sm" className="typography-meta" onClick={() => void handleContinue()}>

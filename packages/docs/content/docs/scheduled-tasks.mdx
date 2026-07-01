@@ -1,0 +1,33 @@
+---
+title: Scheduled Tasks
+description: Run a prompt automatically on a schedule.
+---
+
+# Scheduled Tasks
+
+A scheduled task runs a prompt for you on a schedule — for example, a daily "summarize yesterday's changes" or a weekly cleanup. When it runs, OpenChamber starts a new session and sends the prompt on its own. Open the scheduler from the button at the top of the session sidebar.
+
+## Create a task
+
+1. Open the scheduled tasks dialog from the session sidebar.
+2. Add a task and give it a name.
+3. Choose when it runs:
+   - **daily** — at one or more times each day
+   - **weekly** — on chosen weekdays and times
+   - **once** — a single date and time
+4. Set what it does: the prompt to send, and the provider, model, and agent to use. The prompt can be a slash command, like `/review`.
+5. Save, and make sure the task is enabled.
+
+You can run any task immediately with **run now** to check it does what you expect.
+
+## What success looks like
+
+After a run, the task shows when it last ran, whether it succeeded, and a link to the session it created. If a run fails, the error is shown there too.
+
+## Keep in mind
+
+Tasks only fire while the OpenChamber server is running. If you close it, scheduled runs are paused until it's back up.
+
+## Related
+
+- [Commands & Snippets](/commands-snippets/) — reuse a slash command as the prompt

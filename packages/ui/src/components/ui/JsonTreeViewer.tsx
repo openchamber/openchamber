@@ -1,6 +1,5 @@
 import React from 'react';
-import { RiArrowDownSLine, RiArrowRightSLine } from '@remixicon/react';
-import { useVirtualizer } from '@tanstack/react-virtual';
+import { Virtualizer } from 'virtua';
 
 import {
   parseJsonToTree,
@@ -10,6 +9,7 @@ import {
   type JsonTreeNode,
   type FlatJsonNode,
 } from '@/lib/jsonTreeUtils';
+import { Icon } from "@/components/icon/Icon";
 
 interface JsonTreeViewerProps {
   data: unknown;
@@ -129,9 +129,9 @@ const JsonRow = React.memo(
             className="mr-1 flex h-4 w-4 shrink-0 items-center justify-center rounded-sm hover:bg-[var(--interactive-hover)] text-muted-foreground"
           >
             {isExpanded ? (
-              <RiArrowDownSLine className="h-3 w-3" />
+              <Icon name="arrow-down-s" className="h-3 w-3" />
             ) : (
-              <RiArrowRightSLine className="h-3 w-3" />
+              <Icon name="arrow-right-s" className="h-3 w-3" />
             )}
           </button>
         ) : (
@@ -204,14 +204,6 @@ const JsonTreeViewer = React.forwardRef<{ expandAll: () => void; collapseAll: ()
     const shouldVirtualize = flatNodes.length > VIRTUALIZE_THRESHOLD;
     const parentRef = React.useRef<HTMLDivElement>(null);
 
-    const virtualizer = useVirtualizer({
-      count: flatNodes.length,
-      getScrollElement: () => parentRef.current,
-      estimateSize: () => ROW_HEIGHT,
-      overscan: 20,
-      enabled: shouldVirtualize,
-    });
-
     const handleToggle = React.useCallback((id: string) => {
       setCollapsedPaths((prev) => {
         const next = new Set(prev);
@@ -246,37 +238,21 @@ const JsonTreeViewer = React.forwardRef<{ expandAll: () => void; collapseAll: ()
           className={className}
           style={{ maxHeight, overflow: 'auto' }}
         >
-          <div
-            style={{
-              height: `${virtualizer.getTotalSize()}px`,
-              width: '100%',
-              position: 'relative',
-            }}
+          <Virtualizer
+            data={flatNodes}
+            itemSize={ROW_HEIGHT}
+            bufferSize={ROW_HEIGHT * 20}
+            scrollRef={parentRef}
           >
-            {virtualizer.getVirtualItems().map((virtualRow) => {
-              const flatNode = flatNodes[virtualRow.index];
-              if (!flatNode) return null;
-              return (
-                <div
-                  key={flatNode.node.id}
-                  style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    height: `${virtualRow.size}px`,
-                    transform: `translateY(${virtualRow.start}px)`,
-                  }}
-                >
-                  <JsonRow
-                    flatNode={flatNode}
-                    onToggle={handleToggle}
-                    onCopyPath={onCopyPath}
-                  />
-                </div>
-              );
-            })}
-          </div>
+            {(flatNode) => (
+              <JsonRow
+                key={flatNode.node.id}
+                flatNode={flatNode}
+                onToggle={handleToggle}
+                onCopyPath={onCopyPath}
+              />
+            )}
+          </Virtualizer>
         </div>
       );
     }
@@ -301,4 +277,3 @@ const JsonTreeViewer = React.forwardRef<{ expandAll: () => void; collapseAll: ()
 );
 
 export { JsonTreeViewer };
-export type { JsonTreeViewerProps };

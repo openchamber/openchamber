@@ -74,6 +74,14 @@ function createSdkWithSingleEvent(event, hold) {
   };
 }
 
+function withTimeout(promise, ms, message) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+}
+
 // Helper to create an SDK that yields multiple events in sequence, then holds.
 function createSdkWithEvents(events, hold) {
   return {
@@ -275,7 +283,7 @@ describe('createEventPipeline', () => {
     expect(received[0].payload.type).toBe('server.connected');
   });
 
-  it('skips stale message.part.delta events after a newer message.part.updated for the same field', async () => {
+  it('keeps message.part.delta events when a newer message.part.updated is queued for the same field', async () => {
     installDomStubs();
 
     let releaseStream;
@@ -285,8 +293,8 @@ describe('createEventPipeline', () => {
 
     const received = [];
 
-    // Simulate: part.updated arrives, then delta, then a newer part.updated for the
-    // same part. The older queued delta becomes stale and must be skipped.
+    // The pipeline only routes/coalesces events. Whether this delta is already
+    // represented by the newer snapshot is reducer state, not queue state.
     const directory = '/test/dir';
     const sdk = createSdkWithEvents([
       // T0: message.part.updated for part-A
@@ -299,7 +307,7 @@ describe('createEventPipeline', () => {
           },
         },
       },
-      // T1: message.part.delta for part-A (should be dropped as stale)
+      // T1: message.part.delta for part-A
       {
         payload: {
           type: 'message.part.delta',
@@ -312,7 +320,8 @@ describe('createEventPipeline', () => {
           },
         },
       },
-      // T2: message.part.updated for part-A — coalesces with T0
+      // T2: a newer message.part.updated for part-A — delivered as its own
+      // event (part.updated is never coalesced, ordering is preserved).
       {
         payload: {
           type: 'message.part.updated',
@@ -329,7 +338,7 @@ describe('createEventPipeline', () => {
         sdk,
         onEvent: (dir, payload) => {
           received.push({ directory: dir, payload });
-          if (received.length === 1) {
+          if (received.length === 3) {
             cleanup();
             releaseStream();
             resolve();
@@ -340,8 +349,11 @@ describe('createEventPipeline', () => {
 
     await delivered;
 
-    expect(received.length).toBe(1);
+    expect(received.length).toBe(3);
     expect(received[0].payload.type).toBe('message.part.updated');
+    expect(received[1].payload.type).toBe('message.part.delta');
+    expect(received[1].payload.properties.delta).toBe(' world');
+    expect(received[2].payload.type).toBe('message.part.updated');
   });
 
   it('keeps delta events for other fields on the same part', async () => {
@@ -406,7 +418,7 @@ describe('createEventPipeline', () => {
     expect(received[1].payload.properties.delta).toBe('hello');
   });
 
-  it('coalesces message.part.updated events for the same part', async () => {
+  it('delivers every message.part.updated for the same part (never coalesced)', async () => {
     installDomStubs();
 
     let releaseStream;
@@ -417,6 +429,8 @@ describe('createEventPipeline', () => {
     const received = [];
     const directory = '/test/dir';
 
+    // part.updated snapshots must all reach the reducer in order — coalescing
+    // them can drop intermediate states deltas depend on (see PR #1167).
     const sdk = createSdkWithEvents([
       {
         payload: {
@@ -443,18 +457,20 @@ describe('createEventPipeline', () => {
         sdk,
         onEvent: (dir, payload) => {
           received.push({ directory: dir, payload });
-          cleanup();
-          releaseStream();
-          resolve();
+          if (received.length === 2) {
+            cleanup();
+            releaseStream();
+            resolve();
+          }
         },
       });
     });
 
     await delivered;
 
-    // Only 1 event should be delivered (coalesced)
-    expect(received.length).toBe(1);
+    expect(received.length).toBe(2);
     expect(received[0].payload.type).toBe('message.part.updated');
+    expect(received[1].payload.type).toBe('message.part.updated');
   });
 
   it('routes events before queueing so coalescing happens on the resolved directory', async () => {
@@ -465,23 +481,28 @@ describe('createEventPipeline', () => {
       releaseStream = resolve;
     });
 
+    // Two coalescible session.status events for the same session arrive on
+    // different transport directories; routing resolves both to the same
+    // directory, so they must land in one queue and coalesce to the latest.
     const received = [];
     const sdk = createSdkWithEvents([
       {
         directory: 'global',
         payload: {
-          type: 'message.part.updated',
+          type: 'session.status',
           properties: {
-            part: { id: 'part-A', type: 'text', messageID: 'msg-1' },
+            sessionID: 'session-1',
+            status: { type: 'busy' },
           },
         },
       },
       {
         directory: '/real-dir',
         payload: {
-          type: 'message.part.updated',
+          type: 'session.status',
           properties: {
-            part: { id: 'part-A', type: 'text', messageID: 'msg-1', text: 'next' },
+            sessionID: 'session-1',
+            status: { type: 'idle' },
           },
         },
       },
@@ -491,7 +512,7 @@ describe('createEventPipeline', () => {
       const { cleanup } = createEventPipeline({
         sdk,
         routeDirectory: (directory, payload) => {
-          if (payload.type === 'message.part.updated') {
+          if (payload.type === 'session.status') {
             return '/resolved-dir';
           }
           return directory;
@@ -509,8 +530,8 @@ describe('createEventPipeline', () => {
 
     expect(received).toHaveLength(1);
     expect(received[0].directory).toBe('/resolved-dir');
-    expect(received[0].payload.type).toBe('message.part.updated');
-    expect(received[0].payload.properties.part.text).toBe('next');
+    expect(received[0].payload.type).toBe('session.status');
+    expect(received[0].payload.properties.status.type).toBe('idle');
   });
 
   it('consumes websocket message stream frames when transport is ws', async () => {
@@ -636,25 +657,30 @@ describe('createEventPipeline', () => {
       },
     }, hold);
 
+    let cleanup;
     const delivered = new Promise((resolve) => {
-      const { cleanup } = createEventPipeline({
+      const pipeline = createEventPipeline({
         sdk,
         transport: 'auto',
+        wsReadyTimeoutMs: 20,
         onEvent: (directory, payload) => {
           received.push({ directory, payload });
-          cleanup();
-          releaseStream();
           resolve();
         },
       });
+      cleanup = pipeline.cleanup;
     });
 
     await Promise.resolve();
     const socket = FakeWebSocket.instances[0];
     socket.emitOpen();
 
-    await new Promise((resolve) => setTimeout(resolve, 2300));
-    await delivered;
+    try {
+      await withTimeout(delivered, 500, 'timed out waiting for websocket-ready SSE fallback');
+    } finally {
+      cleanup?.();
+      releaseStream();
+    }
 
     expect(received).toEqual([
       {

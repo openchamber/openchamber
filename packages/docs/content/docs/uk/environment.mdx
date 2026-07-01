@@ -1,0 +1,138 @@
+---
+title: Змінні середовища
+description: Налаштуйте інтеграцію OpenChamber і OpenCode через змінні середовища.
+---
+
+# Змінні середовища
+
+OpenChamber читає ці змінні під час запуску. Для startup-сервісів `openchamber startup enable` типово зберігає snapshot поточного середовища, тому після змін перезапустіть цю команду.
+
+## Сервер OpenChamber
+
+### `OPENCHAMBER_HOST`
+
+Адреса, на якій слухає web-сервер OpenChamber. Використовуйте `0.0.0.0`, щоб відкрити доступ з інших машин.
+
+### `OPENCHAMBER_UI_PASSWORD`
+
+Пароль для browser UI. Використовуйте його для доступу не лише з localhost, тунелів або reverse proxy.
+
+### `OPENCHAMBER_API_ONLY`
+
+Запускає OpenChamber у headless mode, якщо встановлено `true` або `1`. API routes залишаються доступними для desktop і mobile clients, але browser UI не віддається.
+
+### `OPENCHAMBER_DATA_DIR`
+
+Перевизначає директорію даних OpenChamber. Типово це `~/.config/openchamber`.
+
+### `OPENCHAMBER_COMPRESS_API`
+
+Керує стисненням API-відповідей. `true` або `1` вмикає, `false` або `0` вимикає.
+
+### `OPENCHAMBER_SKIP_API_COMPRESSION`
+
+Вимикає стиснення API-відповідей, якщо встановлено `true` або `1`. Має пріоритет над `OPENCHAMBER_COMPRESS_API`.
+
+### `OPENCHAMBER_VERBOSE_REQUEST_LOGS`
+
+Вмикає детальні HTTP request logs, якщо встановлено `true` або `1`.
+
+### `OPENCHAMBER_UPDATE_API_URL`
+
+Перевизначає endpoint для перевірки оновлень. Більшості користувачів це не потрібно.
+
+### `OPENCHAMBER_PACKAGE_MANAGER`
+
+Примусово задає package manager для оновлень, якщо auto-detection помилився.
+
+## Сервер OpenCode
+
+### `OPENCODE_HOST`
+
+Підключає OpenChamber до вже запущеного OpenCode server. Значення має бути `http` або `https` origin з явним портом і без path, query або hash. `OPENCODE_HOST` має пріоритет над `OPENCODE_PORT`.
+
+### `OPENCODE_PORT`
+
+Задає порт OpenCode server. Для managed OpenCode це бажаний порт; з `OPENCODE_SKIP_START=true` OpenChamber підключається до зовнішнього сервера на цьому порту.
+
+### `OPENCODE_SKIP_START`
+
+Не дає OpenChamber запускати власний OpenCode server, якщо встановлено `true`.
+
+### `OPENCHAMBER_OPENCODE_HOSTNAME`
+
+Hostname для OpenCode server, яким керує OpenChamber. Типово `127.0.0.1`.
+
+### `OPENCODE_BINARY`
+
+Шлях до executable `opencode`, який має запускати OpenChamber.
+
+### `OPENCODE_CONFIG`
+
+Шлях до конкретного config-файлу OpenCode.
+
+### `OPENCODE_CONFIG_DIR`
+
+Шлях до директорії config OpenCode для agents, skills, snippets і config discovery.
+
+### `OPENCODE_DATA_DIR`
+
+Власна директорія даних для managed OpenCode server.
+
+### `OPENCODE_WSL_DISTRO`
+
+Вибирає WSL distro для інтеграції OpenCode на Windows.
+
+### `OPENCHAMBER_OPENCODE_WSL_DISTRO`
+
+OpenChamber-specific alias для вибору WSL distro. `OPENCODE_WSL_DISTRO` має пріоритет, якщо задані обидві змінні.
+
+### `OPENCODE_JWT_SECRET`
+
+Secret для підпису UI auth tokens. Для постійних service deployments використовуйте довге випадкове значення.
+
+## Terminal і Git
+
+### `OPENCHAMBER_TERMINAL_SHELL`
+
+Shell executable для terminal sessions в OpenChamber.
+
+### `OPENCHAMBER_GIT_BINARY`
+
+Git executable для Git-функцій OpenChamber.
+
+### `GIT_BINARY`
+
+Альтернативний override для Git executable. Для OpenChamber-specific налаштувань краще використовуйте `OPENCHAMBER_GIT_BINARY`.
+
+### `OPENCHAMBER_GIT_READ_CACHE_TTL_MS`
+
+TTL у мілісекундах для cached Git-backed file reads. Встановіть `0`, щоб вимкнути cache під час debugging.
+
+## Voice і tunnels
+
+### `OPENAI_API_KEY`
+
+API key для voice-функцій OpenChamber, які викликають OpenAI-compatible services.
+
+### `OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS`
+
+Дозволяє remote OpenAI-compatible base URLs для voice-функцій, якщо встановлено `true` або `1`.
+
+### `NGROK_AUTHTOKEN`
+
+ngrok auth token для tunnel-команд OpenChamber. Також можна налаштувати ngrok через `ngrok config add-authtoken <token>`.
+
+## Runtime helpers
+
+### `BUN_BINARY`
+
+Bun executable, який OpenChamber має використовувати для запуску daemon processes.
+
+### `BUN_INSTALL`
+
+Корінь інсталяції Bun. OpenChamber використовує його, щоб знайти `bin/bun` для daemon startup і updates.
+
+### `VITE_OPENCODE_URL`
+
+Build-time API base URL для Vite-built web app. Для звичайного CLI або desktop usage більшості користувачів це не потрібно.

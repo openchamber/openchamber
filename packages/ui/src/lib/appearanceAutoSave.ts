@@ -2,9 +2,11 @@ import { useUIStore } from '@/stores/useUIStore';
 import { updateDesktopSettings } from '@/lib/persistence';
 import type { DesktopSettings } from '@/lib/desktop';
 import type { MonoFontOption, UiFontOption } from '@/lib/fontOptions';
+import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 
 type AppearanceSlice = {
   showReasoningTraces: boolean;
+  collapsibleThinkingBlocks: boolean;
   showDeletionDialog: boolean;
   nativeNotificationsEnabled: boolean;
   notificationMode: 'always' | 'hidden-only';
@@ -32,8 +34,8 @@ type AppearanceSlice = {
   padding: number;
   cornerRadius: number;
   inputBarOffset: number;
+  mobileKeyboardMode: MobileKeyboardMode;
   diffLayoutPreference: 'dynamic' | 'inline' | 'side-by-side';
-  diffViewMode: 'single' | 'stacked';
   gitChangesViewMode: 'flat' | 'tree';
 };
 
@@ -48,6 +50,7 @@ export const startAppearanceAutoSave = (): void => {
 
   let previous: AppearanceSlice = {
     showReasoningTraces: useUIStore.getState().showReasoningTraces,
+    collapsibleThinkingBlocks: useUIStore.getState().collapsibleThinkingBlocks,
     showDeletionDialog: useUIStore.getState().showDeletionDialog,
     nativeNotificationsEnabled: useUIStore.getState().nativeNotificationsEnabled,
     notificationMode: useUIStore.getState().notificationMode,
@@ -70,8 +73,8 @@ export const startAppearanceAutoSave = (): void => {
     padding: useUIStore.getState().padding,
     cornerRadius: useUIStore.getState().cornerRadius,
     inputBarOffset: useUIStore.getState().inputBarOffset,
+    mobileKeyboardMode: useUIStore.getState().mobileKeyboardMode,
     diffLayoutPreference: useUIStore.getState().diffLayoutPreference,
-    diffViewMode: useUIStore.getState().diffViewMode,
     gitChangesViewMode: useUIStore.getState().gitChangesViewMode,
   };
 
@@ -98,6 +101,7 @@ export const startAppearanceAutoSave = (): void => {
   useUIStore.subscribe((state) => {
     const current: AppearanceSlice = {
       showReasoningTraces: state.showReasoningTraces,
+      collapsibleThinkingBlocks: state.collapsibleThinkingBlocks,
       showDeletionDialog: state.showDeletionDialog,
       nativeNotificationsEnabled: state.nativeNotificationsEnabled,
       notificationMode: state.notificationMode,
@@ -120,8 +124,8 @@ export const startAppearanceAutoSave = (): void => {
       padding: state.padding,
       cornerRadius: state.cornerRadius,
       inputBarOffset: state.inputBarOffset,
+      mobileKeyboardMode: state.mobileKeyboardMode,
       diffLayoutPreference: state.diffLayoutPreference,
-      diffViewMode: state.diffViewMode,
       gitChangesViewMode: state.gitChangesViewMode,
     };
 
@@ -129,6 +133,9 @@ export const startAppearanceAutoSave = (): void => {
 
     if (current.showReasoningTraces !== previous.showReasoningTraces) {
       diff.showReasoningTraces = current.showReasoningTraces;
+    }
+    if (current.collapsibleThinkingBlocks !== previous.collapsibleThinkingBlocks) {
+      diff.collapsibleThinkingBlocks = current.collapsibleThinkingBlocks;
     }
     if (current.showDeletionDialog !== previous.showDeletionDialog) {
       diff.showDeletionDialog = current.showDeletionDialog;
@@ -196,11 +203,11 @@ export const startAppearanceAutoSave = (): void => {
     if (current.inputBarOffset !== previous.inputBarOffset) {
       diff.inputBarOffset = current.inputBarOffset;
     }
+    if (current.mobileKeyboardMode !== previous.mobileKeyboardMode) {
+      diff.mobileKeyboardMode = current.mobileKeyboardMode;
+    }
     if (current.diffLayoutPreference !== previous.diffLayoutPreference) {
       diff.diffLayoutPreference = current.diffLayoutPreference;
-    }
-    if (current.diffViewMode !== previous.diffViewMode) {
-      diff.diffViewMode = current.diffViewMode;
     }
     if (current.gitChangesViewMode !== previous.gitChangesViewMode) {
       diff.gitChangesViewMode = current.gitChangesViewMode;

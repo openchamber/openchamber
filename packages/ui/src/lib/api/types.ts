@@ -1,8 +1,9 @@
 import type { WorktreeMetadata } from '@/types/worktree';
+import type { DraftStarterRef } from '@/lib/draftStarters';
 
-export type RuntimePlatform = 'web' | 'desktop' | 'vscode';
+type RuntimePlatform = 'web' | 'desktop' | 'vscode';
 
-export interface RuntimeDescriptor {
+interface RuntimeDescriptor {
   platform: RuntimePlatform;
 
   isDesktop: boolean;
@@ -12,24 +13,18 @@ export interface RuntimeDescriptor {
   label?: string;
 }
 
-export interface ApiError {
-  message: string;
-  code?: string;
-  cause?: unknown;
-}
-
-export interface Subscription {
+interface Subscription {
 
   close: () => void;
 }
 
-export interface RetryPolicy {
+interface RetryPolicy {
   maxRetries: number;
   initialDelayMs: number;
   maxDelayMs: number;
 }
 
-export interface TerminalTransportCapability {
+interface TerminalTransportCapability {
   preferred?: 'ws' | 'http' | 'sse';
   transports?: Array<'ws' | 'http' | 'sse'>;
   ws?: {
@@ -98,7 +93,7 @@ export interface TerminalAPI {
   forceKill?(options: ForceKillOptions): Promise<void>;
 }
 
-export interface GitStatusFile {
+interface GitStatusFile {
   path: string;
   index: string;
   working_dir: string;
@@ -118,11 +113,19 @@ export interface GitRebaseInProgress {
   onto: string;
 }
 
+export interface GitRemoteComparison {
+  remote: string;
+  branch: string;
+  ahead: number;
+  behind: number;
+}
+
 export interface GitStatus {
   current: string;
   tracking: string | null;
   ahead: number;
   behind: number;
+  upstreamComparison?: GitRemoteComparison | null;
   files: GitStatusFile[];
   isClean: boolean;
   diffStats?: Record<string, { insertions: number; deletions: number }>;
@@ -172,7 +175,7 @@ export interface GitBranch {
   branches: Record<string, GitBranchDetails>;
 }
 
-export interface GitCommitSummary {
+interface GitCommitSummary {
   changes: number;
   insertions: number;
   deletions: number;
@@ -203,6 +206,19 @@ export interface GitPullResult {
   deletions: number;
 }
 
+export interface GitPullOptions {
+  remote?: string;
+  branch?: string;
+  rebase?: boolean;
+}
+
+export interface GitStashEntry {
+  ref: string;
+  message: string;
+  relativeTime: string;
+  hash: string;
+}
+
 export interface GitRemote {
   name: string;
   fetchUrl: string;
@@ -213,6 +229,26 @@ export interface GitMergeResult {
   success: boolean;
   conflict?: boolean;
   conflictFiles?: string[];
+}
+
+export interface CheckoutCommitResponse {
+  success: boolean;
+}
+
+export interface CherryPickResponse {
+  success: boolean;
+  conflict?: boolean;
+  conflictFiles?: string[];
+}
+
+export interface RevertCommitResponse {
+  success: boolean;
+  conflict?: boolean;
+  conflictFiles?: string[];
+}
+
+export interface ResetToCommitResponse {
+  success: boolean;
 }
 
 export interface GitRebaseResult {
@@ -243,6 +279,8 @@ export interface GitIdentityProfile {
   userEmail: string;
   authType?: GitIdentityAuthType;
   sshKey?: string | null;
+  signCommits?: boolean;
+  signingKey?: string | null;
   host?: string | null;
   color?: string | null;
   icon?: string | null;
@@ -270,6 +308,7 @@ export interface GitLogEntry {
   filesChanged: number;
   insertions: number;
   deletions: number;
+  parents: string[];
 }
 
 export interface GitLogResponse {
@@ -288,6 +327,12 @@ export interface CommitFileEntry {
 
 export interface GitCommitFilesResponse {
   files: CommitFileEntry[];
+}
+
+export interface CommitFileDiffResponse {
+  original: string;
+  modified: string;
+  isBinary: boolean;
 }
 
 export interface GitWorktreeInfo {
@@ -338,6 +383,8 @@ export interface CreateGitWorktreePayload {
   /** Optional remote provisioning (used for fork PR workflows). */
   ensureRemoteName?: string;
   ensureRemoteUrl?: string;
+  /** Return once the target directory exists and finish Git worktree setup in the background. */
+  returnAfterDirectoryCreated?: boolean;
 }
 
 export interface GitWorktreeCreateResult {
@@ -345,6 +392,8 @@ export interface GitWorktreeCreateResult {
   name: string;
   branch: string;
   path: string;
+  directoryCreated?: true;
+  bootstrapStatus?: GitWorktreeBootstrapStatus;
 }
 
 export interface RemoveGitWorktreePayload {
@@ -369,6 +418,7 @@ export interface GitRemoveRemotePayload {
 export interface CreateGitCommitOptions {
   addAll?: boolean;
   files?: string[];
+  stageFiles?: string[];
 }
 
 export interface GitLogOptions {
@@ -376,6 +426,7 @@ export interface GitLogOptions {
   from?: string;
   to?: string;
   file?: string;
+  all?: boolean;
 }
 
 export interface GeneratedCommitMessage {
@@ -388,7 +439,7 @@ export interface GeneratedPullRequestDescription {
   body: string;
 }
 
-export interface GitWorktreeAPI {
+interface GitWorktreeAPI {
   list(directory: string): Promise<GitWorktreeInfo[]>;
   validate?(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeValidationResult>;
   bootstrapStatus?(directory: string): Promise<GitWorktreeBootstrapStatus>;
@@ -402,7 +453,14 @@ export interface GitAPI {
   getGitStatus(directory: string, options?: { mode?: 'light' }): Promise<GitStatus>;
   getGitDiff(directory: string, options: GetGitDiffOptions): Promise<GitDiffResponse>;
   getGitFileDiff(directory: string, options: GetGitFileDiffOptions): Promise<GitFileDiffResponse>;
-  revertGitFile(directory: string, filePath: string): Promise<void>;
+  revertGitFile(directory: string, filePath: string, options?: { scope?: 'all' | 'working' }): Promise<void>;
+  stageGitFile(directory: string, filePath: string): Promise<void>;
+  stageGitFiles?(directory: string, filePaths: string[]): Promise<void>;
+  unstageGitFile(directory: string, filePath: string): Promise<void>;
+  unstageGitFiles?(directory: string, filePaths: string[]): Promise<void>;
+  stageGitHunk?(directory: string, filePath: string, patch: string): Promise<void>;
+  unstageGitHunk?(directory: string, filePath: string, patch: string): Promise<void>;
+  revertGitHunk?(directory: string, filePath: string, patch: string): Promise<void>;
   isLinkedWorktree(directory: string): Promise<boolean>;
   getGitBranches(directory: string): Promise<GitBranch>;
   deleteGitBranch(directory: string, payload: GitDeleteBranchPayload): Promise<{ success: boolean }>;
@@ -421,13 +479,20 @@ export interface GitAPI {
   deleteGitWorktree?(directory: string, payload: RemoveGitWorktreePayload): Promise<{ success: boolean }>;
   createGitCommit(directory: string, message: string, options?: CreateGitCommitOptions): Promise<GitCommitResult>;
   gitPush(directory: string, options?: { remote?: string; branch?: string; options?: string[] | Record<string, unknown> }): Promise<GitPushResult>;
-  gitPull(directory: string, options?: { remote?: string; branch?: string }): Promise<GitPullResult>;
+  gitPull(directory: string, options?: GitPullOptions): Promise<GitPullResult>;
   gitFetch(directory: string, options?: { remote?: string; branch?: string }): Promise<{ success: boolean }>;
+  listGitStashes(directory: string): Promise<{ stashes: GitStashEntry[] }>;
+  countGitStashFiles(directory: string, refs: string[]): Promise<{ counts: Record<string, number> }>;
+  stashGitChanges(directory: string, options?: { message?: string }): Promise<{ success: boolean; created: boolean; message: string; output: string }>;
+  applyGitStash(directory: string, options: { ref: string }): Promise<{ success: boolean; ref: string }>;
+  popGitStash(directory: string, options: { ref: string }): Promise<{ success: boolean; ref: string }>;
+  dropGitStash(directory: string, options: { ref: string }): Promise<{ success: boolean; ref: string }>;
   checkoutBranch(directory: string, branch: string): Promise<{ success: boolean; branch: string }>;
   createBranch(directory: string, name: string, startPoint?: string): Promise<{ success: boolean; branch: string }>;
   renameBranch(directory: string, oldName: string, newName: string): Promise<{ success: boolean; branch: string }>;
   getGitLog(directory: string, options?: GitLogOptions): Promise<GitLogResponse>;
   getCommitFiles(directory: string, hash: string): Promise<GitCommitFilesResponse>;
+  getCommitFileDiff?(directory: string, hash: string, filePath: string, isBinary: boolean): Promise<CommitFileDiffResponse>;
   getCurrentGitIdentity(directory: string): Promise<GitIdentitySummary | null>;
   hasLocalIdentity?(directory: string): Promise<boolean>;
   setGitIdentity(directory: string, profileId: string): Promise<{ success: boolean; profile: GitIdentityProfile }>;
@@ -445,6 +510,10 @@ export interface GitAPI {
   merge(directory: string, options: { branch: string }): Promise<GitMergeResult>;
   abortMerge(directory: string): Promise<{ success: boolean }>;
   continueMerge(directory: string): Promise<{ success: boolean; conflict: boolean; conflictFiles?: string[] }>;
+  checkoutCommit(directory: string, hash: string): Promise<CheckoutCommitResponse>;
+  cherryPick(directory: string, hash: string): Promise<CherryPickResponse>;
+  revertCommit(directory: string, hash: string): Promise<RevertCommitResponse>;
+  resetToCommit(directory: string, hash: string, mode: 'soft' | 'mixed' | 'hard', force?: boolean): Promise<ResetToCommitResponse>;
   stash(directory: string, options?: { message?: string; includeUntracked?: boolean }): Promise<{ success: boolean }>;
   stashPop(directory: string): Promise<{ success: boolean }>;
   getConflictDetails(directory: string): Promise<MergeConflictDetails>;
@@ -461,7 +530,7 @@ export interface GitAPI {
     cwd: string | null;
     branch: string | null;
     headState: 'branch' | 'detached' | 'unborn';
-    worktreeStatus: 'ready' | 'missing' | 'invalid' | 'not-a-repo';
+    worktreeStatus: 'pending' | 'ready' | 'missing' | 'invalid' | 'not-a-repo';
     legacy: boolean;
     degraded: boolean;
     attentionReason?: 'merge' | 'rebase' | 'cherry-pick' | 'revert' | 'bisect' | null;
@@ -505,13 +574,15 @@ export interface CommandExecResult {
   error?: string;
 }
 
-export interface ListDirectoryOptions {
+interface ListDirectoryOptions {
   respectGitignore?: boolean;
 }
 
-export interface FileReadOptions {
+interface FileReadOptions {
   allowOutsideWorkspace?: boolean;
+  outsideFileGrant?: string;
   optional?: boolean;
+  directory?: string;
 }
 
 export interface FilesAPI {
@@ -557,20 +628,24 @@ export interface SettingsPayload {
   opencodeBinary?: string;
   projects?: ProjectEntry[];
   activeProjectId?: string;
-  approvedDirectories?: string[];
   securityScopedBookmarks?: string[];
   pinnedDirectories?: string[];
   showReasoningTraces?: boolean;
+  collapsibleThinkingBlocks?: boolean;
   showDeletionDialog?: boolean;
   nativeNotificationsEnabled?: boolean;
   notificationMode?: 'always' | 'hidden-only';
   autoDeleteEnabled?: boolean;
   autoDeleteAfterDays?: number;
   sessionRetentionAction?: 'archive' | 'delete';
+  followUpBehavior?: 'steer' | 'queue';
   queueModeEnabled?: boolean;
   gitmojiEnabled?: boolean;
   inputSpellcheckEnabled?: boolean;
+  showOpenCodeUpdateNotifications?: boolean;
+  openCodeUpdateToastDismissedVersion?: string;
   showToolFileIcons?: boolean;
+  showTurnChangedFiles?: boolean;
   showExpandedBashTools?: boolean;
   showExpandedEditTools?: boolean;
   chatRenderMode?: 'sorted' | 'live';
@@ -585,8 +660,8 @@ export interface SettingsPayload {
   padding?: number;
   cornerRadius?: number;
   inputBarOffset?: number;
+  shortcutOverrides?: Record<string, string>;
   diffLayoutPreference?: 'dynamic' | 'inline' | 'side-by-side';
-  diffViewMode?: 'single' | 'stacked';
   gitChangesViewMode?: 'flat' | 'tree';
   directoryShowHidden?: boolean;
   filesViewShowGitignored?: boolean;
@@ -594,6 +669,8 @@ export interface SettingsPayload {
   gitProviderId?: string;
   gitModelId?: string;
   pwaAppName?: string;
+  mobileKeyboardMode?: 'native' | 'resize-content';
+  draftStarters?: DraftStarterRef[];
 
   [key: string]: unknown;
 }
@@ -614,7 +691,7 @@ export interface DirectoryPermissionRequest {
   path: string;
 }
 
-export interface DirectoryPermissionResult {
+interface DirectoryPermissionResult {
   success: boolean;
   path?: string;
   error?: string;
@@ -636,6 +713,10 @@ export interface NotificationPayload {
   body?: string;
 
   tag?: string;
+  kind?: string;
+  sessionId?: string;
+  directory?: string;
+  requireHidden?: boolean;
 }
 
 export interface NotificationsAPI {
@@ -643,7 +724,7 @@ export interface NotificationsAPI {
   canNotify?: () => boolean | Promise<boolean>;
 }
 
-export interface DiagnosticsAPI {
+interface DiagnosticsAPI {
   downloadLogs(): Promise<{ fileName: string; content: string }>;
 }
 
@@ -666,6 +747,9 @@ export interface VSCodeAPI {
   executeCommand(command: string, ...args: unknown[]): Promise<unknown>;
   openAgentManager(): Promise<void>;
   openExternalUrl(url: string): Promise<void>;
+  pickFiles?(): Promise<unknown>;
+  saveImage?(payload: unknown): Promise<unknown>;
+  saveMarkdown?(payload: unknown): Promise<unknown>;
 }
 
 export interface PushSubscribePayload {
@@ -675,17 +759,28 @@ export interface PushSubscribePayload {
     auth: string;
   };
   origin?: string;
+  /** Runtime surface ('ios' | 'android' | 'vscode' | 'desktop' | 'web') for presence-aware routing. */
+  platform?: string;
 }
 
 export interface PushUnsubscribePayload {
   endpoint: string;
 }
 
+export interface ApnsTokenPayload {
+  token: string;
+  /** 'ios' (APNs) or 'android' (FCM) — lets the relay route the token to the right service. */
+  platform?: string;
+}
+
 export interface PushAPI {
   getVapidPublicKey(): Promise<{ publicKey: string } | null>;
   subscribe(payload: PushSubscribePayload): Promise<{ ok: true } | null>;
   unsubscribe(payload: PushUnsubscribePayload): Promise<{ ok: true } | null>;
-  setVisibility(payload: { visible: boolean }): Promise<{ ok: true } | null>;
+  setVisibility(payload: { visible: boolean; platform?: string }): Promise<{ ok: true } | null>;
+  /** Register a native iOS APNs device token (Capacitor mobile app only). */
+  registerApnsToken(payload: ApnsTokenPayload): Promise<{ ok: true } | null>;
+  unregisterApnsToken(payload: ApnsTokenPayload): Promise<{ ok: true } | null>;
 }
 
 export type GitHubUserSummary = {
@@ -696,13 +791,13 @@ export type GitHubUserSummary = {
   email?: string;
 };
 
-export type GitHubRepoRef = {
+type GitHubRepoRef = {
   owner: string;
   repo: string;
   url: string;
 };
 
-export type GitHubChecksSummary = {
+type GitHubChecksSummary = {
   state: 'success' | 'failure' | 'pending' | 'unknown';
   total: number;
   success: number;
@@ -765,7 +860,7 @@ export type GitHubPullRequest = {
   mergeableState?: string | null;
 };
 
-export type GitHubPullRequestHeadRepo = {
+type GitHubPullRequestHeadRepo = {
   owner: string;
   repo: string;
   url: string;
@@ -783,7 +878,7 @@ export type GitHubPullRequestSummary = GitHubPullRequest & {
   sourceRepo?: (GitHubRepoSelector & { source: string }) | null;
 };
 
-export type GitHubPullRequestFile = {
+type GitHubPullRequestFile = {
   filename: string;
   status?: string;
   additions?: number;
@@ -792,7 +887,7 @@ export type GitHubPullRequestFile = {
   patch?: string;
 };
 
-export type GitHubPullRequestReviewComment = {
+type GitHubPullRequestReviewComment = {
   id: number;
   url: string;
   body: string;
@@ -877,7 +972,7 @@ export type GitHubPullRequestMergeResult = {
   message?: string;
 };
 
-export type GitHubIssueLabel = {
+type GitHubIssueLabel = {
   name: string;
   color?: string;
 };
@@ -944,13 +1039,20 @@ export type GitHubAuthStatus = {
   user?: GitHubUserSummary | null;
   scope?: string;
   accounts?: GitHubAuthAccount[];
+  ghCli?: {
+    available: boolean;
+    disabled: boolean;
+    active: boolean;
+    user?: GitHubUserSummary | null;
+  } | null;
 };
 
-export type GitHubAuthAccount = {
+type GitHubAuthAccount = {
   id: string;
   user: GitHubUserSummary;
   scope?: string;
   current?: boolean;
+  source?: 'oauth' | 'gh-cli';
 };
 
 export type GitHubDeviceFlowStart = {
@@ -973,6 +1075,7 @@ export interface GitHubAPI {
   authComplete(deviceCode: string): Promise<GitHubDeviceFlowComplete>;
   authDisconnect(): Promise<{ removed: boolean }>;
   authActivate(accountId: string): Promise<GitHubAuthStatus>;
+  authSetGhCliDisabled(disabled: boolean): Promise<{ disabled: boolean }>;
   me?(): Promise<GitHubUserSummary>;
 
   prStatus(directory: string, branch: string, remote?: string, options?: { force?: boolean }): Promise<GitHubPullRequestStatus>;
@@ -981,18 +1084,49 @@ export interface GitHubAPI {
   prMerge(payload: GitHubPullRequestMergeInput): Promise<GitHubPullRequestMergeResult>;
   prReady(payload: GitHubPullRequestReadyInput): Promise<GitHubPullRequestReadyResult>;
 
-  prsList(directory: string, options?: { page?: number }): Promise<GitHubPullRequestsListResult>;
+  prsList(directory: string, options?: { page?: number; query?: string }): Promise<GitHubPullRequestsListResult>;
   prContext(
     directory: string,
     number: number,
     options?: { includeDiff?: boolean; includeCheckDetails?: boolean; sourceRepo?: GitHubRepoSelector | null }
   ): Promise<GitHubPullRequestContextResult>;
 
-  issuesList(directory: string, options?: { page?: number }): Promise<GitHubIssuesListResult>;
+  issuesList(directory: string, options?: { page?: number; query?: string }): Promise<GitHubIssuesListResult>;
   issueGet(directory: string, number: number, options?: { sourceRepo?: GitHubRepoSelector | null }): Promise<GitHubIssueGetResult>;
   issueComments(directory: string, number: number, options?: { sourceRepo?: GitHubRepoSelector | null }): Promise<GitHubIssueCommentsResult>;
   repoUpstream(directory: string): Promise<GitHubRepoUpstreamResult>;
   repoBranches(owner: string, repo: string): Promise<string[]>;
+}
+
+export interface RemoteClientRecord {
+  id: string;
+  label: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+  expiresAt?: string | null;
+  clientKind?: string | null;
+}
+
+export interface RemoteClientCreateResult {
+  client: RemoteClientRecord;
+  token: string;
+}
+
+export interface RemoteClientRevokeResult {
+  revoked: boolean;
+  client?: RemoteClientRecord;
+}
+
+export interface RemoteClientPurgeRevokedResult {
+  purged: number;
+}
+
+export interface ClientAuthAPI {
+  listClients(): Promise<RemoteClientRecord[]>;
+  createClient(input?: { label?: string }): Promise<RemoteClientCreateResult>;
+  purgeRevokedClients(): Promise<RemoteClientPurgeRevokedResult>;
+  revokeClient(id: string): Promise<RemoteClientRevokeResult>;
 }
 
 export interface RuntimeAPIs {
@@ -1006,6 +1140,7 @@ export interface RuntimeAPIs {
   github?: GitHubAPI;
   push?: PushAPI;
   diagnostics?: DiagnosticsAPI;
+  clientAuth?: ClientAuthAPI;
   tools: ToolsAPI;
   editor?: EditorAPI;
   vscode?: VSCodeAPI;
@@ -1016,9 +1151,9 @@ export type RuntimeAPISelector<TValue> = (apis: RuntimeAPIs) => TValue;
 
 // ============== Skills Catalog Types ==============
 
-export type SkillsCatalogSourceId = string;
+type SkillsCatalogSourceId = string;
 
-export type SkillsCatalogSourceType = 'github' | 'clawdhub';
+type SkillsCatalogSourceType = 'github' | 'clawdhub';
 
 export interface SkillsCatalogSource {
   id: SkillsCatalogSourceId;
@@ -1029,13 +1164,13 @@ export interface SkillsCatalogSource {
   sourceType?: SkillsCatalogSourceType;
 }
 
-export interface SkillsCatalogItemInstalledBadge {
+interface SkillsCatalogItemInstalledBadge {
   isInstalled: boolean;
   scope?: 'user' | 'project';
   source?: 'opencode' | 'agents' | 'claude';
 }
 
-export interface ClawdHubSkillMetadata {
+interface ClawdHubSkillMetadata {
   slug: string;
   version: string;
   displayName?: string;
@@ -1084,7 +1219,7 @@ export interface SkillsRepoScanRequest {
   gitIdentityId?: string;
 }
 
-export type SkillsRepoScanError =
+type SkillsRepoScanError =
   | { kind: 'authRequired'; message: string; sshOnly: true; identities?: Array<{ id: string; name: string }> }
   | { kind: 'invalidSource'; message: string }
   | { kind: 'gitUnavailable'; message: string }
@@ -1097,7 +1232,7 @@ export interface SkillsRepoScanResponse {
   error?: SkillsRepoScanError;
 }
 
-export interface SkillsInstallSelection {
+interface SkillsInstallSelection {
   skillDir: string;
   /** ClawdHub-specific metadata for installation */
   clawdhub?: {

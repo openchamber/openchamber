@@ -18,10 +18,12 @@
  * ```
  */
 
-export type SpeechResultCallback = (text: string, isFinal: boolean) => void;
-export type ErrorCallback = (error: string) => void;
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
-export interface AudioStreamConfig {
+type SpeechResultCallback = (text: string, isFinal: boolean) => void;
+type ErrorCallback = (error: string) => void;
+
+interface AudioStreamConfig {
   /** Base URL of the OpenAI-compatible STT server (e.g. http://localhost:8001/v1) */
   baseURL: string;
   /** Whisper-compatible model name */
@@ -39,6 +41,8 @@ export interface AudioStreamConfig {
    * Default: 1500
    */
   silenceHoldMs?: number;
+  /** Optional API key for the STT server. */
+  apiKey?: string;
 }
 
 // How often (ms) the VAD samples the analyser
@@ -59,6 +63,7 @@ class AudioStreamService {
   private silenceSince: number | null = null;
   private onResult: SpeechResultCallback | null = null;
   private onError: ErrorCallback | null = null;
+  private finishResolver: (() => void) | null = null;
   private lang = 'en';
 
   // Configurable parameters
@@ -68,6 +73,7 @@ class AudioStreamService {
     language: '',
     silenceThresholdDb: -45,
     silenceHoldMs: 1500,
+    apiKey: '',
   };
 
   /** Update service configuration. Can be called before or after startListening. */
@@ -76,8 +82,10 @@ class AudioStreamService {
       silenceThresholdDb: -45,
       silenceHoldMs: 1500,
       language: '',
+      apiKey: '',
       ...config,
     };
+    this.cfg.apiKey = config.apiKey ?? '';
   }
 
   /** Whether the browser supports the required APIs. */
@@ -125,16 +133,29 @@ class AudioStreamService {
 
   /** Stop listening and clean up all resources. */
   stopListening(): void {
-    this.isActive = false;
     this._stopVAD();
     this._stopRecorder();
-    this._teardownAudioContext();
-    this._releaseStream();
-    this.chunks = [];
+    this._cleanupAfterStop(true);
+  }
+
+  async finishListening(): Promise<void> {
+    if (!this.isActive) return;
+
+    this._stopVAD();
     this.isSpeaking = false;
     this.silenceSince = null;
-    this.onResult = null;
-    this.onError = null;
+
+    if (!this.mediaRecorder || this.mediaRecorder.state === 'inactive') {
+      this._cleanupAfterStop(true);
+      return;
+    }
+
+    await new Promise<void>((resolve) => {
+      this.finishResolver = resolve;
+      this._finaliseUtterance(false);
+    });
+
+    this._cleanupAfterStop(true);
   }
 
   /** Whether currently listening. */
@@ -186,11 +207,18 @@ class AudioStreamService {
     this.mediaRecorder.onstop = () => {
       const blobs = this.chunks.splice(0);
       const durationMs = Date.now() - this.recordingStartMs;
-      if (blobs.length === 0 || durationMs < MIN_UTTERANCE_MS) return;
+      if (blobs.length === 0 || durationMs < MIN_UTTERANCE_MS) {
+        this.finishResolver?.();
+        this.finishResolver = null;
+        return;
+      }
 
       const mType = blobs[0].type || mimeType || 'audio/webm';
       const blob = new Blob(blobs, { type: mType });
-      void this._upload(blob, mType);
+      void this._upload(blob, mType).finally(() => {
+        this.finishResolver?.();
+        this.finishResolver = null;
+      });
     };
 
     // Collect data every 250 ms so we don't lose the tail on stop()
@@ -202,6 +230,8 @@ class AudioStreamService {
       try {
         this.mediaRecorder.stop();
       } catch {
+        this.finishResolver?.();
+        this.finishResolver = null;
         // ignore
       }
     }
@@ -244,7 +274,7 @@ class AudioStreamService {
             // End of utterance — stop recorder (triggers onstop → upload)
             this.isSpeaking = false;
             this.silenceSince = null;
-            this._finaliseUtterance();
+            this._finaliseUtterance(true);
           }
         }
       }
@@ -258,12 +288,31 @@ class AudioStreamService {
     }
   }
 
-  /** Stop the current recorder to flush the utterance, then restart it. */
-  private _finaliseUtterance(): void {
+  private _cleanupAfterStop(clearChunks: boolean): void {
+    const pendingResolver = this.finishResolver;
+    this.isActive = false;
+    this.finishResolver = null;
+    this.mediaRecorder = null;
+    this._teardownAudioContext();
+    this._releaseStream();
+    if (clearChunks) {
+      this.chunks = [];
+    }
+    this.isSpeaking = false;
+    this.silenceSince = null;
+    this.onResult = null;
+    this.onError = null;
+    pendingResolver?.();
+  }
+
+  /** Stop the current recorder to flush the utterance, optionally restarting for the next one. */
+  private _finaliseUtterance(restart: boolean): void {
     if (!this.isActive) return;
     if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
       this.mediaRecorder.stop();
     }
+    if (!restart) return;
+
     // Restart recorder for the next utterance after a short delay
     // (MediaRecorder.onstop fires asynchronously; we wait for it to complete)
     setTimeout(() => {
@@ -294,6 +343,9 @@ class AudioStreamService {
         'X-Base-URL': this.cfg.baseURL,
         'X-Model': this.cfg.model,
       };
+      if (this.cfg.apiKey) {
+        headers['Authorization'] = `Bearer ${this.cfg.apiKey}`;
+      }
       if (this.cfg.language) {
         headers['X-Language'] = this.cfg.language;
       } else if (this.lang && this.lang !== 'auto') {
@@ -302,7 +354,7 @@ class AudioStreamService {
         headers['X-Language'] = baseLang;
       }
 
-      const response = await fetch('/api/stt/transcribe', {
+      const response = await runtimeFetch('/api/stt/transcribe', {
         method: 'POST',
         headers,
         body: blob,
@@ -343,4 +395,3 @@ class AudioStreamService {
 }
 
 export const audioStreamService = new AudioStreamService();
-export { AudioStreamService };

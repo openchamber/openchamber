@@ -1,0 +1,79 @@
+export type MobileKeyboardMode = 'native' | 'resize-content';
+
+const MOBILE_KEYBOARD_MODE_STORAGE_KEY = 'openchamber.mobileKeyboardMode';
+const VIEWPORT_META_SELECTOR = 'meta[name="viewport"]';
+const VIEWPORT_CONTENT_BASE = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover';
+
+export const supportsMobileKeyboardResizeContent = (): boolean => {
+  return true;
+};
+
+export function normalizeMobileKeyboardMode(value: unknown): MobileKeyboardMode;
+export function normalizeMobileKeyboardMode(value: unknown, fallback: MobileKeyboardMode): MobileKeyboardMode;
+export function normalizeMobileKeyboardMode(value: unknown, fallback: undefined): MobileKeyboardMode | undefined;
+export function normalizeMobileKeyboardMode(
+  value: unknown,
+  fallback: MobileKeyboardMode | undefined = 'resize-content',
+): MobileKeyboardMode | undefined {
+  if (value === 'native' || value === 'resize-content') {
+    return value;
+  }
+  return fallback;
+}
+
+const getViewportContentForMobileKeyboardMode = (value: unknown): string => {
+  const mode = normalizeMobileKeyboardMode(value);
+  return mode === 'resize-content'
+    ? `${VIEWPORT_CONTENT_BASE}, interactive-widget=resizes-content`
+    : VIEWPORT_CONTENT_BASE;
+};
+
+export const getStoredMobileKeyboardMode = (): MobileKeyboardMode => {
+  if (typeof window === 'undefined') {
+    return 'resize-content';
+  }
+
+  try {
+    return normalizeMobileKeyboardMode(localStorage.getItem(MOBILE_KEYBOARD_MODE_STORAGE_KEY));
+  } catch {
+    return 'resize-content';
+  }
+};
+
+export const setStoredMobileKeyboardMode = (value: unknown): MobileKeyboardMode => {
+  const mode = normalizeMobileKeyboardMode(value);
+
+  if (typeof window !== 'undefined') {
+    try {
+      if (mode === 'resize-content') {
+        localStorage.removeItem(MOBILE_KEYBOARD_MODE_STORAGE_KEY);
+      } else {
+        localStorage.setItem(MOBILE_KEYBOARD_MODE_STORAGE_KEY, mode);
+      }
+    } catch {
+      // Ignore storage failures in restricted browsing contexts.
+    }
+  }
+
+  return mode;
+};
+
+export const applyMobileKeyboardMode = (value: unknown): MobileKeyboardMode => {
+  const mode = setStoredMobileKeyboardMode(value);
+
+  if (typeof document === 'undefined') {
+    return mode;
+  }
+
+  document.documentElement.setAttribute('data-oc-mobile-keyboard-mode', mode);
+
+  const viewportMeta = document.querySelector(VIEWPORT_META_SELECTOR);
+  if (viewportMeta instanceof HTMLMetaElement) {
+    const nextContent = getViewportContentForMobileKeyboardMode(mode);
+    if (viewportMeta.getAttribute('content') !== nextContent) {
+      viewportMeta.setAttribute('content', nextContent);
+    }
+  }
+
+  return mode;
+};

@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
 import { registerTtsRoutes } from './routes.js';
+import { normalizeCustomOpenAIBaseURL } from './base-url.js';
 
 const createApp = () => {
   const app = express();
@@ -15,17 +16,7 @@ const createApp = () => {
 };
 
 describe('tts routes', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it('retries note summarization with notification mode before failing', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => ({
-      ok: false,
-      status: 503,
-      json: async () => ({ error: 'unavailable' }),
-    })));
-
+  it('returns local note fallback while model summarization is retired', async () => {
     const response = await request(createApp())
       .post('/api/text/summarize')
       .send({
@@ -35,54 +26,15 @@ describe('tts routes', () => {
         mode: 'note',
       });
 
-    expect(response.status).toBe(502);
-    expect(fetch).toHaveBeenCalledTimes(2);
-    expect(response.body).toEqual({
-      error: 'Note summarization failed',
-      reason: 'zen API returned 503',
-    });
-  });
-
-  it('uses notification summarizer result when note mode falls back', async () => {
-    vi.stubGlobal('fetch', vi.fn()
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 503,
-        json: async () => ({ error: 'unavailable' }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          output: [{
-            type: 'message',
-            content: [{ type: 'output_text', text: '**Keep provider state stable** during streaming.' }],
-          }],
-        }),
-      }));
-
-    const response = await request(createApp())
-      .post('/api/text/summarize')
-      .send({
-        text: 'First sentence. Preserve provider state references during streaming to avoid wide rerenders.',
-        threshold: 0,
-        maxLength: 100,
-        mode: 'note',
-      });
-
     expect(response.status).toBe(200);
     expect(response.body).toMatchObject({
-      summary: 'Keep provider state stable during streaming.',
-      summarized: true,
+      summary: 'First sentence.',
+      summarized: false,
+      reason: 'Model summarization provider unavailable',
     });
   });
 
-  it('keeps notification fallback behavior', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => ({
-      ok: false,
-      status: 503,
-      json: async () => ({ error: 'unavailable' }),
-    })));
-
+  it('keeps notification fallback behavior without calling zen', async () => {
     const response = await request(createApp())
       .post('/api/text/summarize')
       .send({
@@ -96,7 +48,78 @@ describe('tts routes', () => {
     expect(response.body).toMatchObject({
       summary: 'Notification text that should fall back cleanly.',
       summarized: false,
-      reason: 'zen API returned 503',
+      reason: 'Model summarization provider unavailable',
     });
+  });
+});
+
+describe('normalizeCustomOpenAIBaseURL', () => {
+  const originalRuntime = process.env.OPENCHAMBER_RUNTIME;
+  const originalAllowRemote = process.env.OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS;
+
+  afterEach(() => {
+    // Restore env vars after each test
+    if (originalRuntime === undefined) {
+      delete process.env.OPENCHAMBER_RUNTIME;
+    } else {
+      process.env.OPENCHAMBER_RUNTIME = originalRuntime;
+    }
+    if (originalAllowRemote === undefined) {
+      delete process.env.OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS;
+    } else {
+      process.env.OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS = originalAllowRemote;
+    }
+  });
+
+  it('rejects remote URLs when OPENCHAMBER_RUNTIME is not set (web)', () => {
+    delete process.env.OPENCHAMBER_RUNTIME;
+    delete process.env.OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS;
+
+    const result = normalizeCustomOpenAIBaseURL('https://my-tts-server.example.com/v1');
+    expect(result.error).toMatch(/Remote custom server URLs are disabled/);
+    expect(result.value).toBeUndefined();
+  });
+
+  it('allows remote URLs when OPENCHAMBER_RUNTIME is desktop', () => {
+    process.env.OPENCHAMBER_RUNTIME = 'desktop';
+    delete process.env.OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS;
+
+    const result = normalizeCustomOpenAIBaseURL('https://my-tts-server.example.com/v1');
+    expect(result.error).toBeUndefined();
+    expect(result.value).toBe('https://my-tts-server.example.com/v1');
+  });
+
+  it('allows remote URLs when OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS is true', () => {
+    delete process.env.OPENCHAMBER_RUNTIME;
+    process.env.OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS = 'true';
+
+    const result = normalizeCustomOpenAIBaseURL('https://my-tts-server.example.com/v1');
+    expect(result.error).toBeUndefined();
+    expect(result.value).toBe('https://my-tts-server.example.com/v1');
+  });
+
+  it('allows localhost URLs regardless of runtime', () => {
+    delete process.env.OPENCHAMBER_RUNTIME;
+    delete process.env.OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS;
+
+    const result = normalizeCustomOpenAIBaseURL('http://localhost:8880/v1');
+    expect(result.error).toBeUndefined();
+    expect(result.value).toBe('http://localhost:8880/v1');
+  });
+
+  it('strips query strings and trailing slashes', () => {
+    process.env.OPENCHAMBER_RUNTIME = 'desktop';
+
+    const result = normalizeCustomOpenAIBaseURL('https://my-server.com/v1/?key=123');
+    expect(result.value).toBe('https://my-server.com/v1');
+  });
+
+  it('denies remote URLs on desktop when env var is explicitly false', () => {
+    process.env.OPENCHAMBER_RUNTIME = 'desktop';
+    process.env.OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS = 'false';
+
+    const result = normalizeCustomOpenAIBaseURL('https://my-tts-server.example.com/v1');
+    expect(result.error).toMatch(/Remote custom server URLs are disabled/);
+    expect(result.value).toBeUndefined();
   });
 });

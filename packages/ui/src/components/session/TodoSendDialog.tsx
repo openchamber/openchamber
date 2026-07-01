@@ -6,19 +6,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { AgentSelector } from '@/components/sections/commands/AgentSelector';
+import { ThinkingPill } from '@/components/session/ThinkingPill';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useAgentsStore } from '@/stores/useAgentsStore';
 import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
-import { cn } from '@/lib/utils';
-import { RiArrowDownSLine } from '@remixicon/react';
 import { useI18n } from '@/lib/i18n';
 
 type TodoSendTarget = 'session' | 'worktree';
@@ -51,56 +44,6 @@ const getInitialExecution = (params: {
   agent: params.agent,
 });
 
-type ThinkingPillProps = {
-  value: string;
-  options: string[];
-  disabled?: boolean;
-  onChange: (value: string) => void;
-};
-
-const ThinkingPill = ({ value, options, disabled, onChange }: ThinkingPillProps) => {
-  const { t } = useI18n();
-  const label = value || t('rightSidebar.contextNotesTodo.sendDialog.variant.default');
-
-  const trigger = (
-    <div
-      className={cn(
-        'flex h-6 w-fit items-center gap-1.5 rounded-lg border border-border/20 bg-interactive-selection/20 px-2',
-        disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-interactive-hover/30',
-      )}
-    >
-      <span className="typography-micro whitespace-nowrap font-medium capitalize">{label}</span>
-      <RiArrowDownSLine className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
-    </div>
-  );
-
-  if (disabled) return trigger;
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="max-w-[220px]">
-        <DropdownMenuItem className="typography-meta" onSelect={() => onChange('')}>
-          <span className={cn('font-medium', !value && 'text-primary')}>
-            {t('rightSidebar.contextNotesTodo.sendDialog.variant.default')}
-          </span>
-        </DropdownMenuItem>
-        {options.map((option) => (
-          <DropdownMenuItem
-            key={option}
-            className="typography-meta"
-            onSelect={() => onChange(option)}
-          >
-            <span className={cn('font-medium capitalize', value === option && 'text-primary')}>
-              {option}
-            </span>
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-};
-
 export function TodoSendDialog(props: TodoSendDialogProps) {
   const { t } = useI18n();
   const { open, onOpenChange, target, projectDirectory, submitting = false, onConfirm } = props;
@@ -123,7 +66,7 @@ export function TodoSendDialog(props: TodoSendDialogProps) {
 
   React.useEffect(() => {
     if (!open) return;
-    void loadProviders({ directory: projectDirectory });
+    void loadProviders({ directory: projectDirectory, source: 'todoSendDialog' });
     void loadConfigAgents({ directory: projectDirectory });
     void loadAgentsStoreAgents();
   }, [open, loadProviders, loadConfigAgents, loadAgentsStoreAgents, projectDirectory]);
@@ -196,30 +139,42 @@ export function TodoSendDialog(props: TodoSendDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => { if (!submitting) onOpenChange(nextOpen); }}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-md overflow-visible">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
 
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <ModelSelector
-            providerId={execution.providerID}
-            modelId={execution.modelID}
-            onChange={(providerID, modelID) => {
-              setExecution((prev) => ({ ...prev, providerID, modelID, variant: '' }));
-            }}
-          />
-          <ThinkingPill
-            value={execution.variant}
-            options={variantOptions}
-            disabled={!hasVariantOptions}
-            onChange={(variant) => setExecution((prev) => ({ ...prev, variant }))}
-          />
-          <AgentSelector
-            agentName={execution.agent}
-            filter={agentFilter}
-            onChange={(agent) => setExecution((prev) => ({ ...prev, agent }))}
-          />
+        <div className="flex flex-col gap-4">
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <span className="typography-meta font-medium text-muted-foreground">{t('chat.modelControls.model')}</span>
+            <ModelSelector
+              providerId={execution.providerID}
+              modelId={execution.modelID}
+              className="max-w-[320px] justify-between"
+              dropdownPortalToBody
+              onChange={(providerID, modelID) => {
+                setExecution((prev) => ({ ...prev, providerID, modelID, variant: '' }));
+              }}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <span className="typography-meta font-medium text-muted-foreground">{t('sessions.scheduledTasks.editor.thinkingLevel.label')}</span>
+            <ThinkingPill
+              value={execution.variant}
+              options={variantOptions}
+              disabled={!hasVariantOptions}
+              onChange={(variant) => setExecution((prev) => ({ ...prev, variant }))}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <span className="typography-meta font-medium text-muted-foreground">{t('sessions.scheduledTasks.editor.agent.label')}</span>
+            <AgentSelector
+              agentName={execution.agent}
+              filter={agentFilter}
+              dropdownPortalToBody
+              onChange={(agent) => setExecution((prev) => ({ ...prev, agent }))}
+            />
+          </div>
         </div>
 
         <div className="flex items-center justify-end gap-2">

@@ -1,0 +1,34 @@
+---
+title: Issues et PR GitHub
+description: Connectez GitHub et démarrez des sessions depuis des issues et pull requests.
+---
+
+# Issues et PR GitHub
+
+Connectez votre compte GitHub et OpenChamber peut récupérer les issues et pull requests, démarrer une session directement depuis l’une d’elles, et ouvrir ou mettre à jour des PR pour vous.
+
+## Connecter GitHub
+
+1. Ouvrez **Paramètres → Git**.
+2. Sous GitHub, choisissez **Connect**. OpenChamber affiche un lien et un code court.
+3. Ouvrez le lien, saisissez le code et approuvez.
+
+Une fois connecté, votre compte apparaît dans la section GitHub. Vous pouvez connecter plusieurs comptes et passer de l’un à l’autre, ou vous déconnecter à tout moment.
+
+## Démarrer le travail depuis une issue ou une PR
+
+Lorsque vous créez une [session worktree](/worktrees/) avec GitHub connecté, vous pouvez choisir **Start from GitHub issue/PR** :
+
+- choisissez une **issue** et OpenChamber nomme la branche d’après elle puis ouvre la session avec l’issue et ses commentaires comme premier message
+- choisissez une **pull request** et il récupère la branche de la PR ; vous pouvez inclure le diff de la PR pour que l’agent ait tout le changement
+
+Vous arrivez directement dans une session avec le contexte déjà chargé.
+
+## Ouvrir et gérer des pull requests
+
+Depuis l’onglet **PR** de la [vue git](/git/), vous pouvez créer une pull request, la mettre à jour, marquer un brouillon comme prêt ou la merger. OpenChamber peut générer le titre et la description de la PR à partir de vos changements.
+
+## Pages liées
+
+- [Workflows Git et GitHub](/git/) — commiter et gérer les branches
+- [Sessions worktree](/worktrees/) — là où démarrent les sessions issues et PR

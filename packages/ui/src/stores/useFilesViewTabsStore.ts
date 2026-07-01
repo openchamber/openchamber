@@ -1,7 +1,7 @@
 import { create } from 'zustand';
-import { createJSONStorage, devtools, persist } from 'zustand/middleware';
+import { devtools, persist } from 'zustand/middleware';
 
-import { getSafeStorage } from './utils/safeStorage';
+import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 
 type RootTabsState = {
   openPaths: string[];
@@ -15,10 +15,11 @@ type FilesViewTabsState = {
 };
 
 type FilesViewTabsActions = {
-  addOpenPath: (root: string, path: string) => void;
+  addOpenPath: (root: string, path: string, options?: { allowOutsideRoot?: boolean }) => void;
   removeOpenPath: (root: string, path: string) => void;
   removeOpenPathsByPrefix: (root: string, prefixPath: string) => void;
-  setSelectedPath: (root: string, path: string | null) => void;
+  removeExpandedPathsByPrefix: (root: string, prefixPath: string) => void;
+  setSelectedPath: (root: string, path: string | null, options?: { allowOutsideRoot?: boolean }) => void;
   ensureSelectedPath: (root: string) => void;
   toggleExpandedPath: (root: string, path: string) => void;
   expandPath: (root: string, path: string) => void;
@@ -163,10 +164,10 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
       (set, get) => ({
         byRoot: {},
 
-        addOpenPath: (root, path) => {
+        addOpenPath: (root, path, options) => {
           const normalizedRoot = normalizePath((root || '').trim());
           const normalizedPath = normalizePath((path || '').trim());
-          if (!normalizedRoot || !normalizedPath) {
+          if (!normalizedRoot || !normalizedPath || (!options?.allowOutsideRoot && !isPathWithinRoot(normalizedPath, normalizedRoot))) {
             return;
           }
 
@@ -205,12 +206,15 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
               return state;
             }
 
-            if (!current.openPaths.includes(normalizedPath) && current.selectedPath !== normalizedPath) {
+            const comparablePath = toComparablePath(normalizedPath);
+            const isMatchingPath = (candidate: string) => toComparablePath(candidate) === comparablePath;
+            const selectedPathMatches = current.selectedPath ? isMatchingPath(current.selectedPath) : false;
+            if (!current.openPaths.some(isMatchingPath) && !selectedPathMatches) {
               return state;
             }
 
-            const openPaths = current.openPaths.filter((p) => p !== normalizedPath);
-            const selectedPath = current.selectedPath === normalizedPath ? (openPaths[0] ?? null) : current.selectedPath;
+            const openPaths = current.openPaths.filter((p) => !isMatchingPath(p));
+            const selectedPath = selectedPathMatches ? (openPaths[0] ?? null) : current.selectedPath;
 
             const byRoot = {
               ...state.byRoot,
@@ -238,13 +242,18 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
               return state;
             }
 
-            const prefixWithSlash = normalizedPrefix.endsWith('/') ? normalizedPrefix : `${normalizedPrefix}/`;
-            const openPaths = current.openPaths.filter((p) => p !== normalizedPrefix && !p.startsWith(prefixWithSlash));
+            const comparablePrefix = toComparablePath(normalizedPrefix);
+            const comparablePrefixWithSlash = comparablePrefix.endsWith('/') ? comparablePrefix : `${comparablePrefix}/`;
+            const isWithinPrefix = (candidate: string) => {
+              const comparablePath = toComparablePath(candidate);
+              return comparablePath === comparablePrefix || comparablePath.startsWith(comparablePrefixWithSlash);
+            };
+            const openPaths = current.openPaths.filter((p) => !isWithinPrefix(p));
             if (openPaths.length === current.openPaths.length) {
               return state;
             }
 
-            const selectedPath = current.selectedPath && (current.selectedPath === normalizedPrefix || current.selectedPath.startsWith(prefixWithSlash))
+            const selectedPath = current.selectedPath && isWithinPrefix(current.selectedPath)
               ? (openPaths[0] ?? null)
               : current.selectedPath;
 
@@ -262,10 +271,47 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
           });
         },
 
-        setSelectedPath: (root, path) => {
+        removeExpandedPathsByPrefix: (root, prefixPath) => {
+          const normalizedRoot = normalizePath((root || '').trim());
+          const normalizedPrefix = normalizePath((prefixPath || '').trim());
+          if (!normalizedRoot || !normalizedPrefix) {
+            return;
+          }
+
+          set((state) => {
+            const current = state.byRoot[normalizedRoot];
+            if (!current) {
+              return state;
+            }
+
+            const comparablePrefix = toComparablePath(normalizedPrefix);
+            const comparablePrefixWithSlash = comparablePrefix.endsWith('/') ? comparablePrefix : `${comparablePrefix}/`;
+            const expandedPaths = current.expandedPaths.filter((candidate) => {
+              const comparablePath = toComparablePath(candidate);
+              return comparablePath !== comparablePrefix && !comparablePath.startsWith(comparablePrefixWithSlash);
+            });
+
+            if (expandedPaths.length === current.expandedPaths.length) {
+              return state;
+            }
+
+            const byRoot = {
+              ...state.byRoot,
+              [normalizedRoot]: {
+                ...current,
+                expandedPaths,
+                touchedAt: Date.now(),
+              },
+            };
+
+            return { byRoot: clampRoots(byRoot, 20) };
+          });
+        },
+
+        setSelectedPath: (root, path, options) => {
           const normalizedRoot = normalizePath((root || '').trim());
           const normalizedPath = path ? normalizePath(path.trim()) : null;
-          if (!normalizedRoot) {
+          if (!normalizedRoot || (normalizedPath && !options?.allowOutsideRoot && !isPathWithinRoot(normalizedPath, normalizedRoot))) {
             return;
           }
 
@@ -314,7 +360,7 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
         toggleExpandedPath: (root, path) => {
           const normalizedRoot = normalizePath((root || '').trim());
           const normalizedPath = normalizePath((path || '').trim());
-          if (!normalizedRoot || !normalizedPath) {
+          if (!normalizedRoot || !normalizedPath || !isPathWithinRoot(normalizedPath, normalizedRoot)) {
             return;
           }
 
@@ -344,7 +390,7 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
         expandPath: (root, path) => {
           const normalizedRoot = normalizePath((root || '').trim());
           const normalizedPath = normalizePath((path || '').trim());
-          if (!normalizedRoot || !normalizedPath) {
+          if (!normalizedRoot || !normalizedPath || !isPathWithinRoot(normalizedPath, normalizedRoot)) {
             return;
           }
 
@@ -374,7 +420,12 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
             return;
           }
 
-          const normalizedPaths = paths.map((p) => normalizePath((p || '').trim())).filter(Boolean);
+          const normalizedPaths = paths
+            .map((p) => normalizePath((p || '').trim()))
+            .filter((p) => p && isPathWithinRoot(p, normalizedRoot));
+          if (normalizedPaths.length === 0) {
+            return;
+          }
 
           set((state) => {
             const prev = state.byRoot[normalizedRoot];
@@ -400,7 +451,7 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
       {
         name: 'files-view-tabs-store',
         version: 2,
-        storage: createJSONStorage(() => getSafeStorage()),
+        storage: createDeferredSafeJSONStorage(),
         migrate: (persistedState) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return { byRoot: {} };
@@ -411,7 +462,7 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
             byRoot: sanitizeByRoot(rawByRoot),
           };
         },
-        partialize: (state) => ({ byRoot: state.byRoot }),
+        partialize: (state) => ({ byRoot: sanitizeByRoot(state.byRoot) }),
       }
     ),
     { name: 'files-view-tabs-store' }

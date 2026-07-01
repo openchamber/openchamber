@@ -15,11 +15,19 @@ function waitForReconnectDelay(ms, signal) {
   }
 
   return new Promise((resolve) => {
-    const timeout = setTimeout(resolve, Math.max(0, ms));
-    signal?.addEventListener('abort', () => {
-      clearTimeout(timeout);
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener('abort', onAbort);
       resolve();
-    }, { once: true });
+    };
+    const timeout = setTimeout(finish, Math.max(0, ms));
+    const onAbort = () => {
+      clearTimeout(timeout);
+      finish();
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
   });
 }
 
@@ -29,6 +37,12 @@ function normalizeHeaders(headers) {
   }
 
   return { ...headers };
+}
+
+async function cancelResponseBody(response) {
+  if (response?.body && typeof response.body.cancel === 'function') {
+    await response.body.cancel().catch(() => {});
+  }
 }
 
 export function createUpstreamSseReader({
@@ -49,21 +63,34 @@ export function createUpstreamSseReader({
   let stopped = false;
   let activeController = null;
   let lastEventId = typeof initialLastEventId === 'string' ? initialLastEventId : '';
+  let stopListenerAttached = false;
 
-  const stop = () => {
+  function detachStopListener() {
+    if (!stopListenerAttached) return;
+    signal?.removeEventListener('abort', stop);
+    stopListenerAttached = false;
+  }
+
+  function attachStopListener() {
+    if (!signal || signal.aborted || stopListenerAttached) return;
+    signal.addEventListener('abort', stop, { once: true });
+    stopListenerAttached = true;
+  }
+
+  function stop() {
     stopped = true;
+    detachStopListener();
     if (activeController && !activeController.signal.aborted) {
       activeController.abort();
     }
-  };
-
-  signal?.addEventListener('abort', stop, { once: true });
+  }
 
   const start = () => {
     if (running) {
       return running;
     }
 
+    attachStopListener();
     stopped = false;
     running = (async () => {
       while (!stopped && !signal?.aborted) {
@@ -116,6 +143,7 @@ export function createUpstreamSseReader({
               status: response?.status ?? 0,
               response,
             });
+            await cancelResponseBody(response);
             await waitForReconnectDelay(reconnectDelayMs, signal);
             continue;
           }
@@ -195,6 +223,7 @@ export function createUpstreamSseReader({
         }
       }
     })().finally(() => {
+      detachStopListener();
       running = null;
     });
 

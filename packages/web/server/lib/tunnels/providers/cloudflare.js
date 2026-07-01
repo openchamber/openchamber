@@ -17,6 +17,7 @@ import {
   TUNNEL_PROVIDER_CLOUDFLARE,
   TunnelServiceError,
 } from '../types.js';
+import { getTunnelDependencyInstallInfo } from '../install-help.js';
 
 export const cloudflareTunnelProviderCapabilities = {
   provider: TUNNEL_PROVIDER_CLOUDFLARE,
@@ -97,16 +98,21 @@ export function createCloudflareTunnelProvider() {
     checkAvailability: async () => {
       const result = await checkCloudflaredAvailable();
       if (result.available) {
-        return result;
+        return {
+          ...result,
+          ...getTunnelDependencyInstallInfo(TUNNEL_PROVIDER_CLOUDFLARE),
+        };
       }
+      const installInfo = getTunnelDependencyInstallInfo(TUNNEL_PROVIDER_CLOUDFLARE);
       return {
         ...result,
-        message: 'cloudflared is not installed. Install it with: brew install cloudflared',
+        ...installInfo,
       };
     },
     diagnose: async (request = {}) => {
       const dependency = await checkCloudflaredAvailable();
       const network = await checkCloudflareApiReachability();
+      const installInfo = getTunnelDependencyInstallInfo(TUNNEL_PROVIDER_CLOUDFLARE);
 
       const providerChecks = [
         {
@@ -115,7 +121,7 @@ export function createCloudflareTunnelProvider() {
           status: dependency.available ? 'pass' : 'fail',
           detail: dependency.available
             ? (dependency.version || dependency.path || 'cloudflared available')
-            : 'cloudflared is not installed. Install it with: brew install cloudflared',
+            : installInfo.message,
         },
         {
           id: 'network',
