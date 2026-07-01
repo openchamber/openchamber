@@ -315,7 +315,7 @@ const CACHE_MAX = 240;
 const htmlCache = new Map<string, { hash: string; html: string }>();
 
 // FNV-1a 32-bit hash of the block content.
-const hash = (value: string): string => {
+export const hash = (value: string): string => {
   let h = 0x811c9dc5;
   for (let i = 0; i < value.length; i += 1) {
     h ^= value.charCodeAt(i);
