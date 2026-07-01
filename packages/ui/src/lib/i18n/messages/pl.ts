@@ -2403,8 +2403,6 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.newSessionTitle': 'Nowa sesja',
   'session.newWorktree.noBranchesFound': 'Nie znaleziono gałęzi',
   'session.newWorktree.noMatchingBranches': 'Brak pasujących gałęzi',
-  'session.newWorktree.otherLocalBranches': 'Pozostałe lokalne gałęzie',
-  'session.newWorktree.otherRemoteBranches': 'Pozostałe zdalne gałęzie',
   'session.newWorktree.prNumber': 'PR #{number}',
   'session.newWorktree.remoteBranches': 'Zdalne gałęzie',
   'session.newWorktree.resetToMatchBranchName': 'Zresetuj do nazwy zgodnej z gałęzią',

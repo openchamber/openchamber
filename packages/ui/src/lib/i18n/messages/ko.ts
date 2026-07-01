@@ -1598,8 +1598,6 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.noMatchingBranches': '일치하는 브랜치가 없습니다',
   'session.newWorktree.localBranches': '로컬 브랜치',
   'session.newWorktree.remoteBranches': '리모트 브랜치',
-  'session.newWorktree.otherLocalBranches': '기타 로컬 브랜치',
-  'session.newWorktree.otherRemoteBranches': '기타 리모트 브랜치',
   'session.newWorktree.branchName': '브랜치 이름',
   'session.newWorktree.branchNamePlaceholder': 'feature/my-awesome-feature',
   'session.newWorktree.actions.change': '변경',

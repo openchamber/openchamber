@@ -1562,8 +1562,6 @@ export const dict: Record<I18nKey, string> = {
   "session.newWorktree.noMatchingBranches": "Немає відповідних гілок",
   "session.newWorktree.localBranches": "Локальні гілки",
   "session.newWorktree.remoteBranches": "Віддалені гілки",
-  "session.newWorktree.otherLocalBranches": "Інші локальні гілки",
-  "session.newWorktree.otherRemoteBranches": "Інші віддалені гілки",
   "session.newWorktree.branchName": "Назва гілки",
   "session.newWorktree.branchNamePlaceholder": "feature/my-awesome-feature",
   "session.newWorktree.actions.change": "Змінити",
