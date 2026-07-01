@@ -1404,19 +1404,40 @@ return;
           body = JSON.stringify(req.body);
           forwardedHeaders['content-type'] = 'application/json';
         }
-        const response = await fetch(upstream, {
+        const upstreamResponse = await fetch(upstream, {
           method: req.method,
           headers: forwardedHeaders,
           body,
           signal: controller.signal,
         });
-        const responseText = await response.text();
-        const resContentType = response.headers.get('content-type') || 'application/json';
+        const resContentType = upstreamResponse.headers.get('content-type') || 'application/json';
+        // SSE streams must be piped, not buffered — await response.text() would
+        // block until the stream closes, which for a long-lived SSE never happens.
+        if (resContentType.includes('text/event-stream')) {
+          if (res.headersSent) return;
+          res.status(upstreamResponse.status);
+          res.set('Content-Type', resContentType);
+          res.set('Cache-Control', 'no-cache');
+          res.set('Connection', 'keep-alive');
+          // fetch Response.body is Web ReadableStream, not Node stream.
+          // Use getReader() + res.write() to pipe SSE data through.
+          const reader = upstreamResponse.body.getReader();
+          const pump = () => {
+            reader.read().then(({ done, value }) => {
+              if (done) return res.end();
+              res.write(value);
+              pump();
+            }).catch(() => { if (!res.headersSent) res.end(); });
+          };
+          pump();
+          return;
+        }
+        const responseText = await upstreamResponse.text();
         if (res.headersSent) return;
         if (resContentType.includes('application/json') || resContentType.includes('text/plain')) {
-          res.status(response.status).type(resContentType).send(responseText);
+          res.status(upstreamResponse.status).type(resContentType).send(responseText);
         } else {
-          res.status(response.status).send(responseText);
+          res.status(upstreamResponse.status).send(responseText);
         }
       } finally {
         clearTimeout(timeout);

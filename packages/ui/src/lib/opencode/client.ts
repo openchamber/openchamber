@@ -540,17 +540,27 @@ class OpencodeService {
     directory?: string | null,
   ): Promise<Session> {
     const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
-    const sdkPatch = {
+    // BUG: SDK Session.update hits /api/session/{id} which returns HTML SPA on server 1.17.12.
+    // CORRECT path is /session/{id} (no /api/). Bypass the SDK and call the endpoint directly.
+    // Same pattern as abort: /session/{id}/abort works, /api/session/{id}/abort doesn't.
+    const body = {
       ...(patch.title !== undefined ? { title: patch.title } : {}),
       ...(patch.metadata !== undefined ? { metadata: patch.metadata } : {}),
       ...(patch.time?.archived !== undefined && patch.time.archived !== null ? { time: { archived: patch.time.archived } } : {}),
     };
-    const response = await this.client.session.update({
-      sessionID: id,
-      ...(requestDirectory ? { directory: requestDirectory } : {}),
-      ...sdkPatch,
+    const baseUrl = this.getBaseUrl();
+    const url = new URL(`${baseUrl.replace(/\/$/, '')}/session/${id}`);
+    if (requestDirectory) url.searchParams.set('directory', requestDirectory);
+    const response = await runtimeFetch(url.toString(), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
     });
-    return unwrapSdkData(response, 'session.update');
+    if (!response.ok) {
+      throw new Error(`session.update HTTP ${response.status}: ${await response.text().catch(() => '')}`);
+    }
+    const data = await response.json();
+    return (data?.data ?? data) as Session;
   }
 
   async getSessionMessages(id: string, limit?: number): Promise<{ info: Message; parts: Part[] }[]> {
