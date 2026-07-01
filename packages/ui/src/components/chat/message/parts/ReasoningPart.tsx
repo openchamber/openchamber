@@ -87,6 +87,13 @@ type ReasoningTimelineBlockProps = {
     actions?: React.ReactNode;
     /** Override the initial expanded state. Defaults to `isStreaming`. */
     defaultExpanded?: boolean;
+    /**
+     * Whether the block may auto-expand while streaming and auto-collapse when
+     * the reasoning ends. Defaults to `true`. Set to `false` for "collapsible,
+     * hidden by default": the block stays collapsed even during streaming until
+     * the user opens it.
+     */
+    autoExpand?: boolean;
 };
 
 type ExpansionState = {
@@ -103,10 +110,11 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     isStreaming = false,
     actions,
     defaultExpanded,
+    autoExpand = true,
 }) => {
     const { t } = useI18n();
     const hasEnded = typeof time?.end === 'number';
-    const canAutoExpand = isStreaming && !hasEnded;
+    const canAutoExpand = autoExpand && isStreaming && !hasEnded;
     const [expansion, setExpansion] = React.useState<ExpansionState>(() => {
         if (defaultExpanded === true) {
             return { expanded: true, source: 'user' };
@@ -437,6 +445,10 @@ type ReasoningPartProps = {
     onContentChange?: (reason?: ContentChangeReason) => void;
     messageId: string;
     streamPhase?: StreamPhase;
+    /** Override the initial expanded state. See ReasoningTimelineBlock.defaultExpanded. */
+    defaultExpanded?: boolean;
+    /** Allow auto-expand while streaming. See ReasoningTimelineBlock.autoExpand. */
+    autoExpand?: boolean;
 };
 
 const ReasoningPart = React.memo(({
@@ -444,6 +456,8 @@ const ReasoningPart = React.memo(({
     onContentChange,
     messageId,
     streamPhase,
+    defaultExpanded,
+    autoExpand,
 }: ReasoningPartProps) => {
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const partWithText = part as PartWithText;
@@ -472,6 +486,8 @@ const ReasoningPart = React.memo(({
             blockId={part.id || `${messageId}-reasoning`}
             time={time}
             isStreaming={isStreaming}
+            defaultExpanded={defaultExpanded}
+            autoExpand={autoExpand}
         />
     );
 });
@@ -481,6 +497,10 @@ type MergedReasoningPartProps = {
     onContentChange?: (reason?: ContentChangeReason) => void;
     messageId: string;
     streamPhase?: StreamPhase;
+    /** Override the initial expanded state. See ReasoningTimelineBlock.defaultExpanded. */
+    defaultExpanded?: boolean;
+    /** Allow auto-expand while streaming. See ReasoningTimelineBlock.autoExpand. */
+    autoExpand?: boolean;
 };
 
 /**
@@ -493,6 +513,8 @@ export const MergedReasoningPart = React.memo(({
     onContentChange,
     messageId,
     streamPhase,
+    defaultExpanded,
+    autoExpand,
 }: MergedReasoningPartProps) => {
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
 
@@ -552,6 +574,8 @@ export const MergedReasoningPart = React.memo(({
             blockId={blockId}
             time={mergedTime}
             isStreaming={isStreaming}
+            defaultExpanded={defaultExpanded}
+            autoExpand={autoExpand}
         />
     );
 });

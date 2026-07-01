@@ -120,14 +120,39 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ mobileKeyboardMode: 'fixed-layout' })).toEqual({});
   });
 
-  it('accepts collapsibleThinkingBlocks as a persisted shared setting', () => {
+  it('accepts reasoningMode as a persisted shared setting', () => {
     const helpers = createTestHelpers();
 
-    expect(helpers.sanitizeSettingsUpdate({ collapsibleThinkingBlocks: true })).toEqual({
-      collapsibleThinkingBlocks: true,
+    expect(helpers.sanitizeSettingsUpdate({ reasoningMode: 'off' })).toEqual({
+      reasoningMode: 'off',
     });
-    expect(helpers.sanitizeSettingsUpdate({ collapsibleThinkingBlocks: false })).toEqual({
-      collapsibleThinkingBlocks: false,
+    expect(helpers.sanitizeSettingsUpdate({ reasoningMode: 'collapsible-dynamic' })).toEqual({
+      reasoningMode: 'collapsible-dynamic',
+    });
+  });
+
+  it('migrates legacy showReasoningTraces / collapsibleThinkingBlocks into reasoningMode', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ showReasoningTraces: false })).toEqual({
+      reasoningMode: 'off',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ showReasoningTraces: true, collapsibleThinkingBlocks: false })).toEqual({
+      reasoningMode: 'full',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ showReasoningTraces: true, collapsibleThinkingBlocks: true })).toEqual({
+      reasoningMode: 'collapsible-dynamic',
+    });
+    // Legacy booleans must not pass through unchanged.
+    expect(helpers.sanitizeSettingsUpdate({ collapsibleThinkingBlocks: false })).not.toHaveProperty('collapsibleThinkingBlocks');
+    expect(helpers.sanitizeSettingsUpdate({ collapsibleThinkingBlocks: false })).not.toHaveProperty('showReasoningTraces');
+  });
+
+  it('prefers reasoningMode over legacy booleans when both are present', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ reasoningMode: 'collapsible-hidden', showReasoningTraces: false })).toEqual({
+      reasoningMode: 'collapsible-hidden',
     });
   });
 
@@ -179,28 +204,38 @@ describe('settings helpers', () => {
     });
   });
 
-  it('rejects non-boolean collapsibleThinkingBlocks values', () => {
+  it('rejects invalid reasoningMode values', () => {
     const helpers = createTestHelpers();
 
-    expect(helpers.sanitizeSettingsUpdate({ collapsibleThinkingBlocks: 'true' })).toEqual({});
-    expect(helpers.sanitizeSettingsUpdate({ collapsibleThinkingBlocks: 1 })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ reasoningMode: 'invalid' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ reasoningMode: 1 })).toEqual({});
   });
 
-  it('includes collapsibleThinkingBlocks in formatSettingsResponse', () => {
+  it('includes reasoningMode in formatSettingsResponse', () => {
     const helpers = createTestHelpers();
 
-    const response = helpers.formatSettingsResponse({ collapsibleThinkingBlocks: false });
-    expect(response.collapsibleThinkingBlocks).toBe(false);
+    const response = helpers.formatSettingsResponse({ reasoningMode: 'off' });
+    expect(response.reasoningMode).toBe('off');
 
-    const responseTrue = helpers.formatSettingsResponse({ collapsibleThinkingBlocks: true });
-    expect(responseTrue.collapsibleThinkingBlocks).toBe(true);
+    const responseDynamic = helpers.formatSettingsResponse({ reasoningMode: 'collapsible-dynamic' });
+    expect(responseDynamic.reasoningMode).toBe('collapsible-dynamic');
   });
 
-  it('defaults collapsibleThinkingBlocks to true in formatSettingsResponse when absent', () => {
+  it('migrates legacy booleans in formatSettingsResponse when reasoningMode is absent', () => {
+    const helpers = createTestHelpers();
+
+    const response = helpers.formatSettingsResponse({ showReasoningTraces: false });
+    expect(response.reasoningMode).toBe('off');
+
+    const responseFull = helpers.formatSettingsResponse({ collapsibleThinkingBlocks: false });
+    expect(responseFull.reasoningMode).toBe('full');
+  });
+
+  it('defaults reasoningMode to collapsible-dynamic in formatSettingsResponse when absent', () => {
     const helpers = createTestHelpers();
 
     const response = helpers.formatSettingsResponse({});
-    expect(response.collapsibleThinkingBlocks).toBe(true);
+    expect(response.reasoningMode).toBe('collapsible-dynamic');
   });
 
   it('includes transient desktop LAN access runtime status in desktop settings response', () => {
