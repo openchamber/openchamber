@@ -96,6 +96,32 @@ import {
 import { getFileMentionAutocompleteQuery, type FileMentionAutocompleteInputSource } from './fileMentionAutocompleteState';
 import type { Part } from '@opencode-ai/sdk/v2/client';
 
+/** Snapshot of composer state captured before destructive clears on submit.
+ *  Used to restore the user's input on send failure, scoped per-session. */
+interface SubmissionSnapshot {
+    /** Session ID that owned the send — used to scope restores correctly even
+     *  if the user switches sessions before the async send resolves. */
+    readonly sessionId: string | null;
+    /** Raw textarea text (what the user typed, before mention/snippet expansion). */
+    readonly rawText: string;
+    /** Attached files before sanitization — the original user selection. */
+    readonly attachedFiles: AttachedFile[];
+    /** Queued messages that were removed from the queue store. */
+    readonly queuedItems: QueuedMessage[];
+    /** Inline comment drafts consumed before send. */
+    readonly inlineDrafts: InlineCommentDraft[];
+    /** Confirmed @mention paths before clearing. */
+    readonly confirmedMentions: Set<string>;
+    /** Session key used for inline draft consumption (for restore). */
+    readonly sessionKey: string | null;
+    /** Message-history navigation index before reset. */
+    readonly historyIndex: number;
+    /** Draft message content before reset. */
+    readonly draftMessage: string;
+    /** Whether the input was queued-only (no textarea text to restore). */
+    readonly queuedOnly: boolean;
+}
+
 const MAX_VISIBLE_TEXTAREA_LINES = 8;
 const EMPTY_QUEUE: QueuedMessage[] = [];
 const FILE_MENTION_TOKEN = /^@[^\s]+$/;
@@ -1949,6 +1975,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         if (!primaryText && primaryAttachments.length === 0 && additionalParts.length === 0) return;
 
+        // Stash the pre-clear values of state we're about to reset, so the
+        // failure-restore snapshot (captured further down, after slash-command
+        // early-returns) can restore them.  Without this, the snapshot would
+        // capture the already-cleared values and restore nothing.
+        const savedConfirmedMentions = new Set(confirmedMentionsRef.current);
+        const savedHistoryIndex = historyIndex;
+        const savedDraftMessage = draftMessage;
+
         // Clear queue and input
         if (currentSessionId && queuedMessageId) {
             removeFromQueue(currentSessionId, queuedMessageId);
@@ -1958,9 +1992,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!queuedOnly) {
             setMessage('');
             confirmedMentionsRef.current.clear();
-            // Clear per-session draft on submit
-            saveStoredDraft(currentSessionId, '');
-            saveConfirmedMentions(currentSessionId, confirmedMentionsRef.current);
+            // Clear the per-session draft synchronously.  Slash commands
+            // return early below before any send promise is created, so the
+            // draft must be cleared here for those paths.  For regular sends,
+            // a send failure re-saves the draft from the snapshot captured
+            // below (after the slash-command block).
+            if (currentSessionId) {
+                saveStoredDraft(currentSessionId, '');
+                saveConfirmedMentions(currentSessionId, new Set());
+            }
             // Reset message history navigation state
             setHistoryIndex(-1);
             setDraftMessage('');
@@ -2212,6 +2252,28 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             ...additionalParts.flatMap(p => p.attachments ?? []),
         ];
 
+        // Capture a snapshot of everything we destructively cleared above, so
+        // we can restore on send failure.  Captured HERE — after all
+        // slash-command early-returns — so slash commands don't leave a stale
+        // snapshot.  Scoped to the sending session so a session-switch
+        // mid-flight doesn't restore into the wrong textarea.  This is a LOCAL
+        // variable (not a ref) so concurrent sends each restore their own text.
+        let submissionSnapshot: SubmissionSnapshot | null = null;
+        if (!queuedOnly) {
+            submissionSnapshot = {
+                sessionId: currentSessionId,
+                rawText: inputSnapshot.message,
+                attachedFiles: [...attachedFiles],     // pre-sanitize, as the user chose them
+                queuedItems: currentSessionId ? (queuedMessageId ? queuedMessages.filter((m) => m.id === queuedMessageId) : [...queuedMessages]) : [],
+                inlineDrafts: drafts,
+                confirmedMentions: new Set(savedConfirmedMentions),
+                sessionKey,
+                historyIndex: savedHistoryIndex,
+                draftMessage: savedDraftMessage,
+                queuedOnly,
+            };
+        }
+
         const sendPromise = sendMessage(
             primaryText,
             providerIdToSend,
@@ -2241,6 +2303,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             if (linkedPr) {
                 setLinkedPr(null);
             }
+            // The per-session draft and mentions were already cleared
+            // synchronously in the clear block above (so slash-command
+            // early-returns also clear them).  On success we just drop the
+            // failure-restore snapshot.
+            submissionSnapshot = null;
         }).catch((error: unknown) => {
             const rawMessage =
                 error instanceof Error
@@ -2263,26 +2330,99 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 normalized.includes('gateway timeout') ||
                 normalized === 'failed to send message';
 
+            const snap = submissionSnapshot;
+
+            // ── 413 Payload Too Large ──────────────────────────────────
             if (normalized.includes('payload too large') || normalized.includes('413') || normalized.includes('entity too large')) {
                 toast.error(t('chat.chatInput.toast.attachmentsTooLarge'));
                 if (allAttachments.length > 0) {
                     useInputStore.getState().setAttachedFiles(allAttachments);
                 }
-                return;
-            }
-
-            if (isSoftNetworkError) {
-                if (allAttachments.length > 0) {
-                    useInputStore.getState().setAttachedFiles(allAttachments);
-                    toast.error(t('chat.chatInput.toast.sendAttachmentsFailed'));
+                // Text may have been too large — don't auto-restore to textarea
+                // but preserve it in the per-session draft so the user can edit & retry.
+                if (snap && !snap.queuedOnly) {
+                    saveStoredDraft(snap.sessionId, snap.rawText);
                 }
                 return;
             }
 
+            // ── Soft network error (timeout / "may still processing" / fetch failure) ──
+            // The message may have reached the server — don't auto-restore text
+            // to the textarea to avoid accidental duplicate sends.  Instead,
+            // preserve the draft in localStorage so the user can review & retry.
+            if (isSoftNetworkError) {
+                if (allAttachments.length > 0) {
+                    useInputStore.getState().setAttachedFiles(allAttachments);
+                    toast.error(t('chat.chatInput.toast.sendAttachmentsFailed'));
+                } else {
+                    toast.error(t('chat.chatInput.toast.messageSendMaybeFailed'));
+                }
+                if (snap && !snap.queuedOnly) {
+                    saveStoredDraft(snap.sessionId, snap.rawText);
+                    saveConfirmedMentions(snap.sessionId, snap.confirmedMentions);
+                    if (useSessionUIStore.getState().currentSessionId === snap.sessionId) {
+                        confirmedMentionsRef.current = new Set(snap.confirmedMentions);
+                    }
+                    // Restore inline drafts so the user can re-edit them
+                    if (snap.sessionKey && snap.inlineDrafts.length > 0) {
+                        useInlineCommentDraftStore.getState().restoreDrafts(snap.sessionKey, snap.inlineDrafts);
+                    }
+                    // Re-enqueue queued messages that were removed
+                    for (const qm of snap.queuedItems) {
+                        if (snap.sessionId) {
+                            addToQueue(snap.sessionId, {
+                                content: qm.content,
+                                attachments: qm.attachments,
+                                sendConfig: qm.sendConfig,
+                            });
+                        }
+                    }
+                }
+                return;
+            }
+
+            // ── Hard error: full per-session restore ──────────────────
+            // The send definitively failed — restore everything we cleared
+            // so the user can edit and retry.
             if (allAttachments.length > 0) {
                 useInputStore.getState().setAttachedFiles(allAttachments);
             }
+
+            if (snap && !snap.queuedOnly) {
+                // Restore text to textarea only if the user is still on the
+                // same session.  If they switched away, the draft is persisted
+                // in localStorage and will be restored on switch-back.
+                if (useSessionUIStore.getState().currentSessionId === snap.sessionId) {
+                    setMessage(snap.rawText);
+                    setHistoryIndex(snap.historyIndex);
+                    setDraftMessage(snap.draftMessage);
+                    confirmedMentionsRef.current = new Set(snap.confirmedMentions);
+                    textareaRef.current?.focus();
+                }
+                saveStoredDraft(snap.sessionId, snap.rawText);
+                saveConfirmedMentions(snap.sessionId, snap.confirmedMentions);
+                if (snap.sessionKey && snap.inlineDrafts.length > 0) {
+                    useInlineCommentDraftStore.getState().restoreDrafts(snap.sessionKey, snap.inlineDrafts);
+                }
+                for (const qm of snap.queuedItems) {
+                    if (snap.sessionId) {
+                        addToQueue(snap.sessionId, {
+                            content: qm.content,
+                            attachments: qm.attachments,
+                            sendConfig: qm.sendConfig,
+                        });
+                    }
+                }
+            }
+
             toast.error(rawMessage || t('chat.chatInput.toast.messageSendFailed'));
+            // Show a separate confirmation that the draft was restored, so the
+            // user knows their message wasn't lost.  (Only when we actually
+            // restored something — i.e. there was a snapshot and it wasn't a
+            // queued-only send.)
+            if (snap && !snap.queuedOnly) {
+                toast.info(t('chat.chatInput.toast.messageRestoredToInput'));
+            }
         });
 
         if (!isMobile) {

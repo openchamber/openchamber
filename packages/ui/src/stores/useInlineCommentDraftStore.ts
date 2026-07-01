@@ -29,6 +29,8 @@ interface InlineCommentDraftActions {
   clearDrafts: (sessionKey: string) => void;
   getDrafts: (sessionKey: string) => InlineCommentDraft[];
   consumeDrafts: (sessionKey: string) => InlineCommentDraft[];
+  /** Restore previously consumed drafts back into the store (e.g. on send failure). */
+  restoreDrafts: (sessionKey: string, drafts: InlineCommentDraft[]) => void;
   getDraftCount: (sessionKey: string) => number;
   hasDrafts: (sessionKey: string) => boolean;
 }
@@ -195,6 +197,19 @@ export const useInlineCommentDraftStore = create<InlineCommentDraftStore>()(
           });
 
           return sortedDrafts;
+        },
+
+        restoreDrafts: (sessionKey, drafts) => {
+          if (drafts.length === 0) return;
+          set((state) => {
+            const existing = state.drafts[sessionKey] ?? [];
+            return {
+              drafts: {
+                ...state.drafts,
+                [sessionKey]: [...existing, ...drafts],
+              },
+            };
+          });
         },
 
         getDraftCount: (sessionKey) => {
