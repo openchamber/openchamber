@@ -107,8 +107,8 @@ export type InputState = {
   removeAttachedFile: (id: string) => void
   setAttachedFiles: (files: AttachedFile[]) => void
   clearAttachedFiles: () => void
-  addVSCodeFileAttachment: (path: string, name: string, fileSize: number | null) => void
-  addVSCodeSelectionAttachment: (path: string, file: File) => Promise<void>
+  addVSCodeFileAttachment: (path: string, name: string, fileSize: number | null, agentPath?: string) => void
+  addVSCodeSelectionAttachment: (path: string, file: File, agentPath?: string) => Promise<void>
   setActiveEditorFile: (file: VSCodeActiveEditorFile | null) => void
   /** Add attachments restored from a reverted message (file already on server) */
   addRestoredAttachment: (file: { url: string; mimeType: string; filename: string }) => void
@@ -186,7 +186,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
     set({ attachedFiles: [] })
   },
 
-  addVSCodeFileAttachment: (path: string, name: string, fileSize: number | null) => {
+  addVSCodeFileAttachment: (path: string, name: string, fileSize: number | null, agentPath?: string) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
     const isDuplicate = get().attachedFiles.some(
       (f) => f.source === 'vscode' && f.vscodeSource === 'file' && (f.vscodePath || '') === path
@@ -206,11 +206,12 @@ export const useInputStore = create<InputState>()((set, get) => ({
       source: 'vscode',
       vscodePath: path,
       vscodeSource: 'file',
+      ...(agentPath ? { agentPath } : {}),
     }
     set((s) => ({ attachedFiles: [...s.attachedFiles, attached] }))
   },
 
-  addVSCodeSelectionAttachment: async (path: string, file: File) => {
+  addVSCodeSelectionAttachment: async (path: string, file: File, agentPath?: string) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
     const generation = attachmentReadGeneration
     const selectionKey = getVSCodeSelectionKey(path, file.name)
@@ -238,6 +239,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
       source: 'vscode',
       vscodePath: path,
       vscodeSource: 'selection',
+      ...(agentPath ? { agentPath } : {}),
     }
     set((s) => ({ attachedFiles: [...s.attachedFiles, attached] }))
   },

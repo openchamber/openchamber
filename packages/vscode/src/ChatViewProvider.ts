@@ -200,7 +200,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  public addContextSelection(selection: { filePath: string; filename: string; text: string }) {
+  public addContextSelection(selection: { filePath: string; filename: string; text: string; agentPath?: string }) {
     if (!this._view) {
       return;
     }
@@ -213,7 +213,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  public addFileAttachments(files: Array<{ filePath: string; fileName: string; fileSize: number | null }>) {
+  public addFileAttachments(files: Array<{ filePath: string; fileName: string; fileSize: number | null; agentPath?: string }>) {
     if (!this._view) {
       return;
     }

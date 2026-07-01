@@ -483,15 +483,19 @@ export const ActiveEditorFileSuggestion = memo(() => {
   // Always show only the filename in the suggestion UI
   const displayName = fileName;
 
+  // agentPath is derived at click time from the existing `relativePath` (+ selection range)
+  // to match the Add-to-Context format. No separate payload field is needed since `relativePath`
+  // already carries the workspace-relative path; `fileName`/`selectionLabel` remain basename-only chip labels.
   const handleAddFile = () => {
-    addVSCodeFileAttachment(filePath, fileName, fileSize);
+    addVSCodeFileAttachment(filePath, fileName, fileSize, relativePath);
   };
 
   const handlePinSelection = async () => {
     if (!selection) return;
     const blob = new Blob([selection.text], { type: 'text/plain' });
     const file = new File([blob], selectionLabel, { type: 'text/plain' });
-    await addVSCodeSelectionAttachment(filePath, file);
+    const agentPath = `${relativePath}:${selectionRange}`;
+    await addVSCodeSelectionAttachment(filePath, file, agentPath);
   };
 
   // If there is a selection, prefer showing the pin-selection UI only.

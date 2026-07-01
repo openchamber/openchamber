@@ -304,9 +304,12 @@ export async function activate(context: vscode.ExtensionContext) {
       const lineRange = startLine === endLine ? `${startLine}` : `${startLine}-${endLine}`;
 
       const filename = `${editor.document.fileName.split(/[\\/]/).pop() || filePath}:${lineRange}`;
+      // Workspace-relative path + line range for SDK disambiguation (basename-only label stays in `filename`).
+      const agentPath = `${filePath}:${lineRange}`;
       const contextSelection = {
         filePath: editor.document.uri.fsPath,
         filename,
+        agentPath,
         text: selectedText,
       };
 
@@ -336,7 +339,7 @@ export async function activate(context: vscode.ExtensionContext) {
       }
 
       const uniqueUris = Array.from(new Map(uriCandidates.map((uri) => [uri.toString(), uri])).values());
-      const attachedFiles: Array<{ filePath: string; fileName: string; fileSize: number | null }> = [];
+      const attachedFiles: Array<{ filePath: string; fileName: string; fileSize: number | null; agentPath?: string }> = [];
       const skippedEntries: string[] = [];
 
       for (const uri of uniqueUris) {
@@ -358,6 +361,8 @@ export async function activate(context: vscode.ExtensionContext) {
 
         const filePath = uri.fsPath.trim();
         const fileName = uri.fsPath.replace(/\\/g, '/').split('/').pop() || vscode.workspace.asRelativePath(uri, false).replace(/\\/g, '/').trim();
+        // Workspace-relative path (forward slashes) for SDK file disambiguation.
+        const agentPath = vscode.workspace.asRelativePath(uri, false).replace(/\\/g, '/').trim();
         if (!filePath || !fileName) {
           skippedEntries.push(uri.fsPath || uri.toString());
           continue;
@@ -369,7 +374,7 @@ export async function activate(context: vscode.ExtensionContext) {
         } catch {
           fileSize = null;
         }
-        attachedFiles.push({ filePath, fileName, fileSize });
+        attachedFiles.push({ filePath, fileName, fileSize, agentPath });
       }
 
       if (attachedFiles.length === 0) {

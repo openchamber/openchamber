@@ -219,7 +219,7 @@ export class SessionEditorPanelProvider {
     return this._panels.get(panelId) ?? null;
   }
 
-  public addContextSelectionToActivePanel(selection: { filePath: string; filename: string; text: string }): boolean {
+  public addContextSelectionToActivePanel(selection: { filePath: string; filename: string; text: string; agentPath?: string }): boolean {
     if (!selection.filePath.trim() || !selection.filename.trim() || !selection.text.trim()) {
       return false;
     }
@@ -257,7 +257,7 @@ export class SessionEditorPanelProvider {
     return true;
   }
 
-  public addFileAttachmentsToActivePanel(files: Array<{ filePath: string; fileName: string; fileSize: number | null }>): boolean {
+  public addFileAttachmentsToActivePanel(files: Array<{ filePath: string; fileName: string; fileSize: number | null; agentPath?: string }>): boolean {
     const cleanedFiles = files.filter((entry) => entry.filePath.trim().length > 0 && entry.fileName.trim().length > 0);
 
     if (cleanedFiles.length === 0) {
