@@ -14,7 +14,7 @@ import type {
 import type { PermissionRequest } from "@/types/permission";
 import type { QuestionRequest } from "@/types/question";
 import { getRuntimeUrlResolver } from "@/lib/runtime-url";
-import { runtimeFetch } from "@/lib/runtime-fetch";
+import { runtimeFetch, setActiveProjectDirectory } from "@/lib/runtime-fetch";
 import { getRuntimeKey } from "@/lib/runtime-switch";
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry";
 import { markStartupTrace } from "@/lib/startupTrace";
@@ -373,6 +373,7 @@ class OpencodeService {
       });
     }
     this.currentDirectory = normalized;
+    setActiveProjectDirectory(normalized);
   }
 
   getDirectory(): string | undefined {

@@ -191,10 +191,29 @@ export const sanitizeHeadersForBrowser = (init?: HeadersInit): [string, string][
   return dirty ? entries : undefined;
 };
 
-const mergeHeaders = async (inputHeaders?: HeadersInit, initHeaders?: HeadersInit, attachAuth = true): Promise<Headers> => {
+// DEFINITIVE GLOBAL FIX: the active project directory is stored globally
+// so fs reads always carry the correct x-opencode-directory header and
+// pass the workspace check. Without this, browsers see 400 "Path is outside
+// of active workspace" whenever the OpenChamber service cwd differs from
+// the user's project.
+let activeProjectDirectory: string | undefined;
+  export const setActiveProjectDirectory = (dir: string | undefined) => {
+  activeProjectDirectory = dir;
+  };
+    const mergeHeaders = async (inputHeaders?: HeadersInit, initHeaders?: HeadersInit, attachAuth = true, url?: string | URL | Request): Promise<Headers> => {
   const headers = new Headers(sanitizeHeadersForBrowser(inputHeaders) ?? inputHeaders);
   if (initHeaders) {
     new Headers(sanitizeHeadersForBrowser(initHeaders) ?? initHeaders).forEach((value, key) => headers.set(key, value));
+  }
+  if (url && activeProjectDirectory && !headers.has('x-opencode-directory')) {
+    try {
+      const target = typeof url === 'string' ? url : url instanceof URL ? url.toString() : url.url;
+    if (target.includes('/api/fs/')) {
+        headers.set('x-opencode-directory', activeProjectDirectory);
+  }
+    } catch {
+      // ignore
+    }
   }
   if (!attachAuth) {
     return headers;
@@ -257,7 +276,7 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
     : rewrittenInput.url;
   const resolvedInput = resolveRuntimeFetchInput(sdkRewrittenInput, query);
   const inputHeaders = resolvedInput instanceof Request ? resolvedInput.headers : undefined;
-  const headers = await mergeHeaders(inputHeaders, requestInit.headers, shouldAttachRuntimeAuth(resolvedInput));
+  const headers = await mergeHeaders(inputHeaders, requestInit.headers, shouldAttachRuntimeAuth(resolvedInput), resolvedInput);
   const doFetch = (): Promise<Response> =>
     resolvedInput instanceof Request
       ? fetch(new Request(resolvedInput, { ...requestInit, headers }))
