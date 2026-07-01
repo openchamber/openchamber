@@ -3714,7 +3714,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           <div
             ref={floatingToolbarRef}
             className="absolute right-3 top-3 z-30"
-            onMouseEnter={() => setIsFloatingToolbarOpen(true)}
             onMouseLeave={() => {
               if (toolbarDropdownOpenCountRef.current > 0) return;
               setIsFloatingToolbarOpen(false);
