@@ -11,7 +11,8 @@ Server-owned scheduled task runtime and routes for OpenChamber-only automation.
 ## Files
 
 - `packages/web/server/lib/scheduled-tasks/runtime.js`
-  - Next-run computation (daily/weekly/cron compatibility)
+  - Next-run computation (daily/weekly/once/cron compatibility)
+  - One-time task expiry: enabled `once` tasks whose instant has passed are auto-disabled on sync (`isOneTimeTaskExpired`)
   - Timer scheduling and queueing
   - Concurrency controls
   - Session create + prompt_async execution

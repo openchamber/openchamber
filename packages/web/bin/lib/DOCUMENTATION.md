@@ -46,6 +46,19 @@ Command modules implement user-facing commands and preserve output contracts acr
   - Owns tunnel-specific command flow, interactive prompt decisions, managed-local/managed-remote startup, QR display rules, tunnel start/stop API calls, and tunnel profile command handling.
   - Receives `serveCommand` and `stopCommand` by dependency injection. Do not reach back into `cli.js` command globals from this module.
 
+- `commands-session.js`
+  - Implements `openchamber session` and its actions: `list`, `show`, `rename`, `archive`, `unarchive`, `share`, `unshare`, and `delete`.
+  - Mirrors the app's session read/mutation menu functions by talking to a running instance over HTTP (via `cli-api-client.js`). Scopes to the project directory (`--directory`, default cwd), gates deletion behind confirmation/`--force` in every mode, and preserves `--json`/`--quiet` contracts.
+  - Session creation and initial-prompt dispatch are intentionally excluded: OpenChamber-owned session orchestration (`/api/openchamber/sessions`) is the source of truth for creating sessions and dispatching the first prompt.
+
+- `commands-resources.js`
+  - Implements the config/settings resource commands that mirror the Settings menus: `agent`, `command` (slash commands), `skill`, `mcp`, `snippet`, `provider`, `project`, and `config`.
+  - Each group exposes read actions (`list`/`show`/`models`/`get`) and, where the server supports it, safe `create`/`delete` mutations. Shared `renderList`/`renderMutation`/`confirmDestructive` helpers keep output and validation consistent across modes.
+
+- `commands-schedule.js`
+  - Implements `openchamber schedule` and its actions: `list`, `show`, `create`, `run`, `enable`, `disable`, `delete`, and `status`. Mirrors the scheduled-tasks menu functions over the per-project `/api/projects/:projectId/scheduled-tasks` routes plus the global `/api/openchamber/scheduled-tasks/status`.
+  - Resolves the OpenChamber project via `resolveProjectId` (explicit `--project`, scope directory, active project, or sole project) and builds schedule objects (daily/weekly/once/cron) from flags. Destructive `delete` is gated by confirmation/`--force` in every mode.
+
 ## Shared Helper Modules
 
 These modules hold reusable, non-presentational logic for commands.
@@ -67,6 +80,12 @@ These modules hold reusable, non-presentational logic for commands.
 
 - `cli-http.js`
   - HTTP helpers for health checks, shutdown requests, JSON API calls, tunnel provider fetches, and system info fetches.
+
+- `cli-api-client.js`
+  - Transport layer for resource commands. Resolves the target instance port (explicit `--port` or single-instance discovery, failing deterministically on none/ambiguous), performs authenticated JSON requests against a running server (throwing `ApiError` on non-2xx so failures are mode-agnostic), and resolves the project scope directory.
+
+- `cli-format.js`
+  - Pure presentation helpers shared by resource commands: string truncation, relative-time formatting, and provider/model identifier formatting. Contains no validation or policy.
 
 - `cli-network.js`
   - Host resolution, URL building, LAN detection, unsafe browser port validation, and UI password/network exposure checks.
