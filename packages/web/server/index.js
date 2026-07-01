@@ -1367,6 +1367,16 @@ async function main(options = {}) {
     console.warn('[ScheduledTasks] Failed to start runtime:', error?.message || error);
   }
 
+  // Wire process signals to graceful shutdown so the auto-started OpenCode
+  // child process is killed when the server exits (Ctrl+C, SIGTERM, etc.).
+  // The existing attachProcessHandlers in server-startup-runtime.js covers
+  // SIGTERM/SIGINT/SIGQUIT when attachSignals is enabled (CLI mode), but not
+  // SIGHUP. Register SIGHUP here unconditionally since no other handler covers it.
+  // Use exitProcess:true so the process exits even in programmatic mode.
+  process.on('SIGHUP', () => {
+    gracefulShutdown({ exitProcess: true });
+  });
+
   return {
     expressApp: app,
     httpServer: server,
