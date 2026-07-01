@@ -5,8 +5,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import type { ThemeMode } from '@/types/theme';
 import { useUIStore } from '@/stores/useUIStore';
-import { useMessageQueueStore } from '@/stores/messageQueueStore';
-import { cn, getModifierLabel } from '@/lib/utils';
+import { useMessageQueueStore, type FollowUpBehavior } from '@/stores/messageQueueStore';
+import { cn } from '@/lib/utils';
+import { isCapacitorApp } from '@/lib/platform';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { NumberInput } from '@/components/ui/number-input';
@@ -230,11 +231,22 @@ const WEEK_START_OPTIONS: Option<'auto' | 'monday' | 'sunday'>[] = [
     },
 ];
 
+const FOLLOW_UP_BEHAVIOR_OPTIONS: Option<FollowUpBehavior>[] = [
+    {
+        id: 'steer',
+        labelKey: 'settings.openchamber.visual.option.followUpBehavior.steer.label',
+    },
+    {
+        id: 'queue',
+        labelKey: 'settings.openchamber.visual.option.followUpBehavior.queue.label',
+    },
+];
+
 const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' => {
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-export type VisibleSetting = 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar';
+type VisibleSetting = 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -288,8 +300,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setShowTerminalQuickKeysOnDesktop = useUIStore(state => state.setShowTerminalQuickKeysOnDesktop);
     const fileEditorKeymap = useUIStore(state => state.fileEditorKeymap);
     const setFileEditorKeymap = useUIStore(state => state.setFileEditorKeymap);
-    const queueModeEnabled = useMessageQueueStore(state => state.queueModeEnabled);
-    const setQueueMode = useMessageQueueStore(state => state.setQueueMode);
+    const followUpBehavior = useMessageQueueStore(state => state.followUpBehavior);
+    const setFollowUpBehavior = useMessageQueueStore(state => state.setFollowUpBehavior);
     const persistChatDraft = useUIStore(state => state.persistChatDraft);
     const setPersistChatDraft = useUIStore(state => state.setPersistChatDraft);
     const inputSpellcheckEnabled = useUIStore(state => state.inputSpellcheckEnabled);
@@ -310,6 +322,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setShowSplitAssistantMessageActions = useUIStore(state => state.setShowSplitAssistantMessageActions);
     const messageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport);
     const setMessageStreamTransport = useConfigStore((state) => state.setSettingsMessageStreamTransport);
+    // Capacitor apps are locked to SSE (native WebSocket streaming is unreliable on mobile);
+    // sync-context forces it too. Show SSE selected and disable the other options here.
+    const isCapacitorAppRuntime = React.useMemo(() => isCapacitorApp(), []);
+    const effectiveMessageStreamTransport = isCapacitorAppRuntime ? 'sse' : messageStreamTransport;
     const settingsDefaultFileViewerPreview = useConfigStore((state) => state.settingsDefaultFileViewerPreview);
     const setSettingsDefaultFileViewerPreview = useConfigStore((state) => state.setSettingsDefaultFileViewerPreview);
     const isSettingsDialogOpen = useUIStore(state => state.isSettingsDialogOpen);
@@ -336,6 +352,17 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const macVibrancyEnabled = typeof window !== 'undefined' && window.__OPENCHAMBER_ELECTRON__?.macVibrancy === true;
     const [vibrancyChecked, setVibrancyChecked] = React.useState(macVibrancyEnabled);
     const [vibrancyRestarting, setVibrancyRestarting] = React.useState(false);
+
+    // macOS-desktop-only dock badge that counts chats with unseen activity.
+    // The tray sync (mac-only) pumps the count to the main process, so the
+    // toggle is offered only where it actually has an effect. No relaunch needed.
+    const dockBadgeSupported = React.useMemo(
+        () => isDesktopShell() && typeof window !== 'undefined'
+            && (window as unknown as { __OPENCHAMBER_PLATFORM__?: string }).__OPENCHAMBER_PLATFORM__ === 'darwin',
+        [],
+    );
+    const dockBadgeEnabled = useUIStore(state => state.dockBadgeEnabled);
+    const setDockBadgeEnabled = useUIStore(state => state.setDockBadgeEnabled);
     const [chatRenderPreviewTick, setChatRenderPreviewTick] = React.useState(0);
     const reportUsage = useUIStore(state => state.reportUsage);
     const setReportUsage = useUIStore(state => state.setReportUsage);
@@ -539,7 +566,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('dotfiles')
         || shouldShow('fileViewerPreview')
         || shouldShow('reasoning')
-        || shouldShow('queueMode')
+        || shouldShow('followUpBehavior')
         || shouldShow('persistDraft')
         || shouldShow('showToolFileIcons')
         || shouldShow('expandedTools')
@@ -852,6 +879,38 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 </Button>
                                             </div>
                                         )}
+                                    </div>
+                                )}
+
+                                {dockBadgeSupported && (
+                                    <div data-settings-item="appearance.dock-badge" className="flex flex-col gap-1.5 border-t border-border/40 pt-3">
+                                        <div
+                                            className="group flex cursor-pointer items-start gap-2 py-0.5"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={dockBadgeEnabled}
+                                            onClick={() => setDockBadgeEnabled(!dockBadgeEnabled)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    setDockBadgeEnabled(!dockBadgeEnabled);
+                                                }
+                                            }}
+                                        >
+                                            <Checkbox
+                                                checked={dockBadgeEnabled}
+                                                onChange={setDockBadgeEnabled}
+                                                ariaLabel={t('settings.openchamber.visual.field.dockBadge')}
+                                            />
+                                            <div className="flex min-w-0 flex-col">
+                                                <span className="typography-ui-label text-foreground">
+                                                    {t('settings.openchamber.visual.field.dockBadge')}
+                                                </span>
+                                                <span className="typography-meta text-muted-foreground">
+                                                    {t('settings.openchamber.visual.field.dockBadgeHint')}
+                                                </span>
+                                            </div>
+                                        </div>
                                     </div>
                                 )}
                             </section>
@@ -1375,7 +1434,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                 {hasBehaviorSettings && (
                     <div className="space-y-3">
 
-                            {(shouldShow('userMessageRendering') || shouldShow('mermaidRendering') || shouldShow('chatRenderMode') || shouldShow('messageTransport') || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted') || (shouldShow('diffLayout') && !isVSCode)) && (
+                            {(shouldShow('userMessageRendering') || shouldShow('mermaidRendering') || shouldShow('chatRenderMode') || shouldShow('messageTransport') || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted') || (shouldShow('diffLayout') && !isVSCode) || shouldShow('followUpBehavior')) && (
                                 <div className="grid grid-cols-1 gap-y-2 md:grid-cols-[minmax(0,16rem)_minmax(0,16rem)] md:justify-start md:gap-x-2">
                                     {shouldShow('chatRenderMode') && (
                                         <section data-settings-item="chat.render-mode" className="p-2 md:col-span-2">
@@ -1471,7 +1530,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                             key={option.id}
                                                             variant="chip"
                                                             size="xs"
-                                                            aria-pressed={messageStreamTransport === option.id}
+                                                            aria-pressed={effectiveMessageStreamTransport === option.id}
+                                                            disabled={isCapacitorAppRuntime && option.id !== 'sse'}
                                                             className="!font-normal"
                                                             onClick={() => handleMessageStreamTransportChange(option.id)}
                                                         >
@@ -1481,7 +1541,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 </div>
                                                 <span className="typography-meta text-muted-foreground">
                                                     {(() => {
-                                                        const option = MESSAGE_STREAM_TRANSPORT_OPTIONS.find((item) => item.id === messageStreamTransport);
+                                                        const option = MESSAGE_STREAM_TRANSPORT_OPTIONS.find((item) => item.id === effectiveMessageStreamTransport);
                                                         return option?.descriptionKey ? tUnsafe(option.descriptionKey) : '';
                                                     })()}
                                                 </span>
@@ -1681,10 +1741,46 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         </section>
                                     )}
 
+                                    {shouldShow('followUpBehavior') && (
+                                        <section data-settings-item="chat.follow-up-behavior" className="p-2">
+                                            <h4 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.visual.section.followUpBehavior')}</h4>
+                                            <div role="radiogroup" aria-label={t('settings.openchamber.visual.section.followUpBehaviorAria')} className="mt-0.5 space-y-0">
+                                                {FOLLOW_UP_BEHAVIOR_OPTIONS.map((option) => {
+                                                    const selected = followUpBehavior === option.id;
+                                                    return (
+                                                        <div
+                                                            key={option.id}
+                                                            role="button"
+                                                            tabIndex={0}
+                                                            aria-pressed={selected}
+                                                            onClick={() => setFollowUpBehavior(option.id)}
+                                                            onKeyDown={(event) => {
+                                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                                    event.preventDefault();
+                                                                    setFollowUpBehavior(option.id);
+                                                                }
+                                                            }}
+                                                            className="flex w-full items-center gap-2 py-0 text-left"
+                                                        >
+                                                            <Radio
+                                                                checked={selected}
+                                                                onChange={() => setFollowUpBehavior(option.id)}
+                                                                ariaLabel={t('settings.openchamber.visual.field.followUpBehaviorAria', { option: tUnsafe(option.labelKey) })}
+                                                            />
+                                                            <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
+                                                                {tUnsafe(option.labelKey)}
+                                                            </span>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </section>
+                                    )}
+
                                 </div>
                             )}
 
-                            {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || shouldShow('dotfiles') || shouldShow('fileViewerPreview') || shouldShow('queueMode') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || shouldShow('showTurnChangedFiles') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning')) && (
+                            {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || shouldShow('dotfiles') || shouldShow('fileViewerPreview') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || shouldShow('showTurnChangedFiles') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning')) && (
                                 <section className="p-2 space-y-0.5">
                                     {shouldShow('reasoning') && (
                                         <div
@@ -1933,40 +2029,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 />
                                             </span>
                                             <span className="typography-ui-label text-foreground">{t('settings.openchamber.defaults.field.openFilesPreview')}</span>
-                                        </div>
-                                    )}
-
-                                    {shouldShow('queueMode') && (
-                                        <div
-                                            data-settings-item="chat.queue-mode"
-                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={queueModeEnabled}
-                                            onClick={() => setQueueMode(!queueModeEnabled)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    setQueueMode(!queueModeEnabled);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
-                                                checked={queueModeEnabled}
-                                                onChange={setQueueMode}
-                                                ariaLabel={t('settings.openchamber.visual.field.queueMessagesByDefaultAria')}
-                                            />
-                                            <div className="flex min-w-0 items-center gap-1.5">
-                                                <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.queueMessagesByDefault')}</span>
-                                                <Tooltip>
-                                                    <TooltipTrigger asChild>
-                                                        <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-                                                    </TooltipTrigger>
-                                                    <TooltipContent sideOffset={8} className="max-w-xs">
-                                                        {t('settings.openchamber.visual.field.queueMessagesByDefaultTooltip', { modifier: getModifierLabel() })}
-                                                    </TooltipContent>
-                                                </Tooltip>
-                                            </div>
                                         </div>
                                     )}
 

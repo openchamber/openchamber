@@ -17,6 +17,8 @@ import { useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
+import { markSessionViewed } from '@/sync/notification-store';
+import { setExternallyViewedSession, useDirectoryStore } from '@/sync/sync-context';
 import { ContextPanelContent } from './ContextSidebarTab';
 import { toast } from '@/components/ui';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -43,6 +45,7 @@ const CONTEXT_PANEL_MAX_WIDTH = 1400;
 const CONTEXT_PANEL_DEFAULT_WIDTH = 600;
 const CONTEXT_TAB_LABEL_MAX_CHARS = 24;
 type TranslateFn = ReturnType<typeof useI18n>['t'];
+const EMPTY_SESSION_TITLE_MAP = new Map<string, string>();
 
 type PreviewConsoleEvent = {
   id: number;
@@ -175,9 +178,27 @@ const getFileNameFromPath = (path: string | null): string | null => {
 };
 
 const getTabLabel = (
-  tab: { mode: ContextPanelMode; label: string | null; targetPath: string | null; stagedDiff?: boolean },
+  tab: { mode: ContextPanelMode; label: string | null; targetPath: string | null; dedupeKey?: string; sessionTitleFallback?: string | null; stagedDiff?: boolean },
+  sessionTitleById: ReadonlyMap<string, string>,
   t: TranslateFn
 ): string => {
+  if (tab.mode === 'chat') {
+    const sessionID = getSessionIDFromDedupeKey(tab.dedupeKey);
+    if (sessionID) {
+      const sessionTitle = sessionTitleById.get(sessionID)?.trim();
+      if (sessionTitle) {
+        return sessionTitle;
+      }
+    }
+
+    const sessionTitleFallback = tab.sessionTitleFallback?.trim();
+    if (sessionTitleFallback) {
+      return sessionTitleFallback;
+    }
+
+    return t('contextPanel.mode.chat');
+  }
+
   if (tab.label) {
     return tab.label;
   }
@@ -247,6 +268,47 @@ const getSessionIDFromDedupeKey = (dedupeKey: string | undefined): string | null
 
   const sessionID = dedupeKey.slice('session:'.length).trim();
   return sessionID || null;
+};
+
+const areTitleMapsEqual = (a: ReadonlyMap<string, string>, b: ReadonlyMap<string, string>): boolean => {
+  if (a.size !== b.size) return false;
+  for (const [key, value] of a) {
+    if (b.get(key) !== value) return false;
+  }
+  return true;
+};
+
+const buildSessionTitleMap = (sessions: Array<{ id: string; title?: string | null }>, sessionIDs: readonly string[]): Map<string, string> => {
+  if (sessionIDs.length === 0) return EMPTY_SESSION_TITLE_MAP;
+  const wanted = new Set(sessionIDs);
+  const next = new Map<string, string>();
+  for (const session of sessions) {
+    if (!wanted.has(session.id)) continue;
+    const title = session.title?.trim();
+    if (title) next.set(session.id, title);
+  }
+  return next.size === 0 ? EMPTY_SESSION_TITLE_MAP : next;
+};
+
+const useSessionTitleMap = (directory: string | undefined, sessionIDs: readonly string[]): ReadonlyMap<string, string> => {
+  const store = useDirectoryStore(directory);
+  const snapshotRef = React.useRef<ReadonlyMap<string, string>>(EMPTY_SESSION_TITLE_MAP);
+  const sessionIDsRef = React.useRef<readonly string[]>(sessionIDs);
+
+  sessionIDsRef.current = sessionIDs;
+
+  return React.useSyncExternalStore(
+    store.subscribe,
+    React.useCallback(() => {
+      const next = buildSessionTitleMap(store.getState().session, sessionIDsRef.current);
+      if (areTitleMapsEqual(snapshotRef.current, next)) {
+        return snapshotRef.current;
+      }
+      snapshotRef.current = next;
+      return next;
+    }, [store]),
+    () => EMPTY_SESSION_TITLE_MAP,
+  );
 };
 
 const DESKTOP_BROWSER_INSPECT_SCRIPT = `new Promise((resolve) => {
@@ -447,6 +509,21 @@ const stripPreviewTokenFromUrl = (value: string): string => {
     return value;
   }
 };
+
+const stripPreviewQueryParams = (value: string): string => {
+  if (!value) return value;
+  try {
+    const parsed = new URL(value);
+    parsed.searchParams.delete('ocPreview');
+    parsed.searchParams.delete('oc_preview_token');
+    parsed.searchParams.delete('oc_client_token');
+    parsed.searchParams.delete('oc_url_token');
+    return parsed.toString();
+  } catch {
+    return value;
+  }
+};
+
 const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
@@ -593,6 +670,8 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
     ? (() => {
       const path = normalizedUrl.pathname || '/';
       const searchParams = new URLSearchParams(normalizedUrl.search);
+      searchParams.delete('oc_url_token');
+      searchParams.delete('oc_client_token');
       searchParams.set('ocPreview', String(reloadNonce));
       searchParams.set('oc_preview_token', proxyState.previewToken || '');
       const search = searchParams.toString();
@@ -1394,6 +1473,8 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
       const parsed = new URL(currentUrl);
       const path = parsed.pathname || '/';
       const searchParams = new URLSearchParams(parsed.search);
+      searchParams.delete('oc_url_token');
+      searchParams.delete('oc_client_token');
       searchParams.set('ocPreview', String(reloadNonce));
       searchParams.set('oc_preview_token', proxyState.previewToken || '');
       const search = searchParams.toString();
@@ -1418,7 +1499,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
 
       const rest = parsedFrameUrl.pathname.slice(proxyBasePath.length) || '/';
       const upstreamOrigin = new URL(currentUrl).origin;
-      return new URL(`${rest}${parsedFrameUrl.search}${parsedFrameUrl.hash}`, upstreamOrigin).toString();
+      return stripPreviewQueryParams(new URL(`${rest}${parsedFrameUrl.search}${parsedFrameUrl.hash}`, upstreamOrigin).toString());
     } catch {
       return '';
     }
@@ -1440,7 +1521,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
         return '';
       }
 
-      return new URL(`${parsedFrameUrl.pathname}${parsedFrameUrl.search}${parsedFrameUrl.hash}`, upstreamOrigin).toString();
+      return stripPreviewQueryParams(new URL(`${parsedFrameUrl.pathname}${parsedFrameUrl.search}${parsedFrameUrl.hash}`, upstreamOrigin).toString());
     } catch {
       return '';
     }
@@ -1989,6 +2070,16 @@ export const ContextPanel: React.FC = () => {
   const isOpen = Boolean(panelState?.isOpen && activeTab);
   const isExpanded = Boolean(isOpen && panelState?.expanded);
   const width = clampWidth(panelState?.width ?? CONTEXT_PANEL_DEFAULT_WIDTH);
+  const chatSessionIDs = React.useMemo(() => {
+    const ids: string[] = [];
+    for (const tab of tabs) {
+      if (tab.mode !== 'chat') continue;
+      const sessionID = getSessionIDFromDedupeKey(tab.dedupeKey);
+      if (sessionID && !ids.includes(sessionID)) ids.push(sessionID);
+    }
+    return ids;
+  }, [tabs]);
+  const sessionTitleById = useSessionTitleMap(directoryKey || undefined, chatSessionIDs);
 
   const [isResizing, setIsResizing] = React.useState(false);
   const [suppressWidthTransition, setSuppressWidthTransition] = React.useState(false);
@@ -2157,6 +2248,37 @@ export const ContextPanel: React.FC = () => {
   }, [activeTab, directoryKey, setSelectedFilePath]);
 
   const activeChatTabID = activeTab?.mode === 'chat' ? activeTab.id : null;
+  const activeChatSessionID = activeTab?.mode === 'chat' ? getSessionIDFromDedupeKey(activeTab.dedupeKey) : null;
+
+  React.useEffect(() => {
+    if (!isOpen || !directoryKey || !activeChatSessionID || typeof window === 'undefined') {
+      return;
+    }
+
+    const markActiveChatViewed = () => {
+      if (document.visibilityState === 'hidden' || !document.hasFocus()) {
+        setExternallyViewedSession(directoryKey, activeChatSessionID, false);
+        return;
+      }
+
+      markSessionViewed(activeChatSessionID);
+      setExternallyViewedSession(directoryKey, activeChatSessionID, true);
+    };
+
+    markActiveChatViewed();
+    const interval = window.setInterval(markActiveChatViewed, 10_000);
+    window.addEventListener('focus', markActiveChatViewed);
+    window.addEventListener('blur', markActiveChatViewed);
+    document.addEventListener('visibilitychange', markActiveChatViewed);
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', markActiveChatViewed);
+      window.removeEventListener('blur', markActiveChatViewed);
+      document.removeEventListener('visibilitychange', markActiveChatViewed);
+      setExternallyViewedSession(directoryKey, activeChatSessionID, false);
+    };
+  }, [activeChatSessionID, directoryKey, isOpen]);
 
   const getEmbeddedChatSrc = React.useCallback((tabID: string, sessionID: string, readOnly: boolean): string => {
     return getOrCreateEmbeddedSessionChatURL(chatFrameSrcByTabIDRef.current, tabID, sessionID, directoryKey || null, readOnly, {
@@ -2306,7 +2428,7 @@ export const ContextPanel: React.FC = () => {
   }, [darkThemeId, lightThemeId, postEmbeddedVisibilityToChats, postThemeSyncToEmbeddedChat, tabs, themeMode]);
 
   const tabItems = React.useMemo(() => tabs.map((tab) => {
-    const rawLabel = getTabLabel(tab, t);
+    const rawLabel = getTabLabel(tab, sessionTitleById, t);
     const label = truncateTabLabel(rawLabel, CONTEXT_TAB_LABEL_MAX_CHARS);
     const tabPathLabel = getRelativePathLabel(tab.targetPath, effectiveDirectory);
     return {
@@ -2316,7 +2438,7 @@ export const ContextPanel: React.FC = () => {
       title: tabPathLabel ? `${rawLabel}: ${tabPathLabel}` : rawLabel,
       closeLabel: t('contextPanel.tab.closeTabAria', { label }),
     };
-  }), [effectiveDirectory, t, tabs]);
+  }), [effectiveDirectory, sessionTitleById, t, tabs]);
 
   const activeNonChatContent = activeTab?.mode === 'context'
         ? <ContextPanelContent />

@@ -13,7 +13,7 @@ const escapeAttr = (value: string): string =>
 // Streaming block segmentation (port of OpenCode's markdown-stream)
 // ---------------------------------------------------------------------------
 
-export type MarkdownBlock = {
+type MarkdownBlock = {
   raw: string;
   src: string;
   mode: 'full' | 'live';
@@ -54,7 +54,7 @@ const heal = (text: string): string => {
  * unclosed trailing code fence into its own `live` block so a partial fence
  * does not corrupt the parse of stable content above it.
  */
-export const streamBlocks = (text: string, live: boolean): MarkdownBlock[] => {
+const streamBlocks = (text: string, live: boolean): MarkdownBlock[] => {
   if (!live) return [{ raw: text, src: text, mode: 'full', highlight: true }];
   // Reference-style links/footnotes span multiple tokens (definition elsewhere);
   // keep them as a single block so per-block parsing doesn't break the refs.

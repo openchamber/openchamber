@@ -100,7 +100,7 @@ export interface UseSayTTSReturn {
   unlockAudio: () => Promise<void>;
 }
 
-export interface SpeakOptions {
+interface SpeakOptions {
   /** Voice to use (defaults to Samantha) */
   voice?: string;
   /** Speech rate in words per minute (defaults to 200) */

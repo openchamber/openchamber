@@ -148,7 +148,7 @@ const formatLaunchRuntime = (wrapperType: string, node: string, bun: string): st
   return 'direct executable';
 };
 
-export const buildOpenCodeStatusReport = async (): Promise<string> => {
+const buildOpenCodeStatusReport = async (): Promise<string> => {
   const now = new Date();
   const appVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '(unknown)';
   const platform = typeof navigator !== 'undefined' ? navigator.userAgent : '(no navigator)';

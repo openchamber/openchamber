@@ -4,8 +4,8 @@
  */
 
 import { create } from "zustand"
-import { persist, createJSONStorage } from "zustand/middleware"
-import { getSafeStorage } from "@/stores/utils/safeStorage"
+import { persist } from "zustand/middleware"
+import { createDeferredSafeJSONStorage } from "@/stores/utils/safeStorage"
 
 type ModelSelection = { providerId: string; modelId: string }
 type LastUsedProvider = { providerID: string; modelID: string }
@@ -126,7 +126,7 @@ export const useSelectionStore = create<SelectionState>()(
     {
       name: "selection-store",
       version: 1,
-      storage: createJSONStorage(() => getSafeStorage()),
+      storage: createDeferredSafeJSONStorage(),
       partialize: (state) => {
         // Convert Maps to arrays and slice to keep only the most recent MAX_PERSISTED_SESSIONS
         const models = Array.from(state.sessionModelSelections.entries()).slice(-MAX_PERSISTED_SESSIONS)

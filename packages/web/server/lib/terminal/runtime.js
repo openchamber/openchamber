@@ -1,18 +1,20 @@
 import { WebSocketServer } from 'ws';
 import {
-  TERMINAL_INPUT_WS_MAX_PAYLOAD_BYTES,
-  TERMINAL_INPUT_WS_PATH,
+  TERMINAL_WS_MAX_PAYLOAD_BYTES as TERMINAL_INPUT_WS_MAX_PAYLOAD_BYTES,
+  TERMINAL_WS_PATH as TERMINAL_INPUT_WS_PATH,
+  createTerminalWsControlFrame as createTerminalInputWsControlFrame,
+  isRebindRateLimited,
+  normalizeTerminalWsMessageToText as normalizeTerminalInputWsMessageToText,
+  parseRequestPathname,
+  pruneRebindTimestamps,
+  readTerminalWsControlFrame as readTerminalInputWsControlFrame,
+} from './terminal-ws-protocol.js';
+import {
   TERMINAL_OUTPUT_REPLAY_MAX_BYTES,
   appendTerminalOutputReplayChunk,
   createTerminalOutputReplayBuffer,
-  createTerminalInputWsControlFrame,
-  isRebindRateLimited,
   listTerminalOutputReplayChunksSince,
-  normalizeTerminalInputWsMessageToText,
-  parseRequestPathname,
-  pruneRebindTimestamps,
-  readTerminalInputWsControlFrame,
-} from './index.js';
+} from './output-replay-buffer.js';
 
 export function createTerminalRuntime({
   app,

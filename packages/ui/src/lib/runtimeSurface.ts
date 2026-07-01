@@ -20,7 +20,7 @@ const isTouchOrCoarsePointer = (): boolean => {
   return coarsePointer || touchPoints > 0;
 };
 
-export const detectHostedSurface = (): HostedSurface => {
+const detectHostedSurface = (): HostedSurface => {
   if (typeof window === 'undefined') return 'desktop';
 
   const explicitSurface = window.__OPENCHAMBER_SURFACE__;

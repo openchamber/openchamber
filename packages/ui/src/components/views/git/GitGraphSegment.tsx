@@ -1,7 +1,7 @@
 import React from 'react';
 import type { LanedCommit } from './gitGraph';
 
-export const LANE_WIDTH = 8;
+const LANE_WIDTH = 8;
 
 interface GitGraphSegmentProps {
   laned: LanedCommit;

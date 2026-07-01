@@ -1,11 +1,11 @@
-export type GeneratedCommitResult = {
+type GeneratedCommitResult = {
   kind: 'commit';
   subject: string;
   highlights: string[];
   raw: string;
 };
 
-export type GeneratedPrResult = {
+type GeneratedPrResult = {
   kind: 'pr';
   title: string;
   body: string;
@@ -16,21 +16,15 @@ export type GeneratedResult = GeneratedCommitResult | GeneratedPrResult;
 
 const parseJsonObjects = (value: string): Record<string, unknown>[] => {
   const text = value.trim();
-  const candidates = new Set<string>();
+  const candidates: string[] = [];
 
-  const fencedMatches = text.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi);
-  for (const match of fencedMatches) {
-    if (match[1]) candidates.add(match[1].trim());
+  const fencedMatch = text.match(/^```(?:json)?\s*([\s\S]*?)```$/i);
+  if (fencedMatch?.[1]) {
+    candidates.push(fencedMatch[1].trim());
   }
 
-  const firstObjectStart = text.indexOf('{');
-  if (firstObjectStart >= 0) {
-    for (let end = text.length; end > firstObjectStart; end -= 1) {
-      if (text[end - 1] === '}') {
-        candidates.add(text.slice(firstObjectStart, end));
-        break;
-      }
-    }
+  if (text.startsWith('{') && text.endsWith('}')) {
+    candidates.push(text);
   }
 
   const parsed: Record<string, unknown>[] = [];

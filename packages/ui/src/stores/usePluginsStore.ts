@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import { devtools, persist, createJSONStorage } from 'zustand/middleware';
-import { getSafeStorage } from './utils/safeStorage';
+import { devtools, persist } from 'zustand/middleware';
+import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import {
   startConfigUpdate,
   finishConfigUpdate,
@@ -11,7 +11,7 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
 export type PluginScope = 'user' | 'project';
-export type PluginParsedKind = 'npm' | 'path';
+type PluginParsedKind = 'npm' | 'path';
 
 export interface PluginEntry {
   id: string;
@@ -123,7 +123,7 @@ const getConfigDirectory = (): string | null => {
 };
 
 const CLIENT_RELOAD_DELAY_MS = 800;
-export const PLUGINS_LOAD_CACHE_TTL_MS = 5000;
+const PLUGINS_LOAD_CACHE_TTL_MS = 5000;
 const DEFAULT_PLUGINS_CACHE_KEY = '__default__';
 const pluginsLastLoadedAt = new Map<string, number>();
 const pluginsLoadInFlight = new Map<string, Promise<boolean>>();
@@ -352,7 +352,7 @@ export const usePluginsStore = create<PluginsStore>()(
       }),
       {
         name: 'plugins-store',
-        storage: createJSONStorage(() => getSafeStorage()),
+        storage: createDeferredSafeJSONStorage(),
         partialize: (state) => ({ selectedId: state.selectedId }),
       },
     ),

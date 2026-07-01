@@ -4,6 +4,7 @@ import { vscodeStreamPerfCount, vscodeStreamPerfMeasure, vscodeStreamPerfObserve
 import { extractBodyBase64, extractBodyText, extractJsonBody, hasInitBody } from './requestBodyTransport';
 import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
 import { opencodeClient } from '@openchamber/ui/lib/opencode/client';
+import { sanitizeHeadersForBrowser } from '@openchamber/ui/lib/runtime-fetch';
 import {
   buildVSCodeThemeFromPalette,
   readVSCodeThemePalette,
@@ -279,7 +280,7 @@ const normalizeUrl = (input: string | URL) => {
 
 const headersToRecord = (headers: HeadersInit | undefined): Record<string, string> => {
   if (!headers) return {};
-  const normalized = headers instanceof Headers ? headers : new Headers(headers);
+  const normalized = new Headers(sanitizeHeadersForBrowser(headers) ?? headers);
   const result: Record<string, string> = {};
   normalized.forEach((value, key) => {
     result[key] = value;
@@ -297,8 +298,14 @@ const getRequestDirectoryHint = (url: URL, input?: RequestInfo | URL, init?: Req
   const queryDirectory = url.searchParams.get('directory') || undefined;
   if (queryDirectory) return queryDirectory;
   const headers = getRequestHeaders(input, init);
+  const directoryEncoding = Object.entries(headers).find(([key]) => key.toLowerCase() === 'x-opencode-directory-encoding')?.[1];
   for (const [key, value] of Object.entries(headers)) {
-    if (key.toLowerCase() === 'x-opencode-directory') return value;
+    if (key.toLowerCase() === 'x-opencode-directory') {
+      // headersToRecord marks encoded directory hints so direct/raw percent
+      // sequences from other callers are not decoded accidentally.
+      if (directoryEncoding !== 'uri') return value;
+      try { return decodeURIComponent(value); } catch { return value; }
+    }
   }
   return undefined;
 };

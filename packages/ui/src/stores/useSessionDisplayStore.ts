@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-export type SessionDisplayMode = 'default' | 'minimal';
+type SessionDisplayMode = 'default' | 'minimal';
 
 type SessionDisplayStore = {
   displayMode: SessionDisplayMode;

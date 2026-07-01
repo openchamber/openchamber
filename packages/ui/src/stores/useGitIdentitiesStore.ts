@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { StoreApi, UseBoundStore } from "zustand";
-import { devtools, persist, createJSONStorage } from "zustand/middleware";
-import { getSafeStorage } from "./utils/safeStorage";
+import { devtools, persist } from "zustand/middleware";
+import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
 import {
   getGitIdentities,
   createGitIdentity,
@@ -23,6 +23,8 @@ export interface GitIdentityProfile {
   userEmail: string;
   authType?: GitIdentityAuthType;
   sshKey?: string | null;
+  signCommits?: boolean;
+  signingKey?: string | null;
   host?: string | null;
   color?: string | null;
   icon?: string | null;
@@ -269,7 +271,7 @@ export const useGitIdentitiesStore = create<GitIdentitiesStore>()(
       }),
       {
         name: "git-identities-store",
-        storage: createJSONStorage(() => getSafeStorage()),
+        storage: createDeferredSafeJSONStorage(),
         partialize: (state) => ({
           selectedProfileId: state.selectedProfileId,
         }),

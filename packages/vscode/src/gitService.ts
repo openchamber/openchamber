@@ -120,7 +120,7 @@ async function buildGitEnv(): Promise<NodeJS.ProcessEnv> {
 /**
  * Initialize the git extension API
  */
-export async function initGitExtension(): Promise<GitAPI | null> {
+async function initGitExtension(): Promise<GitAPI | null> {
   if (gitApi && gitExtensionEnabled) {
     return gitApi;
   }
@@ -163,7 +163,7 @@ export async function initGitExtension(): Promise<GitAPI | null> {
 /**
  * Get the git API, initializing if necessary
  */
-export async function getGitApi(): Promise<GitAPI | null> {
+async function getGitApi(): Promise<GitAPI | null> {
   if (gitApi && gitExtensionEnabled) {
     return gitApi;
   }
@@ -173,7 +173,7 @@ export async function getGitApi(): Promise<GitAPI | null> {
 /**
  * Get repository for a given directory
  */
-export async function getRepository(directory: string): Promise<Repository | null> {
+async function getRepository(directory: string): Promise<Repository | null> {
   const api = await getGitApi();
   if (!api) return null;
 
@@ -333,20 +333,20 @@ export async function isLinkedWorktree(directory: string): Promise<boolean> {
 
 // ============== Status Operations ==============
 
-export interface GitStatusFile {
+interface GitStatusFile {
   path: string;
   index: string;
   working_dir: string;
 }
 
-export interface GitMergeInProgress {
+interface GitMergeInProgress {
   /** Short SHA of MERGE_HEAD */
   head: string;
   /** First line of MERGE_MSG */
   message: string;
 }
 
-export interface GitRebaseInProgress {
+interface GitRebaseInProgress {
   /** Branch name being rebased */
   headName: string;
   /** Short SHA of the onto commit */
@@ -591,7 +591,7 @@ async function getGitStatusRaw(directory: string): Promise<GitStatusResult> {
 
 // ============== Branch Operations ==============
 
-export interface GitBranchDetails {
+interface GitBranchDetails {
   current: boolean;
   name: string;
   commit: string;
@@ -720,43 +720,6 @@ export async function checkoutBranch(directory: string, branch: string): Promise
 }
 
 /**
- * Detach HEAD at current commit
- * This allows the current branch to be used in a worktree
- */
-export async function detachHead(directory: string): Promise<{ success: boolean; commit: string }> {
-  // Get current HEAD commit
-  const headResult = await execGit(['rev-parse', 'HEAD'], directory);
-  if (headResult.exitCode !== 0) {
-    return { success: false, commit: '' };
-  }
-  
-  const commit = headResult.stdout.trim();
-  
-  // Checkout the commit directly to detach HEAD
-  const result = await execGit(['checkout', '--detach', 'HEAD'], directory);
-  return { success: result.exitCode === 0, commit };
-}
-
-/**
- * Get the current HEAD branch name (null if detached)
- */
-export async function getCurrentBranch(directory: string): Promise<string | null> {
-  const repo = await getRepository(directory);
-  
-  if (repo) {
-    const head = repo.state.HEAD;
-    return head?.name || null;
-  }
-
-  // Fallback to raw git
-  const result = await execGit(['symbolic-ref', '--short', 'HEAD'], directory);
-  if (result.exitCode === 0) {
-    return result.stdout.trim();
-  }
-  return null; // Detached HEAD
-}
-
-/**
  * Create a new branch
  */
 export async function createBranch(directory: string, name: string, startPoint?: string): Promise<{ success: boolean; branch: string }> {
@@ -825,7 +788,7 @@ type WorktreeListEntry = {
   branch?: string;
 };
 
-export interface GitWorktreeValidationError {
+interface GitWorktreeValidationError {
   code: string;
   message: string;
 }
@@ -1754,6 +1717,19 @@ export async function validateWorktreeCreate(directory: string, input: CreateGit
   }
 }
 
+const assertWorktreeCreatePreflight = async (directory: string, input: CreateGitWorktreePayload = {}): Promise<void> => {
+  const validation = await validateWorktreeCreate(directory, input);
+  if (validation?.ok) {
+    return;
+  }
+
+  const message = validation?.errors
+    ?.map((error) => error?.message)
+    .filter(Boolean)
+    .join('\n') || 'Failed to validate worktree creation';
+  throw new Error(message);
+};
+
 export async function previewWorktreeCreate(directory: string, input: CreateGitWorktreePayload = {}): Promise<GitWorktreeInfo> {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const context = await resolveWorktreeProjectContext(directory);
@@ -1907,6 +1883,11 @@ async function attachGitWorktreeToCandidate(
 export async function createWorktree(directory: string, input: CreateGitWorktreePayload = {}): Promise<GitWorktreeInfo> {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const context = await resolveWorktreeProjectContext(directory);
+
+  if (input?.returnAfterDirectoryCreated === true) {
+    await assertWorktreeCreatePreflight(directory, input);
+  }
+
   await fs.promises.mkdir(context.worktreeRoot, { recursive: true });
 
   const preferredName = String(input?.worktreeName || input?.name || '').trim();
@@ -2051,43 +2032,6 @@ export async function removeWorktree(directory: string, input: RemoveGitWorktree
   clearWorktreeBootstrapState(matchedEntry.worktree);
 
   return true;
-}
-
-/**
- * Get branches that are available for worktree checkout
- * (branches not already checked out in any worktree)
- */
-export async function getAvailableBranchesForWorktree(directory: string): Promise<GitBranchDetails[]> {
-  const [branches, worktrees] = await Promise.all([
-    getGitBranches(directory),
-    listGitWorktrees(directory),
-  ]);
-
-  // Get set of branches already checked out in worktrees
-  const checkedOutBranches = new Set<string>();
-  for (const wt of worktrees) {
-    if (wt.branch) {
-      checkedOutBranches.add(wt.branch.replace(/^refs\/heads\//, ''));
-    }
-  }
-
-  // Filter out branches that are already checked out
-  const availableBranches: GitBranchDetails[] = [];
-  for (const name of branches.all) {
-    // Skip remote branches for worktree creation
-    if (name.startsWith('remotes/')) {
-      continue;
-    }
-    
-    if (!checkedOutBranches.has(name)) {
-      const details = branches.branches[name];
-      if (details) {
-        availableBranches.push(details);
-      }
-    }
-  }
-
-  return availableBranches;
 }
 
 // ============== Diff Operations ==============
@@ -2262,10 +2206,6 @@ export async function revertGitFile(
   }
 }
 
-export async function stageGitFile(directory: string, filePath: string): Promise<void> {
-  await stageGitFiles(directory, [filePath]);
-}
-
 export async function stageGitFiles(directory: string, filePaths: string[]): Promise<void> {
   const paths = filePaths.map((path) => path.trim()).filter(Boolean);
 
@@ -2299,10 +2239,6 @@ export async function stageGitFiles(directory: string, filePaths: string[]): Pro
       throw new Error(perPath.stderr || 'Failed to stage git file');
     }
   }
-}
-
-export async function unstageGitFile(directory: string, filePath: string): Promise<void> {
-  await unstageGitFiles(directory, [filePath]);
 }
 
 export async function unstageGitFiles(directory: string, filePaths: string[]): Promise<void> {
@@ -3284,12 +3220,15 @@ export async function setGitIdentity(
   directory: string,
   userName: string,
   userEmail: string,
-  sshKey?: string | null
+  sshKey?: string | null,
+  signCommits?: boolean | null,
+  signingKey?: string | null
 ): Promise<{ success: boolean }> {
   const repo = await getRepository(directory);
   
   // Build SSH command once if needed
   const sshCommand = sshKey ? buildSshCommand(sshKey) : null;
+  const shouldSignCommits = signCommits === true && typeof signingKey === 'string' && signingKey.trim().length > 0;
   
   if (repo) {
     try {
@@ -3297,6 +3236,11 @@ export async function setGitIdentity(
       await repo.setConfig('user.email', userEmail);
       if (sshCommand) {
         await repo.setConfig('core.sshCommand', sshCommand);
+      }
+      if (shouldSignCommits) {
+        await repo.setConfig('gpg.format', 'ssh');
+        await repo.setConfig('user.signingkey', signingKey.trim());
+        await repo.setConfig('commit.gpgsign', 'true');
       }
       return { success: true };
     } catch (error) {
@@ -3309,6 +3253,11 @@ export async function setGitIdentity(
   await execGit(['config', 'user.email', userEmail], directory);
   if (sshCommand) {
     await execGit(['config', 'core.sshCommand', sshCommand], directory);
+  }
+  if (shouldSignCommits) {
+    await execGit(['config', 'gpg.format', 'ssh'], directory);
+    await execGit(['config', 'user.signingkey', signingKey.trim()], directory);
+    await execGit(['config', 'commit.gpgsign', 'true'], directory);
   }
 
   return { success: true };
@@ -3614,38 +3563,6 @@ export async function resetToCommit(
     throw new Error(result.stderr || 'Reset failed');
   }
   return { success: true };
-}
-
-// ============== Stash Operations ==============
-
-/**
- * Stash changes
- */
-export async function stash(
-  directory: string,
-  options?: { message?: string; includeUntracked?: boolean }
-): Promise<{ success: boolean }> {
-  const args = ['stash', 'push'];
-
-  // Include untracked files by default
-  if (options?.includeUntracked !== false) {
-    args.push('--include-untracked');
-  }
-
-  if (options?.message) {
-    args.push('-m', options.message);
-  }
-
-  const result = await execGit(args, directory);
-  return { success: result.exitCode === 0 };
-}
-
-/**
- * Pop the most recent stash
- */
-export async function stashPop(directory: string): Promise<{ success: boolean }> {
-  const result = await execGit(['stash', 'pop'], directory);
-  return { success: result.exitCode === 0 };
 }
 
 // ============== Worktree Validation & Canonicalization ==============

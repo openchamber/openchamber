@@ -9,21 +9,6 @@ const getHour12Option = (preference: TimeFormatPreference): boolean | undefined 
   return undefined;
 };
 
-export const getUses24HourForPreference = (preference: TimeFormatPreference, locale: string): boolean => {
-  if (preference === '24h') return true;
-  if (preference === '12h') return false;
-
-  try {
-    const options = new Intl.DateTimeFormat(locale, { hour: 'numeric' }).resolvedOptions();
-    if (typeof options.hour12 === 'boolean') {
-      return !options.hour12;
-    }
-    return options.hourCycle === 'h23' || options.hourCycle === 'h24';
-  } catch {
-    return true;
-  }
-};
-
 export const formatTimeForPreference = (
   timestamp: number | Date,
   preference: TimeFormatPreference,

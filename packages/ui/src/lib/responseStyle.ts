@@ -26,7 +26,7 @@ export const getResponseStylePresetInstructions = (preset: ResponseStylePreset):
   }
 };
 
-export const buildResponseStyleInstruction = ({
+const buildResponseStyleInstruction = ({
   enabled,
   preset,
   customInstructions,

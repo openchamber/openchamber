@@ -1,1 +1,1 @@
-export { DiagramEditor, type DiagramEditorProps, type DiagramEditorHandle } from './DiagramEditor';
+export { DiagramEditor, type DiagramEditorHandle } from './DiagramEditor';

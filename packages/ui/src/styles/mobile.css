@@ -85,6 +85,16 @@
     min-width: 36px;
   }
 
+  /* Composer footer action buttons (sessions / attach / auto-accept): hug the
+     icon so the group stays tight. The container only renders in the mobile
+     JSX, so no pointer/runtime gating is needed; !important overrides both the
+     w-8 utility and the global mobile touch-target min-width regardless of
+     cascade layer or specificity. */
+  .composer-mobile-actions button {
+    width: 1.5rem !important;
+    min-width: 0 !important;
+  }
+
   /* Improve input field touch targets */
   :root.mobile-pointer:not(.desktop-runtime) input,
   :root.mobile-pointer:not(.desktop-runtime) textarea,
@@ -237,6 +247,10 @@
   :root.device-tablet:not(.desktop-runtime) .header-safe-area,
   :root.mobile-pointer:not(.desktop-runtime) .header-safe-area {
     padding-top: var(--oc-safe-area-top);
+  }
+
+  :root.oc-capacitor-app [data-sonner-toaster][data-y-position='top'] {
+    top: calc(env(safe-area-inset-top, 0px) + 16px) !important;
   }
 }
 
@@ -497,4 +511,89 @@
       );
     }
   }
+}
+
+/* Small app-wide bottom safe area for the native shell. The phone's rounded hardware
+   corners clip controls flush against the bottom edge, and the PWA's own safe-area
+   padding is gated behind display-mode: standalone — which the Capacitor WebView does
+   not match — so nothing reserves bottom room in the native app. Expose it as a token
+   so any native surface can consume it; the chat shell does so below. */
+:root.oc-capacitor-app {
+  --oc-app-bottom-safe: max(16px, calc(env(safe-area-inset-bottom, 0px) * 0.5));
+}
+
+/* Paint the document canvas with the theme background in the native app — the same
+   thing .desktop-runtime does for body/#root, which the Capacitor shell never got.
+   The status bar is overlaid (transparent), and in dark mode `color-scheme: dark`
+   makes the bare UA canvas dark, so any sliver not covered by content (notably the
+   area behind the status bar) bled through as a dark band at the top. It only showed
+   in dark mode, which is why it tracked the system theme. */
+:root.oc-capacitor-app,
+:root.oc-capacitor-app body,
+:root.oc-capacitor-app #root {
+  background: var(--background) !important;
+  background-color: var(--background) !important;
+}
+
+/* Native (Capacitor) keyboard handling.
+   The Keyboard plugin runs in `resize: 'none'` mode so the WebView keeps its full
+   height; instead we shrink the app shell by the keyboard frame height, exposed as
+   --oc-keyboard-inset and set once from `keyboardWillShow` (see useNativeMobileChrome).
+   Scoped to .oc-capacitor-app so the browser PWA keeps its dvh / interactive-widget
+   behaviour untouched.
+
+   `keyboardWillShow` fires at the start of the iOS keyboard animation, so the inset
+   is set once and the transition carries the rise. The duration/curve are tuned to
+   mimic the native iOS keyboard (≈0.25s, cubic-bezier(0.38, 0.7, 0.125, 1)) so our
+   layout and the keyboard move together. (visualViewport live-tracking would be exact
+   but doesn't report under WKWebView's `resize: 'none'`, so this is the best signal.) */
+:root.oc-capacitor-app .oc-mobile-app-shell {
+  height: calc(100dvh - var(--oc-keyboard-inset, 0px));
+  /* Reserve the bottom safe area only while the keyboard is down — when it's up the
+     inset cancels it out (the home indicator is hidden and the composer should sit
+     flush above the keyboard). The shell keeps its own bg behind this padding. */
+  padding-bottom: max(0px, calc(var(--oc-app-bottom-safe, 0px) - var(--oc-keyboard-inset, 0px)));
+  transition: height 0.25s cubic-bezier(0.38, 0.7, 0.125, 1),
+              padding-bottom 0.25s cubic-bezier(0.38, 0.7, 0.125, 1);
+}
+
+/* Android resizes the window for the keyboard natively (no manual --oc-keyboard-inset),
+   so 100dvh changes instantly. Animating height against that instant resize makes the
+   header/content bounce on keyboard open — disable the transition on Android. */
+:root.oc-capacitor-app.oc-platform-android .oc-mobile-app-shell {
+  transition: none;
+}
+
+/* Portal surfaces (bottom sheets, overlay panels) render at <body> level, outside
+   the app shell, so they don't inherit the shell's keyboard inset. They're full-
+   height `fixed inset-0` scrims with a bottom-anchored (`mt-auto`) sheet, so raising
+   their bottom edge by the keyboard height shrinks scrim + sheet together and lifts
+   any input above the keyboard instead of hiding it underneath. The opacity term
+   preserves the scrim's enter fade (Tailwind's `transition-opacity` would otherwise
+   be overridden by this rule's `transition` shorthand). */
+:root.oc-capacitor-app .oc-keyboard-inset-surface {
+  bottom: var(--oc-keyboard-inset, 0px);
+  transition: bottom 0.25s cubic-bezier(0.38, 0.7, 0.125, 1), opacity 0.2s ease-out;
+}
+
+/* Full-screen scroll views (e.g. the connect/login screen) live outside the app
+   shell, so shrink them by the keyboard height the same way the shell does. Capping
+   the height (instead of min-height: 100dvh) is what makes overflow-y-auto actually
+   scroll, so a field near the bottom lifts above the keyboard rather than staying
+   hidden behind it. min-height: 0 neutralises the Tailwind min-h-dvh baseline. */
+:root.oc-capacitor-app .oc-keyboard-fill-screen {
+  height: calc(100dvh - var(--oc-keyboard-inset, 0px));
+  min-height: 0;
+  transition: height 0.25s cubic-bezier(0.38, 0.7, 0.125, 1);
+}
+
+/* The composer keeps its 1rem bottom padding while the keyboard is down (breathing
+   room above the home indicator), but that gap looks artificial sitting above the
+   keyboard's accessory bar — so tighten it while the keyboard is open. Animated to
+   match the keyboard motion. */
+:root.oc-capacitor-app .oc-mobile-composer {
+  transition: padding-bottom 0.25s cubic-bezier(0.38, 0.7, 0.125, 1);
+}
+:root.oc-capacitor-app.oc-keyboard-open .oc-mobile-composer {
+  padding-bottom: 6px;
 }

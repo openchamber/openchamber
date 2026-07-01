@@ -19,7 +19,7 @@ declare global {
   }
 }
 
-export const vscodeStreamPerfEnabled = (): boolean => {
+const vscodeStreamPerfEnabled = (): boolean => {
   try {
     return window.localStorage.getItem(STREAM_PERF_STORAGE_KEY) === '1';
   } catch {

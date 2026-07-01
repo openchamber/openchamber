@@ -477,9 +477,14 @@ export const ProvidersPage: React.FC = () => {
     setAuthBusyKey(busyKey);
 
     try {
-      const result = await opencodeClient.getSdkClient().auth.remove({ providerID: providerId });
-      if (result.error) {
-        throw new Error(t('settings.providers.page.toast.providerDisconnectFailed'));
+      const response = await runtimeFetch(`/api/provider/${encodeURIComponent(providerId)}/auth?scope=all`, {
+        method: 'DELETE',
+        headers: { Accept: 'application/json' },
+      });
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.error || t('settings.providers.page.toast.providerDisconnectFailed'));
       }
 
       toast.success(t('settings.providers.page.toast.providerDisconnected'));

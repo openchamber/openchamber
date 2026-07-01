@@ -6,7 +6,7 @@ import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { streamDebugEnabled } from '@/stores/utils/streamDebug';
-import { getSafeStorage } from './utils/safeStorage';
+import { getDeferredSafeStorage } from './utils/safeStorage';
 
 interface DirectoryStore {
 
@@ -28,7 +28,7 @@ interface DirectoryStore {
 
 let cachedHomeDirectory: string | null = null;
 let homeResolveGeneration = 0;
-const safeStorage = getSafeStorage();
+const safeStorage = getDeferredSafeStorage();
 const persistedLastDirectory = safeStorage.getItem('lastDirectory');
 const initialHasPersistedDirectory =
   typeof persistedLastDirectory === 'string' && persistedLastDirectory.length > 0;

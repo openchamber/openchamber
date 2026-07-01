@@ -5,7 +5,7 @@ export interface ChatMessageEntry {
     parts: Part[];
 }
 
-export type TurnActivityKind = 'tool' | 'reasoning' | 'justification';
+type TurnActivityKind = 'tool' | 'reasoning' | 'justification';
 
 export interface TurnMessageRecord {
     messageId: string;
@@ -83,7 +83,7 @@ export interface TurnRecord {
     durationMs?: number;
 }
 
-export interface TurnMessageMeta {
+interface TurnMessageMeta {
     turnId: string;
     messageId: string;
     userMessageId: string;

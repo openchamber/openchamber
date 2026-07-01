@@ -29,7 +29,7 @@ export interface VoiceMessage {
  * @param message - The message to format
  * @returns Formatted text for voice, or null if should not be spoken
  */
-export function formatMessage(message: VoiceMessage): string | null {
+function formatMessage(message: VoiceMessage): string | null {
     // Handle edge cases
     if (!message || typeof message.content !== "string") {
         return null;

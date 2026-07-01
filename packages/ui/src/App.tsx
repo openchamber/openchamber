@@ -34,9 +34,10 @@ import { markSessionViewed } from '@/sync/notification-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { opencodeClient } from '@/lib/opencode/client';
-import { disposeTerminalInputTransport } from '@/lib/terminalApi';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
+import { resumeAutoReviewRun } from '@/lib/reviewFlow';
 import { SyncProvider } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
@@ -55,8 +56,8 @@ import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { useI18n } from '@/lib/i18n';
 import { applyMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { SyncAppEffects } from '@/apps/AppEffects';
+import { resetAppForRuntimeEndpointChange } from '@/apps/runtimeEndpointReset';
 import { useAppFontEffects } from '@/apps/useAppFontEffects';
-import { resetStreamingState } from '@/sync/streaming';
 import { OpenCodeUpdateToast } from '@/components/update/OpenCodeUpdateToast';
 import { markStartupTrace, startupTraceEnabled } from '@/lib/startupTrace';
 
@@ -266,27 +267,34 @@ function App({ apis }: AppProps) {
 
   React.useEffect(() => {
     return subscribeRuntimeEndpointChanged((detail) => {
-      useSessionUIStore.getState().prepareForRuntimeSwitch(detail.previousRuntimeKey);
-      useUIStore.getState().prepareForRuntimeSwitch(detail.previousRuntimeKey);
-      disposeTerminalInputTransport();
-      opencodeClient.reconnectToRuntimeBaseUrl();
-      useConfigStore.setState({
-        providers: [],
-        agents: [],
-        isConnected: false,
-        isInitialized: false,
-        connectionPhase: 'connecting',
-        lastDisconnectReason: null,
-      });
-      useProjectsStore.getState().resetForRuntimeSwitch();
-      useSessionUIStore.getState().restoreForRuntimeSwitch(detail.runtimeKey);
-      useUIStore.getState().restoreForRuntimeSwitch(detail.runtimeKey);
-      resetStreamingState();
+      resetAppForRuntimeEndpointChange(detail);
       setRuntimeEndpointEpoch((epoch) => epoch + 1);
       setInitRetryExhausted(false);
       setInitRetryEpoch((epoch) => epoch + 1);
     });
   }, []);
+
+  const autoReviewResumeSignature = useAutoReviewStore((state) => {
+    const runtimeKey = getRuntimeKey();
+    return Object.values(state.runsByOriginalSessionID)
+      .filter((run) => run.status === 'running' && run.runtimeKey === runtimeKey)
+      .map((run) => `${run.originalSessionID}:${run.phase}:${run.lastForwardedMessageID ?? ''}:${run.expectedAssistantParentID ?? ''}`)
+      .sort()
+      .join('|');
+  });
+
+  React.useEffect(() => {
+    if (embeddedSessionChat) {
+      return;
+    }
+
+    const runtimeKey = getRuntimeKey();
+    const runs = Object.values(useAutoReviewStore.getState().runsByOriginalSessionID)
+      .filter((run) => run.status === 'running' && run.runtimeKey === runtimeKey);
+    for (const run of runs) {
+      resumeAutoReviewRun(run.originalSessionID);
+    }
+  }, [autoReviewResumeSignature, embeddedSessionChat, runtimeEndpointEpoch]);
 
   React.useEffect(() => {
     document.documentElement.classList.toggle('wide-chat-layout', wideChatLayoutEnabled);

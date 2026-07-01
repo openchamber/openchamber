@@ -18,7 +18,7 @@ const TOOL_ROW_DESCRIPTION_CLASS = cn('typography-meta', TOOL_ROW_TEXT_CLASS);
 
 type PartWithText = Part & { text?: string; content?: string; time?: { start?: number; end?: number } };
 
-export type ReasoningVariant = 'thinking' | 'justification';
+type ReasoningVariant = 'thinking' | 'justification';
 
 const cleanReasoningText = (text: string): string => {
     if (typeof text !== 'string' || text.trim().length === 0) {
@@ -118,10 +118,14 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
         : expansion.expanded;
     const [shouldRenderExpandedContent, setShouldRenderExpandedContent] = React.useState(defaultExpanded === true || canAutoExpand);
     const contentId = React.useId();
-    const scrollRef = React.useRef<HTMLElement>(null);
     const contentRef = React.useRef<HTMLDivElement>(null);
     const contentAnimationRef = React.useRef<AnimationPlaybackControls | null>(null);
     const contentMountedRef = React.useRef(false);
+    // Stable handle to onContentChange so the height-animation layout effect can
+    // signal auto-follow without taking onContentChange as a dependency (which
+    // would risk re-running — and thus restarting — the animation on re-render).
+    const onContentChangeRef = React.useRef(onContentChange);
+    onContentChangeRef.current = onContentChange;
 
     const summary = React.useMemo(() => getReasoningSummary(text), [text]);
     const toggleAriaLabel = isExpanded
@@ -159,12 +163,6 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
         }
         onContentChange?.('structural');
     }, [onContentChange, text]);
-
-    React.useEffect(() => {
-        if (isStreaming && isExpanded && scrollRef.current) {
-            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-        }
-    }, [text, isStreaming, isExpanded]);
 
     React.useEffect(() => {
         if (isExpanded || isStreaming) {
@@ -239,6 +237,11 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
             element.style.height = '0px';
         } else {
             element.style.height = `${element.scrollHeight}px`;
+            // Only the COLLAPSE animation needs the guard: it shrinks the
+            // timeline and the trailing async scroll events can be misread as a
+            // user scroll-away. Expansion grows the timeline and re-pins cleanly,
+            // and guarding it caused a faint scroll fight while thinking streams.
+            onContentChangeRef.current?.('animation');
         }
 
         const animation = animate(
@@ -279,6 +282,27 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     if (!text || text.trim().length === 0) {
         return null;
     }
+
+    const reasoningBody = (
+        <>
+            <div data-message-text-export-source="true">
+                <MarkdownRenderer
+                    content={text}
+                    messageId={blockId}
+                    isAnimated={false}
+                    isStreaming={isStreaming}
+                    variant="reasoning"
+                />
+            </div>
+            {actions ? (
+                <div className="mt-2 mb-1 flex items-center justify-start gap-1.5" data-message-actions="true">
+                    <div className="flex items-center gap-1.5" data-message-action-group="true">
+                        {actions}
+                    </div>
+                </div>
+            ) : null}
+        </>
+    );
 
     return (
         <div data-reasoning-block-id={blockId} data-message-text-export-root="true">
@@ -379,32 +403,28 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                             className="pointer-events-none absolute left-0 top-0 bottom-0 w-px"
                             style={{ backgroundColor: 'var(--tools-border)' }}
                         />
-                        <ScrollableOverlay
-                            ref={scrollRef}
-                            as="div"
-                            outerClassName="max-h-80"
-                            className="p-0"
-                            useScrollShadow
-                            scrollShadowSize={36}
-                            userIntentOnly
-                        >
-                            <div data-message-text-export-source="true">
-                                <MarkdownRenderer
-                                    content={text}
-                                    messageId={blockId}
-                                    isAnimated={false}
-                                    isStreaming={isStreaming}
-                                    variant="reasoning"
-                                />
+                        {isStreaming ? (
+                            // While streaming, let the thinking grow inline — no
+                            // capped, independently-scrollable box. The chat's own
+                            // auto-follow then handles following / releasing, so the
+                            // box never captures the wheel or fights the user's
+                            // scroll. The max-height scroll box is applied only once
+                            // the thinking has finished (the branch below).
+                            <div className="p-0">
+                                {reasoningBody}
                             </div>
-                            {actions ? (
-                                <div className="mt-2 mb-1 flex items-center justify-start gap-1.5" data-message-actions="true">
-                                    <div className="flex items-center gap-1.5" data-message-action-group="true">
-                                        {actions}
-                                    </div>
-                                </div>
-                            ) : null}
-                        </ScrollableOverlay>
+                        ) : (
+                            <ScrollableOverlay
+                                as="div"
+                                outerClassName="max-h-80"
+                                className="p-0"
+                                useScrollShadow
+                                scrollShadowSize={36}
+                                userIntentOnly
+                            >
+                                {reasoningBody}
+                            </ScrollableOverlay>
+                        )}
                     </div>
                 </div>
             ) : null}
@@ -535,8 +555,5 @@ export const MergedReasoningPart = React.memo(({
         />
     );
 });
-
-// eslint-disable-next-line react-refresh/only-export-components
-export const formatReasoningText = (text: string): string => cleanReasoningText(text);
 
 export default ReasoningPart;

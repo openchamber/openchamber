@@ -48,5 +48,3 @@ export interface WorktreeMetadata {
   /** How this worktree was attached to a session. */
   worktreeSource?: 'existing' | 'created-for-session';
 }
-
-export type WorktreeMap = Map<string, WorktreeMetadata>;

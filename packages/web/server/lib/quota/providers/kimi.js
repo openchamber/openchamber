@@ -12,7 +12,7 @@ import {
 
 export const providerId = 'kimi-for-coding';
 export const providerName = 'Kimi for Coding';
-export const aliases = ['kimi-for-coding', 'kimi'];
+const aliases = ['kimi-for-coding', 'kimi'];
 
 export const isConfigured = () => {
   const auth = readAuthFile();

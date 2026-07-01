@@ -16,6 +16,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { EditorAPI } from '@/lib/api/types';
 import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { ensureOutsideFileGrantForDesktop } from '@/lib/outsideFileGrants';
 import { getDirectoryForFilePath, isAbsoluteFilePath, isFilePathWithinDirectory, normalizeFilePath, toAbsoluteFilePath } from '@/lib/path-utils';
 import { renderMarkdownBlocks, renderMarkdownSync } from './markdown/markdownCore';
@@ -570,6 +571,11 @@ const useFileReferenceInteractions = ({
     }
     let cancelled = false;
     const fileReferenceLinkLimit = getFileReferenceLinkLimit();
+    // On mobile surfaces, file-reference highlighting is disabled entirely — not
+    // just visually. The annotation pass is what issues the filesystem `stat`
+    // probes (fileReferenceExists → /api/fs/stat), so skipping it here guarantees
+    // no probe requests are ever sent from a mobile runtime.
+    const fileReferencesEnabled = enabled && !isMobileSurfaceRuntime();
 
     const clearFileLinkAttributes = (candidate: HTMLElement) => {
       candidate.removeAttribute('data-openchamber-file-link');
@@ -592,7 +598,7 @@ const useFileReferenceInteractions = ({
       unwrapBlockCodePathTokens(container);
     };
 
-    if (!enabled) {
+    if (!fileReferencesEnabled) {
       clearAnnotatedFileLinks();
       return;
     }
@@ -616,7 +622,7 @@ const useFileReferenceInteractions = ({
     };
 
     const annotateFileLinks = () => {
-      if (enabled) {
+      if (fileReferencesEnabled) {
         wrapBlockCodePathTokens(container);
       }
       const candidates = container.querySelectorAll<HTMLElement>(
