@@ -53,7 +53,7 @@ The terminal helpers are used by `packages/web/server/index.js` for:
 - Request pathname parsing for WebSocket routing
 - Replaying startup output such as shell prompts when the client binds after the PTY already emitted data
 
-The web server combines these utilities with `bun-pty` or `node-pty` to drive full-duplex PTY sessions.
+The web server can use Bun's built-in `Bun.Terminal` first when `USE_BUN_TERMINAL_PTY=true`; otherwise it falls back to `bun-pty` or `node-pty` to drive full-duplex PTY sessions.
 
 ## Notes for contributors
 - Keep control frames backward-compatible when possible; use explicit `v` values for protocol changes.
