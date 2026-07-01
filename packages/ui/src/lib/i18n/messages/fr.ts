@@ -2597,6 +2597,8 @@ export const dict = {
   'mobile.settings.placeholder.description': 'Les paramètres mobiles ciblés de connexion et d’application seront ici.',
   'sessions.sidebar.header.displayMode.showArchived': 'Afficher les sessions archivées',
   'sessions.sidebar.group.showMore': 'Afficher plus de sessions',
+  'sidebar.subagent.toggleLabel': 'Show subagent sessions',
+  'sidebar.subagent.toggleDescription': 'When off, only top-level sessions are shown in the sidebar.',
   'gitView.changes.revertDirectoryAria': 'Annuler les modifications dans {path}',
   'gitView.changes.revertDirectory': 'Annuler le dossier',
   'gitView.changes.revertDirectoryDescriptionPlural': 'Cela supprimera les modifications locales dans {count} fichiers sous {path}.',

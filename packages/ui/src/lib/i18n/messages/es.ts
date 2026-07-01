@@ -2597,6 +2597,8 @@ export const dict: Record<I18nKey, string> = {
   "textarea.resizeHandleAria": "Ajustar textarea",
   "sidebar.resize.leftPanelAria": "Ajustar panel izquierdo",
   "sidebar.resize.rightPanelAria": "Ajustar panel derecho",
+  'sidebar.subagent.toggleLabel': 'Show subagent sessions',
+  'sidebar.subagent.toggleDescription': 'When off, only top-level sessions are shown in the sidebar.',
   "mainLayout.mobile.closeDrawerAria": "Cerrar drawer",
   "sortableTabsStrip.aria.tabs": "Pestañas",
   "openChamberLogo.aria.logo": "Logo de OpenChamber",

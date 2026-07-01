@@ -2627,6 +2627,8 @@ export const dict: Record<I18nKey, string> = {
   'textarea.resizeHandleAria': 'テキストエリアのサイズを変更',
   'sidebar.resize.leftPanelAria': '左パネルのサイズを変更',
   'sidebar.resize.rightPanelAria': '右パネルのサイズを変更',
+  'sidebar.subagent.toggleLabel': 'Show subagent sessions',
+  'sidebar.subagent.toggleDescription': 'When off, only top-level sessions are shown in the sidebar.',
   'mainLayout.mobile.closeDrawerAria': 'ドロワーを閉じる',
   'sortableTabsStrip.aria.tabs': 'タブ',
   'openChamberLogo.aria.logo': 'OpenChamberロゴ',

@@ -2452,6 +2452,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.folders.none': 'Brak folderów',
   'sidebar.resize.leftPanelAria': 'Zmień rozmiar lewego panelu',
   'sidebar.resize.rightPanelAria': 'Zmień rozmiar prawego panelu',
+  'sidebar.subagent.toggleLabel': 'Show subagent sessions',
+  'sidebar.subagent.toggleDescription': 'When off, only top-level sessions are shown in the sidebar.',
   'sidebarFilesTree.actions.newFileTitle': 'Nowy plik',
   'sidebarFilesTree.actions.newFolderTitle': 'Nowy folder',
   'sidebarFilesTree.actions.refreshTitle': 'Odśwież',
