@@ -459,6 +459,36 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('openchamber.addLineComment', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        vscode.window.showWarningMessage(t('OpenChamber [Add Comment]: No active editor'));
+        return;
+      }
+
+      const selection = editor.selection;
+      const filePath = editor.document.uri.fsPath;
+      const relativePath = vscode.workspace.asRelativePath(editor.document.uri);
+      const startLine = selection.start.line + 1;
+      const endLine = selection.end.line + 1;
+      const selectedText = editor.document.getText(selection);
+      const language = editor.document.languageId;
+
+      // Drop the user straight into the in-webview comment editor (multi-line,
+      // Shift+Enter aware). An empty comment signals the webview to open the
+      // editor for the new draft. Route to the active session editor panel when
+      // one is focused, otherwise fall back to the sidebar chat.
+      const payload = { filePath, relativePath, startLine, endLine, code: selectedText, language, comment: '' };
+      if (!sessionEditorProvider?.addLineCommentToActivePanel(payload)) {
+        if (!(await revealChatViewForPayload())) {
+          return;
+        }
+        chatViewProvider?.addLineComment(payload);
+      }
+    })
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand('openchamber.newSession', async (directory?: unknown) => {
       const candidates = resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []);
       let folderPath: string | undefined = typeof directory === 'string' ? directory : undefined;
