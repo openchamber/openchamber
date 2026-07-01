@@ -255,4 +255,189 @@ describe("applyDirectoryEvent", () => {
     expect(draft.question.ses_1).not.toBe(afterReply)
     expect(draft.question.ses_1).toEqual([])
   })
+
+  test("preserves optimistic text when server echo is a shorter prefix (slash command)", () => {
+    // Optimistic insert for a slash command like "/debug my symptom" carries the
+    // full user input. The OpenCode server echo for slash commands can omit the
+    // arguments, returning only the command name. To avoid truncating the user
+    // message visible in chat, the reducer must keep the optimistic text when
+    // the server text is a strict non-empty shorter prefix of the optimistic text.
+    // The reducer should also adopt the server part's id so follow-up
+    // `message.part.updated` events for that id correctly update the entry.
+    const optimisticText = "/debug my symptom: import fails on startup with ModuleNotFoundError"
+    const serverText = "/debug"
+    const draft = state({
+      message: { ses_1: [{ id: "msg_1", sessionID: "ses_1", role: "user", time: { created: 1 } } as never] },
+      part: {
+        msg_1: [
+          {
+            id: "prt_optim",
+            messageID: "msg_1",
+            type: "text",
+            text: optimisticText,
+          } as Part,
+        ],
+      },
+    })
+
+    const result = applyDirectoryEvent(draft, {
+      type: "message.part.updated",
+      properties: {
+        part: {
+          id: "prt_server",
+          messageID: "msg_1",
+          sessionID: "ses_1",
+          type: "text",
+          text: serverText,
+        },
+      },
+    } as Event)
+
+    // Result must be a structural change (adopted id) so React re-renders.
+    expect(result).toBe(true)
+    const parts = draft.part.msg_1 ?? []
+    expect(parts.length).toBe(1)
+    expect((parts[0] as { text?: string }).text).toBe(optimisticText)
+    // Server part id was adopted so follow-up updates for that id will match.
+    expect((parts[0] as { id?: string }).id).toBe("prt_server")
+    expect((parts[0] as { sessionID?: string }).sessionID).toBe("ses_1")
+  })
+
+  test("still replaces optimistic text when server echo is not a prefix", () => {
+    // Standard slash command with no truncation: server returns full text, must
+    // replace optimistic part to stay in sync with authoritative server state.
+    const draft = state({
+      message: { ses_1: [{ id: "msg_1", sessionID: "ses_1", role: "user", time: { created: 1 } } as never] },
+      part: {
+        msg_1: [
+          { id: "prt_optim", messageID: "msg_1", type: "text", text: "/help foo bar" } as Part,
+        ],
+      },
+    })
+
+    const result = applyDirectoryEvent(draft, {
+      type: "message.part.updated",
+      properties: {
+        part: {
+          id: "prt_server",
+          messageID: "msg_1",
+          sessionID: "ses_1",
+          type: "text",
+          text: "/help foo bar normalized",
+        },
+      },
+    } as Event)
+
+    expect(result).toBe(true)
+    const parts = draft.part.msg_1 ?? []
+    expect(parts.length).toBe(1)
+    expect((parts[0] as { text?: string }).text).toBe("/help foo bar normalized")
+  })
+
+  test("still replaces optimistic text when server echo is equal-length", () => {
+    // Equal length but different content must still replace.
+    const draft = state({
+      message: { ses_1: [{ id: "msg_1", sessionID: "ses_1", role: "user", time: { created: 1 } } as never] },
+      part: {
+        msg_1: [
+          { id: "prt_optim", messageID: "msg_1", type: "text", text: "/debug A" } as Part,
+        ],
+      },
+    })
+
+    applyDirectoryEvent(draft, {
+      type: "message.part.updated",
+      properties: {
+        part: {
+          id: "prt_server",
+          messageID: "msg_1",
+          sessionID: "ses_1",
+          type: "text",
+          text: "/debug B",
+        },
+      },
+    } as Event)
+
+    const parts = draft.part.msg_1 ?? []
+    expect(parts.length).toBe(1)
+    expect((parts[0] as { text?: string }).text).toBe("/debug B")
+  })
+
+  test("empty server echo replaces optimistic text (not a real prefix)", () => {
+    // Empty string is technically a prefix of any string ("".startsWith is true),
+    // but it carries no useful information. Replacement must proceed so the
+    // authoritative server state is honored.
+    const draft = state({
+      message: { ses_1: [{ id: "msg_1", sessionID: "ses_1", role: "user", time: { created: 1 } } as never] },
+      part: {
+        msg_1: [
+          { id: "prt_optim", messageID: "msg_1", type: "text", text: "/debug full body" } as Part,
+        ],
+      },
+    })
+
+    applyDirectoryEvent(draft, {
+      type: "message.part.updated",
+      properties: {
+        part: {
+          id: "prt_server",
+          messageID: "msg_1",
+          sessionID: "ses_1",
+          type: "text",
+          text: "",
+        },
+      },
+    } as Event)
+
+    const parts = draft.part.msg_1 ?? []
+    expect(parts.length).toBe(1)
+    expect((parts[0] as { text?: string }).text).toBe("")
+  })
+
+  test("follow-up part update with adopted id replaces the optimistic text", () => {
+    // After the prefix-echo branch adopts the server part id, any subsequent
+    // `message.part.updated` for the same id must locate the entry and update
+    // it in-place (no duplicate parts from a fresh optimistic insert).
+    const draft = state({
+      message: { ses_1: [{ id: "msg_1", sessionID: "ses_1", role: "user", time: { created: 1 } } as never] },
+      part: {
+        msg_1: [
+          { id: "prt_optim", messageID: "msg_1", type: "text", text: "/debug full body" } as Part,
+        ],
+      },
+    })
+
+    // First echo: short prefix → keep optimistic text, adopt server id.
+    applyDirectoryEvent(draft, {
+      type: "message.part.updated",
+      properties: {
+        part: {
+          id: "prt_server",
+          messageID: "msg_1",
+          sessionID: "ses_1",
+          type: "text",
+          text: "/debug",
+        },
+      },
+    } as Event)
+
+    // Second echo for the same server part id: now authoritative full text.
+    applyDirectoryEvent(draft, {
+      type: "message.part.updated",
+      properties: {
+        part: {
+          id: "prt_server",
+          messageID: "msg_1",
+          sessionID: "ses_1",
+          type: "text",
+          text: "/debug normalized full body",
+        },
+      },
+    } as Event)
+
+    const parts = draft.part.msg_1 ?? []
+    expect(parts.length).toBe(1)
+    expect((parts[0] as { id?: string }).id).toBe("prt_server")
+    expect((parts[0] as { text?: string }).text).toBe("/debug normalized full body")
+  })
 })
