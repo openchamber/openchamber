@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Sync: the connection indicator no longer briefly flashes "reconnecting" during session warmup, after a reload, or during the initial health-check loop at startup, when a transient HTTP failure happens before the SSE/WS event pipeline has reported its first connect in the new lifecycle. The probe and the initial check now defer to the pipeline, which is the only authoritative source for a real transport disconnect.
 - Desktop: remote instances can now save additional request headers for proxy-auth setups such as Cloudflare Access, including for live updates and terminal streams.
 - Desktop: SSH remote instances with a saved UI password no longer ask for that UI password again after the tunnel connects.
 
