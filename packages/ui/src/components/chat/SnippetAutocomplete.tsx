@@ -1,5 +1,6 @@
 import React from 'react';
-import { cn, fuzzyMatch } from '@/lib/utils';
+import { cn } from '@/lib/utils';
+import { rankAutocompleteItems } from '@/lib/search/autocompleteRanking';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
@@ -46,17 +47,20 @@ export const SnippetAutocomplete = React.forwardRef<SnippetAutocompleteHandle, S
   }, [loadSnippets]);
 
   React.useEffect(() => {
-    const query = searchQuery.trim();
-    const matches = query.length
-      ? snippets.filter((snippet) => fuzzyMatch(snippet.name, query) || snippet.aliases.some((alias) => fuzzyMatch(alias, query)))
-      : snippets;
-    const sortedMatches = [...matches].sort((a, b) => {
-      if (a.source === 'project' && b.source !== 'project') return -1;
-      if (a.source !== 'project' && b.source === 'project') return 1;
-      return a.name.localeCompare(b.name);
-    });
-    setFilteredSnippets(sortedMatches);
-    setSelectedIndex(sortedMatches.length ? 1 : 0);
+    const filtered = rankAutocompleteItems(
+      snippets,
+      searchQuery,
+      (snippet) => `${snippet.name} ${snippet.aliases.join(' ')}`,
+      {
+        compare: (a, b) => {
+          if (a.source === 'project' && b.source !== 'project') return -1;
+          if (a.source !== 'project' && b.source === 'project') return 1;
+          return a.name.localeCompare(b.name);
+        },
+      },
+    );
+    setFilteredSnippets(filtered);
+    setSelectedIndex(filtered.length ? 1 : 0);
   }, [searchQuery, snippets]);
 
   React.useEffect(() => {

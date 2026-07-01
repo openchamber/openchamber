@@ -1,4 +1,5 @@
 import React from 'react';
+import { rankAutocompleteItems } from '@/lib/search/autocompleteRanking';
 import { cn, truncatePathMiddle } from '@/lib/utils';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -256,20 +257,22 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
 
   React.useEffect(() => {
     const visibleAgents = getVisibleAgents();
-    const normalizedQuery = (searchQuery ?? '').trim().toLowerCase();
-    const filtered = visibleAgents
+    const candidates = visibleAgents
       .filter((agent) => agent.mode && agent.mode !== 'primary')
-      .filter((agent) => {
-        if (!normalizedQuery) return true;
-        const haystack = `${agent.name} ${agent.description ?? ''}`.toLowerCase();
-        return haystack.includes(normalizedQuery);
-      })
       .map((agent) => ({
         name: agent.name,
         description: agent.description,
         mode: agent.mode,
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      }));
+
+    const filtered = rankAutocompleteItems(
+      candidates,
+      searchQuery ?? '',
+      (agent) => `${agent.name} ${agent.description ?? ''}`,
+      {
+        compare: (a, b) => a.name.localeCompare(b.name),
+      },
+    );
     setAgents(filtered);
   }, [getVisibleAgents, searchQuery]);
 

@@ -1,5 +1,6 @@
 import React from 'react';
-import { cn, fuzzyMatch } from '@/lib/utils';
+import { cn } from '@/lib/utils';
+import { rankAutocompleteItems } from '@/lib/search/autocompleteRanking';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
@@ -42,19 +43,19 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
   }, [loadSkills]);
 
   React.useEffect(() => {
-    const normalizedQuery = searchQuery.trim();
-    const matches = normalizedQuery.length
-      ? skills.filter((skill) => fuzzyMatch(skill.name, normalizedQuery))
-      : skills;
-
-    const sorted = [...matches].sort((a, b) => {
-      // Sort by project scope first, then name
-      if (a.scope === 'project' && b.scope !== 'project') return -1;
-      if (a.scope !== 'project' && b.scope === 'project') return 1;
-      return a.name.localeCompare(b.name);
-    });
-
-    setFilteredSkills(sorted);
+    const filtered = rankAutocompleteItems(
+      skills,
+      searchQuery,
+      (skill) => skill.name,
+      {
+        compare: (a, b) => {
+          if (a.scope === 'project' && b.scope !== 'project') return -1;
+          if (a.scope !== 'project' && b.scope === 'project') return 1;
+          return a.name.localeCompare(b.name);
+        },
+      },
+    );
+    setFilteredSkills(filtered);
     setSelectedIndex(0);
   }, [skills, searchQuery]);
 
