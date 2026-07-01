@@ -17,6 +17,7 @@ interface ContextUsageDisplayProps {
   userMessages?: number;
   assistantMessages?: number;
   tokensPerSecond?: number;
+  lastTokensPerSecond?: number;
   size?: 'default' | 'compact';
   isMobile?: boolean;
   hideIcon?: boolean;
@@ -43,6 +44,7 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
   userMessages,
   assistantMessages,
   tokensPerSecond,
+  lastTokensPerSecond,
   size = 'default',
   isMobile = false,
   hideIcon = false,
@@ -86,6 +88,7 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
 
   const showCost = typeof cost === 'number' && Number.isFinite(cost) && cost > 0;
   const showTokensPerSecond = typeof tokensPerSecond === 'number' && Number.isFinite(tokensPerSecond) && tokensPerSecond > 0;
+  const showLastTokensPerSecond = typeof lastTokensPerSecond === 'number' && Number.isFinite(lastTokensPerSecond) && lastTokensPerSecond > 0;
 
   const getPercentageColor = (pct: number) => {
     if (pct >= 90) return 'text-status-error';
@@ -100,7 +103,7 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
   const circularProgressOffset = circularProgressCircumference * (1 - progressPct / 100);
 
   const safeOutputLimit = typeof outputLimit === 'number' ? Math.max(outputLimit, 0) : 0;
-  const hasStats = showCost || typeof totalMessages === 'number' || showTokensPerSecond;
+  const hasStats = showCost || typeof totalMessages === 'number' || showTokensPerSecond || showLastTokensPerSecond;
   const tooltipLines = [
     t('contextUsage.tooltip.usedTokens', { tokens: formatTokens(totalTokens) }),
     t('contextUsage.tooltip.contextLimit', { tokens: formatTokens(contextLimit) }),
@@ -111,6 +114,7 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
     ...(typeof userMessages === 'number' ? [t('contextSidebar.stats.user') + ': ' + formatNumber(userMessages)] : []),
     ...(typeof assistantMessages === 'number' ? [t('contextSidebar.stats.assistant') + ': ' + formatNumber(assistantMessages)] : []),
     ...(showTokensPerSecond ? [t('contextSidebar.stats.tokensPerSecond') + ': ' + tokensPerSecond!.toFixed(1) + ' tok/s'] : []),
+    ...(showLastTokensPerSecond ? [t('contextSidebar.stats.lastTokensPerSecond') + ': ' + lastTokensPerSecond!.toFixed(1) + ' tok/s'] : []),
   ];
 
   const isInteractive = !isMobile && typeof onClick === 'function';
@@ -259,6 +263,12 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
                   <div className="flex justify-between items-center">
                     <span className="typography-meta text-muted-foreground">{t('contextSidebar.stats.tokensPerSecond')}</span>
                     <span className="typography-meta text-foreground font-medium">{tokensPerSecond!.toFixed(1)} tok/s</span>
+                  </div>
+                )}
+                {showLastTokensPerSecond && (
+                  <div className="flex justify-between items-center">
+                    <span className="typography-meta text-muted-foreground">{t('contextSidebar.stats.lastTokensPerSecond')}</span>
+                    <span className="typography-meta text-foreground font-medium">{lastTokensPerSecond!.toFixed(1)} tok/s</span>
                   </div>
                 )}
               </div>

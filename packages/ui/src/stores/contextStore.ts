@@ -17,6 +17,7 @@ interface ContextUsage {
     lastMessageId?: string;
     cost?: number;
     tokensPerSecond?: number;
+    lastTokensPerSecond?: number;
 }
 
 interface ContextState {
@@ -235,7 +236,8 @@ export const useContextStore = create<ContextStore>()(
                             existing.thresholdLimit === usage.thresholdLimit &&
                             existing.lastMessageId === usage.lastMessageId &&
                             (existing.cost ?? 0) === (usage.cost ?? 0) &&
-                            (existing.tokensPerSecond ?? 0) === (usage.tokensPerSecond ?? 0)
+                            (existing.tokensPerSecond ?? 0) === (usage.tokensPerSecond ?? 0) &&
+                            (existing.lastTokensPerSecond ?? 0) === (usage.lastTokensPerSecond ?? 0)
                         ) {
                             return state;
                         }
@@ -275,6 +277,7 @@ export const useContextStore = create<ContextStore>()(
                                 lastMessageId,
                                 cost: cachedUsage.cost,
                                 tokensPerSecond: cachedUsage.tokensPerSecond,
+                                lastTokensPerSecond: cachedUsage.lastTokensPerSecond,
                             };
                             scheduleUsageUpdate(recalculated);
                             return recalculated;

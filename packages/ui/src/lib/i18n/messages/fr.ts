@@ -1040,6 +1040,7 @@ export const dict = {
   'contextSidebar.stats.assistant': 'Assistant',
   'contextSidebar.stats.cost': 'Coût',
   'contextSidebar.stats.tokensPerSecond': 'Tokens/s',
+  'contextSidebar.stats.lastTokensPerSecond': 'Dernier tok/s',
   'contextSidebar.tokens.input': 'Entrée',
   'contextSidebar.tokens.output': 'Sortie',
   'contextSidebar.tokens.reasoning': 'Raisonnement',

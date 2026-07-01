@@ -347,7 +347,7 @@ export const ContextPanelContent: React.FC = () => {
     for (const msg of assistantMessages) {
       partsByMessageId.set(msg.info.id, msg.parts);
     }
-    const { avgTokensPerSecond } = computeSessionTokenRate(
+    const { avgTokensPerSecond, lastTokensPerSecond } = computeSessionTokenRate(
       assistantMessages.map((m) => m.info),
       (id) => partsByMessageId.get(id),
     );
@@ -394,6 +394,7 @@ export const ContextPanelContent: React.FC = () => {
       cacheHitRate,
       totalAssistantCost,
       tokensPerSecond: avgTokensPerSecond > 0 ? avgTokensPerSecond : undefined,
+      lastTokensPerSecond: lastTokensPerSecond > 0 ? lastTokensPerSecond : undefined,
       contextLimit,
       breakdown: {
         user: userTokens,
@@ -471,6 +472,7 @@ export const ContextPanelContent: React.FC = () => {
             { label: t('contextSidebar.stats.assistant'), value: formatNumber(viewModel.assistantMessagesCount) },
             { label: t('contextSidebar.stats.cost'), value: formatMoney(viewModel.totalAssistantCost) },
             { label: t('contextSidebar.stats.tokensPerSecond'), value: viewModel.tokensPerSecond != null ? `${viewModel.tokensPerSecond.toFixed(1)} tok/s` : '—' },
+            { label: t('contextSidebar.stats.lastTokensPerSecond'), value: viewModel.lastTokensPerSecond != null ? `${viewModel.lastTokensPerSecond.toFixed(1)} tok/s` : '—' },
           ] as const).map((item) => (
             <div key={item.label} className="rounded-lg bg-[var(--surface-elevated)]/70 px-3 py-2.5">
               <div className="typography-micro text-muted-foreground/70">{item.label}</div>

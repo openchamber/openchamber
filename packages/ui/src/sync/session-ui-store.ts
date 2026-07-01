@@ -884,7 +884,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     if (!lastTokens) return null
 
     const { totalCost, userCount, assistantCount } = computeSessionCostAndCounts(messages)
-    const { avgTokensPerSecond } = computeSessionTokenRate(messages, getSyncParts)
+    const { avgTokensPerSecond, lastTokensPerSecond } = computeSessionTokenRate(messages, getSyncParts)
 
     const totalTokens = lastTokens.input + lastTokens.output + lastTokens.reasoning + (lastTokens.cache?.read ?? 0) + (lastTokens.cache?.write ?? 0)
     const thresholdLimit = contextLimit > 0 ? contextLimit : 200000
@@ -904,6 +904,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       userMessages: userCount,
       assistantMessages: assistantCount,
       tokensPerSecond: avgTokensPerSecond > 0 ? avgTokensPerSecond : undefined,
+      lastTokensPerSecond: lastTokensPerSecond > 0 ? lastTokensPerSecond : undefined,
     }
   },
 

@@ -121,6 +121,7 @@ export const computeSessionCostAndCounts = (messages: Message[]): SessionCostAnd
 
 export interface SessionTokenRate {
     avgTokensPerSecond: number;
+    lastTokensPerSecond: number;
 }
 
 type ToolPartLike = {
@@ -136,6 +137,7 @@ export const computeSessionTokenRate = (
 ): SessionTokenRate => {
     let totalGeneratedTokens = 0;
     let totalGenerationMs = 0;
+    let lastTokensPerSecond = 0;
 
     for (let i = 0; i < messages.length; i++) {
         const msg = messages[i] as {
@@ -176,11 +178,12 @@ export const computeSessionTokenRate = (
 
         totalGeneratedTokens += generatedTokens;
         totalGenerationMs += durationMs;
+        lastTokensPerSecond = generatedTokens / (durationMs / 1000);
     }
 
     const avgTokensPerSecond = totalGenerationMs > 0
         ? totalGeneratedTokens / (totalGenerationMs / 1000)
         : 0;
 
-    return { avgTokensPerSecond };
+    return { avgTokensPerSecond, lastTokensPerSecond };
 };

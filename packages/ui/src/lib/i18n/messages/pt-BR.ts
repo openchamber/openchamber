@@ -1133,6 +1133,7 @@ export const dict: Record<I18nKey, string> = {
   "contextSidebar.stats.assistant": "Assistente",
   "contextSidebar.stats.cost": "Custo",
   "contextSidebar.stats.tokensPerSecond": "Tokens/s",
+  "contextSidebar.stats.lastTokensPerSecond": "Último tok/s",
   "contextSidebar.tokens.input": "Entrada",
   "contextSidebar.tokens.output": "Saída",
   "contextSidebar.tokens.reasoning": "Raciocínio",

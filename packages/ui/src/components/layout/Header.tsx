@@ -629,7 +629,8 @@ const isSameContextUsage = (
     && (a.totalMessages ?? 0) === (b.totalMessages ?? 0)
     && (a.userMessages ?? 0) === (b.userMessages ?? 0)
     && (a.assistantMessages ?? 0) === (b.assistantMessages ?? 0)
-    && (a.tokensPerSecond ?? 0) === (b.tokensPerSecond ?? 0);
+    && (a.tokensPerSecond ?? 0) === (b.tokensPerSecond ?? 0)
+    && (a.lastTokensPerSecond ?? 0) === (b.lastTokensPerSecond ?? 0);
 };
 
 const formatCompactHeaderLabel = (value: string): string => {
@@ -2206,6 +2207,7 @@ export const Header: React.FC<HeaderProps> = ({
               userMessages={stableDesktopContextUsage.userMessages}
               assistantMessages={stableDesktopContextUsage.assistantMessages}
               tokensPerSecond={stableDesktopContextUsage.tokensPerSecond}
+              lastTokensPerSecond={stableDesktopContextUsage.lastTokensPerSecond}
               size="compact"
               hideIcon
               showPercentIcon
