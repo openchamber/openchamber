@@ -965,7 +965,7 @@ const mermaidColorsFromTheme = (theme: Theme) => ({
   surface: theme.colors.surface.muted,
   border: theme.colors.interactive.border,
   transparent: true,
-  font: 'IBM Plex Sans, sans-serif',
+  font: 'system-ui, sans-serif',
 });
 
 const useDecorateContext = (

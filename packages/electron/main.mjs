@@ -1434,7 +1434,7 @@ const buildStartupSplashHtml = () => {
       }
       body {
         margin: 0;
-        font-family: "IBM Plex Sans", sans-serif;
+        font-family: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
         display: grid;
         place-items: center;
         height: 100vh;
