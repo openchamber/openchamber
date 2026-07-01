@@ -873,4 +873,97 @@ describe("optimisticSend resolved payload (#1944)", () => {
 
     expect(optimisticAdds).toHaveLength(1)
   })
+
+  test("patches the message even when resolved.parts is empty (OCR finding)", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    let sentMessageID = ""
+
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(
+      (input) => {
+        wireOptimisticAdd(targetStore)(input)
+      },
+      () => {},
+    )
+
+    await optimisticSend({
+      sessionId: "session-cmd",
+      directory: "/target/project",
+      content: "/push-merge target-branch",
+      providerID: "openai",
+      modelID: "gpt-4o",
+      send: async (messageID) => {
+        sentMessageID = messageID
+        // Server returns info but no parts (e.g. malformed response).
+        return {
+          info: {
+            id: messageID,
+            sessionID: "session-cmd",
+            role: "user",
+            time: { created: 1700000000000 },
+            agent: "build",
+            model: { providerID: "openai", modelID: "gpt-4o" },
+            system: "resolved-system-prompt",
+          } as Message,
+          parts: [],
+        }
+      },
+    })
+
+    // Message-level fields must still be patched even when parts is empty.
+    const storedMessages = targetStore.getState().message["session-cmd"] as Message[]
+    const stored = storedMessages.find((m) => m.id === sentMessageID)
+    expect(stored).not.toBe(undefined)
+    expect(stored?.agent).toBe("build")
+  })
+
+  test("does not clobber placeholder fields that the server did not return (OCR finding)", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    let sentMessageID = ""
+
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(
+      (input) => {
+        wireOptimisticAdd(targetStore)(input)
+      },
+      () => {},
+    )
+
+    await optimisticSend({
+      sessionId: "session-cmd",
+      directory: "/target/project",
+      content: "/push-merge target-branch",
+      providerID: "openai",
+      modelID: "gpt-4o",
+      send: async (messageID) => {
+        sentMessageID = messageID
+        // Server returns ONLY `agent` and `time`. The placeholder had its
+        // own `system` and `model`; the patch must preserve them rather
+        // than overwriting with undefined.
+        return {
+          info: {
+            id: messageID,
+            sessionID: "session-cmd",
+            role: "user",
+            time: { created: 1700000000000 },
+            agent: "build",
+          } as Message,
+          parts: [{ id: "prt_resolved", type: "text", text: "push-merge main" } as Part],
+        }
+      },
+    })
+
+    const storedMessages = targetStore.getState().message["session-cmd"] as Message[]
+    const stored = storedMessages.find((m) => m.id === sentMessageID) as Record<string, unknown> | undefined
+    expect(stored).not.toBe(undefined)
+    expect(stored?.agent).toBe("build")
+    // The server payload did not include `system` or `model`; the
+    // placeholder's values must survive the patch.
+    expect(stored?.system).toBe("")
+    expect(stored?.model).toBe("openai/gpt-4o")
+  })
 })

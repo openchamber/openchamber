@@ -3,7 +3,7 @@
  * Replaces the action methods from the old useSessionStore.
  */
 
-import type { OpencodeClient, Session, Message, Part } from "@opencode-ai/sdk/v2/client"
+import type { OpencodeClient, Session, Message, Part, UserMessage } from "@opencode-ai/sdk/v2/client"
 import { Binary } from "./binary"
 import { useSessionUIStore } from "./session-ui-store"
 import { useInputStore } from "./input-store"
@@ -709,40 +709,49 @@ export async function optimisticSend(input: {
     // parts against the optimistic placeholder. This restores display of
     // the resolved value even when the later SSE echo arrives without it
     // (#1944).
-    if (resolved && resolved.info && Array.isArray(resolved.parts) && resolved.parts.length > 0) {
-      _optimisticAdd({
-        sessionID: input.sessionId,
-        directory: targetDirectory,
-        message: resolved.info,
-        parts: resolved.parts,
-      })
+    if (resolved && resolved.info) {
+      if (Array.isArray(resolved.parts) && resolved.parts.length > 0) {
+        _optimisticAdd({
+          sessionID: input.sessionId,
+          directory: targetDirectory,
+          message: resolved.info,
+          parts: resolved.parts,
+        })
+      }
 
       // _optimisticAdd only inserts a message that is not already in the
       // store (binary search by id). The optimistic placeholder we just
       // inserted has the same id, so resolved.info itself is never stored
       // — only resolved.parts. Patch the existing message in place so
       // message-level fields the server canonicalizes (agent, system,
-      // model, time, metadata) reflect the real values (#1949 review).
-      const resolvedInfo = resolved.info
-      const currentMessages = store.getState().message[input.sessionId]
-      if (Array.isArray(currentMessages)) {
+      // model, time) reflect the real values (#1949 review, #1949 OCR
+      // follow-up). Use a functional setState so the read and write see
+      // a consistent snapshot, and only copy fields the server actually
+      // returned — spreading a server payload with optional undefined
+      // fields would clobber otherwise-correct placeholder values.
+      const resolvedInfo = resolved.info as UserMessage
+      store.setState((state) => {
+        const currentMessages = state.message[input.sessionId]
+        if (!Array.isArray(currentMessages)) return state
         const index = currentMessages.findIndex((m) => m.id === resolvedInfo.id)
-        if (index >= 0) {
-          const existing = currentMessages[index]
-          const patched = {
-            ...existing,
-            ...resolvedInfo,
-            id: existing.id,
-            sessionID: existing.sessionID,
-            role: existing.role,
-          } as Message
-          const nextMessages = currentMessages.slice()
-          nextMessages[index] = patched
-          store.setState({
-            message: { ...store.getState().message, [input.sessionId]: nextMessages },
-          })
+        if (index < 0) return state
+        const existing = currentMessages[index] as UserMessage
+        const canonicalPatch: Partial<UserMessage> = {}
+        if (resolvedInfo.agent !== undefined) canonicalPatch.agent = resolvedInfo.agent
+        if (resolvedInfo.system !== undefined) canonicalPatch.system = resolvedInfo.system
+        if (resolvedInfo.model !== undefined) canonicalPatch.model = resolvedInfo.model
+        if (resolvedInfo.time !== undefined) canonicalPatch.time = resolvedInfo.time
+        const patched: UserMessage = {
+          ...existing,
+          ...canonicalPatch,
+          id: existing.id,
+          sessionID: existing.sessionID,
+          role: existing.role,
         }
-      }
+        const nextMessages = currentMessages.slice()
+        nextMessages[index] = patched
+        return { message: { ...state.message, [input.sessionId]: nextMessages } }
+      })
     }
   } catch (error) {
     // Rollback via optimistic infrastructure
