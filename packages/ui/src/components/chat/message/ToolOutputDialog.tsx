@@ -28,6 +28,7 @@ import { JsonTreeView } from '@/components/ui/JsonTreeView';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { stripAnsi } from '@/lib/text/stripAnsi';
 
 interface ToolOutputDialogProps {
     popup: ToolPopupContent;
@@ -1108,10 +1109,14 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                         <div className="p-4">
                             {(() => {
                                 const tool = popup.metadata?.tool;
+                                // Shell tools (bash, grep --color, ocr, etc.)
+                                // emit ANSI control codes; strip them once here so
+                                // every branch below renders HTML-safe text.
+                                const content = popup.content ? stripAnsi(popup.content) : '';
 
                                 if (tool === 'todowrite' || tool === 'todoread') {
                                     return (
-                                        renderTodoOutput(popup.content, {
+                                        renderTodoOutput(content, {
                                             total: t('chat.todo.total'),
                                             inProgress: t('chat.todo.inProgress'),
                                             pending: t('chat.todo.pending'),
@@ -1120,7 +1125,7 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                                         }) || (
                                             <WorkerHighlightedCode
                                                 language="json"
-                                                code={popup.content}
+                                                code={content}
                                                 style={toolDisplayStyles.getPopupContainerStyles()}
                                                 codeStyle={DIALOG_CODE_TAG_PROPS.style}
                                                 wrap
@@ -1131,9 +1136,9 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
 
                                 if (tool === 'list') {
                                     return (
-                                        renderListOutput(popup.content) || (
+                                        renderListOutput(content) || (
                                             <pre className="typography-markdown bg-muted/30 p-2 rounded-xl border border-border/20 font-mono whitespace-pre-wrap">
-                                                {popup.content}
+                                                {content}
                                             </pre>
                                         )
                                 );
@@ -1141,9 +1146,9 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
 
                                 if (tool === 'grep') {
                                     return (
-                                        renderGrepOutput(popup.content, isMobile) || (
+                                        renderGrepOutput(content, isMobile) || (
                                             <pre className="typography-code bg-muted/30 p-2 rounded-xl border border-border/20 font-mono whitespace-pre-wrap">
-                                                {popup.content}
+                                                {content}
                                             </pre>
                                         )
                                     );
@@ -1151,9 +1156,9 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
 
                                 if (tool === 'glob') {
                                     return (
-                                        renderGlobOutput(popup.content, isMobile) || (
+                                        renderGlobOutput(content, isMobile) || (
                                             <pre className="typography-code bg-muted/30 p-2 rounded-xl border border-border/20 font-mono whitespace-pre-wrap">
-                                                {popup.content}
+                                                {content}
                                             </pre>
                                         )
                                     );
@@ -1162,17 +1167,17 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                                 if (tool === 'task' || tool === 'reasoning') {
                                     return (
                                         <div className={tool === 'reasoning' ? "text-muted-foreground/70" : ""}>
-                                            <SimpleMarkdownRenderer content={popup.content} variant="tool" />
+                                            <SimpleMarkdownRenderer content={content} variant="tool" />
                                         </div>
                                     );
                                 }
 
                                 if (tool === 'web-search' || tool === 'websearch' || tool === 'search_web') {
                                     return (
-                                        renderWebSearchOutput(popup.content) || (
+                                        renderWebSearchOutput(content) || (
                                             <WorkerHighlightedCode
                                                 language="text"
-                                                code={popup.content}
+                                                code={content}
                                                 style={toolDisplayStyles.getPopupContainerStyles()}
                                                 codeStyle={DIALOG_CODE_TAG_PROPS.style}
                                                 wrap
@@ -1186,11 +1191,11 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                                 }
 
                                 // JSON tree viewer for generic JSON outputs
-                                const jsonResult = popup.content ? tryParseJsonOutput(popup.content) : { data: null, isJson: false };
+                                const jsonResult = content ? tryParseJsonOutput(content) : { data: null, isJson: false };
                                 if (jsonResult.isJson) {
                                     return (
                                         <JsonTreeView
-                                            jsonString={popup.content}
+                                            jsonString={content}
                                             initiallyExpandedDepth={3}
                                             maxHeight="70vh"
                                         />
@@ -1200,7 +1205,7 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                                 return (
                                     <WorkerHighlightedCode
                                         language={popup.language || 'text'}
-                                        code={popup.content}
+                                        code={content}
                                         style={toolDisplayStyles.getPopupContainerStyles()}
                                         codeStyle={DIALOG_CODE_TAG_PROPS.style}
                                         wrap
