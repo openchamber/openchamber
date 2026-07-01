@@ -23,6 +23,7 @@ export interface CommandConfig {
   source?: string;
   template?: string;
   scope?: CommandScope;
+  subtask?: boolean;
 }
 
 export interface Command extends CommandConfig {
@@ -60,6 +61,7 @@ const buildCommandsSignature = (commands: Command[]): string => {
       command.agent ?? '',
       command.model ?? '',
       String(command.isBuiltIn === true),
+      String(command.subtask === true),
     ].join('|'))
     .join('||');
 };
@@ -100,6 +102,7 @@ export interface CommandDraft {
   agent?: string | null;
   model?: string | null;
   template?: string;
+  subtask?: boolean;
 }
 
 interface CommandsStore {
@@ -201,12 +204,21 @@ export const useCommandsStore = create<CommandsStore>()(
                             ?? sources.json?.scope;
                         }
 
+                        const result: Command = { ...cmd };
+                        
                         if (scope === 'project' || scope === 'user') {
-                          return { ...cmd, scope: scope as CommandScope };
+                          result.scope = scope as CommandScope;
+                        } else {
+                          // Explicitly clear scope when not found (preserves original behavior)
+                          result.scope = undefined;
+                        }
+                        
+                        // Preserve subtask field from API response
+                        if (data.subtask !== undefined) {
+                          result.subtask = data.subtask;
                         }
 
-                        // Explicitly set null scope if not found
-                        return { ...cmd, scope: undefined };
+                        return result;
                       }
                     } catch (err) {
                       console.warn(`[CommandsStore] Failed to fetch config for command ${cmd.name}:`, err);
@@ -257,6 +269,7 @@ export const useCommandsStore = create<CommandsStore>()(
             if (config.agent) commandConfig.agent = config.agent;
             if (config.model) commandConfig.model = config.model;
             if (config.scope) commandConfig.scope = config.scope;
+            if (config.subtask !== undefined) commandConfig.subtask = config.subtask;
 
             console.log('[CommandsStore] Command config to save:', commandConfig);
 
@@ -319,6 +332,7 @@ export const useCommandsStore = create<CommandsStore>()(
             if (config.agent !== undefined) commandConfig.agent = config.agent;
             if (config.model !== undefined) commandConfig.model = config.model;
             if (config.template !== undefined) commandConfig.template = config.template;
+            if (config.subtask !== undefined) commandConfig.subtask = config.subtask;
 
             console.log('[CommandsStore] Command config to update:', commandConfig);
 
