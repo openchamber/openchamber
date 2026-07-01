@@ -3,7 +3,7 @@
  * Replaces the action methods from the old useSessionStore.
  */
 
-import type { OpencodeClient, Session, Message, Part } from "@opencode-ai/sdk/v2/client"
+import type { OpencodeClient, Session, Message, Part, UserMessage } from "@opencode-ai/sdk/v2/client"
 import { Binary } from "./binary"
 import { useSessionUIStore } from "./session-ui-store"
 import { useInputStore } from "./input-store"
@@ -639,8 +639,11 @@ export async function optimisticSend(input: {
   onOptimisticInsert?: () => void
   onMessageID?: (messageID: string) => void
   beforeOptimisticInsert?: () => void
-  /** The actual API call — receives the optimistic messageID so the server can use the same ID */
-  send: (messageID: string) => Promise<void>
+  /** The actual API call — receives the optimistic messageID so the server can use the same ID.
+   *  May return a server-resolved payload (e.g. from session.command) so the
+   *  resolved `!`shell` substitutions land in the store even if the SSE echo
+   *  arrives with the template token unresolved (#1944). */
+  send: (messageID: string) => Promise<{ info?: Message; parts?: Part[] } | void>
 }): Promise<void> {
   if (!_optimisticAdd || !_optimisticRemove) {
     throw new Error("Optimistic refs not set — is useSync() mounted?")
@@ -697,7 +700,59 @@ export async function optimisticSend(input: {
   })
 
   try {
-    await input.send(messageID)
+    const resolved = await input.send(messageID)
+
+    // If the send returned a server-resolved payload (e.g. session.command
+    // returned the user message with `!`shell` substitutions), apply it
+    // through the optimistic add path. The server uses our messageID, so
+    // mergeOptimisticPage will dedup the message and merge the resolved
+    // parts against the optimistic placeholder. This restores display of
+    // the resolved value even when the later SSE echo arrives without it
+    // (#1944).
+    if (resolved && resolved.info) {
+      if (Array.isArray(resolved.parts) && resolved.parts.length > 0) {
+        _optimisticAdd({
+          sessionID: input.sessionId,
+          directory: targetDirectory,
+          message: resolved.info,
+          parts: resolved.parts,
+        })
+      }
+
+      // _optimisticAdd only inserts a message that is not already in the
+      // store (binary search by id). The optimistic placeholder we just
+      // inserted has the same id, so resolved.info itself is never stored
+      // — only resolved.parts. Patch the existing message in place so
+      // message-level fields the server canonicalizes (agent, system,
+      // model, time) reflect the real values (#1949 review, #1949 OCR
+      // follow-up). Use a functional setState so the read and write see
+      // a consistent snapshot, and only copy fields the server actually
+      // returned — spreading a server payload with optional undefined
+      // fields would clobber otherwise-correct placeholder values.
+      const resolvedInfo = resolved.info as UserMessage
+      store.setState((state) => {
+        const currentMessages = state.message[input.sessionId]
+        if (!Array.isArray(currentMessages)) return state
+        const index = currentMessages.findIndex((m) => m.id === resolvedInfo.id)
+        if (index < 0) return state
+        const existing = currentMessages[index] as UserMessage
+        const canonicalPatch: Partial<UserMessage> = {}
+        if (resolvedInfo.agent !== undefined) canonicalPatch.agent = resolvedInfo.agent
+        if (resolvedInfo.system !== undefined) canonicalPatch.system = resolvedInfo.system
+        if (resolvedInfo.model !== undefined) canonicalPatch.model = resolvedInfo.model
+        if (resolvedInfo.time !== undefined) canonicalPatch.time = resolvedInfo.time
+        const patched: UserMessage = {
+          ...existing,
+          ...canonicalPatch,
+          id: existing.id,
+          sessionID: existing.sessionID,
+          role: existing.role,
+        }
+        const nextMessages = currentMessages.slice()
+        nextMessages[index] = patched
+        return { message: { ...state.message, [input.sessionId]: nextMessages } }
+      })
+    }
   } catch (error) {
     // Rollback via optimistic infrastructure
     _optimisticRemove({
