@@ -3,8 +3,24 @@ import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import {
   Command,
   CommandEmpty,
@@ -31,9 +47,44 @@ interface BranchSelectorProps {
   branchInfo: Record<string, BranchInfo> | undefined;
   onCheckout: (branch: string) => void;
   onCreate: (name: string, remote?: GitRemote) => Promise<void>;
+  onRename?: (oldName: string, newName: string) => Promise<void>;
+  onDelete?: (branch: string) => Promise<void>;
   remotes?: GitRemote[];
   disabled?: boolean;
 }
+
+const BranchNameMarquee = ({ name, className = '' }: { name: string; className?: string }) => {
+  const containerRef = React.useRef<HTMLSpanElement>(null);
+  const textRef = React.useRef<HTMLSpanElement>(null);
+  const measureRef = React.useRef<HTMLSpanElement>(null);
+  const [isOverflowing, setIsOverflowing] = React.useState(false);
+
+  React.useLayoutEffect(() => {
+    const container = containerRef.current;
+    const measure = measureRef.current;
+    if (!container || !measure) return;
+    const updateOverflow = () => setIsOverflowing(measure.scrollWidth > container.clientWidth + 1);
+    updateOverflow();
+    const observer = new ResizeObserver(updateOverflow);
+    observer.observe(container);
+    observer.observe(measure);
+    return () => observer.disconnect();
+  }, [name]);
+
+  return (
+    <span ref={containerRef} className={`relative min-w-0 flex-1 overflow-hidden text-left ${className}`}>
+      <span ref={measureRef} className="invisible pointer-events-none absolute left-0 top-0 max-w-none whitespace-nowrap" aria-hidden="true">{name}</span>
+      {isOverflowing ? (
+        <span className="git-branch-name-marquee-track">
+          <span ref={textRef} className="git-branch-name-marquee-item">{name}</span>
+          <span className="git-branch-name-marquee-item" aria-hidden="true">{name}</span>
+        </span>
+      ) : (
+        <span ref={textRef} className="block truncate">{name}</span>
+      )}
+    </span>
+  );
+};
 
 const sanitizeBranchNameInput = (value: string): string => {
   return value
@@ -48,6 +99,20 @@ const sanitizeBranchNameInput = (value: string): string => {
     .replace(/[-/]+$/, '');
 };
 
+const getRemoteBranchDisplayName = (branch: string, remoteNames?: string[]): string => {
+  const normalized = branch.replace(/^remotes\//, '');
+  if (remoteNames) {
+    for (const name of remoteNames) {
+      if (normalized.startsWith(`${name}/`)) {
+        return normalized.slice(name.length + 1);
+      }
+    }
+    return normalized;
+  }
+  const slashIndex = normalized.indexOf('/');
+  return slashIndex > 0 ? normalized.slice(slashIndex + 1) : normalized;
+};
+
 export const BranchSelector: React.FC<BranchSelectorProps> = ({
   currentBranch,
   localBranches,
@@ -55,6 +120,8 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
   branchInfo,
   onCheckout,
   onCreate,
+  onRename,
+  onDelete,
   remotes = [],
   disabled = false,
 }) => {
@@ -65,17 +132,32 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
   const [showRemoteSelect, setShowRemoteSelect] = React.useState(false);
   const [newBranchName, setNewBranchName] = React.useState('');
   const [isCreating, setIsCreating] = React.useState(false);
+  const [contextMenuBranch, setContextMenuBranch] = React.useState<string | null>(null);
+  const [actionMenuBranch, setActionMenuBranch] = React.useState<string | null>(null);
+  const [renameBranch, setRenameBranch] = React.useState<string | null>(null);
+  const [renameValue, setRenameValue] = React.useState('');
+  const [isRenaming, setIsRenaming] = React.useState(false);
+  const [deleteBranch, setDeleteBranch] = React.useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = React.useState(false);
   const createInputRef = React.useRef<HTMLInputElement>(null);
+  const renameInputRef = React.useRef<HTMLInputElement>(null);
 
   const stopDropdownTypeahead = React.useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
     event.stopPropagation();
   }, []);
 
   const hasMultipleRemotes = remotes.length > 1;
+  const canManageBranches = Boolean(onRename || onDelete);
+  const remoteNames = React.useMemo(() => remotes.map((remote) => remote.name), [remotes]);
 
   const sanitizedNewBranch = React.useMemo(
     () => sanitizeBranchNameInput(newBranchName),
     [newBranchName]
+  );
+
+  const sanitizedRenameBranch = React.useMemo(
+    () => sanitizeBranchNameInput(renameValue),
+    [renameValue]
   );
 
   const filteredLocal = React.useMemo(() => {
@@ -107,13 +189,13 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
 
   const handleCreate = async () => {
     if (!sanitizedNewBranch || isCreating) return;
-    
+
     // If multiple remotes, show remote selection first
     if (hasMultipleRemotes) {
       setShowRemoteSelect(true);
       return;
     }
-    
+
     // Single or no remote - proceed directly
     setIsCreating(true);
     try {
@@ -150,16 +232,95 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
     setShowRemoteSelect(false);
   };
 
+  const closeBranchMenus = React.useCallback(() => {
+    setContextMenuBranch(null);
+    setActionMenuBranch(null);
+  }, []);
+
+  const handleOpenRename = (branch: string) => {
+    setRenameBranch(branch);
+    setRenameValue(branch);
+    closeBranchMenus();
+    setIsOpen(false);
+    setTimeout(() => renameInputRef.current?.focus(), 0);
+  };
+
+  const handleConfirmRename = async () => {
+    if (!renameBranch || !onRename || !sanitizedRenameBranch || isRenaming) return;
+    if (sanitizedRenameBranch === renameBranch) {
+      setRenameBranch(null);
+      return;
+    }
+    setIsRenaming(true);
+    try {
+      await onRename(renameBranch, sanitizedRenameBranch);
+      setRenameBranch(null);
+      setRenameValue('');
+    } finally {
+      setIsRenaming(false);
+    }
+  };
+
+  const handleOpenDelete = (branch: string) => {
+    setDeleteBranch(branch);
+    closeBranchMenus();
+    setIsOpen(false);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteBranch || !onDelete || isDeleting) return;
+    setIsDeleting(true);
+    try {
+      await onDelete(deleteBranch);
+      setDeleteBranch(null);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   React.useEffect(() => {
     if (!isOpen) {
       setSearch('');
       setShowCreate(false);
       setShowRemoteSelect(false);
       setNewBranchName('');
+      closeBranchMenus();
     }
-  }, [isOpen]);
+  }, [closeBranchMenus, isOpen]);
+
+  const renderBranchActions = (branch: string, Item: React.ElementType) => {
+    const ActionItem = Item;
+
+    return (
+      <>
+        {onRename ? (
+          <ActionItem onClick={(event: React.MouseEvent) => {
+            event.stopPropagation();
+            handleOpenRename(branch);
+          }}>
+            <Icon name="edit" className="size-4 shrink-0" />
+            <span className="min-w-0 truncate">{t('gitView.branch.actions.rename')}</span>
+          </ActionItem>
+        ) : null}
+        {onDelete ? (
+          <ActionItem
+            className="text-destructive focus:text-destructive"
+            disabled={currentBranch === branch}
+            onClick={(event: React.MouseEvent) => {
+              event.stopPropagation();
+              handleOpenDelete(branch);
+            }}
+          >
+            <Icon name="delete-bin" className="size-4 shrink-0" />
+            <span className="min-w-0 truncate">{t('gitView.branch.actions.delete')}</span>
+          </ActionItem>
+        ) : null}
+      </>
+    );
+  };
 
   return (
+    <>
     <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -171,9 +332,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
               disabled={disabled}
             >
               <Icon name="git-branch" className="size-4 text-primary" />
-              <span className="min-w-0 truncate font-medium text-left">
-                {currentBranch || t('gitView.branch.detachedHead')}
-              </span>
+              <BranchNameMarquee name={currentBranch || t('gitView.branch.detachedHead')} className="font-medium" />
               <Icon name="arrow-down-s" className="size-4 opacity-60" />
             </Button>
           </DropdownMenuTrigger>
@@ -183,7 +342,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
         </TooltipContent>
       </Tooltip>
 
-      <DropdownMenuContent align="start" className="w-72 p-0 max-h-[60vh] flex flex-col">
+      <DropdownMenuContent align="start" className="w-[calc(100vw-2rem)] p-0 max-h-[60vh] flex flex-col sm:w-72">
         <Command className="h-full min-h-0">
           <CommandInput
             placeholder={t('gitView.branch.searchPlaceholder')}
@@ -289,25 +448,56 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
 
             <CommandGroup heading={t('gitView.branch.localBranches')}>
               {filteredLocal.map((branch) => (
-                <CommandItem
-                  key={`local-${branch}`}
-                  onSelect={() => handleCheckout(branch)}
-                >
-                  <span className="flex flex-1 flex-col">
-                    <span className="typography-ui-label text-foreground">
-                      {branch}
-                    </span>
-                    {(branchInfo?.[branch]?.ahead || branchInfo?.[branch]?.behind) && (
-                      <span className="typography-micro text-muted-foreground">
-                        {branchInfo[branch].ahead || 0} ahead ·{' '}
-                        {branchInfo[branch].behind || 0} behind
+                <ContextMenu key={`local-${branch}`} open={contextMenuBranch === branch} onOpenChange={(open) => setContextMenuBranch(open ? branch : null)}>
+                  <ContextMenuTrigger render={<div className="contents" />}>
+                    <CommandItem className="group" onSelect={() => handleCheckout(branch)}>
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="flex min-w-0 items-center gap-2 typography-ui-label text-foreground">
+                          {currentBranch === branch && (
+                            <span className="typography-micro shrink-0 text-primary">{t('gitView.branch.currentBadge')}</span>
+                          )}
+                          <BranchNameMarquee name={branch} />
+                        </span>
+                        {(branchInfo?.[branch]?.ahead || branchInfo?.[branch]?.behind) && (
+                          <span className="typography-micro text-muted-foreground">
+                            {branchInfo[branch].ahead || 0} ahead ·{' '}
+                            {branchInfo[branch].behind || 0} behind
+                          </span>
+                        )}
                       </span>
-                    )}
-                  </span>
-                  {currentBranch === branch && (
-                    <span className="typography-micro text-primary">{t('gitView.branch.currentBadge')}</span>
-                  )}
-                </CommandItem>
+                      {canManageBranches ? (
+                        <DropdownMenu open={actionMenuBranch === branch} onOpenChange={(open) => setActionMenuBranch(open ? branch : null)}>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="ml-1 size-6 shrink-0 opacity-100"
+                              onMouseDown={(event) => {
+                                event.stopPropagation();
+                              }}
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                              }}
+                              aria-label={t('gitView.branch.actionsAria', { branch })}
+                            >
+                              <Icon name="more-2" className="size-3.5" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-56">
+                            {renderBranchActions(branch, DropdownMenuItem)}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      ) : null}
+                    </CommandItem>
+                  </ContextMenuTrigger>
+                  {canManageBranches ? (
+                    <ContextMenuContent className="w-56">
+                      {renderBranchActions(branch, ContextMenuItem)}
+                    </ContextMenuContent>
+                  ) : null}
+                </ContextMenu>
               ))}
               {filteredLocal.length === 0 && (
                 <CommandItem disabled className="justify-center">
@@ -325,8 +515,11 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
                 <CommandItem
                   key={`remote-${branch}`}
                   onSelect={() => handleCheckout(branch)}
+                  className="justify-start text-left"
                 >
-                  <span className="typography-ui-label text-foreground">{branch}</span>
+                  <span className="flex min-w-0 flex-1 typography-ui-label text-foreground">
+                    <BranchNameMarquee name={getRemoteBranchDisplayName(branch, remoteNames)} />
+                  </span>
                 </CommandItem>
               ))}
               {filteredRemote.length === 0 && (
@@ -342,5 +535,53 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
         </Command>
       </DropdownMenuContent>
     </DropdownMenu>
+    <Dialog open={renameBranch !== null} onOpenChange={(open) => !isRenaming && !open && setRenameBranch(null)}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>{t('gitView.branch.renameDialogTitle')}</DialogTitle>
+          <DialogDescription>{t('gitView.branch.renameDialogDescription', { branch: renameBranch || '' })}</DialogDescription>
+        </DialogHeader>
+        <form
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void handleConfirmRename();
+          }}
+        >
+          <Input
+            ref={renameInputRef}
+            value={renameValue}
+            onChange={(event) => setRenameValue(event.target.value)}
+            className="typography-ui-label"
+            placeholder={t('gitView.branch.namePlaceholder')}
+          />
+          <DialogFooter>
+            <Button variant="outline" size="sm" type="button" onClick={() => setRenameBranch(null)} disabled={isRenaming}>
+              {t('gitView.common.cancel')}
+            </Button>
+            <Button size="sm" type="submit" disabled={!sanitizedRenameBranch || sanitizedRenameBranch === renameBranch || isRenaming}>
+              {isRenaming ? t('gitView.branch.renameSaving') : t('gitView.branch.renameConfirm')}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+    <Dialog open={deleteBranch !== null} onOpenChange={(open) => !isDeleting && !open && setDeleteBranch(null)}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>{t('gitView.branch.deleteDialogTitle')}</DialogTitle>
+          <DialogDescription>{t('gitView.branch.deleteDialogDescription', { branch: deleteBranch || '' })}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" size="sm" onClick={() => setDeleteBranch(null)} disabled={isDeleting}>
+            {t('gitView.common.cancel')}
+          </Button>
+          <Button variant="destructive" size="sm" onClick={() => void handleConfirmDelete()} disabled={isDeleting}>
+            {isDeleting ? t('gitView.branch.deleting') : t('gitView.branch.deleteConfirm')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 };
