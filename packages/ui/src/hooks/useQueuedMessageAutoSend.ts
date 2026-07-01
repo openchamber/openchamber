@@ -110,7 +110,9 @@ const resolveSessionSendConfig = (sessionId: string) => {
 export const shouldDispatchQueuedAutoSend = (
   previousStatusType: SessionStatusType | undefined,
   currentStatusType: SessionStatusType,
+  hasQueuedItems: boolean = false,
 ): boolean => {
+  if (hasQueuedItems && currentStatusType === 'idle') return true;
   return (previousStatusType === 'busy' || previousStatusType === 'retry')
     && currentStatusType === 'idle';
 };
@@ -207,7 +209,7 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
       }
 
       if (queue.length > 0 && (
-        shouldDispatchQueuedAutoSend(previousStatusType, currentStatusType)
+        shouldDispatchQueuedAutoSend(previousStatusType, currentStatusType, queue.length > 0)
         || (wasAutoReviewBlocked && !isAutoReviewRunning && currentStatusType === 'idle')
       )) {
         void dispatchSessionQueue(sessionId, queue);

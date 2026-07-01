@@ -35,13 +35,17 @@ import {
 
 describe('shouldDispatchQueuedAutoSend', () => {
   test('dispatches only after an active session becomes idle', () => {
-    expect(shouldDispatchQueuedAutoSend('busy', 'idle')).toBe(true);
-    expect(shouldDispatchQueuedAutoSend('retry', 'idle')).toBe(true);
+    expect(shouldDispatchQueuedAutoSend('busy', 'idle', false)).toBe(true);
+    expect(shouldDispatchQueuedAutoSend('retry', 'idle', false)).toBe(true);
   });
 
   test('does not dispatch when idle is only first seen or status is missing', () => {
-    expect(shouldDispatchQueuedAutoSend(undefined, 'idle')).toBe(false);
-    expect(shouldDispatchQueuedAutoSend('idle', 'idle')).toBe(false);
+    expect(shouldDispatchQueuedAutoSend(undefined, 'idle', false)).toBe(false);
+    expect(shouldDispatchQueuedAutoSend('idle', 'idle', false)).toBe(false);
+  });
+
+  test('dispatches when idle→idle and queue has items', () => {
+    expect(shouldDispatchQueuedAutoSend('idle', 'idle', true)).toBe(true);
   });
 });
 
