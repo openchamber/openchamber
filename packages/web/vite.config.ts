@@ -105,6 +105,7 @@ export default defineConfig({
         main: path.resolve(__dirname, 'index.html'),
         mobile: path.resolve(__dirname, 'mobile.html'),
         miniChat: path.resolve(__dirname, 'mini-chat.html'),
+        browserPopout: path.resolve(__dirname, 'browser-popout.html'),
       },
       external: ['node:child_process', 'node:fs', 'node:path', 'node:url'],
       output: {

@@ -37,6 +37,14 @@ import { prepareNotificationLastMessage } from './lib/notifications/index.js';
 import { registerTtsRoutes } from './lib/tts/routes.js';
 import { detectSayTtsCapability } from './lib/tts/capability-runtime.js';
 import { createTerminalRuntime } from './lib/terminal/runtime.js';
+import { createBrowserControlRuntime } from './lib/browser/runtime.js';
+import { ensureBrowserMcpRegistration } from './lib/browser/ensure-mcp-registration.js';
+import {
+  getMcpConfig as getBrowserMcpConfig,
+  createMcpConfig as createBrowserMcpConfig,
+  updateMcpConfig as updateBrowserMcpConfig,
+  deleteMcpConfig as deleteBrowserMcpConfig,
+} from './lib/opencode/mcp.js';
 import {
   createGlobalUiEventBroadcaster,
   createGlobalMessageStreamHub,
@@ -356,7 +364,93 @@ const settingsRuntime = createSettingsRuntime({
 const readSettingsFromDiskMigrated = (...args) => settingsRuntime.readSettingsFromDiskMigrated(...args);
 const readSettingsFromDisk = (...args) => settingsRuntime.readSettingsFromDisk(...args);
 const writeSettingsToDisk = (...args) => settingsRuntime.writeSettingsToDisk(...args);
-const persistSettings = (...args) => settingsRuntime.persistSettings(...args);
+const persistSettings = (...args) => {
+  const result = settingsRuntime.persistSettings(...args);
+  // Re-apply the managed browser MCP entry if the automation toggle changed
+  // (no-op until the active port is known post-startup).
+  reapplyBrowserMcpRegistration();
+  return result;
+};
+
+// --- Agent-driven browser control: consent policy + MCP auth token ---
+const BROWSER_MCP_TOKEN_FILE = path.join(OPENCHAMBER_DATA_DIR, 'browser-mcp-token');
+let browserMcpTokenCache = null;
+
+const getOrCreateBrowserMcpToken = () => {
+  if (browserMcpTokenCache) return browserMcpTokenCache;
+  try {
+    if (fs.existsSync(BROWSER_MCP_TOKEN_FILE)) {
+      const existing = fs.readFileSync(BROWSER_MCP_TOKEN_FILE, 'utf8').trim();
+      if (existing) {
+        browserMcpTokenCache = existing;
+        return existing;
+      }
+    }
+  } catch {
+    // fall through to mint a new token
+  }
+  const token = crypto.randomBytes(32).toString('hex');
+  try {
+    fs.mkdirSync(OPENCHAMBER_DATA_DIR, { recursive: true });
+    fs.writeFileSync(BROWSER_MCP_TOKEN_FILE, token, { mode: 0o600 });
+  } catch {
+    // best effort; token still usable in-memory for this run
+  }
+  browserMcpTokenCache = token;
+  return token;
+};
+
+const getBrowserPolicy = () => {
+  // Read synchronously: this is called from the (sync) browser-control policy gate.
+  // NOTE: settingsRuntime.readSettingsFromDisk() is async — do not use it here.
+  let settings = {};
+  try {
+    const raw = fs.readFileSync(SETTINGS_FILE_PATH, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') settings = parsed;
+  } catch {
+    settings = {};
+  }
+  const cfg = (settings && typeof settings.browserAutomation === 'object' && settings.browserAutomation) || {};
+  const envEnabled = process.env.OPENCHAMBER_BROWSER_AUTOMATION === '1' || process.env.OPENCHAMBER_BROWSER_AUTOMATION === 'true';
+  const enabled = cfg.enabled === true || (cfg.enabled === undefined && envEnabled);
+  const advancedEnabled = cfg.advancedEnabled === true
+    || process.env.OPENCHAMBER_BROWSER_ADVANCED === '1'
+    || process.env.OPENCHAMBER_BROWSER_ADVANCED === 'true';
+  // Default: agents may act on any site once enabled. Set allowExternal:false
+  // (Settings) or OPENCHAMBER_BROWSER_LOCALHOST_ONLY=1 to restrict to localhost.
+  const localhostOnly = cfg.allowExternal === false
+    || process.env.OPENCHAMBER_BROWSER_LOCALHOST_ONLY === '1'
+    || process.env.OPENCHAMBER_BROWSER_LOCALHOST_ONLY === 'true';
+  return { enabled, advancedEnabled, allowExternal: !localhostOnly };
+};
+
+// Active loopback port for the browser MCP entry URL; set once the server binds.
+let browserMcpActivePort = null;
+
+const reapplyBrowserMcpRegistration = () => {
+  if (!browserMcpActivePort) return;
+  try {
+    const policy = getBrowserPolicy();
+    const registration = ensureBrowserMcpRegistration({
+      enabled: policy.enabled === true,
+      port: browserMcpActivePort,
+      token: getOrCreateBrowserMcpToken(),
+      workingDirectory: undefined,
+      mcp: {
+        getMcpConfig: getBrowserMcpConfig,
+        createMcpConfig: createBrowserMcpConfig,
+        updateMcpConfig: updateBrowserMcpConfig,
+        deleteMcpConfig: deleteBrowserMcpConfig,
+      },
+    });
+    if (registration.changed) {
+      void refreshOpenCodeAfterConfigChange('browser automation toggle');
+    }
+  } catch (error) {
+    console.warn('[BrowserControl] Failed to reapply MCP registration:', error?.message || error);
+  }
+};
 
 const requestSecurityRuntime = createRequestSecurityRuntime({
   readSettingsFromDiskMigrated,
@@ -471,6 +565,7 @@ let runtimeManagedRemoteTunnelToken = '';
 let runtimeManagedRemoteTunnelHostname = '';
 let terminalRuntime = null;
 let messageStreamRuntime = null;
+let browserRuntime = null;
 const userProvidedOpenCodePassword = hmrStateRuntime.getUserProvidedOpenCodePassword(hmrState);
 const initialOpenCodeAuthState = hmrStateRuntime.resolveOpenCodeAuthFromState({
   hmrState,
@@ -872,6 +967,8 @@ const startupPipelineRuntime = createStartupPipelineRuntime({
   createTerminalRuntime,
   createMessageStreamWsRuntime,
   createServerStartupRuntime,
+  createBrowserControlRuntime,
+  ensureBrowserMcpRegistration,
 });
 
 const openCodeLifecycleState = {};
@@ -1012,6 +1109,10 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   getTerminalRuntime: () => terminalRuntime,
   setTerminalRuntime: (value) => {
     terminalRuntime = value;
+  },
+  getBrowserRuntime: () => browserRuntime,
+  setBrowserRuntime: (value) => {
+    browserRuntime = value;
   },
   getMessageStreamRuntime: () => messageStreamRuntime,
   setMessageStreamRuntime: (value) => {
@@ -1320,9 +1421,31 @@ async function main(options = {}) {
     tunnelRuntimeContext,
     attachSignals,
     apiOnly,
+    getBrowserPolicy,
+    getBrowserMcpToken: getOrCreateBrowserMcpToken,
+    requestOpenBrowser: (payload) => {
+      try {
+        broadcastGlobalUiEvent(
+          { type: 'openchamber:browser-open-request', properties: { url: payload?.url || '' } },
+          { directory: 'global' },
+        );
+      } catch (error) {
+        console.warn('[BrowserControl] Failed to broadcast open request:', error?.message || error);
+      }
+    },
+    browserMcp: {
+      getMcpConfig: getBrowserMcpConfig,
+      createMcpConfig: createBrowserMcpConfig,
+      updateMcpConfig: updateBrowserMcpConfig,
+      deleteMcpConfig: deleteBrowserMcpConfig,
+    },
+    browserMcpWorkingDirectory: undefined,
+    refreshOpenCodeAfterConfigChange,
   });
   terminalRuntime = startupPipelineResult.terminalRuntime;
   messageStreamRuntime = startupPipelineResult.messageStreamRuntime;
+  browserRuntime = startupPipelineResult.browserControlRuntime;
+  browserMcpActivePort = startupPipelineResult.activePort;
 
   try {
     await scheduledTasksRuntime.start();

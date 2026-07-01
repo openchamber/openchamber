@@ -422,6 +422,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['tone', 'concise', 'detailed', 'custom instructions'],
   },
   {
+    id: 'behavior.browser-control',
+    page: 'behavior',
+    titleKey: 'settings.behavior.page.section.browserControl',
+    descriptionKey: 'settings.behavior.page.browserControl.enable',
+    keywords: ['browser', 'automation', 'agent', 'playwright', 'navigate', 'click', 'screenshot', 'test', 'preview', 'devtools'],
+  },
+  {
     id: 'agents.create',
     page: 'agents',
     titleKey: 'settings.agents.page.title.new',

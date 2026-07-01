@@ -1812,4 +1812,13 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'Choose what happens when you press Enter on a follow-up message while the agent is still responding.',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
+  'settings.behavior.page.section.browserControl': '智能体浏览器控制',
+  'settings.behavior.page.browserControl.tooltip': '允许智能体控制内嵌浏览器来导航、检查和测试你的应用。默认关闭。',
+  'settings.behavior.page.browserControl.enable': '允许智能体控制浏览器',
+  'settings.behavior.page.browserControl.enableAria': '允许智能体控制浏览器',
+  'settings.behavior.page.browserControl.help': 'localhost 开发服务器可完全控制。在网页应用中，外部站点仅限导航和截图。',
+  'settings.behavior.page.browserControl.advanced': '允许高级工具（运行 JavaScript、写入 Cookie 和存储、上传文件）',
+  'settings.behavior.page.browserControl.advancedAria': '允许高级浏览器工具',
+  'settings.behavior.page.browserControl.allowExternal': '允许智能体在任何网站上操作（不仅限于 localhost）',
+  'settings.behavior.page.browserControl.allowExternalAria': '允许智能体在任何网站上操作',
 } as const;

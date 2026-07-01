@@ -3,6 +3,8 @@ export const createStartupPipelineRuntime = (dependencies) => {
     createTerminalRuntime,
     createMessageStreamWsRuntime,
     createServerStartupRuntime,
+    createBrowserControlRuntime,
+    ensureBrowserMcpRegistration,
   } = dependencies;
 
   const run = async (options) => {
@@ -52,6 +54,12 @@ export const createStartupPipelineRuntime = (dependencies) => {
       tunnelRuntimeContext,
       attachSignals,
       apiOnly,
+      getBrowserPolicy,
+      getBrowserMcpToken,
+      requestOpenBrowser,
+      browserMcp,
+      browserMcpWorkingDirectory,
+      refreshOpenCodeAfterConfigChange,
     } = options;
 
     const terminalRuntime = createTerminalRuntime({
@@ -84,6 +92,22 @@ export const createStartupPipelineRuntime = (dependencies) => {
       triggerHealthCheck,
       upstreamStallTimeoutMs,
     });
+
+    // Agent-driven embedded browser control. Registered before setupProxy so the
+    // MCP endpoint + WS routes match before the OpenCode /api/* forwarder.
+    const browserControlRuntime = typeof createBrowserControlRuntime === 'function'
+      ? createBrowserControlRuntime({
+        app,
+        server,
+        express,
+        uiAuthController,
+        isRequestOriginAllowed,
+        rejectWebSocketUpgrade,
+        getBrowserPolicy,
+        getBrowserMcpToken,
+        requestOpenBrowser,
+      })
+      : null;
 
     setupProxy(app);
     scheduleOpenCodeApiDetection();
@@ -123,9 +147,32 @@ export const createStartupPipelineRuntime = (dependencies) => {
 
     serverStartupRuntime.attachProcessHandlers({ attachSignals });
 
+    // Idempotent, direct (non-route) registration of the managed browser MCP
+    // entry now that the active loopback port is known. Writes only on drift and
+    // only restarts OpenCode when something actually changed.
+    if (browserControlRuntime && typeof ensureBrowserMcpRegistration === 'function' && browserMcp) {
+      try {
+        const policy = typeof getBrowserPolicy === 'function' ? getBrowserPolicy() : { enabled: false };
+        const registration = ensureBrowserMcpRegistration({
+          enabled: policy.enabled === true,
+          port: startupResult.activePort,
+          token: typeof getBrowserMcpToken === 'function' ? getBrowserMcpToken() : null,
+          workingDirectory: browserMcpWorkingDirectory,
+          mcp: browserMcp,
+        });
+        if (registration.changed && typeof refreshOpenCodeAfterConfigChange === 'function') {
+          void refreshOpenCodeAfterConfigChange('browser mcp registration');
+        }
+      } catch (error) {
+        console.warn('[BrowserControl] MCP registration failed:', error?.message || error);
+      }
+    }
+
     return {
       terminalRuntime,
       messageStreamRuntime,
+      browserControlRuntime,
+      activePort: startupResult.activePort,
     };
   };
 

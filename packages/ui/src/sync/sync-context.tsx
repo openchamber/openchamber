@@ -30,6 +30,8 @@ import { getReconnectCandidateSessionIds } from "./reconnect-recovery"
 import { opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
 import { useConfigStore } from "@/stores/useConfigStore"
+import { useUIStore } from "@/stores/useUIStore"
+import { useDirectoryStore as useAppDirectoryStore } from "@/stores/useDirectoryStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { toast } from "@/components/ui"
 import { appendNotification } from "./notification-store"
@@ -313,6 +315,23 @@ const asOptionalString = (value: unknown): string | undefined => {
   if (typeof value !== "string") return undefined
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : undefined
+}
+
+// Agent asked for a browser but no pane is open — open the Browser context-panel
+// tab in the active project so the model's browser_open can proceed.
+const handleBrowserOpenRequestEvent = (payload: Event): boolean => {
+  if ((payload as { type?: unknown }).type !== "openchamber:browser-open-request") {
+    return false
+  }
+  const properties = (payload as { properties?: unknown }).properties
+  const url = properties && typeof properties === "object"
+    ? asOptionalString((properties as { url?: unknown }).url)
+    : undefined
+  const directory = useAppDirectoryStore.getState().currentDirectory
+  if (directory) {
+    useUIStore.getState().openContextBrowser(directory, url ?? "")
+  }
+  return true
 }
 
 const handleUiNotificationEvent = (payload: Event, fallbackDirectory: string): boolean => {
@@ -1287,6 +1306,10 @@ function handleEvent(
   const directory = resolveDirectoryFromRoutingIndex(routingIndex, rawDirectory, payload, childStores)
 
   if (handleUiNotificationEvent(payload, directory)) {
+    return
+  }
+
+  if (handleBrowserOpenRequestEvent(payload)) {
     return
   }
 

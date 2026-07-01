@@ -93,6 +93,72 @@ export interface TerminalAPI {
   forceKill?(options: ForceKillOptions): Promise<void>;
 }
 
+// ============== Browser control (agent-driven embedded browser) ==============
+
+/** Where the browser surface lives — selects the server-side dispatch backend. */
+export type BrowserBackend = 'desktop-cdp' | 'web-iframe';
+
+/** Origin class of the currently-loaded page (drives capability + consent). */
+export type BrowserOriginClass = 'localhost' | 'external' | 'blank';
+
+/** Per-op capability map for the current controller surface (op → supported). */
+export type BrowserControllerCapabilities = Record<string, boolean>;
+
+export interface BrowserPaneMeta {
+  url?: string;
+  title?: string;
+}
+
+export interface BrowserControllerInfo {
+  controllerId: string;
+  backend: BrowserBackend;
+  originClass: BrowserOriginClass;
+  url?: string;
+  title?: string;
+  capabilities: BrowserControllerCapabilities;
+}
+
+/** Result of executing one browser primitive against a surface. */
+export type BrowserExecResult =
+  | { ok: true; value: unknown }
+  | { ok: false; code: string; message: string };
+
+/**
+ * Renderer-side executor: runs one low-level primitive the server requests
+ * ('eval' | 'navigate' | 'back' | 'forward' | 'reload' | 'screenshot' |
+ * 'setViewport' | 'emulateDevice' | 'setInputFiles'). The server composes
+ * higher-level ops (click, snapshot, handle_dialog, ...) into these primitives
+ * (handle_dialog runs as a same-origin page script via 'eval').
+ */
+export type BrowserCommandExecutor = (primitive: string, args: unknown) => Promise<BrowserExecResult>;
+
+/** Handle returned when a pane registers as a controller. */
+export interface BrowserControllerHandle extends Subscription {
+  /** Resolves with the surface's capability matrix once the server acknowledges. */
+  readonly ready: Promise<BrowserControllerInfo>;
+  /** Report a navigation so the server resets snapshot refs + origin class. */
+  notifyNavigated(meta: BrowserPaneMeta): void;
+}
+
+export interface RegisterControllerOptions {
+  controllerId: string;
+  backend: BrowserBackend;
+  getUrl?: () => string | undefined;
+  getTitle?: () => string | undefined;
+  execute: BrowserCommandExecutor;
+}
+
+/**
+ * Renderer-side glue for the agent-driven embedded browser. NOTE: this is NOT
+ * what the model calls — the model drives the browser through MCP tools on the
+ * server. This API only wires the UI browser pane (iframe on web, webview on
+ * desktop) to the server's control runtime over the control WebSocket.
+ */
+export interface BrowserControlAPI {
+  /** Register the active browser pane as a controller the server can drive. */
+  registerController(opts: RegisterControllerOptions): BrowserControllerHandle;
+}
+
 interface GitStatusFile {
   path: string;
   index: string;
@@ -1130,6 +1196,7 @@ export interface RuntimeAPIs {
   push?: PushAPI;
   diagnostics?: DiagnosticsAPI;
   clientAuth?: ClientAuthAPI;
+  browser?: BrowserControlAPI;
   tools: ToolsAPI;
   editor?: EditorAPI;
   vscode?: VSCodeAPI;

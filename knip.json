@@ -23,6 +23,7 @@
       "entry": [
         "src/mobile-main.tsx",
         "src/mini-chat-main.tsx",
+        "src/browser-popout-main.tsx",
         "src/sw.ts",
         "server/**/*.{test,spec}.{js,cjs,mjs}",
         "src/**/*.{test,spec}.{ts,tsx}"

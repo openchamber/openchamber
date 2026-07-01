@@ -21,6 +21,11 @@ const createStubTerminalAPI = (): TerminalAPI => ({
 export const createVSCodeAPIs = (): RuntimeAPIs => ({
   runtime: { platform: 'vscode', isDesktop: false, isVSCode: true, label: 'VS Code Extension' },
   terminal: createStubTerminalAPI(),
+  // NOTE: `browser` (agent-driven browser control) is intentionally omitted here.
+  // Like `terminal`, it relies on a raw WebSocket to the server (`/api/browser/ws`),
+  // which the VS Code webview cannot open (network goes through the extension-host
+  // fetch proxy). The optional `RuntimeAPIs.browser` stays undefined and the browser
+  // pane's `useBrowserController` guard skips registration — a clean unsupported state.
   git: createVSCodeGitAPI(),
   files: createVSCodeFilesAPI(),
   settings: createVSCodeSettingsAPI(),

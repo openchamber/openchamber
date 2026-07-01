@@ -41,6 +41,9 @@ type BehaviorSettingsState = {
   responseStyleEnabled: boolean;
   responseStylePreset: ResponseStyleValue;
   responseStyleCustomInstructions: string;
+  browserEnabled: boolean;
+  browserAdvanced: boolean;
+  browserAllowExternal: boolean;
 };
 
 const DEFAULT_BEHAVIOR_SETTINGS: BehaviorSettingsState = {
@@ -48,6 +51,9 @@ const DEFAULT_BEHAVIOR_SETTINGS: BehaviorSettingsState = {
   responseStyleEnabled: false,
   responseStylePreset: 'concise',
   responseStyleCustomInstructions: '',
+  browserEnabled: false,
+  browserAdvanced: false,
+  browserAllowExternal: true,
 };
 
 const getResponseStylePreview = (preset: ResponseStyleValue, customInstructions: string) => {
@@ -90,6 +96,9 @@ export const BehaviorPage: React.FC = () => {
   const [responseStyleEnabled, setResponseStyleEnabled] = React.useState(DEFAULT_BEHAVIOR_SETTINGS.responseStyleEnabled);
   const [responseStylePreset, setResponseStylePreset] = React.useState<ResponseStyleValue>(DEFAULT_BEHAVIOR_SETTINGS.responseStylePreset);
   const [responseStyleCustomInstructions, setResponseStyleCustomInstructions] = React.useState(DEFAULT_BEHAVIOR_SETTINGS.responseStyleCustomInstructions);
+  const [browserEnabled, setBrowserEnabled] = React.useState(DEFAULT_BEHAVIOR_SETTINGS.browserEnabled);
+  const [browserAdvanced, setBrowserAdvanced] = React.useState(DEFAULT_BEHAVIOR_SETTINGS.browserAdvanced);
+  const [browserAllowExternal, setBrowserAllowExternal] = React.useState<boolean>(DEFAULT_BEHAVIOR_SETTINGS.browserAllowExternal);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
   const [initialPrompt, setInitialPrompt] = React.useState('');
@@ -98,6 +107,7 @@ export const BehaviorPage: React.FC = () => {
     preset: ResponseStyleValue;
     custom: string;
   } | null>(null);
+  const lastSavedBrowserRef = React.useRef<{ enabled: boolean; advanced: boolean; allowExternal: boolean } | null>(null);
 
   React.useEffect(() => {
     const abort = new AbortController();
@@ -120,6 +130,9 @@ export const BehaviorPage: React.FC = () => {
         let nextSettings: BehaviorSettingsState = DEFAULT_BEHAVIOR_SETTINGS;
         if (settingsRes.ok) {
           const data = await settingsRes.json();
+          const browserAutomation = data.browserAutomation && typeof data.browserAutomation === 'object'
+            ? data.browserAutomation
+            : {};
           nextSettings = {
             ...nextSettings,
             responseStyleEnabled: data.responseStyleEnabled === true,
@@ -127,6 +140,9 @@ export const BehaviorPage: React.FC = () => {
             responseStyleCustomInstructions: typeof data.responseStyleCustomInstructions === 'string'
               ? data.responseStyleCustomInstructions
               : '',
+            browserEnabled: browserAutomation.enabled === true,
+            browserAdvanced: browserAutomation.advancedEnabled === true,
+            browserAllowExternal: browserAutomation.allowExternal !== false,
           };
           if (typeof data.globalBehaviorPrompt === 'string') {
             nextSettings = { ...nextSettings, prompt: data.globalBehaviorPrompt };
@@ -144,11 +160,19 @@ export const BehaviorPage: React.FC = () => {
         setResponseStyleEnabled(nextSettings.responseStyleEnabled);
         setResponseStylePreset(nextSettings.responseStylePreset);
         setResponseStyleCustomInstructions(nextSettings.responseStyleCustomInstructions);
+        setBrowserEnabled(nextSettings.browserEnabled);
+        setBrowserAdvanced(nextSettings.browserAdvanced);
+        setBrowserAllowExternal(nextSettings.browserAllowExternal);
         setInitialPrompt(nextSettings.prompt);
         lastSavedResponseStyleRef.current = {
           enabled: nextSettings.responseStyleEnabled,
           preset: nextSettings.responseStylePreset,
           custom: nextSettings.responseStyleCustomInstructions,
+        };
+        lastSavedBrowserRef.current = {
+          enabled: nextSettings.browserEnabled,
+          advanced: nextSettings.browserAdvanced,
+          allowExternal: nextSettings.browserAllowExternal,
         };
       } catch (error) {
         if ((error as Error).name !== 'AbortError') {
@@ -197,6 +221,27 @@ export const BehaviorPage: React.FC = () => {
 
     return () => clearTimeout(timer);
   }, [responseStyleEnabled, responseStylePreset, responseStyleCustomInstructions, isLoading, t]);
+
+  React.useEffect(() => {
+    if (isLoading) return;
+    const last = lastSavedBrowserRef.current;
+    if (last && last.enabled === browserEnabled && last.advanced === browserAdvanced && last.allowExternal === browserAllowExternal) {
+      return;
+    }
+    const next = { enabled: browserEnabled, advanced: browserAdvanced, allowExternal: browserAllowExternal };
+    const timer = setTimeout(async () => {
+      try {
+        await saveBehaviorSetting({
+          browserAutomation: { enabled: next.enabled, advancedEnabled: next.advanced, allowExternal: next.allowExternal },
+        }, t('settings.behavior.page.toast.saveFailed'));
+        lastSavedBrowserRef.current = next;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : t('settings.behavior.page.toast.saveFailed');
+        toast.error(message);
+      }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [browserEnabled, browserAdvanced, browserAllowExternal, isLoading, t]);
 
   const responseStylePreview = getResponseStylePreview(responseStylePreset, responseStyleCustomInstructions);
   const isPromptDirty = prompt !== initialPrompt;
@@ -351,6 +396,64 @@ export const BehaviorPage: React.FC = () => {
               outerClassName="min-h-[120px]"
               className="w-full font-mono typography-meta bg-transparent"
             />
+          </section>
+        </div>
+
+        <div data-settings-item="behavior.browser-control">
+          <div className="mb-1 px-1">
+            <div className="flex items-center gap-1.5">
+              <h3 className="typography-ui-header font-medium text-foreground">
+                {t('settings.behavior.page.section.browserControl')}
+              </h3>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent sideOffset={8} className="max-w-xs">
+                  {t('settings.behavior.page.browserControl.tooltip')}
+                </TooltipContent>
+              </Tooltip>
+            </div>
+          </div>
+
+          <section className="px-2 pb-2 pt-0 space-y-3">
+            <label className="flex items-center gap-2 typography-ui-label text-foreground">
+              <Checkbox
+                checked={browserEnabled}
+                onChange={setBrowserEnabled}
+                disabled={isLoading}
+                ariaLabel={t('settings.behavior.page.browserControl.enableAria')}
+              />
+              {t('settings.behavior.page.browserControl.enable')}
+            </label>
+
+            <p className="px-2 typography-meta text-muted-foreground/70">
+              {t('settings.behavior.page.browserControl.help')}
+            </p>
+
+            <label className="flex items-center gap-2 typography-ui-label text-foreground">
+              <Checkbox
+                checked={browserAdvanced}
+                onChange={setBrowserAdvanced}
+                disabled={isLoading || !browserEnabled}
+                ariaLabel={t('settings.behavior.page.browserControl.advancedAria')}
+              />
+              <span className={browserEnabled ? 'text-foreground' : 'text-foreground/50'}>
+                {t('settings.behavior.page.browserControl.advanced')}
+              </span>
+            </label>
+
+            <label className="flex items-center gap-2 typography-ui-label text-foreground">
+              <Checkbox
+                checked={browserAllowExternal}
+                onChange={setBrowserAllowExternal}
+                disabled={isLoading || !browserEnabled}
+                ariaLabel={t('settings.behavior.page.browserControl.allowExternalAria')}
+              />
+              <span className={browserEnabled ? 'text-foreground' : 'text-foreground/50'}>
+                {t('settings.behavior.page.browserControl.allowExternal')}
+              </span>
+            </label>
           </section>
         </div>
 

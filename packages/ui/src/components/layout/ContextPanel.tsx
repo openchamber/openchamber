@@ -28,6 +28,12 @@ import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { Icon } from "@/components/icon/Icon";
 import { OpenChamberLogo } from "@/components/ui/OpenChamberLogo";
 import { invokeDesktopCommand } from '@/lib/desktopNative';
+import { toJpeg } from 'html-to-image';
+import { BrowserAgentControlBar } from './BrowserAgentControlBar';
+import { BrowserDetachedPlaceholder } from './BrowserDetachedPlaceholder';
+import { closeBrowserPopout, openBrowserPopout } from '@/lib/browser/popout';
+import { BROWSER_POPOUT_CHANNEL, BROWSER_POPOUT_CLOSED_EVENT, browserPopoutKey, useBrowserPopoutStore } from '@/stores/useBrowserPopoutStore';
+import type { BrowserExecutorCallbacks } from '@/lib/browser/executor';
 import { getOrCreateEmbeddedSessionChatURL, type EmbeddedSessionChatURLCacheEntry } from './contextPanelEmbeddedChat';
 import {
   type PreviewElementMetadata,
@@ -1292,13 +1298,26 @@ type DesktopBrowserPaneProps = {
   initialUrl: string;
   directory: string;
   tabID: string;
+  /** Override the agent controller id (used by the pop-out window). */
+  controllerId?: string;
+  /** True when this pane renders inside the detached pop-out window. */
+  isPopout?: boolean;
 };
 
 const isElectronBrowserRuntime = (): boolean => {
   return typeof window !== 'undefined' && Boolean(window.__OPENCHAMBER_ELECTRON__);
 };
 
-const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, directory, tabID }) => {
+// In a frameless pop-out window on macOS the traffic lights overlay the top-left,
+// so the browser toolbar needs a left inset (matches the mini-chat header).
+const hasMacTrafficLights = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  const major = window.__OPENCHAMBER_MACOS_MAJOR__ ?? 0;
+  return Number.isFinite(major) && major > 0;
+};
+
+const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, directory, tabID, controllerId, isPopout }) => {
+  const paneControllerId = controllerId ?? `${directory}::${tabID}`;
   const { t } = useI18n();
   const iframeRef = React.useRef<HTMLIFrameElement | null>(null);
   const setContextPanelTabTargetPath = useUIStore((state) => state.setContextPanelTabTargetPath);
@@ -1699,9 +1718,45 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
     }
   }, [applyUrl, getUpstreamUrlFromLocalFrameUrl, isInspecting, postInspectMode, proxySrc]);
 
+  // Pane callbacks the agent control bar hands to the server-driven executor.
+  // Same-origin (proxied localhost) content is fully scriptable; external
+  // cross-origin pages degrade to navigate/screenshot (enforced server-side).
+  const [agentActive, setAgentActive] = React.useState(false);
+  const getBrowserCallbacks = React.useCallback((): BrowserExecutorCallbacks => ({
+    runScript: async (js: string) => {
+      const frameWindow = iframeRef.current?.contentWindow as (Window & { eval: (source: string) => unknown }) | null | undefined;
+      if (!frameWindow) throw new Error('Browser frame is not ready');
+      return frameWindow.eval(js);
+    },
+    navigate: (url: string) => applyUrl(url),
+    goBack: () => { if (historyIndex > 0) goToHistory(historyIndex - 1); },
+    goForward: () => { if (historyIndex >= 0 && historyIndex < history.length - 1) goToHistory(historyIndex + 1); },
+    reload: () => handleReload(),
+    screenshot: async () => {
+      const iframe = iframeRef.current;
+      const doc = iframe?.contentDocument;
+      if (!iframe || !doc) throw new Error('cross-origin: cannot capture this page on the web runtime');
+      const dataUrl = await toJpeg(doc.documentElement, { quality: 0.85, pixelRatio: 1, cacheBust: true });
+      return { dataUrl };
+    },
+  }), [applyUrl, historyIndex, history, handleReload, goToHistory]);
+
+  const handlePopOut = React.useCallback(() => {
+    const key = browserPopoutKey(directory, tabID);
+    void openBrowserPopout({ url: currentUrl, directory, tabID })
+      .then((opened) => { if (opened) useBrowserPopoutStore.getState().setDetached(key, true); })
+      .catch(() => { /* window failed to open — keep the pane docked in the panel */ });
+  }, [currentUrl, directory, tabID]);
+
   return (
     <div className="absolute inset-0 flex flex-col bg-background">
-      <div className="flex items-center gap-1 border-b border-border/40 bg-[var(--surface-background)] px-2 py-1">
+      <div
+        className={cn(
+          'flex items-center gap-1 border-b border-border/40 bg-[var(--surface-background)] px-2 py-1',
+          isPopout && 'min-h-[44px] py-1.5 pr-3 app-region-drag',
+        )}
+        style={isPopout && hasMacTrafficLights() ? { paddingLeft: 'var(--oc-titlebar-left-inset, 5.5rem)' } : undefined}
+      >
         <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={historyIndex <= 0} onClick={() => goToHistory(historyIndex - 1)}>
           <Icon name="arrow-left" className="h-3.5 w-3.5" />
         </Button>
@@ -1734,8 +1789,19 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
         <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={!currentUrl} onClick={() => void openExternalUrl(currentUrl)}>
           <Icon name="external-link" className="h-3.5 w-3.5" />
         </Button>
+        <BrowserAgentControlBar
+          backend="web-iframe"
+          controllerId={paneControllerId}
+          directory={directory}
+          url={currentUrl}
+          getCallbacks={getBrowserCallbacks}
+          onActiveChange={setAgentActive}
+          onPopOut={isPopout ? undefined : handlePopOut}
+          canPopOut={!isPopout}
+          onDock={isPopout ? () => closeBrowserPopout({ directory, tabID }) : undefined}
+        />
       </div>
-      <div className="relative min-h-0 flex-1 bg-background">
+      <div className={cn('relative min-h-0 flex-1 bg-background', agentActive && 'ring-2 ring-inset ring-[var(--status-info)]')}>
         {iframeSrc ? (
           <div className="absolute inset-0">
             <iframe
@@ -1782,7 +1848,8 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
   );
 };
 
-const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, directory, tabID }) => {
+const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, directory, tabID, controllerId, isPopout }) => {
+  const paneControllerId = controllerId ?? `${directory}::${tabID}`;
   const { t } = useI18n();
   const webviewRef = React.useRef<WebviewElement | null>(null);
   const setContextPanelTabTargetPath = useUIStore((state) => state.setContextPanelTabTargetPath);
@@ -1989,9 +2056,53 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dir
       .catch(() => setIsInspecting(false));
   }, [addAttachedFile, addInlineCommentDraft, currentSessionId, currentUrl, isInspecting, newSessionDraftOpen, t]);
 
+  // Pane callbacks the agent control bar hands to the server-driven executor. The
+  // webview is a real browser context, so executeJavaScript drives any origin;
+  // screenshots reuse the existing desktop_browser_capture_page IPC.
+  const [agentActive, setAgentActive] = React.useState(false);
+  const getBrowserCallbacks = React.useCallback((): BrowserExecutorCallbacks => ({
+    runScript: async (js: string) => {
+      const webview = webviewRef.current;
+      if (!webview?.executeJavaScript) throw new Error('Browser webview is not ready');
+      return webview.executeJavaScript(js, false);
+    },
+    navigate: (url: string) => loadUrl(url),
+    goBack: () => { try { webviewRef.current?.goBack?.(); } catch { /* webview not ready */ } },
+    goForward: () => { try { webviewRef.current?.goForward?.(); } catch { /* webview not ready */ } },
+    reload: () => { try { webviewRef.current?.reload?.(); } catch { /* webview not ready */ } },
+    screenshot: async () => {
+      const webview = webviewRef.current;
+      const wcId = typeof webview?.getWebContentsId === 'function' ? webview.getWebContentsId() : null;
+      if (wcId === null || wcId === undefined) return null;
+      const capture = await invokeDesktopCommand<{ mime: string; base64: string; width: number; height: number }>(
+        'desktop_browser_capture_page', { webContentsId: wcId },
+      );
+      return { base64: capture.base64, mime: capture.mime, width: capture.width, height: capture.height };
+    },
+    setInputFiles: async ({ ref, selector, paths }: { ref?: string; selector?: string; paths: string[] }) => {
+      const webview = webviewRef.current;
+      const wcId = typeof webview?.getWebContentsId === 'function' ? webview.getWebContentsId() : null;
+      if (wcId === null || wcId === undefined) return { found: false };
+      return invokeDesktopCommand<{ found?: boolean }>('desktop_browser_set_input_files', { webContentsId: wcId, ref, selector, paths });
+    },
+  }), [loadUrl]);
+
+  const handlePopOut = React.useCallback(() => {
+    const key = browserPopoutKey(directory, tabID);
+    void openBrowserPopout({ url: currentUrl, directory, tabID })
+      .then((opened) => { if (opened) useBrowserPopoutStore.getState().setDetached(key, true); })
+      .catch(() => { /* window failed to open — keep the pane docked in the panel */ });
+  }, [currentUrl, directory, tabID]);
+
   return (
     <div className="absolute inset-0 flex flex-col bg-background">
-      <div className="flex items-center gap-1 border-b border-border/40 bg-[var(--surface-background)] px-2 py-1">
+      <div
+        className={cn(
+          'flex items-center gap-1 border-b border-border/40 bg-[var(--surface-background)] px-2 py-1',
+          isPopout && 'min-h-[44px] py-1.5 pr-3 app-region-drag',
+        )}
+        style={isPopout && hasMacTrafficLights() ? { paddingLeft: 'var(--oc-titlebar-left-inset, 5.5rem)' } : undefined}
+      >
         <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { try { webviewRef.current?.goBack?.(); } catch { /* webview not ready */ } }}>
           <Icon name="arrow-left" className="h-3.5 w-3.5" />
         </Button>
@@ -2023,8 +2134,19 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dir
         <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => void openExternalUrl(currentUrl)}>
           <Icon name="external-link" className="h-3.5 w-3.5" />
         </Button>
+        <BrowserAgentControlBar
+          backend="desktop-cdp"
+          controllerId={paneControllerId}
+          directory={directory}
+          url={currentUrl}
+          getCallbacks={getBrowserCallbacks}
+          onActiveChange={setAgentActive}
+          onPopOut={isPopout ? undefined : handlePopOut}
+          canPopOut={!isPopout}
+          onDock={isPopout ? () => closeBrowserPopout({ directory, tabID }) : undefined}
+        />
       </div>
-      <div className="relative min-h-0 flex-1 bg-background">
+      <div className={cn('relative min-h-0 flex-1 bg-background', agentActive && 'ring-2 ring-inset ring-[var(--status-info)]')}>
         <webview
           ref={webviewRef}
           src={normalizeBrowserUrl(initialUrl)}
@@ -2046,6 +2168,16 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dir
       </div>
     </div>
   );
+};
+
+/**
+ * The embedded browser pane, standalone (runtime-appropriate). Reused by the
+ * context panel AND the pop-out window so the popped-out browser keeps its
+ * navigation, controls, and agent controller registration.
+ */
+export const StandaloneBrowserPane: React.FC<DesktopBrowserPaneProps> = (props) => {
+  const Pane = isElectronBrowserRuntime() ? DesktopBrowserPane : IframeBrowserPane;
+  return <Pane {...props} />;
 };
 
 export const ContextPanel: React.FC = () => {
@@ -2467,6 +2599,33 @@ export const ContextPanel: React.FC = () => {
     [tabs],
   );
   const BrowserPane = isElectronBrowserRuntime() ? DesktopBrowserPane : IframeBrowserPane;
+  const detachedBrowserTabs = useBrowserPopoutStore((state) => state.detached);
+
+  // When a pop-out window closes (docked or shut), re-attach its panel pane.
+  // Desktop brokers this through the Electron main process, which reliably reaches
+  // every BrowserWindow; web uses BroadcastChannel (same-origin). Both re-dock via
+  // the same key, and setDetached is a no-op when the key isn't detached here, so
+  // the extra path on desktop is harmless.
+  React.useEffect(() => {
+    const reAttach = (key: unknown) => {
+      if (typeof key === 'string') useBrowserPopoutStore.getState().setDetached(key, false);
+    };
+    const onNativeClosed = (event: Event) => reAttach((event as CustomEvent<{ key?: string }>).detail?.key);
+    window.addEventListener(BROWSER_POPOUT_CLOSED_EVENT, onNativeClosed as EventListener);
+
+    let channel: BroadcastChannel | null = null;
+    if (typeof BroadcastChannel !== 'undefined') {
+      channel = new BroadcastChannel(BROWSER_POPOUT_CHANNEL);
+      channel.onmessage = (event) => {
+        const message = event.data as { type?: string; key?: string } | null;
+        if (message && message.type === 'closed') reAttach(message.key);
+      };
+    }
+    return () => {
+      window.removeEventListener(BROWSER_POPOUT_CLOSED_EVENT, onNativeClosed as EventListener);
+      channel?.close();
+    };
+  }, []);
   const hasFileTabs = React.useMemo(
     () => tabs.some((tab) => tab.mode === 'file'),
     [tabs],
@@ -2633,7 +2792,11 @@ export const ContextPanel: React.FC = () => {
               activeTab?.id !== tab.id && 'hidden'
             )}
           >
-            <BrowserPane initialUrl={tab.targetPath ?? ''} directory={directoryKey} tabID={tab.id} />
+            {detachedBrowserTabs[browserPopoutKey(directoryKey, tab.id)] ? (
+              <BrowserDetachedPlaceholder directory={directoryKey} tabID={tab.id} url={tab.targetPath ?? ''} />
+            ) : (
+              <BrowserPane initialUrl={tab.targetPath ?? ''} directory={directoryKey} tabID={tab.id} />
+            )}
           </div>
         ))}
         {diffTabs.map((tab) => (

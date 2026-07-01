@@ -150,6 +150,10 @@ const MINI_CHAT_WINDOW_WIDTH = 520;
 const MINI_CHAT_WINDOW_HEIGHT = 760;
 const MINI_CHAT_MIN_WINDOW_WIDTH = 360;
 const MINI_CHAT_MIN_WINDOW_HEIGHT = 480;
+const BROWSER_POPOUT_WINDOW_WIDTH = 1024;
+const BROWSER_POPOUT_WINDOW_HEIGHT = 768;
+const BROWSER_POPOUT_MIN_WINDOW_WIDTH = 480;
+const BROWSER_POPOUT_MIN_WINDOW_HEIGHT = 360;
 const MAX_CAPTURE_PAGE_RECT_AREA = 4_000_000;
 const LOCAL_HOST_ID = 'local';
 const LOCAL_DESKTOP_CLIENT_KIND = 'desktop-local';
@@ -2403,6 +2407,150 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
   return browserWindow;
 };
 
+// ---- Browser pop-out window (detached embedded browser) ----
+const browserPopoutWindows = new Map();
+
+const buildBrowserPopoutUrl = ({ directory = '', tabID = '', initialUrl = '' }) => {
+  const base = state.localOrigin || state.sidecarUrl;
+  if (!base) {
+    throw new Error('Local UI is not available');
+  }
+  const url = new URL(shouldUsePackagedUi() ? buildPackagedUiUrl('/browser-popout.html') : '/browser-popout.html', base);
+  if (directory) url.searchParams.set('directory', directory);
+  if (tabID) url.searchParams.set('tabID', tabID);
+  if (initialUrl) url.searchParams.set('url', initialUrl);
+  return url.toString();
+};
+
+const browserPopoutWindowKey = (runtimeConfig, directory, tabID) => {
+  const runtimeKey = normalizeHostUrl(runtimeConfig?.apiBaseUrl || state.apiBaseUrl || state.localOrigin || state.sidecarUrl || '') || 'local';
+  return `${runtimeKey}\n${directory}::${tabID}`;
+};
+
+const createBrowserPopoutWindow = async ({ directory = '', tabID = '', initialUrl = '', runtimeConfig = {} } = {}) => {
+  const effectiveRuntimeConfig = {
+    apiBaseUrl: normalizeHostUrl(runtimeConfig.apiBaseUrl || state.apiBaseUrl || state.localOrigin || state.sidecarUrl || ''),
+    clientToken: sanitizeClientTokenForStorage(runtimeConfig.clientToken || state.clientToken || ''),
+    requestHeaders: sanitizeRuntimeRequestHeaders(runtimeConfig.requestHeaders || state.requestHeaders || {}),
+  };
+
+  const windowKey = browserPopoutWindowKey(effectiveRuntimeConfig, directory, tabID);
+  const existing = browserPopoutWindows.get(windowKey);
+  if (existing && !existing.isDestroyed()) {
+    if (existing.isMinimized()) existing.restore();
+    existing.show();
+    existing.focus();
+    return existing;
+  }
+  browserPopoutWindows.delete(windowKey);
+
+  const desktopLocalOrigin = state.localOrigin || '';
+  const desktopApiBaseUrl = effectiveRuntimeConfig.apiBaseUrl || '';
+  const desktopClientToken = effectiveRuntimeConfig.clientToken || '';
+  const desktopRequestHeaders = effectiveRuntimeConfig.requestHeaders || {};
+  const desktopHome = os.homedir() || '';
+  const desktopMacosMajor = String(macosMajorVersion());
+  const useVibrancy = process.platform === 'darwin' && readSettingsRoot().desktopVibrancy !== false;
+
+  const browserWindow = new BrowserWindow({
+    title: 'OpenChamber Browser',
+    width: BROWSER_POPOUT_WINDOW_WIDTH,
+    height: BROWSER_POPOUT_WINDOW_HEIGHT,
+    minWidth: BROWSER_POPOUT_MIN_WINDOW_WIDTH,
+    minHeight: BROWSER_POPOUT_MIN_WINDOW_HEIGHT,
+    icon: getWindowIconPath(),
+    show: false,
+    backgroundColor: useVibrancy ? '#00000000' : '#151313',
+    frame: process.platform === 'win32' ? false : undefined,
+    autoHideMenuBar: process.platform !== 'darwin',
+    titleBarStyle: process.platform === 'darwin' || process.platform === 'win32' ? 'hidden' : 'default',
+    trafficLightPosition: process.platform === 'darwin' ? { x: 16, y: 17 } : undefined,
+    webPreferences: {
+      additionalArguments: [
+        `--openchamber-local-origin=${desktopLocalOrigin}`,
+        `--openchamber-api-base-url=${desktopApiBaseUrl}`,
+        `--openchamber-client-token=${desktopClientToken}`,
+        `--openchamber-runtime-headers=${JSON.stringify(desktopRequestHeaders)}`,
+        `--openchamber-home=${desktopHome}`,
+        `--openchamber-macos-major=${desktopMacosMajor}`,
+      ],
+      preload: isDev ? path.join(__dirname, 'preload.mjs') : path.join(app.getAppPath(), 'preload.mjs'),
+      backgroundThrottling: false,
+      contextIsolation: true,
+      nodeIntegration: false,
+      webviewTag: true,
+      // sandbox must stay off
+      sandbox: false,
+    },
+  });
+  browserWindow.__ocLabel = nextWindowLabel();
+  browserWindow.__ocRuntimeConfig = effectiveRuntimeConfig;
+  browserWindow.__ocInitScript = buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
+  browserWindow.__ocBrowserPopout = true;
+  browserWindow.__ocBrowserPopoutKey = windowKey;
+  browserWindow.__ocBrowserPopoutDir = directory;
+  browserWindow.__ocBrowserPopoutTab = tabID;
+
+  const rendererPopoutKey = `${directory}::${tabID}`;
+  browserPopoutWindows.set(windowKey, browserWindow);
+  browserWindow.on('closed', () => {
+    const tracked = browserPopoutWindows.get(windowKey);
+    if (tracked?.id === browserWindow.id) browserPopoutWindows.delete(windowKey);
+    // Tell every window's panel to re-dock the browser tab for this key. Event
+    // name + key format are mirrored in useBrowserPopoutStore
+    // (BROWSER_POPOUT_CLOSED_EVENT / browserPopoutKey) — keep them in sync.
+    emitToAllWindows('openchamber:browser-popout-closed', { key: rendererPopoutKey });
+  });
+
+  if (process.platform === 'darwin') {
+    const refreshTrafficLights = () => {
+      if (browserWindow.isDestroyed()) return;
+      try {
+        browserWindow.setWindowButtonVisibility(true);
+        browserWindow.setTrafficLightPosition({ x: 16, y: 17 });
+      } catch {}
+    };
+    browserWindow.on('show', refreshTrafficLights);
+    browserWindow.on('focus', refreshTrafficLights);
+    browserWindow.on('minimize', () => setMacVibrancyReady(browserWindow, false));
+    browserWindow.on('restore', () => scheduleMacVibrancyReady(browserWindow, 180));
+    // Traffic lights are hidden in fullscreen; nudge the renderer to recompute the
+    // toolbar's left inset (--oc-titlebar-left-inset) when fullscreen toggles.
+    browserWindow.on('enter-full-screen', () => emitToWindow(browserWindow, 'openchamber:window-resized'));
+    browserWindow.on('leave-full-screen', () => emitToWindow(browserWindow, 'openchamber:window-resized'));
+  }
+
+  browserWindow.once('ready-to-show', () => {
+    browserWindow.show();
+    browserWindow.focus();
+    if (useVibrancy) applyMacVibrancy(browserWindow);
+  });
+
+  browserWindow.webContents.setWindowOpenHandler(({ url }) => {
+    void shell.openExternal(url).catch(() => {});
+    return { action: 'deny' };
+  });
+  browserWindow.webContents.on('will-navigate', (event, url) => {
+    try {
+      const target = new URL(url);
+      const local = new URL(shouldUsePackagedUi() ? packagedUiOrigin() : (state.localOrigin || state.sidecarUrl || ''));
+      if (target.origin === local.origin) return;
+    } catch {
+    }
+    event.preventDefault();
+    void shell.openExternal(url).catch(() => {});
+  });
+  browserWindow.webContents.on('dom-ready', () => {
+    const initScript = browserWindow.__ocInitScript || state.initScript;
+    if (initScript) {
+      void browserWindow.webContents.executeJavaScript(initScript).catch(() => {});
+    }
+  });
+
+  await navigateWindow(browserWindow, buildBrowserPopoutUrl({ directory, tabID, initialUrl }));
+  return browserWindow;
+};
+
 const setMiniChatPinned = (browserWindow, pinned) => {
   if (!browserWindow || browserWindow.isDestroyed()) {
     throw new Error('Window is not available');
@@ -3181,6 +3329,59 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       };
     }
 
+    case 'desktop_browser_set_input_files': {
+      // Set files on a <input type="file"> inside the embedded browser webview via
+      // CDP DOM.setFileInputFiles (a page cannot do this itself). Local desktop only;
+      // paths are contained to the user's home directory. Kept off the
+      // remote-safe command allowlist so a remote renderer can never reach it.
+      const wcId = Number.isFinite(args.webContentsId) ? Math.trunc(args.webContentsId) : null;
+      if (wcId === null || wcId < 0) throw new Error('webContentsId is required');
+      const wc = webContents.fromId(wcId);
+      if (!wc || wc.isDestroyed()) throw new Error('WebContents not found');
+
+      const homeDir = os.homedir();
+      const rawPaths = Array.isArray(args.paths) ? args.paths : [];
+      const files = [];
+      for (const candidate of rawPaths) {
+        if (typeof candidate !== 'string' || !candidate.trim()) continue;
+        const resolved = path.resolve(candidate);
+        if (resolved !== homeDir && !resolved.startsWith(homeDir + path.sep)) {
+          throw new Error('File must be within the home directory');
+        }
+        let stat;
+        try { stat = fs.statSync(resolved); } catch { throw new Error(`File not found: ${resolved}`); }
+        if (!stat.isFile()) throw new Error(`Not a file: ${resolved}`);
+        files.push(resolved);
+      }
+      if (files.length === 0) throw new Error('No valid files to upload');
+
+      const selector = typeof args.ref === 'string' && args.ref
+        ? `[data-oc-ref="${args.ref.replace(/"/g, '\\"')}"]`
+        : (typeof args.selector === 'string' ? args.selector : '');
+      if (!selector) throw new Error('ref or selector is required');
+
+      const dbg = wc.debugger;
+      let attachedHere = false;
+      try {
+        if (!dbg.isAttached()) { dbg.attach('1.3'); attachedHere = true; }
+      } catch (err) {
+        throw new Error(`Could not attach debugger (DevTools may be open): ${err && err.message ? err.message : err}`);
+      }
+      try {
+        await dbg.sendCommand('DOM.enable');
+        const doc = await dbg.sendCommand('DOM.getDocument', { depth: 0 });
+        const rootNodeId = doc && doc.root && doc.root.nodeId;
+        if (!rootNodeId) throw new Error('Could not read document');
+        const found = await dbg.sendCommand('DOM.querySelector', { nodeId: rootNodeId, selector });
+        const nodeId = found && found.nodeId;
+        if (!nodeId) return { found: false };
+        await dbg.sendCommand('DOM.setFileInputFiles', { files, nodeId });
+        return { found: true, files: files.length };
+      } finally {
+        if (attachedHere) { try { dbg.detach(); } catch { /* ignore */ } }
+      }
+    }
+
     case 'desktop_capture_page_rect': {
       if (!browserWindow || browserWindow.isDestroyed()) {
         throw new Error('Window is not available');
@@ -3744,6 +3945,27 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return null;
     }
 
+    case 'desktop_open_browser_popout_window': {
+      const directory = typeof args.directory === 'string' ? args.directory.trim() : '';
+      const tabID = typeof args.tabID === 'string' ? args.tabID.trim() : '';
+      const initialUrl = typeof args.initialUrl === 'string' ? args.initialUrl.trim() : '';
+      await createBrowserPopoutWindow({ directory, tabID, initialUrl, runtimeConfig: resolveMiniChatRuntimeConfig(browserWindow, args) });
+      return { ok: true };
+    }
+
+    case 'desktop_close_browser_popout_window': {
+      const directory = typeof args.directory === 'string' ? args.directory.trim() : '';
+      const tabID = typeof args.tabID === 'string' ? args.tabID.trim() : '';
+      // Scope by the caller's runtime host (same key createBrowserPopoutWindow
+      // used), so closing one host's pop-out doesn't also close another remote
+      // host's pop-out that happens to share the same directory + tabID.
+      const runtimeConfig = resolveMiniChatRuntimeConfig(browserWindow, args);
+      const windowKey = browserPopoutWindowKey(runtimeConfig, directory, tabID);
+      const win = browserPopoutWindows.get(windowKey);
+      if (win && !win.isDestroyed()) win.close();
+      return { ok: true };
+    }
+
     case 'desktop_set_window_pinned':
       return setMiniChatPinned(browserWindow, args.pinned === true);
 
@@ -4147,6 +4369,8 @@ const COMMANDS_SAFE_FOR_REMOTE = new Set([
   'desktop_host_probe',
   'desktop_new_window',
   'desktop_new_window_at_url',
+  'desktop_open_browser_popout_window',
+  'desktop_close_browser_popout_window',
   'desktop_set_window_title',
   'desktop_set_window_theme',
   'desktop_is_window_fullscreen',
