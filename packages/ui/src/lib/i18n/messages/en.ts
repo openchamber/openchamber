@@ -451,6 +451,7 @@ export const dict = {
   'sessions.sidebar.session.export.dialog.confirm': 'Export',
   'sessions.sidebar.session.status.active': 'Session active',
   'sessions.sidebar.session.status.unread': 'Unread updates',
+  'sessions.sidebar.session.status.unreadError': 'Unread error updates',
   'sessions.sidebar.session.status.pinned': 'Pinned session',
   'sessions.sidebar.session.status.permissionRequired': 'Permission required',
   'sessions.sidebar.session.subsessions.collapse': 'Collapse subsessions',

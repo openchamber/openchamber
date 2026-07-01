@@ -19,9 +19,10 @@ import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Icon } from "@/components/icon/Icon";
+import { getSessionStatusMarker } from '../sessionStatusMarker';
 import { buildExportFilename, downloadAsMarkdown, formatSessionAsMarkdown, getExportRevealLabelKey, revealExportedMarkdown, saveAsMarkdownDesktop } from '@/lib/exportSession';
 import type { ChildSessionExport } from '@/lib/exportSession';
-import { buildSessionMessageRecordsSnapshot, useDirectoryStore, useGlobalSessionStatus, useSessionPermissions } from '@/sync/sync-context';
+import { buildSessionMessageRecordsSnapshot, useDirectoryStore, useGlobalSessionStatus, useSessionPermissions, useSessionQuestions } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { useViewportStore, viewportSessionKey } from '@/sync/viewport-store';
 import { DraggableSessionRow } from './sessionFolderDnd';
@@ -30,7 +31,7 @@ import type { SessionNodeChildRenderExtras, SessionNodeRenderExtras } from './se
 import type { SessionNode } from './types';
 import { formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from './utils';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
-import { useSessionUnseenCount } from '@/sync/notification-store';
+import { useNotificationStore, useSessionUnseenCount } from '@/sync/notification-store';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import { useI18n } from '@/lib/i18n';
 import { useShiftKeyHeld } from '@/hooks/useShiftKeyHeld';
@@ -353,6 +354,10 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   );
   const sessionStatus = useGlobalSessionStatus(session.id);
   const sessionPermissions = useSessionPermissions(session.id, sessionDirectory ?? undefined);
+  const sessionQuestions = useSessionQuestions(session.id, sessionDirectory ?? undefined);
+  const hasUnseenError = useNotificationStore(
+    React.useCallback((state) => state.index.session.unseenHasError[session.id] ?? false, [session.id]),
+  );
   const isActive = currentSessionId === session.id;
   const sessionTitle = resolvedSession.title || t('sessions.sidebar.session.untitled');
   const hasChildren = node.children.length > 0;
@@ -563,26 +568,27 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     );
   }
 
-  const statusType = sessionStatus?.type ?? 'idle';
-  const isStreaming = statusType === 'busy' || statusType === 'retry';
   const pendingPermissionCount = sessionPermissions.length;
-  const showUnreadStatus = !isStreaming && needsAttention && !isActive;
-  const showStatusMarker = isStreaming || showUnreadStatus;
-  const statusMarkerContent = isStreaming
-    ? (
-        <span
-          className="h-1.5 w-1.5 rounded-full bg-primary animate-busy-pulse"
-          aria-label={t('sessions.sidebar.session.status.active')}
-          title={t('sessions.sidebar.session.status.active')}
-        />
-      )
-    : (
-        <span
-          className="h-1.5 w-1.5 rounded-full bg-[var(--status-info)]"
-          aria-label={t('sessions.sidebar.session.status.unread')}
-          title={t('sessions.sidebar.session.status.unread')}
-        />
-      );
+  const pendingQuestionCount = sessionQuestions.length;
+  const statusMarker = getSessionStatusMarker({
+    statusType: sessionStatus?.type,
+    pendingPermissionCount,
+    pendingQuestionCount,
+    showUnread: needsAttention && !isActive,
+    hasUnseenError,
+  });
+  const showStatusMarker = statusMarker !== null;
+  const statusMarkerLabel = statusMarker ? t(statusMarker.labelKey) : undefined;
+  const statusMarkerContent = statusMarker ? (
+    <span
+      className={cn(
+        'h-1.5 w-1.5 rounded-full',
+        statusMarker.className,
+      )}
+      aria-label={statusMarkerLabel}
+      title={statusMarkerLabel}
+    />
+  ) : null;
   const hideLeadingIndicatorOnHover = !alwaysShowActions && hasChildren && (showStatusMarker || isPinnedSession);
   const showPinnedMarker = isPinnedSession && !showStatusMarker;
   const pinnedMarkerContent = (
