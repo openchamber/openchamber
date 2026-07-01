@@ -1180,11 +1180,8 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
           await git.gitPull(currentDirectory, { remote: remote.name, branch: trackedBranch, rebase: true });
         }
 
-        const afterPull = await git.getGitStatus(currentDirectory);
-        let result: Awaited<ReturnType<typeof git.gitPush>> | undefined;
-        if ((afterPull.ahead ?? 0) > 0) {
-          result = await git.gitPush(currentDirectory);
-        }
+        // Always push the new commit; gating on ahead skips branches with no upstream.
+        const result = await git.gitPush(currentDirectory);
         toast.success(t('gitView.toast.pushedToUpstream', { name: getPushedRemoteName(result) }));
         triggerFireworks();
         await refreshStatusAndBranches(false);
