@@ -512,7 +512,7 @@ const runStructuredGenerationInActiveSession = async ({
   requestChatForceScrollBottom(generationSession.sessionId);
 
   const response = await opencodeClient.withDirectory(directory, async () => {
-    return opencodeClient.getApiClient().session.prompt({
+    return opencodeClient.getApiClient().session.promptAsync({
       sessionID: generationSession.sessionId,
       ...(trimmedDirectory.length > 0 ? { directory: trimmedDirectory } : {}),
       model: {
@@ -521,6 +521,7 @@ const runStructuredGenerationInActiveSession = async ({
       },
       ...(generationSession.agent ? { agent: generationSession.agent } : {}),
       ...(generationSession.variant ? { variant: generationSession.variant } : {}),
+      messageID: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
       parts: promptParts,
     });
   });
