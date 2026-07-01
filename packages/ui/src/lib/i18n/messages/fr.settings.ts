@@ -1812,4 +1812,13 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'Choose what happens when you press Enter on a follow-up message while the agent is still responding.',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
+  'settings.behavior.page.section.browserControl': 'Contrôle du navigateur par les agents',
+  'settings.behavior.page.browserControl.tooltip': 'Laissez les agents piloter le navigateur intégré pour naviguer, inspecter et tester votre application. Désactivé par défaut.',
+  'settings.behavior.page.browserControl.enable': 'Autoriser les agents à piloter le navigateur',
+  'settings.behavior.page.browserControl.enableAria': 'Autoriser les agents à piloter le navigateur',
+  'settings.behavior.page.browserControl.help': 'Les serveurs de développement localhost sont entièrement contrôlables. Dans l’app web, les sites externes sont limités à la navigation et aux captures.',
+  'settings.behavior.page.browserControl.advanced': 'Autoriser les outils avancés (exécuter JavaScript, écrire cookies et stockage, téléverser des fichiers)',
+  'settings.behavior.page.browserControl.advancedAria': 'Autoriser les outils avancés du navigateur',
+  'settings.behavior.page.browserControl.allowExternal': 'Autoriser les agents sur tous les sites web (pas seulement localhost)',
+  'settings.behavior.page.browserControl.allowExternalAria': 'Autoriser les agents sur tous les sites web',
 } as const;

@@ -1812,4 +1812,13 @@
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'Choose what happens when you press Enter on a follow-up message while the agent is still responding.',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
+  'settings.behavior.page.section.browserControl': '代理瀏覽器控制',
+  'settings.behavior.page.browserControl.tooltip': '允許代理控制內嵌瀏覽器來導覽、檢查和測試你的應用程式。預設關閉。',
+  'settings.behavior.page.browserControl.enable': '允許代理控制瀏覽器',
+  'settings.behavior.page.browserControl.enableAria': '允許代理控制瀏覽器',
+  'settings.behavior.page.browserControl.help': 'localhost 開發伺服器可完全控制。在網頁應用程式中，外部網站僅限導覽與螢幕截圖。',
+  'settings.behavior.page.browserControl.advanced': '允許進階工具（執行 JavaScript、寫入 Cookie 與儲存、上傳檔案）',
+  'settings.behavior.page.browserControl.advancedAria': '允許進階瀏覽器工具',
+  'settings.behavior.page.browserControl.allowExternal': '允許代理在任何網站上操作（不僅限於 localhost）',
+  'settings.behavior.page.browserControl.allowExternalAria': '允許代理在任何網站上操作',
 } as const;

@@ -1804,4 +1804,13 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'Choose what happens when you press Enter on a follow-up message while the agent is still responding.',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
+  'settings.behavior.page.section.browserControl': 'Sterowanie przeglądarką przez agentów',
+  'settings.behavior.page.browserControl.tooltip': 'Pozwól agentom sterować wbudowaną przeglądarką, aby nawigować, sprawdzać i testować aplikację. Domyślnie wyłączone.',
+  'settings.behavior.page.browserControl.enable': 'Pozwól agentom sterować przeglądarką',
+  'settings.behavior.page.browserControl.enableAria': 'Pozwól agentom sterować przeglądarką',
+  'settings.behavior.page.browserControl.help': 'Serwery deweloperskie localhost są w pełni sterowalne. W aplikacji webowej witryny zewnętrzne są ograniczone do nawigacji i zrzutów ekranu.',
+  'settings.behavior.page.browserControl.advanced': 'Zezwól na zaawansowane narzędzia (uruchamianie JavaScript, zapis cookies i pamięci, przesyłanie plików)',
+  'settings.behavior.page.browserControl.advancedAria': 'Zezwól na zaawansowane narzędzia przeglądarki',
+  'settings.behavior.page.browserControl.allowExternal': 'Zezwól agentom na dowolnej stronie (nie tylko localhost)',
+  'settings.behavior.page.browserControl.allowExternalAria': 'Zezwól agentom na dowolnej stronie',
 };

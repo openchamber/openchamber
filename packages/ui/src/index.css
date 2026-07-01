@@ -524,6 +524,11 @@ svg.animate-spin {
   -webkit-app-region: no-drag;
 }
 
+/* Interactive controls inside a class-based drag region stay clickable. */
+.app-region-drag :where(button, input, textarea, select, a, [role="button"], [role="tab"]) {
+  -webkit-app-region: no-drag;
+}
+
 .animate-spin-once {
   animation: spin-once 0.5s linear forwards;
 }

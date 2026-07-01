@@ -109,6 +109,12 @@ WebSocket protocol utilities for terminal input handling including message norma
 
 - Module docs: `packages/web/server/lib/terminal/DOCUMENTATION.md`
 
+##### browser
+
+Agent-driven automation of the embedded browser: policy/capability core, ref-addressable snapshot, per-op page scripts, the control WebSocket runtime, and the MCP endpoint the model calls.
+
+- Module docs: `packages/web/server/lib/browser/DOCUMENTATION.md`
+
 ##### tts
 
 Server-side text-to-speech services and summarization helpers for `/api/tts/*` endpoints.

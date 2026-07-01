@@ -1812,4 +1812,13 @@ export const settingsDict = {
   "settings.openchamber.visual.field.followUpBehaviorDescription": "Choose what happens when you press Enter on a follow-up message while the agent is still responding.",
   "settings.openchamber.visual.option.followUpBehavior.steer.label": "Steer",
   "settings.openchamber.visual.option.followUpBehavior.queue.label": "Queue",
+  "settings.behavior.page.section.browserControl": "Керування браузером агентами",
+  "settings.behavior.page.browserControl.tooltip": "Дозвольте агентам керувати вбудованим браузером для навігації, перевірки та тестування вашого застосунку. Вимкнено за замовчуванням.",
+  "settings.behavior.page.browserControl.enable": "Дозволити агентам керувати браузером",
+  "settings.behavior.page.browserControl.enableAria": "Дозволити агентам керувати браузером",
+  "settings.behavior.page.browserControl.help": "Сервери розробки на localhost повністю керовані. У вебзастосунку зовнішні сайти обмежені навігацією та знімками екрана.",
+  "settings.behavior.page.browserControl.advanced": "Дозволити розширені інструменти (виконання JavaScript, запис cookies і сховища, завантаження файлів)",
+  "settings.behavior.page.browserControl.advancedAria": "Дозволити розширені інструменти браузера",
+  "settings.behavior.page.browserControl.allowExternal": "Дозволити агентам на будь-якому сайті (не лише localhost)",
+  "settings.behavior.page.browserControl.allowExternalAria": "Дозволити агентам на будь-якому сайті",
 } as const;

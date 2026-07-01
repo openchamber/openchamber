@@ -1812,4 +1812,13 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'Choose what happens when you press Enter on a follow-up message while the agent is still responding.',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
+  'settings.behavior.page.section.browserControl': '에이전트 브라우저 제어',
+  'settings.behavior.page.browserControl.tooltip': '에이전트가 내장 브라우저를 제어하여 앱을 탐색, 검사, 테스트할 수 있게 합니다. 기본값은 꺼짐입니다.',
+  'settings.behavior.page.browserControl.enable': '에이전트가 브라우저를 제어하도록 허용',
+  'settings.behavior.page.browserControl.enableAria': '에이전트가 브라우저를 제어하도록 허용',
+  'settings.behavior.page.browserControl.help': 'localhost 개발 서버는 완전히 제어할 수 있습니다. 웹 앱에서 외부 사이트는 탐색과 스크린샷으로 제한됩니다.',
+  'settings.behavior.page.browserControl.advanced': '고급 도구 허용(JavaScript 실행, 쿠키 및 스토리지 쓰기, 파일 업로드)',
+  'settings.behavior.page.browserControl.advancedAria': '고급 브라우저 도구 허용',
+  'settings.behavior.page.browserControl.allowExternal': 'localhost뿐 아니라 모든 웹사이트에서 에이전트 허용',
+  'settings.behavior.page.browserControl.allowExternalAria': '모든 웹사이트에서 에이전트 허용',
 } as const;

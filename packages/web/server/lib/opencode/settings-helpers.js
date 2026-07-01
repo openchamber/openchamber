@@ -178,6 +178,19 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.desktopLanAccessEnabled === 'boolean') {
       result.desktopLanAccessEnabled = candidate.desktopLanAccessEnabled;
     }
+    if (candidate.browserAutomation && typeof candidate.browserAutomation === 'object' && !Array.isArray(candidate.browserAutomation)) {
+      const browserAutomation = {};
+      if (typeof candidate.browserAutomation.enabled === 'boolean') {
+        browserAutomation.enabled = candidate.browserAutomation.enabled;
+      }
+      if (typeof candidate.browserAutomation.advancedEnabled === 'boolean') {
+        browserAutomation.advancedEnabled = candidate.browserAutomation.advancedEnabled;
+      }
+      if (typeof candidate.browserAutomation.allowExternal === 'boolean') {
+        browserAutomation.allowExternal = candidate.browserAutomation.allowExternal;
+      }
+      result.browserAutomation = browserAutomation;
+    }
     if (typeof candidate.desktopUiPassword === 'string') {
       result.desktopUiPassword = candidate.desktopUiPassword.trim();
     }

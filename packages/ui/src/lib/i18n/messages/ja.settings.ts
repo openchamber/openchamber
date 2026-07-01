@@ -1812,4 +1812,13 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'エージェントが応答している間にフォローアップメッセージで Enter を押したときの動作を選択します。',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'ステア',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'キュー',
+  'settings.behavior.page.section.browserControl': 'エージェントによるブラウザ操作',
+  'settings.behavior.page.browserControl.tooltip': 'エージェントが埋め込みブラウザを操作してアプリの移動・検査・テストを行えるようにします。デフォルトは無効です。',
+  'settings.behavior.page.browserControl.enable': 'エージェントによるブラウザ操作を許可',
+  'settings.behavior.page.browserControl.enableAria': 'エージェントによるブラウザ操作を許可',
+  'settings.behavior.page.browserControl.help': 'localhost の開発サーバーは完全に操作できます。Web アプリでは外部サイトはナビゲーションとスクリーンショットのみです。',
+  'settings.behavior.page.browserControl.advanced': '高度なツールを許可（JavaScript の実行、Cookie とストレージの書き込み、ファイルのアップロード）',
+  'settings.behavior.page.browserControl.advancedAria': '高度なブラウザツールを許可',
+  'settings.behavior.page.browserControl.allowExternal': 'localhost 以外の任意のウェブサイトでエージェントを許可',
+  'settings.behavior.page.browserControl.allowExternalAria': '任意のウェブサイトでエージェントを許可',
 } as const;

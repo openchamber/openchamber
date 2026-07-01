@@ -177,6 +177,12 @@ export type DesktopSettings = {
   responseStyleEnabled?: boolean;
   responseStylePreset?: 'concise' | 'detailed' | 'mentor' | 'pushback' | 'noFiller' | 'matchEnergy' | 'warmPeer' | 'custom';
   responseStyleCustomInstructions?: string;
+  // Agent-driven embedded browser control (off by default).
+  browserAutomation?: {
+    enabled?: boolean;
+    advancedEnabled?: boolean;
+    allowExternal?: boolean;
+  };
   sttProvider?: 'browser' | 'server' | 'wasm';
   sttServerUrl?: string;
   sttModel?: string;
