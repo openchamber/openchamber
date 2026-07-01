@@ -5,7 +5,7 @@ import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
 import type { StreamPhase } from '../types';
 import type { ContentChangeReason } from '@/hooks/useChatAutoFollow';
 import type { ToolPopupContent } from '../types';
-import ToolPart from './ToolPart';
+import ToolPart, { ToolExpandedContent } from './ToolPart';
 import { MinDurationShineText } from './MinDurationShineText';
 import { ToolRevealOnMount } from './ToolRevealOnMount';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
@@ -25,6 +25,7 @@ import JustificationBlock from './JustificationBlock';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { getExternalFaviconUrl } from '@/lib/url';
 import { getDirectoryForFilePath, getRelativeFilePath, isFilePathWithinDirectory, normalizeFilePath, toAbsoluteFilePath } from '@/lib/path-utils';
+import { useDeferredExpandedContent } from './useDeferredExpandedContent';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
@@ -438,6 +439,9 @@ interface StaticGroupedToolRowProps {
     activities: TurnActivityPart[];
     animateTailText: boolean;
     animateRows: boolean;
+    isExpanded: boolean;
+    onToggleTool: (toolId: string) => void;
+    onShowPopup?: (content: ToolPopupContent) => void;
 }
 
 const StaticGroupedToolRow: React.FC<StaticGroupedToolRowProps> = ({
@@ -445,12 +449,18 @@ const StaticGroupedToolRow: React.FC<StaticGroupedToolRowProps> = ({
     activities,
     animateTailText,
     animateRows,
+    isExpanded,
+    onToggleTool,
+    onShowPopup,
 }) => {
     const content = (
         <StaticToolRow
             toolName={toolName}
             activities={activities}
             animateTailText={animateTailText}
+            isExpanded={isExpanded}
+            onToggleTool={onToggleTool}
+            onShowPopup={onShowPopup}
         />
     );
 
@@ -471,6 +481,9 @@ const MemoStaticGroupedToolRow = React.memo(StaticGroupedToolRow, (prev, next) =
     return prev.toolName === next.toolName
         && prev.animateTailText === next.animateTailText
         && prev.animateRows === next.animateRows
+        && prev.isExpanded === next.isExpanded
+        && prev.onToggleTool === next.onToggleTool
+        && prev.onShowPopup === next.onShowPopup
         && areActivityListsEqual(prev.activities, next.activities);
 });
 
@@ -567,7 +580,10 @@ const StaticToolRowInner: React.FC<{
     toolName: string;
     activities: TurnActivityPart[];
     animateTailText: boolean;
-}> = ({ toolName, activities, animateTailText }) => {
+    isExpanded: boolean;
+    onToggleTool: (toolId: string) => void;
+    onShowPopup?: (content: ToolPopupContent) => void;
+}> = ({ toolName, activities, animateTailText, isExpanded, onToggleTool, onShowPopup }) => {
     const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
     const displayName = getToolMetadata(toolName).displayName;
     const icon = getToolIcon(toolName);
@@ -673,14 +689,58 @@ const StaticToolRowInner: React.FC<{
     const isFetchGroup = normalizedToolName === 'webfetch' || normalizedToolName === 'fetch' || normalizedToolName === 'curl' || normalizedToolName === 'wget';
     const isSkillGroup = normalizedToolName === 'skill';
 
+    const toolId = activities[0]?.id;
+    const handleToggle = React.useCallback(() => {
+        if (toolId) {
+            onToggleTool(toolId);
+        }
+    }, [toolId, onToggleTool]);
+    const handleKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+        if (event.target !== event.currentTarget) {
+            return;
+        }
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            handleToggle();
+        }
+    }, [handleToggle]);
+    const expandedPart = activities[0]?.part as ToolPartType | undefined;
+    const shouldRenderExpandedContent = useDeferredExpandedContent(isExpanded);
+
     return (
+        <div className="min-w-0">
         <div
             className={cn(
-                'flex w-full items-center gap-x-1.5 pr-2 pl-px py-1.5 rounded-xl min-w-0'
+                'group/tool flex w-full items-center gap-x-1.5 pr-2 pl-px py-1.5 rounded-xl min-w-0 cursor-pointer'
             )}
+            role="button"
+            tabIndex={0}
+            aria-expanded={isExpanded}
+            onClick={handleToggle}
+            onKeyDown={handleKeyDown}
         >
-            <div className="inline-flex h-5 items-center flex-shrink-0" style={{ color: 'var(--tools-icon)' }}>
-                {icon}
+            <div className="relative h-3.5 w-3.5 flex-shrink-0 cursor-pointer">
+                <div
+                    className={cn(
+                        'absolute inset-0 transition-opacity',
+                        isExpanded && 'opacity-0',
+                        !isExpanded && 'group-hover/tool:opacity-0',
+                    )}
+                    style={{ color: 'var(--tools-icon)' }}
+                >
+                    {icon}
+                </div>
+                <div
+                    className={cn(
+                        'absolute inset-0 transition-opacity flex items-center justify-center',
+                        isExpanded && 'opacity-100',
+                        !isExpanded && 'opacity-0 group-hover/tool:opacity-100',
+                    )}
+                    style={{ color: 'var(--tools-icon)' }}
+                    aria-hidden="true"
+                >
+                    {isExpanded ? <Icon name="arrow-down-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-right-s" className="h-3.5 w-3.5" />}
+                </div>
             </div>
             <MinDurationShineText
                 active={hasRunningActivity}
@@ -731,6 +791,9 @@ const StaticToolRowInner: React.FC<{
                         href={url}
                         target="_blank"
                         rel="noopener noreferrer"
+                        onClick={(event) => {
+                            event.stopPropagation();
+                        }}
                         className={cn(
                             'min-w-0 flex-1 inline-flex items-center gap-1.5 underline decoration-[color:var(--status-info)] underline-offset-2 hover:opacity-90',
                             'truncate whitespace-nowrap', TOOL_ROW_DESCRIPTION_CLASS
@@ -771,12 +834,34 @@ const StaticToolRowInner: React.FC<{
                 </Text>
             ) : null}
         </div>
+        {isExpanded && expandedPart ? (
+            <div className="relative ml-2 pl-3" aria-hidden={!isExpanded}>
+                <span
+                    aria-hidden="true"
+                    className="pointer-events-none absolute left-0 top-px bottom-0 w-px"
+                    style={{ backgroundColor: 'var(--tools-border)' }}
+                />
+                {shouldRenderExpandedContent ? (
+                    <ToolExpandedContent
+                        part={expandedPart}
+                        state={expandedPart.state}
+                        currentDirectory={currentDirectory}
+                        isExpanded={isExpanded}
+                        onShowPopup={onShowPopup}
+                    />
+                ) : null}
+            </div>
+        ) : null}
+        </div>
     );
 };
 
 export const StaticToolRow = React.memo(StaticToolRowInner, (prev, next) => {
     return prev.toolName === next.toolName
         && prev.animateTailText === next.animateTailText
+        && prev.isExpanded === next.isExpanded
+        && prev.onToggleTool === next.onToggleTool
+        && prev.onShowPopup === next.onShowPopup
         && areActivityListsEqual(prev.activities, next.activities);
 });
 
@@ -926,6 +1011,9 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                         activities={row.activities}
                         animateTailText={row.activities.some((activity) => animatedToolIds?.has(activity.id))}
                         animateRows={animateRows}
+                        isExpanded={row.activities.some((activity) => expandedTools.has(activity.id))}
+                        onToggleTool={onToggleTool}
+                        onShowPopup={onShowPopup}
                     />
                 );
 
