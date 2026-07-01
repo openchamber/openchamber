@@ -31,6 +31,31 @@ import {
     detectLanguageFromOutput,
     formatInputForDisplay,
     tryParseJsonOutput,
+    renderLspDiagnosticsOutput,
+    renderLspGotoDefinitionOutput,
+    renderLspFindReferencesOutput,
+    renderLspSymbolsOutput,
+    renderLspRenameOutput,
+    renderLspPrepareRenameOutput,
+    renderSessionListOutput,
+    renderSessionReadOutput,
+    renderSessionInfoOutput,
+    renderSessionSearchOutput,
+    renderBackgroundOutputOutput,
+    renderMonitorOutputOutput,
+    renderSkillOutput,
+    renderSkillMcpOutput,
+    renderHashlineEditOutput,
+    renderCodeSearchOutput,
+    renderWebFetchOutput,
+    renderStructuredOutput,
+    renderPlanModeOutput,
+    renderGrepOutput,
+    renderGlobOutput,
+    renderListOutput,
+    renderTodoOutput,
+    renderWebSearchOutput,
+    renderMarkdownOutput,
 } from '../toolRenderers';
 import { JsonTreeViewer } from '@/components/ui/JsonTreeViewer';
 import { Icon } from "@/components/icon/Icon";
@@ -291,6 +316,15 @@ const parseWriteLineCount = (input?: Record<string, unknown>): number | null => 
         }
     }
     return lines;
+};
+
+const parseTodoProgress = (input?: Record<string, unknown>): {  total: number; completed: number; inProgress: number; pending: number } | null => {
+    if (!input?.todos || !Array.isArray(input.todos)) return null;
+    const total = input.todos.length;
+    const completed = input.todos.filter((todo): todo is { status: 'completed' } => todo.status === 'completed').length;
+    const pending = input.todos.filter((todo): todo is { status: 'pending' } => todo.status === 'pending').length;
+    const inProgress = input.todos.filter((todo): todo is { status: 'in_progress' } => todo.status === 'in_progress').length;
+    return { total, completed, inProgress, pending };
 };
 
 const extractFirstChangedLineFromDiff = (diffText: string): number | undefined => {
@@ -1043,6 +1077,61 @@ const getTaskSummaryLabel = (entry: TaskToolSummaryEntry): string => {
         if (typeof urlCandidate === 'string' && urlCandidate.trim().length > 0) {
             return urlCandidate.trim();
         }
+
+        const nameCandidate = input.name;
+        if (typeof nameCandidate === 'string' && nameCandidate.trim().length > 0) {
+            return nameCandidate.trim();
+        }
+
+        const commandCandidate = input.command;
+        if (typeof commandCandidate === 'string' && commandCandidate.trim().length > 0) {
+            return commandCandidate.trim();
+        }
+
+        const patternCandidate = input.pattern;
+        if (typeof patternCandidate === 'string' && patternCandidate.trim().length > 0) {
+            return patternCandidate.trim();
+        }
+
+        const queryCandidate = input.query;
+        if (typeof queryCandidate === 'string' && queryCandidate.trim().length > 0) {
+            return queryCandidate.trim();
+        }
+
+        const descriptionCandidate = input.description;
+        if (typeof descriptionCandidate === 'string' && descriptionCandidate.trim().length > 0) {
+            return descriptionCandidate.trim();
+        }
+
+        const goalCandidate = input.goal;
+        if (typeof goalCandidate === 'string' && goalCandidate.trim().length > 0) {
+            return goalCandidate.trim();
+        }
+
+        const mcpNameCandidate = input.mcp_name;
+        if (typeof mcpNameCandidate === 'string' && mcpNameCandidate.trim().length > 0) {
+            return mcpNameCandidate.trim();
+        }
+
+        const toolNameCandidate = input.tool_name;
+        if (typeof toolNameCandidate === 'string' && toolNameCandidate.trim().length > 0) {
+            return toolNameCandidate.trim();
+        }
+
+        const subagentTypeCandidate = input.subagent_type;
+        if (typeof subagentTypeCandidate === 'string' && subagentTypeCandidate.trim().length > 0) {
+            return subagentTypeCandidate.trim();
+        }
+
+        const sessionIdCandidate = input.session_id;
+        if (typeof sessionIdCandidate === 'string' && sessionIdCandidate.trim().length > 0) {
+            return sessionIdCandidate.trim();
+        }
+
+        const taskIdCandidate = input.task_id;
+        if (typeof taskIdCandidate === 'string' && taskIdCandidate.trim().length > 0) {
+            return taskIdCandidate.trim();
+        }
     }
 
     return '';
@@ -1643,6 +1732,7 @@ interface ToolExpandedContentProps {
     state: ToolStateUnion;
     currentDirectory: string;
     isExpanded: boolean;
+    isMobile: boolean;
     onShowPopup?: (content: ToolPopupContent) => void;
 }
 
@@ -1651,6 +1741,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     state,
     currentDirectory,
     isExpanded,
+    isMobile,
     onShowPopup,
 }) => {
     const { t } = useI18n();
@@ -1891,6 +1982,142 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             return null;
         }
 
+        // LSP Tools
+        if (part.tool === 'lsp_diagnostics' && hasStringOutput) {
+            const rendered = renderLspDiagnosticsOutput(outputString);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if (part.tool === 'lsp_goto_definition' && hasStringOutput) {
+            const rendered = renderLspGotoDefinitionOutput(outputString);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if (part.tool === 'lsp_find_references' && hasStringOutput) {
+            const rendered = renderLspFindReferencesOutput(outputString, undefined, t);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if (part.tool === 'lsp_symbols' && hasStringOutput) {
+            const rendered = renderLspSymbolsOutput(outputString);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if (part.tool === 'lsp_rename' && hasStringOutput) {
+            const rendered = renderLspRenameOutput(outputString, undefined, t);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if (part.tool === 'lsp_prepare_rename' && hasStringOutput) {
+            const rendered = renderLspPrepareRenameOutput(outputString, undefined, t);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        // Session Tools
+        if (part.tool === 'session_list' && hasStringOutput) {
+            const rendered = renderSessionListOutput(outputString);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if (part.tool === 'session_read' && hasStringOutput) {
+            const rendered = renderSessionReadOutput(outputString);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if (part.tool === 'session_info' && hasStringOutput) {
+            const rendered = renderSessionInfoOutput(outputString);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if (part.tool === 'session_search' && hasStringOutput) {
+            const rendered = renderSessionSearchOutput(outputString);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        // Background & Monitor Tools
+        if (part.tool === 'background_output' && hasStringOutput) {
+            const rendered = renderBackgroundOutputOutput(outputString, undefined, t);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if (part.tool === 'monitor_output' && hasStringOutput) {
+            const rendered = renderMonitorOutputOutput(outputString, undefined, t);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        // Other Tools
+        if (part.tool === 'skill' && hasStringOutput) {
+            const rendered = renderSkillOutput(outputString);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if ((part.tool === 'skill_mcp' || part.tool === 'skill-mcp') && hasStringOutput) {
+            const rendered = renderSkillMcpOutput(outputString);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if (part.tool === 'grep' && hasStringOutput) {
+            const rendered = renderGrepOutput(outputString, isMobile);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if (part.tool === 'glob' && hasStringOutput) {
+            const rendered = renderGlobOutput(outputString, isMobile);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if (part.tool === 'list' && hasStringOutput) {
+            const rendered = renderListOutput(outputString);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if (part.tool === 'todowrite' && hasStringOutput) {
+            const rendered = renderTodoOutput(outputString, {
+                total: t('chat.todo.total'),
+                inProgress: t('chat.todo.inProgress'),
+                pending: t('chat.todo.pending'),
+                completed: t('chat.todo.completed'),
+                cancelled: t('chat.todo.cancelled'),
+            });
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if (part.tool === 'websearch_web_search_exa' && hasStringOutput) {
+            const rendered = renderWebSearchOutput(outputString);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if (part.tool === 'hashline_edit' && hasStringOutput) {
+            const rendered = renderHashlineEditOutput(outputString, undefined, t);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        // Code Search & Web Tools
+        if (part.tool === 'codesearch' && hasStringOutput) {
+            const rendered = renderCodeSearchOutput(outputString, undefined, t);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if (part.tool === 'webfetch' && hasStringOutput) {
+            const rendered = renderWebFetchOutput(outputString);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if ((part.tool === 'structuredoutput' || part.tool === 'structured_output') && hasStringOutput) {
+            const rendered = renderStructuredOutput(outputString);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if ((part.tool === 'plan_enter' || part.tool === 'plan_exit') && hasStringOutput) {
+            const rendered = renderPlanModeOutput(outputString, part.tool);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
+        if ((part.tool.startsWith('codegraph_') || part.tool.startsWith('grep_app_') || part.tool.startsWith('context7_')) && hasStringOutput) {
+            const rendered = renderMarkdownOutput(outputString);
+            if (rendered) return renderScrollableBlock(rendered, { className: 'p-1' });
+        }
+
         if (hasStringOutput && outputString.trim()) {
             return renderScrollableBlock(
                 <ToolScrollableTextOutput
@@ -1993,6 +2220,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     onShowPopup,
     animateTailText = true,
 }) => {
+    const { t } = useI18n();
     const state = part.state;
     const showToolFileIcons = useUIStore((s) => s.showToolFileIcons);
     const currentDirectory = useEffectiveDirectory() ?? '';
@@ -2321,6 +2549,9 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         return normalizedPartTool === 'write' ? parseWriteLineCount(input) : null;
     }, [input, normalizedPartTool]);
     const isMultiFileApplyPatch = normalizedPartTool === 'apply_patch' && Array.isArray(metadata?.files) && (metadata?.files as []).length > 1;
+    const todoProgress = React.useMemo(() => {
+        return normalizedPartTool === 'todowrite' ? parseTodoProgress(input) : null;
+    }, [input, normalizedPartTool]);
     const normalizedPart = normalizedPartTool !== part.tool ? ({ ...part, tool: normalizedPartTool } as ToolPartType) : part;
     const descriptionPath = getToolDescriptionPath(normalizedPart, state, currentDirectory);
     const description = getToolDescription(normalizedPart, state, currentDirectory);
@@ -2345,12 +2576,111 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         }
         const title = (stateWithData as { title?: string }).title;
         if (typeof title === 'string' && title.trim().length > 0) {
+            if (input && typeof input === 'object') {
+                const taskIdCandidate = input.task_id || input.taskId || input.taskID;
+                if (typeof taskIdCandidate === 'string' && taskIdCandidate.trim().length > 0) {
+                    return title.trim() + ' (task: ' + taskIdCandidate.trim() + ')';
+                }
+            }
             return title;
         }
         const inputDesc = input?.description;
         if (typeof inputDesc === 'string' && inputDesc.trim().length > 0) {
+            const subagentTypeCandidate = input.subagent_type;
+            if (typeof subagentTypeCandidate === 'string' && subagentTypeCandidate.trim().length > 0) {
+                return subagentTypeCandidate.trim() + ' - ' + inputDesc.trim();
+            }
             return inputDesc;
         }
+
+        if (input && typeof input === 'object') {
+            const nameCandidate = input.name;
+            if (typeof nameCandidate === 'string' && nameCandidate.trim().length > 0) {
+                return nameCandidate.trim();
+            }
+
+            const commandCandidate = input.command;
+            if (typeof commandCandidate === 'string' && commandCandidate.trim().length > 0) {
+                return commandCandidate.trim();
+            }
+
+            const patternCandidate = input.pattern;
+            if (typeof patternCandidate === 'string' && patternCandidate.trim().length > 0) {
+                return 'pattern: ' + patternCandidate.trim();
+            }
+
+            const queryCandidate = input.query;
+            if (typeof queryCandidate === 'string' && queryCandidate.trim().length > 0) {
+                const repoCandidate = input.repo;
+                if (typeof repoCandidate === 'string' && repoCandidate.trim().length > 0) {
+                    return 'query: ' + queryCandidate.trim() + ' (repo: ' + repoCandidate.trim() + ')';
+                }
+                return 'query: ' + queryCandidate.trim();
+            }
+
+            const goalCandidate = input.goal;
+            if (typeof goalCandidate === 'string' && goalCandidate.trim().length > 0) {
+                return goalCandidate.trim();
+            }
+
+            const mcpNameCandidate = input.mcp_name;
+            if (typeof mcpNameCandidate === 'string' && mcpNameCandidate.trim().length > 0) {
+                const toolNameCandidate = input.tool_name;
+                if (typeof toolNameCandidate === 'string' && toolNameCandidate.trim().length > 0) {
+                    const args = input.arguments as Record<string, unknown> | undefined;
+                    const argCandidate = (typeof args?.url === 'string' ? args.url : undefined) 
+                        || (typeof args?.uri === 'string' ? args.uri : undefined) 
+                        || (typeof args?.time === 'number' ? String(args.time) + 's' : undefined);
+                    if ((toolNameCandidate.trim().toLowerCase() === 'browser_navigate'
+                        || toolNameCandidate.trim().toLowerCase() === 'browser_wait_for')
+                        && argCandidate) {
+                        return mcpNameCandidate.trim() + ' - ' + toolNameCandidate.trim() + ' ' + argCandidate;
+                    }
+                    return mcpNameCandidate.trim() + ' - ' + toolNameCandidate.trim();
+                }
+                return mcpNameCandidate.trim();
+            }
+
+            const toolNameCandidate = input.tool_name;
+            if (typeof toolNameCandidate === 'string' && toolNameCandidate.trim().length > 0) {
+                return toolNameCandidate.trim();
+            }
+
+            const subagentTypeCandidate = input.subagent_type;
+            if (typeof subagentTypeCandidate === 'string' && subagentTypeCandidate.trim().length > 0) {
+                return subagentTypeCandidate.trim();
+            }
+
+            const sessionIdCandidate = input.session_id;
+            if (typeof sessionIdCandidate === 'string' && sessionIdCandidate.trim().length > 0) {
+                return sessionIdCandidate.trim();
+            }
+
+            const taskIdCandidate = input.task_id || input.taskId || input.taskID;
+            if (typeof taskIdCandidate === 'string' && taskIdCandidate.trim().length > 0) {
+                return taskIdCandidate.trim();
+            }
+
+            const projectPathCandidate = input.projectPath || input.project_path || input.project;
+            if (typeof projectPathCandidate === 'string' && projectPathCandidate.trim().length > 0) {
+                const pathCandidate = input.path;
+                if (typeof pathCandidate === 'string' && pathCandidate.trim().length > 0) {
+                    return projectPathCandidate.trim() + '/' + pathCandidate.trim();
+                }
+                return projectPathCandidate.trim();
+            }
+
+            const filePathCandidate = input.filePath || input.file_path || input.path;
+            if (typeof filePathCandidate === 'string' && filePathCandidate.trim().length > 0) {
+                return filePathCandidate.trim();
+            }
+
+            const fileCandidate = input.file || input.filename || input.file_name;
+            if (typeof fileCandidate === 'string' && fileCandidate.trim().length > 0) {
+                return fileCandidate.trim();
+            }
+        }
+
         return null;
     }, [descriptionPath, normalizedPartTool, stateWithData, input]);
     const runtime = React.useContext(RuntimeAPIContext);
@@ -2541,6 +2871,14 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                                     <span style={{ color: 'var(--status-success)' }}>+{writeLineCount}</span>
                                 </span>
                             )}
+                            {todoProgress && (todoProgress.inProgress !== 0 || todoProgress.pending !== 0 || todoProgress.completed !== 0) && (
+                                <span className="flex-shrink-0 inline-flex items-center gap-0 typography-meta" style={{ fontSize: '0.8rem', lineHeight: '1' }}>(
+                                    {todoProgress.inProgress != 0 && (<span className={cn('font-medium', (todoProgress.pending !== 0 || todoProgress.completed !== 0) && 'me-2')} style={{ color: 'var(--foreground)' }}>{t('chat.todo.inProgress')}: {todoProgress.inProgress}</span>)}
+                                    {todoProgress.pending != 0 && (<span className={cn('font-medium', todoProgress.completed !== 0 && 'me-2')} style={{ color: 'var(--muted-foreground)' }}>{t('chat.todo.pending')}: {todoProgress.pending}</span>)}
+                                    {todoProgress.completed != 0 && (<span className="font-medium" style={{ color: 'var(--status-success)' }}>{t('chat.todo.completed')}: {todoProgress.completed}</span>)}
+                                )
+                                </span>
+                            )}
                         </div>
                     </div>
                 )}
@@ -2585,6 +2923,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                                 state={state}
                                 currentDirectory={currentDirectory}
                                 isExpanded={isExpanded}
+                                isMobile={isMobile}
                                 onShowPopup={onShowPopup}
                             />
                         </div>
