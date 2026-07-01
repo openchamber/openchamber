@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Desktop: remote instances can now save additional request headers for proxy-auth setups such as Cloudflare Access, including for live updates and terminal streams.
+- Desktop: SSH remote instances with a saved UI password no longer ask for that UI password again after the tunnel connects.
+
+## [1.13.8] - 2026-06-29
+
+- Startup: launching the app no longer hangs for around 20 seconds before you can open a session, load a diff, or send a message — GitHub pull request status checks no longer tie up the connection to the server during startup.
+- OpenCode: when a separate OpenCode is already running (the TUI, `opencode serve`, or a daemon on the default port 4096), the app now starts its own server instead of attaching to it. This fixes the "OpenChamber could not finish initialization" error and stops the app from opening or closing your separate OpenCode when it starts and quits. Connecting to an external OpenCode now requires setting `OPENCODE_HOST`, `OPENCODE_PORT`, or `OPENCODE_SKIP_START`.
+- Chat: a new Follow-up behavior setting (Settings → Chat) controls what happens when you press Enter on a message while the agent is still responding — Steer inserts it into the agent's current turn, or Queue holds it until the turn finishes. Replaces the previous queue-mode toggle (thanks to @bashrusakh).
+- Sessions: deleting a worktree group from the sidebar, or permanently deleting an archived session that has subagent sessions, now removes those subagent sessions too instead of leaving them behind (thanks to @bashrusakh).
+- Sessions: clicking a session inside a worktree group no longer briefly jumps the selection to the project's first session while the sidebar data catches up (thanks to @bashrusakh).
+- Sync: a connected but quiet session (for example an agent running a long tool call) no longer triggers repeated background refreshes every ~15 seconds (thanks to @tomzx).
+
 ## [1.13.7] - 2026-06-28
 
 - Chat: with tool calls (such as Bash and Edit) shown expanded by default, scrolling no longer twitches, and slow scrolling no longer jumps past several messages.

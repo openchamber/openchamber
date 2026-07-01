@@ -424,7 +424,7 @@ export function DesktopHostSwitcherDialog({
             return [h.id, { status: 'unreachable' as const, latencyMs: 0 } satisfies HostStatus] as const;
           }
           const clientToken = h.id === LOCAL_HOST_ID ? localClientToken : (h.clientToken || '');
-          const res = await desktopHostProbe(url, { clientToken: clientToken || null }).catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
+          const res = await desktopHostProbe(url, { clientToken: clientToken || null, requestHeaders: h.requestHeaders || null }).catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
           return [h.id, { status: res.status, latencyMs: res.latencyMs } satisfies HostStatus] as const;
         })
       );
@@ -492,7 +492,7 @@ export function DesktopHostSwitcherDialog({
       if (!apiOrigin) return;
       setSwitchingHostId(host.id);
       const clientToken = host.id === LOCAL_HOST_ID ? await getLocalClientToken() : (host.clientToken || '');
-      const probe = await desktopHostProbe(apiOrigin, { clientToken: clientToken || null }).catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
+      const probe = await desktopHostProbe(apiOrigin, { clientToken: clientToken || null, requestHeaders: host.requestHeaders || null }).catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
       setStatusById((prev) => ({
         ...prev,
         [host.id]: { status: probe.status, latencyMs: probe.latencyMs },
@@ -504,7 +504,7 @@ export function DesktopHostSwitcherDialog({
         return;
       }
 
-      switchRuntimeEndpoint({ apiBaseUrl: apiOrigin, clientToken: clientToken || null, runtimeKey: runtimeKeyForHost(host) });
+      switchRuntimeEndpoint({ apiBaseUrl: apiOrigin, clientToken: clientToken || null, requestHeaders: host.requestHeaders || null, runtimeKey: runtimeKeyForHost(host) });
       onHostSwitched?.();
       setSwitchingHostId(null);
       return;
@@ -598,7 +598,7 @@ export function DesktopHostSwitcherDialog({
 
     if (host.id !== LOCAL_HOST_ID && isDesktopShell()) {
       setSwitchingHostId(host.id);
-      const probe = await desktopHostProbe(origin, { clientToken: host.clientToken || null }).catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
+      const probe = await desktopHostProbe(origin, { clientToken: host.clientToken || null, requestHeaders: host.requestHeaders || null }).catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
       setStatusById((prev) => ({
         ...prev,
         [host.id]: { status: probe.status, latencyMs: probe.latencyMs },
@@ -646,7 +646,7 @@ export function DesktopHostSwitcherDialog({
     const url = resolved.persistedUrl;
 
     const label = (editLabel || redactSensitiveUrl(url)).trim();
-    const nextHosts = configHosts.map((h) => (h.id === editingId ? { ...h, label, url } : h));
+    const nextHosts = configHosts.map((h) => (h.id === editingId ? { ...h, label, url, apiUrl: url } : h));
     await persist(nextHosts, defaultHostId);
     cancelEdit();
     if (resolved.redeemUrl) {
@@ -663,7 +663,7 @@ export function DesktopHostSwitcherDialog({
     const origin = host.id === LOCAL_HOST_ID ? localOrigin : getDesktopHostApiUrl(host);
     if (!origin) return;
     const target = toNavigationUrl(origin);
-    desktopOpenNewWindowAtUrl(target, { clientToken: host.clientToken || null }).catch((err: unknown) => {
+    desktopOpenNewWindowAtUrl(target, { clientToken: host.clientToken || null, requestHeaders: host.requestHeaders || null }).catch((err: unknown) => {
       toast.error(t('desktopHostSwitcher.error.failedToOpenNewWindow'), {
         description: err instanceof Error ? err.message : String(err),
       });

@@ -735,6 +735,7 @@ class OpencodeService {
     }>;
     messageId?: string;
     agentMentions?: Array<{ name: string; source?: { value: string; start: number; end: number } }>;
+    delivery?: 'steer';
     format?: {
       type: 'json_schema';
       schema: Record<string, unknown>;
@@ -840,6 +841,7 @@ class OpencodeService {
           agent: params.agent,
           variant: params.variant,
           messageID: messageId,
+          ...(params.delivery ? { delivery: params.delivery } : {}),
           ...(params.format ? { format: params.format } : {}),
           parts,
         });

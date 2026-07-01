@@ -84,6 +84,7 @@ import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.j
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
 import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
+import { attachRealtimeProxy } from './lib/realtime-proxy.js';
 import { createProxyMiddleware, responseInterceptor } from 'http-proxy-middleware';
 import webPush from 'web-push';
 
@@ -135,9 +136,14 @@ const SSE_PATH_PREFIXES = [
   '/api/global/event',
   '/api/notifications/stream',
   '/api/openchamber/events',
+  '/api/openchamber/realtime-proxy/sse',
 ];
 
 function shouldSkipCompression(req, res) {
+  if (process.env.OPENCHAMBER_RUNTIME === 'desktop') {
+    return true;
+  }
+
   if (headerIncludesEventStream(req.headers.accept)) {
     return true;
   }
@@ -1087,6 +1093,9 @@ async function main(options = {}) {
   if (typeof options.getIsWindowFocused === 'function') {
     notificationTriggerRuntime.setGetIsWindowFocused(options.getIsWindowFocused);
   }
+  const getDesktopRuntimeConfig = typeof options.getDesktopRuntimeConfig === 'function'
+    ? options.getDesktopRuntimeConfig
+    : null;
 
   console.log(`Starting OpenChamber on port ${port === 0 ? 'auto' : port}`);
 
@@ -1132,6 +1141,7 @@ async function main(options = {}) {
   }));
   expressApp = app;
   server = http.createServer(app);
+  let realtimeProxyRuntime = { stop: () => {} };
 
   const bootstrapResult = bootstrapRuntime.setupBaseRoutes(app, {
     process,
@@ -1202,6 +1212,13 @@ async function main(options = {}) {
     setAutoAcceptSession,
   });
   uiAuthController = bootstrapResult.uiAuthController;
+  realtimeProxyRuntime = attachRealtimeProxy({
+    app,
+    server,
+    getDesktopRuntimeConfig,
+    getUiAuthController: () => uiAuthController,
+    isRequestOriginAllowed,
+  });
 
   const tunnelRuntimeContext = tunnelWiringRuntime.initialize(app, port);
   const { tunnelService, startTunnelWithNormalizedRequest } = tunnelRuntimeContext;
@@ -1327,13 +1344,24 @@ async function main(options = {}) {
     }),
     isReady: () => isOpenCodeReady,
     restartOpenCode: () => restartOpenCode(),
-    getOpenCodeProcessInfo: () => ({
-      managed: Boolean((openCodeProcess || openCodePort) && !ENV_SKIP_OPENCODE_START && !isExternalOpenCode),
-      pid: typeof openCodeProcess?.pid === 'number' ? openCodeProcess.pid : null,
-      port: openCodePort,
-    }),
-    stop: (shutdownOptions = {}) =>
-      gracefulShutdown({ exitProcess: shutdownOptions.exitProcess ?? false })
+    getOpenCodeProcessInfo: () => {
+      const managed = Boolean((openCodeProcess || openCodePort) && !ENV_SKIP_OPENCODE_START && !isExternalOpenCode);
+      // Only ever expose pid/port for a server WE manage. The Electron-side
+      // killer kills by port (lsof + kill -KILL), so returning a port we don't
+      // own — e.g. an external/desktop OpenCode on 4096 we attached to — would
+      // let a single miscomputed `managed` flag take down the user's separate
+      // server. Structurally withhold what isn't ours so the killer has no
+      // target, instead of relying on the flag check alone.
+      return {
+        managed,
+        pid: managed && typeof openCodeProcess?.pid === 'number' ? openCodeProcess.pid : null,
+        port: managed ? openCodePort : null,
+      };
+    },
+    stop: (shutdownOptions = {}) => {
+      realtimeProxyRuntime.stop();
+      return gracefulShutdown({ exitProcess: shutdownOptions.exitProcess ?? false });
+    }
   };
 }
 

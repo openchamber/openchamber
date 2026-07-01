@@ -217,11 +217,11 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
-    id: 'chat.queue-mode',
+    id: 'chat.follow-up-behavior',
     page: 'chat',
-    titleKey: 'settings.openchamber.visual.field.queueMessagesByDefault',
-    descriptionKey: 'settings.openchamber.visual.field.queueMessagesByDefaultTooltip',
-    keywords: ['queue', 'enter', 'send'],
+    titleKey: 'settings.openchamber.visual.section.followUpBehavior',
+    descriptionKey: 'settings.openchamber.visual.field.followUpBehaviorDescription',
+    keywords: ['follow up', 'queue', 'steer', 'send immediately'],
   },
   {
     id: 'chat.persist-drafts',
@@ -404,7 +404,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'remote-instances',
     titleKey: 'settings.remoteInstances.direct.title',
     descriptionKey: 'settings.remoteInstances.direct.description',
-    keywords: ['server url', 'connection token', 'import link', 'host switcher'],
+    keywords: ['server url', 'connection token', 'import link', 'host switcher', 'additional headers', 'request headers', 'cloudflare access', 'service token'],
     isAvailable: (ctx) => ctx.isDesktop,
   },
   {

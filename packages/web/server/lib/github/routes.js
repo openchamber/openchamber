@@ -1,6 +1,25 @@
 const PR_STATUS_CACHE_TTL_MS = 90_000;
 const PR_STATUS_CACHE_MAX_ENTRIES = 200;
+// Upper bound for resolving a single PR status. resolveGitHubPrStatus makes many
+// serial GitHub API calls; under GitHub secondary-rate-limiting a single request
+// can otherwise hang 20s+. We bound it so the route fails fast instead of holding
+// the response (and a client socket) open — the client keeps its last-known
+// status on error, and a later poll fills it in.
+const PR_STATUS_RESOLVE_TIMEOUT_MS = 12_000;
 const prStatusCache = new Map();
+
+function withTimeout(promise, timeoutMs, label) {
+  let timer;
+  const timeout = new Promise((_resolve, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error(`${label} timed out after ${timeoutMs}ms`);
+      error.code = 'ETIMEDOUT';
+      reject(error);
+    }, timeoutMs);
+    if (typeof timer.unref === 'function') timer.unref();
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 function getRequestedRepo(req) {
   const owner = typeof req.query?.owner === 'string' ? req.query.owner.trim() : '';
@@ -89,8 +108,8 @@ export function registerGitHubRoutes(app) {
 
       if (ghToken !== null && !ghCliDisabled) {
         try {
-          const { Octokit } = await import('@octokit/rest');
-          ghCliUser = await getGitHubUserSummary(new Octokit({ auth: ghToken }));
+          const { createOctokit } = await import('./octokit.js');
+          ghCliUser = await getGitHubUserSummary(createOctokit(ghToken));
         } catch {
           ghCliUser = null;
         }
@@ -227,8 +246,8 @@ export function registerGitHubRoutes(app) {
         return res.status(500).json({ error: 'Missing access_token from GitHub' });
       }
 
-      const { Octokit } = await import('@octokit/rest');
-      const octokit = new Octokit({ auth: accessToken });
+      const { createOctokit } = await import('./octokit.js');
+      const octokit = createOctokit(accessToken);
       const user = await getGitHubUserSummary(octokit);
 
       setGitHubAuth({
@@ -264,8 +283,8 @@ export function registerGitHubRoutes(app) {
           return res.status(404).json({ error: 'GitHub CLI account not found' });
         }
 
-        const { Octokit } = await import('@octokit/rest');
-        const user = await getGitHubUserSummary(new Octokit({ auth: ghToken }));
+        const { createOctokit } = await import('./octokit.js');
+        const user = await getGitHubUserSummary(createOctokit(ghToken));
         setGhCliActive(true);
         const accounts = getGitHubAuthAccounts()
           .map((account) => ({ ...account, current: false }))
@@ -300,8 +319,8 @@ export function registerGitHubRoutes(app) {
       let ghCliUser = null;
       if (ghToken) {
         try {
-          const { Octokit } = await import('@octokit/rest');
-          ghCliUser = await getGitHubUserSummary(new Octokit({ auth: ghToken }));
+          const { createOctokit } = await import('./octokit.js');
+          ghCliUser = await getGitHubUserSummary(createOctokit(ghToken));
           accounts = accounts.concat({
             id: GH_CLI_ACCOUNT_ID,
             user: ghCliUser,
@@ -400,6 +419,17 @@ export function registerGitHubRoutes(app) {
         return res.json(cached.data);
       }
 
+      // If GitHub recently rate-limited us, don't pile on more calls that will
+      // also fail. Serve whatever we last cached (even if stale); otherwise
+      // report a transient failure so the client keeps its last-known status.
+      const { isGitHubRateLimited } = await import('./rate-limit.js');
+      if (isGitHubRateLimited()) {
+        if (cached) {
+          return res.json(cached.data);
+        }
+        return res.status(503).json({ error: 'GitHub rate limited' });
+      }
+
       // Intercept res.json to cache successful responses before sending
       // Only caches responses with connected:true — error/edge-case responses are not cached
       const originalJson = res.json.bind(res);
@@ -417,12 +447,16 @@ export function registerGitHubRoutes(app) {
       }
 
       const { resolveGitHubPrStatus } = await import('./pr-status.js');
-      const resolvedStatus = await resolveGitHubPrStatus({
-        octokit,
-        directory,
-        branch,
-        remoteName: remote,
-      });
+      const resolvedStatus = await withTimeout(
+        resolveGitHubPrStatus({
+          octokit,
+          directory,
+          branch,
+          remoteName: remote,
+        }),
+        PR_STATUS_RESOLVE_TIMEOUT_MS,
+        'resolveGitHubPrStatus',
+      );
       const searchRepo = resolvedStatus.repo;
       const first = resolvedStatus.pr;
       if (!searchRepo) {
@@ -553,6 +587,24 @@ export function registerGitHubRoutes(app) {
         const { clearGitHubAuth } = await getGitHubLibraries();
         clearGitHubAuth();
         return res.json({ connected: false });
+      }
+      // Transient failures — a rate limit, or the overall resolve timeout
+      // firing — are expected under heavy load and should not be logged as hard
+      // errors. Record a rate-limit cooldown when applicable, then serve the
+      // last cached status (even if stale) or a 503 so the client keeps its
+      // last-known value instead of clearing the badge.
+      const { noteIfGitHubRateLimit } = await import('./rate-limit.js');
+      const wasRateLimited = noteIfGitHubRateLimit(error);
+      const wasTimeout = error?.code === 'ETIMEDOUT';
+      if (wasRateLimited || wasTimeout) {
+        const dir = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
+        const br = typeof req.query?.branch === 'string' ? req.query.branch.trim() : '';
+        const rem = typeof req.query?.remote === 'string' ? req.query.remote.trim() : 'origin';
+        const cached = prStatusCache.get(`${dir}::${br}::${rem}`);
+        if (cached) {
+          return res.json(cached.data);
+        }
+        return res.status(503).json({ error: wasRateLimited ? 'GitHub rate limited' : 'GitHub request timed out' });
       }
       if (isGitHubResourceUnavailable(error)) {
         return res.json({

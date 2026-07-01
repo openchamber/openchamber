@@ -5,7 +5,7 @@ import {
   getRuntimeUrlResolver,
   setRuntimeUrlResolver,
 } from './runtime-url';
-import { setRuntimeBearerToken, setRuntimeUrlAuthToken } from './runtime-auth';
+import { setLocalRuntimeUrlAuthToken, setRuntimeBearerToken, setRuntimeExtraHeaders, setRuntimeUrlAuthToken } from './runtime-auth';
 
 describe('createRuntimeUrlResolver', () => {
   const withWindow = <T>(value: unknown, callback: () => T): T => {
@@ -74,6 +74,54 @@ describe('createRuntimeUrlResolver', () => {
 
       expect(urls.websocket('/api/global/event/ws')).toBe('ws://127.0.0.1:57123/api/global/event/ws');
     });
+  });
+
+  test('routes realtime URLs through local desktop proxy when runtime headers are configured', () => {
+    setRuntimeExtraHeaders({ 'CF-Access-Client-Id': 'client-id' });
+    try {
+      withWindow({
+        location: { origin: 'openchamber-ui://app', href: 'openchamber-ui://app/index.html' },
+        __OPENCHAMBER_API_BASE_URL__: 'https://remote.example',
+        __OPENCHAMBER_LOCAL_ORIGIN__: 'http://127.0.0.1:57123',
+      }, () => {
+        const urls = createRuntimeUrlResolver({});
+        const sse = new URL(urls.sse('/api/global/event'));
+        const ws = new URL(urls.websocket('/api/global/event/ws'));
+
+        expect(sse.origin).toBe('http://127.0.0.1:57123');
+        expect(sse.pathname).toBe('/api/openchamber/realtime-proxy/sse');
+        expect(sse.searchParams.get('url')).toBe('https://remote.example/api/global/event');
+        expect(ws.origin).toBe('ws://127.0.0.1:57123');
+        expect(ws.pathname).toBe('/api/openchamber/realtime-proxy/ws');
+        expect(ws.searchParams.get('url')).toBe('wss://remote.example/api/global/event/ws');
+      });
+    } finally {
+      setRuntimeExtraHeaders(null);
+    }
+  });
+
+  test('adds local URL auth token to desktop realtime proxy URL', () => {
+    setRuntimeExtraHeaders({ 'CF-Access-Client-Id': 'client-id' });
+    setRuntimeUrlAuthToken('remote-url-token', Date.now() + 60_000);
+    setLocalRuntimeUrlAuthToken('local-url-token', Date.now() + 60_000);
+    try {
+      withWindow({
+        location: { origin: 'openchamber-ui://app', href: 'openchamber-ui://app/index.html' },
+        __OPENCHAMBER_API_BASE_URL__: 'https://remote.example',
+        __OPENCHAMBER_LOCAL_ORIGIN__: 'http://127.0.0.1:57123',
+      }, () => {
+        const urls = createRuntimeUrlResolver({});
+        const sse = new URL(urls.sse('/api/global/event'));
+        const target = new URL(sse.searchParams.get('url') || '');
+
+        expect(sse.searchParams.get('oc_url_token')).toBe('local-url-token');
+        expect(target.searchParams.get('oc_url_token')).toBe('remote-url-token');
+      });
+    } finally {
+      setRuntimeExtraHeaders(null);
+      setRuntimeUrlAuthToken(null, null);
+      setLocalRuntimeUrlAuthToken(null, null);
+    }
   });
 
   test('reads injected desktop API base URL at call time', () => {

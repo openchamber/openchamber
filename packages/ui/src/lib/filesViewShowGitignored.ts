@@ -1,6 +1,6 @@
 import React from 'react';
 
-import { getSafeStorage } from '@/stores/utils/safeStorage';
+import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { updateDesktopSettings } from '@/lib/persistence';
 
 const SHOW_GITIGNORED_STORAGE_KEY = 'filesViewShowGitignored';
@@ -11,7 +11,7 @@ const readStoredShowGitignored = (): boolean => {
     return false;
   }
   try {
-    const stored = getSafeStorage().getItem(SHOW_GITIGNORED_STORAGE_KEY);
+    const stored = getDeferredSafeStorage().getItem(SHOW_GITIGNORED_STORAGE_KEY);
     return stored === 'true';
   } catch {
     return false;
@@ -33,7 +33,7 @@ export const setFilesViewShowGitignored = (
     return;
   }
   try {
-    getSafeStorage().setItem(SHOW_GITIGNORED_STORAGE_KEY, value ? 'true' : 'false');
+    getDeferredSafeStorage().setItem(SHOW_GITIGNORED_STORAGE_KEY, value ? 'true' : 'false');
     notifyFilesViewShowGitignoredChanged();
   } catch {
     // ignore storage errors
