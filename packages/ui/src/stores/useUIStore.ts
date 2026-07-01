@@ -740,7 +740,7 @@ interface UIStore {
   toggleHiddenModel: (providerID: string, modelID: string) => void;
   isHiddenModel: (providerID: string, modelID: string) => boolean;
   hideAllModels: (providerID: string, modelIDs: string[]) => void;
-  showAllModels: (providerID: string) => void;
+  showAllModels: (providerID: string, modelIDs?: string[]) => void;
   toggleModelProviderCollapsed: (providerID: string) => void;
   setModelProvidersCollapsed: (providerIDs: string[], collapsed: boolean) => void;
   isFavoriteModel: (providerID: string, modelID: string) => boolean;
@@ -1796,10 +1796,20 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
-        showAllModels: (providerID) => {
-          set((state) => ({
-            hiddenModels: state.hiddenModels.filter((item) => item.providerID !== providerID),
-          }));
+        showAllModels: (providerID, modelIDs) => {
+          set((state) => {
+            if (modelIDs === undefined) {
+              return {
+                hiddenModels: state.hiddenModels.filter((item) => item.providerID !== providerID),
+              };
+            }
+            const idsSet = new Set(modelIDs.filter((id) => typeof id === 'string' && id.length > 0));
+            return {
+              hiddenModels: state.hiddenModels.filter(
+                (item) => !(item.providerID === providerID && idsSet.has(item.modelID))
+              ),
+            };
+          });
         },
 
         toggleModelProviderCollapsed: (providerID) => {
