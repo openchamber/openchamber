@@ -706,33 +706,42 @@ type FocusModeButtonProps = {
     iconSizeClass: string;
     isExpandedInput: boolean;
     onToggle: () => void;
+    withTooltip?: boolean;
 };
 
 const FocusModeButton = React.memo(function FocusModeButton(props: FocusModeButtonProps) {
-    const { footerIconButtonClass, iconSizeClass, isExpandedInput, onToggle } = props;
+    const { footerIconButtonClass, iconSizeClass, isExpandedInput, onToggle, withTooltip = false } = props;
     const { t } = useI18n();
+
+    const button = (
+        <button
+            type="button"
+            className={cn(
+                footerIconButtonClass,
+                'rounded-md',
+                isExpandedInput
+                    ? 'text-primary'
+                    : 'text-foreground hover:bg-[var(--interactive-hover)]/40'
+            )}
+            onMouseDown={(event) => {
+                event.preventDefault();
+            }}
+            onClick={onToggle}
+            aria-label={t('chat.chatInput.focusMode.toggleAria')}
+            aria-pressed={isExpandedInput}
+        >
+            <Icon name="fullscreen" className={cn(iconSizeClass)} />
+        </button>
+    );
+
+    if (!withTooltip) {
+        return button;
+    }
 
     return (
         <Tooltip>
             <TooltipTrigger asChild>
-                <button
-                    type="button"
-                    className={cn(
-                        footerIconButtonClass,
-                        'rounded-md',
-                        isExpandedInput
-                            ? 'text-primary'
-                            : 'text-foreground hover:bg-[var(--interactive-hover)]/40'
-                    )}
-                    onMouseDown={(event) => {
-                        event.preventDefault();
-                    }}
-                    onClick={onToggle}
-                    aria-label={t('chat.chatInput.focusMode.toggleAria')}
-                    aria-pressed={isExpandedInput}
-                >
-                    <Icon name="fullscreen" className={cn(iconSizeClass)} />
-                </button>
+                {button}
             </TooltipTrigger>
             <TooltipContent side="top" sideOffset={8}>
                 <div className="flex flex-col gap-0.5 text-center">
@@ -1145,7 +1154,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
     }, [currentSessionId, currentDirectory, t]);
 
-    const isDesktopExpanded = isExpandedInput && !isMobile;
     // Rounder composer on mobile (touch UI reads better with a softer corner).
     const chatInputRadius = isMobile ? '1.5rem' : 'var(--radius-xl)';
     const useCompactChatPlaceholder = isMobile || isNarrowComposer;
@@ -2425,7 +2433,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
         }
 
-        if (isDesktopExpanded && e.key === 'Escape') {
+        if (isExpandedInput && e.key === 'Escape') {
             e.preventDefault();
             setExpandedInput(false);
             return;
@@ -2618,7 +2626,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, []);
 
     const updateAutocompleteOverlayPosition = React.useCallback(() => {
-        if (!isDesktopExpanded) {
+        if (!isExpandedInput) {
             setAutocompleteOverlayPosition(null);
             return;
         }
@@ -2663,7 +2671,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             maxHeight,
         });
     }, [
-        isDesktopExpanded,
+        isExpandedInput,
         measureCaretInTextarea,
         message.length,
         showCommandAutocomplete,
@@ -2681,17 +2689,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         showSkillAutocomplete,
         showSnippetAutocomplete,
         showFileMention,
-        isDesktopExpanded,
+        isExpandedInput,
     ]);
 
     React.useEffect(() => {
-        if (!isDesktopExpanded) return;
+        if (!isExpandedInput) return;
         const onResize = () => updateAutocompleteOverlayPosition();
         window.addEventListener('resize', onResize);
         return () => {
             window.removeEventListener('resize', onResize);
         };
-    }, [isDesktopExpanded, updateAutocompleteOverlayPosition]);
+    }, [isExpandedInput, updateAutocompleteOverlayPosition]);
 
     const startAbortIndicator = React.useCallback(() => {
         if (abortTimeoutRef.current) {
@@ -2733,7 +2741,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         const previousScrollTop = textarea.scrollTop;
 
-        if (isDesktopExpanded) {
+        if (isExpandedInput) {
             textarea.style.height = '100%';
             textarea.style.maxHeight = 'none';
             setTextareaSize(null);
@@ -2774,7 +2782,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
             return { height: nextHeight, maxHeight };
         });
-    }, [isDesktopExpanded]);
+    }, [isExpandedInput]);
 
     React.useLayoutEffect(() => {
         const allowShrink = message.length < previousMessageLengthRef.current;
@@ -4016,12 +4024,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             onSubmit={(e) => { e.preventDefault(); handlePrimaryAction(); }}
             className={cn(
                 "relative w-full pt-0 pb-4",
-                isDesktopExpanded && 'flex h-full min-h-0 flex-col pt-4',
+                isExpandedInput && 'flex h-full min-h-0 flex-col pt-4',
                 isMobile && 'bottom-safe-area oc-mobile-composer'
             )}
             style={isMobile && inputBarOffset > 0 ? { marginBottom: `${inputBarOffset}px` } : undefined}
         >
-            {newSessionDraftOpen && !isDesktopExpanded && !isMobile && !isVSCode && !isMiniChatSurface ? (
+            {newSessionDraftOpen && !isExpandedInput && !isMobile && !isVSCode && !isMiniChatSurface ? (
                 <div className="chat-input-column mb-7 text-center">
                     <h1 className="text-balance text-2xl font-normal tracking-tight text-foreground md:text-3xl">
                         {renderDraftTitle(
@@ -4033,7 +4041,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     </h1>
                 </div>
             ) : null}
-            <div className={cn('chat-input-column relative overflow-visible', isDesktopExpanded && 'flex flex-1 min-h-0 flex-col')}>
+            <div className={cn('chat-input-column relative overflow-visible', isExpandedInput && 'flex flex-1 min-h-0 flex-col')}>
                 <AttachedFilesList onShowPopup={handleShowAttachmentPreview} />
                 <QueuedMessageChips
                     onEditMessage={handleQueuedMessageEdit}
@@ -4302,7 +4310,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 <div
                     className={cn(
                         "flex flex-col relative overflow-visible",
-                        isDesktopExpanded && 'flex-1 min-h-0',
+                        isExpandedInput && 'flex-1 min-h-0',
                         "border border-border/80",
                         "focus-within:ring-1",
                         inputMode === 'shell'
@@ -4349,7 +4357,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             searchQuery={commandQuery}
                             onCommandSelect={handleCommandSelect}
                             onClose={() => setShowCommandAutocomplete(false)}
-                            style={isDesktopExpanded && autocompleteOverlayPosition
+                            style={isExpandedInput && autocompleteOverlayPosition
                                 ? {
                                     left: `${autocompleteOverlayPosition.left}px`,
                                     top: `${autocompleteOverlayPosition.top}px`,
@@ -4368,7 +4376,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             searchQuery={skillQuery}
                             onSkillSelect={handleSkillSelect}
                             onClose={() => setShowSkillAutocomplete(false)}
-                            style={isDesktopExpanded && autocompleteOverlayPosition
+                            style={isExpandedInput && autocompleteOverlayPosition
                                 ? {
                                     left: `${autocompleteOverlayPosition.left}px`,
                                     top: `${autocompleteOverlayPosition.top}px`,
@@ -4387,7 +4395,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             searchQuery={snippetQuery}
                             onSnippetSelect={handleSnippetSelect}
                             onClose={() => setShowSnippetAutocomplete(false)}
-                            style={isDesktopExpanded && autocompleteOverlayPosition
+                            style={isExpandedInput && autocompleteOverlayPosition
                                 ? {
                                     left: `${autocompleteOverlayPosition.left}px`,
                                     top: `${autocompleteOverlayPosition.top}px`,
@@ -4408,7 +4416,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             onFileSelect={handleFileSelect}
                             onAgentSelect={handleAgentSelect}
                             onClose={() => setShowFileMention(false)}
-                            style={isDesktopExpanded && autocompleteOverlayPosition
+                            style={isExpandedInput && autocompleteOverlayPosition
                                 ? {
                                     left: `${autocompleteOverlayPosition.left}px`,
                                     top: `${autocompleteOverlayPosition.top}px`,
@@ -4420,18 +4428,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                 : undefined}
                         />
                     )}
-                    <div className={cn("overflow-hidden", isDesktopExpanded && 'flex flex-1 min-h-0 flex-col')}>
+                    <div className={cn("overflow-hidden", isExpandedInput && 'flex flex-1 min-h-0 flex-col')}>
                         <div className="flex items-center gap-1 px-3 pt-1 flex-wrap relative z-10">
                             <AttachedVSCodeFileChips onShowPopup={handleShowAttachmentPreview} />
                             <ActiveEditorFileSuggestion />
                         </div>
-                        <div className={cn("relative overflow-hidden", isDesktopExpanded && 'flex flex-1 min-h-0 flex-col')}>
+                        <div className={cn("relative overflow-hidden", isExpandedInput && 'flex flex-1 min-h-0 flex-col')}>
                             {highlightedComposerContent && (
                                 <div
                                     aria-hidden
                                     className={cn(
                                         'pointer-events-none absolute inset-0 z-0 whitespace-pre-wrap break-words px-3 rounded-b-none',
-                                        isDesktopExpanded
+                                        isExpandedInput
                                             ? 'h-full min-h-0 py-4'
                                             : isMobile
                                                 ? 'py-2.5'
@@ -4487,11 +4495,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                 autoCorrect={isMobile ? "on" : "off"}
                                 autoCapitalize={isMobile ? "sentences" : "off"}
                                 spellCheck={isMobile || inputSpellcheckEnabled}
-                                fillContainer={isDesktopExpanded}
-                                outerClassName={cn('ring-0 bg-transparent shadow-none hover:bg-transparent focus-within:ring-0', isDesktopExpanded && 'flex-1 min-h-0')}
+                                fillContainer={isExpandedInput}
+                                outerClassName={cn('ring-0 bg-transparent shadow-none hover:bg-transparent focus-within:ring-0', isExpandedInput && 'flex-1 min-h-0')}
                                 className={cn(
                                     'min-h-[52px] resize-none border-0 px-3 rounded-b-none appearance-none hover:border-transparent bg-transparent relative z-10',
-                                    isDesktopExpanded
+                                    isExpandedInput
                                         ? 'h-full min-h-0 py-4'
                                         : isMobile
                                             ? 'py-2.5'
@@ -4500,9 +4508,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                     highlightedComposerContent && 'text-transparent caret-[var(--surface-foreground)]',
                                 )}
                                 style={{
-                                    flex: isDesktopExpanded ? '1 1 auto' : 'none',
-                                    height: !isDesktopExpanded && textareaSize ? `${textareaSize.height}px` : undefined,
-                                    maxHeight: !isDesktopExpanded && textareaSize ? `${textareaSize.maxHeight}px` : undefined,
+                                    flex: isExpandedInput ? '1 1 auto' : 'none',
+                                    height: !isExpandedInput && textareaSize ? `${textareaSize.height}px` : undefined,
+                                    maxHeight: !isExpandedInput && textareaSize ? `${textareaSize.maxHeight}px` : undefined,
                                     borderTopLeftRadius: chatInputRadius,
                                     borderTopRightRadius: chatInputRadius,
                                 }}
@@ -4547,6 +4555,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                             permissionScopeSessionId={permissionScopeSessionId}
                                             permissionAutoAcceptEnabled={permissionAutoAcceptEnabled}
                                             handlePermissionAutoAcceptToggle={handlePermissionAutoAcceptToggle}
+                                        />
+                                        <FocusModeButton
+                                            footerIconButtonClass={footerIconButtonClass}
+                                            iconSizeClass={iconSizeClass}
+                                            isExpandedInput={isExpandedInput}
+                                            onToggle={handleToggleExpandedInput}
                                         />
                                     </div>
                                     <div className="flex items-center min-w-0 gap-x-1 justify-end">
@@ -4602,6 +4616,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         iconSizeClass={iconSizeClass}
                                         isExpandedInput={isExpandedInput}
                                         onToggle={handleToggleExpandedInput}
+                                        withTooltip
                                     />
                                     <PermissionAutoAcceptButton
                                         footerIconButtonClass={footerIconButtonClass}
@@ -4638,7 +4653,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     {isMobile && <MobileSessionStatusBar />}
                 </div>
             </div>
-            {newSessionDraftOpen && !isDesktopExpanded && !isMobile && !isVSCode && !isMiniChatSurface ? (
+            {newSessionDraftOpen && !isExpandedInput && !isMobile && !isVSCode && !isMiniChatSurface ? (
                 <DraftPresetChips onSubmit={submitPresetPrompt} className="chat-input-column mt-4" />
             ) : null}
         </form>
