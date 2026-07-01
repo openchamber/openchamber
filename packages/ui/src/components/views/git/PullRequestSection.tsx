@@ -47,6 +47,9 @@ import { useI18n } from '@/lib/i18n';
 type MergeMethod = 'merge' | 'squash' | 'rebase';
 type DetectedUpstream = { owner: string; repo: string; url: string; defaultBranch?: string; defaultBranchSha?: string | null; remoteName?: string | null };
 
+const EMPTY_GIT_REMOTES: GitRemote[] = [];
+const EMPTY_REMOTE_BRANCHES: string[] = [];
+
 const statusColor = (state: string | undefined | null): string => {
   switch (state) {
     case 'success':
@@ -218,9 +221,11 @@ const rankRemotesForAutoSelect = (
   pushUnique(byName.get('upstream'));
   pushUnique(byName.get('origin'));
 
-  remotes
-    .filter((remote) => !isEphemeralPrRemote(remote.name))
-    .forEach((remote) => pushUnique(remote));
+  for (const remote of remotes) {
+    if (!isEphemeralPrRemote(remote.name)) {
+      pushUnique(remote);
+    }
+  }
   remotes.forEach((remote) => pushUnique(remote));
 
   return ordered;
@@ -300,6 +305,132 @@ function useDetectedUpstreamRepo(directory: string, github: GitHubAPI | undefine
   return { detectedUpstream, upstreamBranches };
 }
 
+const CheckRunSummary: React.FC<{
+  run: GitHubCheckRun;
+  expandedStepKeys: Set<string>;
+  onToggleStep: (stepKey: string) => void;
+  formatTimestamp: (value?: string) => string;
+}> = ({ run, expandedStepKeys, onToggleStep, formatTimestamp }) => {
+  const { t } = useI18n();
+  const status = run.status || 'unknown';
+  const conclusion = run.conclusion ?? undefined;
+  const statusText = conclusion ? `${status} / ${conclusion}` : status;
+  const appName = run.app?.name || run.app?.slug;
+  return (
+    <div className="space-y-2">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="typography-ui-label text-foreground truncate">{run.name}</div>
+          <div className="typography-micro text-muted-foreground truncate">
+            {appName ? `${appName} · ${statusText}` : statusText}
+          </div>
+        </div>
+
+        {run.detailsUrl ? (
+          <Button variant="outline" size="sm" asChild className="flex-shrink-0">
+            <a href={run.detailsUrl} target="_blank" rel="noopener noreferrer">
+              <Icon name="external-link" className="size-4" />
+              Open
+            </a>
+          </Button>
+        ) : null}
+      </div>
+
+      {run.output?.title ? (
+        <div className="typography-micro text-foreground">{run.output.title}</div>
+      ) : null}
+      {run.output?.summary ? (
+        <div className="typography-micro text-muted-foreground whitespace-pre-wrap">
+          {run.output.summary}
+        </div>
+      ) : null}
+      {run.output?.text ? (
+        <div className="rounded border border-border/40 bg-transparent px-2 py-2 typography-micro text-muted-foreground whitespace-pre-wrap max-h-48 overflow-y-auto">
+          {run.output.text}
+        </div>
+      ) : null}
+
+      {Array.isArray(run.annotations) && run.annotations.length > 0 ? (
+        <div className="space-y-1">
+          <div className="typography-micro text-muted-foreground">
+            Failed annotations{run.annotations.length > 20 ? ` (showing 20/${run.annotations.length})` : ''}
+          </div>
+          <div className="space-y-1">
+            {run.annotations.slice(0, 20).map((annotation, idx) => (
+              <div key={`${annotation.path || 'file'}:${annotation.startLine || idx}:${idx}`} className="rounded border border-[var(--status-error-border)] bg-[var(--status-error-background)]/40 px-2 py-2">
+                <div className="typography-micro text-[var(--status-error)]">
+                  {annotation.title || annotation.level || 'Issue'}
+                  {annotation.path ? ` · ${annotation.path}` : ''}
+                  {typeof annotation.startLine === 'number' ? `:${annotation.startLine}` : ''}
+                  {typeof annotation.endLine === 'number' && annotation.endLine !== annotation.startLine ? `-${annotation.endLine}` : ''}
+                </div>
+                <div className="typography-micro text-foreground whitespace-pre-wrap mt-1">
+                  {annotation.message}
+                </div>
+                {annotation.rawDetails ? (
+                  <div className="typography-micro text-muted-foreground whitespace-pre-wrap mt-1">
+                    {annotation.rawDetails}
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {run.job?.steps && run.job.steps.length > 0 ? (
+        <div className="space-y-1">
+          <div className="typography-micro text-muted-foreground">{t('gitView.pr.checks.steps')}</div>
+          <div className="space-y-1">
+            {run.job.steps.map((step, idx) => {
+              const c = (step.conclusion || '').toLowerCase();
+              const isFail = c && !['success', 'neutral', 'skipped'].includes(c);
+              const stepKey = `${run.id ?? 'run'}:${run.job?.jobId ?? 'job'}:${step.number ?? idx}:${step.name}`;
+              const stepExpanded = expandedStepKeys.has(stepKey);
+              if (!isFail) {
+                return (
+                  <div
+                    key={stepKey}
+                    className="typography-micro flex w-full items-center gap-2 rounded px-2 py-1 text-muted-foreground"
+                  >
+                    <span className="truncate">{step.name}</span>
+                    {step.conclusion ? <span className="ml-auto flex-shrink-0">{step.conclusion}</span> : null}
+                  </div>
+                );
+              }
+              return (
+                <Collapsible key={stepKey} open={stepExpanded}>
+                  <button
+                    type="button"
+                    onClick={() => onToggleStep(stepKey)}
+                    className={
+                      'typography-micro flex w-full items-center gap-2 rounded px-2 py-1 text-left ' +
+                      (isFail ? 'bg-destructive/10 text-destructive' : 'text-muted-foreground')
+                    }
+                  >
+                    {stepExpanded ? <Icon name="arrow-down-s" className="size-4" /> : <Icon name="arrow-right-s" className="size-4" />}
+                    <span className="truncate">{step.name}</span>
+                    {step.conclusion ? <span className="ml-auto flex-shrink-0">{step.conclusion}</span> : null}
+                  </button>
+                  <CollapsibleContent>
+                    <div className="ml-6 mt-1 rounded border border-border/40 bg-transparent px-2 py-2 typography-micro text-muted-foreground space-y-1">
+                      {typeof step.number === 'number' ? <div>{t('gitView.pr.checks.stepLabel')}: {step.number}</div> : null}
+                      {step.status ? <div>{t('gitView.pr.checks.statusLabel')}: {step.status}</div> : null}
+                      {step.conclusion ? <div>{t('gitView.pr.checks.conclusionLabel')}: {step.conclusion}</div> : null}
+                      {step.startedAt ? <div>{t('gitView.pr.checks.startedLabel')}: {formatTimestamp(step.startedAt)}</div> : null}
+                      {step.completedAt ? <div>{t('gitView.pr.checks.completedLabel')}: {formatTimestamp(step.completedAt)}</div> : null}
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
 export const PullRequestSection: React.FC<{
   directory: string;
   branch: string;
@@ -308,7 +439,7 @@ export const PullRequestSection: React.FC<{
   remotes?: GitRemote[];
   remoteBranches?: string[];
   onGeneratedDescription?: () => void;
-}> = ({ directory, branch, baseBranch, trackingBranch, remotes = [], remoteBranches = [], onGeneratedDescription }) => {
+}> = ({ directory, branch, baseBranch, trackingBranch, remotes = EMPTY_GIT_REMOTES, remoteBranches = EMPTY_REMOTE_BRANCHES, onGeneratedDescription }) => {
   const { t } = useI18n();
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const { github } = useRuntimeAPIs();
@@ -320,16 +451,13 @@ export const PullRequestSection: React.FC<{
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const { isMobile, hasTouchInput } = useDeviceInfo();
 
-  const openGitHubSettings = React.useCallback(() => {
+  const openGitHubSettings = () => {
     setSettingsPage('github');
     setSettingsDialogOpen(true);
-  }, [setSettingsDialogOpen, setSettingsPage]);
+  };
 
-  const snapshotKey = React.useMemo(() => getPullRequestSnapshotKey(directory, branch), [directory, branch]);
-  const initialSnapshot = React.useMemo(
-    () => pullRequestDraftSnapshots.get(snapshotKey) ?? null,
-    [snapshotKey]
-  );
+  const snapshotKey = getPullRequestSnapshotKey(directory, branch);
+  const initialSnapshot = pullRequestDraftSnapshots.get(snapshotKey) ?? null;
   const ensurePrStatusEntry = useGitHubPrStatusStore((state) => state.ensureEntry);
   const setPrStatusParams = useGitHubPrStatusStore((state) => state.setParams);
   const startPrStatusWatching = useGitHubPrStatusStore((state) => state.startWatching);
@@ -381,10 +509,7 @@ export const PullRequestSection: React.FC<{
   const isFork = hasUpstreamRemote || detectedUpstream !== null;
   const canShow = Boolean(directory && branch && baseBranch && (branch !== baseBranch || isFork));
 
-  const prStatusKey = React.useMemo(
-    () => getGitHubPrStatusKey(directory, branch),
-    [directory, branch],
-  );
+  const prStatusKey = getGitHubPrStatusKey(directory, branch);
   const statusEntry = useGitHubPrStatusStore((state) => state.entries[prStatusKey]);
 
   const isLoading = statusEntry?.isLoading ?? false;
@@ -474,10 +599,10 @@ export const PullRequestSection: React.FC<{
   const [commentsDetails, setCommentsDetails] = React.useState<GitHubPullRequestContextResult | null>(null);
   const [isLoadingCommentsDetails, setIsLoadingCommentsDetails] = React.useState(false);
 
-  const attemptedBodyHydrationRef = React.useRef<Set<string>>(new Set());
+  const attemptedBodyHydrationRef = React.useRef<Set<string> | null>(null);
   const lastSyncedPrNumberRef = React.useRef<number | null>(null);
   const didUserOverrideRemoteRef = React.useRef(false);
-  const autoRemoteProbeDoneRef = React.useRef<Set<string>>(new Set());
+  const autoRemoteProbeDoneRef = React.useRef<Set<string> | null>(null);
   const pendingActionRefreshTimersRef = React.useRef<number[]>([]);
 
   // Auto-enable detected upstream when there's no explicit upstream remote
@@ -510,10 +635,11 @@ export const PullRequestSection: React.FC<{
     }
 
     const hydrationKey = `${directory}#${pr.number}`;
-    if (attemptedBodyHydrationRef.current.has(hydrationKey)) {
+    const attemptedBodyHydration = (attemptedBodyHydrationRef.current ??= new Set());
+    if (attemptedBodyHydration.has(hydrationKey)) {
       return;
     }
-    attemptedBodyHydrationRef.current.add(hydrationKey);
+    attemptedBodyHydration.add(hydrationKey);
     setHydratingPrBodyKey(hydrationKey);
 
     let cancelled = false;
@@ -576,7 +702,7 @@ export const PullRequestSection: React.FC<{
     lastSyncedPrNumberRef.current = pr.number;
   }, [isEditingPr, pr]);
 
-  const openChecksDialog = React.useCallback(async () => {
+  const openChecksDialog = async () => {
     if (!github?.prContext) {
       toast.error(t('gitView.pr.toast.githubApiUnavailable'));
       return;
@@ -598,9 +724,9 @@ export const PullRequestSection: React.FC<{
     } finally {
       setIsLoadingCheckDetails(false);
     }
-  }, [directory, github, pr, t]);
+  };
 
-  const openCommentsDialog = React.useCallback(async () => {
+  const openCommentsDialog = async () => {
     if (!github?.prContext) {
       toast.error(t('gitView.pr.toast.githubApiUnavailable'));
       return;
@@ -621,9 +747,9 @@ export const PullRequestSection: React.FC<{
     } finally {
       setIsLoadingCommentsDetails(false);
     }
-  }, [directory, github, pr, t]);
+  };
 
-  const formatTimestamp = React.useCallback((value?: string) => {
+  const formatTimestamp = (value?: string) => {
     if (!value) return '';
     const ts = Date.parse(value);
     if (!Number.isFinite(ts)) {
@@ -636,18 +762,16 @@ export const PullRequestSection: React.FC<{
       hour: 'numeric',
       minute: '2-digit',
     });
-  }, [timeFormatPreference]);
+  };
 
-  const connectedGitHubLogin = React.useMemo(() => {
+  const connectedGitHubLogin = (() => {
     const login = githubAuthStatus?.user?.login;
     return typeof login === 'string' ? login.trim() : '';
-  }, [githubAuthStatus]);
+  })();
 
-  const selfMentionHighlightClass = React.useMemo(() => {
-    return "[&_a[href*='oc-self-mention=1']]:!text-[var(--primary-base)] [&_a[href*='oc-self-mention=1']]:font-semibold [&_a[href*='oc-self-mention=1']]:!no-underline [&_a[href*='oc-self-mention=1']:hover]:!text-[var(--primary-hover)]";
-  }, []);
+  const selfMentionHighlightClass = "[&_a[href*='oc-self-mention=1']]:!text-[var(--primary-base)] [&_a[href*='oc-self-mention=1']]:font-semibold [&_a[href*='oc-self-mention=1']]:!no-underline [&_a[href*='oc-self-mention=1']:hover]:!text-[var(--primary-hover)]";
 
-  const linkifyMentionsMarkdown = React.useCallback((content: string) => {
+  const linkifyMentionsMarkdown = (content: string) => {
     const selfLoginLower = connectedGitHubLogin.toLowerCase();
     const mentionRegex = /(^|[^\w`])@([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,38}))/g;
     return content.replace(mentionRegex, (_match, prefix: string, username: string) => {
@@ -656,9 +780,9 @@ export const PullRequestSection: React.FC<{
       const selfTag = selfLoginLower && usernameLower === selfLoginLower ? '?oc-self-mention=1' : '';
       return `${prefix}[${mention}](https://github.com/${usernameLower}${selfTag})`;
     });
-  }, [connectedGitHubLogin]);
+  };
 
-  const timelineComments = React.useMemo<TimelineCommentItem[]>(() => {
+  const timelineComments: TimelineCommentItem[] = (() => {
     const issue = (commentsDetails?.issueComments ?? []).map((comment) => ({
       id: `issue-${comment.id}`,
       body: comment.body || '',
@@ -692,9 +816,9 @@ export const PullRequestSection: React.FC<{
       return aVal - bVal;
     });
     return all;
-  }, [commentsDetails, t]);
+  })();
 
-  const resolveChatDispatchTarget = React.useCallback((): ChatDispatchTarget | null => {
+  const resolveChatDispatchTarget = (): ChatDispatchTarget | null => {
     if (!currentSessionId) {
       toast.error(t('gitView.pr.toast.noActiveSession'), { description: t('gitView.pr.toast.noActiveSessionDescription') });
       return null;
@@ -716,9 +840,9 @@ export const PullRequestSection: React.FC<{
       currentAgentName: currentAgentName ?? null,
       currentVariant: currentVariant ?? null,
     };
-  }, [currentSessionId, t]);
+  };
 
-  const dispatchSyntheticPrompt = React.useCallback((
+  const dispatchSyntheticPrompt = (
     target: ChatDispatchTarget,
     visibleText: string,
     instructionsText: string,
@@ -740,139 +864,21 @@ export const PullRequestSection: React.FC<{
       const message = e instanceof Error ? e.message : String(e);
       toast.error(t('gitView.pr.toast.sendMessageFailed'), { description: message });
     });
-  }, [t]);
+  };
 
-  const renderCheckRunSummary = React.useCallback((run: GitHubCheckRun) => {
-    const status = run.status || 'unknown';
-    const conclusion = run.conclusion ?? undefined;
-    const statusText = conclusion ? `${status} / ${conclusion}` : status;
-    const appName = run.app?.name || run.app?.slug;
-    return (
-      <div className="space-y-2">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="typography-ui-label text-foreground truncate">{run.name}</div>
-            <div className="typography-micro text-muted-foreground truncate">
-              {appName ? `${appName} · ${statusText}` : statusText}
-            </div>
-          </div>
+  const toggleCheckStep = (stepKey: string) => {
+    setExpandedCheckStepKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(stepKey)) {
+        next.delete(stepKey);
+      } else {
+        next.add(stepKey);
+      }
+      return next;
+    });
+  };
 
-          {run.detailsUrl ? (
-            <Button variant="outline" size="sm" asChild className="flex-shrink-0">
-              <a href={run.detailsUrl} target="_blank" rel="noopener noreferrer">
-                <Icon name="external-link" className="size-4" />
-                Open
-              </a>
-            </Button>
-          ) : null}
-        </div>
-
-        {run.output?.title ? (
-          <div className="typography-micro text-foreground">{run.output.title}</div>
-        ) : null}
-        {run.output?.summary ? (
-          <div className="typography-micro text-muted-foreground whitespace-pre-wrap">
-            {run.output.summary}
-          </div>
-        ) : null}
-        {run.output?.text ? (
-          <div className="rounded border border-border/40 bg-transparent px-2 py-2 typography-micro text-muted-foreground whitespace-pre-wrap max-h-48 overflow-y-auto">
-            {run.output.text}
-          </div>
-        ) : null}
-
-        {Array.isArray(run.annotations) && run.annotations.length > 0 ? (
-          <div className="space-y-1">
-            <div className="typography-micro text-muted-foreground">
-              Failed annotations{run.annotations.length > 20 ? ` (showing 20/${run.annotations.length})` : ''}
-            </div>
-            <div className="space-y-1">
-              {run.annotations.slice(0, 20).map((annotation, idx) => (
-                <div key={`${annotation.path || 'file'}:${annotation.startLine || idx}:${idx}`} className="rounded border border-[var(--status-error-border)] bg-[var(--status-error-background)]/40 px-2 py-2">
-                  <div className="typography-micro text-[var(--status-error)]">
-                    {annotation.title || annotation.level || 'Issue'}
-                    {annotation.path ? ` · ${annotation.path}` : ''}
-                    {typeof annotation.startLine === 'number' ? `:${annotation.startLine}` : ''}
-                    {typeof annotation.endLine === 'number' && annotation.endLine !== annotation.startLine ? `-${annotation.endLine}` : ''}
-                  </div>
-                  <div className="typography-micro text-foreground whitespace-pre-wrap mt-1">
-                    {annotation.message}
-                  </div>
-                  {annotation.rawDetails ? (
-                    <div className="typography-micro text-muted-foreground whitespace-pre-wrap mt-1">
-                      {annotation.rawDetails}
-                    </div>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        {run.job?.steps && run.job.steps.length > 0 ? (
-          <div className="space-y-1">
-            <div className="typography-micro text-muted-foreground">{t('gitView.pr.checks.steps')}</div>
-            <div className="space-y-1">
-              {run.job.steps.map((step, idx) => {
-                const c = (step.conclusion || '').toLowerCase();
-                const isFail = c && !['success', 'neutral', 'skipped'].includes(c);
-                const stepKey = `${run.id ?? 'run'}:${run.job?.jobId ?? 'job'}:${step.number ?? idx}:${step.name}`;
-                const stepExpanded = expandedCheckStepKeys.has(stepKey);
-                if (!isFail) {
-                  return (
-                    <div
-                      key={stepKey}
-                      className="typography-micro flex w-full items-center gap-2 rounded px-2 py-1 text-muted-foreground"
-                    >
-                      <span className="truncate">{step.name}</span>
-                      {step.conclusion ? <span className="ml-auto flex-shrink-0">{step.conclusion}</span> : null}
-                    </div>
-                  );
-                }
-                return (
-                  <Collapsible key={stepKey} open={stepExpanded}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setExpandedCheckStepKeys((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(stepKey)) {
-                            next.delete(stepKey);
-                          } else {
-                            next.add(stepKey);
-                          }
-                          return next;
-                        });
-                      }}
-                      className={
-                        'typography-micro flex w-full items-center gap-2 rounded px-2 py-1 text-left ' +
-                        (isFail ? 'bg-destructive/10 text-destructive' : 'text-muted-foreground')
-                      }
-                    >
-                      {stepExpanded ? <Icon name="arrow-down-s" className="size-4" /> : <Icon name="arrow-right-s" className="size-4" />}
-                      <span className="truncate">{step.name}</span>
-                      {step.conclusion ? <span className="ml-auto flex-shrink-0">{step.conclusion}</span> : null}
-                    </button>
-                    <CollapsibleContent>
-                      <div className="ml-6 mt-1 rounded border border-border/40 bg-transparent px-2 py-2 typography-micro text-muted-foreground space-y-1">
-                        {typeof step.number === 'number' ? <div>{t('gitView.pr.checks.stepLabel')}: {step.number}</div> : null}
-                        {step.status ? <div>{t('gitView.pr.checks.statusLabel')}: {step.status}</div> : null}
-                        {step.conclusion ? <div>{t('gitView.pr.checks.conclusionLabel')}: {step.conclusion}</div> : null}
-                        {step.startedAt ? <div>{t('gitView.pr.checks.startedLabel')}: {formatTimestamp(step.startedAt)}</div> : null}
-                        {step.completedAt ? <div>{t('gitView.pr.checks.completedLabel')}: {formatTimestamp(step.completedAt)}</div> : null}
-                      </div>
-                    </CollapsibleContent>
-                  </Collapsible>
-                );
-              })}
-            </div>
-          </div>
-        ) : null}
-      </div>
-    );
-  }, [expandedCheckStepKeys, formatTimestamp, t]);
-
-  const sendFailedChecksToChat = React.useCallback(async () => {
+  const sendFailedChecksToChat = async () => {
     setActiveMainTab('chat');
 
     if (!github?.prContext) {
@@ -926,9 +932,9 @@ export const PullRequestSection: React.FC<{
       const message = e instanceof Error ? e.message : String(e);
       toast.error(t('gitView.pr.toast.loadChecksFailed'), { description: message });
     }
-  }, [directory, dispatchSyntheticPrompt, github, pr, resolveChatDispatchTarget, setActiveMainTab, t]);
+  };
 
-  const sendCommentsToChat = React.useCallback(async () => {
+  const sendCommentsToChat = async () => {
     setActiveMainTab('chat');
 
     if (!github?.prContext) {
@@ -965,9 +971,9 @@ export const PullRequestSection: React.FC<{
       const message = e instanceof Error ? e.message : String(e);
       toast.error(t('gitView.pr.toast.loadPrCommentsFailed'), { description: message });
     }
-  }, [directory, dispatchSyntheticPrompt, github, pr, resolveChatDispatchTarget, setActiveMainTab, t]);
+  };
 
-  const sendSingleCommentToChat = React.useCallback(async (comment: TimelineCommentItem) => {
+  const sendSingleCommentToChat = async (comment: TimelineCommentItem) => {
     setCommentsDialogOpen(false);
     setActiveMainTab('chat');
 
@@ -976,8 +982,10 @@ export const PullRequestSection: React.FC<{
       return;
     }
 
-    const visibleText = await renderMagicPrompt('github.pr.comment.single.visible');
-    const instructionsText = await renderMagicPrompt('github.pr.comment.single.instructions');
+    const [visibleText, instructionsText] = await Promise.all([
+      renderMagicPrompt('github.pr.comment.single.visible'),
+      renderMagicPrompt('github.pr.comment.single.instructions'),
+    ]);
     const payloadText = `GitHub PR comment (JSON)\n${JSON.stringify({
       repo: commentsDetails?.repo ?? null,
       pr: commentsDetails?.pr ?? pr ?? null,
@@ -985,20 +993,20 @@ export const PullRequestSection: React.FC<{
     }, null, 2)}`;
 
     dispatchSyntheticPrompt(target, visibleText, instructionsText, payloadText);
-  }, [commentsDetails, dispatchSyntheticPrompt, pr, resolveChatDispatchTarget, setActiveMainTab]);
+  };
 
   const refresh = React.useCallback(async (options?: { force?: boolean; onlyExistingPr?: boolean; silent?: boolean; markInitialResolved?: boolean }) => {
     await refreshPrStatus(prStatusKey, options);
   }, [prStatusKey, refreshPrStatus]);
 
-  const scheduleActionRefresh = React.useCallback(() => {
+  const scheduleActionRefresh = () => {
     pendingActionRefreshTimersRef.current.forEach((timerId) => {
       window.clearTimeout(timerId);
     });
     pendingActionRefreshTimersRef.current = PR_ACTION_REFRESH_DELAYS_MS.map((delayMs) => window.setTimeout(() => {
       void refresh({ force: true, silent: true, markInitialResolved: true });
     }, delayMs));
-  }, [refresh]);
+  };
 
   React.useEffect(() => {
     if (!github?.prStatus || !canShow || remotes.length <= 1) {
@@ -1012,10 +1020,11 @@ export const PullRequestSection: React.FC<{
     }
 
     const probeKey = `${snapshotKey}::${selectedRemote?.name ?? ''}`;
-    if (autoRemoteProbeDoneRef.current.has(probeKey)) {
+    const autoRemoteProbeDone = (autoRemoteProbeDoneRef.current ??= new Set());
+    if (autoRemoteProbeDone.has(probeKey)) {
       return;
     }
-    autoRemoteProbeDoneRef.current.add(probeKey);
+    autoRemoteProbeDone.add(probeKey);
 
     const candidates = rankRemotesForAutoSelect(remotes, trackingBranch)
       .filter((remote) => remote.name !== selectedRemote?.name);
@@ -1166,16 +1175,15 @@ export const PullRequestSection: React.FC<{
   }, [snapshotKey, title, body, draft, additionalContext, targetBaseBranch, selectedRemote?.name, directory, branch]);
 
   React.useEffect(() => {
-    const pendingActionRefreshTimers = pendingActionRefreshTimersRef.current;
     return () => {
-      pendingActionRefreshTimers.forEach((timerId) => {
+      pendingActionRefreshTimersRef.current.forEach((timerId) => {
         window.clearTimeout(timerId);
       });
       pendingActionRefreshTimersRef.current = [];
     };
   }, []);
 
-  const generateDescription = React.useCallback(async () => {
+  const generateDescription = async () => {
     if (isGenerating) return;
     if (!directory) return;
     setIsGenerating(true);
@@ -1208,9 +1216,9 @@ export const PullRequestSection: React.FC<{
     } finally {
       setIsGenerating(false);
     }
-  }, [additionalContext, branch, detectedUpstream?.defaultBranchSha, directory, isGenerating, onGeneratedDescription, targetBaseBranch, t, useDetectedUpstream]);
+  };
 
-  const createPr = React.useCallback(async () => {
+  const createPr = async () => {
     if (!github?.prCreate) {
       toast.error(t('gitView.pr.toast.githubApiUnavailable'));
       return;
@@ -1263,9 +1271,9 @@ export const PullRequestSection: React.FC<{
     } finally {
       setIsCreating(false);
     }
-  }, [body, branch, detectedUpstream, directory, draft, github, prStatusKey, refresh, scheduleActionRefresh, selectedRemote, targetBaseBranch, title, trackingBranch, updatePrStatus, useDetectedUpstream, t]);
+  };
 
-  const mergePr = React.useCallback(async (pr: GitHubPullRequest) => {
+  const mergePr = async (pr: GitHubPullRequest) => {
     if (!github?.prMerge) {
       toast.error(t('gitView.pr.toast.githubApiUnavailable'));
       return;
@@ -1289,9 +1297,9 @@ export const PullRequestSection: React.FC<{
     } finally {
       setIsMerging(false);
     }
-  }, [directory, github, mergeMethod, refresh, scheduleActionRefresh, t]);
+  };
 
-  const markReady = React.useCallback(async (pr: GitHubPullRequest) => {
+  const markReady = async (pr: GitHubPullRequest) => {
     if (!github?.prReady) {
       toast.error(t('gitView.pr.toast.githubApiUnavailable'));
       return;
@@ -1311,9 +1319,9 @@ export const PullRequestSection: React.FC<{
     } finally {
       setIsMarkingReady(false);
     }
-  }, [directory, github, refresh, scheduleActionRefresh, t]);
+  };
 
-  const updatePr = React.useCallback(async (pr: GitHubPullRequest) => {
+  const updatePr = async (pr: GitHubPullRequest) => {
     if (!github?.prUpdate) {
       toast.error(t('gitView.pr.toast.githubApiUnavailable'));
       return;
@@ -1352,7 +1360,7 @@ export const PullRequestSection: React.FC<{
     } finally {
       setIsUpdating(false);
     }
-  }, [directory, editBody, editTitle, github, prStatusKey, refresh, scheduleActionRefresh, updatePrStatus, t]);
+  };
 
   if (!canShow) {
     return (
@@ -1790,19 +1798,7 @@ export const PullRequestSection: React.FC<{
                   />
                 </label>
 
-                <div
-                  className="flex items-center gap-2 cursor-pointer"
-                  role="button"
-                  tabIndex={0}
-                  aria-pressed={draft}
-                  onClick={() => setDraft((v) => !v)}
-                  onKeyDown={(e) => {
-                    if (e.key === ' ' || e.key === 'Enter') {
-                      e.preventDefault();
-                      setDraft((v) => !v);
-                    }
-                  }}
-                >
+                <label className="flex w-fit items-center gap-2 cursor-pointer">
                   <Checkbox
                     size="sm"
                     checked={draft}
@@ -1810,7 +1806,7 @@ export const PullRequestSection: React.FC<{
                     ariaLabel={t('gitView.pr.actions.toggleDraftAria')}
                   />
                   <span className="typography-ui-label text-foreground select-none">{t('gitView.pr.field.draft')}</span>
-                </div>
+                </label>
 
                 {/* Additional Context Section */}
                 {isMobile ? (
@@ -1944,7 +1940,12 @@ export const PullRequestSection: React.FC<{
                     const key = `${run.id ?? 'run'}:${run.job?.jobId ?? 'job'}:${run.name}:${idx}`;
                     return (
                       <div key={key} className="p-1">
-                        {renderCheckRunSummary(run)}
+                        <CheckRunSummary
+                          run={run}
+                          expandedStepKeys={expandedCheckStepKeys}
+                          onToggleStep={toggleCheckStep}
+                          formatTimestamp={formatTimestamp}
+                        />
                       </div>
                     );
                   })
