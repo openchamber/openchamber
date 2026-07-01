@@ -112,6 +112,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             tooltipsEnabled={tooltipsEnabled && (isActuallyMobile ? isMobilePanelOpen : isDropdownOpen)}
             isFavorite={(entry) => isFavoriteModel(entry.providerID, entry.modelID)}
             onToggleFavorite={(entry) => toggleFavoriteModel(entry.providerID, entry.modelID)}
+            scrollToSelectedOnOpen
         />
     );
 
