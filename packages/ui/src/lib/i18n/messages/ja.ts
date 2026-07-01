@@ -2274,6 +2274,8 @@ export const dict: Record<I18nKey, string> = {
   'mcpDropdown.status.unknownError': '不明なエラー',
   'mcpDropdown.status.needsAuth': '認証が必要です',
   'mcpDropdown.status.needsRegistration': '登録が必要: {error}',
+  'mcpDropdown.status.configured': 'Configured',
+  'mcpDropdown.status.notConnected': 'Not connected',
   'mcpDropdown.empty.configureInConfig': '設定でMCPサーバーを構成してください。',
   'sessionAuth.error.rateLimitTitle': '試行回数が多すぎます',
   'sessionAuth.error.networkTitle': 'サーバーに到達できません',

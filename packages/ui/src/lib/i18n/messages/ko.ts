@@ -2275,6 +2275,8 @@ export const dict: Record<I18nKey, string> = {
   'mcpDropdown.status.unknownError': '알 수 없음 오류',
   'mcpDropdown.status.needsAuth': '인증 필요',
   'mcpDropdown.status.needsRegistration': '등록 필요: {error}',
+  'mcpDropdown.status.configured': 'Configured',
+  'mcpDropdown.status.notConnected': 'Not connected',
   'mcpDropdown.empty.configureInConfig': '설정에서 MCP 서버를 구성하세요.',
   'sessionAuth.error.rateLimitTitle': '시도가 너무 많습니다',
   'sessionAuth.error.networkTitle': '서버에 연결할 수 없습니다',

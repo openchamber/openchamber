@@ -2241,6 +2241,8 @@ export const dict: Record<I18nKey, string> = {
   "mcpDropdown.status.unknownError": "Error desconocido",
   "mcpDropdown.status.needsAuth": "Necesita autenticación",
   "mcpDropdown.status.needsRegistration": "Necesita registro: {error}",
+  "mcpDropdown.status.configured": "Configured",
+  "mcpDropdown.status.notConnected": "Not connected",
   "mcpDropdown.empty.configureInConfig": "Configura los servidores MCP en Ajustes.",
   "sessionAuth.error.rateLimitTitle": "Demasiados intentos",
   "sessionAuth.error.networkTitle": "No se puede alcanzar el servidor",

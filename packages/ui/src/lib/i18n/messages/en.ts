@@ -2275,6 +2275,8 @@ export const dict = {
   'mcpDropdown.status.unknownError': 'Unknown error',
   'mcpDropdown.status.needsAuth': 'Needs authentication',
   'mcpDropdown.status.needsRegistration': 'Needs registration: {error}',
+  'mcpDropdown.status.configured': 'Configured',
+  'mcpDropdown.status.notConnected': 'Not connected',
   'mcpDropdown.empty.configureInConfig': 'Configure MCP servers in Settings.',
   'sessionAuth.error.rateLimitTitle': 'Too many attempts',
   'sessionAuth.error.networkTitle': 'Unable to reach server',
