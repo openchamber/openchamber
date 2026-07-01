@@ -1,0 +1,168 @@
+name: pr-contributing-check
+
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened, ready_for_review, labeled, unlabeled]
+
+concurrency:
+  group: pr-contributing-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Generate bot app token
+        id: app-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        with:
+          app-id: ${{ secrets.OC_REVIEW_APP_ID }}
+          private-key: ${{ secrets.OC_REVIEW_APP_PRIVATE_KEY }}
+
+      - name: Run contributing compliance check
+        id: check
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set +e
+
+          REPO="${{ github.repository }}"
+          NL=$'\n'
+
+          # Resolve PR metadata
+          pr_json="$(gh pr view "$PR_NUMBER" --repo "$REPO" --json title,body,labels,files)"
+          title="$(printf '%s' "$pr_json" | jq -r '.title')"
+          body="$(printf '%s' "$pr_json" | jq -r '.body // ""')"
+          label_list="$(printf '%s' "$pr_json" | jq -r '[.labels[].name] | join(",")')"
+          file_list="$(printf '%s' "$pr_json" | jq -r '[.files[].path] | join("|")')"
+
+          # Override: skip if maintainer bypass label is present
+          if printf '%s' "$label_list" | grep -qE '(skip-contributing-check|maintainer-approved)'; then
+            echo "SKIPPED=true" >> "$GITHUB_OUTPUT"
+            echo "Override label detected — skipping contributing compliance check."
+            exit 0
+          fi
+
+          FAILURES=""
+          WARNINGS=""
+
+          # ---------------------------------------------------------------
+          # Check 1: PR title format (conventional commit)
+          # ---------------------------------------------------------------
+          if ! printf '%s' "$title" | grep -qE '^(feat|fix|docs|chore|refactor|test)(\([a-z0-9-]+\))?: .+'; then
+            FAILURES="${FAILURES}- [ ] Use a conventional PR title, e.g. \`fix(web): preserve pending messages after reconnect\`${NL}"
+          fi
+
+          # ---------------------------------------------------------------
+          # Check 2: Linked issue
+          # ---------------------------------------------------------------
+          has_issue_ref="$(printf '%s' "$body" | grep -ciE '(fixes|closes|related to|part of) #[0-9]+')"
+          is_docs="$(printf '%s' "$title" | grep -ciE '^docs')"
+          if [ "$has_issue_ref" -eq 0 ] && [ "$is_docs" -eq 0 ]; then
+            FAILURES="${FAILURES}- [ ] Link an issue with \`Fixes #\`, \`Closes #\`, \`Related to #\`, or \`Part of #\`${NL}"
+          fi
+
+          # ---------------------------------------------------------------
+          # Check 3: Verification section
+          # ---------------------------------------------------------------
+          if ! printf '%s' "$body" | grep -qi '## Verification'; then
+            FAILURES="${FAILURES}- [ ] Add a short \`## Verification\` section${NL}"
+          fi
+
+          # ---------------------------------------------------------------
+          # Check 4: UI evidence
+          # ---------------------------------------------------------------
+          ui_pattern='packages/ui/|packages/web/|packages/electron/|packages/vscode/|\.css|\.tsx'
+          touches_ui="$(printf '%s' "$file_list" | grep -cE "$ui_pattern")"
+          if [ "$touches_ui" -gt 0 ]; then
+            has_screenshots="$(printf '%s' "$body" | grep -ciE '## Screenshots|## Recordings')"
+            has_no_visual="$(printf '%s' "$body" | grep -ciE 'No visual change')"
+            if [ "$has_screenshots" -eq 0 ] && [ "$has_no_visual" -eq 0 ]; then
+              FAILURES="${FAILURES}- [ ] Add screenshots/recordings or write \`No visual change\`${NL}"
+            fi
+          fi
+
+          # ---------------------------------------------------------------
+          # Check 5: No AI wall of text
+          # ---------------------------------------------------------------
+          body_length="$(printf '%s' "$body" | wc -c)"
+          has_summary="$(printf '%s' "$body" | grep -ci '## Summary')"
+          has_verification="$(printf '%s' "$body" | grep -ci '## Verification')"
+          if [ "$body_length" -gt 6000 ] && { [ "$has_summary" -eq 0 ] || [ "$has_verification" -eq 0 ]; }; then
+            FAILURES="${FAILURES}- [ ] Shorten the PR description; avoid AI-generated walls of text${NL}"
+          fi
+
+          # ---------------------------------------------------------------
+          # Check 6: Scope warning (cross-runtime)
+          # ---------------------------------------------------------------
+          top_level_count="$(printf '%s' "$file_list" | tr '|' '\n' | grep -oE '^packages/[^/]+' | sort -u | wc -l)"
+          if [ "$top_level_count" -ge 3 ]; then
+            WARNINGS="${WARNINGS}- This PR touches multiple packages. Please explain whether this is intentional cross-runtime work.${NL}"
+          fi
+
+          # ---------------------------------------------------------------
+          # Check 7: Language policy
+          # ---------------------------------------------------------------
+          if printf '%s' "$title" | perl -Mutf8 -CS -ne 'exit 0 if /[\x{0400}-\x{04FF}\x{4E00}-\x{9FFF}\x{0600}-\x{06FF}\x{0590}-\x{05FF}]/; exit 1'; then
+            WARNINGS="${WARNINGS}- PR title should be written in English.${NL}"
+          fi
+
+          # ---------------------------------------------------------------
+          # Post or update bot comment
+          # ---------------------------------------------------------------
+          if [ -n "$FAILURES" ] || [ -n "$WARNINGS" ]; then
+            comment_file="$(mktemp)"
+            echo '<!-- pr-contributing-check -->' > "$comment_file"
+            echo '' >> "$comment_file"
+            echo 'This PR does not yet match CONTRIBUTING.md.' >> "$comment_file"
+            echo '' >> "$comment_file"
+            echo 'Please fix:' >> "$comment_file"
+            echo '' >> "$comment_file"
+
+            if [ -n "$FAILURES" ]; then
+              printf '%s' "$FAILURES" >> "$comment_file"
+              echo '' >> "$comment_file"
+            fi
+
+            if [ -n "$WARNINGS" ]; then
+              echo 'Warnings:' >> "$comment_file"
+              echo '' >> "$comment_file"
+              printf '%s' "$WARNINGS" >> "$comment_file"
+              echo '' >> "$comment_file"
+            fi
+
+            # Look for an existing bot comment to update
+            existing_id="$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" --jq \
+              '[.[] | select(.user.login == "openchamber-bot[bot]" and (.body | startswith("<!-- pr-contributing-check -->")))] | last | .id // empty')"
+
+            if [ -n "$existing_id" ] && [ "$existing_id" != "null" ]; then
+              body="$(cat "$comment_file")"
+              jq -n --arg body "$body" '{body: $body}' | \
+                gh api "repos/$REPO/issues/comments/$existing_id" \
+                  --method PATCH --input - >/dev/null
+            else
+              gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file "$comment_file"
+            fi
+
+            rm -f "$comment_file"
+          fi
+
+          # ---------------------------------------------------------------
+          # Set output for job status
+          # ---------------------------------------------------------------
+          if [ -n "$FAILURES" ]; then
+            echo "status=failure" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=success" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fail check on violations
+        if: steps.check.outputs.SKIPPED != 'true' && steps.check.outputs.status == 'failure'
+        run: |
+          echo "Contributing compliance check failed. See bot comment above for details."
+          exit 1
