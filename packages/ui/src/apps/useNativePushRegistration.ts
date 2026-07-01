@@ -1,6 +1,7 @@
 import React from 'react';
 
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { getClientPlatform } from '@/lib/platform';
 import { useUIStore } from '@/stores/useUIStore';
 
 /**
@@ -16,15 +17,15 @@ import { useUIStore } from '@/stores/useUIStore';
  * additionally gates on the `nativeNotificationsEnabled` setting and re-registers when
  * the connection (and thus the active server endpoint) changes.
  */
-// Push is APNs-only today: the server/relay path and token handling target iOS. On Android the
-// @capacitor/push-notifications plugin's register() goes through Firebase (FCM), which crashes
-// with "Default FirebaseApp is not initialized" until FCM is set up (google-services.json + the
-// Google Services Gradle plugin). Gate registration to iOS so the Android app runs; wire FCM up
-// as a separate piece of work (see local-dev-android-push.md).
-const isApplePushPlatform = (): boolean => {
+// Native push: iOS uses APNs, Android uses FCM. Both are set up natively (google-services.json +
+// the Google Services Gradle plugin on Android), so @capacitor/push-notifications' register()
+// returns the right token per platform. The token is sent to the server tagged with its platform
+// so the relay routes it to APNs vs FCM.
+const isNativePushPlatform = (): boolean => {
   if (typeof window === 'undefined') return false;
   const capacitor = (window as typeof window & { Capacitor?: { getPlatform?: () => string } }).Capacitor;
-  return capacitor?.getPlatform?.() === 'ios';
+  const platform = capacitor?.getPlatform?.();
+  return platform === 'ios' || platform === 'android';
 };
 
 export const useNativePushRegistration = (options: { enabled: boolean }): void => {
@@ -33,7 +34,7 @@ export const useNativePushRegistration = (options: { enabled: boolean }): void =
   const lastTokenRef = React.useRef<string | null>(null);
 
   React.useEffect(() => {
-    if (!enabled || !nativeNotificationsEnabled || !isApplePushPlatform()) {
+    if (!enabled || !nativeNotificationsEnabled || !isNativePushPlatform()) {
       return;
     }
 
@@ -55,7 +56,7 @@ export const useNativePushRegistration = (options: { enabled: boolean }): void =
         const registrationHandle = await PushNotifications.addListener('registration', (token) => {
           lastTokenRef.current = token.value;
           const apis = getRegisteredRuntimeAPIs();
-          void apis?.push?.registerApnsToken?.({ token: token.value });
+          void apis?.push?.registerApnsToken?.({ token: token.value, platform: getClientPlatform() });
         });
 
         const registrationErrorHandle = await PushNotifications.addListener('registrationError', (error) => {

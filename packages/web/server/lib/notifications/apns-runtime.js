@@ -81,21 +81,22 @@ export const createApnsRuntime = (deps) => {
     y: publicJwk.y,
   });
 
-  const registerTokenWithRelay = async (token) => {
+  const registerTokenWithRelay = async (token, platform = 'ios') => {
     const relay = resolveRelayConfig();
     if (!relay) return; // direct mode — no relay binding needed
     try {
       const { privateKey, publicJwk } = await getOrCreateRelayKeypair();
       const ts = Date.now();
-      const sig = signRelayMessage(privateKey, `${ts}.${token}`);
+      // platform is part of the signed message so it can't be tampered en route.
+      const sig = signRelayMessage(privateKey, `${ts}.${token}.${platform}`);
       const res = await fetch(relay.registerUrl, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ token, publicKeyJwk: relayPublicJwk(publicJwk), ts, sig }),
+        body: JSON.stringify({ token, platform, publicKeyJwk: relayPublicJwk(publicJwk), ts, sig }),
       });
-      if (!res.ok) console.warn(`[APNs relay] register-token failed status=${res.status}`);
+      if (!res.ok) console.warn(`[Push relay] register-token failed status=${res.status}`);
     } catch (error) {
-      console.warn('[APNs relay] register-token request failed:', error?.message ?? error);
+      console.warn('[Push relay] register-token request failed:', error?.message ?? error);
     }
   };
 
@@ -151,14 +152,21 @@ export const createApnsRuntime = (deps) => {
           createdAt: typeof entry.createdAt === 'number' ? entry.createdAt : null,
           lastSeenAt: typeof entry.lastSeenAt === 'number' ? entry.lastSeenAt : null,
           userAgent: typeof entry.userAgent === 'string' ? entry.userAgent : undefined,
+          // 'ios' (APNs) or 'android' (FCM). Older entries without one are APNs by default.
+          platform: entry.platform === 'android' ? 'android' : 'ios',
         };
       })
       .filter(Boolean);
   };
 
-  const addOrUpdateApnsToken = async (uiSessionToken, deviceToken, userAgent) => {
+  // Normalize an incoming platform hint to the two we support; default to APNs/iOS since that
+  // was the only registrant before Android/FCM existed.
+  const normalizePlatform = (platform) => (platform === 'android' ? 'android' : 'ios');
+
+  const addOrUpdateApnsToken = async (uiSessionToken, deviceToken, userAgent, platform) => {
     if (!uiSessionToken || typeof deviceToken !== 'string' || deviceToken.trim().length === 0) return;
     const token = deviceToken.trim();
+    const tokenPlatform = normalizePlatform(platform);
     const now = Date.now();
 
     await persistTokenUpdate((current) => {
@@ -170,6 +178,7 @@ export const createApnsRuntime = (deps) => {
         createdAt: now,
         lastSeenAt: now,
         userAgent: typeof userAgent === 'string' && userAgent.length > 0 ? userAgent : undefined,
+        platform: tokenPlatform,
       });
       tokensBySession[uiSessionToken] = filtered.slice(0, MAX_TOKENS_PER_SESSION);
       return { version: APNS_TOKENS_VERSION, tokensBySession };
@@ -178,8 +187,9 @@ export const createApnsRuntime = (deps) => {
     // (Re)bind this token to our server on the relay so only we can push to it. The device
     // re-sends its token on each launch; this is an idempotent upsert relay-side, and binding
     // every time (not just for new tokens) keeps existing tokens bound after a relay/server
-    // upgrade rather than silently going unbound.
-    await registerTokenWithRelay(token);
+    // upgrade rather than silently going unbound. Platform is bound too so the relay routes
+    // it to APNs vs FCM.
+    await registerTokenWithRelay(token, tokenPlatform);
   };
 
   const removeApnsToken = async (uiSessionToken, deviceToken) => {

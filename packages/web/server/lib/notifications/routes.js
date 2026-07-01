@@ -161,8 +161,9 @@ export const registerNotificationRoutes = (app, dependencies) => {
       return res.status(400).json({ error: 'Invalid body' });
     }
 
+    const platform = req.body?.platform === 'android' ? 'android' : 'ios';
     if (typeof addOrUpdateApnsToken === 'function') {
-      await addOrUpdateApnsToken(uiToken, deviceToken, req.headers['user-agent']);
+      await addOrUpdateApnsToken(uiToken, deviceToken, req.headers['user-agent'], platform);
     }
     return res.json({ ok: true });
   });

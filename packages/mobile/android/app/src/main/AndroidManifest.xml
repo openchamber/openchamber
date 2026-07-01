@@ -35,6 +35,12 @@
         <meta-data
             android:name="com.google.mlkit.vision.DEPENDENCIES"
             android:value="barcode_ui" />
+
+        <!-- Small icon shown in the status bar / notification shade for FCM notifications the
+             system displays while the app is backgrounded. Must be a monochrome silhouette. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_stat_notify" />
     </application>
 
     <!-- Permissions -->
@@ -44,4 +50,7 @@
          requestPermissions() returns denied without ever prompting the user. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- Android 13+ requires this declared for FCM push notifications to be shown; the runtime
+         prompt is requested by @capacitor/push-notifications on register. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 </manifest>

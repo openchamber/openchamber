@@ -98,7 +98,8 @@ describe('apns runtime relay mode (default)', () => {
       const body = JSON.parse(init.body);
       expect(body.publicKeyJwk).toMatchObject({ kty: 'EC', crv: 'P-256' });
       expect(typeof body.ts).toBe('number');
-      expect(await verifyRelaySignature(body.publicKeyJwk, `${body.ts}.${body.token}`, body.sig)).toBe(true);
+      expect(body.platform).toBe('ios');
+      expect(await verifyRelaySignature(body.publicKeyJwk, `${body.ts}.${body.token}.${body.platform}`, body.sig)).toBe(true);
     }
 
     fetchMock.mockClear();

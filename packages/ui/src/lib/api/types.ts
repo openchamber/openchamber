@@ -769,6 +769,8 @@ export interface PushUnsubscribePayload {
 
 export interface ApnsTokenPayload {
   token: string;
+  /** 'ios' (APNs) or 'android' (FCM) — lets the relay route the token to the right service. */
+  platform?: string;
 }
 
 export interface PushAPI {
