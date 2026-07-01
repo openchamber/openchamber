@@ -5,10 +5,12 @@ import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { clampPercent, resolveUsageTone } from '@/lib/quota';
+import { formatUsdCost } from '@/lib/costFormat';
 
 interface ContextUsageDisplayProps {
   totalTokens: number;
   percentage: number;
+  cost?: number;
   colorPercentage?: number;
   contextLimit: number;
   outputLimit?: number;
@@ -26,6 +28,7 @@ interface ContextUsageDisplayProps {
 export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
   totalTokens,
   percentage,
+  cost,
   colorPercentage,
   contextLimit,
   outputLimit,
@@ -73,6 +76,8 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
   const circularProgressOffset = circularProgressCircumference * (1 - progressPct / 100);
 
   const safeOutputLimit = typeof outputLimit === 'number' ? Math.max(outputLimit, 0) : 0;
+  const safeCost = typeof cost === 'number' && Number.isFinite(cost) && cost > 0 ? cost : 0;
+  const formattedCost = safeCost > 0 ? formatUsdCost(safeCost) : null;
   const tooltipLines = [
     t('contextUsage.tooltip.usedTokens', { tokens: formatTokens(totalTokens) }),
     t('contextUsage.tooltip.contextLimit', { tokens: formatTokens(contextLimit) }),
@@ -117,10 +122,14 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
               />
             </svg>
             <span className="text-foreground">{Math.min(percentage, 999).toFixed(1)}%</span>
+            {formattedCost ? <span className="text-muted-foreground">&middot;</span> : null}
+            {formattedCost ? <span className="text-foreground">{formattedCost}</span> : null}
           </>
         ) : (
           <>
             <span className={getPercentageColor(colorPct)}>{Math.min(percentage, 999).toFixed(1)}</span>%
+            {formattedCost ? <span className="text-muted-foreground">&middot;</span> : null}
+            {formattedCost ? <span className="text-foreground">{formattedCost}</span> : null}
           </>
         )}
       </span>
@@ -189,6 +198,12 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
                   {Math.min(percentage, 999).toFixed(1)}%
                 </span>
               </div>
+              {formattedCost ? (
+                <div className="flex justify-between items-center pt-1 border-t border-border/40">
+                  <span className="typography-meta text-muted-foreground">{t('contextSidebar.stats.cost')}</span>
+                  <span className="typography-meta text-foreground font-medium">{formattedCost}</span>
+                </div>
+              ) : null}
             </div>
           </div>
         </MobileOverlayPanel>
