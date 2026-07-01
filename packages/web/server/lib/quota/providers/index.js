@@ -7,15 +7,24 @@
 
 import { buildResult } from '../utils/index.js';
 
+import * as atlascloud from './atlascloud.js';
+import * as byteplus from './byteplus.js';
 import * as claude from './claude.js';
 import * as codex from './codex.js';
 import * as copilot from './copilot.js';
 import * as cursor from './cursor.js';
 import * as google from './google/index.js';
 import * as kimi from './kimi.js';
+import * as longcat from './longcat.js';
+import * as mistral from './mistral.js';
 import * as nanogpt from './nanogpt.js';
 import * as openai from './openai.js';
+import * as opencodeGo from './opencode-go.js';
 import * as openrouter from './openrouter.js';
+import * as poe from './poe.js';
+import * as qwencloud from './qwencloud.js';
+import * as stepfun from './stepfun.js';
+import * as xai from './xai.js';
 import * as zai from './zai.js';
 import * as zhipuaiCodingPlan from './zhipuai-coding-plan.js';
 import * as minimaxCodingPlan from './minimax-coding-plan.js';
@@ -24,6 +33,18 @@ import * as ollamaCloud from './ollama-cloud.js';
 import * as wafer from './wafer.js';
 
 const registry = {
+  atlascloud: {
+    providerId: atlascloud.providerId,
+    providerName: atlascloud.providerName,
+    isConfigured: atlascloud.isConfigured,
+    fetchQuota: atlascloud.fetchQuota
+  },
+  byteplus: {
+    providerId: byteplus.providerId,
+    providerName: byteplus.providerName,
+    isConfigured: byteplus.isConfigured,
+    fetchQuota: byteplus.fetchQuota
+  },
   claude: {
     providerId: claude.providerId,
     providerName: claude.providerName,
@@ -47,6 +68,48 @@ const registry = {
     providerName: google.providerName,
     isConfigured: google.isConfigured,
     fetchQuota: google.fetchGoogleQuota
+  },
+  longcat: {
+    providerId: longcat.providerId,
+    providerName: longcat.providerName,
+    isConfigured: longcat.isConfigured,
+    fetchQuota: longcat.fetchQuota
+  },
+  mistral: {
+    providerId: mistral.providerId,
+    providerName: mistral.providerName,
+    isConfigured: mistral.isConfigured,
+    fetchQuota: mistral.fetchQuota
+  },
+  'opencode-go': {
+    providerId: opencodeGo.providerId,
+    providerName: opencodeGo.providerName,
+    isConfigured: opencodeGo.isConfigured,
+    fetchQuota: opencodeGo.fetchQuota
+  },
+  poe: {
+    providerId: poe.providerId,
+    providerName: poe.providerName,
+    isConfigured: poe.isConfigured,
+    fetchQuota: poe.fetchQuota
+  },
+  qwencloud: {
+    providerId: qwencloud.providerId,
+    providerName: qwencloud.providerName,
+    isConfigured: qwencloud.isConfigured,
+    fetchQuota: qwencloud.fetchQuota
+  },
+  stepfun: {
+    providerId: stepfun.providerId,
+    providerName: stepfun.providerName,
+    isConfigured: stepfun.isConfigured,
+    fetchQuota: stepfun.fetchQuota
+  },
+  xai: {
+    providerId: xai.providerId,
+    providerName: xai.providerName,
+    isConfigured: xai.isConfigured,
+    fetchQuota: xai.fetchQuota
   },
   'zai-coding-plan': {
     providerId: zai.providerId,
@@ -175,3 +238,13 @@ export const fetchMinimaxCnCodingPlanQuota = minimaxCnCodingPlan.fetchQuota;
 export const fetchOllamaCloudQuota = ollamaCloud.fetchQuota;
 export const fetchWaferQuota = wafer.fetchQuota;
 export const fetchZhipuaiQuota = zhipuaiCodingPlan.fetchQuota;
+export const fetchAtlascloudQuota = atlascloud.fetchQuota;
+export const fetchByteplusQuota = byteplus.fetchQuota;
+export const fetchLongcatQuota = longcat.fetchQuota;
+export const fetchMistralQuota = mistral.fetchQuota;
+export const fetchOpencodeGoQuota = opencodeGo.fetchQuota;
+export const fetchPoeQuota = poe.fetchQuota;
+export const fetchQwencloudQuota = qwencloud.fetchQuota;
+export const fetchStepfunQuota = stepfun.fetchQuota;
+export const fetchXaiQuota = xai.fetchQuota;
+
