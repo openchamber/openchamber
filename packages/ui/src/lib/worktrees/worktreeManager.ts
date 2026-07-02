@@ -385,6 +385,10 @@ export async function createWorktree(project: ProjectRef, args: CreateWorktreeAr
     availableWorktrees: [...useSessionUIStore.getState().availableWorktrees, metadata],
   });
 
+  // Trigger sidebar re-discovery so any worktrees created externally
+  // (e.g., by OpenCode) also appear.
+  useSessionUIStore.getState().triggerWorktreeRediscovery();
+
   return metadata;
 }
 
@@ -446,6 +450,9 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
     ),
     worktreeMetadata: updatedMetadata,
   });
+
+  // Trigger sidebar re-discovery so the sidebar reflects the removed worktree.
+  useSessionUIStore.getState().triggerWorktreeRediscovery();
 
   const branchName = (worktree.branch || '').replace(/^refs\/heads\//, '').trim();
   if (deleteRemote && branchName) {

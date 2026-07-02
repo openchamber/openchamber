@@ -2043,7 +2043,6 @@ export function MobileApp({ apis }: MobileAppProps) {
 
     const run = async () => {
       const worktreesByProject = new Map<string, WorktreeMetadata[]>();
-      const allWorktrees: WorktreeMetadata[] = [];
 
       await Promise.all(
         projects.map(async (project) => {
@@ -2055,19 +2054,30 @@ export function MobileApp({ apis }: MobileAppProps) {
               cachedIsGitRepo ?? (await import('@/lib/gitApi').then((m) => m.checkIsGitRepository(projectPath)));
             if (!isGitRepo) return;
             const worktrees = await listProjectWorktrees({ id: project.id, path: projectPath });
-            if (cancelled || worktrees.length === 0) return;
+            if (cancelled) return;
+            // Always add the project, even with an empty worktree list.
+            // Skipping would wipe persisted data when the store is overwritten.
             worktreesByProject.set(projectPath, worktrees);
-            allWorktrees.push(...worktrees);
           } catch {
             // Worktree discovery is best-effort; draft selector falls back to the project root.
+            // The merge below preserves existing data for projects where discovery failed.
           }
         }),
       );
 
       if (cancelled) return;
+
+      // Merge with existing store data to preserve worktrees for projects
+      // where discovery failed (e.g., server not ready at startup).
+      const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
+      const mergedByProject = new Map(currentByProject);
+      for (const [projectPath, worktrees] of worktreesByProject) {
+        mergedByProject.set(projectPath, worktrees);
+      }
+
       useSessionUIStore.setState({
-        availableWorktrees: allWorktrees,
-        availableWorktreesByProject: worktreesByProject,
+        availableWorktrees: [...mergedByProject.values()].flat(),
+        availableWorktreesByProject: mergedByProject,
       });
     };
 

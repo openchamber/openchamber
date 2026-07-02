@@ -244,6 +244,10 @@ export type SessionUIState = {
   pendingChangesBarDismissed: Map<string, string>
   dismissPendingChangesBar: (sessionId: string, signature: string | null) => void
 
+  // Worktree discovery epoch — incremented on create/attach/remove to trigger re-discovery
+  worktreeDiscoveryEpoch: number
+  triggerWorktreeRediscovery: () => void
+
   // Actions — UI state management
   setCurrentSession: (id: string | null, directoryHint?: string | null) => void
   prepareForRuntimeSwitch: (apiBaseUrl?: string | null) => void
@@ -560,6 +564,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   lastLoadedDirectory: null,
   sessionPlanAvailable: new Map(),
   pendingChangesBarDismissed: new Map(),
+  worktreeDiscoveryEpoch: 0,
+  triggerWorktreeRediscovery: () => set((state) => ({ worktreeDiscoveryEpoch: state.worktreeDiscoveryEpoch + 1 })),
 
   // ---------------------------------------------------------------------------
   // setCurrentSession

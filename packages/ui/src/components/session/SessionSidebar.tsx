@@ -419,10 +419,11 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     void refreshGlobalSessions(syncSessionsSnapshotRef.current);
   }, []);
 
-  // Tracks the last project list we already kicked off discovery for.
-  // A re-mount with the same project set shouldn't fan out another
-  // burst of `checkIsGitRepository` / `listProjectWorktrees` calls.
-  const discoveredProjectsRef = React.useRef<string>('');
+  // Re-discover worktrees when the project set changes or when an external
+  // mutation (create/attach/remove) bumps the epoch. The epoch replaces the
+  // old discoveredProjectsRef guard — the effect re-runs whenever the epoch
+  // changes, regardless of whether the project set changed.
+  const worktreeDiscoveryEpoch = useSessionUIStore((state) => state.worktreeDiscoveryEpoch);
   React.useEffect(() => {
     let cancelled = false;
 
@@ -431,7 +432,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       if (projectEntries.length === 0) return;
 
       const worktreesByProject = new Map<string, WorktreeMetadata[]>();
-      const allWorktrees: WorktreeMetadata[] = [];
 
       // Constrain fanout: previously `Promise.all(projects.map(...))` could
       // spawn dozens of concurrent `git worktree list` and
@@ -457,11 +457,14 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
             const isGitRepo = cachedIsGitRepo ?? await checkIsGitRepository(projectPath);
             if (!isGitRepo) continue;
             const worktrees = await listProjectWorktrees({ id: project.id, path: projectPath });
-            if (cancelled || worktrees.length === 0) continue;
+            if (cancelled) continue;
+            // Always add the project to the map, even with an empty worktree
+            // list. Skipping projects with zero worktrees would wipe persisted
+            // data for those projects when the store is overwritten below.
             worktreesByProject.set(projectPath, worktrees);
-            allWorktrees.push(...worktrees);
           } catch {
-            // ignore discovery errors
+            // ignore discovery errors — the merge below preserves existing
+            // data for projects where discovery failed
           }
         }
       });
@@ -469,23 +472,27 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
       if (cancelled) return;
 
+      // Merge with existing store data instead of replacing. This preserves
+      // worktrees for projects where discovery failed (e.g., server not
+      // ready at startup) while updating projects where discovery succeeded.
+      const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
+      const mergedByProject = new Map(currentByProject);
+      for (const [projectPath, worktrees] of worktreesByProject) {
+        mergedByProject.set(projectPath, worktrees);
+      }
+
       useSessionUIStore.setState({
-        availableWorktrees: allWorktrees,
-        availableWorktreesByProject: worktreesByProject,
+        availableWorktrees: [...mergedByProject.values()].flat(),
+        availableWorktreesByProject: mergedByProject,
       });
     };
 
-    // Skip if we already discovered worktrees for this exact project set.
-    if (discoveredProjectsRef.current === projectWorktreeDiscoveryKey) {
-      return;
-    }
-    discoveredProjectsRef.current = projectWorktreeDiscoveryKey;
     void discoverWorktrees();
 
     return () => {
       cancelled = true;
     };
-  }, [projectWorktreeDiscoveryKey]);
+  }, [projectWorktreeDiscoveryKey, worktreeDiscoveryEpoch]);
 
   React.useEffect(() => {
     let refreshTimeout: ReturnType<typeof setTimeout> | null = null;

@@ -893,6 +893,9 @@ export function NewWorktreeDialog({
               availableWorktrees: [...useSessionUIStore.getState().availableWorktrees, matched],
             });
           }
+          // Trigger sidebar re-discovery so any other worktrees created
+          // externally (e.g., by OpenCode) also appear.
+          useSessionUIStore.getState().triggerWorktreeRediscovery();
           metadata = matched;
         } else {
           metadata = await createWorktree(projectRef, resolvedArgs);
