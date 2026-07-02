@@ -39,7 +39,7 @@ export const resolveGoogleOAuthClient = (sourceId) => {
   };
 };
 
-export const resolveGeminiCliAuth = (auth) => {
+const resolveGeminiCliAuth = (auth) => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['google', 'google.oauth']));
   const entryObject = asObject(entry);
   if (!entryObject) {
@@ -64,7 +64,7 @@ export const resolveGeminiCliAuth = (auth) => {
   };
 };
 
-export const resolveAntigravityAuth = () => {
+const resolveAntigravityAuth = () => {
   for (const filePath of ANTIGRAVITY_ACCOUNTS_PATHS) {
     const data = readJsonFile(filePath);
     const accounts = data?.accounts;

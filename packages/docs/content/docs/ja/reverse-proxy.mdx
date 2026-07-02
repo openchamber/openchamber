@@ -1,0 +1,347 @@
+---
+title: リバースプロキシ
+description: Nginx、Nginx Proxy Manager、その他のリバースプロキシの背後で OpenChamber を正しく設定します。
+---
+
+# リバースプロキシ
+
+Nginx、Nginx Proxy Manager、Caddy、Cloudflare、その他のリバースプロキシの背後で OpenChamber を実行する場合は、このページを使ってください。
+
+## プロキシする前に
+
+1. まず OpenChamber が直接動くことを確認します。
+2. 同じネットワークから `http://<server-ip>:3000` またはカスタムポートを開きます。
+3. 直接接続が動いてから、リバースプロキシを追加します。
+
+## プロキシが対応すべきもの
+
+- ライブメッセージ転送用の WebSocket:
+  - `/api/event/ws`
+  - `/api/global/event/ws`
+  - `/api/terminal/ws`
+- バッファリングなしの SSE:
+  - `/api/event`
+  - `/api/global/event`
+  - `/api/notifications/stream`
+  - `/api/openchamber/events`
+  - `/api/terminal/:sessionId/stream`
+- 添付ファイルとファイル操作向けの大きなリクエストボディ
+- ライブストリームとターミナルセッション向けの長い read timeout
+
+## 重要なルール
+
+- WebSocket プロキシを有効にします。
+- SSE ルートではバッファリングを無効にします。
+- OpenChamber がすでにレスポンスを圧縮している場合、プロキシ側の gzip を無効にします。
+- 圧縮を有効にする層は 1 つだけにします。
+- `Host`、`X-Forwarded-For`、`X-Forwarded-Proto` など通常のプロキシヘッダーを転送します。
+- ユーザーがファイルをアップロードする場合は body size limit を増やします。
+
+## クイックチェックリスト
+
+- OpenChamber に LAN から直接到達できる
+- プロキシで WebSocket が有効
+- SSE ルートのバッファリングがオフ
+- プロキシホストで `gzip off`、または別の方法でプロキシ圧縮が無効
+- `client_max_body_size` が添付ファイルに十分な大きさ
+- `proxy_read_timeout` がストリームに十分長い
+
+## 例: Nginx
+
+<details>
+<summary>設定例を表示</summary>
+
+```nginx
+client_max_body_size 50M;
+client_body_buffer_size 50M;
+proxy_request_buffering off;
+
+proxy_http_version 1.1;
+proxy_set_header Connection "";
+proxy_set_header Host $host;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;
+proxy_set_header X-Forwarded-Host $host;
+
+gzip off;
+
+location = /api/terminal/ws {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+
+location = /api/global/event/ws {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+
+location = /api/event/ws {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+
+location ~ ^/api/(event|global/event|notifications/stream|openchamber/events)$ {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Accept "text/event-stream";
+    proxy_set_header Cache-Control "no-cache";
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    add_header X-Accel-Buffering "no" always;
+    add_header Cache-Control "no-cache, no-transform" always;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+
+location ~ ^/api/terminal/.+/stream$ {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Accept "text/event-stream";
+    proxy_set_header Cache-Control "no-cache";
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    add_header X-Accel-Buffering "no" always;
+    add_header Cache-Control "no-cache, no-transform" always;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+
+location /api {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+
+location / {
+    proxy_pass http://127.0.0.1:3000;
+}
+```
+
+</details>
+
+## 例: Nginx Proxy Manager
+
+<details>
+<summary>Advanced タブの例を表示</summary>
+
+```nginx
+client_max_body_size 50M;
+client_body_buffer_size 50M;
+proxy_request_buffering off;
+
+proxy_http_version 1.1;
+proxy_set_header Connection "";
+proxy_set_header Host $host;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;
+proxy_set_header X-Forwarded-Host $host;
+
+gzip off;
+
+location = /api/terminal/ws {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location = /api/global/event/ws {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location = /api/event/ws {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location = /api/event {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Accept "text/event-stream";
+    proxy_set_header Cache-Control "no-cache";
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    add_header X-Accel-Buffering "no" always;
+    add_header Cache-Control "no-cache, no-transform" always;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location = /api/global/event {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Accept "text/event-stream";
+    proxy_set_header Cache-Control "no-cache";
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    add_header X-Accel-Buffering "no" always;
+    add_header Cache-Control "no-cache, no-transform" always;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location = /api/notifications/stream {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Accept "text/event-stream";
+    proxy_set_header Cache-Control "no-cache";
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    add_header X-Accel-Buffering "no" always;
+    add_header Cache-Control "no-cache, no-transform" always;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location = /api/openchamber/events {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Accept "text/event-stream";
+    proxy_set_header Cache-Control "no-cache";
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    add_header X-Accel-Buffering "no" always;
+    add_header Cache-Control "no-cache, no-transform" always;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location ~ ^/api/terminal/.+/stream$ {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Accept "text/event-stream";
+    proxy_set_header Cache-Control "no-cache";
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    add_header X-Accel-Buffering "no" always;
+    add_header Cache-Control "no-cache, no-transform" always;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location /api {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
+
+location / {
+    proxy_pass http://127.0.0.1:3000;
+}
+```
+
+</details>
+
+このホストでは Nginx Proxy Manager の `Websockets Support` も有効にしてください。
+
+## よくある失敗の兆候
+
+### ページは読み込まれるが、メッセージ送信に失敗する
+
+- プロキシで WebSocket が有効になっていません
+- `/api/event/ws` または `/api/global/event/ws` が正しく通っていません
+
+### 通知またはライブ状態が更新されない
+
+- SSE ルートのどれかがバッファリングまたはキャッシュされています
+- `X-Accel-Buffering "no"` がありません
+
+### ファイルアップロードに失敗する
+
+- `client_max_body_size` が小さすぎます
+
+### ローカルではすべて動くが、プロキシ背後でだけ壊れる
+
+- プロキシがライブ通信を圧縮またはバッファリングしています
+- プロキシに WebSocket 対応がありません
+
+## 例: Caddy
+
+<details>
+<summary>設定例を表示</summary>
+
+```caddy
+reverse_proxy 127.0.0.1:3000 {
+    # WebSocket support is automatic in Caddy
+
+    # Flush SSE responses immediately
+    flush_interval -1
+
+    # Pass through Host and proxy headers
+    header_up Host {host}
+    header_up X-Real-IP {remote_host}
+    header_up X-Forwarded-For {remote_host}
+    header_up X-Forwarded-Proto {scheme}
+
+    # Increase timeouts for long-lived streams
+    transport http {
+        read_timeout 3600s
+        write_timeout 3600s
+    }
+}
+```
+
+</details>
+
+Caddy は WebSocket upgrade を自動で処理します。追加設定は不要です。`flush_interval -1` ディレクティブにより、SSE チャンクがバッファリングされずすぐ転送されます。
+
+## CDN と二重圧縮の警告
+
+リバースプロキシの前に Cloudflare などの CDN を置く場合、二重圧縮に注意してください。
+
+- OpenChamber は HTTP レスポンスを gzip 圧縮します（しきい値 1 KB）。
+- Cloudflare や他の CDN もデフォルトでレスポンスを圧縮します。
+- これにより、二重圧縮されたレスポンスや誤った `Content-Encoding` ヘッダーが発生することがあります。
+
+これを避けるには、**どちらか一方**の層で圧縮を無効にします。
+
+- **Cloudflare:** Rules → Compression → disable（または "Passthrough" mode を使用）。
+- **Nginx:** `gzip off`（上の例に含まれています）。
+- **Caddy:** upstream がすでに圧縮済みコンテンツを送る場合、Caddy はデフォルトでは再圧縮しません。
+
+SSE ストリーミングルートは OpenChamber 側で圧縮対象外ですが、CDN がまだバッファリングする場合があります。SSE パスでバッファリングを無効にする方法は、CDN のドキュメントを確認してください。
+
+## 関連
+
+- [トンネル](/tunnels/)
+- [トラブルシューティング](/troubleshooting/)

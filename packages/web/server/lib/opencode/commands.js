@@ -327,11 +327,6 @@ function deleteCommand(commandName, workingDirectory) {
 }
 
 export {
-  ensureProjectCommandDir,
-  getProjectCommandPath,
-  getUserCommandPath,
-  getCommandScope,
-  getCommandWritePath,
   getCommandSources,
   createCommand,
   updateCommand,

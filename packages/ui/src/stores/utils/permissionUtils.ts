@@ -1,20 +1,5 @@
 import type { EditPermissionMode } from "../types/sessionTypes";
 
-const EDIT_PERMISSION_TOOL_NAMES = new Set([
-    'edit',
-    'multiedit',
-    'str_replace',
-    'str_replace_based_edit_tool',
-    'write',
-]);
-
-export const isEditPermissionType = (type?: string | null): boolean => {
-    if (!type) {
-        return false;
-    }
-    return EDIT_PERMISSION_TOOL_NAMES.has(type.toLowerCase());
-};
-
 type PermissionAction = 'allow' | 'deny' | 'ask';
 
 type PermissionRule = {

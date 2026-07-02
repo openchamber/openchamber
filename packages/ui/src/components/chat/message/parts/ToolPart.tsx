@@ -226,11 +226,27 @@ const scheduleDeferredToolBodyMount = (fn: () => void) => {
 };
 
 const useDeferredExpandedContent = (isExpanded: boolean) => {
-    const [shouldRender, setShouldRender] = React.useState(false);
+    // If the tool is expanded when the row first mounts (e.g. "show tools open
+    // by default", or scrolling a default-open tool back into a virtualized
+    // view), render the body SYNCHRONOUSLY so the virtualizer measures the real
+    // height immediately. Deferring it would let the row mount short and grow a
+    // frame later, which makes the virtualizer compensate scroll and lurch the
+    // viewport past several messages on slow scroll. Only defer LATER
+    // user-initiated expansions, where instant single-item feedback isn't worth
+    // blocking the click on a heavy body render.
+    const [shouldRender, setShouldRender] = React.useState(isExpanded);
+    const mountedRef = React.useRef(false);
 
     React.useEffect(() => {
         if (!isExpanded) {
+            mountedRef.current = true;
             setShouldRender(false);
+            return;
+        }
+
+        if (!mountedRef.current) {
+            mountedRef.current = true;
+            setShouldRender(true);
             return;
         }
 

@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input';
 import { NumberInput } from '@/components/ui/number-input';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
-import { useAgentsStore, type AgentConfig, type AgentScope } from '@/stores/useAgentsStore';
+import { useAgentsStore, type AgentConfig, type AgentMutationResult, type AgentScope } from '@/stores/useAgentsStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useDirectorySync } from '@/sync/sync-context';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -635,18 +635,22 @@ export const AgentsPage: React.FC = () => {
         scope: isNewAgent ? draftScope : undefined,
       };
 
-      let success: boolean;
+      let result: AgentMutationResult;
       if (isNewAgent) {
-        success = await createAgent(config);
-        if (success) {
+        result = await createAgent(config);
+        if (result.ok) {
           setAgentDraft(null); // Clear draft after successful creation
         }
       } else {
-        success = await updateAgent(agentName, config);
+        result = await updateAgent(agentName, config);
       }
 
-      if (success) {
-        toast.success(isNewAgent ? t('settings.agents.page.toast.created') : t('settings.agents.page.toast.updated'));
+      if (result.ok) {
+        if (result.requiresManualRestart) {
+          toast.warning(t('settings.agents.page.toast.savedManualRestart'));
+        } else {
+          toast.success(isNewAgent ? t('settings.agents.page.toast.created') : t('settings.agents.page.toast.updated'));
+        }
       } else {
         toast.error(isNewAgent ? t('settings.agents.page.toast.createFailed') : t('settings.agents.page.toast.updateFailed'));
       }

@@ -132,7 +132,7 @@ export interface PaceInfo {
  * Infer window duration in seconds from a window label.
  * Used when the API doesn't provide windowSeconds directly.
  */
-export const inferWindowSeconds = (label: string): number | null => {
+const inferWindowSeconds = (label: string): number | null => {
   const normalized = label.toLowerCase().trim();
   
   // Exact matches

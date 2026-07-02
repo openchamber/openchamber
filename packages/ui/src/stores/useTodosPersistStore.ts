@@ -1,7 +1,7 @@
 import { create } from 'zustand';
-import { createJSONStorage, devtools, persist } from 'zustand/middleware';
+import { devtools, persist } from 'zustand/middleware';
 import type { Todo } from '@opencode-ai/sdk/v2/client';
-import { getSafeStorage } from './utils/safeStorage';
+import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 
 const MAX_SESSIONS = 50;
 
@@ -55,7 +55,7 @@ export const useTodosPersistStore = create<TodosPersistState>()(
             {
                 name: 'openchamber-session-todos',
                 version: 1,
-                storage: createJSONStorage(() => getSafeStorage()),
+                storage: createDeferredSafeJSONStorage(),
                 partialize: (state) => ({ sessions: state.sessions }),
             },
         ),

@@ -7,7 +7,7 @@ const COOKIE_PATH = join(homedir(), '.config', 'ollama-quota', 'cookie');
 
 export const providerId = 'ollama-cloud';
 export const providerName = 'Ollama Cloud';
-export const aliases = ['ollama-cloud', 'ollamacloud'];
+const aliases = ['ollama-cloud', 'ollamacloud'];
 
 const readCookieFile = () => {
   try {

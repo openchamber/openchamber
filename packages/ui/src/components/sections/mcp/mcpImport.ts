@@ -17,7 +17,7 @@ export interface ImportedMcpResult {
   readonly enabled: boolean;
 }
 
-export type ImportedMcpError =
+type ImportedMcpError =
   | { readonly ok: false; readonly error: string }
   | { readonly ok: false; readonly error: string; readonly parsed: unknown };
 

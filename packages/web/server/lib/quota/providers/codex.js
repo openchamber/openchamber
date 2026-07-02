@@ -11,7 +11,7 @@ import {
 
 export const providerId = 'codex';
 export const providerName = 'Codex';
-export const aliases = ['openai', 'codex', 'chatgpt'];
+const aliases = ['openai', 'codex', 'chatgpt'];
 
 export const isConfigured = () => {
   const auth = readAuthFile();

@@ -7,7 +7,6 @@ This module fetches quota and usage signals for supported providers in the web s
 - `packages/web/server/lib/quota/index.js`: public entrypoint imported by `packages/web/server/index.js`.
 - `packages/web/server/lib/quota/routes.js`: Express route registration for quota endpoints.
 - `packages/web/server/lib/quota/providers/index.js`: provider registry, configured-provider list, and provider dispatcher.
-- `packages/web/server/lib/quota/providers/interface.js`: JSDoc provider contract used as implementation reference.
 - `packages/web/server/lib/quota/providers/google/`: Google-specific auth, API, and transform modules.
 - `packages/web/server/lib/quota/utils/`: shared auth, transform, and formatting helpers.
 
@@ -41,6 +40,9 @@ All providers should return results via shared helpers to preserve API shape:
 - Required fields: `providerId`, `providerName`, `ok`, `configured`, `usage`, `fetchedAt`
 - Optional field: `error`
 - Unsupported provider requests should return `ok: false`, `configured: false`, `error: Unsupported provider`
+
+Provider modules must export `providerId`, `providerName`, `aliases`, `isConfigured(auth?)`, and `fetchQuota()`.
+`fetchQuota()` should return a quota result with `usage.windows` keyed by window name (for example `5h`, `7d`, `daily`) and optional provider-specific `usage.models` data.
 
 ## Add a new provider (quick steps)
 1. Choose module shape based on complexity:

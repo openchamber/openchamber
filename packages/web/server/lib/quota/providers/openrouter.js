@@ -10,7 +10,7 @@ import {
 
 export const providerId = 'openrouter';
 export const providerName = 'OpenRouter';
-export const aliases = ['openrouter'];
+const aliases = ['openrouter'];
 
 export const isConfigured = () => {
   const auth = readAuthFile();

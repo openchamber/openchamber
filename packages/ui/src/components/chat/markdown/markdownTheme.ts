@@ -6,7 +6,7 @@ import { MARKDOWN_SHIKI_THEME, MARKDOWN_SHIKI_THEME_DEFINITION } from './markdow
 // `--md-syntax-*` CSS variables) lives in the dependency-free
 // `markdownShikiThemeDefinition` module so it can also be imported inside the
 // Shiki Web Worker. See that module for the rationale.
-export { MARKDOWN_SHIKI_THEME };
+
 
 let registered = false;
 

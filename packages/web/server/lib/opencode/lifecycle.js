@@ -753,12 +753,22 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
     await restartOpenCode();
 
+    // A managed OpenCode process is restarted (and thus re-reads config from
+    // disk) by restartOpenCode(). An external OpenCode server is NOT owned by
+    // OpenChamber: restartOpenCode() only re-probes its health, so the freshly
+    // written config is on disk but the running server keeps serving its old,
+    // startup-cached config until the user restarts it themselves. Report this
+    // honestly so callers don't claim the change is live.
+    const external = state.isExternalOpenCode === true;
+
     try {
       await waitForOpenCodeReady();
       state.isOpenCodeReady = true;
       state.openCodeNotReadySince = 0;
 
-      if (agentName) {
+      // Waiting for the agent to appear only makes sense when we actually
+      // reloaded config. An external server will never surface it here.
+      if (agentName && !external) {
         await waitForAgentPresence(agentName);
       }
 
@@ -770,6 +780,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       console.error(`Failed to refresh OpenCode after ${reason}:`, error.message);
       throw error;
     }
+
+    return { reloaded: !external, external };
   };
 
   const bootstrapOpenCodeAtStartup = async () => {
@@ -807,15 +819,15 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         state.lastOpenCodeError = null;
         state.openCodeNotReadySince = 0;
         syncToHmrState();
-      } else if (!env.ENV_EFFECTIVE_PORT && await probeExternalOpenCode(4096)) {
-        console.log('Auto-detected existing OpenCode server on default port 4096');
-        setOpenCodePort(4096);
-        state.isOpenCodeReady = true;
-        state.isExternalOpenCode = true;
-        state.lastOpenCodeError = null;
-        state.openCodeNotReadySince = 0;
-        syncToHmrState();
       } else {
+        // We never auto-attach to an arbitrary pre-existing OpenCode instance.
+        // Attaching to an external server requires explicit opt-in via env
+        // (OPENCODE_HOST / OPENCODE_PORT / OPENCODE_SKIP_START), handled by the
+        // branches above. Without that opt-in we always start our OWN managed
+        // instance on a freshly-allocated port. A blind probe of the default
+        // port 4096 used to hijack a user's separately-running OpenCode (e.g.
+        // the OpenCode desktop app), coupling our lifecycle to theirs and
+        // breaking init against an unexpected server version/config.
         if (env.ENV_EFFECTIVE_PORT) {
           console.log(`Using OpenCode port from environment: ${env.ENV_EFFECTIVE_PORT}`);
           setOpenCodePort(env.ENV_EFFECTIVE_PORT);

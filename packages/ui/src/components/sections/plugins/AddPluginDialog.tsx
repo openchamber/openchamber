@@ -300,5 +300,3 @@ export const AddPluginDialog: React.FC<AddPluginDialogProps> = ({
     </Dialog>
   );
 };
-
-export default AddPluginDialog;

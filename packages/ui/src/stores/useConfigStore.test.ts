@@ -129,7 +129,23 @@ const deferred = <T,>() => {
 };
 
 mock.module('@/stores/utils/safeStorage', () => ({
+  getDeferredSafeStorage: () => makeStorage(),
   getSafeStorage: () => makeStorage(),
+  createDeferredSafeJSONStorage: () => {
+    const testStorage = makeStorage();
+    return {
+      getItem: (name: string) => {
+        const value = testStorage.getItem(name);
+        return value === null ? null : JSON.parse(value);
+      },
+      setItem: (name: string, value: unknown) => {
+        testStorage.setItem(name, JSON.stringify(value));
+      },
+      removeItem: (name: string) => {
+        testStorage.removeItem(name);
+      },
+    };
+  },
 }));
 
 mock.module('@/stores/useProjectsStore', () => ({
@@ -389,6 +405,50 @@ describe('useConfigStore provider persistence', () => {
     expect(state.currentVariant).toBe('fast');
   });
 
+  test('provider reload preserves the add-provider sentinel selection', async () => {
+    // The user has opened the "Add provider" form, which sets selectedProviderId
+    // to the sentinel. A background provider refresh must not navigate them away
+    // (and discard their unsaved input) just because the sentinel is not a real
+    // provider id. See issue #1765.
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      currentProviderId: 'live',
+      currentModelId: 'live-model',
+      selectedProviderId: '__add_provider__',
+      directoryScoped: {},
+    });
+
+    liveProviderId = 'live';
+    await useConfigStore.getState().loadProviders({ source: 'test:add-provider' });
+
+    expect(useConfigStore.getState().selectedProviderId).toBe('__add_provider__');
+  });
+
+  test('add-provider sentinel is not persisted as a stable provider selection', async () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      currentProviderId: 'live',
+      currentModelId: 'live-model',
+      selectedProviderId: '__add_provider__',
+      directoryScoped: {
+        [DIRECTORY]: {
+          providers: [provider('live')],
+          agents: [],
+          currentProviderId: 'live',
+          currentModelId: 'live-model',
+          currentAgentName: undefined,
+          selectedProviderId: '__add_provider__',
+          agentModelSelections: {},
+          defaultProviders: { default: 'live' },
+        },
+      },
+    });
+
+    const persisted = JSON.parse(storage.get(STORAGE_KEY) ?? '{}');
+    expect(persisted.state.selectedProviderId).toBe('');
+    expect(persisted.state.directoryScoped[DIRECTORY].selectedProviderId).toBe('');
+  });
+
   test('setAgent applies settings default variant for an agent configured model', () => {
     useSessionUIStore.setState({ currentSessionId: 'ses_agent_default_variant' });
     useConfigStore.setState({
@@ -582,6 +642,47 @@ describe('useConfigStore provider persistence', () => {
     expect(state.directoryScoped[DIRECTORY]?.opencodeDefaultAgent).toBe('review');
     expect(state.directoryScoped[worktree]).toBe(undefined);
     expect(state.currentAgentName).toBe('review');
+  });
+
+  test('sync config defaults do not close the add-provider settings flow', () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5'), provider('anthropic', 'claude')],
+      agents: [
+        testAgent('build', { model: { providerID: 'anthropic', modelID: 'claude' } }),
+        testAgent('review', { model: { providerID: 'openai', modelID: 'gpt-5.5' } }),
+      ],
+      currentProviderId: 'anthropic',
+      currentModelId: 'claude',
+      currentAgentName: 'build',
+      selectedProviderId: '__add_provider__',
+      selectionSource: 'auto',
+      directoryScoped: {
+        [DIRECTORY]: {
+          providers: [provider('openai', 'gpt-5.5'), provider('anthropic', 'claude')],
+          agents: [
+            testAgent('build', { model: { providerID: 'anthropic', modelID: 'claude' } }),
+            testAgent('review', { model: { providerID: 'openai', modelID: 'gpt-5.5' } }),
+          ],
+          currentProviderId: 'anthropic',
+          currentModelId: 'claude',
+          currentAgentName: 'build',
+          selectedProviderId: '__add_provider__',
+          agentModelSelections: {},
+          defaultProviders: {},
+          selectionSource: 'auto',
+        },
+      },
+    });
+
+    emitSyncConfigChanged(DIRECTORY, { default_agent: 'review', model: 'openai/gpt-5.5' });
+
+    const state = useConfigStore.getState();
+    expect(state.currentAgentName).toBe('review');
+    expect(state.currentProviderId).toBe('openai');
+    expect(state.currentModelId).toBe('gpt-5.5');
+    expect(state.selectedProviderId).toBe('__add_provider__');
+    expect(state.directoryScoped[DIRECTORY]?.selectedProviderId).toBe('__add_provider__');
   });
 
   test('duplicate sync config event is a no-op when defaults and selection are unchanged', () => {
