@@ -526,9 +526,10 @@ const loadPersistedWorktreeMap = (): Map<string, WorktreeMetadata[]> => {
   }
 }
 
-const persistWorktreeMap = (map: Map<string, WorktreeMetadata[]>): void => {
+const persistWorktreeMap = (map: Map<string, WorktreeMetadata[]>, preSerialized?: string): void => {
   try {
-    getDeferredSafeStorage().setItem(WORKTREE_MAP_STORAGE_KEY, JSON.stringify([...map.entries()]))
+    const serialized = preSerialized ?? JSON.stringify([...map.entries()])
+    getDeferredSafeStorage().setItem(WORKTREE_MAP_STORAGE_KEY, serialized)
   } catch {
     // quota / serialization error — ignore; discovery still refreshes at runtime
   }
@@ -1553,10 +1554,10 @@ let lastPersistedWorktreeHash = ''
 useSessionUIStore.subscribe((state, prev) => {
   if (state.availableWorktreesByProject !== prev.availableWorktreesByProject) {
     try {
-      const hash = JSON.stringify([...state.availableWorktreesByProject.entries()])
-      if (hash !== lastPersistedWorktreeHash) {
-        lastPersistedWorktreeHash = hash
-        persistWorktreeMap(state.availableWorktreesByProject)
+      const serialized = JSON.stringify([...state.availableWorktreesByProject.entries()])
+      if (serialized !== lastPersistedWorktreeHash) {
+        lastPersistedWorktreeHash = serialized
+        persistWorktreeMap(state.availableWorktreesByProject, serialized)
       }
     } catch {
       // serialization error — skip persist; discovery still refreshes at runtime

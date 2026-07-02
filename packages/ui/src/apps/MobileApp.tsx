@@ -43,7 +43,7 @@ import { useMcpConfigStore, type McpDraft } from '@/stores/useMcpConfigStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
-import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
+import { listProjectWorktrees, worktreeMapsEqual } from '@/lib/worktrees/worktreeManager';
 import type { QuotaProviderId, UsageWindow } from '@/types';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
@@ -2332,25 +2332,10 @@ export function MobileApp({ apis }: MobileAppProps) {
       // Skip the store update if nothing actually changed. Each reference
       // change to availableWorktreesByProject triggers re-renders in 16+
       // subscribers, so avoiding unnecessary updates is worth the comparison.
-      // listProjectWorktrees returns new array instances on each call, so
-      // reference equality alone won't detect identical content. Compare
-      // array lengths and element references instead.
+      // Uses path-based comparison (not reference equality) because
+      // readStableProjectWorktrees creates new object instances on each call.
       const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
-      let changed = worktreesByProject.size !== currentByProject.size;
-      if (!changed) {
-        for (const [key, value] of worktreesByProject) {
-          const existing = currentByProject.get(key);
-          if (
-            !existing ||
-            existing.length !== value.length ||
-            existing.some((item, i) => item !== value[i])
-          ) {
-            changed = true;
-            break;
-          }
-        }
-      }
-      if (changed) {
+      if (!worktreeMapsEqual(worktreesByProject, currentByProject)) {
         useSessionUIStore.setState({
           availableWorktrees: allWorktrees,
           availableWorktreesByProject: worktreesByProject,
