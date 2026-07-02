@@ -52,6 +52,7 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
   const setDirectory = useDirectoryStore((state) => state.setDirectory);
   const projects = useProjectsStore((state) => state.projects);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const worktreeDiscoveryEpoch = useSessionUIStore((state) => state.worktreeDiscoveryEpoch);
   const draftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const draftDirectory = useSessionUIStore((state) => {
     if (!state.newSessionDraft?.open) return '';
@@ -175,7 +176,8 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
 
     const discoverWorktrees = async () => {
       const worktreesByProject = new Map<string, WorktreeMetadata[]>();
-      const allWorktrees: WorktreeMetadata[] = [];
+      // Track confirmed non-Git repos so we can prune their stale entries.
+      const nonGitProjectPaths = new Set<string>();
 
       await Promise.all(projects.map(async (project) => {
         const projectPath = project.path.replace(/\\/g, '/').replace(/\/+$/, '');
@@ -183,20 +185,46 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
         try {
           const cachedIsGitRepo = useGitStore.getState().directories.get(projectPath)?.isGitRepo;
           const isGitRepo = cachedIsGitRepo ?? await import('@/lib/gitApi').then((m) => m.checkIsGitRepository(projectPath));
-          if (!isGitRepo) return;
+          if (!isGitRepo) {
+            nonGitProjectPaths.add(projectPath);
+            return;
+          }
           const worktrees = await listProjectWorktrees({ id: project.id, path: projectPath });
-          if (cancelled || worktrees.length === 0) return;
+          if (cancelled) return;
+          // Always add the project, even with an empty worktree list.
+          // Skipping would wipe persisted data when the store is overwritten.
           worktreesByProject.set(projectPath, worktrees);
-          allWorktrees.push(...worktrees);
         } catch {
           // Worktree discovery is best-effort; draft selector falls back to the project root.
+          // The merge below preserves existing data for projects where discovery failed.
         }
       }));
 
       if (cancelled) return;
+
+      // Merge with existing store data to preserve worktrees for projects
+      // where discovery failed. Prune stale entries for removed projects
+      // and projects confirmed as non-Git repos.
+      const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
+      const normalizeProjectPath = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '');
+      const currentProjectPaths = new Set(
+        projects
+          .map((p) => normalizeProjectPath(p.path))
+          .filter((p): p is string => Boolean(p)),
+      );
+      const mergedByProject = new Map<string, WorktreeMetadata[]>();
+      for (const [projectPath, worktrees] of worktreesByProject) {
+        mergedByProject.set(projectPath, worktrees);
+      }
+      for (const [projectPath, worktrees] of currentByProject) {
+        if (!mergedByProject.has(projectPath) && currentProjectPaths.has(projectPath) && !nonGitProjectPaths.has(projectPath)) {
+          mergedByProject.set(projectPath, worktrees);
+        }
+      }
+
       useSessionUIStore.setState({
-        availableWorktrees: allWorktrees,
-        availableWorktreesByProject: worktreesByProject,
+        availableWorktrees: [...mergedByProject.values()].flat(),
+        availableWorktreesByProject: mergedByProject,
       });
     };
 
@@ -205,7 +233,7 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
     return () => {
       cancelled = true;
     };
-  }, [projects]);
+  }, [projects, worktreeDiscoveryEpoch]);
 
   // Dismiss the HTML splash (see mini-chat.html) once the real content is ready,
   // so the window doesn't flash through white/connecting states. Fades out when

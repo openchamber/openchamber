@@ -419,10 +419,11 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     void refreshGlobalSessions(syncSessionsSnapshotRef.current);
   }, []);
 
-  // Tracks the last project list we already kicked off discovery for.
-  // A re-mount with the same project set shouldn't fan out another
-  // burst of `checkIsGitRepository` / `listProjectWorktrees` calls.
-  const discoveredProjectsRef = React.useRef<string>('');
+  // Re-discover worktrees when the project set changes or when an external
+  // mutation (create/attach/remove) bumps the epoch. The epoch replaces the
+  // old discoveredProjectsRef guard — the effect re-runs whenever the epoch
+  // changes, regardless of whether the project set changed.
+  const worktreeDiscoveryEpoch = useSessionUIStore((state) => state.worktreeDiscoveryEpoch);
   React.useEffect(() => {
     let cancelled = false;
 
@@ -431,7 +432,10 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       if (projectEntries.length === 0) return;
 
       const worktreesByProject = new Map<string, WorktreeMetadata[]>();
-      const allWorktrees: WorktreeMetadata[] = [];
+      // Track which project paths were confirmed as non-Git repos so we can
+      // prune their stale entries. Projects where discovery failed (server
+      // not ready) are NOT added here — their data is preserved.
+      const nonGitProjectPaths = new Set<string>();
 
       // Constrain fanout: previously `Promise.all(projects.map(...))` could
       // spawn dozens of concurrent `git worktree list` and
@@ -455,13 +459,19 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
             // PR/render paths downstream can read isGitRepo for free.
             const cachedIsGitRepo = useGitStore.getState().directories.get(projectPath)?.isGitRepo;
             const isGitRepo = cachedIsGitRepo ?? await checkIsGitRepository(projectPath);
-            if (!isGitRepo) continue;
+            if (!isGitRepo) {
+              nonGitProjectPaths.add(projectPath);
+              continue;
+            }
             const worktrees = await listProjectWorktrees({ id: project.id, path: projectPath });
-            if (cancelled || worktrees.length === 0) continue;
+            if (cancelled) continue;
+            // Always add the project to the map, even with an empty worktree
+            // list. Skipping projects with zero worktrees would wipe persisted
+            // data for those projects when the store is overwritten below.
             worktreesByProject.set(projectPath, worktrees);
-            allWorktrees.push(...worktrees);
           } catch {
-            // ignore discovery errors
+            // ignore discovery errors — the merge below preserves existing
+            // data for projects where discovery failed
           }
         }
       });
@@ -469,23 +479,42 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
       if (cancelled) return;
 
+      // Merge discovery results with existing store data. This preserves
+      // worktrees for projects where discovery failed (e.g., server not
+      // ready at startup) while updating projects where discovery succeeded.
+      // Prune stale entries for projects removed from the list or confirmed
+      // as non-Git repos.
+      const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
+      const mergedByProject = new Map<string, WorktreeMetadata[]>();
+      const currentProjectPaths = new Set(
+        projectEntries
+          .map((p) => normalizePath(p.path))
+          .filter((p): p is string => p !== null),
+      );
+      for (const [projectPath, worktrees] of worktreesByProject) {
+        mergedByProject.set(projectPath, worktrees);
+      }
+      // Preserve existing data for projects in the current project list
+      // where discovery failed, but drop entries for removed projects
+      // and projects confirmed as non-Git repos.
+      for (const [projectPath, worktrees] of currentByProject) {
+        if (!mergedByProject.has(projectPath) && currentProjectPaths.has(projectPath) && !nonGitProjectPaths.has(projectPath)) {
+          mergedByProject.set(projectPath, worktrees);
+        }
+      }
+
       useSessionUIStore.setState({
-        availableWorktrees: allWorktrees,
-        availableWorktreesByProject: worktreesByProject,
+        availableWorktrees: [...mergedByProject.values()].flat(),
+        availableWorktreesByProject: mergedByProject,
       });
     };
 
-    // Skip if we already discovered worktrees for this exact project set.
-    if (discoveredProjectsRef.current === projectWorktreeDiscoveryKey) {
-      return;
-    }
-    discoveredProjectsRef.current = projectWorktreeDiscoveryKey;
     void discoverWorktrees();
 
     return () => {
       cancelled = true;
     };
-  }, [projectWorktreeDiscoveryKey]);
+  }, [projectWorktreeDiscoveryKey, worktreeDiscoveryEpoch]);
 
   React.useEffect(() => {
     let refreshTimeout: ReturnType<typeof setTimeout> | null = null;
