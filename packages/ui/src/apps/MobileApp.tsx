@@ -43,7 +43,7 @@ import { useMcpConfigStore, type McpDraft } from '@/stores/useMcpConfigStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
-import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
+import { listProjectWorktrees, worktreeMapsEqual } from '@/lib/worktrees/worktreeManager';
 import type { QuotaProviderId, UsageWindow } from '@/types';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
@@ -2065,10 +2065,19 @@ export function MobileApp({ apis }: MobileAppProps) {
       );
 
       if (cancelled) return;
-      useSessionUIStore.setState({
-        availableWorktrees: allWorktrees,
-        availableWorktreesByProject: worktreesByProject,
-      });
+
+      // Skip the store update if nothing actually changed. Each reference
+      // change to availableWorktreesByProject triggers re-renders in 16+
+      // subscribers, so avoiding unnecessary updates is worth the comparison.
+      // Uses path-based comparison (not reference equality) because
+      // readStableProjectWorktrees creates new object instances on each call.
+      const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
+      if (!worktreeMapsEqual(worktreesByProject, currentByProject)) {
+        useSessionUIStore.setState({
+          availableWorktrees: allWorktrees,
+          availableWorktreesByProject: worktreesByProject,
+        });
+      }
     };
 
     void run();

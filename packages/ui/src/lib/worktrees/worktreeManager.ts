@@ -229,6 +229,27 @@ const toCreatePayload = (args: {
   };
 };
 
+/**
+ * Compare two worktree-by-project maps for equality.
+ * Uses path-based comparison for entries (not reference equality)
+ * because readStableProjectWorktrees creates new object instances
+ * on each call, making reference checks always report changed.
+ */
+export const worktreeMapsEqual = (
+  a: Map<string, WorktreeMetadata[]>,
+  b: Map<string, WorktreeMetadata[]>,
+): boolean => {
+  if (a.size !== b.size) return false;
+  for (const [key, value] of a) {
+    const existing = b.get(key);
+    if (!existing || existing.length !== value.length) return false;
+    for (let i = 0; i < value.length; i++) {
+      if (value[i].path !== existing[i].path) return false;
+    }
+  }
+  return true;
+};
+
 // Cache worktree listings to avoid repeated git worktree list + rev-parse calls
 const _worktreeListCache = new Map<string, { value: WorktreeMetadata[]; at: number }>();
 const _worktreeListInflight = new Map<string, Promise<WorktreeMetadata[]>>();
