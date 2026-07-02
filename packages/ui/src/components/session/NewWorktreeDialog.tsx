@@ -860,40 +860,45 @@ export function NewWorktreeDialog({
       
       const resolvedArgs = await withWorktreeUpstreamDefaults(projectDirectory, args);
 
+      // For existing-branch mode, check if the branch already has a worktree
+      // before trying to create one. If it does, attach the existing worktree
+      // to the store instead of creating a duplicate.
       let metadata: WorktreeMetadata;
-      try {
-        metadata = await createWorktree(projectRef, resolvedArgs);
-      } catch (createError) {
-        // If the branch is already checked out in another worktree,
-        // find the existing worktree and attach it to the store instead.
-        const message = createError instanceof Error ? createError.message : '';
-        if (message.includes('already checked out') && mode === 'existing-branch') {
-          // Invalidate cache so we get fresh data from git
-          invalidateWorktreeList(projectDirectory);
-          const existingWorktrees = await listProjectWorktrees(projectRef);
-          const matched = existingWorktrees.find(
-            (wt) => wt.branch === normalizedBranch || wt.branch === `refs/heads/${normalizedBranch}`,
-          );
-          if (matched) {
-            // Attach existing worktree to the store
-            const sidebarProjectKey = projectDirectory;
-            const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
-            const updatedByProject = new Map(currentByProject);
-            const existing = updatedByProject.get(sidebarProjectKey) ?? [];
-            if (!existing.some((wt) => wt.path === matched.path)) {
-              updatedByProject.set(sidebarProjectKey, [...existing, matched]);
-              useSessionUIStore.setState({
-                availableWorktreesByProject: updatedByProject,
-                availableWorktrees: [...useSessionUIStore.getState().availableWorktrees, matched],
-              });
-            }
-            metadata = matched;
-          } else {
-            throw createError;
+      if (mode === 'existing-branch') {
+        invalidateWorktreeList(projectDirectory);
+        const existingWorktrees = await listProjectWorktrees(projectRef);
+        // The user may have selected a remote ref like remotes/fork/sdk-v1.17.12-pagination.
+        // normalizedBranch strips remotes/ → fork/sdk-v1.17.12-pagination, but the actual
+        // local branch is sdk-v1.17.12-pagination. Try both the normalized value and the
+        // local branch name derived from the remote ref.
+        const localBranchFromRemote = branchName.startsWith('remotes/')
+          ? branchName.split('/').slice(2).join('/')
+          : null;
+        const matched = existingWorktrees.find(
+          (wt) =>
+            wt.branch === normalizedBranch ||
+            wt.branch === `refs/heads/${normalizedBranch}` ||
+            (localBranchFromRemote && (wt.branch === localBranchFromRemote || wt.branch === `refs/heads/${localBranchFromRemote}`)),
+        );
+        if (matched) {
+          // Attach existing worktree to the store
+          const sidebarProjectKey = projectDirectory;
+          const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
+          const updatedByProject = new Map(currentByProject);
+          const existing = updatedByProject.get(sidebarProjectKey) ?? [];
+          if (!existing.some((wt) => wt.path === matched.path)) {
+            updatedByProject.set(sidebarProjectKey, [...existing, matched]);
+            useSessionUIStore.setState({
+              availableWorktreesByProject: updatedByProject,
+              availableWorktrees: [...useSessionUIStore.getState().availableWorktrees, matched],
+            });
           }
+          metadata = matched;
         } else {
-          throw createError;
+          metadata = await createWorktree(projectRef, resolvedArgs);
         }
+      } else {
+        metadata = await createWorktree(projectRef, resolvedArgs);
       }
 
       let createdSessionId: string | null = null;
