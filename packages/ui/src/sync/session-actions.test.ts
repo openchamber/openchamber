@@ -498,6 +498,37 @@ describe("respondToPermission passes directory", () => {
     expect(replyCalls[0].params.reply).toBe("reject")
     expect(replyCalls[0].params.directory).toBe("/fallback/dir")
   })
+
+  test("passes message when rejecting with reason", async () => {
+    replyCalls.length = 0
+    const childStores = createChildStores([])
+
+    const { setActionRefs, respondToPermission } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    await respondToPermission("session-a", "perm-4", "reject", "Use rg instead of grep")
+
+    expect(replyCalls.length).toBe(1)
+    expect(replyCalls[0].params.requestID).toBe("perm-4")
+    expect(replyCalls[0].params.reply).toBe("reject")
+    expect(replyCalls[0].params.message).toBe("Use rg instead of grep")
+    expect(replyCalls[0].params.directory).toBe("/test/project")
+  })
+
+  test("does not pass message when rejecting without reason", async () => {
+    replyCalls.length = 0
+    const childStores = createChildStores([])
+
+    const { setActionRefs, respondToPermission } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    await respondToPermission("session-a", "perm-5", "reject")
+
+    expect(replyCalls.length).toBe(1)
+    expect(replyCalls[0].params.requestID).toBe("perm-5")
+    expect(replyCalls[0].params.reply).toBe("reject")
+    expect(replyCalls[0].params.message).toBe(undefined)
+  })
 })
 
 describe("revertToMessage passes session directory", () => {

@@ -736,6 +736,7 @@ export async function respondToPermission(
   sessionId: string,
   requestId: string,
   response: "once" | "always" | "reject",
+  message?: string,
 ): Promise<void> {
   await waitForConnectionOrThrow()
   const directory = resolveDirectoryForBlockingRequest("permission", sessionId, requestId)
@@ -745,6 +746,7 @@ export async function respondToPermission(
     requestID: requestId,
     reply: response,
     ...(directory ? { directory } : {}),
+    ...(message ? { message } : {}),
   })
   if (assertSdkData(result, "permission.reply") !== true) {
     throw new Error("Permission reply failed")

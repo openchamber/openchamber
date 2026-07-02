@@ -9,7 +9,6 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { toast } from '@/components/ui';
 import type { QuestionRequest } from '@/types/question';
 import { useUIStore } from '@/stores/useUIStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessions } from '@/sync/sync-context';
 import * as sessionActions from '@/sync/session-actions';
 import { useI18n } from '@/lib/i18n';
@@ -93,12 +92,10 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
   const rejectQuestion = sessionActions.rejectQuestion;
   const isMobile = useUIStore((state) => state.isMobile);
   const sessions = useSessions();
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const isFromSubagent = React.useMemo(() => {
-    if (!currentSessionId || question.sessionID === currentSessionId) return false;
     const sourceSession = sessions.find((session) => session.id === question.sessionID);
-    return Boolean(sourceSession?.parentID && sourceSession.parentID === currentSessionId);
-  }, [question.sessionID, currentSessionId, sessions]);
+    return Boolean(sourceSession?.parentID);
+  }, [question.sessionID, sessions]);
   const [activeTab, setActiveTab] = React.useState<TabKey>('0');
   const [isResponding, setIsResponding] = React.useState(false);
   const [hasResponded, setHasResponded] = React.useState(false);

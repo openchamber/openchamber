@@ -1,7 +1,6 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
 import type { PermissionRequest, PermissionResponse } from '@/types/permission';
-import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessions } from '@/sync/sync-context';
 import * as sessionActions from '@/sync/session-actions';
 import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
@@ -94,14 +93,14 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
   const { t } = useI18n();
   const [isResponding, setIsResponding] = React.useState(false);
   const [hasResponded, setHasResponded] = React.useState(false);
+  const [correctStage, setCorrectStage] = React.useState<'idle' | 'input'>('idle');
+  const [correctMessage, setCorrectMessage] = React.useState('');
   const respondToPermission = sessionActions.respondToPermission;
   const sessions = useSessions();
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const isFromSubagent = React.useMemo(() => {
-    if (!currentSessionId || permission.sessionID === currentSessionId) return false;
     const sourceSession = sessions.find((session) => session.id === permission.sessionID);
-    return Boolean(sourceSession?.parentID && sourceSession.parentID === currentSessionId);
-  }, [permission.sessionID, currentSessionId, sessions]);
+    return Boolean(sourceSession?.parentID);
+  }, [permission.sessionID, sessions]);
 
   const handleResponse = async (response: PermissionResponse) => {
     setIsResponding(true);
@@ -114,6 +113,45 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
       console.error('[PermissionCard] Failed to respond to permission:', error);
     } finally {
       setIsResponding(false);
+    }
+  };
+
+  const handleCorrect = async () => {
+    if (isResponding) return;
+    const trimmed = correctMessage.trim();
+    if (!trimmed) return;
+
+    setIsResponding(true);
+
+    try {
+      await respondToPermission(permission.sessionID, permission.id, 'reject', trimmed);
+      setHasResponded(true);
+      onResponse?.('reject');
+    } catch (error) {
+      console.error('[PermissionCard] Failed to respond to permission:', error);
+    } finally {
+      setIsResponding(false);
+    }
+  };
+
+  const openCorrectInput = () => {
+    setCorrectStage('input');
+    setCorrectMessage('');
+  };
+
+  const cancelCorrect = () => {
+    setCorrectStage('idle');
+    setCorrectMessage('');
+  };
+
+  const onCorrectKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (isResponding) return;
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      void handleCorrect();
+    }
+    if (e.key === 'Escape') {
+      cancelCorrect();
     }
   };
 
@@ -346,6 +384,59 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
           </div>
 
           {}
+          {correctStage === 'input' ? (
+            <div className="px-2 pb-2 pt-1.5 border-t border-border/20">
+              <textarea
+                value={correctMessage}
+                onChange={(e) => setCorrectMessage(e.target.value)}
+                onKeyDown={onCorrectKeyDown}
+                placeholder={t('chat.permissionCard.correctPlaceholder')}
+                disabled={isResponding}
+                className="w-full typography-meta px-2 py-1.5 rounded bg-muted/20 border border-border/30 resize-none focus:outline-none focus:border-primary/50 text-foreground placeholder:text-muted-foreground/60 disabled:opacity-50"
+                rows={2}
+                autoFocus
+              />
+              <div className="flex items-center justify-end gap-1.5 mt-1.5">
+                <button
+                  onClick={cancelCorrect}
+                  disabled={isResponding}
+                  className={cn(
+                    "flex items-center gap-1 px-3 py-1.5 typography-meta font-medium rounded transition-all",
+                    "text-muted-foreground hover:bg-muted/30",
+                    "disabled:opacity-50 disabled:cursor-not-allowed"
+                  )}
+                >
+                  {t('chat.permissionCard.cancel')}
+                </button>
+                <button
+                  onClick={handleCorrect}
+                  disabled={isResponding || !correctMessage.trim()}
+                  className={cn(
+                    "flex items-center gap-1 px-3 py-1.5 typography-meta font-medium rounded transition-all",
+                    "disabled:opacity-50 disabled:cursor-not-allowed"
+                  )}
+                  style={{
+                    backgroundColor: 'rgb(var(--status-error) / 0.1)',
+                    color: 'var(--status-error)'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = 'rgb(var(--status-error) / 0.2)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'rgb(var(--status-error) / 0.1)';
+                  }}
+                >
+                  <Icon name="close" className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
+                  {t('chat.permissionCard.correct')}
+                </button>
+                {isResponding && (
+                  <div className="flex justify-center py-1 typography-meta text-muted-foreground">
+                    <div className="animate-spin h-3 w-3 border border-primary border-t-transparent rounded-full" />
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
           <div className="px-2 pb-2 sm:pb-1.5 pt-1.5 sm:pt-1 flex flex-col sm:flex-row sm:items-center sm:flex-wrap gap-1.5 border-t border-border/20">
             <button
               onClick={() => handleResponse('once')}
@@ -448,12 +539,37 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
               Deny
             </button>
 
+            {isFromSubagent && (
+              <button
+                onClick={openCorrectInput}
+                disabled={isResponding}
+                className={cn(
+                  "flex items-center gap-1.5 sm:gap-1 px-3 sm:px-2 py-1.5 sm:py-1 typography-meta font-medium rounded transition-all min-h-[32px] sm:min-h-0 w-full sm:w-auto",
+                  "disabled:opacity-50 disabled:cursor-not-allowed"
+                )}
+                style={{
+                  backgroundColor: 'rgb(var(--status-warning) / 0.12)',
+                  color: 'var(--status-warning)'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'rgb(var(--status-warning) / 0.22)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'rgb(var(--status-warning) / 0.12)';
+                }}
+              >
+                <Icon name="edit-2" className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
+                {t('chat.permissionCard.correct')}
+              </button>
+            )}
+
             {isResponding && (
               <div className="flex justify-center w-full sm:w-auto sm:ml-auto py-1 sm:py-0 typography-meta text-muted-foreground">
                 <div className="animate-spin h-3 w-3 border border-primary border-t-transparent rounded-full" />
               </div>
             )}
           </div>
+          )}
         </div>
       </div>
     </div>
