@@ -21,6 +21,12 @@ const IDLE_RESULT: SessionActivityResult = {
 
 type SessionMessage = Pick<Message, 'role' | 'time'>;
 
+const getAssistantCompletedAt = (message: SessionMessage | undefined): number | undefined => {
+  const time = message?.time;
+  if (!time || !('completed' in time)) return undefined;
+  return typeof time.completed === 'number' ? time.completed : undefined;
+};
+
 type SessionActivityInput = {
   sessionId: string | null | undefined;
   status: SessionStatus | undefined;
@@ -43,21 +49,13 @@ export function deriveSessionActivity({
   const phase = status?.type ?? 'idle';
 
   const lastMessage = messages[messages.length - 1];
-  const hasCompletedAssistantTurn = Boolean(
-    lastMessage
-    && lastMessage.role === 'assistant'
-    && typeof lastMessage.time?.completed === 'number',
-  );
+  const hasCompletedAssistantTurn = lastMessage?.role === 'assistant' && getAssistantCompletedAt(lastMessage) !== undefined;
 
   if (status && phase !== 'idle' && hasCompletedAssistantTurn) {
     return IDLE_RESULT;
   }
 
-  const hasPendingAssistant = Boolean(
-    lastMessage
-    && lastMessage.role === 'assistant'
-    && typeof lastMessage.time?.completed !== 'number',
-  );
+  const hasPendingAssistant = lastMessage?.role === 'assistant' && getAssistantCompletedAt(lastMessage) === undefined;
 
   const hasAuthoritativeStatus = status !== undefined;
   const statusWorking = hasAuthoritativeStatus && phase !== 'idle';
