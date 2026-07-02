@@ -4,8 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- Desktop: remote instances can now save additional request headers for proxy-auth setups such as Cloudflare Access, including for live updates and terminal streams.
-- Desktop: SSH remote instances with a saved UI password no longer ask for that UI password again after the tunnel connects.
+## [1.13.9] - 2026-07-02
+
+- Mobile: added the native iOS and Android app projects ahead of the mobile app release, with continued polish for saved connections, password unlock, QR-code connection scanning, push notifications, iOS widgets, app resume, and native layout details.
+- Desktop: the app can now use a bundled OpenCode CLI, or you can choose your own CLI path in settings.
+- Desktop: added a Keep awake setting for the upcoming desktop app release to prevent the computer from sleeping while the app is running.
+- Desktop: you can now specify optional custom headers when adding a remote OpenChamber instance to the desktop app, including for Cloudflare Access-style setups; settings and environment variables can still override them, and the bundled CLI can be replaced by setting a direct OpenCode CLI path.
+- Desktop: SSH remote instances with a saved UI password now open directly after the tunnel connects instead of showing the unlock screen again.
+- Chat: fixed edge cases where late-loading tool content, subagent content, or streaming Thinking blocks could pull the conversation away from the latest message or fight manual scrolling.
+- Chat: embedded JSON examples in messages no longer render as generated-result cards.
+- Sync: chat state now recovers after idle reconnects instead of leaving sessions stuck in a stale busy state.
+- VSCode: clearing optional agent fields now removes them from agent config instead of saving `null` values.
+- VSCode: the extension no longer picks OpenCode desktop app installs when looking for the standalone OpenCode CLI.
 
 ## [1.13.8] - 2026-06-29
 
