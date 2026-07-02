@@ -229,6 +229,38 @@ const toCreatePayload = (args: {
   };
 };
 
+/**
+ * Attach a worktree to the store so it appears immediately in the sidebar
+ * without waiting for re-discovery. Deduplicates against both the per-project
+ * map and the flat list to avoid double entries.
+ */
+export const attachWorktreeToStore = (
+  projectDirectory: string,
+  worktree: WorktreeMetadata,
+): void => {
+  const sidebarProjectKey = projectDirectory;
+  const state = useSessionUIStore.getState();
+  const currentByProject = state.availableWorktreesByProject;
+  const currentFlat = state.availableWorktrees;
+  const existing = currentByProject.get(sidebarProjectKey) ?? [];
+
+  // Skip if already present in the project map
+  if (existing.some((wt) => wt.path === worktree.path)) return;
+
+  const updatedByProject = new Map(currentByProject);
+  updatedByProject.set(sidebarProjectKey, [...existing, worktree]);
+
+  // Also deduplicate against the flat list
+  const updatedFlat = currentFlat.some((wt) => wt.path === worktree.path)
+    ? currentFlat
+    : [...currentFlat, worktree];
+
+  useSessionUIStore.setState({
+    availableWorktreesByProject: updatedByProject,
+    availableWorktrees: updatedFlat,
+  });
+};
+
 // Cache worktree listings to avoid repeated git worktree list + rev-parse calls
 const _worktreeListCache = new Map<string, { value: WorktreeMetadata[]; at: number }>();
 const _worktreeListInflight = new Map<string, Promise<WorktreeMetadata[]>>();
@@ -375,15 +407,7 @@ export async function createWorktree(project: ProjectRef, args: CreateWorktreeAr
   invalidateResolvedProjectRootCache();
 
   // Update sidebar store so new worktree appears immediately
-  const sidebarProjectKey = projectDirectory;
-  const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
-  const updatedByProject = new Map(currentByProject);
-  const existing = updatedByProject.get(sidebarProjectKey) ?? [];
-  updatedByProject.set(sidebarProjectKey, [...existing, metadata]);
-  useSessionUIStore.setState({
-    availableWorktreesByProject: updatedByProject,
-    availableWorktrees: [...useSessionUIStore.getState().availableWorktrees, metadata],
-  });
+  attachWorktreeToStore(projectDirectory, metadata);
 
   // Trigger sidebar re-discovery so any worktrees created externally
   // (e.g., by OpenCode) also appear.

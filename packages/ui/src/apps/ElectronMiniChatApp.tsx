@@ -52,6 +52,7 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
   const setDirectory = useDirectoryStore((state) => state.setDirectory);
   const projects = useProjectsStore((state) => state.projects);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const worktreeDiscoveryEpoch = useSessionUIStore((state) => state.worktreeDiscoveryEpoch);
   const draftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const draftDirectory = useSessionUIStore((state) => {
     if (!state.newSessionDraft?.open) return '';
@@ -197,11 +198,21 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
       if (cancelled) return;
 
       // Merge with existing store data to preserve worktrees for projects
-      // where discovery failed (e.g., server not ready at startup).
+      // where discovery failed. Prune stale entries for removed projects.
       const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
-      const mergedByProject = new Map(currentByProject);
+      const currentProjectPaths = new Set(
+        projects
+          .map((p) => p.path.replace(/\\/g, '/').replace(/\/+$/, ''))
+          .filter(Boolean) as string[],
+      );
+      const mergedByProject = new Map<string, WorktreeMetadata[]>();
       for (const [projectPath, worktrees] of worktreesByProject) {
         mergedByProject.set(projectPath, worktrees);
+      }
+      for (const [projectPath, worktrees] of currentByProject) {
+        if (!mergedByProject.has(projectPath) && currentProjectPaths.has(projectPath)) {
+          mergedByProject.set(projectPath, worktrees);
+        }
       }
 
       useSessionUIStore.setState({
@@ -215,7 +226,7 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
     return () => {
       cancelled = true;
     };
-  }, [projects]);
+  }, [projects, worktreeDiscoveryEpoch]);
 
   // Dismiss the HTML splash (see mini-chat.html) once the real content is ready,
   // so the window doesn't flash through white/connecting states. Fades out when

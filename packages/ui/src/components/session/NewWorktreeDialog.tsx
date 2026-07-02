@@ -31,7 +31,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { validateWorktreeCreate, createWorktree, listProjectWorktrees, invalidateWorktreeList } from '@/lib/worktrees/worktreeManager';
+import { validateWorktreeCreate, createWorktree, listProjectWorktrees, invalidateWorktreeList, attachWorktreeToStore } from '@/lib/worktrees/worktreeManager';
 import { withWorktreeUpstreamDefaults } from '@/lib/worktrees/worktreeCreate';
 import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
 import { getWorktreeSetupCommands, getWorktreeSetupWaitEnabled } from '@/lib/openchamberConfig';
@@ -881,18 +881,9 @@ export function NewWorktreeDialog({
             (localBranchFromRemote && (wt.branch === localBranchFromRemote || wt.branch === `refs/heads/${localBranchFromRemote}`)),
         );
         if (matched) {
-          // Attach existing worktree to the store
-          const sidebarProjectKey = projectDirectory;
-          const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
-          const updatedByProject = new Map(currentByProject);
-          const existing = updatedByProject.get(sidebarProjectKey) ?? [];
-          if (!existing.some((wt) => wt.path === matched.path)) {
-            updatedByProject.set(sidebarProjectKey, [...existing, matched]);
-            useSessionUIStore.setState({
-              availableWorktreesByProject: updatedByProject,
-              availableWorktrees: [...useSessionUIStore.getState().availableWorktrees, matched],
-            });
-          }
+          // Attach existing worktree to the store using shared helper
+          // to keep this path consistent with createWorktree's store update.
+          attachWorktreeToStore(projectDirectory, matched);
           // Trigger sidebar re-discovery so any other worktrees created
           // externally (e.g., by OpenCode) also appear.
           useSessionUIStore.getState().triggerWorktreeRediscovery();

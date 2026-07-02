@@ -1939,6 +1939,7 @@ export function MobileApp({ apis }: MobileAppProps) {
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const error = useSessionUIStore((state) => state.error);
   const clearError = useSessionUIStore((state) => state.clearError);
+  const worktreeDiscoveryEpoch = useSessionUIStore((state) => state.worktreeDiscoveryEpoch);
   const setIsMobile = useUIStore((state) => state.setIsMobile);
   const refreshGitHubAuthStatus = useGitHubAuthStore((state) => state.refreshStatus);
   const setPlanModeEnabled = useFeatureFlagsStore((state) => state.setPlanModeEnabled);
@@ -2068,11 +2069,21 @@ export function MobileApp({ apis }: MobileAppProps) {
       if (cancelled) return;
 
       // Merge with existing store data to preserve worktrees for projects
-      // where discovery failed (e.g., server not ready at startup).
+      // where discovery failed. Prune stale entries for removed projects.
       const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
-      const mergedByProject = new Map(currentByProject);
+      const currentProjectPaths = new Set(
+        projects
+          .map((p) => p.path.replace(/\\/g, '/').replace(/\/+$/, ''))
+          .filter(Boolean) as string[],
+      );
+      const mergedByProject = new Map<string, WorktreeMetadata[]>();
       for (const [projectPath, worktrees] of worktreesByProject) {
         mergedByProject.set(projectPath, worktrees);
+      }
+      for (const [projectPath, worktrees] of currentByProject) {
+        if (!mergedByProject.has(projectPath) && currentProjectPaths.has(projectPath)) {
+          mergedByProject.set(projectPath, worktrees);
+        }
       }
 
       useSessionUIStore.setState({
@@ -2086,7 +2097,7 @@ export function MobileApp({ apis }: MobileAppProps) {
     return () => {
       cancelled = true;
     };
-  }, [projects]);
+  }, [projects, worktreeDiscoveryEpoch]);
 
   React.useEffect(() => {
     let cancelled = false;

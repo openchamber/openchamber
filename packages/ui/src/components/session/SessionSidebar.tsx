@@ -472,13 +472,27 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
       if (cancelled) return;
 
-      // Merge with existing store data instead of replacing. This preserves
+      // Merge discovery results with existing store data. This preserves
       // worktrees for projects where discovery failed (e.g., server not
       // ready at startup) while updating projects where discovery succeeded.
+      // Prune stale entries for projects that have been removed from the
+      // project list or are no longer Git repos.
       const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
-      const mergedByProject = new Map(currentByProject);
+      const mergedByProject = new Map<string, WorktreeMetadata[]>();
+      const currentProjectPaths = new Set(
+        projectEntries
+          .map((p) => normalizePath(p.path))
+          .filter(Boolean) as string[],
+      );
       for (const [projectPath, worktrees] of worktreesByProject) {
         mergedByProject.set(projectPath, worktrees);
+      }
+      // Preserve existing data for projects in the current project list
+      // where discovery failed, but drop stale entries for removed projects.
+      for (const [projectPath, worktrees] of currentByProject) {
+        if (!mergedByProject.has(projectPath) && currentProjectPaths.has(projectPath)) {
+          mergedByProject.set(projectPath, worktrees);
+        }
       }
 
       useSessionUIStore.setState({
