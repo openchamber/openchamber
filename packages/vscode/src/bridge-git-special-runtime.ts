@@ -259,6 +259,11 @@ const generateBridgeTextWithSessionFlow = async ({
   } finally {
     if (sessionId) {
       try {
+        await client.v2.session.interrupt({ sessionID: sessionId }, { signal: AbortSignal.timeout(5_000), throwOnError: true });
+      } catch {
+        // ignore
+      }
+      try {
         await client.session.delete({ sessionID: sessionId }, { signal: AbortSignal.timeout(5_000) });
       } catch {
         // ignore cleanup failures

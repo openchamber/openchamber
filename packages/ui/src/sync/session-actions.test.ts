@@ -2,11 +2,13 @@ import { describe, expect, test, beforeEach, mock } from "bun:test"
 import type { PermissionRequest } from "@/types/permission"
 import type { QuestionRequest } from "@/types/question"
 
-// Mock SDK client that records permission.reply / question.reply calls
+// Mock SDK client that records interrupt / permission.reply / question.reply calls
 const replyCalls: Array<{ method: string; params: Record<string, unknown> }> = []
 const scopedClientDirectories: string[] = []
 const registeredSessionDirectories: Array<{ sessionID: string; directory: string }> = []
 let sessionRevertResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
+let sessionUnrevertResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
+let sessionMessagesResult: { data?: unknown; error?: unknown; response?: { status?: number } } = { data: [] }
 let questionReplyError: unknown | null = null
 let questionRejectError: unknown | null = null
 let sessionShareResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
@@ -41,11 +43,15 @@ const mockSdk = {
   session: {
     messages: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "session.messages", params })
-      return Promise.resolve({ data: [] })
+      return Promise.resolve(sessionMessagesResult)
     }),
     revert: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "session.revert", params })
       return Promise.resolve(sessionRevertResult)
+    }),
+    unrevert: mock((params: Record<string, unknown>) => {
+      replyCalls.push({ method: "session.unrevert", params })
+      return Promise.resolve(sessionUnrevertResult)
     }),
     abort: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "session.abort", params })
@@ -59,6 +65,14 @@ const mockSdk = {
       replyCalls.push({ method: "session.unshare", params })
       return Promise.resolve(sessionShareResult)
     }),
+  },
+  v2: {
+    session: {
+      interrupt: mock((params: Record<string, unknown>) => {
+        replyCalls.push({ method: "session.interrupt", params })
+        return Promise.resolve({ data: true })
+      }),
+    },
   },
   permission: {
     reply: mock((params: Record<string, unknown>) => {
@@ -339,6 +353,28 @@ describe("shareSession live state", () => {
   })
 })
 
+describe("abortCurrentOperation uses interrupt", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+  })
+
+  test("calls session.interrupt for the current session", async () => {
+    const childStores = createChildStores([["/test/project", createStore({})]])
+
+    const { setActionRefs, abortCurrentOperation } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    await abortCurrentOperation("session-a")
+
+    expect(replyCalls).toEqual([
+      {
+        method: "session.interrupt",
+        params: { sessionID: "session-a" },
+      },
+    ])
+  })
+})
+
 describe("optimisticSend target directory", () => {
   beforeEach(() => {
     replyCalls.length = 0
@@ -505,6 +541,8 @@ describe("revertToMessage passes session directory", () => {
     replyCalls.length = 0
     scopedClientDirectories.length = 0
     sessionRevertResult = {}
+    sessionUnrevertResult = {}
+    sessionMessagesResult = { data: [] }
     Object.assign(inputState, {
       pendingInputText: "previous draft",
       pendingInputMode: "normal" as const,
@@ -518,6 +556,7 @@ describe("revertToMessage passes session directory", () => {
     const targetPart = { id: "prt_2", messageID: "msg_2", type: "text", text: "edit this" } as Part
     const sessionStore = createStore({}, {
       session: [session],
+      session_status: { "session-a": { type: "busy" as const } },
       message: { "session-a": [targetMessage] },
       part: { "msg_2": [targetPart] },
     })
@@ -533,6 +572,7 @@ describe("revertToMessage passes session directory", () => {
 
     await revertToMessage("session-a", "msg_2")
 
+    expect(replyCalls.map((call) => call.method)).toEqual(["session.interrupt", "session.revert"])
     expect(replyCalls.find((call) => call.method === "session.revert")?.params.directory).toBe("/test/project")
     expect((sessionStore.getState().session[0] as Session & { revert?: { messageID?: string } }).revert?.messageID).toBe("msg_2")
     expect(currentStore.getState().session).toHaveLength(0)
@@ -565,6 +605,31 @@ describe("revertToMessage passes session directory", () => {
     expect((thrown as Error).message).toContain("session.revert failed (500)")
     expect((sessionStore.getState().session[0] as Session & { revert?: { messageID?: string } }).revert).toBe(undefined)
     expect(inputState.pendingInputText).toBe("previous draft")
+  })
+
+  test("interrupts busy sessions before unreverting", async () => {
+    const session = { id: "session-a", time: { created: 1 } } as Session
+    const sessionStore = createStore({}, {
+      session: [session],
+      session_status: { "session-a": { type: "busy" as const } },
+    })
+    const childStores = createChildStores([["/test/project", sessionStore]])
+    sessionUnrevertResult = { data: { id: "session-a", time: { created: 1, updated: 2 } } as Session }
+    sessionMessagesResult = {
+      data: [
+        {
+          info: { id: "msg_1", sessionID: "session-a", role: "assistant", time: { created: 2 } } as Message,
+          parts: [],
+        },
+      ],
+    }
+
+    const { setActionRefs, unrevertSession } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    await unrevertSession("session-a")
+
+    expect(replyCalls.map((call) => call.method)).toEqual(["session.interrupt", "session.unrevert", "session.messages"])
   })
 })
 
