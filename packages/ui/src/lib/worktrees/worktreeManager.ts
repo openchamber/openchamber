@@ -11,6 +11,7 @@ import {
   startWorktreeBootstrapWatcher,
 } from '@/lib/worktrees/worktreeBootstrap';
 import { invalidateResolvedProjectRootCache, resolveProjectRoot } from '@/lib/worktrees/worktreeStatus';
+import { normalizeProjectPath } from '@/lib/projectResolution';
 import type {
   CreateGitWorktreePayload,
   GitWorktreeBootstrapStatus,
@@ -240,7 +241,8 @@ export const attachWorktreeToStore = (
   projectDirectory: string,
   worktree: WorktreeMetadata,
 ): void => {
-  const sidebarProjectKey = normalizePath(projectDirectory) ?? projectDirectory;
+  const sidebarProjectKey = normalizeProjectPath(projectDirectory);
+  if (!sidebarProjectKey) return;
   const state = useSessionUIStore.getState();
   const currentByProject = state.availableWorktreesByProject;
   const currentFlat = state.availableWorktrees;
@@ -328,7 +330,8 @@ const readStableProjectWorktrees = async (projectDirectory: string): Promise<Wor
 };
 
 export async function listProjectWorktrees(project: ProjectRef): Promise<WorktreeMetadata[]> {
-  const projectDirectory = normalizePath(project.path);
+  const projectDirectory = normalizeProjectPath(project.path);
+  if (!projectDirectory) return [];
 
   // Return cached if fresh
   const cached = _worktreeListCache.get(projectDirectory);
@@ -367,7 +370,10 @@ export type CreateWorktreeArgs = {
 };
 
 export async function createWorktree(project: ProjectRef, args: CreateWorktreeArgs): Promise<WorktreeMetadata> {
-  const projectDirectory = normalizePath(project.path);
+  const projectDirectory = normalizeProjectPath(project.path);
+  if (!projectDirectory) {
+    throw new Error('Invalid project path');
+  }
   const metadataProjectDirectory = await resolveProjectRoot(projectDirectory).catch(() => projectDirectory);
   const payload = toCreatePayload(args, projectDirectory);
 
@@ -429,7 +435,10 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
   deleteLocalBranch?: boolean;
   remoteName?: string;
 }): Promise<void> {
-  const projectDirectory = normalizePath(project.path);
+  const projectDirectory = normalizeProjectPath(project.path);
+  if (!projectDirectory) {
+    throw new Error('Invalid project path');
+  }
 
   const deleteRemote = Boolean(options?.deleteRemoteBranch);
   const deleteLocalBranch = options?.deleteLocalBranch === true;
@@ -444,7 +453,7 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
 
   clearWorktreeBootstrapState(worktree.path);
 
-  invalidateWorktreeList(normalizePath(project.path));
+  invalidateWorktreeList(projectDirectory);
   // Removing a worktree changes the repo's worktree topology; drop cached root
   // resolutions so root-branch lookups re-resolve against the new layout.
   invalidateResolvedProjectRootCache();

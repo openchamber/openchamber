@@ -66,6 +66,7 @@ import { useFontsReady } from './useFontsReady';
 import { useDeepLinkHandlers, useDeepLinkSource } from './deepLinkNavigation';
 import { useEdgeSwipeSessionSwitch } from './useEdgeSwipeSessionSwitch';
 import { useNativePushRegistration } from './useNativePushRegistration';
+import { normalizeProjectPath } from '@/lib/projectResolution';
 
 const MOBILE_SETTINGS_PAGES = [
   'appearance',
@@ -2049,7 +2050,7 @@ export function MobileApp({ apis }: MobileAppProps) {
 
       await Promise.all(
         projects.map(async (project) => {
-          const projectPath = project.path.replace(/\\/g, '/').replace(/\/+$/, '');
+          const projectPath = normalizeProjectPath(project.path);
           if (!projectPath) return;
           try {
             const cachedIsGitRepo = useGitStore.getState().directories.get(projectPath)?.isGitRepo;
@@ -2077,7 +2078,6 @@ export function MobileApp({ apis }: MobileAppProps) {
       // where discovery failed. Prune stale entries for removed projects
       // and projects confirmed as non-Git repos.
       const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
-      const normalizeProjectPath = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '');
       const currentProjectPaths = new Set(
         projects
           .map((p) => normalizeProjectPath(p.path))

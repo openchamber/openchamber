@@ -19,6 +19,7 @@ import { useSync } from '@/sync/use-sync';
 import { SyncRuntimeEffects } from './AppEffects';
 import { useAppFontEffects } from './useAppFontEffects';
 import { useMiniChatKeyboardShortcuts } from '@/hooks/useMiniChatKeyboardShortcuts';
+import { normalizeProjectPath } from '@/lib/projectResolution';
 import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
 import type { WorktreeMetadata } from '@/types/worktree';
 
@@ -180,7 +181,7 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
       const nonGitProjectPaths = new Set<string>();
 
       await Promise.all(projects.map(async (project) => {
-        const projectPath = project.path.replace(/\\/g, '/').replace(/\/+$/, '');
+        const projectPath = normalizeProjectPath(project.path);
         if (!projectPath) return;
         try {
           const cachedIsGitRepo = useGitStore.getState().directories.get(projectPath)?.isGitRepo;
@@ -206,7 +207,6 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
       // where discovery failed. Prune stale entries for removed projects
       // and projects confirmed as non-Git repos.
       const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
-      const normalizeProjectPath = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '');
       const currentProjectPaths = new Set(
         projects
           .map((p) => normalizeProjectPath(p.path))
