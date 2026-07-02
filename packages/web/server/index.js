@@ -1366,9 +1366,11 @@ const INTERNAL_API_PREFIXES = [
 '/api/fs/', '/api/git/',
 // OpenChamber config handlers (NOT OpenCode list endpoints)
 '/api/config/skills', '/api/config/themes', '/api/config/plugins',
-'/api/config/mcp', '/api/config/mcp/', '/api/config/snippets',
-'/api/config/opencode-resolution', '/api/config/settings',
-'/api/config/reload',
+'/api/config/mcp', '/api/config/snippets', '/api/config/agents',
+'/api/config/commands', '/api/config/opencode-resolution',
+'/api/config/settings', '/api/config/reload',
+// Provider config (OpenChamber wraps OpenCode provider sources/auth)
+'/api/provider',
 // OpenChamber-managed resources (NOT OpenCode SDK endpoints)
 '/api/auth/', '/api/passkeys', '/api/session-folders',
 '/api/magic-prompts', '/api/mcp/auth',
