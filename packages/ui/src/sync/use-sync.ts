@@ -399,7 +399,12 @@ export function useSync() {
           complete: merged.complete,
           loading: false,
         })
-        store.setState({ message: materialized.message, part: materialized.part })
+        if (materialized.messagesChanged || materialized.partsChanged) {
+          store.setState({
+            ...(materialized.messagesChanged ? { message: materialized.message } : {}),
+            ...(materialized.partsChanged ? { part: materialized.part } : {}),
+          })
+        }
         setSessionPrefetch({
           directory,
           sessionID,
@@ -498,13 +503,12 @@ export function useSync() {
           shouldLoadMessages ? loadMessages(sessionID, { isStale }) : Promise.resolve(),
         ])
 
-        // Progressive mount: after the initial page resolves, if the session
-        // isn't stale and the server indicated more messages, dispatch a
-        // second fetch to prepend older history. The user sees the first page
-        // immediately; the rest arrive shortly after. This gives the scroll
-        // container headroom above the viewport so the "load older on
-        // scroll-up" trigger fires before the user hits the absolute top.
-        if (!isStale()) {
+        // Progressive mount on desktop: after the initial page resolves, if the
+        // session isn't stale and the server indicated more messages, dispatch a
+        // second fetch to prepend older history. Mobile avoids this background
+        // prepend because adding rows after first paint on a narrow viewport can
+        // visibly shift the timeline; user scroll still loads older history.
+        if (!isStale() && !isMobileSurfaceRuntime()) {
           const currentMeta = getMetaFor(sessionID)
           if (currentMeta.cursor && !currentMeta.complete) {
             loadMessages(sessionID, { before: currentMeta.cursor, mode: "prepend", isStale })

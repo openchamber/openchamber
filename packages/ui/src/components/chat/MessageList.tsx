@@ -155,6 +155,21 @@ const getMessageParentId = (message: ChatMessageEntry): string | null => {
     return typeof parentID === 'string' && parentID.trim().length > 0 ? parentID : null;
 };
 
+const isInsideStuckSticky = (node: HTMLElement, container: HTMLElement, containerTop: number): boolean => {
+    if (typeof window === 'undefined') return false;
+
+    let current: HTMLElement | null = node;
+    while (current && current !== container) {
+        const computed = window.getComputedStyle(current);
+        if (computed.position === 'sticky' && current.getBoundingClientRect().top <= containerTop + 1) {
+            return true;
+        }
+        current = current.parentElement;
+    }
+
+    return false;
+};
+
 const isUserShellMarkerMessage = (message: ChatMessageEntry | undefined): boolean => {
     if (!message) return false;
     if (resolveMessageRole(message) !== 'user') return false;
@@ -373,6 +388,7 @@ export interface MessageListHandle {
     scrollToMessageId: (messageId: string, options?: { behavior?: ScrollBehavior }) => boolean;
     captureViewportAnchor: () => { messageId: string; offsetTop: number } | null;
     restoreViewportAnchor: (anchor: { messageId: string; offsetTop: number }) => boolean;
+    isHistoryVirtualized: () => boolean;
     scrollToBottom: () => void;
 }
 
@@ -1262,7 +1278,10 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     }
 
     const historyEntries = staticRenderEntries;
-    const shouldVirtualizeHistory = historyEntries.length >= MESSAGE_LIST_VIRTUALIZE_THRESHOLD;
+    // Virtua hides unmeasured items until ResizeObserver reports their height.
+    // Mobile momentum scrolling can outrun that measurement and expose blank
+    // reserved rows, so keep the constrained mobile history mounted normally.
+    const shouldVirtualizeHistory = !isMobileSurfaceRuntime() && historyEntries.length >= MESSAGE_LIST_VIRTUALIZE_THRESHOLD;
     const historyEntryKeys = React.useMemo(() => historyEntries.map((entry) => entry.key), [historyEntries]);
     const virtualCache = React.useMemo(
         () => (shouldVirtualizeHistory ? readTimelineCache(sessionKey, historyEntryKeys) : undefined),
@@ -1468,6 +1487,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     );
             },
 
+            isHistoryVirtualized: () => shouldVirtualizeHistory,
+
             captureViewportAnchor: () => {
                 const container = resolveScrollContainer();
                 if (!container) {
@@ -1486,9 +1507,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                         return true;
                     }
 
-                    const computed = window.getComputedStyle(node);
-                    const isStuckSticky = computed.position === 'sticky' && rect.top <= containerRect.top + 1;
-                    return !isStuckSticky;
+                    return !isInsideStuckSticky(node, container, containerRect.top);
                 }) ?? nodes.find((node) => node.getBoundingClientRect().bottom > containerRect.top + 1);
                 if (!firstVisible) {
                     return null;

@@ -16,6 +16,7 @@ import { initializeLocale, I18nProvider } from '@/lib/i18n';
 import { initializeAppearancePreferences, syncDesktopSettings } from '@/lib/persistence';
 import { startModelPrefsAutoSave } from '@/lib/modelPrefsAutoSave';
 import { startTypographyWatcher } from '@/lib/typographyWatcher';
+import { preloadMarkdownRenderer } from '@/components/chat/markdownRendererLoader';
 import { MobileApp } from './MobileApp';
 
 const initializeSharedPreferences = () => {
@@ -42,6 +43,7 @@ const initializeSharedPreferences = () => {
 };
 
 export function renderMobileApp(apis: RuntimeAPIs) {
+  preloadMarkdownRenderer();
   initializeSharedPreferences();
 
   // Expose the widget snapshot builder so the native shell can read the session overview
