@@ -472,10 +472,33 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
       if (cancelled) return;
 
-      useSessionUIStore.setState({
-        availableWorktrees: allWorktrees,
-        availableWorktreesByProject: worktreesByProject,
-      });
+      // Skip the store update if nothing actually changed. Each reference
+      // change to availableWorktreesByProject triggers re-renders in 16+
+      // subscribers, so avoiding unnecessary updates is worth the comparison.
+      // listProjectWorktrees returns new array instances on each call, so
+      // reference equality alone won't detect identical content. Compare
+      // array lengths and element references instead.
+      const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
+      let changed = worktreesByProject.size !== currentByProject.size;
+      if (!changed) {
+        for (const [key, value] of worktreesByProject) {
+          const existing = currentByProject.get(key);
+          if (
+            !existing ||
+            existing.length !== value.length ||
+            existing.some((item, i) => item !== value[i])
+          ) {
+            changed = true;
+            break;
+          }
+        }
+      }
+      if (changed) {
+        useSessionUIStore.setState({
+          availableWorktrees: allWorktrees,
+          availableWorktreesByProject: worktreesByProject,
+        });
+      }
     };
 
     // Skip if we already discovered worktrees for this exact project set.

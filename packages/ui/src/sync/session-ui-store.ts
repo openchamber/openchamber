@@ -1546,10 +1546,20 @@ setSessionOpener((sessionID, directory) => {
 })
 
 // Write-through persist of the worktree map whenever discovery refreshes it.
-// Cheap reference-equality guard — this fires only when the map actually
-// changes (discovery / worktree create/remove), not on hot session updates.
+// Reference-equality guard filters hot session updates; content-hash guard
+// avoids redundant localStorage writes when the Map reference changed but
+// the content is identical (e.g., re-discovery that found the same worktrees).
+let lastPersistedWorktreeHash = ''
 useSessionUIStore.subscribe((state, prev) => {
   if (state.availableWorktreesByProject !== prev.availableWorktreesByProject) {
-    persistWorktreeMap(state.availableWorktreesByProject)
+    try {
+      const hash = JSON.stringify([...state.availableWorktreesByProject.entries()])
+      if (hash !== lastPersistedWorktreeHash) {
+        lastPersistedWorktreeHash = hash
+        persistWorktreeMap(state.availableWorktreesByProject)
+      }
+    } catch {
+      // serialization error — skip persist; discovery still refreshes at runtime
+    }
   }
 })
