@@ -1,3 +1,8 @@
+import type { Message, SessionStatus } from '@opencode-ai/sdk/v2/client';
+
+import type { PermissionRequest } from '@/types/permission';
+import type { QuestionRequest } from '@/types/question';
+
 type SessionActivityPhase = 'idle' | 'busy' | 'retry';
 
 export interface SessionActivityResult {
@@ -14,17 +19,14 @@ const IDLE_RESULT: SessionActivityResult = {
   isCooldown: false,
 };
 
-type SessionMessageLike = {
-  role?: string;
-  time?: { completed?: number };
-};
+type SessionMessage = Pick<Message, 'role' | 'time'>;
 
 type SessionActivityInput = {
   sessionId: string | null | undefined;
-  status: { type?: SessionActivityPhase } | undefined;
-  messages: SessionMessageLike[];
-  permissions: unknown[];
-  questions: unknown[];
+  status: SessionStatus | undefined;
+  messages: readonly SessionMessage[];
+  permissions: readonly PermissionRequest[];
+  questions: readonly QuestionRequest[];
 };
 
 export function deriveSessionActivity({
@@ -38,7 +40,7 @@ export function deriveSessionActivity({
 
   if (permissions.length > 0 || questions.length > 0) return IDLE_RESULT;
 
-  const phase: SessionActivityPhase = (status?.type ?? 'idle') as SessionActivityPhase;
+  const phase = status?.type ?? 'idle';
 
   const lastMessage = messages[messages.length - 1];
   const hasCompletedAssistantTurn = Boolean(
