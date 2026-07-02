@@ -2205,7 +2205,14 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
 const activateMainWindow = async (url, localOrigin, bootOutcome, runtimeConfig = {}) => {
   state.localOrigin = localOrigin;
   try {
-    state.localUiOrigin = typeof url === 'string' ? new URL(url).origin : null;
+    if (typeof url === 'string') {
+      const parsed = new URL(url);
+      state.localUiOrigin = (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost' || parsed.hostname === '[::1]' || parsed.hostname === '0.0.0.0')
+        ? parsed.origin
+        : null;
+    } else {
+      state.localUiOrigin = null;
+    }
   } catch {
     state.localUiOrigin = null;
   }
@@ -4565,7 +4572,14 @@ app.whenReady().then(async () => {
     const { localOrigin, localUiUrl, bootOutcome, requestHeaders } = await resolveInitialUrl();
     state.localOrigin = localOrigin;
     try {
-      state.localUiOrigin = localUiUrl ? new URL(localUiUrl).origin : null;
+      if (localUiUrl) {
+        const parsed = new URL(localUiUrl);
+        state.localUiOrigin = (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost' || parsed.hostname === '[::1]' || parsed.hostname === '0.0.0.0')
+          ? parsed.origin
+          : null;
+      } else {
+        state.localUiOrigin = null;
+      }
     } catch {
       state.localUiOrigin = null;
     }
