@@ -129,6 +129,11 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     const contentRef = React.useRef<HTMLDivElement>(null);
     const contentAnimationRef = React.useRef<AnimationPlaybackControls | null>(null);
     const contentMountedRef = React.useRef(false);
+    // Scroll container for the capped peek view (hidden-by-default mode while
+    // streaming, or any finished reasoning). Auto-follows the stream bottom
+    // unless the user has scrolled away.
+    const scrollBoxRef = React.useRef<HTMLElement | null>(null);
+    const userScrolledAwayRef = React.useRef(false);
     // Stable handle to onContentChange so the height-animation layout effect can
     // signal auto-follow without taking onContentChange as a dependency (which
     // would risk re-running — and thus restarting — the animation on re-render).
@@ -171,6 +176,22 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
         }
         onContentChange?.('structural');
     }, [onContentChange, text]);
+
+    // Stick-to-bottom while streaming: pin the capped box to the latest content
+    // bottom on each text tick, but release the moment the user scrolls up so
+    // they can read earlier reasoning without being yanked back. Same logic
+    // applies to both modes (dynamic + hidden-by-default) because both render
+    // the capped scroll box while streaming.
+    React.useLayoutEffect(() => {
+        if (!isStreaming || !isExpanded) {
+            return;
+        }
+        const el = scrollBoxRef.current;
+        if (!el || userScrolledAwayRef.current) {
+            return;
+        }
+        el.scrollTop = el.scrollHeight;
+    }, [isStreaming, isExpanded, text]);
 
     React.useEffect(() => {
         if (isExpanded || isStreaming) {
@@ -412,15 +433,22 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                             style={{ backgroundColor: 'var(--tools-border)' }}
                         />
                         {isStreaming ? (
-                            // While streaming, let the thinking grow inline — no
-                            // capped, independently-scrollable box. The chat's own
-                            // auto-follow then handles following / releasing, so the
-                            // box never captures the wheel or fights the user's
-                            // scroll. The max-height scroll box is applied only once
-                            // the thinking has finished (the branch below).
-                            <div className="p-0">
+                            <ScrollableOverlay
+                                ref={scrollBoxRef}
+                                as="div"
+                                outerClassName="max-h-80"
+                                className="p-0"
+                                useScrollShadow
+                                scrollShadowSize={36}
+                                userIntentOnly
+                                onScroll={(event: React.UIEvent<HTMLElement>) => {
+                                    const el = event.currentTarget;
+                                    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+                                    userScrolledAwayRef.current = distanceFromBottom > 24;
+                                }}
+                            >
                                 {reasoningBody}
-                            </div>
+                            </ScrollableOverlay>
                         ) : (
                             <ScrollableOverlay
                                 as="div"
