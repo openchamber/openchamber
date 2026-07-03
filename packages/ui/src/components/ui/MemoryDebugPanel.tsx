@@ -99,7 +99,7 @@ const PerfSection: React.FC<{ title: string; snapshot: StreamPerfSnapshot; empty
   );
 };
 
-export const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
+const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
   const { t } = useI18n();
   const [activeTab, setActiveTab] = React.useState<DebugTab>('memory');
   const [copyState, setCopyState] = React.useState<'idle' | 'copied' | 'error'>('idle');

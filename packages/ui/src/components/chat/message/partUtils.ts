@@ -2,7 +2,7 @@ import type { Part } from '@opencode-ai/sdk/v2';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string };
 
-export const isValidPart = (part: unknown): part is Part => {
+const isValidPart = (part: unknown): part is Part => {
     return Boolean(part && typeof part === 'object' && typeof (part as { type?: unknown }).type === 'string');
 };
 
@@ -66,14 +66,4 @@ export const filterVisibleParts = (parts: Part[], options: VisibleFilterOptions 
 
         return !isPatchPart;
     });
-};
-
-type PartWithTime = Part & { time?: { start?: number; end?: number } };
-
-export const isFinalizedTextPart = (part: Part): boolean => {
-    if (part.type !== 'text') {
-        return false;
-    }
-    const time = (part as PartWithTime).time;
-    return Boolean(time && typeof time.end !== 'undefined');
 };

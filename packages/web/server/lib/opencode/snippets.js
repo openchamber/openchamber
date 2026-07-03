@@ -240,5 +240,3 @@ export function expandSnippets(text, workingDirectory) {
   const expanded = expandText(text || '', registry, new Map(), collector).trim();
   return [...collector.prepend, expanded, ...collector.append].filter(Boolean).join('\n\n');
 }
-
-export { assertValidSnippetName };

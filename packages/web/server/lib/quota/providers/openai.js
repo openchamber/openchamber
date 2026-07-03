@@ -8,11 +8,11 @@ import {
   toTimestamp
 } from '../utils/index.js';
 
-export const providerId = 'openai';
-export const providerName = 'OpenAI';
-export const aliases = ['openai', 'codex', 'chatgpt'];
+const providerId = 'openai';
+const providerName = 'OpenAI';
+const aliases = ['openai', 'codex', 'chatgpt'];
 
-export const isConfigured = () => {
+const isConfigured = () => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
   return Boolean(entry?.access || entry?.token);

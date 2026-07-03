@@ -85,7 +85,7 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
   const content = (
     <div
       className={cn(
-        'fixed inset-0 z-[60] flex flex-col bg-[rgb(0_0_0_/_0.45)] transition-opacity duration-200 ease-out',
+        'oc-keyboard-inset-surface fixed inset-0 z-[60] flex flex-col bg-[rgb(0_0_0_/_0.45)] transition-opacity duration-200 ease-out',
         entered ? 'opacity-100' : 'opacity-0',
       )}
       role="dialog"
@@ -140,5 +140,3 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
 
   return createPortal(content, overlayRootRef.current);
 };
-
-export default MobileOverlayPanel;

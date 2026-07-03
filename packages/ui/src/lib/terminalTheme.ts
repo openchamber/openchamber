@@ -62,35 +62,6 @@ export function convertThemeToXterm(theme: Theme): TerminalTheme {
   };
 }
 
-export function getTerminalOptions(
-  fontFamily: string,
-  fontSize: number,
-  theme: TerminalTheme
-) {
-
-  const powerlineFallbacks =
-    '"JetBrainsMonoNL Nerd Font", "FiraCode Nerd Font", "Cascadia Code PL", "Fira Code", "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", "Courier New", monospace';
-  const augmentedFontFamily = `${fontFamily}, ${powerlineFallbacks}`;
-
-  return {
-    fontFamily: augmentedFontFamily,
-    fontSize,
-    lineHeight: 1,
-    cursorBlink: false,
-    cursorStyle: 'bar' as const,
-    theme,
-    allowTransparency: false,
-    scrollback: 10_000,
-    minimumContrastRatio: 1,
-    fastScrollModifier: 'shift' as const,
-    fastScrollSensitivity: 5,
-    scrollSensitivity: 3,
-    macOptionIsMeta: true,
-    macOptionClickForcesSelection: false,
-    rightClickSelectsWord: true,
-  };
-}
-
 /**
  * Get terminal options for Ghostty Web terminal
  */

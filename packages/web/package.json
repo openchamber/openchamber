@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/web",
-  "version": "1.13.2",
+  "version": "1.13.9",
   "private": false,
   "type": "module",
   "main": "./server/index.js",
@@ -25,7 +25,7 @@
   "dependencies": {
     "@clack/prompts": "^1.1.0",
     "@octokit/rest": "^22.0.1",
-    "@opencode-ai/sdk": "^1.17.7",
+    "@opencode-ai/sdk": "1.17.12",
     "@simplewebauthn/server": "13.3.1",
     "adm-zip": "^0.5.16",
     "better-sqlite3": "^12.10.0",
@@ -51,9 +51,6 @@
     "@codemirror/lang-cpp": "^6.0.3",
     "@codemirror/lang-go": "^6.0.1",
     "@eslint/js": "^9.33.0",
-    "@fontsource/ibm-plex-mono": "^5.2.7",
-    "@fontsource/ibm-plex-sans": "^5.1.1",
-    "@ibm/plex": "^6.4.1",
     "@radix-ui/react-collapsible": "^1.1.12",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.16",

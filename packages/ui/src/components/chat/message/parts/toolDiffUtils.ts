@@ -18,7 +18,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => {
     return typeof value === 'object' && value !== null;
 };
 
-export const normalizePatchText = (patch: string): string => {
+const normalizePatchText = (patch: string): string => {
     return patch.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
 };
 

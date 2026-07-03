@@ -1,7 +1,7 @@
 import type { Message, Part } from '@opencode-ai/sdk/v2/client';
 import type { State } from '@/sync/types';
 
-export type RevertedMessageRecord = {
+type RevertedMessageRecord = {
     message: Message & { role: 'user' };
     parts: Part[];
 };

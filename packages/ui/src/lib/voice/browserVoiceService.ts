@@ -34,9 +34,9 @@ declare global {
 }
 
 // Callback types
-export type SpeechResultCallback = (text: string, isFinal: boolean) => void;
-export type SpeechEndCallback = () => void;
-export type ErrorCallback = (error: string) => void;
+type SpeechResultCallback = (text: string, isFinal: boolean) => void;
+type SpeechEndCallback = () => void;
+type ErrorCallback = (error: string) => void;
 
 /**
  * Browser Voice Service class
@@ -234,7 +234,7 @@ class BrowserVoiceService {
       this.isListening = true;
       this.restartOnEnd = true;
     };
-    
+
     this.recognition.onaudiostart = () => {
       console.log('[BrowserVoiceService] Audio recording started');
     };
@@ -652,6 +652,3 @@ class BrowserVoiceService {
 
 // Export singleton instance
 export const browserVoiceService = new BrowserVoiceService();
-
-// Also export the class for testing/customization
-export { BrowserVoiceService };

@@ -2,7 +2,7 @@ import type { DesktopSettings } from '@/lib/desktop';
 import { createProjectIdFromPath } from '@/lib/projectId';
 import { useUIStore } from '@/stores/useUIStore';
 import { isMonoFontOption, isUiFontOption } from '@/lib/fontOptions';
-import { useMessageQueueStore } from '@/stores/messageQueueStore';
+import { isFollowUpBehavior, normalizeFollowUpBehavior, useMessageQueueStore, type FollowUpBehavior } from '@/stores/messageQueueStore';
 import { setDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { setFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { loadAppearancePreferences, applyAppearancePreferences } from '@/lib/appearancePersistence';
@@ -201,6 +201,42 @@ const areStringRecordsEqual = (left: Record<string, string>, right: Record<strin
   const rightEntries = Object.entries(right);
   if (leftEntries.length !== rightEntries.length) return false;
   return leftEntries.every(([key, value]) => right[key] === value);
+};
+
+const areModelRefsEqual = (
+  left: Array<{ providerID: string; modelID: string }>,
+  right: Array<{ providerID: string; modelID: string }>,
+): boolean => (
+  left.length === right.length &&
+  left.every((item, idx) => item.providerID === right[idx]?.providerID && item.modelID === right[idx]?.modelID)
+);
+
+const areStringArraysEqual = (left: string[], right: string[]): boolean => (
+  left.length === right.length && left.every((value, idx) => value === right[idx])
+);
+
+const sanitizeStringArray = (value: unknown): string[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  return Array.from(new Set(value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)));
+};
+
+const sanitizeRecentEfforts = (value: unknown): Record<string, string[]> | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const result: Record<string, string[]> = {};
+  for (const [key, variants] of Object.entries(value)) {
+    if (!key || !Array.isArray(variants)) continue;
+    const sanitized = sanitizeStringArray(variants);
+    if (sanitized && sanitized.length > 0) {
+      result[key] = sanitized.slice(0, 5);
+    }
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+};
+
+const areRecentEffortsEqual = (left: Record<string, string[]>, right: Record<string, string[]>): boolean => {
+  const leftKeys = Object.keys(left);
+  if (leftKeys.length !== Object.keys(right).length) return false;
+  return leftKeys.every((key) => Array.isArray(right[key]) && areStringArraysEqual(left[key], right[key]));
 };
 
 const HEX_COLOR_PATTERN = /^#(?:[\da-fA-F]{3}|[\da-fA-F]{6})$/;
@@ -408,8 +444,14 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
     }
   }
 
-  if (typeof settings.queueModeEnabled === 'boolean' && settings.queueModeEnabled !== queueStore.queueModeEnabled) {
-    queueStore.setQueueMode(settings.queueModeEnabled);
+  let nextFollowUpBehavior: FollowUpBehavior | null = null;
+  if (isFollowUpBehavior(settings.followUpBehavior)) {
+    nextFollowUpBehavior = settings.followUpBehavior;
+  } else if (typeof settings.queueModeEnabled === 'boolean') {
+    nextFollowUpBehavior = normalizeFollowUpBehavior(undefined, settings.queueModeEnabled);
+  }
+  if (nextFollowUpBehavior && nextFollowUpBehavior !== queueStore.followUpBehavior) {
+    queueStore.setFollowUpBehavior(nextFollowUpBehavior);
   }
 
   if (typeof settings.showDeletionDialog === 'boolean' && settings.showDeletionDialog !== store.showDeletionDialog) {
@@ -604,22 +646,48 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (Array.isArray(settings.favoriteModels)) {
     const current = store.favoriteModels;
     const next = settings.favoriteModels;
-    const same =
-      current.length === next.length &&
-      current.every((item, idx) => item.providerID === next[idx]?.providerID && item.modelID === next[idx]?.modelID);
-    if (!same) {
+    if (!areModelRefsEqual(current, next)) {
       useUIStore.setState({ favoriteModels: next });
+    }
+  }
+
+  if (Array.isArray(settings.hiddenModels)) {
+    const current = store.hiddenModels;
+    const next = settings.hiddenModels;
+    if (!areModelRefsEqual(current, next)) {
+      useUIStore.setState({ hiddenModels: next });
+    }
+  }
+
+  if (Array.isArray(settings.collapsedModelProviders)) {
+    const current = store.collapsedModelProviders;
+    const next = settings.collapsedModelProviders;
+    if (!areStringArraysEqual(current, next)) {
+      useUIStore.setState({ collapsedModelProviders: next });
     }
   }
 
   if (Array.isArray(settings.recentModels)) {
     const current = store.recentModels;
     const next = settings.recentModels;
-    const same =
-      current.length === next.length &&
-      current.every((item, idx) => item.providerID === next[idx]?.providerID && item.modelID === next[idx]?.modelID);
-    if (!same) {
+    if (!areModelRefsEqual(current, next)) {
       useUIStore.setState({ recentModels: next });
+    }
+  }
+
+  if (Array.isArray(settings.recentAgents)) {
+    const current = store.recentAgents;
+    const next = settings.recentAgents;
+    if (!areStringArraysEqual(current, next)) {
+      useUIStore.setState({ recentAgents: next });
+    }
+  }
+
+  if (settings.recentEfforts && typeof settings.recentEfforts === 'object') {
+    const current = store.recentEfforts;
+    const next = settings.recentEfforts;
+    if (!areRecentEffortsEqual(current, next)) {
+      useUIStore.setState({ recentEfforts: next });
     }
   }
   if (typeof settings.diffLayoutPreference === 'string'
@@ -779,8 +847,10 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.gitmojiEnabled === 'boolean') {
     result.gitmojiEnabled = candidate.gitmojiEnabled;
   }
-  if (typeof candidate.queueModeEnabled === 'boolean') {
-    result.queueModeEnabled = candidate.queueModeEnabled;
+  if (isFollowUpBehavior(candidate.followUpBehavior)) {
+    result.followUpBehavior = candidate.followUpBehavior;
+  } else if (typeof candidate.queueModeEnabled === 'boolean') {
+    result.followUpBehavior = normalizeFollowUpBehavior(undefined, candidate.queueModeEnabled);
   }
   if (typeof candidate.showDeletionDialog === 'boolean') {
     result.showDeletionDialog = candidate.showDeletionDialog;
@@ -1053,9 +1123,29 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
     result.favoriteModels = favoriteModels;
   }
 
+  const hiddenModels = sanitizeModelRefs(candidate.hiddenModels, 1024);
+  if (hiddenModels) {
+    result.hiddenModels = hiddenModels;
+  }
+
+  const collapsedModelProviders = sanitizeStringArray(candidate.collapsedModelProviders);
+  if (collapsedModelProviders) {
+    result.collapsedModelProviders = collapsedModelProviders;
+  }
+
   const recentModels = sanitizeModelRefs(candidate.recentModels, 16);
   if (recentModels) {
     result.recentModels = recentModels;
+  }
+
+  const recentAgents = sanitizeStringArray(candidate.recentAgents);
+  if (recentAgents) {
+    result.recentAgents = recentAgents;
+  }
+
+  const recentEfforts = sanitizeRecentEfforts(candidate.recentEfforts);
+  if (recentEfforts) {
+    result.recentEfforts = recentEfforts;
   }
   if (
     typeof candidate.diffLayoutPreference === 'string'
@@ -1260,13 +1350,19 @@ export const syncDesktopSettings = async (): Promise<void> => {
 // Coalesce rapid updateDesktopSettings calls into a single PUT
 let _pendingSettingsChanges: Partial<DesktopSettings> | null = null;
 let _settingsFlushTimer: ReturnType<typeof setTimeout> | null = null;
+let _settingsFlushWaiters: Array<() => void> = [];
 const SETTINGS_DEBOUNCE_MS = 200;
 
 const _flushSettingsUpdate = async (): Promise<void> => {
   const changes = _pendingSettingsChanges;
+  const waiters = _settingsFlushWaiters;
   _pendingSettingsChanges = null;
   _settingsFlushTimer = null;
-  if (!changes || Object.keys(changes).length === 0) return;
+  _settingsFlushWaiters = [];
+  if (!changes || Object.keys(changes).length === 0) {
+    waiters.forEach((resolve) => resolve());
+    return;
+  }
 
   const runtimeSettings = getRuntimeSettingsAPI();
   if (runtimeSettings) {
@@ -1276,7 +1372,9 @@ const _flushSettingsUpdate = async (): Promise<void> => {
         persistToLocalStorage(updated);
         applyDesktopUiPreferences(updated);
         dispatchSettingsSynced(updated);
+        _settingsCache = null;
       }
+      waiters.forEach((resolve) => resolve());
       return;
     } catch (error) {
       console.warn('Failed to update settings via runtime settings API:', error);
@@ -1308,6 +1406,8 @@ const _flushSettingsUpdate = async (): Promise<void> => {
     }
   } catch (error) {
     console.warn('Failed to update shared settings via API:', error);
+  } finally {
+    waiters.forEach((resolve) => resolve());
   }
 };
 
@@ -1321,7 +1421,11 @@ export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): 
   if (_settingsFlushTimer) {
     clearTimeout(_settingsFlushTimer);
   }
+  const flushed = new Promise<void>((resolve) => {
+    _settingsFlushWaiters.push(resolve);
+  });
   _settingsFlushTimer = setTimeout(() => void _flushSettingsUpdate(), SETTINGS_DEBOUNCE_MS);
+  return flushed;
 };
 
 export const initializeAppearancePreferences = async (): Promise<void> => {

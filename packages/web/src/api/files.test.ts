@@ -32,14 +32,16 @@ describe('createWebFilesAPI', () => {
     runtimeFetchMock.mockResolvedValueOnce(Response.json({ path: '/worktree-b/file.txt', isFile: true, size: 12 }));
     await api.statFile?.('/worktree-b/file.txt', { directory: '/worktree-a' });
 
-    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/stat?path=%2Fworktree-b%2Ffile.txt', {
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/stat', {
+      query: new URLSearchParams({ path: '/worktree-b/file.txt' }),
       headers: { 'x-opencode-directory': '/worktree-a' },
     });
 
     runtimeFetchMock.mockResolvedValueOnce(new Response('content'));
     await api.readFile?.('/worktree-b/file.txt', { directory: '/worktree-a' });
 
-    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/read?path=%2Fworktree-b%2Ffile.txt', {
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/read', {
+      query: new URLSearchParams({ path: '/worktree-b/file.txt' }),
       cache: 'default',
       headers: { 'x-opencode-directory': '/worktree-a' },
     });

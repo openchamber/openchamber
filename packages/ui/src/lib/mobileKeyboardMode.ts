@@ -1,8 +1,8 @@
 export type MobileKeyboardMode = 'native' | 'resize-content';
 
-export const MOBILE_KEYBOARD_MODE_STORAGE_KEY = 'openchamber.mobileKeyboardMode';
-export const VIEWPORT_META_SELECTOR = 'meta[name="viewport"]';
-export const VIEWPORT_CONTENT_BASE = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover';
+const MOBILE_KEYBOARD_MODE_STORAGE_KEY = 'openchamber.mobileKeyboardMode';
+const VIEWPORT_META_SELECTOR = 'meta[name="viewport"]';
+const VIEWPORT_CONTENT_BASE = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover';
 
 export const supportsMobileKeyboardResizeContent = (): boolean => {
   return true;
@@ -21,7 +21,7 @@ export function normalizeMobileKeyboardMode(
   return fallback;
 }
 
-export const getViewportContentForMobileKeyboardMode = (value: unknown): string => {
+const getViewportContentForMobileKeyboardMode = (value: unknown): string => {
   const mode = normalizeMobileKeyboardMode(value);
   return mode === 'resize-content'
     ? `${VIEWPORT_CONTENT_BASE}, interactive-widget=resizes-content`

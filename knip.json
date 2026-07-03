@@ -1,0 +1,62 @@
+{
+  "$schema": "https://unpkg.com/knip@latest/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": [
+        "scripts/**/*.{js,cjs,mjs,ts}"
+      ],
+      "project": [
+        "*.{js,cjs,mjs,ts}",
+        "scripts/**/*.{js,cjs,mjs,ts}"
+      ]
+    },
+    "packages/ui": {
+      "entry": [
+        "src/**/*.{test,spec}.{js,cjs,mjs,jsx,ts,tsx}",
+        "src/**/__tests__/**/*.{js,cjs,mjs,jsx,ts,tsx}"
+      ],
+      "project": [
+        "src/**/*.{ts,tsx}"
+      ]
+    },
+    "packages/web": {
+      "entry": [
+        "src/mobile-main.tsx",
+        "src/mini-chat-main.tsx",
+        "src/sw.ts",
+        "server/**/*.{test,spec}.{js,cjs,mjs}",
+        "src/**/*.{test,spec}.{ts,tsx}"
+      ],
+      "project": [
+        "bin/**/*.js",
+        "server/**/*.{js,mjs,cjs}",
+        "src/**/*.{ts,tsx}"
+      ]
+    },
+    "packages/electron": {
+      "entry": [
+        "main.mjs",
+        "preload.mjs",
+        "tray.mjs",
+        "ssh-manager.mjs",
+        "opencode-cwd.mjs",
+        "*.{test,spec}.{js,cjs,mjs}",
+        "scripts/**/*.{js,cjs,mjs}"
+      ],
+      "project": [
+        "*.{js,cjs,mjs}",
+        "scripts/**/*.{js,cjs,mjs}"
+      ]
+    },
+    "packages/vscode": {
+      "entry": [
+        "src/**/*.{test,spec}.{js,cjs,mjs,ts,tsx}",
+        "webview/**/*.{test,spec}.{js,cjs,mjs,ts,tsx}"
+      ],
+      "project": [
+        "src/**/*.{ts,tsx}",
+        "webview/**/*.{ts,tsx}"
+      ]
+    }
+  }
+}

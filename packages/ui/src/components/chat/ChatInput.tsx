@@ -5,6 +5,7 @@ import { BrowserVoiceButton } from '@/components/voice';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
+import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useInputStore } from '@/sync/input-store';
@@ -16,11 +17,13 @@ import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { startReviewFlow } from '@/lib/reviewFlow';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import { ReviewFlowDialog, type ReviewFlowExecution } from '@/components/session/ReviewFlowDialog';
 import { AttachedFilesList, AttachedVSCodeFileChips, ActiveEditorFileSuggestion } from './FileAttachment';
 import ToolOutputDialog from './message/ToolOutputDialog';
 import type { ToolPopupContent } from './message/types';
 import { QueuedMessageChips } from './QueuedMessageChips';
+import { AutoReviewBanner } from './AutoReviewBanner';
 import { FileMentionAutocomplete, type FileMentionHandle } from './FileMentionAutocomplete';
 import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from './CommandAutocomplete';
 import { SkillAutocomplete, type SkillAutocompleteHandle } from './SkillAutocomplete';
@@ -90,6 +93,7 @@ import {
     buildAttachmentCitationText,
     findAttachmentCitationRanges,
 } from './attachmentCitations';
+import { getFileMentionAutocompleteQuery, type FileMentionAutocompleteInputSource } from './fileMentionAutocompleteState';
 import type { Part } from '@opencode-ai/sdk/v2/client';
 
 const MAX_VISIBLE_TEXTAREA_LINES = 8;
@@ -127,6 +131,38 @@ const buildImagePasteInsertion = (pastedText: string, citationText: string): str
     }
     return `${text}${/\s$/.test(text) ? '' : ' '}${citationText}`;
 };
+
+const getInsertedTextFromChange = (previousValue: string, nextValue: string): string => {
+    if (previousValue === nextValue) {
+        return '';
+    }
+
+    let prefixLength = 0;
+    while (
+        prefixLength < previousValue.length
+        && prefixLength < nextValue.length
+        && previousValue[prefixLength] === nextValue[prefixLength]
+    ) {
+        prefixLength += 1;
+    }
+
+    let previousSuffix = previousValue.length;
+    let nextSuffix = nextValue.length;
+    while (
+        previousSuffix > prefixLength
+        && nextSuffix > prefixLength
+        && previousValue[previousSuffix - 1] === nextValue[nextSuffix - 1]
+    ) {
+        previousSuffix -= 1;
+        nextSuffix -= 1;
+    }
+
+    return nextValue.slice(prefixLength, nextSuffix);
+};
+
+const getFileMentionInputSourceForInsertedText = (insertedText: string): FileMentionAutocompleteInputSource => (
+    insertedText.includes('@') ? 'paste' : 'manual'
+);
 
 const withInlineInsertionBoundaries = (content: string, before: string, after: string): string => {
     if (!content) {
@@ -963,6 +999,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const dragEnterCountRef = React.useRef(0);
     const suppressNextFileDropTextInsertRef = React.useRef(false);
     const suppressNextFileDropTextInsertTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    const suppressNextFileMentionPasteRef = React.useRef(false);
+    const suppressNextFileMentionPasteTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const pendingDroppedAbsolutePathsRef = React.useRef<string[]>([]);
     const canAcceptDropRef = React.useRef(false);
     const mentionRef = React.useRef<FileMentionHandle>(null);
@@ -1097,6 +1135,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 variant: execution.variant || undefined,
                 generateHandoff: execution.generateHandoff,
                 returnAfterHandoffRequest: execution.generateHandoff,
+                autoReview: execution.autoReview,
             });
             setReviewDialogOpen(false);
         } catch (error) {
@@ -1108,7 +1147,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, [currentSessionId, currentDirectory, t]);
 
     const isDesktopExpanded = isExpandedInput && !isMobile;
-    const chatInputRadius = 'var(--radius-xl)';
+    // Rounder composer on mobile (touch UI reads better with a softer corner).
+    const chatInputRadius = isMobile ? '1.5rem' : 'var(--radius-xl)';
     const useCompactChatPlaceholder = isMobile || isNarrowComposer;
 
     React.useEffect(() => {
@@ -1382,7 +1422,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     } | null>(null);
 
     // Message queue
-    const queueModeEnabled = useMessageQueueStore((state) => state.queueModeEnabled);
+    const followUpBehavior = useMessageQueueStore((state) => state.followUpBehavior);
     const queuedMessages = useMessageQueueStore(
         React.useCallback(
             (state) => {
@@ -1601,6 +1641,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     // Session activity for queue availability and controls
     const { phase: sessionPhase } = useCurrentSessionActivity();
+    const autoReviewRunning = useAutoReviewStore(React.useCallback((state) => {
+        if (!currentSessionId) return false;
+        const run = state.runsByOriginalSessionID[currentSessionId];
+        return run?.status === 'running' && run.runtimeKey === getRuntimeKey();
+    }, [currentSessionId]));
 
     const handleOpenMobilePanel = React.useCallback((panel: MobileControlsPanel) => {
         if (!isMobile) {
@@ -1654,6 +1699,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     type SubmitOptions = {
         queuedOnly?: boolean;
         queuedMessageId?: string;
+        delivery?: 'steer';
     };
     const handleSubmitRef = React.useRef<(options?: SubmitOptions) => Promise<void>>(async () => {});
 
@@ -1703,7 +1749,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, []);
 
     const handleQueuedMessageSend = React.useCallback((messageId: string) => {
-        void handleSubmitRef.current({ queuedOnly: true, queuedMessageId: messageId });
+        // Force-sending from the queue during a busy session counts as steer
+        void handleSubmitRef.current({ queuedOnly: true, queuedMessageId: messageId, delivery: 'steer' });
     }, []);
 
     const handleOpenAgentPanel = React.useCallback(() => {
@@ -1725,10 +1772,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const handleSubmit = async (options?: SubmitOptions) => {
         const queuedOnly = options?.queuedOnly ?? false;
         const queuedMessageId = options?.queuedMessageId;
+        const delivery = options?.delivery === 'steer' && sessionPhase !== 'idle' ? 'steer' : undefined;
         const inputSnapshot = getCurrentInputSnapshot();
         const queuedMessagesToSend = queuedMessageId
             ? queuedMessages.filter((message) => message.id === queuedMessageId)
             : queuedMessages;
+
+        if (queuedOnly && autoReviewRunning) {
+            return;
+        }
 
         if (queuedOnly) {
             if (queuedMessagesToSend.length === 0 || !currentSessionId) return;
@@ -1746,6 +1798,30 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             console.warn('Cannot send message: provider or model not selected');
             return;
         }
+
+        // Sending is authoritative: if a question prompt is open, dismiss it
+        // so the prompt cannot linger or strand the session. The dismiss clears
+        // the card instantly (optimistic) and formally rejects the question.
+        // Rejecting unblocks the agent's tool but does NOT end its turn, so a
+        // direct send would race with the still-active run and be silently
+        // discarded by the OpenCode runner. Instead we queue the message; the
+        // queued-message auto-send hook delivers it as the next turn once the
+        // rejected turn winds down and the session returns to idle. This avoids
+        // aborting the turn (which would surface an "aborted" notice).
+        if (currentSessionId && !queuedOnly && autoReviewRunning) {
+            handleQueueMessage();
+            return;
+        }
+
+        if (currentSessionId && !queuedOnly) {
+            const dismissedQuestions = await sessionActions.dismissOpenQuestionsForSession(currentSessionId);
+            if (dismissedQuestions) {
+                handleQueueMessage();
+                return;
+            }
+        }
+
+        const sendMessageOptions = delivery ? { delivery } : undefined;
 
         // Build the primary message (first part) and additional parts
         let primaryText = '';
@@ -1964,6 +2040,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         [{ text: instructionsText, synthetic: true }],
                         variantToSend,
                         inputMode,
+                        sendMessageOptions,
                     );
                     scrollToBottom?.();
                 } catch (error) {
@@ -1986,6 +2063,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         [{ text: instructionsText, synthetic: true }],
                         variantToSend,
                         inputMode,
+                        sendMessageOptions,
                     );
                     scrollToBottom?.();
                 } catch (error) {
@@ -2012,6 +2090,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         [{ text: instructionsText, synthetic: true }],
                         variantToSend,
                         inputMode,
+                        sendMessageOptions,
                     );
                     scrollToBottom?.();
                 } catch (error) {
@@ -2034,6 +2113,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         [{ text: instructionsText, synthetic: true }],
                         variantToSend,
                         inputMode,
+                        sendMessageOptions,
                     );
                     scrollToBottom?.();
                 } catch (error) {
@@ -2056,6 +2136,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         [{ text: instructionsText, synthetic: true }],
                         variantToSend,
                         inputMode,
+                        sendMessageOptions,
                     );
                     scrollToBottom?.();
                 } catch (error) {
@@ -2078,6 +2159,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         [{ text: instructionsText, synthetic: true }],
                         variantToSend,
                         inputMode,
+                        sendMessageOptions,
                     );
                     scrollToBottom?.();
                 } catch (error) {
@@ -2100,6 +2182,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         [{ text: instructionsText, synthetic: true }],
                         variantToSend,
                         inputMode,
+                        sendMessageOptions,
                     );
                     scrollToBottom?.();
                 } catch (error) {
@@ -2148,7 +2231,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             agentMentionName,
             additionalParts.length > 0 ? additionalParts : undefined,
             variantToSend,
-            inputMode
+            inputMode,
+            sendMessageOptions,
         );
 
         if (typeof window === 'undefined') {
@@ -2219,16 +2303,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     // Update ref with latest handleSubmit on every render
     handleSubmitRef.current = handleSubmit;
 
-    // Primary action for send button - respects queue mode setting
+    // Primary action for send/queue button — respects selected follow-up behavior
     const handlePrimaryAction = React.useCallback(() => {
         const inputSnapshot = getCurrentInputSnapshot();
-        const canQueue = inputMode === 'normal' && inputSnapshot.hasContent && currentSessionId && sessionPhase !== 'idle';
-        if (queueModeEnabled && canQueue) {
+        const canQueue = inputMode === 'normal' && inputSnapshot.hasContent && currentSessionId && (sessionPhase !== 'idle' || autoReviewRunning);
+        if (followUpBehavior === 'queue' && canQueue) {
             handleQueueMessage();
+        } else if (followUpBehavior === 'steer' && canQueue) {
+            void handleSubmitRef.current({ delivery: 'steer' });
         } else {
             void handleSubmitRef.current();
         }
-    }, [inputMode, getCurrentInputSnapshot, currentSessionId, sessionPhase, queueModeEnabled, handleQueueMessage]);
+    }, [inputMode, getCurrentInputSnapshot, currentSessionId, sessionPhase, autoReviewRunning, followUpBehavior, handleQueueMessage]);
 
     // Draft welcome presets: populate the composer and submit immediately.
     // getCurrentInputSnapshot reads textareaRef.current.value first, so setting it
@@ -2372,11 +2458,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
 
         // Handle ArrowUp/ArrowDown for message history navigation
-        // ArrowUp: only when input is empty (so pressing Up at start of text just moves cursor)
+        // ArrowUp: only when cursor at start (position 0) or input is empty
         // ArrowDown: also works when cursor at end (to cycle forward through history)
         const isAnyAutocompleteOpen = showCommandAutocomplete || showSkillAutocomplete || showSnippetAutocomplete || showFileMention;
+        const cursorAtStart = textareaRef.current?.selectionStart === 0 && textareaRef.current?.selectionEnd === 0;
         const cursorAtEnd = textareaRef.current?.selectionStart === message.length && textareaRef.current?.selectionEnd === message.length;
-        const canNavigateHistoryUp = !isAnyAutocompleteOpen && message.length === 0;
+        const canNavigateHistoryUp = !isAnyAutocompleteOpen && (message.length === 0 || cursorAtStart);
         const canNavigateHistoryDown = !isAnyAutocompleteOpen && (message.length === 0 || cursorAtEnd);
 
         // Markdown-aware auto-pairing (source mode), normal input only.
@@ -2466,33 +2553,28 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             return;
         }
 
-        // Handle Enter/Ctrl+Enter based on queue mode
+        // Handle Enter/Ctrl+Enter based on selected follow-up behavior.
         if (e.key === 'Enter' && !e.shiftKey && (!isMobile || e.ctrlKey || e.metaKey)) {
             e.preventDefault();
 
             const isCtrlEnter = e.ctrlKey || e.metaKey;
 
-            // Queue mode: Enter queues, Ctrl+Enter sends
-            // Normal mode: Enter sends, Ctrl+Enter queues
-            // Note: Queueing only works when there's an existing session (currentSessionId)
-            // For new sessions (draft), always send immediately
-            const canQueue = inputMode === 'normal' && hasContent && currentSessionId && sessionPhase !== 'idle';
+            // Queueing / steering only works when there's an existing busy
+            // session (or an active auto-review run).
+            const canQueue = inputMode === 'normal' && hasContent && currentSessionId && (sessionPhase !== 'idle' || autoReviewRunning);
 
-            if (queueModeEnabled) {
+            if (followUpBehavior === 'queue') {
                 if (isCtrlEnter || !canQueue) {
-                    // Ctrl+Enter sends, or Enter when can't queue (new session)
                     handleSubmit();
                 } else {
-                    // Enter queues when we have a session
                     handleQueueMessage();
                 }
             } else {
-                if (isCtrlEnter && canQueue) {
-                    // Ctrl+Enter queues when we have a session
-                    handleQueueMessage();
-                } else {
-                    // Enter sends
+                // steer: Enter steers into the running turn, Ctrl+Enter sends now.
+                if (isCtrlEnter || !canQueue) {
                     handleSubmit();
+                } else {
+                    handleSubmit({ delivery: 'steer' });
                 }
             }
         }
@@ -2710,7 +2792,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         adjustTextareaHeight({ allowShrink });
     }, [adjustTextareaHeight, message, isMobile]);
 
-    const updateAutocompleteState = React.useCallback((value: string, cursorPosition: number) => {
+    const updateAutocompleteState = React.useCallback((
+        value: string,
+        cursorPosition: number,
+        inputSource: FileMentionAutocompleteInputSource = 'manual',
+        insertedText?: string,
+    ) => {
         if (inputMode === 'shell') {
             setShowCommandAutocomplete(false);
             setShowFileMention(false);
@@ -2775,19 +2862,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         setShowSnippetAutocomplete(false);
 
-        const lastAtSymbol = textBeforeCursor.lastIndexOf('@');
-        if (lastAtSymbol !== -1) {
-            const charBefore = lastAtSymbol > 0 ? textBeforeCursor[lastAtSymbol - 1] : null;
-            const textAfterAt = textBeforeCursor.substring(lastAtSymbol + 1);
-            const isWordBoundary = !charBefore || /\s/.test(charBefore);
-            if (isWordBoundary && !textAfterAt.includes(' ') && !textAfterAt.includes('\n')) {
-                setMentionQuery(textAfterAt);
-                setShowFileMention(true);
-            } else {
-                setShowFileMention(false);
-            }
-        } else {
+        const nextMentionQuery = getFileMentionAutocompleteQuery({ value, cursorPosition, inputSource, insertedText });
+        if (nextMentionQuery === null) {
             setShowFileMention(false);
+        } else {
+            setMentionQuery(nextMentionQuery);
+            setShowFileMention(true);
         }
     }, [
         inputMode,
@@ -2801,7 +2881,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         setSnippetQuery,
     ]);
 
-    const insertTextAtSelection = React.useCallback((text: string) => {
+    const insertTextAtSelection = React.useCallback((
+        text: string,
+        inputSource: FileMentionAutocompleteInputSource = 'manual',
+    ) => {
         if (!text) {
             return;
         }
@@ -2810,7 +2893,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!textarea) {
             const nextValue = message + text;
             setMessage(nextValue);
-            updateAutocompleteState(nextValue, nextValue.length);
+            updateAutocompleteState(nextValue, nextValue.length, inputSource, text);
             requestAnimationFrame(() => adjustTextareaHeight());
             return;
         }
@@ -2830,7 +2913,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             adjustTextareaHeight();
         });
 
-        updateAutocompleteState(nextValue, cursorPosition);
+        updateAutocompleteState(nextValue, cursorPosition, inputSource, text);
     }, [adjustTextareaHeight, message, updateAutocompleteState]);
 
     const clearDropTextSuppression = React.useCallback(() => {
@@ -2850,6 +2933,25 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             clearDropTextSuppression();
         }, 700);
     }, [clearDropTextSuppression]);
+
+    const clearFileMentionPasteSuppression = React.useCallback(() => {
+        suppressNextFileMentionPasteRef.current = false;
+        if (suppressNextFileMentionPasteTimeoutRef.current) {
+            clearTimeout(suppressNextFileMentionPasteTimeoutRef.current);
+            suppressNextFileMentionPasteTimeoutRef.current = null;
+        }
+    }, []);
+
+    const markFileMentionPasteSuppression = React.useCallback(() => {
+        suppressNextFileMentionPasteRef.current = true;
+        if (suppressNextFileMentionPasteTimeoutRef.current) {
+            clearTimeout(suppressNextFileMentionPasteTimeoutRef.current);
+        }
+        suppressNextFileMentionPasteTimeoutRef.current = setTimeout(() => {
+            suppressNextFileMentionPasteRef.current = false;
+            suppressNextFileMentionPasteTimeoutRef.current = null;
+        }, 700);
+    }, []);
 
     const handleBeforeInput = React.useCallback((e: React.FormEvent<HTMLTextAreaElement>) => {
         if (!isVSCodeRuntime() || !suppressNextFileDropTextInsertRef.current) {
@@ -2878,6 +2980,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         const value = e.target.value;
         const cursorPosition = e.target.selectionStart ?? value.length;
+        const pastedInsertedText = nativeInputEvent?.inputType?.startsWith('insertFromPaste')
+            ? getInsertedTextFromChange(messageRef.current, value)
+            : '';
+        const isPasteInput = pastedInsertedText.includes('@') || suppressNextFileMentionPasteRef.current;
+        if (suppressNextFileMentionPasteRef.current) {
+            clearFileMentionPasteSuppression();
+        }
+        const inputSource: FileMentionAutocompleteInputSource = isPasteInput
+            ? 'paste'
+            : 'manual';
 
         if (inputMode === 'normal' && value.startsWith('!')) {
             const shellCommand = value.slice(1);
@@ -2899,14 +3011,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         setMessage(value);
         adjustTextareaHeight();
-        updateAutocompleteState(value, cursorPosition);
+        updateAutocompleteState(value, cursorPosition, inputSource, pastedInsertedText);
     };
 
     React.useEffect(() => {
         return () => {
             clearDropTextSuppression();
+            clearFileMentionPasteSuppression();
         };
-    }, [clearDropTextSuppression]);
+    }, [clearDropTextSuppression, clearFileMentionPasteSuppression]);
 
     const handlePaste = React.useCallback(async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
         // Pasting a URL over a selection wraps it as a markdown link:
@@ -2937,7 +3050,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         }
                         adjustTextareaHeight();
                     });
-                    updateAutocompleteState(next, caret);
+                    updateAutocompleteState(next, caret, getFileMentionInputSourceForInsertedText(url), url);
                     return;
                 }
             }
@@ -2961,17 +3074,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         });
 
         const imageFiles = Array.from(fileMap.values());
+        const pastedText = e.clipboardData.getData('text');
         if (imageFiles.length === 0) {
+            if (pastedText.includes('@')) {
+                markFileMentionPasteSuppression();
+            }
             return;
         }
 
         if (!currentSessionId && !newSessionDraftOpen) {
+            if (pastedText.includes('@')) {
+                markFileMentionPasteSuppression();
+            }
             return;
         }
 
         e.preventDefault();
 
-        const pastedText = e.clipboardData.getData('text');
         const assignedFilenames = assignImageAttachmentFilenames(
             imageFiles,
             [
@@ -2989,7 +3108,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             message.slice(selectionEnd),
         );
 
-        insertTextAtSelection(insertionText);
+        insertTextAtSelection(insertionText, getFileMentionInputSourceForInsertedText(insertionText));
 
         for (let index = 0; index < imageFiles.length; index += 1) {
             const filename = assignedFilenames[index];
@@ -3004,7 +3123,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 pendingPastedAttachmentFilenamesRef.current.delete(filename);
             }
         }
-    }, [addAttachedFile, attachedFiles, adjustTextareaHeight, currentSessionId, inputMode, message, newSessionDraftOpen, insertTextAtSelection, setMessage, t, updateAutocompleteState]);
+    }, [addAttachedFile, attachedFiles, adjustTextareaHeight, currentSessionId, inputMode, markFileMentionPasteSuppression, message, newSessionDraftOpen, insertTextAtSelection, setMessage, t, updateAutocompleteState]);
 
     const handleFileSelect = (file: { name: string; path: string; relativePath?: string }) => {
 
@@ -3908,7 +4027,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             className={cn(
                 "relative w-full pt-0 pb-4",
                 isDesktopExpanded && 'flex h-full min-h-0 flex-col pt-4',
-                isMobile && 'bottom-safe-area'
+                isMobile && 'bottom-safe-area oc-mobile-composer'
             )}
             style={isMobile && inputBarOffset > 0 ? { marginBottom: `${inputBarOffset}px` } : undefined}
         >
@@ -3930,6 +4049,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     onEditMessage={handleQueuedMessageEdit}
                     onSendMessage={handleQueuedMessageSend}
                 />
+                <AutoReviewBanner />
                 {hasDrafts && (
                     <div className="flex flex-wrap items-center gap-2 pb-2">
                         {reviewCount > 0 ? (
@@ -4415,7 +4535,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         {isMobile ? (
                             <>
                                 <div className="flex w-full items-center justify-between gap-x-1.5">
-                                    <div className="flex items-center gap-x-1.5">
+                                    <div className="composer-mobile-actions flex items-center gap-x-2 pl-1">
                                         <MobileSessionPanelTrigger
                                             footerIconButtonClass={footerIconButtonClass}
                                             iconSizeClass={iconSizeClass}
@@ -4440,7 +4560,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         />
                                     </div>
                                     <div className="flex items-center min-w-0 gap-x-1 justify-end">
-                                        <div className="flex items-center gap-x-1 min-w-0 max-w-[60vw] flex-shrink">
+                                        <div className="flex items-center gap-x-2 min-w-0 max-w-[60vw] flex-shrink">
                                             <MemoMobileModelButton onOpenModel={() => handleOpenMobilePanel('model')} className="min-w-0 flex-shrink" />
                                             <MemoMobileAgentButton
                                                 onOpenAgentPanel={handleOpenAgentPanel}

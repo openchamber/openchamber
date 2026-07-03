@@ -5,11 +5,11 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 
 export type McpStatusMap = Record<string, McpStatus>;
-export type McpRuntimeDiagnostic = {
+type McpRuntimeDiagnostic = {
   status: 'failed';
   error: string;
 };
-export type McpRuntimeDiagnosticMap = Record<string, McpRuntimeDiagnostic>;
+type McpRuntimeDiagnosticMap = Record<string, McpRuntimeDiagnostic>;
 
 const EMPTY_STATUS: McpStatusMap = {};
 const EMPTY_DIAGNOSTICS: McpRuntimeDiagnosticMap = {};

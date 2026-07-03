@@ -1,0 +1,41 @@
+---
+title: デスクトップトンネル
+description: デスクトップアプリから Cloudflare または Ngrok トンネルを作成します。
+---
+
+# デスクトップトンネル
+
+デスクトップアプリでは **Settings → OpenChamber → Tunnel** から公開トンネルを作成できます。この方法では CLI から OpenChamber を起動する必要はありません。
+
+## プロバイダーをインストールする
+
+OpenChamber はあなたのマシン上でプロバイダー CLI を起動します。使いたいプロバイダーを先にインストールしてください。
+
+```bash
+brew install cloudflared
+brew install ngrok
+```
+
+Cloudflare は `cloudflared` を使います。Ngrok には ngrok アカウントと ngrok ダッシュボードの authtoken が必要です。
+
+```bash
+ngrok config add-authtoken <your-ngrok-token>
+```
+
+## アプリから開始する
+
+1. **Settings → OpenChamber → Tunnel** を開きます。
+2. **Cloudflare** または **Ngrok** を選びます。
+3. クイックトンネルを開始します。
+4. 生成された QR コードをスマートフォンでスキャンします。
+
+現在、Ngrok はクイックトンネルに対応しています。Cloudflare はクイックトンネルと管理対象 Cloudflare モードに対応しています。
+
+## アクセス保護
+
+プロバイダー URL 自体が公開されていても、OpenChamber は独自の接続トークンでアクセスを保護します。生成される接続リンクには一度きりのトークンが含まれ、TTL があり、新しいリンクを生成するかトンネルを停止/再起動すると、未使用の古いリンクは無効化されます。
+
+## 関連
+
+- [トンネル](/tunnels/) — CLI でのトンネル利用と管理対象 Cloudflare モード
+- [PWA とモバイル](/mobile/) — スマートフォンから OpenChamber にアクセスする

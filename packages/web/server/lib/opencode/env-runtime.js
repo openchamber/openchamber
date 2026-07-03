@@ -260,6 +260,47 @@ export const createOpenCodeEnvRuntime = (deps) => {
     return /(^|[\\/])wsl(\.exe)?$/i.test(trimmed);
   };
 
+  const isWindowsOpenCodeDesktopAppPath = (candidate) => {
+    if (process.platform !== 'win32' || typeof candidate !== 'string') {
+      return false;
+    }
+    const normalized = path.resolve(candidate).toLowerCase();
+    const localAppData = typeof process.env.LOCALAPPDATA === 'string' && process.env.LOCALAPPDATA.trim()
+      ? path.resolve(process.env.LOCALAPPDATA).toLowerCase()
+      : '';
+    if (!localAppData || !normalized.startsWith(`${localAppData}${path.sep}`)) {
+      return false;
+    }
+    return normalized.endsWith(`${path.sep}programs${path.sep}opencode${path.sep}opencode.exe`);
+  };
+
+  const bundledOpenCodeCliCandidates = () => {
+    const names = process.platform === 'win32' ? ['opencode.exe'] : ['opencode'];
+    const roots = [
+      process.env.OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR,
+      typeof process.resourcesPath === 'string' ? path.join(process.resourcesPath, 'opencode-cli') : null,
+    ]
+      .map((value) => (typeof value === 'string' ? value.trim() : ''))
+      .filter(Boolean);
+
+    const candidates = [];
+    for (const root of roots) {
+      for (const name of names) {
+        candidates.push(path.join(root, name));
+      }
+    }
+    return candidates;
+  };
+
+  const resolveBundledOpenCodeCliPath = () => {
+    for (const candidate of bundledOpenCodeCliCandidates()) {
+      if (isExecutable(candidate) && !isWindowsOpenCodeDesktopAppPath(candidate)) {
+        return candidate;
+      }
+    }
+    return null;
+  };
+
   const clearWslOpencodeResolution = () => {
     state.useWslForOpencode = false;
     state.resolvedWslBinary = null;
@@ -278,11 +319,18 @@ export const createOpenCodeEnvRuntime = (deps) => {
       .filter(Boolean);
 
     for (const candidate of explicit) {
-      if (isExecutable(candidate)) {
+      if (isExecutable(candidate) && !isWindowsOpenCodeDesktopAppPath(candidate)) {
         clearWslOpencodeResolution();
         state.resolvedOpencodeBinarySource = 'env';
         return candidate;
       }
+    }
+
+    const bundled = resolveBundledOpenCodeCliPath();
+    if (bundled) {
+      clearWslOpencodeResolution();
+      state.resolvedOpencodeBinarySource = 'bundled';
+      return bundled;
     }
 
     const resolvedFromPath = searchPathFor('opencode');
@@ -319,7 +367,6 @@ export const createOpenCodeEnvRuntime = (deps) => {
         path.join(programData, 'chocolatey', 'bin', 'opencode.cmd'),
         path.join(userProfile, '.bun', 'bin', 'opencode.exe'),
         path.join(userProfile, '.bun', 'bin', 'opencode.cmd'),
-        localAppData ? path.join(localAppData, 'Programs', 'opencode', 'opencode.exe') : '',
       ].filter(Boolean);
     })();
 
@@ -344,7 +391,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
             .split(/\r?\n/)
             .map((line) => line.trim())
             .filter(Boolean);
-          const found = lines.find((line) => isExecutable(line));
+          const found = lines.find((line) => isExecutable(line) && !isWindowsOpenCodeDesktopAppPath(line));
           if (found) {
             clearWslOpencodeResolution();
             state.resolvedOpencodeBinarySource = 'where';
@@ -824,13 +871,17 @@ export const createOpenCodeEnvRuntime = (deps) => {
     return /\/OpenCode\.app\/Contents\/MacOS\/(?:OpenCode|opencode-cli)$/i.test(candidate);
   };
 
+  const isKnownOpenCodeDesktopAppPath = (candidate) => isMacOpenCodeAppBundlePath(candidate)
+    || isWindowsOpenCodeDesktopAppPath(candidate);
+
   const createConfiguredOpencodeBinaryError = (raw, normalized) => {
     const configured = typeof raw === 'string' ? raw.trim() : '';
     const candidate = typeof normalized === 'string' && normalized.trim().length > 0 ? normalized.trim() : configured;
     const messageSuffix = 'OpenChamber needs the standalone opencode CLI. Install it and set settings.opencodeBinary to the CLI path, for example ~/.opencode/bin/opencode, or leave the setting empty to use PATH lookup.';
     const error = (() => {
-      if (isMacOpenCodeAppBundlePath(candidate) || isMacOpenCodeAppBundlePath(configured)) {
-        return new Error(`Configured OpenCode binary points at the macOS desktop app bundle, not the CLI: ${candidate}. ${messageSuffix}`);
+      if (isKnownOpenCodeDesktopAppPath(candidate) || isKnownOpenCodeDesktopAppPath(configured)) {
+        const platformName = process.platform === 'win32' ? 'Windows desktop app install' : 'macOS desktop app bundle';
+        return new Error(`Configured OpenCode binary points at the ${platformName}, not the CLI: ${candidate}. ${messageSuffix}`);
       }
 
       try {
@@ -927,7 +978,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
         return null;
       }
 
-      if (normalized && isExecutable(normalized) && !isMacOpenCodeAppBundlePath(normalized)) {
+      if (normalized && isExecutable(normalized) && !isKnownOpenCodeDesktopAppPath(normalized)) {
         clearWslOpencodeResolution();
         process.env.OPENCODE_BINARY = normalized;
         prependToPath(path.dirname(normalized));

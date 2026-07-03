@@ -30,6 +30,3 @@ export const VOICE_CONFIG = {
     /** Enable debug logging for voice context updates */
     ENABLE_DEBUG_LOGGING: true,
 } as const;
-
-/** Type for VOICE_CONFIG keys */
-export type VoiceConfigKey = keyof typeof VOICE_CONFIG;

@@ -13,7 +13,7 @@ import { useSync } from '@/sync/use-sync';
 import { useSessionPrefetch } from './sidebar/hooks/useSessionPrefetch';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { getSafeStorage } from '@/stores/utils/safeStorage';
+import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { useGitStore, useGitAllBranches, useGitRepoStatusMap } from '@/stores/useGitStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { NewWorktreeDialog } from './NewWorktreeDialog';
@@ -70,7 +70,7 @@ import {
   normalizePath,
 } from './sidebar/utils';
 import {
-  mergeSessionDirectoryMetadata,
+  mergeLiveSessionWithGlobalSession,
   refreshGlobalSessions,
   refreshGlobalSessionsForDirectories,
   resolveGlobalSessionDirectory,
@@ -188,7 +188,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const [editTitle, setEditTitle] = React.useState('');
   const [editingProjectDialogId, setEditingProjectDialogId] = React.useState<string | null>(null);
   const [expandedParents, setExpandedParents] = React.useState<Set<string>>(new Set());
-  const safeStorage = React.useMemo(() => getSafeStorage(), []);
+  const safeStorage = React.useMemo(() => getDeferredSafeStorage(), []);
   const [collapsedProjects, setCollapsedProjects] = React.useState<Set<string>>(new Set());
 
   const [projectRepoStatus, setProjectRepoStatus] = React.useState<Map<string, boolean | null>>(new Map());
@@ -207,7 +207,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const togglePinnedSession = useSessionPinnedStore((state) => state.toggle);
   const [collapsedGroups, setCollapsedGroups] = React.useState<Set<string>>(() => {
     try {
-      const raw = getSafeStorage().getItem(GROUP_COLLAPSE_STORAGE_KEY);
+      const raw = getDeferredSafeStorage().getItem(GROUP_COLLAPSE_STORAGE_KEY);
       if (!raw) {
         return new Set();
       }
@@ -219,7 +219,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   });
   const [groupOrderByProject, setGroupOrderByProject] = React.useState<Map<string, string[]>>(() => {
     try {
-      const raw = getSafeStorage().getItem(GROUP_ORDER_STORAGE_KEY);
+      const raw = getDeferredSafeStorage().getItem(GROUP_ORDER_STORAGE_KEY);
       if (!raw) {
         return new Map();
       }
@@ -237,7 +237,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   });
   const [activeSessionByProject, setActiveSessionByProject] = React.useState<Map<string, string>>(() => {
     try {
-      const raw = getSafeStorage().getItem(PROJECT_ACTIVE_SESSION_STORAGE_KEY);
+      const raw = getDeferredSafeStorage().getItem(PROJECT_ACTIVE_SESSION_STORAGE_KEY);
       if (!raw) {
         return new Map();
       }
@@ -361,7 +361,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     const liveById = new Map(liveSessions.map((session) => [session.id, session]));
     const merged = globalActiveSessions.map((session) => {
       const liveSession = liveById.get(session.id);
-      return liveSession ? mergeSessionDirectoryMetadata(liveSession, session) : session;
+      return liveSession ? mergeLiveSessionWithGlobalSession(liveSession, session) : session;
     });
     const seenIds = new Set(merged.map((session) => session.id));
 

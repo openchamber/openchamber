@@ -27,15 +27,3 @@ export const DrawerProvider: React.FC<{
         </DrawerContext.Provider>
     );
 };
-
-// eslint-disable-next-line react-refresh/only-export-components
-export const useDrawer = (): DrawerContextValue => {
-    const context = React.useContext(DrawerContext);
-    if (!context) {
-        throw new Error('useDrawer must be used within a DrawerProvider');
-    }
-    return context;
-};
-
-// eslint-disable-next-line react-refresh/only-export-components
-export const useOptionalDrawer = (): DrawerContextValue | null => React.useContext(DrawerContext);

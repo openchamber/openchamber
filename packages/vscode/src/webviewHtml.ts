@@ -4,7 +4,7 @@ import { getThemeKindName } from './theme';
 import type { ConnectionStatus } from './opencode';
 import type { WorkspaceFolderCandidate } from './workspaceResolver';
 
-export type PanelType = 'chat' | 'agentManager';
+type PanelType = 'chat' | 'agentManager';
 
 export interface WebviewHtmlOptions {
   webview: vscode.Webview;
