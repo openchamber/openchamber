@@ -34,7 +34,6 @@ import { markSessionViewed } from '@/sync/notification-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { opencodeClient } from '@/lib/opencode/client';
-import { disposeTerminalInputTransport } from '@/lib/terminalApi';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
@@ -57,8 +56,8 @@ import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { useI18n } from '@/lib/i18n';
 import { applyMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { SyncAppEffects } from '@/apps/AppEffects';
+import { resetAppForRuntimeEndpointChange } from '@/apps/runtimeEndpointReset';
 import { useAppFontEffects } from '@/apps/useAppFontEffects';
-import { resetStreamingState } from '@/sync/streaming';
 import { OpenCodeUpdateToast } from '@/components/update/OpenCodeUpdateToast';
 import { markStartupTrace, startupTraceEnabled } from '@/lib/startupTrace';
 
@@ -268,25 +267,7 @@ function App({ apis }: AppProps) {
 
   React.useEffect(() => {
     return subscribeRuntimeEndpointChanged((detail) => {
-      useSessionUIStore.getState().prepareForRuntimeSwitch(detail.previousRuntimeKey);
-      useUIStore.getState().prepareForRuntimeSwitch(detail.previousRuntimeKey);
-      if (detail.previousRuntimeKey) {
-        useAutoReviewStore.getState().stopRunningRunsForRuntime(detail.previousRuntimeKey);
-      }
-      disposeTerminalInputTransport();
-      opencodeClient.reconnectToRuntimeBaseUrl();
-      useConfigStore.setState({
-        providers: [],
-        agents: [],
-        isConnected: false,
-        isInitialized: false,
-        connectionPhase: 'connecting',
-        lastDisconnectReason: null,
-      });
-      useProjectsStore.getState().resetForRuntimeSwitch();
-      useSessionUIStore.getState().restoreForRuntimeSwitch(detail.runtimeKey);
-      useUIStore.getState().restoreForRuntimeSwitch(detail.runtimeKey);
-      resetStreamingState();
+      resetAppForRuntimeEndpointChange(detail);
       setRuntimeEndpointEpoch((epoch) => epoch + 1);
       setInitRetryExhausted(false);
       setInitRetryEpoch((epoch) => epoch + 1);

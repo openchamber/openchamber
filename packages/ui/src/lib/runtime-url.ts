@@ -1,4 +1,4 @@
-import { getRuntimeUrlAuthTokenSync } from '@/lib/runtime-auth';
+import { getLocalRuntimeUrlAuthTokenSync, getRuntimeExtraHeadersSync, getRuntimeUrlAuthTokenSync } from '@/lib/runtime-auth';
 
 type QueryValue = string | number | boolean | null | undefined;
 
@@ -38,6 +38,14 @@ const readInjectedApiBaseUrl = (): string => {
   const injected = (window as typeof window & { __OPENCHAMBER_API_BASE_URL__?: string }).__OPENCHAMBER_API_BASE_URL__;
   return normalizeBaseUrl(injected);
 };
+
+const readInjectedLocalOrigin = (): string => {
+  if (typeof window === 'undefined') return '';
+  const injected = (window as typeof window & { __OPENCHAMBER_LOCAL_ORIGIN__?: string }).__OPENCHAMBER_LOCAL_ORIGIN__;
+  return normalizeBaseUrl(injected);
+};
+
+const hasRuntimeExtraHeaders = (): boolean => Object.keys(getRuntimeExtraHeadersSync()).length > 0;
 
 const currentHref = (config: RuntimeUrlConfig): string => {
   const configured = config.currentHref?.();
@@ -91,14 +99,12 @@ const withUrlAuth = (urlValue: string): string => {
   const token = getRuntimeUrlAuthTokenSync();
   if (!token) return urlValue;
 
-  if (ABSOLUTE_URL_PATTERN.test(urlValue)) {
-    const url = new URL(urlValue);
-    url.searchParams.set('oc_url_token', token);
-    return url.toString();
-  }
-
-  const separator = urlValue.includes('?') ? '&' : '?';
-  return `${urlValue}${separator}oc_url_token=${encodeURIComponent(token)}`;
+  const url = ABSOLUTE_URL_PATTERN.test(urlValue)
+    ? new URL(urlValue)
+    : new URL(urlValue, 'http://openchamber.local');
+  url.searchParams.set('oc_url_token', token);
+  if (ABSOLUTE_URL_PATTERN.test(urlValue)) return url.toString();
+  return `${url.pathname}${url.search}${url.hash}`;
 };
 
 const toWebSocketUrl = (candidate: string, config: RuntimeUrlConfig): string => {
@@ -110,6 +116,25 @@ const toWebSocketUrl = (candidate: string, config: RuntimeUrlConfig): string => 
   }
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   return url.toString();
+};
+
+const toRealtimeProxyUrl = (kind: 'sse' | 'ws', targetUrl: string, config: RuntimeUrlConfig): string | null => {
+  if (!hasRuntimeExtraHeaders()) return null;
+  const localOrigin = readInjectedLocalOrigin();
+  if (!localOrigin) return null;
+  try {
+    const proxy = new URL(`/api/openchamber/realtime-proxy/${kind === 'sse' ? 'sse' : 'ws'}`, `${localOrigin}/`);
+    proxy.searchParams.set('url', targetUrl);
+    const localToken = getLocalRuntimeUrlAuthTokenSync(localOrigin);
+    if (localToken) proxy.searchParams.set('oc_url_token', localToken);
+    if (kind === 'ws') {
+      proxy.protocol = proxy.protocol === 'https:' ? 'wss:' : 'ws:';
+      return toWebSocketUrl(proxy.toString(), config);
+    }
+    return proxy.toString();
+  } catch {
+    return null;
+  }
 };
 
 export const createRuntimeUrlResolver = (config: RuntimeUrlConfig = {}): RuntimeUrlResolver => {
@@ -133,8 +158,14 @@ export const createRuntimeUrlResolver = (config: RuntimeUrlConfig = {}): Runtime
       allowOutsideWorkspace: options?.allowOutsideWorkspace === true ? true : undefined,
       outsideFileGrant: options?.outsideFileGrant,
     }),
-    sse: (path, query) => withUrlAuth(realtime(path, query)),
-    websocket: (path, query) => toWebSocketUrl(withUrlAuth(realtime(path, query)), config),
+    sse: (path, query) => {
+      const target = withUrlAuth(realtime(path, query));
+      return toRealtimeProxyUrl('sse', target, config) || target;
+    },
+    websocket: (path, query) => {
+      const target = toWebSocketUrl(withUrlAuth(realtime(path, query)), config);
+      return toRealtimeProxyUrl('ws', target, config) || target;
+    },
   };
 };
 

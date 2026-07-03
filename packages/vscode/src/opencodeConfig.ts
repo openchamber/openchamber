@@ -1605,10 +1605,28 @@ export const createAgent = (agentName: string, config: Record<string, unknown>, 
   }
 
   // Extract scope and prompt from config - scope is only used for path determination, not written to file
-  const { prompt, scope: _ignored, ...frontmatter } = config as Record<string, unknown> & { prompt?: unknown; scope?: unknown };
+  const { prompt, scope: _ignored, ...rawFrontmatter } = config as Record<string, unknown> & { prompt?: unknown; scope?: unknown };
   void _ignored; // Scope is only used for path determination
+  const frontmatter = Object.fromEntries(
+    Object.entries(rawFrontmatter).filter(([, value]) => value !== null && value !== undefined)
+  );
   writeMdFile(targetPath, frontmatter, typeof prompt === 'string' ? prompt : '');
   resetAgentLookupCache(globalAgentLookupCache);
+};
+
+const deleteAgentJsonField = (config: Record<string, unknown>, agentName: string, field: string): boolean => {
+  const agentMap = config.agent as Record<string, unknown> | undefined;
+  const current = agentMap?.[agentName] as Record<string, unknown> | undefined;
+  if (!agentMap || !current || !(field in current)) return false;
+
+  delete current[field];
+  if (Object.keys(current).length === 0) {
+    delete agentMap[agentName];
+  }
+  if (Object.keys(agentMap).length === 0) {
+    delete config.agent;
+  }
+  return true;
 };
 
 export const updateAgent = (agentName: string, updates: Record<string, unknown>, workingDirectory?: string) => {
@@ -1756,6 +1774,19 @@ export const updateAgent = (agentName: string, updates: Record<string, unknown>,
 
     const hasMdField = Boolean(mdData?.frontmatter?.[field] !== undefined);
     const hasJsonField = Boolean(jsonSection?.[field] !== undefined);
+
+    if (value === null) {
+      if (hasMdField && mdData) {
+        delete mdData.frontmatter[field];
+        mdModified = true;
+      }
+
+      if (hasJsonField && deleteAgentJsonField(config, agentName, field)) {
+        jsonModified = true;
+      }
+
+      continue;
+    }
 
     // JSON takes precedence over md, so update JSON first if field exists there
     if (hasJsonField) {

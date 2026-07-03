@@ -20,6 +20,8 @@ export interface SettingsSearchResult extends SettingsSearchItem {
 interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
   isMobile: boolean;
   isDesktopLocalOrigin: boolean;
+  // macOS desktop shell — for controls that only render on darwin (e.g. dock badge).
+  isMac: boolean;
 }
 
 const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
@@ -64,6 +66,16 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     descriptionKey: 'settings.openchamber.visual.field.macVibrancyHint',
     keywords: ['transparent', 'transparency', 'vibrancy', 'blur', 'macos', 'opaque'],
     isAvailable: (ctx) => ctx.isDesktopLocalOrigin,
+  },
+  {
+    id: 'appearance.dock-badge',
+    page: 'appearance',
+    titleKey: 'settings.openchamber.visual.field.dockBadge',
+    descriptionKey: 'settings.openchamber.visual.field.dockBadgeHint',
+    keywords: ['dock', 'badge', 'unread', 'unseen', 'counter', 'count', 'notification', 'macos'],
+    // Exactly matches the render guard in OpenChamberVisualSettings: any darwin
+    // Electron shell (isMac already implies isDesktopShell), local or remote host.
+    isAvailable: (ctx) => ctx.isMac,
   },
   {
     id: 'appearance.pwa-install-name',
@@ -205,11 +217,11 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
-    id: 'chat.queue-mode',
+    id: 'chat.follow-up-behavior',
     page: 'chat',
-    titleKey: 'settings.openchamber.visual.field.queueMessagesByDefault',
-    descriptionKey: 'settings.openchamber.visual.field.queueMessagesByDefaultTooltip',
-    keywords: ['queue', 'enter', 'send'],
+    titleKey: 'settings.openchamber.visual.section.followUpBehavior',
+    descriptionKey: 'settings.openchamber.visual.field.followUpBehaviorDescription',
+    keywords: ['follow up', 'queue', 'steer', 'send immediately'],
   },
   {
     id: 'chat.persist-drafts',
@@ -273,6 +285,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.desktopNetwork.field.launchAtLogin',
     descriptionKey: 'settings.openchamber.desktopNetwork.field.launchAtLoginDescription',
     keywords: ['desktop', 'startup', 'login'],
+    isAvailable: (ctx) => ctx.isDesktopLocalOrigin,
+  },
+  {
+    id: 'sessions.desktop-keep-awake',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.desktopNetwork.field.keepAwake',
+    descriptionKey: 'settings.openchamber.desktopNetwork.field.keepAwakeDescription',
+    keywords: ['desktop', 'sleep', 'awake', 'server', 'mobile', 'phone'],
     isAvailable: (ctx) => ctx.isDesktopLocalOrigin,
   },
   {
@@ -392,7 +412,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'remote-instances',
     titleKey: 'settings.remoteInstances.direct.title',
     descriptionKey: 'settings.remoteInstances.direct.description',
-    keywords: ['server url', 'connection token', 'import link', 'host switcher'],
+    keywords: ['server url', 'connection token', 'import link', 'host switcher', 'additional headers', 'request headers', 'cloudflare access', 'service token'],
     isAvailable: (ctx) => ctx.isDesktop,
   },
   {

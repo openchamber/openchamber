@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import { devtools, persist, createJSONStorage } from 'zustand/middleware';
-import { getSafeStorage } from './utils/safeStorage';
+import { devtools, persist } from 'zustand/middleware';
+import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import {
   startConfigUpdate,
   finishConfigUpdate,
@@ -352,7 +352,7 @@ export const usePluginsStore = create<PluginsStore>()(
       }),
       {
         name: 'plugins-store',
-        storage: createJSONStorage(() => getSafeStorage()),
+        storage: createDeferredSafeJSONStorage(),
         partialize: (state) => ({ selectedId: state.selectedId }),
       },
     ),

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
-import { createJSONStorage, devtools, persist } from 'zustand/middleware';
+import { devtools, persist } from 'zustand/middleware';
 
-import { getSafeStorage } from './utils/safeStorage';
+import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 
 type RootTabsState = {
   openPaths: string[];
@@ -451,7 +451,7 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
       {
         name: 'files-view-tabs-store',
         version: 2,
-        storage: createJSONStorage(() => getSafeStorage()),
+        storage: createDeferredSafeJSONStorage(),
         migrate: (persistedState) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return { byRoot: {} };

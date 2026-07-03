@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { StoreApi, UseBoundStore } from "zustand";
-import { devtools, persist, createJSONStorage } from "zustand/middleware";
+import { devtools, persist } from "zustand/middleware";
 import type { Agent, PermissionConfig } from "@opencode-ai/sdk/v2";
 import { opencodeClient } from "@/lib/opencode/client";
 import { emitConfigChange, scopeMatches, subscribeToConfigChanges, type ConfigChangeScope } from "@/lib/configSync";
@@ -9,7 +9,7 @@ import {
   finishConfigUpdate,
   updateConfigUpdateMessage,
 } from "@/lib/configUpdate";
-import { getSafeStorage } from "./utils/safeStorage";
+import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
 import { useConfigStore } from "@/stores/useConfigStore";
 import { invalidateCommandsLoadCache, useCommandsStore } from "@/stores/useCommandsStore";
 import { useProjectsStore } from "@/stores/useProjectsStore";
@@ -176,6 +176,8 @@ const FAST_HEALTH_POLL_ATTEMPTS = 4;
 const SLOW_HEALTH_POLL_BASE_MS = 800;
 const SLOW_HEALTH_POLL_INCREMENT_MS = 200;
 const SLOW_HEALTH_POLL_MAX_MS = 2000;
+
+const hasValue = <T>(value: T | null | undefined): value is T => value !== null && value !== undefined;
 
 export interface AgentDraft {
   name: string;
@@ -345,8 +347,8 @@ export const useAgentsStore = create<AgentsStore>()(
             if (config.description) agentConfig.description = config.description;
             if (config.model) agentConfig.model = config.model;
             if (config.variant) agentConfig.variant = config.variant;
-            if (config.temperature !== undefined) agentConfig.temperature = config.temperature ?? null;
-            if (config.top_p !== undefined) agentConfig.top_p = config.top_p ?? null;
+            if (hasValue(config.temperature)) agentConfig.temperature = config.temperature;
+            if (hasValue(config.top_p)) agentConfig.top_p = config.top_p;
             if (config.prompt) agentConfig.prompt = config.prompt;
             if (config.permission) agentConfig.permission = config.permission;
             if (config.disable !== undefined) agentConfig.disable = config.disable;
@@ -554,7 +556,7 @@ export const useAgentsStore = create<AgentsStore>()(
       }),
       {
         name: "agents-store",
-        storage: createJSONStorage(() => getSafeStorage()),
+        storage: createDeferredSafeJSONStorage(),
         partialize: (state) => ({
           selectedAgentName: state.selectedAgentName,
         }),

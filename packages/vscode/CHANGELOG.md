@@ -1,3 +1,25 @@
+## [1.13.9] - 2026-07-02
+
+- Agents: clearing optional agent fields now removes them from agent config instead of saving `null` values.
+- Startup: the extension no longer picks OpenCode desktop app installs when looking for the standalone OpenCode CLI.
+- Chat: fixed edge cases where late-loading tool content, subagent content, or streaming Thinking blocks could pull the conversation away from the latest message or fight manual scrolling.
+- Chat: embedded JSON examples in messages no longer render as generated-result cards.
+- Sync: chat state now recovers after idle reconnects instead of leaving sessions stuck in a stale busy state.
+
+## [1.13.8] - 2026-06-29
+
+- Chat: a new Follow-up behavior setting controls what happens when you press Enter on a message while the agent is still responding — Steer inserts it into the agent's current turn, or Queue holds it until the turn finishes. Replaces the previous queue-mode toggle (thanks to @bashrusakh).
+- Sync: a connected but quiet session (for example an agent running a long tool call) no longer triggers repeated background refreshes every ~15 seconds (thanks to @tomzx).
+
+## [1.13.7] - 2026-06-28
+
+- Chat: with tool calls (such as Bash and Edit) shown expanded by default, scrolling no longer twitches, and slow scrolling no longer jumps past several messages.
+- Providers: the Add provider form stays open while provider data refreshes or a model is picked in the background, instead of snapping back to an existing provider.
+
+## [1.13.6] - 2026-06-28
+
+- Chat: scrolling in conversations now stays steady while sending, queueing, streaming, switching sessions, and loading older messages.
+
 ## [1.13.5] - 2026-06-27
 
 - No notable changes.

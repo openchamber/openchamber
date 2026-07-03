@@ -399,6 +399,36 @@ describe('client auth routes', () => {
     expect(revoked.body.client.id).toBe(current.body.client.id);
   });
 
+  it('allows only the local desktop client token to create remote client tokens', async () => {
+    const app = express();
+    let authContext = { type: 'session' };
+    const dependencies = createDependencies({
+      resolveAuthContext: async () => authContext,
+    });
+    registerAuthAndAccessRoutes(app, dependencies);
+
+    const desktop = await request(app)
+      .post('/api/client-auth/clients')
+      .send({ label: 'OpenChamber Desktop', clientKind: 'desktop-local' });
+    const remote = await request(app)
+      .post('/api/client-auth/clients')
+      .send({ label: 'Phone' });
+
+    authContext = { type: 'client', clientId: remote.body.client.id, client: remote.body.client };
+    const denied = await request(app)
+      .post('/api/client-auth/clients')
+      .send({ label: 'Another phone' });
+    expect(denied.status).toBe(403);
+    expect(denied.body.error).toBe('Client tokens cannot create remote clients');
+
+    authContext = { type: 'client', clientId: desktop.body.client.id, client: desktop.body.client };
+    const created = await request(app)
+      .post('/api/client-auth/clients')
+      .send({ label: 'Mobile' });
+    expect(created.status).toBe(201);
+    expect(created.body.client.label).toBe('Mobile');
+  });
+
   it('requires UI-session auth for passkey registration management routes', async () => {
     const app = express();
     const dependencies = createDependencies();

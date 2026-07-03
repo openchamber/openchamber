@@ -61,7 +61,7 @@ describe("applyDirectoryEvent", () => {
 
     expect(result).toEqual({
       changed: false,
-      materialization: { type: "incomplete-session-snapshot", messageID: "msg_1", partID: "prt_1" },
+      materialization: { type: "incomplete-session-snapshot", reason: "orphan-delta", messageID: "msg_1", partID: "prt_1" },
     })
   })
 
@@ -73,7 +73,7 @@ describe("applyDirectoryEvent", () => {
 
     expect(result).toEqual({
       changed: false,
-      materialization: { type: "incomplete-session-snapshot", messageID: "msg_1", partID: "prt_1" },
+      materialization: { type: "incomplete-session-snapshot", reason: "missing-delta-part", messageID: "msg_1", partID: "prt_1" },
     })
   })
 
@@ -86,6 +86,7 @@ describe("applyDirectoryEvent", () => {
       changed: true,
       materialization: {
         type: "incomplete-session-snapshot",
+        reason: "missing-owning-message",
         sessionID: "ses_1",
         messageID: "msg_1",
         partID: "prt_1",
@@ -102,6 +103,7 @@ describe("applyDirectoryEvent", () => {
       changed: true,
       materialization: {
         type: "incomplete-session-snapshot",
+        reason: "missing-owning-message",
         sessionID: "ses_1",
         messageID: "msg_1",
         partID: "prt_1",
@@ -123,7 +125,7 @@ describe("applyDirectoryEvent", () => {
 
     expect(result).toEqual({
       changed: false,
-      materialization: { type: "incomplete-session-snapshot", sessionID: "ses_1", messageID: "msg_1", partID: "prt_1" },
+      materialization: { type: "incomplete-session-snapshot", reason: "orphan-delta", sessionID: "ses_1", messageID: "msg_1", partID: "prt_1" },
     })
   })
 

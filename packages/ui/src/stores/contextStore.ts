@@ -1,11 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { create } from "zustand";
-import { devtools, persist, createJSONStorage } from "zustand/middleware";
+import { devtools, persist } from "zustand/middleware";
 import type { EditPermissionMode } from "./types/sessionTypes";
 import { getAgentDefaultEditPermission } from "./utils/permissionUtils";
 import { extractTokensFromMessage } from "./utils/tokenUtils";
 import { calculateContextUsage } from "./utils/contextUtils";
-import { getSafeStorage } from "./utils/safeStorage";
+import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
 
 interface ContextUsage {
     totalTokens: number;
@@ -449,7 +449,7 @@ export const useContextStore = create<ContextStore>()(
             }),
             {
                 name: "context-store",
-                storage: createJSONStorage(() => getSafeStorage()),
+                storage: createDeferredSafeJSONStorage(),
                 partialize: (state) => ({
                     sessionModelSelections: Array.from(state.sessionModelSelections.entries()),
                     sessionAgentSelections: Array.from(state.sessionAgentSelections.entries()),

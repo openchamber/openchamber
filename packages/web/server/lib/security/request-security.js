@@ -1,6 +1,6 @@
 export const createRequestSecurityRuntime = (deps) => {
   const { readSettingsFromDiskMigrated } = deps;
-  const packagedClientOrigins = new Set(['openchamber-ui://app']);
+  const packagedClientOrigins = new Set(['openchamber-ui://app', 'capacitor://localhost']);
 
   const getUiSessionTokenFromRequest = (req) => {
     const cookieHeader = req?.headers?.cookie;

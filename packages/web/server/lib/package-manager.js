@@ -483,7 +483,7 @@ export function detectPackageManagerDetails() {
   };
 }
 
-function detectPackageManager() {
+export function detectPackageManager() {
   return detectPackageManagerDetails().packageManager;
 }
 
@@ -769,7 +769,7 @@ export async function checkForUpdates(options = {}) {
 /**
  * Execute the update (used by CLI)
  */
-function executeUpdate(pm = detectPackageManager(), options = {}) {
+export function executeUpdate(pm = detectPackageManager(), options = {}) {
   const command = getUpdateCommand(pm);
   if (!options?.silent) {
     console.log(`Updating ${PACKAGE_NAME} using ${pm}...`);
