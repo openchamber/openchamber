@@ -3,6 +3,7 @@ export type QuotaProviderId =
   | 'codex'
   | 'cursor'
   | 'claude'
+  | 'deepseek'
   | 'github-copilot'
   | 'github-copilot-addon'
   | 'google'
