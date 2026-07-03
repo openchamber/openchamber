@@ -339,8 +339,8 @@ function resolveOpencodeCliPath(): string | null {
     path.join(home, '.opencode', 'bin', 'opencode'),
     path.join(home, '.bun', 'bin', 'opencode'),
     path.join(home, '.local', 'bin', 'opencode'),
-    '/usr/local/bin/opencode',
     '/opt/homebrew/bin/opencode',
+    '/usr/local/bin/opencode',
     path.join(home, 'bin', 'opencode'),
   ];
 

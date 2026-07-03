@@ -12,6 +12,7 @@ const TOOLCHAIN_SEGMENTS = [
   '/opt/pkg/',
   '/opt/pmk/',
   '/snap/',
+  '/usr/local/',
 ];
 
 const TOOLCHAIN_BASENAMES = new Set([
