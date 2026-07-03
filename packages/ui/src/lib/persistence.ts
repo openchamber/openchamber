@@ -113,7 +113,7 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
       localStorage.removeItem('opencode-update-toast-dismissed-version');
     }
   }
-  if (settings.sttProvider === 'browser' || settings.sttProvider === 'server') {
+  if (settings.sttProvider === 'local' || settings.sttProvider === 'openai-compatible') {
     localStorage.setItem('sttProvider', settings.sttProvider);
   }
   if (typeof settings.sttServerUrl === 'string') {
@@ -122,17 +122,11 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   if (typeof settings.sttModel === 'string') {
     localStorage.setItem('sttModel', settings.sttModel);
   }
+  if (typeof settings.sttLocalModel === 'string') {
+    localStorage.setItem('sttLocalModel', settings.sttLocalModel);
+  }
   if (typeof settings.sttLanguage === 'string') {
     localStorage.setItem('sttLanguage', settings.sttLanguage);
-  }
-  if (typeof settings.sttSilenceThresholdDb === 'number' && Number.isFinite(settings.sttSilenceThresholdDb)) {
-    localStorage.setItem('sttSilenceThresholdDb', String(settings.sttSilenceThresholdDb));
-  }
-  if (typeof settings.sttSilenceHoldMs === 'number' && Number.isFinite(settings.sttSilenceHoldMs)) {
-    localStorage.setItem('sttSilenceHoldMs', String(settings.sttSilenceHoldMs));
-  }
-  if (typeof settings.sttTranscribeOnStop === 'boolean') {
-    localStorage.setItem('sttTranscribeOnStop', String(settings.sttTranscribeOnStop));
   }
 };
 
@@ -614,7 +608,7 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
   if (configStoreApi && configStore) {
     const nextConfigState: Partial<typeof configStore> = {};
-    if ((settings.sttProvider === 'browser' || settings.sttProvider === 'server') && settings.sttProvider !== configStore.sttProvider) {
+    if ((settings.sttProvider === 'local' || settings.sttProvider === 'openai-compatible') && settings.sttProvider !== configStore.sttProvider) {
       nextConfigState.sttProvider = settings.sttProvider;
     }
     if (typeof settings.sttServerUrl === 'string' && settings.sttServerUrl !== configStore.sttServerUrl) {
@@ -623,17 +617,11 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
     if (typeof settings.sttModel === 'string' && settings.sttModel !== configStore.sttModel) {
       nextConfigState.sttModel = settings.sttModel;
     }
+    if (typeof settings.sttLocalModel === 'string' && settings.sttLocalModel !== configStore.sttLocalModel) {
+      nextConfigState.sttLocalModel = settings.sttLocalModel;
+    }
     if (typeof settings.sttLanguage === 'string' && settings.sttLanguage !== configStore.sttLanguage) {
       nextConfigState.sttLanguage = settings.sttLanguage;
-    }
-    if (typeof settings.sttSilenceThresholdDb === 'number' && Number.isFinite(settings.sttSilenceThresholdDb) && settings.sttSilenceThresholdDb !== configStore.sttSilenceThresholdDb) {
-      nextConfigState.sttSilenceThresholdDb = settings.sttSilenceThresholdDb;
-    }
-    if (typeof settings.sttSilenceHoldMs === 'number' && Number.isFinite(settings.sttSilenceHoldMs) && settings.sttSilenceHoldMs !== configStore.sttSilenceHoldMs) {
-      nextConfigState.sttSilenceHoldMs = settings.sttSilenceHoldMs;
-    }
-    if (typeof settings.sttTranscribeOnStop === 'boolean' && settings.sttTranscribeOnStop !== configStore.sttTranscribeOnStop) {
-      nextConfigState.sttTranscribeOnStop = settings.sttTranscribeOnStop;
     }
     if (Object.keys(nextConfigState).length > 0) {
       configStoreApi.setState(nextConfigState);
@@ -1200,8 +1188,13 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.responseStyleCustomInstructions === 'string') {
     result.responseStyleCustomInstructions = candidate.responseStyleCustomInstructions;
   }
-  if (candidate.sttProvider === 'browser' || candidate.sttProvider === 'server') {
+  if (candidate.sttProvider === 'local' || candidate.sttProvider === 'openai-compatible') {
     result.sttProvider = candidate.sttProvider;
+  } else if (candidate.sttProvider === 'server') {
+    // Legacy provider migration: 'server' was the OpenAI-compatible endpoint.
+    result.sttProvider = 'openai-compatible';
+  } else if (candidate.sttProvider === 'browser' || candidate.sttProvider === 'wasm') {
+    result.sttProvider = 'local';
   }
   if (typeof candidate.sttServerUrl === 'string') {
     result.sttServerUrl = candidate.sttServerUrl.trim();
@@ -1209,17 +1202,11 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.sttModel === 'string') {
     result.sttModel = candidate.sttModel.trim();
   }
+  if (typeof candidate.sttLocalModel === 'string') {
+    result.sttLocalModel = candidate.sttLocalModel.trim();
+  }
   if (typeof candidate.sttLanguage === 'string') {
     result.sttLanguage = candidate.sttLanguage.trim();
-  }
-  if (typeof candidate.sttSilenceThresholdDb === 'number' && Number.isFinite(candidate.sttSilenceThresholdDb)) {
-    result.sttSilenceThresholdDb = candidate.sttSilenceThresholdDb;
-  }
-  if (typeof candidate.sttSilenceHoldMs === 'number' && Number.isFinite(candidate.sttSilenceHoldMs)) {
-    result.sttSilenceHoldMs = candidate.sttSilenceHoldMs;
-  }
-  if (typeof candidate.sttTranscribeOnStop === 'boolean') {
-    result.sttTranscribeOnStop = candidate.sttTranscribeOnStop;
   }
 
   return result;

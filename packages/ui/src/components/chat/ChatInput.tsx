@@ -1,6 +1,6 @@
 import React from 'react';
 import { Textarea } from '@/components/ui/textarea';
-import { BrowserVoiceButton } from '@/components/voice';
+import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 // sessionStore removed — currentSessionId comes from useSessionUIStore
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -381,7 +381,7 @@ const getProjectIconColor = (projectColor?: string | null): string | undefined =
 };
 
 const MemoModelControls = React.memo(ModelControls);
-const MemoBrowserVoiceButton = React.memo(BrowserVoiceButton);
+const MemoComposerDictation = React.memo(ComposerDictation);
 const MemoMobileAgentButton = React.memo(MobileAgentButton);
 const MemoMobileModelButton = React.memo(MobileModelButton);
 const MemoStatusRow = React.memo(StatusRow);
@@ -2315,6 +2315,33 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             textarea.value = text;
         }
         setMessage(text);
+        void handleSubmitRef.current();
+    }, []);
+
+    // Dictation: insert the transcript inline; optionally submit immediately.
+    // getCurrentInputSnapshot reads textareaRef.current.value first, so setting
+    // it synchronously lets handleSubmit pick up the text in the same tick.
+    const handleDictationInsert = React.useCallback((text: string) => {
+        setMessage((prev) => {
+            const next = appendInlineText(prev, text);
+            const textarea = textareaRef.current;
+            if (textarea) {
+                textarea.value = next;
+            }
+            return next;
+        });
+        setTimeout(() => {
+            textareaRef.current?.focus();
+        }, 0);
+    }, []);
+
+    const handleDictationInsertAndSend = React.useCallback((text: string) => {
+        const textarea = textareaRef.current;
+        const next = appendInlineText(textarea?.value ?? messageRef.current, text);
+        if (textarea) {
+            textarea.value = next;
+        }
+        setMessage(next);
         void handleSubmitRef.current();
     }, []);
 
@@ -4559,7 +4586,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                             />
                                         </div>
                                         <div className="flex items-center gap-x-1 flex-shrink-0">
-                                            <MemoBrowserVoiceButton />
+                                            <MemoComposerDictation
+                                                radius={chatInputRadius}
+                                                footerIconButtonClass={footerIconButtonClass}
+                                                iconSizeClass={iconSizeClass}
+                                                onInsert={handleDictationInsert}
+                                                onInsertAndSend={handleDictationInsertAndSend}
+                                            />
                                             <ComposerActionButtons
                                                 isMobile={isMobile}
                                                 footerIconButtonClass={footerIconButtonClass}
@@ -4614,7 +4647,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                 </div>
                                 <div className={cn('flex items-center flex-1 justify-end', footerGapClass, 'md:gap-x-3')}>
                                     <MemoModelControls className={cn('flex-1 min-w-0 justify-end')} />
-                                    <MemoBrowserVoiceButton />
+                                    <MemoComposerDictation
+                                        radius={chatInputRadius}
+                                        footerIconButtonClass={footerIconButtonClass}
+                                        iconSizeClass={iconSizeClass}
+                                        onInsert={handleDictationInsert}
+                                        onInsertAndSend={handleDictationInsertAndSend}
+                                    />
                                     <ComposerActionButtons
                                         isMobile={isMobile}
                                         footerIconButtonClass={footerIconButtonClass}

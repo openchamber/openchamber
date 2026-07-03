@@ -723,8 +723,13 @@ export const createSettingsHelpers = (dependencies) => {
 
     if (typeof candidate.sttProvider === 'string') {
       const provider = candidate.sttProvider.trim();
-      if (provider === 'browser' || provider === 'server' || provider === 'wasm') {
+      if (provider === 'local' || provider === 'openai-compatible') {
         result.sttProvider = provider;
+      } else if (provider === 'server') {
+        // Legacy provider migration: 'server' was the OpenAI-compatible endpoint.
+        result.sttProvider = 'openai-compatible';
+      } else if (provider === 'browser' || provider === 'wasm') {
+        result.sttProvider = 'local';
       }
     }
     if (typeof candidate.sttServerUrl === 'string') {
@@ -739,10 +744,10 @@ export const createSettingsHelpers = (dependencies) => {
         result.sttModel = trimmed;
       }
     }
-    if (typeof candidate.wasmSttModel === 'string') {
-      const trimmed = candidate.wasmSttModel.trim();
-      if (trimmed.length <= 256) {
-        result.wasmSttModel = trimmed;
+    if (typeof candidate.sttLocalModel === 'string') {
+      const trimmed = candidate.sttLocalModel.trim();
+      if (trimmed.length <= STT_MODEL_MAX_LENGTH) {
+        result.sttLocalModel = trimmed;
       }
     }
     if (typeof candidate.sttLanguage === 'string') {
@@ -750,15 +755,6 @@ export const createSettingsHelpers = (dependencies) => {
       if (trimmed.length <= STT_LANGUAGE_MAX_LENGTH) {
         result.sttLanguage = trimmed;
       }
-    }
-    if (typeof candidate.sttSilenceThresholdDb === 'number' && Number.isFinite(candidate.sttSilenceThresholdDb)) {
-      result.sttSilenceThresholdDb = Math.max(-100, Math.min(0, candidate.sttSilenceThresholdDb));
-    }
-    if (typeof candidate.sttSilenceHoldMs === 'number' && Number.isFinite(candidate.sttSilenceHoldMs)) {
-      result.sttSilenceHoldMs = Math.max(250, Math.min(10000, Math.round(candidate.sttSilenceHoldMs)));
-    }
-    if (typeof candidate.sttTranscribeOnStop === 'boolean') {
-      result.sttTranscribeOnStop = candidate.sttTranscribeOnStop;
     }
 
     return result;

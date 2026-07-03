@@ -53,4 +53,10 @@
     <!-- Android 13+ requires this declared for FCM push notifications to be shown; the runtime
          prompt is requested by @capacitor/push-notifications on register. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Microphone: voice dictation via WebView getUserMedia. Capacitor's
+         BridgeWebChromeClient forwards the WebView AUDIO_CAPTURE permission
+         request to the Android runtime prompt when this is declared. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
 </manifest>

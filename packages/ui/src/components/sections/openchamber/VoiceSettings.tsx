@@ -1,5 +1,4 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { useBrowserVoice } from '@/hooks/useBrowserVoice';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useDeviceInfo } from '@/lib/device';
 
@@ -16,85 +15,107 @@ import { NumberInput } from '@/components/ui/number-input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import { browserVoiceService } from '@/lib/voice/browserVoiceService';
-import { audioStreamService } from '@/lib/voice/audioStreamService';
-import { wasmSttService, WASM_MODELS } from '@/lib/voice/wasmSttService';
-import type { WasmModelStatus } from '@/lib/voice/wasmSttService';
 import { cn } from '@/lib/utils';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useI18n } from '@/lib/i18n';
 import { disposePreviewAudio } from './voicePreviewAudio';
-const LANGUAGE_OPTIONS = [
-    { value: 'en-US', label: 'English' },
-    { value: 'es-ES', label: 'Español' },
-    { value: 'fr-FR', label: 'Français' },
-    { value: 'de-DE', label: 'Deutsch' },
-    { value: 'ja-JP', label: '日本語' },
-    { value: 'zh-CN', label: '中文' },
-    { value: 'pt-BR', label: 'Português' },
-    { value: 'it-IT', label: 'Italiano' },
-    { value: 'ko-KR', label: '한국어' },
-    { value: 'uk-UA', label: 'Українська' },
-];
 
-const WasmModelStatusIndicator = ({ modelId }: { modelId: string }) => {
+const LOCAL_STT_MODELS = [
+    { id: 'parakeet-tdt-0.6b-v2-int8', labelKey: 'settings.voice.page.stt.model.parakeetV2' },
+    { id: 'parakeet-tdt-0.6b-v3-int8', labelKey: 'settings.voice.page.stt.model.parakeetV3' },
+] as const;
+
+interface DictationModelState {
+    id: string;
+    installed: boolean;
+    downloading: boolean;
+    downloadError: string | null;
+}
+
+const LocalModelStatusIndicator = ({ modelId }: { modelId: string }) => {
     const { t } = useI18n();
-    const [status, setStatus] = useState<WasmModelStatus>(wasmSttService.getModelStatus());
-    const [loading, setLoading] = useState(false);
+    const [model, setModel] = useState<DictationModelState | null>(null);
+    const [requesting, setRequesting] = useState(false);
 
-    useEffect(() => {
-        const handler = (s: WasmModelStatus) => setStatus(s);
-        wasmSttService.onModelStatusChange = handler;
-        return () => { wasmSttService.onModelStatusChange = null; };
-    }, []);
-
-    const currentModelId = wasmSttService.getCurrentModelId();
-    const isLoadingOrDownloading = status.state === 'downloading' || status.state === 'loading';
-
-    // Reset local loading state when model finishes loading or errors
-    useEffect(() => {
-        if (status.state !== 'downloading' && status.state !== 'loading') {
-            setLoading(false);
+    const refresh = useCallback(async () => {
+        try {
+            const response = await runtimeFetch('/api/dictation/status', {
+                query: { provider: 'local', localModel: modelId },
+            });
+            if (!response.ok) {
+                return;
+            }
+            const data = await response.json();
+            const entry = Array.isArray(data?.models)
+                ? data.models.find((m: DictationModelState) => m.id === modelId)
+                : null;
+            if (entry) {
+                setModel(entry);
+            }
+        } catch {
+            // Display-only status; keep the previous state on fetch failure.
         }
-    }, [status.state]);
+    }, [modelId]);
+
+    useEffect(() => {
+        setModel(null);
+        void refresh();
+    }, [refresh]);
+
+    // Poll while a download is in flight so the status flips to installed.
+    useEffect(() => {
+        if (!model?.downloading) {
+            return;
+        }
+        const interval = setInterval(() => {
+            void refresh();
+        }, 3000);
+        return () => clearInterval(interval);
+    }, [model?.downloading, refresh]);
 
     const handleDownload = async () => {
-        setLoading(true);
+        setRequesting(true);
         try {
-            await wasmSttService.loadModel(modelId);
+            await runtimeFetch(`/api/dictation/models/${encodeURIComponent(modelId)}/download`, {
+                method: 'POST',
+            });
+            await refresh();
         } catch {
-            // Error is shown via status indicator
+            // Status refresh reports errors.
+        } finally {
+            setRequesting(false);
         }
     };
 
-    if (status.state === 'ready' && currentModelId === modelId) {
+    if (!model) {
+        return null;
+    }
+
+    if (model.installed) {
         return (
-            <div className="flex items-center gap-2">
-                <span className="typography-ui-compact text-green-600 dark:text-green-400">
-                    {t('settings.voice.page.stt.wasmLoaded')}
-                </span>
-            </div>
+            <span className="typography-ui-compact text-[var(--status-success)]">
+                {t('settings.voice.page.stt.modelInstalled')}
+            </span>
         );
     }
 
-    if (isLoadingOrDownloading) {
-        const progress = status.state === 'downloading' ? Math.round(status.progress) : undefined;
+    if (model.downloading) {
         return (
             <div className="flex items-center gap-2">
+                <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
                 <span className="typography-ui-compact text-muted-foreground">
-                    {status.state === 'downloading' ? t('settings.voice.page.stt.wasmDownloading') : t('settings.voice.page.stt.wasmLoading')}
-                    {progress !== undefined ? ` (${progress}%)` : ''}
+                    {t('settings.voice.page.stt.modelDownloading')}
                 </span>
             </div>
         );
     }
 
-    if (status.state === 'error') {
-        // Partial download (cached progress): show retry button.
+    if (model.downloadError) {
         return (
             <div className="flex items-center gap-2">
-                <span className="typography-ui-compact text-destructive">{status.error}</span>
-                <Button variant="chip" size="xs" disabled={loading} onClick={handleDownload}>
-                    {t('settings.voice.page.stt.wasmRetry')}
+                <span className="typography-ui-compact text-[var(--status-error)]">{model.downloadError}</span>
+                <Button variant="chip" size="xs" disabled={requesting} onClick={handleDownload}>
+                    {t('settings.voice.page.stt.modelRetry')}
                 </Button>
             </div>
         );
@@ -103,10 +124,10 @@ const WasmModelStatusIndicator = ({ modelId }: { modelId: string }) => {
     return (
         <div className="flex items-center gap-2">
             <span className="typography-ui-compact text-muted-foreground">
-                {t('settings.voice.page.stt.wasmNotLoaded')}
+                {t('settings.voice.page.stt.modelNotInstalled')}
             </span>
-            <Button variant="chip" size="xs" disabled={loading} onClick={handleDownload}>
-                {t('settings.voice.page.stt.wasmDownload')}
+            <Button variant="chip" size="xs" disabled={requesting} onClick={handleDownload}>
+                {t('settings.voice.page.stt.modelDownload')}
             </Button>
         </div>
     );
@@ -131,11 +152,6 @@ const OPENAI_VOICE_OPTIONS = [
 export const VoiceSettings: React.FC = () => {
     const { t } = useI18n();
     const { isMobile } = useDeviceInfo();
-    const {
-        isSupported,
-        language,
-        setLanguage,
-    } = useBrowserVoice();
     const voiceProvider = useConfigStore((state) => state.voiceProvider);
     const setVoiceProvider = useConfigStore((state) => state.setVoiceProvider);
     const speechRate = useConfigStore((state) => state.speechRate);
@@ -172,16 +188,10 @@ export const VoiceSettings: React.FC = () => {
     const setSttApiKey = useConfigStore((state) => state.setSttApiKey);
     const sttModel = useConfigStore((state) => state.sttModel);
     const setSttModel = useConfigStore((state) => state.setSttModel);
-    const wasmSttModel = useConfigStore((state) => state.wasmSttModel);
-    const setWasmSttModel = useConfigStore((state) => state.setWasmSttModel);
+    const sttLocalModel = useConfigStore((state) => state.sttLocalModel);
+    const setSttLocalModel = useConfigStore((state) => state.setSttLocalModel);
     const sttLanguage = useConfigStore((state) => state.sttLanguage);
     const setSttLanguage = useConfigStore((state) => state.setSttLanguage);
-    const sttSilenceThresholdDb = useConfigStore((state) => state.sttSilenceThresholdDb);
-    const setSttSilenceThresholdDb = useConfigStore((state) => state.setSttSilenceThresholdDb);
-    const sttSilenceHoldMs = useConfigStore((state) => state.sttSilenceHoldMs);
-    const setSttSilenceHoldMs = useConfigStore((state) => state.setSttSilenceHoldMs);
-    const sttTranscribeOnStop = useConfigStore((state) => state.sttTranscribeOnStop);
-    const setSttTranscribeOnStop = useConfigStore((state) => state.setSttTranscribeOnStop);
     const setShowMessageTTSButtons = useConfigStore((state) => state.setShowMessageTTSButtons);
     const voiceModeEnabled = useConfigStore((state) => state.voiceModeEnabled);
     const setVoiceModeEnabled = useConfigStore((state) => state.setVoiceModeEnabled);
@@ -775,7 +785,7 @@ export const VoiceSettings: React.FC = () => {
                             <div className="flex items-center gap-8 py-1.5">
                                 <span className="typography-ui-label text-foreground sm:w-56 shrink-0">{t('settings.voice.page.field.speechRate')}</span>
                                 <div className="flex items-center gap-2 w-fit">
-                                    {!isMobile && <input type="range" min={0.5} max={2} step={0.1} value={speechRate} onChange={(e) => setSpeechRate(Number(e.target.value))} disabled={!isSupported} className={sliderClass} />}
+                                    {!isMobile && <input type="range" min={0.5} max={2} step={0.1} value={speechRate} onChange={(e) => setSpeechRate(Number(e.target.value))} className={sliderClass} />}
                                     <NumberInput value={speechRate} onValueChange={setSpeechRate} min={0.5} max={2} step={0.1} className="w-16 tabular-nums" />
                                 </div>
                             </div>
@@ -784,7 +794,7 @@ export const VoiceSettings: React.FC = () => {
                             <div className="flex items-center gap-8 py-1.5">
                                 <span className="typography-ui-label text-foreground sm:w-56 shrink-0">{t('settings.voice.page.field.speechPitch')}</span>
                                 <div className="flex items-center gap-2 w-fit">
-                                    {!isMobile && <input type="range" min={0.5} max={2} step={0.1} value={speechPitch} onChange={(e) => setSpeechPitch(Number(e.target.value))} disabled={!isSupported} className={sliderClass} />}
+                                    {!isMobile && <input type="range" min={0.5} max={2} step={0.1} value={speechPitch} onChange={(e) => setSpeechPitch(Number(e.target.value))} className={sliderClass} />}
                                     <NumberInput value={speechPitch} onValueChange={setSpeechPitch} min={0.5} max={2} step={0.1} className="w-16 tabular-nums" />
                                 </div>
                             </div>
@@ -793,7 +803,7 @@ export const VoiceSettings: React.FC = () => {
                             <div className="flex items-center gap-8 py-1.5">
                                 <span className="typography-ui-label text-foreground sm:w-56 shrink-0">{t('settings.voice.page.field.speechVolume')}</span>
                                 <div className="flex items-center gap-2 w-fit">
-                                    {!isMobile && <input type="range" min={0} max={1} step={0.1} value={speechVolume} onChange={(e) => setSpeechVolume(Number(e.target.value))} disabled={!isSupported} className={sliderClass} />}
+                                    {!isMobile && <input type="range" min={0} max={1} step={0.1} value={speechVolume} onChange={(e) => setSpeechVolume(Number(e.target.value))} className={sliderClass} />}
                                     {isMobile ? (
                                         <NumberInput value={Math.round(speechVolume * 100)} onValueChange={(v) => setSpeechVolume(v / 100)} min={0} max={100} step={10} className="w-16 tabular-nums" />
                                     ) : (
@@ -804,30 +814,13 @@ export const VoiceSettings: React.FC = () => {
                                 </div>
                             </div>
 
-                            {/* Language */}
-                            <div className="flex items-center gap-8 py-1.5">
-                                <span className="typography-ui-label text-foreground sm:w-56 shrink-0">{t('settings.voice.page.field.language')}</span>
-                                <div className="flex items-center gap-2 w-fit">
-                                    <Select value={language} onValueChange={setLanguage} disabled={!isSupported}>
-                                        <SelectTrigger className="w-fit">
-                                            <SelectValue placeholder={t('settings.voice.page.field.selectLanguagePlaceholder')} />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {LANGUAGE_OPTIONS.map((lang) => (
-                                                <SelectItem key={lang.value} value={lang.value}>{lang.label}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                            </div>
                         </>
                     )}
                 </section>
             </div>
 
             {/* Speech Recognition */}
-            {voiceModeEnabled && (
-                <div data-settings-item="voice.speech-recognition" className="mb-8">
+            <div data-settings-item="voice.speech-recognition" className="mb-8">
                     <div className="mb-1 px-1">
                         <h3 className="typography-ui-header font-medium text-foreground">
                             {t('settings.voice.page.section.speechRecognition')}
@@ -845,7 +838,7 @@ export const VoiceSettings: React.FC = () => {
                                         </TooltipTrigger>
                                         <TooltipContent sideOffset={8} className="max-w-xs">
                                             <ul className="space-y-1">
-                                                <li><strong>{t('settings.voice.page.provider.browser')}</strong> {t('settings.voice.page.tooltip.sttBrowser')}</li>
+                                                <li><strong>{t('settings.voice.page.provider.local')}</strong> {t('settings.voice.page.tooltip.sttLocal')}</li>
                                                 <li><strong>{t('settings.voice.page.provider.server')}</strong> {t('settings.voice.page.tooltip.sttServer')}</li>
                                             </ul>
                                         </TooltipContent>
@@ -855,53 +848,48 @@ export const VoiceSettings: React.FC = () => {
                                     <Button
                                         variant="chip"
                                         size="xs"
-                                        aria-pressed={sttProvider === 'browser'}
-                                        onClick={() => setSttProvider('browser')}
+                                        aria-pressed={sttProvider === 'local'}
+                                        onClick={() => setSttProvider('local')}
                                         className="!font-normal"
                                     >
-                                        {t('settings.voice.page.provider.browser')}
+                                        {t('settings.voice.page.provider.local')}
                                     </Button>
                                     <Button
                                         variant="chip"
                                         size="xs"
-                                        aria-pressed={sttProvider === 'server'}
-                                        onClick={() => setSttProvider('server')}
+                                        aria-pressed={sttProvider === 'openai-compatible'}
+                                        onClick={() => setSttProvider('openai-compatible')}
                                         className="!font-normal"
                                     >
                                         {t('settings.voice.page.provider.server')}
-                                    </Button>
-                                    <Button
-                                        variant="chip"
-                                        size="xs"
-                                        aria-pressed={sttProvider === 'wasm'}
-                                        onClick={() => setSttProvider('wasm')}
-                                        className="!font-normal"
-                                    >
-                                        {t('settings.voice.page.provider.wasm')}
                                     </Button>
                                 </div>
                             </div>
                         </div>
 
-                        {sttProvider === 'server' && (
+                        {sttProvider === 'local' && (
                             <div className="py-1.5 space-y-2">
-                                <div
-                                    className="group flex cursor-pointer items-center gap-2 py-1.5"
-                                    role="button"
-                                    tabIndex={0}
-                                    aria-pressed={sttTranscribeOnStop}
-                                    onClick={() => setSttTranscribeOnStop(!sttTranscribeOnStop)}
-                                    onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setSttTranscribeOnStop(!sttTranscribeOnStop); } }}
-                                >
-                                    <Checkbox checked={sttTranscribeOnStop} onChange={setSttTranscribeOnStop} ariaLabel={t('settings.voice.page.field.transcribeOnStopAria')} />
-                                    <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.transcribeOnStop')}</span>
+                                <div>
+                                    <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.model')}</span>
+                                    <div className="mt-1.5 flex items-center gap-3">
+                                        <Select value={sttLocalModel} onValueChange={setSttLocalModel}>
+                                            <SelectTrigger className="w-fit">
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {LOCAL_STT_MODELS.map((m) => (
+                                                    <SelectItem key={m.id} value={m.id}>{t(m.labelKey)}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        <LocalModelStatusIndicator modelId={sttLocalModel} />
+                                    </div>
                                 </div>
+                            </div>
+                        )}
 
-                                {!audioStreamService.isSupported() && (
-                                    <p className="typography-meta text-[var(--status-error)]">
-                                        {t('settings.voice.page.field.sttBrowserSupportError')}
-                                    </p>
-                                )}
+                        {sttProvider === 'openai-compatible' && (
+                            <div className="py-1.5 space-y-2">
                                 <div>
                                     <span className={cn("typography-ui-label text-foreground", !sttServerUrl.trim() && "text-[var(--status-error)]")}>
                                         {t('settings.voice.page.field.serverUrl')}
@@ -979,60 +967,28 @@ export const VoiceSettings: React.FC = () => {
                                         />
                                     </div>
                                 </div>
-                                <div className="flex items-center gap-8 py-0.5">
-                                    <span className="typography-ui-label text-foreground sm:w-56 shrink-0">{t('settings.voice.page.field.silenceThreshold')}</span>
-                                    <div className="flex items-center gap-2 w-fit">
-                                        {!isMobile && <input type="range" min={-60} max={-20} step={1} value={sttSilenceThresholdDb} onChange={(e) => setSttSilenceThresholdDb(Number(e.target.value))} className={sliderClass} />}
-                                        <span className="typography-ui-label text-foreground tabular-nums min-w-[3.5rem] text-right">
-                                            {sttSilenceThresholdDb} dB
-                                        </span>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-8 py-0.5">
-                                    <span className="typography-ui-label text-foreground sm:w-56 shrink-0">{t('settings.voice.page.field.silenceHold')}</span>
-                                    <div className="flex items-center gap-2 w-fit">
-                                        {!isMobile && <input type="range" min={500} max={3000} step={100} value={sttSilenceHoldMs} onChange={(e) => setSttSilenceHoldMs(Number(e.target.value))} className={sliderClass} />}
-                                        <NumberInput value={sttSilenceHoldMs} onValueChange={setSttSilenceHoldMs} min={500} max={3000} step={100} className="w-20 tabular-nums" />
-                                        <span className="typography-meta text-muted-foreground">{t('settings.voice.page.field.millisecondsUnit')}</span>
-                                    </div>
-                                </div>
                             </div>
                         )}
 
-                        {sttProvider === 'wasm' && (
-                            <div className="py-1.5 space-y-2">
-                                <div>
-                                    <span className="typography-ui-label text-muted-foreground">
-                                        {t('settings.voice.page.stt.wasmModel')}
-                                    </span>
-                                    <Select value={wasmSttModel} onValueChange={setWasmSttModel}>
-                                        <SelectTrigger className="mt-0.5">
-                                            <SelectValue placeholder={t('settings.voice.page.stt.wasmModel')} />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {WASM_MODELS.map((m) => (
-                                                <SelectItem key={m.id} value={m.id}>
-                                                    <div className="flex flex-col">
-                                                        <span>{m.name}</span>
-                                                        <span className="typography-ui-compact text-muted-foreground">
-                                                            {m.size} · {m.languages}
-                                                        </span>
-                                                    </div>
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                    <p className="typography-ui-compact text-muted-foreground mt-0.5">
-                                        {WASM_MODELS.find((m) => m.id === wasmSttModel)?.description}
-                                    </p>
+                        {sttProvider === 'local' && (
+                            <div className="py-1.5">
+                                <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.language')}</span>
+                                <span className="typography-meta ml-2 text-muted-foreground">
+                                    {t('settings.voice.page.field.sttLanguageHint')}
+                                </span>
+                                <div className="relative mt-1.5 max-w-[8rem]">
+                                    <input
+                                        type="text"
+                                        value={sttLanguage}
+                                        onChange={(e) => setSttLanguage(e.target.value)}
+                                        placeholder="auto"
+                                        className="w-full h-7 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/70"
+                                    />
                                 </div>
-                                {/* Model status indicator */}
-                                <WasmModelStatusIndicator modelId={wasmSttModel} />
                             </div>
                         )}
                     </section>
-                </div>
-            )}
+            </div>
 
             {/* Playback & Summarization */}
             <div data-settings-item="voice.playback" className="mb-8">
@@ -1086,20 +1042,6 @@ export const VoiceSettings: React.FC = () => {
                     </div>
 
                 </section>
-
-                {voiceModeEnabled && isSupported && (
-                    <div className="mt-2 px-2">
-                        <p className="typography-meta text-muted-foreground">
-                            {t('settings.voice.page.hint.shiftClickPrefix')}
-                            {' '}
-                            <kbd className="px-1 py-0.5 mx-0.5 rounded border border-[var(--interactive-border)] bg-background typography-mono text-[10px]">Shift</kbd>
-                            {' + '}
-                            <kbd className="px-1 py-0.5 mx-0.5 rounded border border-[var(--interactive-border)] bg-background typography-mono text-[10px]">Click</kbd>
-                            {' '}
-                            {t('settings.voice.page.hint.shiftClickSuffix')}
-                        </p>
-                    </div>
-                )}
             </div>
 
         </div>
