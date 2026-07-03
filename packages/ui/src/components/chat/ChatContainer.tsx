@@ -46,6 +46,7 @@ import { getSessionPrefetch, subscribeSessionPrefetch } from '@/sync/session-pre
 import { getSessionMaterializationStatus } from '@/sync/materialization';
 import { usePlanDetection } from '@/hooks/usePlanDetection';
 import { useI18n } from '@/lib/i18n';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { usePendingDiscordStore } from '@/stores/usePendingDiscordStore';
 
@@ -158,6 +159,8 @@ type ChatViewportProps = {
     sessionQuestions: QuestionRequest[];
     sessionPermissions: PermissionRequest[];
     isProgrammaticFollowActive: boolean;
+    showLoadOlderButton: boolean;
+    onLoadOlder: () => void;
 };
 
 const ChatViewport = React.memo(({
@@ -182,7 +185,10 @@ const ChatViewport = React.memo(({
     sessionQuestions,
     sessionPermissions,
     isProgrammaticFollowActive,
+    showLoadOlderButton,
+    onLoadOlder,
 }: ChatViewportProps) => {
+    const { t } = useI18n();
     const focusScrollContainer = React.useCallback((event: React.MouseEvent<HTMLElement>) => {
         if (event.defaultPrevented || shouldIgnoreChatNavigationTarget(event.target)) {
             return;
@@ -219,6 +225,21 @@ const ChatViewport = React.memo(({
                     data-scrollbar="chat"
                 >
                     <div className="relative z-0 min-h-full">
+                        {showLoadOlderButton && (
+                            <div className="flex justify-center pt-3 pb-1">
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={onLoadOlder}
+                                    disabled={isLoadingOlder}
+                                >
+                                    {isLoadingOlder && (
+                                        <Icon name="loader-4" className="size-4 animate-spin" />
+                                    )}
+                                    {t('chat.history.loadOlder')}
+                                </Button>
+                            </div>
+                        )}
                         <MessageList
                             ref={messageListRef}
                             sessionKey={currentSessionId}
@@ -278,7 +299,9 @@ const ChatViewport = React.memo(({
         && prev.scrollToBottom === next.scrollToBottom
         && prev.sessionQuestions === next.sessionQuestions
         && prev.sessionPermissions === next.sessionPermissions
-        && prev.isProgrammaticFollowActive === next.isProgrammaticFollowActive;
+        && prev.isProgrammaticFollowActive === next.isProgrammaticFollowActive
+        && prev.showLoadOlderButton === next.showLoadOlderButton
+        && prev.onLoadOlder === next.onLoadOlder;
 });
 
 ChatViewport.displayName = 'ChatViewport';
@@ -655,6 +678,14 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     const resumeToLatestInstant = React.useCallback(() => {
         goToBottom('instant');
     }, [goToBottom]);
+    // Mobile loads older history via an explicit top button instead of a
+    // scroll-position trigger (see handleHistoryScroll in the controller).
+    const showLoadOlderButton = isMobileSurfaceRuntime()
+        && timelineController.historySignals.canLoadEarlier;
+    const timelineLoadEarlier = timelineController.loadEarlier;
+    const handleLoadOlderClick = React.useCallback(() => {
+        void timelineLoadEarlier({ userInitiated: true });
+    }, [timelineLoadEarlier]);
 
     React.useEffect(() => {
         activeTurnChangeRef.current = timelineController.handleActiveTurnChange;
@@ -974,6 +1005,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 sessionQuestions={sessionQuestions}
                 sessionPermissions={sessionPermissions}
                 isProgrammaticFollowActive={isFollowingProgrammatically}
+                showLoadOlderButton={showLoadOlderButton}
+                onLoadOlder={handleLoadOlderClick}
             />
 
             <div

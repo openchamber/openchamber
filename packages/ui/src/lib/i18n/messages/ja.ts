@@ -1287,6 +1287,7 @@ export const dict: Record<I18nKey, string> = {
   'diffView.hunk.discardTitle': 'ハンク{index}を破棄',
   'diffView.hunk.unavailable': 'このハンクはもう利用できません。差分を更新してからもう一度お試しください。',
   'diffView.hunk.unsupported': '個別のハンクのステージングはこのランタイムではサポートされていません。',
+  'chat.history.loadOlder': '以前のメッセージを読み込む',
   'chat.autoReview.title': 'コードレビューループが実行中です',
   'chat.autoReview.status.waitingForReviewer': 'レビュアーを待機中',
   'chat.autoReview.status.waitingForImplementer': '実装者を待機中',

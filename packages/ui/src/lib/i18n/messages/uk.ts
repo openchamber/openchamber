@@ -1248,6 +1248,7 @@ export const dict: Record<I18nKey, string> = {
   'diffView.reviewDialog.actions.starting': 'Запуск...',
   'diffView.reviewDialog.toast.noSessionDirectory': 'Директорія сесії недоступна',
   'diffView.reviewDialog.toast.startFailed': 'Не вдалося запустити review flow',
+  'chat.history.loadOlder': 'Завантажити ще',
   'chat.autoReview.title': 'Цикл код-ревʼю триває',
   'chat.autoReview.status.waitingForReviewer': 'Очікуємо ревʼювера',
   'chat.autoReview.status.waitingForImplementer': 'Очікуємо імплементатора',

@@ -1248,6 +1248,7 @@ export const dict: Record<I18nKey, string> = {
   'diffView.reviewDialog.actions.starting': 'Iniciando...',
   'diffView.reviewDialog.toast.noSessionDirectory': 'El directorio de la sesión no está disponible',
   'diffView.reviewDialog.toast.startFailed': 'No se pudo iniciar el flujo de revisión',
+  'chat.history.loadOlder': 'Cargar mensajes anteriores',
   'chat.autoReview.title': 'El ciclo de revisión de código está en curso',
   'chat.autoReview.status.waitingForReviewer': 'Esperando al revisor',
   'chat.autoReview.status.waitingForImplementer': 'Esperando al implementador',

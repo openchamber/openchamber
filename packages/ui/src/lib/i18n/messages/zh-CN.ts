@@ -1248,6 +1248,7 @@ export const dict: Record<I18nKey, string> = {
   'diffView.reviewDialog.actions.starting': 'Starting...',
   'diffView.reviewDialog.toast.noSessionDirectory': 'Session directory is unavailable',
   'diffView.reviewDialog.toast.startFailed': 'Failed to start review flow',
+  'chat.history.loadOlder': '加载更早的消息',
   'chat.autoReview.title': '代码审查循环正在运行',
   'chat.autoReview.status.waitingForReviewer': '等待审查者',
   'chat.autoReview.status.waitingForImplementer': '等待实现者',

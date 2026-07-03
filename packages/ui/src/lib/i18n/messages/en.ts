@@ -1282,6 +1282,7 @@ export const dict = {
   'diffView.reviewDialog.actions.starting': 'Starting...',
   'diffView.reviewDialog.toast.noSessionDirectory': 'Session directory is unavailable',
   'diffView.reviewDialog.toast.startFailed': 'Failed to start review flow',
+  'chat.history.loadOlder': 'Load older messages',
   'chat.autoReview.title': 'Code review loop is running',
   'chat.autoReview.status.waitingForReviewer': 'Waiting for reviewer',
   'chat.autoReview.status.waitingForImplementer': 'Waiting for implementer',

@@ -60,24 +60,6 @@ export interface UseChatTimelineControllerResult {
 
 const TURN_MODEL_CACHE_MAX = 30
 const HISTORY_SCROLL_THRESHOLD = 200
-// On touch surfaces the user can drag continuously toward the top, and
-// loadEarlier is an async (network) fetch. A 200px lead is enough on desktop
-// (wheel + fast render) but the finger can outrun an in-flight fetch on mobile
-// and hit the very top before history lands. Give touch a much larger,
-// viewport-relative head start so the fetch completes before the top is
-// reached, regardless of how fast the user drags.
-const MOBILE_HISTORY_SCROLL_THRESHOLD_MIN = 1200
-const MOBILE_HISTORY_SCROLL_VIEWPORT_FACTOR = 2
-
-const resolveHistoryScrollThreshold = (clientHeight: number): number => {
-    if (!isMobileSurfaceRuntime()) {
-        return HISTORY_SCROLL_THRESHOLD
-    }
-    return Math.max(
-        MOBILE_HISTORY_SCROLL_THRESHOLD_MIN,
-        clientHeight * MOBILE_HISTORY_SCROLL_VIEWPORT_FACTOR,
-    )
-}
 const VSCODE_TURN_MODEL_CACHE_MAX = 4
 const VSCODE_TURN_MODEL_CACHE_MAX_MESSAGES = 30
 const MOBILE_TURN_MODEL_CACHE_MAX = 4
@@ -544,7 +526,10 @@ export const useChatTimelineController = ({
                 return true;
             };
 
-            if (isMobileSurfaceRuntime() && heightDelta > 0) {
+            // Non-virtualized mobile list only: fight iOS momentum manually.
+            // The virtualized mobile list (tanstack) defers prepend adjustments
+            // through touch/momentum in core, so manual writes would double up.
+            if (isMobileSurfaceRuntime() && !historyVirtualized && heightDelta > 0) {
                 setScrollTopDefeatingMomentum(container, snap.top + heightDelta);
                 updateTracking();
                 return;
@@ -554,12 +539,20 @@ export const useChatTimelineController = ({
             // restoreViewportAnchor which falls back to virtualizer-aware
             // scrollHistoryIndexIntoView when the element is not in the DOM.
             // Note: an unchanged scrollTop after restore is NOT a failure here —
-            // the virtualized desktop list runs with virtua `shift`, which
-            // compensates the prepend internally, so staying near snap.top is
-            // the correct outcome.
+            // the virtualized list compensates the prepend internally, so
+            // staying near snap.top is the correct outcome.
             if (!(snap.anchor && restoreViewportAnchor(snap.anchor))) {
                 // Fallback: height-delta compensation
                 applyHeightDelta();
+            }
+            if (historyVirtualized && snap.anchor && isMobileSurfaceRuntime()) {
+                // Mobile only: freshly prepended rows keep re-measuring for a
+                // few frames and each pass can shift content, so hold the
+                // anchor until it settles. Desktop must NOT run this — wheel
+                // scrolling during the hold would fight the re-assertions and
+                // read as a frozen scroll; the virtualizer's own anchoring is
+                // enough there.
+                messageListRef.current?.holdViewportAnchor(snap.anchor);
             }
         } else if (isPrepend && prev && !historyVirtualized) {
             // Released viewport: preserve the read position by compensating for the
@@ -690,10 +683,16 @@ export const useChatTimelineController = ({
     }, [beginHistoryInteraction, fetchOlderHistory, releaseAutoFollow, settleHistoryInteraction]);
 
     const handleHistoryScroll = React.useCallback(() => {
+        // Mobile never loads history from scroll position: any prepend racing
+        // an active touch gesture can be hijacked by the native scroll
+        // animation. The user scrolls to the natural top and taps an explicit
+        // "load older" button instead — the insert then happens from a resting
+        // state, which is fully deterministic.
+        if (isMobileSurfaceRuntime()) return;
         const container = scrollRef.current;
         if (!container) return;
         if (isPinnedRef.current) return;
-        if (container.scrollTop >= resolveHistoryScrollThreshold(container.clientHeight)) return;
+        if (container.scrollTop >= HISTORY_SCROLL_THRESHOLD) return;
         if (!historySignalsRef.current.canLoadEarlier) return;
         if (isLoadingOlderRef.current || pendingRevealWorkRef.current) return;
 

@@ -174,5 +174,8 @@
     "typescript": "~5.9.0",
     "typescript-eslint": "^8.39.1",
     "vite": "^7.1.2"
+  },
+  "patchedDependencies": {
+    "@tanstack/virtual-core@3.17.3": "patches/@tanstack%2Fvirtual-core@3.17.3.patch"
   }
 }

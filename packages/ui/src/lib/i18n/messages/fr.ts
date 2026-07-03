@@ -1116,6 +1116,7 @@ export const dict = {
   'diffView.reviewDialog.actions.starting': 'Démarrage...',
   'diffView.reviewDialog.toast.noSessionDirectory': 'Le dossier de session est indisponible',
   'diffView.reviewDialog.toast.startFailed': 'Impossible de démarrer le flux de revue',
+  'chat.history.loadOlder': 'Charger les messages précédents',
   'chat.autoReview.title': 'La boucle de revue de code est en cours',
   'chat.autoReview.status.waitingForReviewer': 'En attente du reviewer',
   'chat.autoReview.status.waitingForImplementer': 'En attente de l’implémenteur',

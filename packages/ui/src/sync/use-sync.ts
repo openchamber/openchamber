@@ -503,11 +503,15 @@ export function useSync() {
           shouldLoadMessages ? loadMessages(sessionID, { isStale }) : Promise.resolve(),
         ])
 
-        // Progressive mount on desktop: after the initial page resolves, if the
-        // session isn't stale and the server indicated more messages, dispatch a
-        // second fetch to prepend older history. Mobile avoids this background
-        // prepend because adding rows after first paint on a narrow viewport can
-        // visibly shift the timeline; user scroll still loads older history.
+        // Progressive mount (desktop/VS Code): after the initial page
+        // resolves, if the session isn't stale and the server indicated more
+        // messages, dispatch a second fetch to prepend older history — it
+        // gives the scroll container headroom so the scroll-up trigger fires
+        // seamlessly. Mobile deliberately opts out: it has no scroll-position
+        // trigger at all — ALL older history loads happen through the
+        // explicit "load older" button at the top, so every prepend lands
+        // from a resting state the user initiated. (The initial page itself,
+        // including the turn-boundary extension, is unaffected.)
         if (!isStale() && !isMobileSurfaceRuntime()) {
           const currentMeta = getMetaFor(sessionID)
           if (currentMeta.cursor && !currentMeta.complete) {

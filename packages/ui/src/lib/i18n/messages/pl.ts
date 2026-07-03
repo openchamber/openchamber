@@ -1484,6 +1484,7 @@ export const dict: Record<I18nKey, string> = {
   'diffView.reviewDialog.actions.starting': 'Uruchamianie...',
   'diffView.reviewDialog.toast.noSessionDirectory': 'Katalog sesji jest niedostępny',
   'diffView.reviewDialog.toast.startFailed': 'Nie udało się uruchomić flow review',
+  'chat.history.loadOlder': 'Wczytaj starsze wiadomości',
   'chat.autoReview.title': 'Pętla code review trwa',
   'chat.autoReview.status.waitingForReviewer': 'Oczekiwanie na reviewera',
   'chat.autoReview.status.waitingForImplementer': 'Oczekiwanie na implementatora',

@@ -1285,6 +1285,7 @@ export const dict: Record<I18nKey, string> = {
   'diffView.reviewDialog.actions.starting': '시작 중...',
   'diffView.reviewDialog.toast.noSessionDirectory': '세션 디렉터리를 사용할 수 없습니다',
   'diffView.reviewDialog.toast.startFailed': '리뷰 흐름을 시작하지 못했습니다',
+  'chat.history.loadOlder': '이전 메시지 불러오기',
   'chat.autoReview.title': '코드 리뷰 루프 실행 중',
   'chat.autoReview.status.waitingForReviewer': '리뷰어를 기다리는 중',
   'chat.autoReview.status.waitingForImplementer': '구현 에이전트를 기다리는 중',
