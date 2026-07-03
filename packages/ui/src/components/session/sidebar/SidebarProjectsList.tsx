@@ -101,6 +101,11 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
   // orderedGroups.filter/find work and any consumer-memoization see a
   // stable reference.
   const orderedGroupsCacheRef = React.useRef<Map<string, { groups: SessionGroup[]; ordered: SessionGroup[] }>>(new Map());
+  const orderedGroupsCacheGetOrderedGroupsRef = React.useRef<typeof props.getOrderedGroups>(props.getOrderedGroups);
+  if (orderedGroupsCacheGetOrderedGroupsRef.current !== props.getOrderedGroups) {
+    orderedGroupsCacheGetOrderedGroupsRef.current = props.getOrderedGroups;
+    orderedGroupsCacheRef.current.clear();
+  }
   const cachedGetOrderedGroups = (projectId: string, groups: SessionGroup[]): SessionGroup[] => {
     const cache = orderedGroupsCacheRef.current;
     const hit = cache.get(projectId);
@@ -137,7 +142,12 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
   }
 
   return (
-    <ScrollableOverlay ref={scrollContainerRef} useScrollShadow scrollShadowSize={96} outerClassName="flex-1 min-h-0" className={cn('space-y-1 pb-1 pl-2.5 pr-2', props.mobileVariant ? '' : '')}>
+    // [overflow-anchor:none] — the browser's native scroll anchoring otherwise
+    // latches onto content BELOW a growing session group (e.g. the "Show more"
+    // button) and holds it in place, which makes newly revealed sessions look
+    // like they insert upward. With anchoring off, scrollTop stays put and new
+    // rows appear below naturally.
+    <ScrollableOverlay ref={scrollContainerRef} useScrollShadow scrollShadowSize={96} outerClassName="flex-1 min-h-0" className={cn('space-y-1 pb-1 pl-2.5 pr-2 [overflow-anchor:none]', props.mobileVariant ? '' : '')}>
       {props.topContent}
       {props.showOnlyMainWorkspace ? (
         <div className="space-y-[0.6rem] py-1">

@@ -31,7 +31,7 @@ export interface UsageWindows {
   windows: Record<string, UsageWindow>;
 }
 
-export interface ProviderUsage extends UsageWindows {
+interface ProviderUsage extends UsageWindows {
   models?: Record<string, UsageWindows>;
 }
 

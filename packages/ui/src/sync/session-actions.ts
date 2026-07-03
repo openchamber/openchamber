@@ -8,6 +8,7 @@ import { Binary } from "./binary"
 import { useSessionUIStore } from "./session-ui-store"
 import { useInputStore } from "./input-store"
 import type { ChildStoreManager } from "./child-store"
+import { computeSubtreeIds } from "./scoped-blocking-requests"
 import { opencodeClient } from "@/lib/opencode/client"
 import { mergeSessionDirectoryMetadata, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { useConfigStore } from "@/stores/useConfigStore"
@@ -465,6 +466,10 @@ function restoreSessionListSnapshots(snapshots: SessionListSnapshot[]): void {
   }
 }
 
+function cleanupSessionWorktreeMetadata(sessionId: string): void {
+  useSessionUIStore.getState().setWorktreeMetadata(sessionId, null)
+}
+
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function deleteSession(sessionId: string, _options?: Record<string, unknown>): Promise<boolean> {
   const sessionDirectory = getSessionDirectory(sessionId)
@@ -483,6 +488,7 @@ export async function deleteSession(sessionId: string, _options?: Record<string,
       throw new Error("session.delete failed: server did not confirm deletion")
     }
     useGlobalSessionsStore.getState().removeSessions([sessionId])
+    cleanupSessionWorktreeMetadata(sessionId)
     return true
   } catch (error) {
     console.error("[session-actions] deleteSession failed", error)
@@ -490,6 +496,7 @@ export async function deleteSession(sessionId: string, _options?: Record<string,
     // Subsequent delete attempts for those children return 404; treat as
     // success since the session was already deleted by the cascade.
     if ((error as { status?: number })?.status === 404) {
+      cleanupSessionWorktreeMetadata(sessionId)
       return true
     }
     restoreSessionListSnapshots(snapshots)
@@ -513,10 +520,12 @@ export async function deleteSessionInDirectory(sessionId: string, directory: str
       throw new Error("session.delete failed: server did not confirm deletion")
     }
     useGlobalSessionsStore.getState().removeSessions([sessionId])
+    cleanupSessionWorktreeMetadata(sessionId)
     return true
   } catch (error) {
     console.error("[session-actions] deleteSessionInDirectory failed", error)
     if ((error as { status?: number })?.status === 404) {
+      cleanupSessionWorktreeMetadata(sessionId)
       return true
     }
     restoreSessionListSnapshots(snapshots)
@@ -628,6 +637,8 @@ export async function optimisticSend(input: {
   directory?: string | null
   files?: Array<{ type: "file"; mime: string; url: string; filename: string }>
   onOptimisticInsert?: () => void
+  onMessageID?: (messageID: string) => void
+  beforeOptimisticInsert?: () => void
   /** The actual API call — receives the optimistic messageID so the server can use the same ID */
   send: (messageID: string) => Promise<void>
 }): Promise<void> {
@@ -636,10 +647,12 @@ export async function optimisticSend(input: {
   }
 
   await waitForConnectionOrThrow()
+  input.beforeOptimisticInsert?.()
 
   const targetDirectory = input.directory ?? dir()
   const store = targetDirectory ? dirStoreForDirectory(targetDirectory) : dirStore()
   const messageID = ascendingId("msg")
+  input.onMessageID?.(messageID)
   const textPartId = ascendingId("prt")
 
   const optimisticParts: Part[] = [
@@ -813,6 +826,72 @@ export async function rejectQuestion(
     }
     throw error
   }
+}
+
+/**
+ * Dismiss every pending question for the session subtree rooted at `sessionId`
+ * (the session itself plus any subagent children). Used by the chat send path:
+ * sending a message while a question prompt is open must cancel/supersede the
+ * open question so it cannot linger or strand the session in a half-answered
+ * state.
+ *
+ * The questions are removed from the local store OPTIMISTICALLY (before any
+ * network call) so the prompt disappears instantly instead of waiting on the
+ * `question.reject` round-trip. Each question is then formally rejected on the
+ * backend, which fires `question.rejected` for reconciliation.
+ *
+ * Returns true when at least one question was dismissed. Rejection failures are
+ * swallowed (a stranded question must never block the send);
+ * QuestionNotFoundError also clears the stale entry from the child store via
+ * {@link rejectQuestion}.
+ *
+ * NOTE: rejecting unblocks the agent's tool but does NOT end its turn. Callers
+ * that need to send the next message right away (the chat send path) must also
+ * abort the session so the OpenCode runner reaches `idle` — otherwise the new
+ * prompt arrives while the run is still active and is discarded by the runner's
+ * `ensureRunning`.
+ */
+export async function dismissOpenQuestionsForSession(sessionId: string): Promise<boolean> {
+  if (!sessionId) return false
+  const stores = _childStores
+  if (!stores) return false
+
+  const toDismiss: Array<{ sessionId: string; requestId: string }> = []
+  for (const [, store] of stores.children) {
+    const state = store.getState()
+    const scopedIds = computeSubtreeIds(state.session, sessionId)
+    if (scopedIds.size === 0) continue
+    const questionsBySession = state.question ?? {}
+    for (const scopedId of scopedIds) {
+      const requests = questionsBySession[scopedId]
+      if (!requests) continue
+      for (const request of requests) {
+        toDismiss.push({ sessionId: scopedId, requestId: request.id })
+      }
+    }
+  }
+
+  if (toDismiss.length === 0) return false
+
+  // Optimistically clear the questions from the local store so the prompt
+  // disappears immediately, before the reject round-trip.
+  for (const { sessionId: scopedSessionId, requestId } of toDismiss) {
+    removeQuestionRequestFromChildStores(scopedSessionId, requestId)
+  }
+
+  await Promise.all(
+    toDismiss.map(async ({ sessionId: scopedSessionId, requestId }) => {
+      try {
+        await rejectQuestion(scopedSessionId, requestId)
+      } catch (error) {
+        if (isQuestionRequestNotFoundError(error)) return
+        // Swallow: a failed dismissal must not block the send. The next
+        // question.asked / question.rejected event reconciles the store.
+        console.error("[session-actions] Failed to dismiss open question on send:", error)
+      }
+    }),
+  )
+  return true
 }
 
 // ---------------------------------------------------------------------------
@@ -1059,19 +1138,19 @@ export async function fetchMessagesForSession(sessionID: string, directory?: str
   const resolvedDir = directory ?? dir()
   if (!resolvedDir) return
 
-  const s = sdk()
-  const store = directory
-    ? dirStoreForDirectory(directory)
-    : dirStore()
-
-  if (getSessionMaterializationStatus(store.getState(), sessionID).renderable) return
-
   const loadingKey = `${resolvedDir}:${sessionID}`
   if (FETCH_MESSAGES_LOADING.has(loadingKey)) return
 
   FETCH_MESSAGES_LOADING.add(loadingKey)
 
   try {
+    const s = sdk()
+    const store = directory
+      ? dirStoreForDirectory(directory)
+      : dirStore()
+
+    if (getSessionMaterializationStatus(store.getState(), sessionID).renderable) return
+
     const result = await retry(async () => {
       const response = await s.session.messages({
         sessionID,
@@ -1090,6 +1169,10 @@ export async function fetchMessagesForSession(sessionID: string, directory?: str
     // can't repopulate (and un-evict) a session already navigated away from.
     if (useSessionUIStore.getState().currentSessionId !== sessionID) return
 
+    const latestState = store.getState()
+    const latestStatus = getSessionMaterializationStatus(latestState, sessionID)
+    if (latestStatus.renderable && (latestState.message[sessionID]?.length ?? 0) >= records.length) return
+
     store.setState((state) => {
       const materialized = materializeSessionSnapshots(
         state,
@@ -1100,6 +1183,7 @@ export async function fetchMessagesForSession(sessionID: string, directory?: str
         })),
         { skipPartTypes: MESSAGE_REFETCH_SKIP_PARTS },
       )
+      if (!materialized.messagesChanged && !materialized.partsChanged) return state
       return { message: materialized.message, part: materialized.part }
     })
   } catch {

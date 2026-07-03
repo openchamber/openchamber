@@ -28,7 +28,7 @@ export const getOutsideFileGrant = (path: string): string | undefined => {
   return entry.outsideFileGrant;
 };
 
-export const rememberOutsideFileGrant = (
+const rememberOutsideFileGrant = (
   path: string,
   outsideFileGrant: string,
   expiresAt?: number,

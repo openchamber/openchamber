@@ -161,10 +161,3 @@ export function useSessionUnseenCount(sessionId: string): number {
   return useNotificationStore((s) => s.index.session.unseenCount[sessionId] ?? 0)
 }
 
-export function useSessionHasError(sessionId: string): boolean {
-  return useNotificationStore((s) => s.index.session.unseenHasError[sessionId] ?? false)
-}
-
-export function useProjectUnseenCount(directory: string): number {
-  return useNotificationStore((s) => s.index.project.unseenCount[directory] ?? 0)
-}

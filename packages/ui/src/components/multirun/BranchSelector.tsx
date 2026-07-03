@@ -17,12 +17,6 @@ import { useI18n } from '@/lib/i18n';
 /** localStorage key matching NewWorktreeDialog */
 const LAST_SOURCE_BRANCH_KEY = 'oc:lastWorktreeSourceBranch';
 
-export type WorktreeBaseOption = {
-  value: string;
-  label: string;
-  group: 'special' | 'local' | 'remote';
-};
-
 export interface BranchSelectorProps {
   /** Current directory to check for git repository */
   directory: string | null;

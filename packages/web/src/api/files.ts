@@ -5,12 +5,11 @@ import type {
   FilesAPI,
 } from '@openchamber/ui/lib/api/types';
 import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
-import type { RuntimeUrlResolver } from '@openchamber/ui/lib/runtime-url';
 
 const normalizePath = (path: string): string => path.replace(/\\/g, '/');
 
 interface WebFilesAPIOptions {
-  urls: RuntimeUrlResolver;
+  urls?: unknown;
   getDirectory?: () => string | undefined;
 }
 
@@ -51,7 +50,7 @@ const directoryHeaders = (getDirectory?: () => string | undefined, override?: st
   return directory ? { 'x-opencode-directory': directory } : undefined;
 };
 
-export const createWebFilesAPI = ({ urls, getDirectory }: WebFilesAPIOptions): FilesAPI => ({
+export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAPI => ({
   async listDirectory(path: string, options): Promise<DirectoryListResult> {
     const target = normalizePath(path);
     const params = new URLSearchParams();
@@ -62,7 +61,8 @@ export const createWebFilesAPI = ({ urls, getDirectory }: WebFilesAPIOptions): F
       params.set('respectGitignore', 'true');
     }
 
-    const response = await runtimeFetch(urls.api('/api/fs/list', params), {
+    const response = await runtimeFetch('/api/fs/list', {
+      query: params,
       headers: directoryHeaders(getDirectory),
     });
 
@@ -91,7 +91,8 @@ export const createWebFilesAPI = ({ urls, getDirectory }: WebFilesAPIOptions): F
       params.set('limit', String(payload.maxResults));
     }
 
-    const response = await runtimeFetch(urls.api('/api/find/file', params), {
+    const response = await runtimeFetch('/api/find/file', {
+      query: params,
       headers: directoryHeaders(getDirectory),
     });
 
@@ -111,7 +112,7 @@ export const createWebFilesAPI = ({ urls, getDirectory }: WebFilesAPIOptions): F
 
   async createDirectory(path: string): Promise<{ success: boolean; path: string }> {
     const target = normalizePath(path);
-    const response = await runtimeFetch(urls.api('/api/fs/mkdir'), {
+    const response = await runtimeFetch('/api/fs/mkdir', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...directoryHeaders(getDirectory) },
       body: JSON.stringify({ path: target }),
@@ -138,7 +139,8 @@ export const createWebFilesAPI = ({ urls, getDirectory }: WebFilesAPIOptions): F
     if (options?.outsideFileGrant) {
       params.set('outsideFileGrant', options.outsideFileGrant);
     }
-    const response = await runtimeFetch(urls.api('/api/fs/stat', params), {
+    const response = await runtimeFetch('/api/fs/stat', {
+      query: params,
       headers: directoryHeaders(getDirectory, options?.directory),
     });
 
@@ -168,7 +170,8 @@ export const createWebFilesAPI = ({ urls, getDirectory }: WebFilesAPIOptions): F
     if (options?.optional) {
       params.set('optional', 'true');
     }
-    const response = await runtimeFetch(urls.api('/api/fs/read', params), {
+    const response = await runtimeFetch('/api/fs/read', {
+      query: params,
       cache: options?.optional ? 'no-store' : 'default',
       headers: directoryHeaders(getDirectory, options?.directory),
     });
@@ -184,7 +187,7 @@ export const createWebFilesAPI = ({ urls, getDirectory }: WebFilesAPIOptions): F
 
   async writeFile(path: string, content: string): Promise<{ success: boolean; path: string }> {
     const target = normalizePath(path);
-    const response = await runtimeFetch(urls.api('/api/fs/write'), {
+    const response = await runtimeFetch('/api/fs/write', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...directoryHeaders(getDirectory) },
       body: JSON.stringify({ path: target, content }),
@@ -204,7 +207,7 @@ export const createWebFilesAPI = ({ urls, getDirectory }: WebFilesAPIOptions): F
 
   async delete(path: string): Promise<{ success: boolean }> {
     const target = normalizePath(path);
-    const response = await runtimeFetch(urls.api('/api/fs/delete'), {
+    const response = await runtimeFetch('/api/fs/delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...directoryHeaders(getDirectory) },
       body: JSON.stringify({ path: target }),
@@ -220,7 +223,7 @@ export const createWebFilesAPI = ({ urls, getDirectory }: WebFilesAPIOptions): F
   },
 
   async rename(oldPath: string, newPath: string): Promise<{ success: boolean; path: string }> {
-    const response = await runtimeFetch(urls.api('/api/fs/rename'), {
+    const response = await runtimeFetch('/api/fs/rename', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...directoryHeaders(getDirectory) },
       body: JSON.stringify({ oldPath, newPath }),
@@ -239,7 +242,7 @@ export const createWebFilesAPI = ({ urls, getDirectory }: WebFilesAPIOptions): F
   },
 
   async revealPath(targetPath: string): Promise<{ success: boolean }> {
-    const response = await runtimeFetch(urls.api('/api/fs/reveal'), {
+    const response = await runtimeFetch('/api/fs/reveal', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...directoryHeaders(getDirectory) },
       body: JSON.stringify({ path: normalizePath(targetPath) }),

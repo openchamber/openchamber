@@ -5,10 +5,12 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import {
   getDesktopLanAddress,
+  getDesktopKeepAwake,
   getDesktopLaunchAtLogin,
   isDesktopLocalOriginActive,
   isDesktopShell,
   restartDesktopApp,
+  setDesktopKeepAwake,
   setDesktopLaunchAtLogin,
 } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
@@ -29,6 +31,9 @@ export const DesktopNetworkSettings: React.FC = () => {
   const [launchAtLoginSupported, setLaunchAtLoginSupported] = React.useState(false);
   const [launchAtLoginEnabled, setLaunchAtLoginEnabled] = React.useState(false);
   const [isSavingLaunchAtLogin, setIsSavingLaunchAtLogin] = React.useState(false);
+  const [keepAwakeSupported, setKeepAwakeSupported] = React.useState(false);
+  const [keepAwakeEnabled, setKeepAwakeEnabled] = React.useState(false);
+  const [isSavingKeepAwake, setIsSavingKeepAwake] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [lanAddress, setLanAddress] = React.useState<string | null>(null);
 
@@ -100,6 +105,27 @@ export const DesktopNetworkSettings: React.FC = () => {
       }
       setLaunchAtLoginSupported(status?.supported === true);
       setLaunchAtLoginEnabled(status?.enabled === true);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isLocalDesktop]);
+
+  React.useEffect(() => {
+    if (!isLocalDesktop) {
+      setKeepAwakeSupported(false);
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      const status = await getDesktopKeepAwake();
+      if (cancelled) {
+        return;
+      }
+      setKeepAwakeSupported(status?.supported === true);
+      setKeepAwakeEnabled(status?.enabled === true);
     })();
 
     return () => {
@@ -183,6 +209,30 @@ export const DesktopNetworkSettings: React.FC = () => {
     }
   }, [isSavingLaunchAtLogin, launchAtLoginEnabled, launchAtLoginSupported, t]);
 
+  const handleKeepAwakeToggle = React.useCallback(async () => {
+    if (!keepAwakeSupported || isSavingKeepAwake) {
+      return;
+    }
+
+    const nextValue = !keepAwakeEnabled;
+    setKeepAwakeEnabled(nextValue);
+    setIsSavingKeepAwake(true);
+    setError(null);
+
+    try {
+      const status = await setDesktopKeepAwake(nextValue);
+      if (!status?.supported) {
+        throw new Error(t('settings.openchamber.desktopNetwork.error.keepAwakeUnsupported'));
+      }
+      setKeepAwakeEnabled(status.enabled);
+    } catch (cause) {
+      setKeepAwakeEnabled(!nextValue);
+      setError(cause instanceof Error ? cause.message : t('settings.openchamber.desktopNetwork.error.keepAwakeSaveFailed'));
+    } finally {
+      setIsSavingKeepAwake(false);
+    }
+  }, [isSavingKeepAwake, keepAwakeEnabled, keepAwakeSupported, t]);
+
   const handleSaveAndRestart = React.useCallback(async () => {
     if (!isDirty) {
       return;
@@ -256,6 +306,35 @@ export const DesktopNetworkSettings: React.FC = () => {
               <div className="typography-ui-label text-foreground">{t('settings.openchamber.desktopNetwork.field.launchAtLogin')}</div>
               <div className="typography-micro text-muted-foreground/70">
                 {t('settings.openchamber.desktopNetwork.field.launchAtLoginDescription')}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {keepAwakeSupported ? (
+          <div
+            data-settings-item="sessions.desktop-keep-awake"
+            className="group flex cursor-pointer items-start gap-2 py-1.5"
+            role="button"
+            tabIndex={0}
+            onClick={handleKeepAwakeToggle}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                handleKeepAwakeToggle();
+              }
+            }}
+          >
+            <Checkbox
+              checked={keepAwakeEnabled}
+              onChange={handleKeepAwakeToggle}
+              ariaLabel={t('settings.openchamber.desktopNetwork.field.keepAwakeAria')}
+              disabled={isSavingKeepAwake}
+            />
+            <div className="min-w-0 flex-1">
+              <div className="typography-ui-label text-foreground">{t('settings.openchamber.desktopNetwork.field.keepAwake')}</div>
+              <div className="typography-micro text-muted-foreground/70">
+                {t('settings.openchamber.desktopNetwork.field.keepAwakeDescription')}
               </div>
             </div>
           </div>

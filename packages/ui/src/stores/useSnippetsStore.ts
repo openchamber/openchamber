@@ -4,10 +4,11 @@ import type { Snippet } from '@/types/snippet';
 import { opencodeClient } from '@/lib/opencode/client';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
 
 export type SnippetScope = 'global' | 'project';
 
-export interface SnippetDraft {
+interface SnippetDraft {
   name: string;
   scope: SnippetScope;
   content?: string;
@@ -37,10 +38,12 @@ let loadInFlight: Promise<boolean> | null = null;
 
 const getRequestDirectory = (): string | null => {
   try {
-    const activeProject = useProjectsStore.getState().getActiveProject?.();
-    if (activeProject?.path?.trim()) return activeProject.path.trim();
+    const currentDirectory = useDirectoryStore.getState().currentDirectory;
+    if (currentDirectory?.trim()) return currentDirectory.trim();
     const clientDir = opencodeClient.getDirectory();
     if (clientDir?.trim()) return clientDir.trim();
+    const activeProject = useProjectsStore.getState().getActiveProject?.();
+    if (activeProject?.path?.trim()) return activeProject.path.trim();
   } catch (error) {
     console.warn('[SnippetsStore] Error resolving config directory:', error);
   }

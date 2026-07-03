@@ -57,10 +57,3 @@ export function locationPartsFrom(value: SkillLocationValue): { scope: SkillScop
   }
   return { scope: match.scope, source: match.source };
 }
-
-export function locationLabel(scope: SkillScope, source: SkillSource): string {
-  if (scope === 'user' && source === 'claude') return 'User / Claude';
-  if (scope === 'project' && source === 'claude') return 'Project / Claude';
-  const match = SKILL_LOCATION_OPTIONS.find((option) => option.scope === scope && option.source === source);
-  return match?.label || `${scope} / ${source}`;
-}

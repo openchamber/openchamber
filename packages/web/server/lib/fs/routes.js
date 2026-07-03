@@ -883,7 +883,13 @@ export const registerFsRoutes = (app, dependencies) => {
       const download = req.query.download === 'true';
       if (download) {
         const fileName = path.basename(canonicalPath);
-        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+        // RFC 5987: use filename*= for non-ASCII filenames, with ASCII-only
+        // filename= as fallback for older clients.
+        const asciiOnly = fileName.replace(/[^\u0000-\u007F]/g, '');
+        const fallback = asciiOnly || 'file';
+        // Percent-encode the raw UTF-8 bytes for filename*=
+        const encoded = encodeURIComponent(fileName);
+        res.setHeader('Content-Disposition', `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`);
       }
 
       const content = await fsPromises.readFile(canonicalPath);

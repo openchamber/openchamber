@@ -4,7 +4,7 @@ import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 
-export const SIDEBAR_CONTENT_WIDTH = 280;
+const SIDEBAR_CONTENT_WIDTH = 280;
 const SIDEBAR_MIN_WIDTH = 280;
 const SIDEBAR_MAX_WIDTH = 500;
 

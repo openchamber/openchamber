@@ -24,6 +24,7 @@ export type ReviewFlowExecution = {
   variant: string;
   agent: string;
   generateHandoff: boolean;
+  autoReview: boolean;
 };
 
 type ReviewFlowDialogProps = {
@@ -45,6 +46,7 @@ const getInitialExecution = (params: {
   variant: params.variant,
   agent: params.agent,
   generateHandoff: true,
+  autoReview: false,
 });
 
 export function ReviewFlowDialog({
@@ -163,6 +165,16 @@ export function ReviewFlowDialog({
               ariaLabel={t('diffView.reviewDialog.generateHandoff')}
             />
             <span>{t('diffView.reviewDialog.generateHandoff')}</span>
+          </label>
+
+          <label className="flex items-center gap-2 typography-ui-label text-foreground">
+            <Checkbox
+              checked={execution.autoReview}
+              onChange={(autoReview) => setExecution((prev) => ({ ...prev, autoReview }))}
+              disabled={submitting}
+              ariaLabel={t('diffView.reviewDialog.autoReview')}
+            />
+            <span>{t('diffView.reviewDialog.autoReview')}</span>
           </label>
 
           <div className="flex min-w-0 flex-col gap-1.5">

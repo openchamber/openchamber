@@ -2,7 +2,7 @@ import React from 'react';
 
 import { useUIStore } from '@/stores/useUIStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
-import { useGitStore, useGitStatus, useIsGitRepo, useGitFileCount, useGitLoadingStatus } from '@/stores/useGitStore';
+import { useGitStore, useGitStatus, useIsGitRepo, useGitLoadingStatus } from '@/stores/useGitStore';
 import { cn } from '@/lib/utils';
 import type { GitStatus } from '@/lib/api/types';
 import {
@@ -1297,6 +1297,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 variant: execution.variant || undefined,
                 generateHandoff: execution.generateHandoff,
                 returnAfterHandoffRequest: execution.generateHandoff,
+                autoReview: execution.autoReview,
             });
             setReviewDialogOpen(false);
         } catch (error) {
@@ -1693,23 +1694,4 @@ export const DiffView: React.FC<DiffViewProps> = ({
             {renderContent()}
         </div>
     );
-};
-
-// eslint-disable-next-line react-refresh/only-export-components
-export const useDiffFileCount = (): number => {
-    const { git } = useRuntimeAPIs();
-    const effectiveDirectory = useEffectiveDirectory();
-
-    const setActiveDirectory = useGitStore((state) => state.setActiveDirectory);
-    const ensureStatus = useGitStore((state) => state.ensureStatus);
-    const fileCount = useGitFileCount(effectiveDirectory ?? null);
-
-    React.useEffect(() => {
-        if (effectiveDirectory) {
-            setActiveDirectory(effectiveDirectory);
-            void ensureStatus(effectiveDirectory, git);
-        }
-    }, [effectiveDirectory, setActiveDirectory, ensureStatus, git]);
-
-    return fileCount;
 };

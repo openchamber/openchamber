@@ -824,6 +824,19 @@ const isNotGitRepositoryError = (error) => {
   return /not a git repository/i.test(text);
 };
 
+// A directory that no longer exists (e.g. a worktree deleted while something
+// was still polling its status) is an expected, benign condition — not a fault
+// to scream about. simple-git throws "Cannot use simple-git on a directory that
+// does not exist"; the underlying fs errors are ENOENT/ENOTDIR.
+const isMissingDirectoryError = (error) => {
+  const code = error?.code;
+  if (code === 'ENOENT' || code === 'ENOTDIR') {
+    return true;
+  }
+  const text = parseGitErrorText(error);
+  return /directory that does not exist|does not exist|no such file or directory/i.test(text);
+};
+
 const runGitCommand = async (cwd, args) => {
   try {
     const { stdout, stderr } = await execFileAsync(getGitBinary(), args, {
@@ -1913,6 +1926,12 @@ export async function setLocalIdentity(directory, profile) {
       await git.raw(['config', '--local', '--unset', 'core.sshCommand']).catch(() => {});
     }
 
+    if (profile.signCommits === true && typeof profile.signingKey === 'string' && profile.signingKey.trim()) {
+      await git.addConfig('gpg.format', 'ssh', false, 'local');
+      await git.addConfig('user.signingkey', profile.signingKey.trim(), false, 'local');
+      await git.addConfig('commit.gpgsign', 'true', false, 'local');
+    }
+
     return true;
   } catch (error) {
     console.error('Failed to set Git identity:', error);
@@ -2178,7 +2197,7 @@ export async function getStatus(directory, options = {}) {
       rebaseInProgress,
     };
   } catch (error) {
-    if (!isNotGitRepositoryError(error)) {
+    if (!isNotGitRepositoryError(error) && !isMissingDirectoryError(error)) {
       console.error('Failed to get Git status:', error);
     }
     throw error;
@@ -3544,6 +3563,19 @@ export async function validateWorktreeCreate(directory, input = {}) {
   }
 }
 
+const assertWorktreeCreatePreflight = async (directory, input = {}) => {
+  const validation = await validateWorktreeCreate(directory, input);
+  if (validation?.ok) {
+    return;
+  }
+
+  const message = validation?.errors
+    ?.map((error) => error?.message)
+    .filter(Boolean)
+    .join('\n') || 'Failed to validate worktree creation';
+  throw new Error(message);
+};
+
 export async function previewWorktreeCreate(directory, input = {}) {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const context = await resolveWorktreeProjectContext(directory);
@@ -3692,6 +3724,11 @@ async function attachGitWorktreeToCandidate(context, candidate, input = {}) {
 export async function createWorktree(directory, input = {}) {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const context = await resolveWorktreeProjectContext(directory);
+
+  if (input?.returnAfterDirectoryCreated === true) {
+    await assertWorktreeCreatePreflight(directory, input);
+  }
+
   await fsp.mkdir(context.worktreeRoot, { recursive: true });
 
   const preferredName = String(input?.worktreeName || input?.name || '').trim();

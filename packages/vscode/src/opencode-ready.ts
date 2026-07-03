@@ -1,6 +1,6 @@
 import type { ConnectionStatus, OpenCodeManager } from './opencode';
 
-export const API_URL_WAIT_TIMEOUT_MS = 30000;
+const API_URL_WAIT_TIMEOUT_MS = 30000;
 
 export async function waitForApiUrl(
   manager: OpenCodeManager | undefined,

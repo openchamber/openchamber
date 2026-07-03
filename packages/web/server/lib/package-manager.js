@@ -634,7 +634,7 @@ export function getCurrentVersion() {
 /**
  * Fetch latest version from npm registry
  */
-export async function getLatestVersion() {
+async function getLatestVersion() {
   try {
     const response = await fetch(NPM_REGISTRY_URL, {
       headers: { Accept: 'application/json' },
@@ -690,7 +690,7 @@ function compareVersions(left, right) {
 /**
  * Fetch changelog notes between versions
  */
-export async function fetchChangelogNotes(fromVersion, toVersion) {
+async function fetchChangelogNotes(fromVersion, toVersion) {
   try {
     const response = await fetch(CHANGELOG_URL, {
       signal: AbortSignal.timeout(10000),
