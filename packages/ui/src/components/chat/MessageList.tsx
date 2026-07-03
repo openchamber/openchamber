@@ -50,7 +50,7 @@ const TANSTACK_MOBILE_OVERSCAN = 16;
 const resolveTanstackOverscan = (): number => (
     isMobileSurfaceRuntime() ? TANSTACK_MOBILE_OVERSCAN : TANSTACK_OVERSCAN
 );
-// Post-prepend anchor hold (upstream parity): measurements of freshly
+// Post-prepend anchor hold: measurements of freshly
 // prepended rows settle over multiple frames, so a single restore can be
 // invalidated by the next measurement pass. Re-assert the anchor until it
 // holds still for STABLE_FRAMES consecutive frames, giving up at MAX_FRAMES.
@@ -61,6 +61,8 @@ const ANCHOR_HOLD_MAX_FRAMES = 180;
 const TANSTACK_ESTIMATE_MIN_SAMPLES = 5;
 const TANSTACK_ESTIMATE_MIN = 120;
 const TANSTACK_ESTIMATE_MAX = 1200;
+// "At bottom" tolerance for resize-adjustment decisions.
+const TANSTACK_AT_END_THRESHOLD_PX = 80;
 
 // Quiet-window prepend on mobile: while a touch drag or momentum scroll is
 // active, iOS owns the scroll position and ANY geometry change above the
@@ -1098,7 +1100,7 @@ const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, 
         scrollToFn: (offset, options, instance) => {
             // Expose the new total height before core writes an anchor
             // correction so the browser does not clamp the offset to the old
-            // height (upstream parity).
+            // height.
             const sizeElement = sizeContainerRef.current;
             if (sizeElement) sizeElement.style.height = `${instance.getTotalSize()}px`;
             elementScroll(offset, options, instance);
@@ -1111,6 +1113,17 @@ const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, 
         initialOffset: () => Number.MAX_SAFE_INTEGER,
         initialMeasurementsCache: initialMeasurements,
     });
+    // Only compensate scroll for rows growing ABOVE the viewport (history
+    // remeasures, prepended pages). A row growing inside the viewport —
+    // expanding a tool call or thinking block — must grow DOWNWARD naturally;
+    // the end-anchored default made it expand upward. At the bottom,
+    // app-level auto-follow owns pinning, so skip there too instead of
+    // double-writing. (This is an instance field, not a constructor option.)
+    tanstackVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
+        if (instance.isAtEnd(TANSTACK_AT_END_THRESHOLD_PX)) return false;
+        const firstVisibleIndex = instance.range?.startIndex;
+        return firstVisibleIndex !== undefined && item.index < firstVisibleIndex;
+    };
 
     React.useEffect(() => {
         if (!isTanstack) return;
