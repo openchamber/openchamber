@@ -18,7 +18,7 @@ type ScrollSpyInput = {
     MutationObserver?: typeof globalThis.MutationObserver;
 };
 
-export const pickVisibleTurnId = (list: VisibleTurn[], line: number): string | undefined => {
+const pickVisibleTurnId = (list: VisibleTurn[], line: number): string | undefined => {
     if (list.length === 0) {
         return undefined;
     }
@@ -40,7 +40,7 @@ export const pickVisibleTurnId = (list: VisibleTurn[], line: number): string | u
     return sorted[0]?.id;
 };
 
-export const pickOffsetTurnId = (list: OffsetTurn[], cutoff: number): string | undefined => {
+const pickOffsetTurnId = (list: OffsetTurn[], cutoff: number): string | undefined => {
     if (list.length === 0) {
         return undefined;
     }

@@ -48,8 +48,8 @@ export const WASM_MODELS: WasmModelInfo[] = [
   },
 ];
 
-export type SpeechResultCallback = (text: string, isFinal: boolean) => void;
-export type ErrorCallback = (error: string) => void;
+type SpeechResultCallback = (text: string, isFinal: boolean) => void;
+type ErrorCallback = (error: string) => void;
 
 const VAD_POLL_MS = 80;
 const MIN_UTTERANCE_MS = 300;
@@ -553,4 +553,3 @@ class WasmSttService {
 }
 
 export const wasmSttService = new WasmSttService();
-export { WasmSttService };

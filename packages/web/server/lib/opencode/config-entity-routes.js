@@ -26,6 +26,30 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
     expandSnippets,
   } = dependencies;
 
+  // Build the response for a config mutation based on whether OpenCode actually
+  // reloaded the change. When connected to an external OpenCode server that
+  // OpenChamber cannot restart, the change is persisted to disk but the running
+  // server will not serve it until the user restarts that server. We must not
+  // report a clean "reloading" success in that case, otherwise the UI silently
+  // reverts the edit to the stale value on the next refresh.
+  const buildConfigMutationResponse = (refreshResult, { liveMessage, manualRestartMessage }) => {
+    if (refreshResult && refreshResult.external) {
+      return {
+        success: true,
+        requiresReload: false,
+        requiresManualRestart: true,
+        message: manualRestartMessage,
+      };
+    }
+
+    return {
+      success: true,
+      requiresReload: true,
+      message: liveMessage,
+      reloadDelayMs: clientReloadDelayMs,
+    };
+  };
+
   const completeMcpMutation = async (res, action, name, applyChange) => {
     applyChange();
 
@@ -104,16 +128,14 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       console.log('[Server] Scope:', scope, 'Working directory:', directory);
 
       createAgent(agentName, config, directory, scope);
-      await refreshOpenCodeAfterConfigChange('agent creation', {
+      const refreshResult = await refreshOpenCodeAfterConfigChange('agent creation', {
         agentName
       });
 
-      res.json({
-        success: true,
-        requiresReload: true,
-        message: `Agent ${agentName} created successfully. Reloading interface…`,
-        reloadDelayMs: clientReloadDelayMs,
-      });
+      res.json(buildConfigMutationResponse(refreshResult, {
+        liveMessage: `Agent ${agentName} created successfully. Reloading interface…`,
+        manualRestartMessage: `Agent ${agentName} saved. Restart your connected OpenCode server to apply the change.`,
+      }));
     } catch (error) {
       console.error('Failed to create agent:', error);
       res.status(500).json({ error: error.message || 'Failed to create agent' });
@@ -134,16 +156,14 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       console.log('[Server] Working directory:', directory);
 
       updateAgent(agentName, updates, directory);
-      await refreshOpenCodeAfterConfigChange('agent update');
+      const refreshResult = await refreshOpenCodeAfterConfigChange('agent update');
 
       console.log(`[Server] Agent ${agentName} updated successfully`);
 
-      res.json({
-        success: true,
-        requiresReload: true,
-        message: `Agent ${agentName} updated successfully. Reloading interface…`,
-        reloadDelayMs: clientReloadDelayMs,
-      });
+      res.json(buildConfigMutationResponse(refreshResult, {
+        liveMessage: `Agent ${agentName} updated successfully. Reloading interface…`,
+        manualRestartMessage: `Agent ${agentName} saved. Restart your connected OpenCode server to apply the change.`,
+      }));
     } catch (error) {
       console.error('[Server] Failed to update agent:', error);
       console.error('[Server] Error stack:', error.stack);
@@ -161,14 +181,12 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
 
       const scope = req.body?.scope;
       deleteAgent(agentName, directory, scope);
-      await refreshOpenCodeAfterConfigChange('agent deletion');
+      const refreshResult = await refreshOpenCodeAfterConfigChange('agent deletion');
 
-      res.json({
-        success: true,
-        requiresReload: true,
-        message: `Agent ${agentName} deleted successfully. Reloading interface…`,
-        reloadDelayMs: clientReloadDelayMs,
-      });
+      res.json(buildConfigMutationResponse(refreshResult, {
+        liveMessage: `Agent ${agentName} deleted successfully. Reloading interface…`,
+        manualRestartMessage: `Agent ${agentName} deleted. Restart your connected OpenCode server to apply the change.`,
+      }));
     } catch (error) {
       console.error('Failed to delete agent:', error);
       res.status(500).json({ error: error.message || 'Failed to delete agent' });

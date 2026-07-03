@@ -12,6 +12,7 @@ import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { getRuntimeExtraHeadersSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { desktopHostsGet, desktopHostsSet, getDesktopHostApiUrl, normalizeHostUrl } from '@/lib/desktopHosts';
 import {
@@ -129,20 +130,30 @@ const shouldUseDesktopShellPasswordLogin = (): boolean => {
   return isDesktopShell() && !isLocalDesktopRuntime();
 };
 
-const issueDesktopClientTokenViaShell = async (password: string, trustDevice: boolean): Promise<string> => {
+type DesktopPasswordLoginResult = {
+  token: string;
+  status?: number;
+};
+
+const issueDesktopClientTokenViaShell = async (password: string, trustDevice: boolean): Promise<DesktopPasswordLoginResult | null> => {
   if (!isDesktopShell() || typeof window === 'undefined') {
-    return '';
+    return null;
   }
   const response = await invokeDesktop('desktop_remote_password_login', {
     url: getRuntimeApiBaseUrl(),
     password,
     trustDevice,
+    requestHeaders: getRuntimeExtraHeadersSync(),
   }).catch(() => null);
   if (!response || typeof response !== 'object') {
-    return '';
+    return null;
   }
   const token = (response as { token?: unknown }).token;
-  return typeof token === 'string' ? token.trim() : '';
+  const status = (response as { status?: unknown }).status;
+  return {
+    token: typeof token === 'string' ? token.trim() : '',
+    ...(typeof status === 'number' ? { status } : {}),
+  };
 };
 
 const persistDesktopClientToken = async (apiBaseUrl: string, clientToken: string): Promise<void> => {
@@ -180,8 +191,13 @@ const persistDesktopClientToken = async (apiBaseUrl: string, clientToken: string
 const applyDesktopClientToken = async (clientToken: string): Promise<void> => {
   if (!clientToken) return;
   const apiBaseUrl = getRuntimeApiBaseUrl();
+  const requestHeaders = getRuntimeExtraHeadersSync();
   await persistDesktopClientToken(apiBaseUrl, clientToken);
-  switchRuntimeEndpoint({ apiBaseUrl, clientToken });
+  switchRuntimeEndpoint({
+    apiBaseUrl,
+    clientToken,
+    requestHeaders: Object.keys(requestHeaders).length > 0 ? requestHeaders : null,
+  });
 };
 
 const AuthShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -486,15 +502,43 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
     setErrorMessage('');
 
     try {
+      if (shouldUseDesktopShellPasswordLogin()) {
+        const shellLogin = await issueDesktopClientTokenViaShell(password, trustDevice);
+        if (shellLogin?.token) {
+          setPassword('');
+          setIsTunnelLocked(false);
+          await applyDesktopClientToken(shellLogin.token);
+          setState('authenticated');
+          return;
+        }
+        if (shellLogin?.status === 401) {
+          setErrorMessage(t('sessionAuth.error.incorrectPassword'));
+          setIsTunnelLocked(false);
+          setState('locked');
+          return;
+        }
+        if (shellLogin?.status === 429) {
+          setRetryAfter(undefined);
+          setIsTunnelLocked(false);
+          setState('rate-limited');
+          return;
+        }
+      }
+
       const response = await submitPassword(password, trustDevice);
       if (response.ok) {
         const payload = await response.json().catch(() => null) as { clientToken?: unknown } | null;
         const shouldUseClientToken = shouldIssueDesktopClientToken();
-        const clientToken = shouldUseClientToken
-          ? (typeof payload?.clientToken === 'string' && payload.clientToken.trim()
+        let clientToken = '';
+        if (shouldUseClientToken) {
+          clientToken = typeof payload?.clientToken === 'string' && payload.clientToken.trim()
             ? payload.clientToken.trim()
-            : await issueDesktopClientTokenViaShell(password, trustDevice) || await issueDesktopClientToken())
-          : '';
+            : '';
+          if (!clientToken) {
+            const shellLogin = await issueDesktopClientTokenViaShell(password, trustDevice);
+            clientToken = shellLogin?.token || await issueDesktopClientToken();
+          }
+        }
         setPassword('');
         setIsTunnelLocked(false);
         if (clientToken) {
@@ -541,14 +585,26 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
       setState('error');
     } catch (error) {
       console.warn('Failed to submit UI password:', error);
-      const clientToken = shouldUseDesktopShellPasswordLogin()
+      const shellLogin = shouldUseDesktopShellPasswordLogin()
         ? await issueDesktopClientTokenViaShell(password, trustDevice)
-        : '';
-      if (clientToken) {
+        : null;
+      if (shellLogin?.token) {
         setPassword('');
         setIsTunnelLocked(false);
-        await applyDesktopClientToken(clientToken);
+        await applyDesktopClientToken(shellLogin.token);
         setState('authenticated');
+        return;
+      }
+      if (shellLogin?.status === 401) {
+        setErrorMessage(t('sessionAuth.error.incorrectPassword'));
+        setIsTunnelLocked(false);
+        setState('locked');
+        return;
+      }
+      if (shellLogin?.status === 429) {
+        setRetryAfter(undefined);
+        setIsTunnelLocked(false);
+        setState('rate-limited');
         return;
       }
       setErrorMessage(t('sessionAuth.error.networkRetry'));

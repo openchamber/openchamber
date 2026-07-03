@@ -8,6 +8,7 @@ import {
   applySessionStatusSnapshot,
   needsSnapshotAfterStatusPoll,
   shouldUseDisconnectedTransportPhase,
+  shouldTriggerStaleResync,
 } from "../sync-context"
 
 type StatusSnapshot = Record<string, { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }>
@@ -132,5 +133,57 @@ describe("shouldUseDisconnectedTransportPhase", () => {
     expect(shouldUseDisconnectedTransportPhase("ws_closed:code=1006")).toBe(false)
     expect(shouldUseDisconnectedTransportPhase("ws_heartbeat_timeout")).toBe(false)
     expect(shouldUseDisconnectedTransportPhase(null)).toBe(false)
+  })
+})
+
+describe("shouldTriggerStaleResync", () => {
+  const STALE_MS = 20_000
+  const COOLDOWN_MS = 15_000
+
+  test("does NOT trigger when heartbeats are recent (quiet-but-connected session)", () => {
+    // 5s ago a heartbeat arrived — stream is alive even though no meaningful
+    // events came through. This is the core fix for issue #1656.
+    const now = 100_000
+    const lastStreamActivityAt = now - 5_000
+    expect(shouldTriggerStaleResync(lastStreamActivityAt, 0, now, STALE_MS, COOLDOWN_MS)).toBe(false)
+  })
+
+  test("does NOT trigger when a non-heartbeat event is recent", () => {
+    const now = 100_000
+    const lastStreamActivityAt = now - 3_000
+    expect(shouldTriggerStaleResync(lastStreamActivityAt, 0, now, STALE_MS, COOLDOWN_MS)).toBe(false)
+  })
+
+  test("triggers when no events at all (including heartbeats) for the stale threshold", () => {
+    const now = 100_000
+    const lastStreamActivityAt = now - STALE_MS - 1
+    expect(shouldTriggerStaleResync(lastStreamActivityAt, 0, now, STALE_MS, COOLDOWN_MS)).toBe(true)
+  })
+
+  test("does NOT trigger when within the resync cooldown even if stream is stale", () => {
+    const now = 100_000
+    const lastStreamActivityAt = now - STALE_MS - 1
+    const lastFullResyncAt = now - 5_000 // only 5s ago, cooldown is 15s
+    expect(shouldTriggerStaleResync(lastStreamActivityAt, lastFullResyncAt, now, STALE_MS, COOLDOWN_MS)).toBe(false)
+  })
+
+  test("triggers when stream is stale AND cooldown has elapsed", () => {
+    const now = 100_000
+    const lastStreamActivityAt = now - STALE_MS - 1
+    const lastFullResyncAt = now - COOLDOWN_MS - 1
+    expect(shouldTriggerStaleResync(lastStreamActivityAt, lastFullResyncAt, now, STALE_MS, COOLDOWN_MS)).toBe(true)
+  })
+
+  test("does NOT trigger when no events have been received yet (lastStreamActivityAt is 0)", () => {
+    // Prevents firing before the first heartbeat arrives
+    expect(shouldTriggerStaleResync(0, 0, 100_000, STALE_MS, COOLDOWN_MS)).toBe(false)
+  })
+
+  test("uses default thresholds when omitted", () => {
+    const now = 100_000
+    // 25s since last activity (> 20s default), 20s since last resync (> 15s default)
+    expect(shouldTriggerStaleResync(now - 25_000, now - 20_000, now)).toBe(true)
+    // 10s since last activity (< 20s default)
+    expect(shouldTriggerStaleResync(now - 10_000, 0, now)).toBe(false)
   })
 })

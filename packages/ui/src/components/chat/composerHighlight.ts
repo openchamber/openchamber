@@ -17,7 +17,7 @@
  * with ordinary prose (`2 * 3`, `foo_bar`).
  */
 
-export type HighlightStyle =
+type HighlightStyle =
     | 'marker'
     | 'code'
     | 'codeFence'
@@ -27,7 +27,7 @@ export type HighlightStyle =
     | 'blockquote'
     | 'listMarker';
 
-export type MentionKind = 'file' | 'agent';
+type MentionKind = 'file' | 'agent';
 
 export interface HighlightRange {
     start: number;

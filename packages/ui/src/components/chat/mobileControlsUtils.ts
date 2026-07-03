@@ -5,7 +5,7 @@ export type MobileControlsPanel = 'model' | 'agent' | 'variant' | null;
 
 export const isPrimaryMode = (mode?: string) => mode === 'primary' || mode === 'all' || mode === undefined || mode === null;
 
-export const getCyclablePrimaryAgents = (agents: Agent[]) => agents.filter((agent) => isPrimaryMode(agent.mode));
+const getCyclablePrimaryAgents = (agents: Agent[]) => agents.filter((agent) => isPrimaryMode(agent.mode));
 
 export const getCycledPrimaryAgentName = (
     agents: Agent[],
@@ -23,7 +23,7 @@ export const getCycledPrimaryAgentName = (
     return primaryAgents[nextIndex]?.name ?? null;
 };
 
-export const capitalizeLabel = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
+const capitalizeLabel = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
 
 export const getAgentDisplayName = (agents: Agent[], agentName?: string) => {
     if (agentName) {
@@ -54,59 +54,4 @@ export const formatEffortLabel = (variant?: string) => {
         return trimmed;
     }
     return capitalizeLabel(trimmed);
-};
-
-export const DEFAULT_EFFORT_KEY = 'default';
-
-export const serializeEffortVariant = (variant?: string) => {
-    const trimmed = typeof variant === 'string' ? variant.trim() : '';
-    return trimmed.length > 0 ? trimmed : DEFAULT_EFFORT_KEY;
-};
-
-export const parseEffortVariant = (variant: string) => {
-    return variant === DEFAULT_EFFORT_KEY ? undefined : variant;
-};
-
-const EFFORT_RANKS: Record<string, number> = {
-    max: 6,
-    maximum: 6,
-    xhigh: 5,
-    high: 4,
-    medium: 3,
-    default: 2,
-    low: 1,
-    min: 0,
-    minimal: 0,
-};
-
-export const getEffortRank = (variant?: string) => {
-    if (!variant || variant.trim().length === 0) {
-        return EFFORT_RANKS.default;
-    }
-    const normalized = variant.trim().toLowerCase();
-    if (Object.prototype.hasOwnProperty.call(EFFORT_RANKS, normalized)) {
-        return EFFORT_RANKS[normalized];
-    }
-    const numeric = Number.parseFloat(normalized);
-    return Number.isFinite(numeric) ? numeric : 0;
-};
-
-export const getQuickEffortOptions = (variants: string[]) => {
-    const options = new Map<string, string | undefined>();
-    options.set('default', undefined);
-    for (const variant of variants) {
-        options.set(variant, variant);
-    }
-
-    const ordered = Array.from(options.values()).sort((a, b) => getEffortRank(b) - getEffortRank(a));
-    if (ordered.length <= 4) {
-        return ordered;
-    }
-
-    const top = ordered.slice(0, 3);
-    const lowest = ordered[ordered.length - 1];
-    if (top.some((item) => item === lowest)) {
-        return top;
-    }
-    return [...top, lowest];
 };

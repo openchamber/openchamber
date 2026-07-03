@@ -32,7 +32,6 @@ export const OPEN_IN_APPS: OpenInApp[] = [
 
 export const DEFAULT_OPEN_IN_APP_ID = 'finder';
 export const OPEN_IN_ALWAYS_AVAILABLE_APP_IDS = new Set(['finder', 'terminal']);
-export const OPEN_DIRECTORY_APP_IDS = new Set(['finder', 'terminal', 'iterm2', 'ghostty']);
 
 export const getPlatformOpenInApp = (app: OpenInApp): OpenInApp => {
   if (typeof window !== 'undefined' && window.__OPENCHAMBER_PLATFORM__ === 'win32') {
@@ -49,8 +48,4 @@ export const getOpenInAppById = (id: string | null | undefined): OpenInApp | nul
   }
   const app = OPEN_IN_APPS.find((candidate) => candidate.id === id) ?? null;
   return app ? getPlatformOpenInApp(app) : null;
-};
-
-export const getDefaultOpenInApp = (): OpenInApp => {
-  return getOpenInAppById(DEFAULT_OPEN_IN_APP_ID) ?? getPlatformOpenInApp(OPEN_IN_APPS[0]);
 };

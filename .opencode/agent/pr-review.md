@@ -67,6 +67,18 @@ Prioritize these risks:
 - Missing targeted tests for risky logic.
 - Claims in the PR description that are not actually true in the implementation.
 
+## User-facing behavior contract
+
+For every user-facing change, first infer the behavioral contract before judging the implementation:
+
+- What is the user trying to accomplish, and what are the natural inputs, choices, and recovery paths for that task?
+- What existing product patterns should this reuse, and what state must be preserved if the user edits an unrelated field?
+- Does the UI expose a guided interaction when the value has known choices, rather than exposing raw internal/schema values by default?
+- Is any raw/manual input intentionally requested, or should it be an advanced/fallback path only?
+- Does the implementation preserve persisted/custom/unknown values instead of normalizing them away or clearing them silently?
+
+Do not map schema/API types directly to UI/API behavior. A config field typed as `string` does not automatically justify a plain text input, and a backend nullable field does not automatically define the user interaction. Review for mismatches between the requested behavior and the implemented UX, not just type correctness, null handling, and i18n coverage.
+
 ## Security and supply-chain focus
 
 Pay extra attention to:
@@ -122,6 +134,13 @@ Briefly explain what this PR changes and what problem it is trying to solve.
 Merge signal in plain English: safe to merge, safe after a small fix, or not safe to merge yet.
 
 Explain the reason in a short paragraph. If there are findings, name the files that need attention.
+</details>
+
+<details open><summary><h3>Risk Score: X/5</h3></summary>
+
+1 is low risk (isolated, reversible, well-contained change), 5 is high risk (touches security, data persistence, shared state, build/release, or broad cross-runtime contracts).
+
+Explain the score in a short paragraph: which risk dimensions apply (correctness, data loss, security/supply-chain, performance, cross-runtime parity) and what makes the change more or less risky.
 </details>
 
 <details><summary><h3>Findings</h3></summary>

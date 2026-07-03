@@ -1,13 +1,13 @@
 import { getRuntimeUrlResolver } from './runtime-url';
 import { runtimeFetch } from './runtime-fetch';
 
-export interface TerminalWebSocketDescriptor {
+interface TerminalWebSocketDescriptor {
   path: string;
   v?: number;
   enc?: string;
 }
 
-export interface TerminalTransportCapability {
+interface TerminalTransportCapability {
   preferred?: 'ws' | 'http' | 'sse';
   transports?: Array<'ws' | 'http' | 'sse'>;
   ws?: TerminalWebSocketDescriptor;
