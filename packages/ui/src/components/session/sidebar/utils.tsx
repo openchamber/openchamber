@@ -94,6 +94,61 @@ export const isPathWithinProject = (directory?: string | null, projectPath?: str
   return normalizedDirectory.startsWith(`${normalizedProjectPath}/`);
 };
 
+type NormalizedProjectPath = { normalizedPath: string };
+type WorktreePath = { path: string };
+
+export const collectKnownProjectDirectories = (
+  normalizedProjects: NormalizedProjectPath[],
+  availableWorktreesByProject: Map<string, WorktreePath[]>,
+  isVSCode: boolean,
+): Set<string> => {
+  const knownDirectories = new Set<string>();
+
+  normalizedProjects.forEach((project) => {
+    if (project.normalizedPath) {
+      knownDirectories.add(project.normalizedPath);
+    }
+  });
+
+  if (isVSCode) {
+    return knownDirectories;
+  }
+
+  for (const worktrees of availableWorktreesByProject.values()) {
+    for (const worktree of worktrees) {
+      const normalized = normalizePath(worktree.path);
+      if (normalized) {
+        knownDirectories.add(normalized);
+      }
+    }
+  }
+
+  return knownDirectories;
+};
+
+const findBestProjectDirectoryMatch = (
+  value: string | null,
+  knownDirectories?: Iterable<string>,
+): string | null => {
+  if (!value || !knownDirectories) {
+    return null;
+  }
+
+  let bestMatch: string | null = null;
+  for (const candidate of knownDirectories) {
+    const normalizedCandidate = normalizePath(candidate);
+    if (!normalizedCandidate || !isPathWithinProject(value, normalizedCandidate)) {
+      continue;
+    }
+
+    if (!bestMatch || normalizedCandidate.length > bestMatch.length) {
+      bestMatch = normalizedCandidate;
+    }
+  }
+
+  return bestMatch;
+};
+
 export const normalizeForBranchComparison = (value: string): string => {
   return value
     .toLowerCase()
@@ -177,21 +232,30 @@ export const isSessionRelatedToProject = (
   session: Session,
   projectRoot: string,
   validDirectories?: Set<string>,
+  knownDirectories?: Iterable<string>,
 ): boolean => {
   const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
   const projectWorktree = normalizePath((session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? null);
+  const resolvedDirectory = sessionDirectory ?? projectWorktree;
 
-  if (projectWorktree && (projectWorktree === projectRoot || projectWorktree.startsWith(`${projectRoot}/`))) {
+  if (projectWorktree && validDirectories?.has(projectWorktree)) {
     return true;
   }
 
-  if (!sessionDirectory) {
+  if (sessionDirectory && validDirectories?.has(sessionDirectory)) {
+    return true;
+  }
+
+  if (!resolvedDirectory) {
     return false;
   }
-  if (validDirectories && validDirectories.has(sessionDirectory)) {
-    return true;
+
+  const bestMatch = findBestProjectDirectoryMatch(resolvedDirectory, knownDirectories);
+  if (bestMatch) {
+    return validDirectories ? validDirectories.has(bestMatch) : bestMatch === projectRoot;
   }
-  return sessionDirectory === projectRoot || sessionDirectory.startsWith(`${projectRoot}/`);
+
+  return resolvedDirectory === projectRoot || resolvedDirectory.startsWith(`${projectRoot}/`);
 };
 
 
