@@ -1767,6 +1767,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.questionCard.dismissFailed": "Не вдалося відхилити питання",
   "chat.questionCard.noLongerPending": "Це питання більше не очікує відповіді.",
   "chat.questionCard.tryAgain": "Спробуйте ще раз за мить.",
+  "chat.questionCard.autoAnswerCountdown": "Автоматичний вибір першого варіанта через {seconds} с — натисніть, щоб скасувати",
   "chat.textSelection.toast.noProject": "Для цієї сесії не знайдено жодного проєкту",
   "chat.textSelection.toast.addToNotesFailed": "Не вдалося додати до нотаток",
   "chat.textSelection.toast.addToNotesSuccess": "Вибраний текст додано до нотаток",

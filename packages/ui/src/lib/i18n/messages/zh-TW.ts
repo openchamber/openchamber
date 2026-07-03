@@ -1771,6 +1771,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.questionCard.dismissFailed': '忽略問題失敗',
   'chat.questionCard.noLongerPending': '此問題不再等待回答。',
   'chat.questionCard.tryAgain': '請稍後再試。',
+  'chat.questionCard.autoAnswerCountdown': '{seconds} 秒後自動選擇第一個選項 — 點擊可取消',
   'chat.textSelection.toast.noProject': '找不到此會話對應的專案',
   'chat.textSelection.toast.addToNotesFailed': '加入筆記失敗',
   'chat.textSelection.toast.addToNotesSuccess': '已將選取文字加入筆記',
