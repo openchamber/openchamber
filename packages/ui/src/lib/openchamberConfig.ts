@@ -30,9 +30,10 @@ function getRuntimeFilesAPI(): FilesAPI | null {
   return null;
 }
 
-export interface OpenChamberConfig {
+interface OpenChamberConfig {
   projectPath?: string;
   'setup-worktree'?: string[];
+  'setup-worktree-wait'?: boolean;
   projectNotes?: string;
   projectTodos?: OpenChamberProjectTodoItem[];
   projectPlanFiles?: OpenChamberProjectPlanFileLink[];
@@ -41,7 +42,7 @@ export interface OpenChamberConfig {
   draftStarters?: DraftStarterRef[];
 }
 
-export type OpenChamberProjectActionPlatform = 'macos' | 'linux' | 'windows';
+type OpenChamberProjectActionPlatform = 'macos' | 'linux' | 'windows';
 
 export interface OpenChamberProjectAction {
   id: string;
@@ -90,11 +91,11 @@ export interface OpenChamberProjectContextData extends OpenChamberProjectNotesTo
 
 export const OPENCHAMBER_PROJECT_NOTES_MAX_LENGTH = 3000;
 export const OPENCHAMBER_PROJECT_TODO_TEXT_MAX_LENGTH = 120;
-export const OPENCHAMBER_PROJECT_ACTION_NAME_MAX_LENGTH = 80;
-export const OPENCHAMBER_PROJECT_ACTION_COMMAND_MAX_LENGTH = 4000;
-export const OPENCHAMBER_PROJECT_ACTION_OPEN_URL_MAX_LENGTH = 2000;
-export const OPENCHAMBER_PROJECT_ACTION_DESKTOP_FORWARD_MAX_LENGTH = 300;
-export const OPENCHAMBER_PROJECT_PLAN_TITLE_MAX_LENGTH = 160;
+const OPENCHAMBER_PROJECT_ACTION_NAME_MAX_LENGTH = 80;
+const OPENCHAMBER_PROJECT_ACTION_COMMAND_MAX_LENGTH = 4000;
+const OPENCHAMBER_PROJECT_ACTION_OPEN_URL_MAX_LENGTH = 2000;
+const OPENCHAMBER_PROJECT_ACTION_DESKTOP_FORWARD_MAX_LENGTH = 300;
+const OPENCHAMBER_PROJECT_PLAN_TITLE_MAX_LENGTH = 160;
 
 const OPENCHAMBER_ACTION_PLATFORM_SET = new Set<OpenChamberProjectActionPlatform>(['macos', 'linux', 'windows']);
 
@@ -519,7 +520,7 @@ const getProjectPlansDirectory = async (project: ProjectRef): Promise<string | n
   return joinPath(projectDirectory, 'plans');
 };
 
-export const formatProjectPlanMarkdown = (title: string, body: string): string => {
+const formatProjectPlanMarkdown = (title: string, body: string): string => {
   const normalizedTitle = sanitizePlanTitle(title) || 'Plan';
   const normalizedBody = body.trim();
   return normalizedBody
@@ -551,7 +552,7 @@ export const parseProjectPlanMarkdown = (raw: string): { title: string; body: st
  * Read the config for a project.
  * Returns null if file doesn't exist or is invalid.
  */
-export async function readOpenChamberConfig(project: ProjectRef): Promise<OpenChamberConfig | null> {
+async function readOpenChamberConfig(project: ProjectRef): Promise<OpenChamberConfig | null> {
   const projectDirectory = typeof project?.path === 'string' ? project.path.trim() : '';
   if (!projectDirectory) {
     return null;
@@ -623,7 +624,7 @@ export async function readOpenChamberConfig(project: ProjectRef): Promise<OpenCh
  * dedicated route and never round-trips them through this config write path to
  * avoid a read-then-write race clobbering a concurrent server update.
  */
-export async function writeOpenChamberConfig(
+async function writeOpenChamberConfig(
   project: ProjectRef,
   config: OpenChamberConfig
 ): Promise<boolean> {
@@ -677,7 +678,7 @@ export async function writeOpenChamberConfig(
 /**
  * Update specific keys in the config, preserving other values.
  */
-export async function updateOpenChamberConfig(
+async function updateOpenChamberConfig(
   project: ProjectRef,
   updates: Partial<OpenChamberConfig>
 ): Promise<boolean> {
@@ -697,6 +698,15 @@ export async function getWorktreeSetupCommands(project: ProjectRef): Promise<str
 export async function saveWorktreeSetupCommands(project: ProjectRef, commands: string[]): Promise<boolean> {
   const filtered = commands.filter((cmd) => cmd.trim().length > 0);
   return updateOpenChamberConfig(project, { 'setup-worktree': filtered });
+}
+
+export async function getWorktreeSetupWaitEnabled(project: ProjectRef): Promise<boolean> {
+  const config = await readOpenChamberConfig(project);
+  return config?.['setup-worktree-wait'] === true;
+}
+
+export async function saveWorktreeSetupWaitEnabled(project: ProjectRef, enabled: boolean): Promise<boolean> {
+  return updateOpenChamberConfig(project, { 'setup-worktree-wait': enabled });
 }
 
 /**
@@ -743,12 +753,12 @@ export async function getProjectContextData(project: ProjectRef): Promise<OpenCh
   });
 }
 
-export async function getProjectPlanFiles(project: ProjectRef): Promise<OpenChamberProjectPlanFileLink[]> {
+async function getProjectPlanFiles(project: ProjectRef): Promise<OpenChamberProjectPlanFileLink[]> {
   const config = await readOpenChamberConfig(project);
   return sanitizeProjectPlanFileLinks(config?.projectPlanFiles);
 }
 
-export async function saveProjectPlanFiles(
+async function saveProjectPlanFiles(
   project: ProjectRef,
   value: OpenChamberProjectPlanFileLink[]
 ): Promise<boolean> {

@@ -1,5 +1,3 @@
-export type QuestionAnswer = string[];
-
 export interface QuestionOption {
   label: string;
   description: string;
@@ -19,27 +17,5 @@ export interface QuestionRequest {
   tool?: {
     messageID: string;
     callID: string;
-  };
-}
-
-export interface QuestionAskedEvent {
-  type: 'question.asked';
-  properties: QuestionRequest;
-}
-
-export interface QuestionRepliedEvent {
-  type: 'question.replied';
-  properties: {
-    sessionID: string;
-    requestID: string;
-    answers: QuestionAnswer[];
-  };
-}
-
-export interface QuestionRejectedEvent {
-  type: 'question.rejected';
-  properties: {
-    sessionID: string;
-    requestID: string;
   };
 }

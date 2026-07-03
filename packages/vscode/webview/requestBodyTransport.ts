@@ -1,4 +1,4 @@
-export const encodeBase64 = (bytes: Uint8Array): string => {
+const encodeBase64 = (bytes: Uint8Array): string => {
   const CHUNK = 0x8000;
   let binary = '';
   for (let i = 0; i < bytes.length; i += CHUNK) {
@@ -9,7 +9,7 @@ export const encodeBase64 = (bytes: Uint8Array): string => {
 
 export const hasInitBody = (init: RequestInit | undefined): boolean => init?.body !== undefined && init.body !== null;
 
-export const readBodyBytes = async (body: BodyInit): Promise<Uint8Array> => {
+const readBodyBytes = async (body: BodyInit): Promise<Uint8Array> => {
   if (typeof body === 'string') {
     return new TextEncoder().encode(body);
   }
@@ -37,7 +37,7 @@ export const readBodyBytes = async (body: BodyInit): Promise<Uint8Array> => {
   throw new Error('Unsupported request body type');
 };
 
-export const readBodyText = async (body: BodyInit): Promise<string> => {
+const readBodyText = async (body: BodyInit): Promise<string> => {
   if (typeof body === 'string') return body;
   if (body instanceof URLSearchParams) return body.toString();
   if (body instanceof Blob) return await body.text();

@@ -366,6 +366,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
     const toggleFavoriteModel = useUIStore((state) => state.toggleFavoriteModel);
     const reorderFavoriteModel = useUIStore((state) => state.reorderFavoriteModel);
+    const providerOrder = useUIStore((state) => state.providerOrder);
+    const setProviderOrder = useUIStore((state) => state.setProviderOrder);
     const isFavoriteModel = useUIStore((state) => state.isFavoriteModel);
     const addRecentModel = useUIStore((state) => state.addRecentModel);
     const addRecentAgent = useUIStore((state) => state.addRecentAgent);
@@ -1669,7 +1671,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         isSelected && 'bg-interactive-selection/15 text-interactive-selection-foreground'
                     )}
                 >
-                    <div className="flex items-start gap-2 px-2 py-1.5">
+                    <div className="flex items-center gap-2 px-2 py-1.5">
                         <button
                             type="button"
                             onClick={() => handleMobileModelApply(providerId, modelId, resolvedVariant)}
@@ -1678,15 +1680,15 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 'focus:outline-none focus-visible:ring-1 focus-visible:ring-primary rounded-lg'
                             )}
                         >
-                            {showProviderLogo ? (
-                                <ProviderLogo providerId={providerId} className="mt-0.5 size-3.5 flex-shrink-0" />
-                            ) : null}
                             <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                                <div className="flex min-w-0 items-start gap-2">
+                                <div className="flex min-w-0 items-center gap-1.5">
+                                    {showProviderLogo ? (
+                                        <ProviderLogo providerId={providerId} className="size-3.5 flex-shrink-0" />
+                                    ) : null}
                                     <span className="typography-meta font-medium text-foreground truncate">
                                         {getModelDisplayName(model)}
                                     </span>
-                                    {isSelected ? <Icon name="check" className="mt-0.5 size-4 flex-shrink-0 text-primary" /> : null}
+                                    {isSelected ? <Icon name="check" className="size-4 flex-shrink-0 text-primary" /> : null}
                                 </div>
                                 {contextText || indicatorIcons.length > 0 ? (
                                     <div className="flex min-w-0 items-center gap-1.5 overflow-hidden typography-micro text-muted-foreground">
@@ -1720,7 +1722,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             <button
                                 type="button"
                                 onClick={() => setExpandedMobileModelKey((prev) => prev === rowKey ? null : rowKey)}
-                                className="flex items-center gap-1 rounded-lg border border-border/40 px-2 py-1 typography-micro font-medium text-muted-foreground hover:bg-interactive-hover/50 flex-shrink-0"
+                                className="flex items-center gap-0.5 typography-micro font-medium text-muted-foreground hover:text-foreground flex-shrink-0"
                                 aria-expanded={isExpanded}
                                 aria-label={isExpanded ? t('chat.modelControls.hideThinkingModes') : t('chat.modelControls.showThinkingModes')}
                             >
@@ -1728,7 +1730,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 {isExpanded ? <Icon name="arrow-down-s" className="size-3.5" /> : <Icon name="arrow-right-s" className="size-3.5" />}
                             </button>
                         ) : null}
-                        <div className="flex flex-shrink-0 items-start gap-1.5">
+                        <div className="flex flex-shrink-0 items-center gap-1.5">
                             <button
                                 type="button"
                                 onClick={(event) => {
@@ -2368,6 +2370,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 )}
                                 reorderFavoriteAriaLabel={t('chat.modelControls.reorderFavoriteAria')}
                                 reorderFavoriteTitle={t('chat.modelControls.reorderFavoriteTitle')}
+                                providerOrder={providerOrder}
+                                onReorderProvider={setProviderOrder}
+                                reorderProviderTitle={t('chat.modelControls.reorderProviderTitle')}
                                 footerContent={(activeEntry) => {
                                     const activeHasThinkingVariants = activeEntry
                                         ? getModelVariantOptions(activeEntry.providerID, activeEntry.modelID).length > 0

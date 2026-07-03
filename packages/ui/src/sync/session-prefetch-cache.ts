@@ -69,34 +69,6 @@ export function subscribeSessionPrefetch(directory: string, sessionID: string, c
   }
 }
 
-export function getSessionPrefetchPromise(directory: string, sessionID: string) {
-  return inflight.get(compositeKey(directory, sessionID))
-}
-
-export function isSessionPrefetchCurrent(directory: string, sessionID: string, value: number) {
-  return version(compositeKey(directory, sessionID)) === value
-}
-
-/** Run a prefetch task with inflight dedup + version tracking. */
-export function runSessionPrefetch(input: {
-  directory: string
-  sessionID: string
-  task: (value: number) => Promise<Meta | undefined>
-}) {
-  const id = compositeKey(input.directory, input.sessionID)
-  const pending = inflight.get(id)
-  if (pending) return pending
-
-  const value = version(id)
-
-  const promise = input.task(value).finally(() => {
-    if (inflight.get(id) === promise) inflight.delete(id)
-  })
-
-  inflight.set(id, promise)
-  return promise
-}
-
 export function setSessionPrefetch(input: {
   directory: string
   sessionID: string
@@ -120,19 +92,6 @@ export function clearSessionPrefetch(directory: string, sessionIDs: Iterable<str
   for (const sessionID of sessionIDs) {
     if (!sessionID) continue
     const id = compositeKey(directory, sessionID)
-    rev.set(id, version(id) + 1)
-    cache.delete(id)
-    inflight.delete(id)
-    notify(id)
-  }
-}
-
-/** Invalidate all cache entries for a directory. */
-export function clearSessionPrefetchDirectory(directory: string) {
-  const prefix = `${directory}\n`
-  const keys = new Set([...cache.keys(), ...inflight.keys()])
-  for (const id of keys) {
-    if (!id.startsWith(prefix)) continue
     rev.set(id, version(id) + 1)
     cache.delete(id)
     inflight.delete(id)

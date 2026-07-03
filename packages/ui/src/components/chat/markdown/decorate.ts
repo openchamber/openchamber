@@ -140,13 +140,13 @@ const extractTableData = (table: HTMLTableElement): { headers: string[]; rows: s
 const escapeCsv = (value: string): string =>
   /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 
-export const tableToCSV = ({ headers, rows }: { headers: string[]; rows: string[][] }): string =>
+const tableToCSV = ({ headers, rows }: { headers: string[]; rows: string[][] }): string =>
   [headers, ...rows].map((row) => row.map(escapeCsv).join(',')).join('\n');
 
-export const tableToTSV = ({ headers, rows }: { headers: string[]; rows: string[][] }): string =>
+const tableToTSV = ({ headers, rows }: { headers: string[]; rows: string[][] }): string =>
   [headers, ...rows].map((row) => row.join('\t')).join('\n');
 
-export const tableToMarkdown = ({ headers, rows }: { headers: string[]; rows: string[][] }): string => {
+const tableToMarkdown = ({ headers, rows }: { headers: string[]; rows: string[][] }): string => {
   const head = `| ${headers.join(' | ')} |`;
   const sep = `| ${headers.map(() => '---').join(' | ')} |`;
   const body = rows.map((row) => `| ${row.join(' | ')} |`).join('\n');

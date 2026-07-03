@@ -26,7 +26,7 @@ export const resolveProjectForDirectory = (
   return best;
 };
 
-export const resolveProjectFromWorktreeDirectory = (
+const resolveProjectFromWorktreeDirectory = (
   projects: ProjectEntry[],
   availableWorktreesByProject: Map<string, WorktreeMetadata[]>,
   directory: string | null,

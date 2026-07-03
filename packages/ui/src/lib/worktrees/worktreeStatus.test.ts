@@ -9,10 +9,6 @@ let statusImpl: (directory: string) => { current: string } = () => ({ current: '
 const resolveRootCalls: string[] = [];
 const statusCalls: string[] = [];
 
-mock.module('@/lib/execCommands', () => ({
-  execCommands: () => Promise.resolve({ success: false, results: [] }),
-}));
-
 mock.module('@/lib/gitApi', () => ({
   getGitStatus: (directory: string) => {
     statusCalls.push(directory);

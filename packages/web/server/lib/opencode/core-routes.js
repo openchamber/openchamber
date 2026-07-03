@@ -396,6 +396,35 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     }
   };
 
+  const runWithClientCreateAuth = async (req, res, next, handler) => {
+    try {
+      if (typeof uiAuthController.resolveAuthContext === 'function') {
+        const context = await uiAuthController.resolveAuthContext(req, res, {
+          allowClientAuth: true,
+          allowUrlToken: false,
+        });
+        if (context?.type === 'session') {
+          await handler(context);
+          return;
+        }
+        if (context?.type === 'client') {
+          const client = await clientRecordFromAuthContext(context);
+          if (client?.clientKind === 'desktop-local') {
+            await handler({ ...context, client });
+            return;
+          }
+          return res.status(403).json({ error: 'Client tokens cannot create remote clients' });
+        }
+      }
+
+      await runWithUiAuth(req, res, next, async () => {
+        await handler({ type: 'session' });
+      }, { sessionOnly: true });
+    } catch (error) {
+      next(error);
+    }
+  };
+
   const clientIdFromAuthContext = (context) => {
     const raw = context?.client?.id || context?.clientId;
     return typeof raw === 'string' && raw.length > 0 ? raw : null;
@@ -567,7 +596,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
   });
 
   app.post('/api/client-auth/clients', express.json({ limit: '64kb' }), async (req, res, next) => {
-    await runWithUiAuth(req, res, next, async () => {
+    await runWithClientCreateAuth(req, res, next, async () => {
       const result = await remoteClientAuthRuntime.createClient({
         label: req.body?.label,
         clientKind: req.body?.clientKind,
@@ -575,7 +604,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
       });
       res.setHeader('Cache-Control', 'no-store');
       res.status(201).json(result);
-    }, { sessionOnly: true });
+    });
   });
 
   app.delete('/api/client-auth/clients/:id', async (req, res, next) => {

@@ -384,5 +384,5 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
 };
 
 // Re-export for easy sidebar icon usage
-export { McpIcon } from '@/components/icons/McpIcon';
+
 import { Icon } from "@/components/icon/Icon";

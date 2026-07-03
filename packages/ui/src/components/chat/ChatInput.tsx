@@ -5,6 +5,7 @@ import { BrowserVoiceButton } from '@/components/voice';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
+import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useInputStore } from '@/sync/input-store';
@@ -16,11 +17,13 @@ import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { startReviewFlow } from '@/lib/reviewFlow';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import { ReviewFlowDialog, type ReviewFlowExecution } from '@/components/session/ReviewFlowDialog';
 import { AttachedFilesList, AttachedVSCodeFileChips, ActiveEditorFileSuggestion } from './FileAttachment';
 import ToolOutputDialog from './message/ToolOutputDialog';
 import type { ToolPopupContent } from './message/types';
 import { QueuedMessageChips } from './QueuedMessageChips';
+import { AutoReviewBanner } from './AutoReviewBanner';
 import { FileMentionAutocomplete, type FileMentionHandle } from './FileMentionAutocomplete';
 import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from './CommandAutocomplete';
 import { SkillAutocomplete, type SkillAutocompleteHandle } from './SkillAutocomplete';
@@ -1131,6 +1134,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 variant: execution.variant || undefined,
                 generateHandoff: execution.generateHandoff,
                 returnAfterHandoffRequest: execution.generateHandoff,
+                autoReview: execution.autoReview,
             });
             setReviewDialogOpen(false);
         } catch (error) {
@@ -1142,7 +1146,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, [currentSessionId, currentDirectory, t]);
 
     const isDesktopExpanded = isExpandedInput && !isMobile;
-    const chatInputRadius = 'var(--radius-xl)';
+    // Rounder composer on mobile (touch UI reads better with a softer corner).
+    const chatInputRadius = isMobile ? '1.5rem' : 'var(--radius-xl)';
     const useCompactChatPlaceholder = isMobile || isNarrowComposer;
 
     React.useEffect(() => {
@@ -1416,7 +1421,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     } | null>(null);
 
     // Message queue
-    const queueModeEnabled = useMessageQueueStore((state) => state.queueModeEnabled);
+    const followUpBehavior = useMessageQueueStore((state) => state.followUpBehavior);
     const queuedMessages = useMessageQueueStore(
         React.useCallback(
             (state) => {
@@ -1635,6 +1640,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     // Session activity for queue availability and controls
     const { phase: sessionPhase } = useCurrentSessionActivity();
+    const autoReviewRunning = useAutoReviewStore(React.useCallback((state) => {
+        if (!currentSessionId) return false;
+        const run = state.runsByOriginalSessionID[currentSessionId];
+        return run?.status === 'running' && run.runtimeKey === getRuntimeKey();
+    }, [currentSessionId]));
 
     const handleOpenMobilePanel = React.useCallback((panel: MobileControlsPanel) => {
         if (!isMobile) {
@@ -1688,6 +1698,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     type SubmitOptions = {
         queuedOnly?: boolean;
         queuedMessageId?: string;
+        delivery?: 'steer';
     };
     const handleSubmitRef = React.useRef<(options?: SubmitOptions) => Promise<void>>(async () => {});
 
@@ -1737,7 +1748,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, []);
 
     const handleQueuedMessageSend = React.useCallback((messageId: string) => {
-        void handleSubmitRef.current({ queuedOnly: true, queuedMessageId: messageId });
+        // Force-sending from the queue during a busy session counts as steer
+        void handleSubmitRef.current({ queuedOnly: true, queuedMessageId: messageId, delivery: 'steer' });
     }, []);
 
     const handleOpenAgentPanel = React.useCallback(() => {
@@ -1759,10 +1771,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const handleSubmit = async (options?: SubmitOptions) => {
         const queuedOnly = options?.queuedOnly ?? false;
         const queuedMessageId = options?.queuedMessageId;
+        const delivery = options?.delivery === 'steer' && sessionPhase !== 'idle' ? 'steer' : undefined;
         const inputSnapshot = getCurrentInputSnapshot();
         const queuedMessagesToSend = queuedMessageId
             ? queuedMessages.filter((message) => message.id === queuedMessageId)
             : queuedMessages;
+
+        if (queuedOnly && autoReviewRunning) {
+            return;
+        }
 
         if (queuedOnly) {
             if (queuedMessagesToSend.length === 0 || !currentSessionId) return;
@@ -1780,6 +1797,30 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             console.warn('Cannot send message: provider or model not selected');
             return;
         }
+
+        // Sending is authoritative: if a question prompt is open, dismiss it
+        // so the prompt cannot linger or strand the session. The dismiss clears
+        // the card instantly (optimistic) and formally rejects the question.
+        // Rejecting unblocks the agent's tool but does NOT end its turn, so a
+        // direct send would race with the still-active run and be silently
+        // discarded by the OpenCode runner. Instead we queue the message; the
+        // queued-message auto-send hook delivers it as the next turn once the
+        // rejected turn winds down and the session returns to idle. This avoids
+        // aborting the turn (which would surface an "aborted" notice).
+        if (currentSessionId && !queuedOnly && autoReviewRunning) {
+            handleQueueMessage();
+            return;
+        }
+
+        if (currentSessionId && !queuedOnly) {
+            const dismissedQuestions = await sessionActions.dismissOpenQuestionsForSession(currentSessionId);
+            if (dismissedQuestions) {
+                handleQueueMessage();
+                return;
+            }
+        }
+
+        const sendMessageOptions = delivery ? { delivery } : undefined;
 
         // Build the primary message (first part) and additional parts
         let primaryText = '';
@@ -1989,6 +2030,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         [{ text: instructionsText, synthetic: true }],
                         variantToSend,
                         inputMode,
+                        sendMessageOptions,
                     );
                     scrollToBottom?.();
                 } catch (error) {
@@ -2011,6 +2053,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         [{ text: instructionsText, synthetic: true }],
                         variantToSend,
                         inputMode,
+                        sendMessageOptions,
                     );
                     scrollToBottom?.();
                 } catch (error) {
@@ -2037,6 +2080,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         [{ text: instructionsText, synthetic: true }],
                         variantToSend,
                         inputMode,
+                        sendMessageOptions,
                     );
                     scrollToBottom?.();
                 } catch (error) {
@@ -2059,6 +2103,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         [{ text: instructionsText, synthetic: true }],
                         variantToSend,
                         inputMode,
+                        sendMessageOptions,
                     );
                     scrollToBottom?.();
                 } catch (error) {
@@ -2081,6 +2126,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         [{ text: instructionsText, synthetic: true }],
                         variantToSend,
                         inputMode,
+                        sendMessageOptions,
                     );
                     scrollToBottom?.();
                 } catch (error) {
@@ -2103,6 +2149,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         [{ text: instructionsText, synthetic: true }],
                         variantToSend,
                         inputMode,
+                        sendMessageOptions,
                     );
                     scrollToBottom?.();
                 } catch (error) {
@@ -2125,6 +2172,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         [{ text: instructionsText, synthetic: true }],
                         variantToSend,
                         inputMode,
+                        sendMessageOptions,
                     );
                     scrollToBottom?.();
                 } catch (error) {
@@ -2173,7 +2221,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             agentMentionName,
             additionalParts.length > 0 ? additionalParts : undefined,
             variantToSend,
-            inputMode
+            inputMode,
+            sendMessageOptions,
         );
 
         if (typeof window === 'undefined') {
@@ -2244,16 +2293,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     // Update ref with latest handleSubmit on every render
     handleSubmitRef.current = handleSubmit;
 
-    // Primary action for send button - respects queue mode setting
+    // Primary action for send/queue button — respects selected follow-up behavior
     const handlePrimaryAction = React.useCallback(() => {
         const inputSnapshot = getCurrentInputSnapshot();
-        const canQueue = inputMode === 'normal' && inputSnapshot.hasContent && currentSessionId && sessionPhase !== 'idle';
-        if (queueModeEnabled && canQueue) {
+        const canQueue = inputMode === 'normal' && inputSnapshot.hasContent && currentSessionId && (sessionPhase !== 'idle' || autoReviewRunning);
+        if (followUpBehavior === 'queue' && canQueue) {
             handleQueueMessage();
+        } else if (followUpBehavior === 'steer' && canQueue) {
+            void handleSubmitRef.current({ delivery: 'steer' });
         } else {
             void handleSubmitRef.current();
         }
-    }, [inputMode, getCurrentInputSnapshot, currentSessionId, sessionPhase, queueModeEnabled, handleQueueMessage]);
+    }, [inputMode, getCurrentInputSnapshot, currentSessionId, sessionPhase, autoReviewRunning, followUpBehavior, handleQueueMessage]);
 
     // Draft welcome presets: populate the composer and submit immediately.
     // getCurrentInputSnapshot reads textareaRef.current.value first, so setting it
@@ -2492,33 +2543,28 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             return;
         }
 
-        // Handle Enter/Ctrl+Enter based on queue mode
+        // Handle Enter/Ctrl+Enter based on selected follow-up behavior.
         if (e.key === 'Enter' && !e.shiftKey && (!isMobile || e.ctrlKey || e.metaKey)) {
             e.preventDefault();
 
             const isCtrlEnter = e.ctrlKey || e.metaKey;
 
-            // Queue mode: Enter queues, Ctrl+Enter sends
-            // Normal mode: Enter sends, Ctrl+Enter queues
-            // Note: Queueing only works when there's an existing session (currentSessionId)
-            // For new sessions (draft), always send immediately
-            const canQueue = inputMode === 'normal' && hasContent && currentSessionId && sessionPhase !== 'idle';
+            // Queueing / steering only works when there's an existing busy
+            // session (or an active auto-review run).
+            const canQueue = inputMode === 'normal' && hasContent && currentSessionId && (sessionPhase !== 'idle' || autoReviewRunning);
 
-            if (queueModeEnabled) {
+            if (followUpBehavior === 'queue') {
                 if (isCtrlEnter || !canQueue) {
-                    // Ctrl+Enter sends, or Enter when can't queue (new session)
                     handleSubmit();
                 } else {
-                    // Enter queues when we have a session
                     handleQueueMessage();
                 }
             } else {
-                if (isCtrlEnter && canQueue) {
-                    // Ctrl+Enter queues when we have a session
-                    handleQueueMessage();
-                } else {
-                    // Enter sends
+                // steer: Enter steers into the running turn, Ctrl+Enter sends now.
+                if (isCtrlEnter || !canQueue) {
                     handleSubmit();
+                } else {
+                    handleSubmit({ delivery: 'steer' });
                 }
             }
         }
@@ -3971,7 +4017,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             className={cn(
                 "relative w-full pt-0 pb-4",
                 isDesktopExpanded && 'flex h-full min-h-0 flex-col pt-4',
-                isMobile && 'bottom-safe-area'
+                isMobile && 'bottom-safe-area oc-mobile-composer'
             )}
             style={isMobile && inputBarOffset > 0 ? { marginBottom: `${inputBarOffset}px` } : undefined}
         >
@@ -3993,6 +4039,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     onEditMessage={handleQueuedMessageEdit}
                     onSendMessage={handleQueuedMessageSend}
                 />
+                <AutoReviewBanner />
                 {hasDrafts && (
                     <div className="flex flex-wrap items-center gap-2 pb-2">
                         {reviewCount > 0 ? (
@@ -4478,7 +4525,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         {isMobile ? (
                             <>
                                 <div className="flex w-full items-center justify-between gap-x-1.5">
-                                    <div className="flex items-center gap-x-1.5">
+                                    <div className="composer-mobile-actions flex items-center gap-x-2 pl-1">
                                         <MobileSessionPanelTrigger
                                             footerIconButtonClass={footerIconButtonClass}
                                             iconSizeClass={iconSizeClass}
@@ -4503,7 +4550,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         />
                                     </div>
                                     <div className="flex items-center min-w-0 gap-x-1 justify-end">
-                                        <div className="flex items-center gap-x-1 min-w-0 max-w-[60vw] flex-shrink">
+                                        <div className="flex items-center gap-x-2 min-w-0 max-w-[60vw] flex-shrink">
                                             <MemoMobileModelButton onOpenModel={() => handleOpenMobilePanel('model')} className="min-w-0 flex-shrink" />
                                             <MemoMobileAgentButton
                                                 onOpenAgentPanel={handleOpenAgentPanel}

@@ -9,6 +9,7 @@ import { spawn } from 'child_process';
 import { randomBytes } from 'crypto';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 import { resolveWorkingDirectoryChange } from './workingDirectoryChange';
+import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } from './opencodeProcessRegistry';
 
 const t = vscode.l10n.t;
 
@@ -20,7 +21,7 @@ const WINDOWS_EXECUTABLE_EXTENSIONS = (process.env.PATHEXT || '.EXE;.CMD;.BAT;.C
   .map((ext) => (ext.startsWith('.') ? ext : `.${ext}`));
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
-export type OpenCodeDebugInfo = {
+type OpenCodeDebugInfo = {
   mode: 'managed' | 'external';
   status: ConnectionStatus;
   lastError?: string;
@@ -46,7 +47,7 @@ export type OpenCodeDebugInfo = {
   authSource: 'user-env' | 'generated' | 'rotated' | null;
 };
 
-export type SetWorkingDirectoryResult =
+type SetWorkingDirectoryResult =
   | { success: true; path: string }
   | { success: false; error: string };
 
@@ -195,10 +196,30 @@ function isMacOpenCodeAppBundlePath(candidate: string): boolean {
   return process.platform === 'darwin' && /\/OpenCode\.app\/Contents\/MacOS\/(?:OpenCode|opencode-cli)$/i.test(candidate);
 }
 
+function isWindowsOpenCodeDesktopAppPath(candidate: string): boolean {
+  if (process.platform !== 'win32' || typeof candidate !== 'string') {
+    return false;
+  }
+  const localAppData = typeof process.env.LOCALAPPDATA === 'string' && process.env.LOCALAPPDATA.trim()
+    ? path.resolve(process.env.LOCALAPPDATA).toLowerCase()
+    : '';
+  if (!localAppData) {
+    return false;
+  }
+  const normalized = path.resolve(candidate).toLowerCase();
+  return normalized.startsWith(`${localAppData}${path.sep}`)
+    && normalized.endsWith(`${path.sep}programs${path.sep}opencode${path.sep}opencode.exe`);
+}
+
+function isKnownOpenCodeDesktopAppPath(candidate: string): boolean {
+  return isMacOpenCodeAppBundlePath(candidate) || isWindowsOpenCodeDesktopAppPath(candidate);
+}
+
 function createConfiguredOpencodeBinaryError(raw: string, normalized: string): Error {
   const messageSuffix = 'OpenChamber needs the standalone opencode CLI. Install it and set openchamber.opencodeBinary to the CLI path, for example ~/.opencode/bin/opencode, or leave the setting empty to use PATH lookup.';
-  if (isMacOpenCodeAppBundlePath(raw) || isMacOpenCodeAppBundlePath(normalized)) {
-    return new Error(`Configured OpenCode binary points at the macOS desktop app bundle, not the CLI: ${normalized}. ${messageSuffix}`);
+  if (isKnownOpenCodeDesktopAppPath(raw) || isKnownOpenCodeDesktopAppPath(normalized)) {
+    const platformName = process.platform === 'win32' ? 'Windows desktop app install' : 'macOS desktop app bundle';
+    return new Error(`Configured OpenCode binary points at the ${platformName}, not the CLI: ${normalized}. ${messageSuffix}`);
   }
 
   try {
@@ -253,7 +274,7 @@ function validateConfiguredOpencodeBinaryForManagedStart(): string | null {
     return null;
   }
 
-  if (isExecutable(normalized) && !isMacOpenCodeAppBundlePath(normalized)) {
+  if (isExecutable(normalized) && !isKnownOpenCodeDesktopAppPath(normalized)) {
     return normalized;
   }
 
@@ -270,7 +291,7 @@ function resolveOpencodeCliPath(): string | null {
     }
   })();
 
-  if (configured && isExecutable(configured) && !isMacOpenCodeAppBundlePath(configured)) {
+  if (configured && isExecutable(configured) && !isKnownOpenCodeDesktopAppPath(configured)) {
     return configured;
   }
 
@@ -287,7 +308,7 @@ function resolveOpencodeCliPath(): string | null {
     }
   })();
 
-  if (sharedFromOpenChamber && isExecutable(sharedFromOpenChamber) && !isMacOpenCodeAppBundlePath(sharedFromOpenChamber)) {
+  if (sharedFromOpenChamber && isExecutable(sharedFromOpenChamber) && !isKnownOpenCodeDesktopAppPath(sharedFromOpenChamber)) {
     return sharedFromOpenChamber;
   }
 
@@ -301,13 +322,13 @@ function resolveOpencodeCliPath(): string | null {
     .filter(Boolean);
 
   for (const candidate of explicit) {
-    if (isExecutable(candidate)) {
+    if (isExecutable(candidate) && !isKnownOpenCodeDesktopAppPath(candidate)) {
       return candidate;
     }
   }
 
   if (cachedDetectedOpencodeCliPath) {
-    if (isExecutable(cachedDetectedOpencodeCliPath)) {
+    if (isExecutable(cachedDetectedOpencodeCliPath) && !isKnownOpenCodeDesktopAppPath(cachedDetectedOpencodeCliPath)) {
       return cachedDetectedOpencodeCliPath;
     }
     cachedDetectedOpencodeCliPath = undefined;
@@ -326,7 +347,6 @@ function resolveOpencodeCliPath(): string | null {
   const winFallbacks = (() => {
     const userProfile = process.env.USERPROFILE || home;
     const appData = process.env.APPDATA || path.join(userProfile, 'AppData', 'Roaming');
-    const localAppData = process.env.LOCALAPPDATA || '';
     const programData = process.env.ProgramData || 'C:\\ProgramData';
     const npmDir = path.join(appData, 'npm');
 
@@ -343,14 +363,12 @@ function resolveOpencodeCliPath(): string | null {
       // Bun global install
       path.join(userProfile, '.bun', 'bin', 'opencode.exe'),
       path.join(userProfile, '.bun', 'bin', 'opencode.cmd'),
-      // Some installers use LocalAppData
-      localAppData ? path.join(localAppData, 'Programs', 'opencode', 'opencode.exe') : '',
     ].filter(Boolean);
   })();
 
   if (process.platform !== 'win32') {
     const fromPath = findExecutableInPath('opencode');
-    if (fromPath) {
+    if (fromPath && !isKnownOpenCodeDesktopAppPath(fromPath)) {
       cachedDetectedOpencodeCliPath = fromPath;
       return fromPath;
     }
@@ -358,7 +376,7 @@ function resolveOpencodeCliPath(): string | null {
 
   const fallbacks = process.platform === 'win32' ? winFallbacks : unixFallbacks;
   for (const candidate of fallbacks) {
-    if (isExecutable(candidate)) {
+    if (isExecutable(candidate) && !isKnownOpenCodeDesktopAppPath(candidate)) {
       cachedDetectedOpencodeCliPath = candidate;
       return candidate;
     }
@@ -366,7 +384,7 @@ function resolveOpencodeCliPath(): string | null {
 
   if (process.platform === 'win32') {
     const fromPath = findExecutableInPath('opencode');
-    if (fromPath) {
+    if (fromPath && !isKnownOpenCodeDesktopAppPath(fromPath)) {
       cachedDetectedOpencodeCliPath = fromPath;
       return fromPath;
     }
@@ -381,7 +399,7 @@ function resolveOpencodeCliPath(): string | null {
           .split(/\r?\n/)
           .map((line) => line.trim())
           .filter(Boolean);
-        const found = lines.find((line) => isExecutable(line));
+        const found = lines.find((line) => isExecutable(line) && !isKnownOpenCodeDesktopAppPath(line));
         if (found) {
           cachedDetectedOpencodeCliPath = found;
           return found;
@@ -688,6 +706,9 @@ async function spawnManagedOpenCodeServer(
     child.on('error', onError);
   });
 
+  // Record this child so a future run can reap it if we crash before teardown.
+  registerManagedProcess({ pid: child.pid, ownerPid: process.pid, port, binary, runtime: 'vscode' });
+
   return {
     url,
     close: () => {
@@ -696,6 +717,7 @@ async function spawnManagedOpenCodeServer(
       } catch {
         // ignore
       }
+      unregisterManagedProcess(child.pid);
     },
   };
 }
@@ -726,6 +748,7 @@ async function allocateManagedOpenCodePort(): Promise<number> {
 
 export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCodeManager {
   let server: { url: string; close: () => void } | null = null;
+  let reapedOrphansOnce = false;
   let managedApiUrlOverride: string | null = null;
   let managedPassword: string | null = null;
   let managedPasswordSource: 'user-env' | 'generated' | 'rotated' | null = null;
@@ -864,6 +887,19 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
         setStatus('connected');
       }
       return;
+    }
+
+    // Before spawning our own server, reap any OpenCode process WE spawned in a
+    // prior run that was orphaned by a crash/host-kill. Verified + scoped to our
+    // own pids, so it never touches a live instance's or the user's own server.
+    if (!reapedOrphansOnce) {
+      reapedOrphansOnce = true;
+      try {
+        const { reaped } = await reapOrphanedProcesses({ log: (msg) => console.log(msg) });
+        if (reaped > 0) console.log(`[opencode] startup reaped ${reaped} orphaned process(es)`);
+      } catch (error) {
+        console.warn('[opencode] orphan reap failed:', error instanceof Error ? error.message : error);
+      }
     }
 
     setStatus('connecting');

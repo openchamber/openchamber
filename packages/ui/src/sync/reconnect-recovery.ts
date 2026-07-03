@@ -9,7 +9,7 @@ type ReconnectMaterializationState = {
   part?: Record<string, Part[]>
 }
 
-export type ViewedSessionMaterializationTarget = {
+type ViewedSessionMaterializationTarget = {
   directory: string
   sessionId: string
 }

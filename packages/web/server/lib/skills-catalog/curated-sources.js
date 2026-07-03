@@ -1,4 +1,4 @@
-export const CURATED_SKILLS_SOURCES = [
+const CURATED_SKILLS_SOURCES = [
   {
     id: 'anthropic',
     label: 'Anthropic',

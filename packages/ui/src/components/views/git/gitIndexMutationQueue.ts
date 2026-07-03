@@ -1,6 +1,6 @@
 export type GitIndexMutationDirection = 'stage' | 'unstage';
 
-export type QueuedGitIndexMutation = {
+type QueuedGitIndexMutation = {
   directory: string;
   direction: GitIndexMutationDirection;
   paths: Set<string>;

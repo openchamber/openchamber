@@ -32,7 +32,7 @@ import type { WorktreeMetadata } from '@/types/worktree';
 import { MobileDeleteWorktreeDialog } from './MobileDeleteWorktreeDialog';
 import { MobileSurfaceShell } from './MobileSurfaceShell';
 
-export type MobileEditableProject = {
+type MobileEditableProject = {
   id: string;
   label: string;
   path: string;

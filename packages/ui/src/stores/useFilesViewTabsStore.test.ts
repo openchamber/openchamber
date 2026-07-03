@@ -28,4 +28,23 @@ describe('useFilesViewTabsStore', () => {
 
     expect(useFilesViewTabsStore.getState().byRoot[root]?.expandedPaths).toEqual(['/repo/src']);
   });
+
+  test('removes stale expanded paths by prefix without closing files', () => {
+    const root = '/repo';
+    const store = useFilesViewTabsStore.getState();
+
+    store.addOpenPath(root, '/repo/src/index.ts');
+    store.expandPaths(root, [
+      '/repo/src',
+      '/repo/bun test packages',
+      '/repo/bun test packages/web',
+      '/repo/other',
+    ]);
+
+    store.removeExpandedPathsByPrefix(root, '/repo/bun test packages');
+
+    const state = useFilesViewTabsStore.getState().byRoot[root];
+    expect(state?.openPaths).toEqual(['/repo/src/index.ts']);
+    expect(state?.expandedPaths).toEqual(['/repo/src', '/repo/other']);
+  });
 });

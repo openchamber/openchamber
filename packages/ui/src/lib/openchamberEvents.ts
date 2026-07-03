@@ -1,7 +1,7 @@
 import { getRuntimeUrlResolver } from './runtime-url';
 import { subscribeRuntimeEndpointChanged } from './runtime-switch';
 
-export type ScheduledTaskRanEvent = {
+type ScheduledTaskRanEvent = {
   type: 'scheduled-task-ran';
   projectId: string;
   taskId: string;

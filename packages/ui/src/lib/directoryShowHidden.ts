@@ -1,5 +1,5 @@
 import React from 'react';
-import { getSafeStorage } from '@/stores/utils/safeStorage';
+import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { updateDesktopSettings } from '@/lib/persistence';
 
 const SHOW_HIDDEN_STORAGE_KEY = 'directoryTreeShowHidden';
@@ -10,7 +10,7 @@ const readStoredShowHidden = (): boolean => {
     return true;
   }
   try {
-    const stored = getSafeStorage().getItem(SHOW_HIDDEN_STORAGE_KEY);
+    const stored = getDeferredSafeStorage().getItem(SHOW_HIDDEN_STORAGE_KEY);
     if (stored === null) {
       return true;
     }
@@ -20,7 +20,7 @@ const readStoredShowHidden = (): boolean => {
   }
 };
 
-export const notifyDirectoryShowHiddenChanged = () => {
+const notifyDirectoryShowHiddenChanged = () => {
   if (typeof window === 'undefined') {
     return;
   }
@@ -35,7 +35,7 @@ export const setDirectoryShowHidden = (
     return;
   }
   try {
-    getSafeStorage().setItem(SHOW_HIDDEN_STORAGE_KEY, value ? 'true' : 'false');
+    getDeferredSafeStorage().setItem(SHOW_HIDDEN_STORAGE_KEY, value ? 'true' : 'false');
     notifyDirectoryShowHiddenChanged();
   } catch {
     // ignore storage errors
@@ -67,5 +67,3 @@ export const useDirectoryShowHidden = (): boolean => {
 
   return showHidden;
 };
-
-export const DIRECTORY_SHOW_HIDDEN_STORAGE_KEY = SHOW_HIDDEN_STORAGE_KEY;

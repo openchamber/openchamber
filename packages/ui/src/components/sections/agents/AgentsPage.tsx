@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input';
 import { NumberInput } from '@/components/ui/number-input';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
-import { useAgentsStore, type AgentConfig, type AgentScope } from '@/stores/useAgentsStore';
+import { useAgentsStore, type AgentConfig, type AgentMutationResult, type AgentScope } from '@/stores/useAgentsStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useDirectorySync } from '@/sync/sync-context';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -504,8 +504,8 @@ export const AgentsPage: React.FC = () => {
       const modeValue = agentDraft.mode || 'subagent';
       const modelValue = agentDraft.model || '';
       const variantValue = agentDraft.variant || '';
-      const temperatureValue = agentDraft.temperature;
-      const topPValue = agentDraft.top_p;
+      const temperatureValue = agentDraft.temperature ?? undefined;
+      const topPValue = agentDraft.top_p ?? undefined;
       const promptValue = agentDraft.prompt || '';
 
       setDraftName(draftNameValue);
@@ -628,25 +628,29 @@ export const AgentsPage: React.FC = () => {
         mode,
         model: trimmedModel === '' ? null : trimmedModel,
         variant: trimmedVariant === '' ? null : trimmedVariant || undefined,
-        temperature,
-        top_p: topP,
+        temperature: temperature ?? null,
+        top_p: topP ?? null,
         prompt: trimmedPrompt || (isNewAgent ? undefined : null),
         permission: permissionConfig,
         scope: isNewAgent ? draftScope : undefined,
       };
 
-      let success: boolean;
+      let result: AgentMutationResult;
       if (isNewAgent) {
-        success = await createAgent(config);
-        if (success) {
+        result = await createAgent(config);
+        if (result.ok) {
           setAgentDraft(null); // Clear draft after successful creation
         }
       } else {
-        success = await updateAgent(agentName, config);
+        result = await updateAgent(agentName, config);
       }
 
-      if (success) {
-        toast.success(isNewAgent ? t('settings.agents.page.toast.created') : t('settings.agents.page.toast.updated'));
+      if (result.ok) {
+        if (result.requiresManualRestart) {
+          toast.warning(t('settings.agents.page.toast.savedManualRestart'));
+        } else {
+          toast.success(isNewAgent ? t('settings.agents.page.toast.created') : t('settings.agents.page.toast.updated'));
+        }
       } else {
         toast.error(isNewAgent ? t('settings.agents.page.toast.createFailed') : t('settings.agents.page.toast.updateFailed'));
       }

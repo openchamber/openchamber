@@ -1,4 +1,4 @@
-export type StartupTraceEvent = {
+type StartupTraceEvent = {
   t: number;
   name: string;
   data?: Record<string, unknown>;
@@ -43,7 +43,7 @@ export const markStartupTrace = (name: string, data?: Record<string, unknown>) =
   }
 };
 
-export const getStartupTraceSummary = () => {
+const getStartupTraceSummary = () => {
   const trace = typeof window !== 'undefined' ? window.__OPENCHAMBER_STARTUP_TRACE__ ?? [] : [];
   const readyIndex = trace.findIndex((event) => event.name === 'ModelControls:ready');
   const endIndex = readyIndex >= 0 ? Math.min(trace.length, readyIndex + 8) : trace.length;

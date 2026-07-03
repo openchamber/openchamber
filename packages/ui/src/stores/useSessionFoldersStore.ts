@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
-import { getSafeStorage } from './utils/safeStorage';
+import { getDeferredSafeStorage } from './utils/safeStorage';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
@@ -46,7 +46,7 @@ const SESSION_FOLDERS_API_PATH = '/api/session-folders';
 const DISK_WRITE_DEBOUNCE_MS = 250;
 const ARCHIVED_SCOPE_PREFIX = '__archived__:';
 
-const safeStorage = getSafeStorage();
+const safeStorage = getDeferredSafeStorage();
 let diskWriteTimer: ReturnType<typeof setTimeout> | null = null;
 let diskHydrated = false;
 let diskHydrationInFlight = false;
