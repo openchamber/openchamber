@@ -1,17 +1,9 @@
 import React from 'react';
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import { ProjectIdentityFields } from '@/components/sections/projects/ProjectIdentityFields';
+import { ProjectIdentityEditor } from '@/components/sections/projects/ProjectIdentityEditor';
 import { useProjectIdentityForm } from '@/components/sections/projects/useProjectIdentityForm';
 import type { ProjectEntry } from '@/lib/api/types';
-import { useI18n } from '@/lib/i18n';
 
 interface ProjectEditDialogProps {
   open: boolean;
@@ -32,7 +24,6 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
   project,
   onSave,
 }) => {
-  const { t } = useI18n();
   const form = useProjectIdentityForm(open ? project : null);
 
   const handleSave = React.useCallback(async () => {
@@ -44,28 +35,12 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg p-0 gap-0 overflow-hidden">
-        <DialogHeader className="px-6 pt-6 pb-2 min-w-0">
-          <DialogTitle>{t('projectEditDialog.title')}</DialogTitle>
-        </DialogHeader>
-
-        <ScrollableOverlay outerClassName="max-h-[min(70vh,32rem)]" className="w-full">
-          <div className="px-4 pb-2">
-            <ProjectIdentityFields form={form} />
+      <DialogContent className="w-full max-w-4xl gap-0 overflow-hidden p-0 sm:max-w-xl">
+        <ScrollableOverlay outerClassName="max-h-[min(85vh,40rem)]" className="w-full bg-background">
+          <div className="mx-auto w-full max-w-4xl p-3 sm:p-6 sm:pt-8">
+            <ProjectIdentityEditor form={form} onSave={handleSave} className="mb-0" />
           </div>
         </ScrollableOverlay>
-
-        <DialogFooter className="px-6 py-4 border-t border-border/40">
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            {t('projectEditDialog.actions.cancel')}
-          </Button>
-          <Button
-            onClick={() => void handleSave()}
-            disabled={!form.name.trim() || form.isUploadingIcon || form.isRemovingCustomIcon}
-          >
-            {t('projectEditDialog.actions.save')}
-          </Button>
-        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

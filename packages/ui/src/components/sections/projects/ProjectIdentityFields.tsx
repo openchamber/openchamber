@@ -69,9 +69,6 @@ export const ProjectIdentityFields: React.FC<ProjectIdentityFieldsProps> = ({ fo
             className="h-7 min-w-0 w-full sm:max-w-[19rem]"
           />
         </div>
-        <p className="mt-1 typography-meta text-muted-foreground truncate" title={project.path}>
-          {project.path}
-        </p>
       </div>
 
       <div data-settings-item="projects.default-model" className="py-1.5">
