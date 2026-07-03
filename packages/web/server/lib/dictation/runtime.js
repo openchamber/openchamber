@@ -41,12 +41,43 @@ const parseRequestPathname = (url) => {
 export function createDictationRuntime({
   app,
   server,
+  express,
   uiAuthController,
   isRequestOriginAllowed,
   rejectWebSocketUpgrade,
   modelsDir,
 }) {
   const service = createDictationService({ modelsDir });
+
+  // Local text-to-speech (Kokoro in the dictation worker). Returns WAV bytes;
+  // 503 with a reason code while the model is still downloading.
+  app.post('/api/dictation/tts/speak', express.json({ limit: '1mb' }), async (req, res) => {
+    try {
+      const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+      if (!text) {
+        res.status(400).json({ error: 'Text is required' });
+        return;
+      }
+      const result = await service.synthesizeSpeech({
+        text,
+        model: typeof req.body?.model === 'string' ? req.body.model : undefined,
+        speakerId: Number.isInteger(req.body?.speakerId) ? req.body.speakerId : undefined,
+        speed: typeof req.body?.speed === 'number' ? req.body.speed : undefined,
+      });
+      if (result.error) {
+        res.status(503).json({
+          error: result.error,
+          retryable: result.retryable !== false,
+          ...(result.reasonCode ? { reasonCode: result.reasonCode } : {}),
+        });
+        return;
+      }
+      res.setHeader('Content-Type', result.format || 'audio/wav');
+      res.send(result.audio);
+    } catch (error) {
+      res.status(500).json({ error: error?.message || 'Failed to synthesize speech' });
+    }
+  });
 
   app.get('/api/dictation/status', async (req, res) => {
     try {

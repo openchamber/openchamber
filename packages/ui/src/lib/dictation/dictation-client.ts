@@ -7,6 +7,7 @@
  */
 
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
+import { refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
 
 export interface DictationStartOptions {
     provider?: 'local' | 'openai-compatible';
@@ -100,6 +101,17 @@ export class DictationClient {
         if (this.connectPromise) {
             await this.connectPromise;
             return;
+        }
+
+        // A WebSocket upgrade can't carry an Authorization header, so it
+        // authenticates via the oc_url_token query param. Mint/await a valid
+        // token BEFORE connecting — the sync getter returns "" while the token
+        // is unminted or inside its expiry skew, and the server would reject
+        // the upgrade with 401.
+        try {
+            await refreshRuntimeUrlAuthToken();
+        } catch {
+            // No auth configured (local runtime) — proceed without a token.
         }
 
         this.connectPromise = new Promise<void>((resolve, reject) => {

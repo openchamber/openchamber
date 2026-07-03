@@ -113,6 +113,9 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
       localStorage.removeItem('opencode-update-toast-dismissed-version');
     }
   }
+  if (typeof settings.dictationEnabled === 'boolean') {
+    localStorage.setItem('dictationEnabled', String(settings.dictationEnabled));
+  }
   if (settings.sttProvider === 'local' || settings.sttProvider === 'openai-compatible') {
     localStorage.setItem('sttProvider', settings.sttProvider);
   }
@@ -608,6 +611,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
   if (configStoreApi && configStore) {
     const nextConfigState: Partial<typeof configStore> = {};
+    if (typeof settings.dictationEnabled === 'boolean' && settings.dictationEnabled !== configStore.dictationEnabled) {
+      nextConfigState.dictationEnabled = settings.dictationEnabled;
+    }
     if ((settings.sttProvider === 'local' || settings.sttProvider === 'openai-compatible') && settings.sttProvider !== configStore.sttProvider) {
       nextConfigState.sttProvider = settings.sttProvider;
     }
@@ -1187,6 +1193,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.responseStyleCustomInstructions === 'string') {
     result.responseStyleCustomInstructions = candidate.responseStyleCustomInstructions;
+  }
+  if (typeof candidate.dictationEnabled === 'boolean') {
+    result.dictationEnabled = candidate.dictationEnabled;
   }
   if (candidate.sttProvider === 'local' || candidate.sttProvider === 'openai-compatible') {
     result.sttProvider = candidate.sttProvider;

@@ -9,6 +9,7 @@ import { useCallback, useState } from 'react';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useServerTTS } from './useServerTTS';
 import { useSayTTS } from './useSayTTS';
+import { useLocalTTS } from './useLocalTTS';
 import { browserVoiceService } from '@/lib/voice/browserVoiceService';
 import { sanitizeForTTS } from '@/lib/voice/summarize';
 
@@ -29,6 +30,7 @@ export function useMessageTTS(): UseMessageTTSReturn {
     const speechPitch = useConfigStore((state) => state.speechPitch);
     const speechVolume = useConfigStore((state) => state.speechVolume);
     const sayVoice = useConfigStore((state) => state.sayVoice);
+    const localTtsVoiceId = useConfigStore((state) => state.localTtsVoiceId);
     const browserVoice = useConfigStore((state) => state.browserVoice);
     const openaiVoice = useConfigStore((state) => state.openaiVoice);
     const openaiCompatibleVoice = useConfigStore((state) => state.openaiCompatibleVoice);
@@ -48,13 +50,15 @@ export function useMessageTTS(): UseMessageTTSReturn {
     const { speak: speakSayTTS, stop: stopSayTTS, isAvailable: isSayTTSAvailable } = useSayTTS({
         enabled: shouldCheckSayAvailability,
     });
+    const { speak: speakLocalTTS, stop: stopLocalTTS } = useLocalTTS();
     
     const stop = useCallback(() => {
         setIsPlaying(false);
         stopServerTTS();
         stopSayTTS();
+        stopLocalTTS();
         browserVoiceService.cancelSpeech();
-    }, [stopServerTTS, stopSayTTS]);
+    }, [stopServerTTS, stopSayTTS, stopLocalTTS]);
     
     const play = useCallback(async (text: string) => {
         if (!text.trim()) return;
@@ -81,6 +85,13 @@ export function useMessageTTS(): UseMessageTTSReturn {
                     volume: speechVolume,
                     summarize: false,
                     baseURL,
+                    onEnd: () => setIsPlaying(false),
+                    onError: () => setIsPlaying(false),
+                });
+            } else if (voiceProvider === 'local') {
+                await speakLocalTTS(sanitizedText, {
+                    speakerId: localTtsVoiceId,
+                    speed: speechRate,
                     onEnd: () => setIsPlaying(false),
                     onError: () => setIsPlaying(false),
                 });
@@ -129,6 +140,8 @@ export function useMessageTTS(): UseMessageTTSReturn {
         ttsInputMode,
         speakServerTTS,
         speakSayTTS,
+        speakLocalTTS,
+        localTtsVoiceId,
         stop,
     ]);
     

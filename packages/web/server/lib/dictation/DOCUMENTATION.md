@@ -1,9 +1,16 @@
 # Dictation module
 
-Server-authoritative streaming speech-to-text for the chat composer. The
-client streams 16 kHz mono PCM16 chunks (base64) over a WebSocket; the server
-runs the transcription and streams live partial transcripts back. Ported from
-the paseo daemon dictation design.
+Server-authoritative streaming speech-to-text for the chat composer, plus
+local text-to-speech. The client streams 16 kHz mono PCM16 chunks (base64)
+over a WebSocket; the server runs the transcription and streams live partial
+transcripts back. Ported from the paseo daemon dictation design.
+
+Local TTS (Kokoro via sherpa-onnx OfflineTts) runs in the same worker process
+and is exposed as `POST /api/dictation/tts/speak` (JSON `{text, speakerId?,
+speed?, model?}` → WAV bytes; 503 with `reasonCode` while the model is
+downloading). TTS models live in the same catalog/downloader as STT models
+(`local/model-catalog.js` `LOCAL_TTS_MODEL_CATALOG`) and are managed by the
+same status/download/delete routes.
 
 ## Ownership
 

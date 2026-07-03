@@ -980,14 +980,15 @@ interface ConfigStore {
     settingsZenModel: string | undefined;
     settingsMessageStreamTransport: 'auto' | 'ws' | 'sse';
     // Voice provider preference ('browser', 'openai', 'openai-compatible', or 'say' for macOS)
-    voiceProvider: 'browser' | 'openai' | 'openai-compatible' | 'say';
-    setVoiceProvider: (provider: 'browser' | 'openai' | 'openai-compatible' | 'say') => void;
+    voiceProvider: 'browser' | 'local' | 'openai' | 'openai-compatible' | 'say';
+    setVoiceProvider: (provider: 'browser' | 'local' | 'openai' | 'openai-compatible' | 'say') => void;
     // TTS settings
     speechRate: number;
     speechPitch: number;
     speechVolume: number;
     sayVoice: string;
     browserVoice: string;
+    localTtsVoiceId: number;
     openaiVoice: string;
     openaiApiKey: string;
     openaiCompatibleUrl: string;
@@ -995,6 +996,7 @@ interface ConfigStore {
     openaiCompatibleVoice: string;
     openaiCompatibleTtsModel: string;
     // STT (dictation) settings
+    dictationEnabled: boolean;
     sttProvider: 'local' | 'openai-compatible';
     sttServerUrl: string;
     sttApiKey: string;
@@ -1003,7 +1005,6 @@ interface ConfigStore {
     sttLanguage: string;
     showMessageTTSButtons: boolean;
     ttsInputMode: 'sanitized' | 'raw';
-    voiceModeEnabled: boolean;
     // Summarization settings
     summarizeMessageTTS: boolean;
     summarizeVoiceConversation: boolean;
@@ -1014,12 +1015,14 @@ interface ConfigStore {
     setSpeechVolume: (volume: number) => void;
     setSayVoice: (voice: string) => void;
     setBrowserVoice: (voice: string) => void;
+    setLocalTtsVoiceId: (voiceId: number) => void;
     setOpenaiVoice: (voice: string) => void;
     setOpenaiApiKey: (apiKey: string) => void;
     setOpenaiCompatibleUrl: (url: string) => void;
     setOpenaiCompatibleApiKey: (apiKey: string) => void;
     setOpenaiCompatibleVoice: (voice: string) => void;
     setOpenaiCompatibleTtsModel: (model: string) => void;
+    setDictationEnabled: (enabled: boolean) => void;
     setSttProvider: (provider: 'local' | 'openai-compatible') => void;
     setSttServerUrl: (url: string) => void;
     setSttApiKey: (apiKey: string) => void;
@@ -1028,7 +1031,6 @@ interface ConfigStore {
     setSttLanguage: (lang: string) => void;
     setShowMessageTTSButtons: (show: boolean) => void;
     setTtsInputMode: (mode: 'sanitized' | 'raw') => void;
-    setVoiceModeEnabled: (enabled: boolean) => void;
     setSummarizeMessageTTS: (enabled: boolean) => void;
     setSummarizeVoiceConversation: (enabled: boolean) => void;
     setSummarizeCharacterThreshold: (threshold: number) => void;
@@ -1121,7 +1123,7 @@ export const useConfigStore = create<ConfigStore>()(
                 voiceProvider: (() => {
                     if (typeof window !== 'undefined') {
                         const saved = localStorage.getItem('voiceProvider');
-                        if (saved === 'openai' || saved === 'browser' || saved === 'say' || saved === 'openai-compatible') return saved;
+                        if (saved === 'openai' || saved === 'browser' || saved === 'local' || saved === 'say' || saved === 'openai-compatible') return saved;
                     }
                     return 'browser';
                 })(),
@@ -1163,6 +1165,17 @@ export const useConfigStore = create<ConfigStore>()(
                         if (saved) return saved;
                     }
                     return 'Samantha';
+                })(),
+                // Local (Kokoro) TTS speaker id - load from localStorage or default to 0
+                localTtsVoiceId: (() => {
+                    if (typeof window !== 'undefined') {
+                        const saved = localStorage.getItem('localTtsVoiceId');
+                        if (saved !== null) {
+                            const parsed = Number.parseInt(saved, 10);
+                            if (Number.isInteger(parsed) && parsed >= 0) return parsed;
+                        }
+                    }
+                    return 0;
                 })(),
                 // Browser voice - load from localStorage or default to empty (auto-select)
                 browserVoice: (() => {
@@ -1219,6 +1232,14 @@ export const useConfigStore = create<ConfigStore>()(
                         if (saved && saved !== 'speaches-ai/Kokoro-82M-v1.0-ONNX') return saved;
                     }
                     return 'kokoro';
+                })(),
+                // Voice input (dictation) master toggle - default enabled
+                dictationEnabled: (() => {
+                    if (typeof window !== 'undefined') {
+                        const saved = localStorage.getItem('dictationEnabled');
+                        if (saved === 'false') return false;
+                    }
+                    return true;
                 })(),
                 // STT provider: 'local' (server-side sherpa-onnx) or 'openai-compatible'
                 sttProvider: (() => {
@@ -1280,14 +1301,6 @@ export const useConfigStore = create<ConfigStore>()(
                         if (saved === 'raw') return 'raw' as const;
                     }
                     return 'sanitized' as const;
-                })(),
-                // Voice mode enabled - load from localStorage or default to false
-                voiceModeEnabled: (() => {
-                    if (typeof window !== 'undefined') {
-                        const saved = localStorage.getItem('voiceModeEnabled');
-                        if (saved === 'true') return true;
-                    }
-                    return false;
                 })(),
                 // Summarization settings
                 summarizeMessageTTS: (() => {
@@ -2756,7 +2769,7 @@ export const useConfigStore = create<ConfigStore>()(
                     });
                 },
 
-                setVoiceProvider: (provider: 'browser' | 'openai' | 'openai-compatible' | 'say') => {
+                setVoiceProvider: (provider: 'browser' | 'local' | 'openai' | 'openai-compatible' | 'say') => {
                     set({ voiceProvider: provider });
                     if (typeof window !== 'undefined') {
                         localStorage.setItem('voiceProvider', provider);
@@ -2791,6 +2804,13 @@ export const useConfigStore = create<ConfigStore>()(
                     set({ sayVoice: voice });
                     if (typeof window !== 'undefined') {
                         localStorage.setItem('sayVoice', voice);
+                    }
+                },
+
+                setLocalTtsVoiceId: (voiceId: number) => {
+                    set({ localTtsVoiceId: voiceId });
+                    if (typeof window !== 'undefined') {
+                        localStorage.setItem('localTtsVoiceId', String(voiceId));
                     }
                 },
 
@@ -2841,6 +2861,14 @@ export const useConfigStore = create<ConfigStore>()(
                     if (typeof window !== 'undefined') {
                         localStorage.setItem('openaiCompatibleTtsModel', model);
                     }
+                },
+
+                setDictationEnabled: (enabled: boolean) => {
+                    set({ dictationEnabled: enabled });
+                    if (typeof window !== 'undefined') {
+                        localStorage.setItem('dictationEnabled', String(enabled));
+                    }
+                    updateDesktopSettings({ dictationEnabled: enabled }).catch(() => {});
                 },
 
                 setSttProvider: (provider: 'local' | 'openai-compatible') => {
@@ -2901,13 +2929,6 @@ export const useConfigStore = create<ConfigStore>()(
                     set({ ttsInputMode: mode });
                     if (typeof window !== 'undefined') {
                         localStorage.setItem('ttsInputMode', mode);
-                    }
-                },
-
-                setVoiceModeEnabled: (enabled: boolean) => {
-                    set({ voiceModeEnabled: enabled });
-                    if (typeof window !== 'undefined') {
-                        localStorage.setItem('voiceModeEnabled', String(enabled));
                     }
                 },
 

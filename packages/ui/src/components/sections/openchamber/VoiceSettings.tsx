@@ -19,6 +19,7 @@ import { browserVoiceService } from '@/lib/voice/browserVoiceService';
 import { cn } from '@/lib/utils';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useI18n } from '@/lib/i18n';
+import { useLocalTTS } from '@/hooks/useLocalTTS';
 import { disposePreviewAudio } from './voicePreviewAudio';
 
 const LOCAL_STT_MODELS = [
@@ -246,6 +247,129 @@ const LocalModelPicker = ({
     );
 };
 
+/** Kokoro en_v0_19 speaker ids in sherpa-onnx order. */
+const KOKORO_VOICE_OPTIONS = [
+    { id: 0, label: 'Alloy (af)' },
+    { id: 1, label: 'Bella (af)' },
+    { id: 2, label: 'Nicole (af)' },
+    { id: 3, label: 'Sarah (af)' },
+    { id: 4, label: 'Sky (af)' },
+    { id: 5, label: 'Adam (am)' },
+    { id: 6, label: 'Michael (am)' },
+    { id: 7, label: 'Emma (bf)' },
+    { id: 8, label: 'Isabella (bf)' },
+    { id: 9, label: 'George (bm)' },
+    { id: 10, label: 'Lewis (bm)' },
+];
+
+const LOCAL_TTS_MODEL_ID = 'kokoro-en-v0_19';
+
+const LocalTtsModelStatus = () => {
+    const { t } = useI18n();
+    const [model, setModel] = useState<DictationModelState | null>(null);
+    const [requesting, setRequesting] = useState(false);
+
+    const refresh = useCallback(async () => {
+        try {
+            const response = await runtimeFetch('/api/dictation/status', { query: { provider: 'local' } });
+            if (!response.ok) {
+                return;
+            }
+            const data = await response.json();
+            const entry = Array.isArray(data?.ttsModels)
+                ? data.ttsModels.find((m: DictationModelState) => m.id === LOCAL_TTS_MODEL_ID)
+                : null;
+            if (entry) {
+                setModel(entry);
+            }
+        } catch {
+            // Display-only status; keep the previous state on fetch failure.
+        }
+    }, []);
+
+    useEffect(() => {
+        void refresh();
+    }, [refresh]);
+
+    useEffect(() => {
+        if (!model?.downloading) {
+            return;
+        }
+        const interval = setInterval(() => {
+            void refresh();
+        }, 2000);
+        return () => clearInterval(interval);
+    }, [model?.downloading, refresh]);
+
+    const request = async (method: 'POST' | 'DELETE') => {
+        setRequesting(true);
+        try {
+            const path = method === 'POST'
+                ? `/api/dictation/models/${LOCAL_TTS_MODEL_ID}/download`
+                : `/api/dictation/models/${LOCAL_TTS_MODEL_ID}`;
+            await runtimeFetch(path, { method });
+            await refresh();
+        } catch {
+            // Status refresh reports errors.
+        } finally {
+            setRequesting(false);
+        }
+    };
+
+    if (!model) {
+        return null;
+    }
+
+    return (
+        <div className="flex items-center gap-2 py-1.5">
+            <span className="typography-ui-label text-foreground">Kokoro</span>
+            <span className="typography-ui-compact tabular-nums text-muted-foreground">305 MB</span>
+            {model.installed ? (
+                <>
+                    <Icon
+                        name="checkbox-circle"
+                        className="h-4 w-4 text-[var(--status-success)]"
+                        aria-label={t('settings.voice.page.stt.modelInstalled')}
+                    />
+                    <Button
+                        variant="ghost"
+                        size="xs"
+                        className="h-6 w-6 p-0 text-muted-foreground hover:text-[var(--status-error)]"
+                        disabled={requesting}
+                        onClick={() => { void request('DELETE'); }}
+                        title={t('settings.voice.page.stt.modelDelete')}
+                        aria-label={t('settings.voice.page.stt.modelDelete')}
+                    >
+                        <Icon name="delete-bin" className="h-4 w-4" />
+                    </Button>
+                </>
+            ) : model.downloading ? (
+                <span className="flex items-center gap-1.5">
+                    <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                    <span className="typography-ui-compact tabular-nums text-muted-foreground">
+                        {typeof model.downloadProgress === 'number' ? `${model.downloadProgress}%` : ''}
+                    </span>
+                </span>
+            ) : (
+                <Button
+                    variant="ghost"
+                    size="xs"
+                    className="h-6 w-6 p-0"
+                    disabled={requesting}
+                    onClick={() => { void request('POST'); }}
+                    title={t('settings.voice.page.stt.modelDownload')}
+                    aria-label={t('settings.voice.page.stt.modelDownload')}
+                >
+                    <Icon name="download" className="h-4 w-4" />
+                </Button>
+            )}
+            {model.downloadError ? (
+                <span className="typography-meta text-[var(--status-error)]">{model.downloadError}</span>
+            ) : null}
+        </div>
+    );
+};
+
 const OPENAI_VOICE_OPTIONS = [
     { value: 'alloy', label: 'Alloy' },
     { value: 'ash', label: 'Ash' },
@@ -275,6 +399,22 @@ export const VoiceSettings: React.FC = () => {
     const setSpeechVolume = useConfigStore((state) => state.setSpeechVolume);
     const sayVoice = useConfigStore((state) => state.sayVoice);
     const setSayVoice = useConfigStore((state) => state.setSayVoice);
+    const localTtsVoiceId = useConfigStore((state) => state.localTtsVoiceId);
+    const setLocalTtsVoiceId = useConfigStore((state) => state.setLocalTtsVoiceId);
+    const { speak: speakLocalTts, stop: stopLocalTts, isPlaying: isLocalTtsPlaying, error: localTtsError } = useLocalTTS();
+
+    const previewLocalVoice = useCallback(() => {
+        if (isLocalTtsPlaying) {
+            stopLocalTts();
+            return;
+        }
+        const voiceLabel = KOKORO_VOICE_OPTIONS.find((v) => v.id === localTtsVoiceId)?.label
+            ?? String(localTtsVoiceId);
+        void speakLocalTts(t('settings.voice.page.preview.voiceLine', { voiceName: voiceLabel }), {
+            speakerId: localTtsVoiceId,
+            speed: useConfigStore.getState().speechRate,
+        });
+    }, [isLocalTtsPlaying, localTtsVoiceId, speakLocalTts, stopLocalTts, t]);
     const browserVoice = useConfigStore((state) => state.browserVoice);
     const setBrowserVoice = useConfigStore((state) => state.setBrowserVoice);
     const openaiVoice = useConfigStore((state) => state.openaiVoice);
@@ -306,8 +446,8 @@ export const VoiceSettings: React.FC = () => {
     const sttLanguage = useConfigStore((state) => state.sttLanguage);
     const setSttLanguage = useConfigStore((state) => state.setSttLanguage);
     const setShowMessageTTSButtons = useConfigStore((state) => state.setShowMessageTTSButtons);
-    const voiceModeEnabled = useConfigStore((state) => state.voiceModeEnabled);
-    const setVoiceModeEnabled = useConfigStore((state) => state.setVoiceModeEnabled);
+    const dictationEnabled = useConfigStore((state) => state.dictationEnabled);
+    const setDictationEnabled = useConfigStore((state) => state.setDictationEnabled);
 
     const [isSayAvailable, setIsSayAvailable] = useState(false);
     const [sayVoices, setSayVoices] = useState<Array<{ name: string; locale: string }>>([]);
@@ -397,7 +537,7 @@ export const VoiceSettings: React.FC = () => {
     }, [isBrowserPreviewPlaying]);
 
     useEffect(() => {
-        if (!voiceModeEnabled || (voiceProvider !== 'openai' && voiceProvider !== 'openai-compatible')) {
+        if (!showMessageTTSButtons || (voiceProvider !== 'openai' && voiceProvider !== 'openai-compatible')) {
             setIsOpenAIAvailable(openaiApiKey.trim().length > 0);
             return;
         }
@@ -415,10 +555,10 @@ export const VoiceSettings: React.FC = () => {
         };
 
         checkOpenAIAvailability();
-    }, [openaiApiKey, voiceModeEnabled, voiceProvider]);
+    }, [openaiApiKey, showMessageTTSButtons, voiceProvider]);
 
     useEffect(() => {
-        if (!voiceModeEnabled) {
+        if (!showMessageTTSButtons) {
             setIsSayAvailable(false);
             setSayVoices([]);
             return;
@@ -440,7 +580,7 @@ export const VoiceSettings: React.FC = () => {
             .catch(() => {
                 setIsSayAvailable(false);
             });
-    }, [voiceModeEnabled]);
+    }, [showMessageTTSButtons]);
 
     const previewVoice = useCallback(async () => {
         if (previewAudio) {
@@ -621,11 +761,11 @@ export const VoiceSettings: React.FC = () => {
     return (
         <div className="space-y-8">
 
-            {/* Voice Setup */}
-            <div data-settings-item="voice.voice-setup" className="mb-8">
+            {/* Playback (read messages aloud) */}
+            <div data-settings-item="voice.playback" className="mb-8">
                 <div className="mb-1 px-1">
                     <h3 className="typography-ui-header font-medium text-foreground">
-                        {t('settings.voice.page.section.voiceSetup')}
+                        {t('settings.voice.page.section.playbackAndSummary')}
                     </h3>
                 </div>
 
@@ -635,15 +775,15 @@ export const VoiceSettings: React.FC = () => {
                         className="group flex cursor-pointer items-center gap-2 py-1.5"
                         role="button"
                         tabIndex={0}
-                        aria-pressed={voiceModeEnabled}
-                        onClick={() => setVoiceModeEnabled(!voiceModeEnabled)}
-                        onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setVoiceModeEnabled(!voiceModeEnabled); } }}
+                        aria-pressed={showMessageTTSButtons}
+                        onClick={() => setShowMessageTTSButtons(!showMessageTTSButtons)}
+                        onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setShowMessageTTSButtons(!showMessageTTSButtons); } }}
                     >
-                        <Checkbox checked={voiceModeEnabled} onChange={setVoiceModeEnabled} ariaLabel={t('settings.voice.page.field.enableVoiceModeAria')} />
-                        <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.enableVoiceMode')}</span>
+                        <Checkbox checked={showMessageTTSButtons} onChange={setShowMessageTTSButtons} ariaLabel={t('settings.voice.page.field.messageReadAloudButtonAria')} />
+                        <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.messageReadAloudButton')}</span>
                     </div>
 
-                    {voiceModeEnabled && (
+                    {showMessageTTSButtons && (
                         <>
                             <div className="pb-1.5 pt-0.5">
                                 <div className="flex min-w-0 flex-col gap-1.5">
@@ -656,6 +796,7 @@ export const VoiceSettings: React.FC = () => {
                                             <TooltipContent sideOffset={8} className="max-w-xs">
                                                 <ul className="space-y-1">
                                                     <li><strong>{t('settings.voice.page.provider.browser')}</strong> {t('settings.voice.page.tooltip.browser')}</li>
+                                                    <li><strong>{t('settings.voice.page.provider.local')}</strong> {t('settings.voice.page.tooltip.localTts')}</li>
                                                     <li><strong>OpenAI:</strong> {t('settings.voice.page.tooltip.openai')}</li>
                                                     <li><strong>{t('settings.voice.page.provider.custom')}</strong> {t('settings.voice.page.tooltip.custom')}</li>
                                                     <li><strong>{t('settings.voice.page.provider.say')}</strong> {t('settings.voice.page.tooltip.say')}</li>
@@ -672,6 +813,15 @@ export const VoiceSettings: React.FC = () => {
                                             className="!font-normal"
                                         >
                                             {t('settings.voice.page.provider.browser')}
+                                        </Button>
+                                        <Button
+                                            variant="chip"
+                                            size="xs"
+                                            aria-pressed={voiceProvider === 'local'}
+                                            onClick={() => setVoiceProvider('local')}
+                                            className="!font-normal"
+                                        >
+                                            {t('settings.voice.page.provider.local')}
                                         </Button>
                                         <Button
                                             variant="chip"
@@ -829,10 +979,39 @@ export const VoiceSettings: React.FC = () => {
                                 </div>
                             )}
 
+                            {/* Local (Kokoro) TTS model status */}
+                            {voiceProvider === 'local' && <LocalTtsModelStatus />}
+
                             {/* Voice Selection */}
                             <div className="flex items-center gap-8 py-1.5">
                                 <span className="typography-ui-label text-foreground sm:w-56 shrink-0">{t('settings.voice.page.field.voice')}</span>
                                 <div className="flex items-center gap-2 w-fit">
+                                    {voiceProvider === 'local' && (
+                                        <>
+                                            <Select
+                                                value={String(localTtsVoiceId)}
+                                                onValueChange={(value) => setLocalTtsVoiceId(Number.parseInt(value, 10) || 0)}
+                                            >
+                                                <SelectTrigger className="w-fit">
+                                                    <SelectValue placeholder={t('settings.voice.page.field.selectVoicePlaceholder')}>
+                                                        {(value) => KOKORO_VOICE_OPTIONS.find((v) => String(v.id) === value)?.label ?? value}
+                                                    </SelectValue>
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {KOKORO_VOICE_OPTIONS.map((v) => (
+                                                        <SelectItem key={v.id} value={String(v.id)}>{v.label}</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                            <Button size="xs" variant="ghost" onClick={previewLocalVoice} title={t('settings.voice.page.actions.preview')}>
+                                                {isLocalTtsPlaying ? <Icon name="stop" className="w-3.5 h-3.5" /> : <Icon name="play" className="w-3.5 h-3.5" />}
+                                            </Button>
+                                            {localTtsError ? (
+                                                <span className="typography-meta text-[var(--status-error)]">{localTtsError}</span>
+                                            ) : null}
+                                        </>
+                                    )}
+
                                     {voiceProvider === 'openai' && isOpenAIAvailable && (
                                         <>
                                             <Select value={openaiVoice} onValueChange={setOpenaiVoice}>
@@ -927,6 +1106,36 @@ export const VoiceSettings: React.FC = () => {
                                 </div>
                             </div>
 
+                            {/* TTS input mode */}
+                            <div className="pb-1.5 pt-0.5">
+                                <div className="flex min-w-0 flex-col gap-1.5">
+                                    <div className="flex items-center gap-1.5">
+                                        <span className="typography-ui-label text-foreground">
+                                            {t('settings.voice.page.field.ttsInputMode')}
+                                        </span>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-1">
+                                        <Button
+                                            variant="chip"
+                                            size="xs"
+                                            aria-pressed={ttsInputMode === 'sanitized'}
+                                            onClick={() => setTtsInputMode('sanitized')}
+                                            className="!font-normal"
+                                        >
+                                            {t('settings.voice.page.field.ttsInputModeSanitized')}
+                                        </Button>
+                                        <Button
+                                            variant="chip"
+                                            size="xs"
+                                            aria-pressed={ttsInputMode === 'raw'}
+                                            onClick={() => setTtsInputMode('raw')}
+                                            className="!font-normal"
+                                        >
+                                            {t('settings.voice.page.field.ttsInputModeRaw')}
+                                        </Button>
+                                    </div>
+                                </div>
+                            </div>
                         </>
                     )}
                 </section>
@@ -941,6 +1150,19 @@ export const VoiceSettings: React.FC = () => {
                     </div>
 
                     <section className="px-2 pb-2 pt-0 space-y-0">
+                        <div
+                            className="group flex cursor-pointer items-center gap-2 py-1.5"
+                            role="button"
+                            tabIndex={0}
+                            aria-pressed={dictationEnabled}
+                            onClick={() => setDictationEnabled(!dictationEnabled)}
+                            onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setDictationEnabled(!dictationEnabled); } }}
+                        >
+                            <Checkbox checked={dictationEnabled} onChange={setDictationEnabled} ariaLabel={t('settings.voice.page.field.enableVoiceInputAria')} />
+                            <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.enableVoiceInput')}</span>
+                        </div>
+
+                        {dictationEnabled && (<>
                         <div className="pb-1.5 pt-0.5">
                             <div className="flex min-w-0 flex-col gap-1.5">
                                 <div className="flex items-center gap-1.5">
@@ -1069,62 +1291,10 @@ export const VoiceSettings: React.FC = () => {
                             </div>
                         )}
 
+                        </>)}
                     </section>
             </div>
 
-            {/* Playback & Summarization */}
-            <div data-settings-item="voice.playback" className="mb-8">
-                <div className="mb-1 px-1">
-                    <h3 className="typography-ui-header font-medium text-foreground">
-                        {t('settings.voice.page.section.playbackAndSummary')}
-                    </h3>
-                </div>
-
-                <section className="px-2 pb-2 pt-0 space-y-0">
-                    <div
-                        className="group flex cursor-pointer items-center gap-2 py-1.5"
-                        role="button"
-                        tabIndex={0}
-                        aria-pressed={showMessageTTSButtons}
-                        onClick={() => setShowMessageTTSButtons(!showMessageTTSButtons)}
-                        onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setShowMessageTTSButtons(!showMessageTTSButtons); } }}
-                    >
-                        <Checkbox checked={showMessageTTSButtons} onChange={setShowMessageTTSButtons} ariaLabel={t('settings.voice.page.field.messageReadAloudButtonAria')} />
-                        <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.messageReadAloudButton')}</span>
-                    </div>
-
-                    <div className="pb-1.5 pt-0.5">
-                        <div className="flex min-w-0 flex-col gap-1.5">
-                            <div className="flex items-center gap-1.5">
-                                <span className="typography-ui-label text-foreground">
-                                    {t('settings.voice.page.field.ttsInputMode')}
-                                </span>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-1">
-                                <Button
-                                    variant="chip"
-                                    size="xs"
-                                    aria-pressed={ttsInputMode === 'sanitized'}
-                                    onClick={() => setTtsInputMode('sanitized')}
-                                    className="!font-normal"
-                                >
-                                    {t('settings.voice.page.field.ttsInputModeSanitized')}
-                                </Button>
-                                <Button
-                                    variant="chip"
-                                    size="xs"
-                                    aria-pressed={ttsInputMode === 'raw'}
-                                    onClick={() => setTtsInputMode('raw')}
-                                    className="!font-normal"
-                                >
-                                    {t('settings.voice.page.field.ttsInputModeRaw')}
-                                </Button>
-                            </div>
-                        </div>
-                    </div>
-
-                </section>
-            </div>
 
         </div>
     );

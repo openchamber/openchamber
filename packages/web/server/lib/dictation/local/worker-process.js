@@ -19,12 +19,15 @@ import {
   SherpaOfflineRecognizerEngine,
   SherpaRealtimeTranscriptionSession,
 } from './sherpa-recognizer.js';
+import { SherpaTtsEngine } from './sherpa-tts.js';
 import { getLocalSttModelDir, getLocalSttModelSpec } from './model-catalog.js';
+import { pcm16ToWav } from '../audio.js';
 import path from 'path';
 
 process.title = 'OpenChamber Dictation';
 
 const engines = new Map();
+const ttsEngines = new Map();
 const sessions = new Map();
 let ipcClosing = false;
 
@@ -90,8 +93,36 @@ function toBuffer(audio) {
   throw new Error('Unsupported audio payload in dictation worker');
 }
 
+function getTtsEngine(modelsDir, modelId) {
+  const key = `${modelsDir}:${modelId}`;
+  const existing = ttsEngines.get(key);
+  if (existing) {
+    return existing;
+  }
+  const spec = getLocalSttModelSpec(modelId);
+  const created = new SherpaTtsEngine({
+    modelDir: getLocalSttModelDir(modelsDir, modelId),
+    files: spec.files,
+    numThreads: 2,
+  });
+  ttsEngines.set(key, created);
+  return created;
+}
+
 async function handleRequest(message) {
   switch (message.type) {
+    case 'tts.synthesize': {
+      const engine = getTtsEngine(message.modelsDir, message.modelId);
+      const { pcm16, sampleRate } = engine.synthesize(message.text, {
+        speakerId: message.speakerId,
+        speed: message.speed,
+      });
+      sendOk(message.requestId, {
+        audio: pcm16ToWav(pcm16, sampleRate),
+        format: 'audio/wav',
+      });
+      return;
+    }
     case 'session.create': {
       cleanupSession(message.sessionId);
       const engine = getEngine(message.modelsDir, message.modelId);
@@ -158,6 +189,9 @@ process.once('disconnect', () => {
   }
   for (const engine of engines.values()) {
     engine.free();
+  }
+  for (const tts of ttsEngines.values()) {
+    tts.free();
   }
   process.exit(0);
 });

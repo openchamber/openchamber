@@ -115,6 +115,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
 }) => {
     const { t } = useI18n();
     const { currentTheme } = useThemeSystem();
+    const dictationEnabled = useConfigStore((state) => state.dictationEnabled);
     // The dictation server (WebSocket + STT worker) lives in the OpenChamber
     // web server; the VS Code bridge has no server process for it.
     const [supported] = React.useState(() => !isVSCodeRuntime() && isDictationCaptureSupported());
@@ -176,7 +177,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
         }
     }, [isActiveStatus]);
 
-    if (!supported) {
+    if (!supported || !dictationEnabled) {
         return null;
     }
 

@@ -76,6 +76,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
     const dictationRuntime = createDictationRuntime({
       app,
       server,
+      express,
       uiAuthController,
       isRequestOriginAllowed,
       rejectWebSocketUpgrade,

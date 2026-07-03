@@ -15,10 +15,15 @@ import { DictationWorkerClient, WorkerBackedTranscriptionSession } from './local
 import { OpenAICompatibleTranscriptionSession } from './openai-compatible-session.js';
 import {
   DEFAULT_LOCAL_STT_MODEL,
+  DEFAULT_LOCAL_TTS_MODEL,
   LOCAL_STT_MODEL_CATALOG,
   LOCAL_STT_MODEL_IDS,
+  LOCAL_TTS_MODEL_CATALOG,
+  LOCAL_TTS_MODEL_IDS,
   getLocalSttModelDir,
+  isLocalModelId,
   isLocalSttModelId,
+  isLocalTtsModelId,
 } from './local/model-catalog.js';
 import { ensureLocalSttModel, isLocalSttModelInstalled } from './local/model-downloader.js';
 
@@ -157,24 +162,29 @@ export function createDictationService({ modelsDir }) {
     const provider = options.provider === 'openai-compatible' ? 'openai-compatible' : 'local';
     const modelId = resolveLocalModelId(options.localModel);
 
+    const describeModel = async (id, catalog) => ({
+      id,
+      description: catalog[id].description,
+      installed: await isLocalSttModelInstalled(modelsDir, id),
+      downloading: downloadStates.get(id) === 'downloading',
+      downloadProgress: downloadProgress.get(id) ?? null,
+      downloadError: downloadErrors.get(id) || null,
+    });
+
     const models = await Promise.all(
-      LOCAL_STT_MODEL_IDS.map(async (id) => ({
-        id,
-        description: LOCAL_STT_MODEL_CATALOG[id].description,
-        installed: await isLocalSttModelInstalled(modelsDir, id),
-        downloading: downloadStates.get(id) === 'downloading',
-        downloadProgress: downloadProgress.get(id) ?? null,
-        downloadError: downloadErrors.get(id) || null,
-      })),
+      LOCAL_STT_MODEL_IDS.map((id) => describeModel(id, LOCAL_STT_MODEL_CATALOG)),
+    );
+    const ttsModels = await Promise.all(
+      LOCAL_TTS_MODEL_IDS.map((id) => describeModel(id, LOCAL_TTS_MODEL_CATALOG)),
     );
 
     if (provider === 'openai-compatible') {
-      return { provider, available: true, models };
+      return { provider, available: true, models, ttsModels };
     }
 
     const model = models.find((entry) => entry.id === modelId) || null;
     if (model?.installed) {
-      return { provider, available: true, activeModel: modelId, models };
+      return { provider, available: true, activeModel: modelId, models, ttsModels };
     }
     if (model?.downloading) {
       return {
@@ -183,6 +193,7 @@ export function createDictationService({ modelsDir }) {
         reasonCode: 'model_download_in_progress',
         activeModel: modelId,
         models,
+        ttsModels,
       };
     }
     if (model?.downloadError) {
@@ -193,6 +204,7 @@ export function createDictationService({ modelsDir }) {
         error: model.downloadError,
         activeModel: modelId,
         models,
+        ttsModels,
       };
     }
     return {
@@ -201,7 +213,45 @@ export function createDictationService({ modelsDir }) {
       reasonCode: 'models_missing',
       activeModel: modelId,
       models,
+      ttsModels,
     };
+  };
+
+  /**
+   * Synthesize speech with the local TTS model. Returns WAV bytes, or a
+   * readiness error while the model is missing/downloading.
+   * @param {{ text: string, model?: string, speakerId?: number, speed?: number }} options
+   */
+  const synthesizeSpeech = async ({ text, model, speakerId, speed }) => {
+    const modelId = isLocalTtsModelId(model) ? model : DEFAULT_LOCAL_TTS_MODEL;
+    const installed = await isLocalSttModelInstalled(modelsDir, modelId);
+    if (!installed) {
+      const state = downloadStates.get(modelId);
+      if (state === 'error') {
+        const message = downloadErrors.get(modelId) || 'Model download failed';
+        downloadStates.delete(modelId);
+        return {
+          error: `Failed to download TTS model: ${message}`,
+          retryable: true,
+          reasonCode: 'model_download_failed',
+        };
+      }
+      void startModelDownload(modelId);
+      return {
+        error: 'TTS model is downloading',
+        retryable: true,
+        reasonCode: 'model_download_in_progress',
+      };
+    }
+
+    const result = await workerClient.synthesizeSpeech({
+      modelsDir,
+      modelId,
+      text,
+      speakerId,
+      speed,
+    });
+    return { audio: result.audio, format: result.format };
   };
 
   /**
@@ -209,7 +259,7 @@ export function createDictationService({ modelsDir }) {
    * download action so Settings can pre-download models).
    */
   const requestModelDownload = async (modelId) => {
-    if (!isLocalSttModelId(modelId)) {
+    if (!isLocalModelId(modelId)) {
       return { ok: false, error: 'Unknown model id' };
     }
     if (await isLocalSttModelInstalled(modelsDir, modelId)) {
@@ -226,7 +276,7 @@ export function createDictationService({ modelsDir }) {
    * on the next use if the model is selected again.
    */
   const deleteModel = async (modelId) => {
-    if (!isLocalSttModelId(modelId)) {
+    if (!isLocalModelId(modelId)) {
       return { ok: false, error: 'Unknown model id' };
     }
     if (downloadStates.get(modelId) === 'downloading') {
@@ -243,6 +293,7 @@ export function createDictationService({ modelsDir }) {
 
   return {
     createSttSession,
+    synthesizeSpeech,
     getStatus,
     requestModelDownload,
     deleteModel,

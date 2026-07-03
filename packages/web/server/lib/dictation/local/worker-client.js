@@ -47,6 +47,23 @@ export class DictationWorkerClient {
   }
 
   /**
+   * Synthesize speech in the worker. Returns WAV bytes.
+   * @param {{ modelsDir: string, modelId: string, text: string, speakerId?: number, speed?: number }} params
+   * @returns {Promise<{ audio: Buffer, format: string }>}
+   */
+  async synthesizeSpeech(params) {
+    // Long texts on slow hardware can exceed the default request timeout.
+    const result = await this.sendRequest(
+      { type: 'tts.synthesize', ...params },
+      { timeoutMs: 120000 },
+    );
+    return {
+      audio: Buffer.isBuffer(result.audio) ? result.audio : Buffer.from(result.audio),
+      format: result.format || 'audio/wav',
+    };
+  }
+
+  /**
    * Create a streaming STT session in the worker.
    * @param {{ modelsDir: string, modelId: string }} params
    * @param {EventEmitter} emitter receives 'committed' | 'transcript' | 'error'
@@ -117,7 +134,7 @@ export class DictationWorkerClient {
     }
   }
 
-  sendRequest(input) {
+  sendRequest(input, options = {}) {
     const worker = this.ensureWorker();
     const requestId = randomUUID();
     const message = { ...input, requestId };
@@ -130,7 +147,7 @@ export class DictationWorkerClient {
         this.inFlightRequests = Math.max(0, this.inFlightRequests - 1);
         this.scheduleIdleShutdownIfReady();
         reject(new Error(`Dictation worker request timed out: ${input.type}`));
-      }, this.requestTimeoutMs);
+      }, options.timeoutMs ?? this.requestTimeoutMs);
 
       this.pendingRequests.set(requestId, { resolve, reject, timeout });
 

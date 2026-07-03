@@ -64,9 +64,31 @@ export const LOCAL_STT_MODEL_CATALOG = {
   },
 };
 
+/**
+ * Local text-to-speech models (sherpa-onnx OfflineTts). Downloaded and
+ * managed through the same pipeline as the STT models.
+ */
+export const LOCAL_TTS_MODEL_CATALOG = {
+  'kokoro-en-v0_19': {
+    type: 'kokoro',
+    archiveUrl:
+      'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-en-v0_19.tar.bz2',
+    extractedDir: 'kokoro-en-v0_19',
+    files: {
+      model: 'model.onnx',
+      voices: 'voices.bin',
+      tokens: 'tokens.txt',
+      espeakData: 'espeak-ng-data',
+    },
+    description: 'Kokoro TTS (English, natural voices)',
+  },
+};
+
 export const DEFAULT_LOCAL_STT_MODEL = 'parakeet-tdt-0.6b-v2-int8';
+export const DEFAULT_LOCAL_TTS_MODEL = 'kokoro-en-v0_19';
 
 export const LOCAL_STT_MODEL_IDS = Object.keys(LOCAL_STT_MODEL_CATALOG);
+export const LOCAL_TTS_MODEL_IDS = Object.keys(LOCAL_TTS_MODEL_CATALOG);
 
 /**
  * @param {string} modelId
@@ -78,11 +100,29 @@ export function isLocalSttModelId(modelId) {
 
 /**
  * @param {string} modelId
+ * @returns {boolean}
+ */
+export function isLocalTtsModelId(modelId) {
+  return typeof modelId === 'string' && Object.hasOwn(LOCAL_TTS_MODEL_CATALOG, modelId);
+}
+
+/**
+ * Any managed local model (STT or TTS).
+ * @param {string} modelId
+ * @returns {boolean}
+ */
+export function isLocalModelId(modelId) {
+  return isLocalSttModelId(modelId) || isLocalTtsModelId(modelId);
+}
+
+/**
+ * Spec lookup across both catalogs (STT and TTS).
+ * @param {string} modelId
  */
 export function getLocalSttModelSpec(modelId) {
-  const spec = LOCAL_STT_MODEL_CATALOG[modelId];
+  const spec = LOCAL_STT_MODEL_CATALOG[modelId] ?? LOCAL_TTS_MODEL_CATALOG[modelId];
   if (!spec) {
-    throw new Error(`Unknown local STT model id: ${modelId}`);
+    throw new Error(`Unknown local speech model id: ${modelId}`);
   }
   return {
     id: modelId,

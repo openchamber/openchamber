@@ -1030,7 +1030,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                         : <Icon name={iconName!} className="h-4 w-4 shrink-0" />}
                       <span className="flex items-center gap-1.5 whitespace-nowrap overflow-hidden transition-opacity duration-150 opacity-100">
                         <span className="typography-ui-label font-normal truncate">{getPageTitle(page.slug)}</span>
-                        {(page.slug === 'voice' || page.slug === 'tunnel') && (
+                        {page.slug === 'tunnel' && (
                           <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-[var(--status-warning)] bg-[var(--status-warning)]/10">
                             {t('settings.view.badge.beta')}
                           </span>
