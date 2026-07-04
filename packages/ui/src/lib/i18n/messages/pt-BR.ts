@@ -428,6 +428,8 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.rename.cancel": "Cancelar renomeação da sessão",
   "sessions.sidebar.session.menu.unpin": "Desfixar sessão",
   "sessions.sidebar.session.menu.pin": "Fixar sessão",
+  "sessions.sidebar.session.menu.markUnread": "Marcar como não lida",
+  "sessions.sidebar.session.menu.markRead": "Marcar como lida",
   "sessions.sidebar.session.menu.share": "Compartilhar",
   "sessions.sidebar.session.menu.copied": "Copiado",
   "sessions.sidebar.session.menu.copyLink": "Copiar link",

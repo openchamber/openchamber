@@ -428,6 +428,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.rename.cancel': 'セッション名の変更をキャンセル',
   'sessions.sidebar.session.menu.unpin': 'セッションのピン留めを解除',
   'sessions.sidebar.session.menu.pin': 'セッションをピン留め',
+  'sessions.sidebar.session.menu.markUnread': '未読にする',
+  'sessions.sidebar.session.menu.markRead': '既読にする',
   'sessions.sidebar.session.menu.share': '共有',
   'sessions.sidebar.session.menu.copied': 'コピーしました',
   'sessions.sidebar.session.menu.copyLink': 'リンクをコピー',

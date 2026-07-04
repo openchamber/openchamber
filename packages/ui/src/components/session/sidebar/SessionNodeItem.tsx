@@ -30,7 +30,7 @@ import type { SessionNodeChildRenderExtras, SessionNodeRenderExtras } from './se
 import type { SessionNode } from './types';
 import { formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from './utils';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
-import { useSessionUnseenCount } from '@/sync/notification-store';
+import { useSessionUnseenCount, markSessionViewed, markSessionUnread } from '@/sync/notification-store';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import { useI18n } from '@/lib/i18n';
 import { useShiftKeyHeld } from '@/hooks/useShiftKeyHeld';
@@ -805,6 +805,19 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
         {isPinnedSession ? <Icon name="unpin" className="mr-1 h-4 w-4" /> : <Icon name="pushpin" className="mr-1 h-4 w-4" />}
         {isPinnedSession ? t('sessions.sidebar.session.menu.unpin') : t('sessions.sidebar.session.menu.pin')}
       </Item>
+      {!isActive ? (
+        needsAttention ? (
+          <Item onClick={() => markSessionViewed(session.id)} className="[&>svg]:mr-1">
+            <Icon name="checkbox-circle" className="mr-1 h-4 w-4" />
+            {t('sessions.sidebar.session.menu.markRead')}
+          </Item>
+        ) : (
+          <Item onClick={() => markSessionUnread(session.id, sessionDirectory ?? undefined)} className="[&>svg]:mr-1">
+            <Icon name="record-circle" className="mr-1 h-4 w-4" />
+            {t('sessions.sidebar.session.menu.markUnread')}
+          </Item>
+        )
+      ) : null}
       {!resolvedSession.share ? (
         <Item onClick={() => handleShareSession(resolvedSession)} className="[&>svg]:mr-1">
           <Icon name="share-2" className="mr-1 h-4 w-4" />

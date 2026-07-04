@@ -428,6 +428,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.rename.cancel': '取消重命名会话',
   'sessions.sidebar.session.menu.unpin': '取消置顶会话',
   'sessions.sidebar.session.menu.pin': '置顶会话',
+  'sessions.sidebar.session.menu.markUnread': '标记为未读',
+  'sessions.sidebar.session.menu.markRead': '标记为已读',
   'sessions.sidebar.session.menu.share': '分享',
   'sessions.sidebar.session.menu.copied': '已复制',
   'sessions.sidebar.session.menu.copyLink': '复制链接',

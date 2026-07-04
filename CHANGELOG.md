@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Sessions: added a "Mark as unread" / "Mark as read" option to the session menu so you can restore or clear a session's unread indicator on demand.
+
 ## [1.13.9] - 2026-07-02
 
 - Mobile: added the native iOS and Android app projects ahead of the mobile app release, with continued polish for saved connections, password unlock, QR-code connection scanning, push notifications, iOS widgets, app resume, and native layout details.
