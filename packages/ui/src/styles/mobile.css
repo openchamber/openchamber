@@ -24,6 +24,15 @@
   display: none;
 }
 
+/* Mobile session drawer swipe-to-close: the browser will steal a horizontal
+   drag that starts on a vertically-scrollable element, cancelling the gesture.
+   Reserving horizontal for JS with pan-y on the drawer AND its scroll container
+   fixes close while leaving vertical scroll (and vertical dnd reorder) intact. */
+.oc-mobile-session-drawer,
+.oc-mobile-session-drawer .overlay-scrollbar-container {
+  touch-action: pan-y;
+}
+
 @media (max-width: 1024px) {
   :root.mobile-pointer:not(.desktop-runtime) .desktop-only {
     display: none !important;
