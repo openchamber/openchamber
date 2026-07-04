@@ -74,6 +74,30 @@ describe('isSessionRelatedToProject', () => {
     ).toBe(true);
   });
 
+  test('prefers explicit session directory over broader project worktree metadata', () => {
+    const session = {
+      id: 'ses_directory_beats_worktree',
+      directory: '/home/user/proj/foo/src',
+      project: {
+        worktree: '/home/user',
+      },
+    } as unknown as Session;
+
+    const knownProjectDirectories = new Set(['/home/user', '/home/user/proj/foo']);
+
+    expect(
+      isSessionRelatedToProject(session, '/home/user', new Set(['/home/user']), knownProjectDirectories),
+    ).toBe(false);
+    expect(
+      isSessionRelatedToProject(
+        session,
+        '/home/user/proj/foo',
+        new Set(['/home/user/proj/foo']),
+        knownProjectDirectories,
+      ),
+    ).toBe(true);
+  });
+
   test('keeps descendant sessions on the broad project when no child project matches', () => {
     const session = {
       id: 'ses_home_misc',

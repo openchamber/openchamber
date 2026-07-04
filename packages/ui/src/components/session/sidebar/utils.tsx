@@ -238,11 +238,7 @@ export const isSessionRelatedToProject = (
   const projectWorktree = normalizePath((session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? null);
   const resolvedDirectory = sessionDirectory ?? projectWorktree;
 
-  if (projectWorktree && validDirectories?.has(projectWorktree)) {
-    return true;
-  }
-
-  if (sessionDirectory && validDirectories?.has(sessionDirectory)) {
+  if (resolvedDirectory && validDirectories?.has(resolvedDirectory)) {
     return true;
   }
 
