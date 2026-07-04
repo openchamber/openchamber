@@ -555,6 +555,14 @@ export function useSync() {
     [getMetaFor],
   )
 
+  // True only when a fetch has positively confirmed the history is fully
+  // loaded (no next cursor). Distinct from !hasMore(), which is also true for
+  // sessions whose meta simply hasn't been populated yet.
+  const isComplete = useCallback(
+    (sessionID: string) => getMetaFor(sessionID).complete,
+    [getMetaFor],
+  )
+
   // Optimistic add (for prompt submission)
   const optimisticAdd = useCallback(
     (input: { sessionID: string; directory?: string | null; message: Message; parts: Part[] }) => {
@@ -610,11 +618,12 @@ export function useSync() {
       loadMore,
       hasMore,
       isLoading,
+      isComplete,
       optimistic: {
         add: optimisticAdd,
         remove: optimisticRemove,
       },
     }),
-    [syncSession, loadMore, hasMore, isLoading, optimisticAdd, optimisticRemove],
+    [syncSession, loadMore, hasMore, isLoading, isComplete, optimisticAdd, optimisticRemove],
   )
 }
