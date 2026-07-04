@@ -37,7 +37,7 @@ macOS builds create `dmg` and `zip` files. You need Xcode/build tools for notari
 
 Windows builds create an NSIS installer. If signing env vars are not set, the build script makes an unsigned installer.
 
-Linux builds produce an AppImage for the native x64 or arm64 host.
+Linux builds produce AppImage and `deb` packages for the native x64 or arm64 host. Depending on distro, you may need extra system packages required by `electron-builder`.
 
 For desktop-specific details, see [`packages/electron/README.md`](./packages/electron/README.md).
 

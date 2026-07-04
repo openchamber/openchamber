@@ -66,7 +66,7 @@ That runs, in order:
 
 Build output goes to `packages/electron/dist`.
 
-macOS builds produce `dmg` and `zip` artifacts. Windows builds produce an NSIS installer. Linux builds produce an AppImage for the native x64 or arm64 host.
+macOS builds produce `dmg` and `zip` artifacts. Windows builds produce an NSIS installer. Linux builds produce AppImage and `deb` packages for the native x64 or arm64 host.
 
 ## Platform Notes
 
@@ -86,7 +86,9 @@ Linux updates are supported only when the packaged app is running from a writabl
 
 A loopback-only updater fixture is available for contributor QA of N-to-N+1 AppImage replacement and restart behavior. It is test infrastructure, not a user-configurable update source. See [`scripts/updater-e2e-fixture.md`](./scripts/updater-e2e-fixture.md) for the controlled test procedure. Unit tests cover feed selection, check failures, no-update results, and fixture generation; actual AppImage replacement and restart remains a manual native N-to-N+1 release boundary because it requires executing two packaged versions on each supported architecture.
 
-The package supports macOS, Windows, and Linux desktop features. Linux AppImage builds include in-app window controls and auto-update; system tray and launch-at-login remain macOS/Windows only. Some native discovery helpers are platform-specific. For example, app icon fetching and app filtering currently only work on macOS, while opening files in installed apps and installed-app discovery work on macOS and Windows (Linux returns an empty list without errors).
+Linux packaging uses `electron-builder` AppImage and deb tooling. The host system may need extra build dependencies installed depending on distro.
+
+The package supports macOS, Windows, and Linux desktop features. Linux AppImage builds include in-app window controls and auto-update; system tray and launch-at-login remain macOS/Windows only. Some native discovery helpers are platform-specific. App icon fetching and app filtering currently only work on macOS, while opening files in installed apps and installed-app discovery work on macOS, Windows, and Linux.
 
 ## Bundled OpenCode CLI
 
