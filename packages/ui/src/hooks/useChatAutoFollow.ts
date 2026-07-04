@@ -2,7 +2,8 @@ import React from 'react';
 
 import { MessageFreshnessDetector } from '@/lib/messageFreshness';
 import { createScrollSpy } from '@/components/chat/lib/scroll/scrollSpy';
-import { useViewportStore } from '@/sync/viewport-store';
+import { getViewportSessionMemory, useViewportStore, type SessionMemoryState } from '@/sync/viewport-store';
+import { useUIStore } from '@/stores/useUIStore';
 
 type AutoFollowState = 'following' | 'released';
 
@@ -127,6 +128,13 @@ const isNearBottom = (el: HTMLElement, isMobile: boolean): boolean => {
     return distanceFromBottom(el) <= computeBottomZoneThreshold(isMobile, el);
 };
 
+const isAtBottomSnapshot = (snapshot: NonNullable<SessionMemoryState['scrollPosition']>, isMobile: boolean): boolean => {
+    const max = Math.max(0, snapshot.scrollHeight - snapshot.clientHeight);
+    if (max <= 0) return true;
+    const threshold = computeBottomZoneThreshold(isMobile, null);
+    return max - snapshot.scrollTop <= threshold;
+};
+
 const isReleaseKey = (event: KeyboardEvent): boolean => {
     if (event.altKey || event.ctrlKey || event.metaKey) {
         return false;
@@ -211,7 +219,7 @@ export const useChatAutoFollow = ({
     const entryStickLastHeightRef = React.useRef(0);
 
     const saveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-    const pendingSaveRef = React.useRef<{ sessionId: string; anchor: number } | null>(null);
+    const pendingSaveRef = React.useRef<{ sessionId: string; anchor: number; scrollTop: number; scrollHeight: number; clientHeight: number } | null>(null);
     // When restoreSnapshot is invoked while ChatViewport is still hydrating
     // (skeleton rendered, no scroll container yet), we record the session here
     // so a follow-up effect can replay the restore once the container mounts.
@@ -411,7 +419,7 @@ export const useChatAutoFollow = ({
         stop();
     }, [endEntryStick, stop]);
 
-    // ── per-session snapshot persistence (kept; restore still goes to bottom) ─
+    // ── per-session snapshot persistence ─────────────────────────────────────
     const flushSave = React.useCallback(() => {
         if (saveTimerRef.current !== null) {
             clearTimeout(saveTimerRef.current);
@@ -419,15 +427,14 @@ export const useChatAutoFollow = ({
         }
         const pending = pendingSaveRef.current;
         if (!pending) return;
-        const container = scrollRef.current;
-        if (!container) {
-            pendingSaveRef.current = null;
-            return;
-        }
+        // Use the dimensions captured at queueSave time, not the live container.
+        // After a session switch, scrollRef.current points to the NEW session's
+        // container (which remounts via key), so re-reading it here would write
+        // the wrong session's dimensions (scrollTop: 0) over the old session's entry.
         updateViewportAnchor(pending.sessionId, pending.anchor, {
-            scrollTop: container.scrollTop,
-            scrollHeight: container.scrollHeight,
-            clientHeight: container.clientHeight,
+            scrollTop: pending.scrollTop,
+            scrollHeight: pending.scrollHeight,
+            clientHeight: pending.clientHeight,
         });
         pendingSaveRef.current = null;
     }, [updateViewportAnchor]);
@@ -444,7 +451,7 @@ export const useChatAutoFollow = ({
             : 0;
         const anchor = Math.floor(anchorRatio * sessionMessageCountRef.current);
 
-        pendingSaveRef.current = { sessionId, anchor };
+        pendingSaveRef.current = { sessionId, anchor, scrollTop, scrollHeight, clientHeight };
         if (saveTimerRef.current !== null) return;
         saveTimerRef.current = setTimeout(() => {
             saveTimerRef.current = null;
@@ -470,18 +477,39 @@ export const useChatAutoFollow = ({
         }
         pendingInitialRestoreRef.current = null;
 
-        // Always return to the bottom on session switch. The content
-        // ResizeObserver re-pins instantly as late
-        // history measures in, so there is no smooth scroll-from-mid artifact.
-        setStateValue('following');
-        scrollToBottom(true);
-        // Hold the bottom across late async growth (e.g. task/subagent child
-        // session data landing a beat after entry) until content quiesces or the
-        // user scrolls.
-        beginEntryStick();
-        updateOverflowAndButton();
-        return false;
-    }, [beginEntryStick, scrollToBottom, setStateValue, updateOverflowAndButton]);
+        const saved = getViewportSessionMemory(sessionId)?.scrollPosition;
+        const scrollRestoreMode = useUIStore.getState().sessionScrollRestoreMode;
+
+        if (!saved || scrollRestoreMode === 'jump-to-end' || isAtBottomSnapshot(saved, isMobileRef.current)) {
+            // No saved position, user chose jump-to-end, or last position was at
+            // the bottom: pin to the bottom and hold across late async growth.
+            setStateValue('following');
+            scrollToBottom(true);
+            beginEntryStick();
+            updateOverflowAndButton();
+            return false;
+        }
+
+        // Restore the saved scroll position using a ratio so it tolerates
+        // content-size differences between visits (e.g. new messages arrived,
+        // virtualizer re-measurement).
+        const savedMaxScroll = Math.max(0, saved.scrollHeight - saved.clientHeight);
+        const ratio = savedMaxScroll > 0 ? saved.scrollTop / savedMaxScroll : 0;
+        const currentMaxScroll = Math.max(0, container.scrollHeight - container.clientHeight);
+        const targetTop = Math.round(ratio * currentMaxScroll);
+
+        setStateValue('released');
+        container.scrollTop = targetTop;
+
+        const memState = getViewportSessionMemory(sessionId);
+        updateViewportAnchor(sessionId, memState?.viewportAnchor ?? 0, {
+            scrollTop: container.scrollTop,
+            scrollHeight: container.scrollHeight,
+            clientHeight: container.clientHeight,
+        });
+
+        return true;
+    }, [beginEntryStick, scrollToBottom, setStateValue, updateOverflowAndButton, updateViewportAnchor]);
 
     // ── session change ───────────────────────────────────────────────────────
     React.useEffect(() => {

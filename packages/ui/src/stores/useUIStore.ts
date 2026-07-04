@@ -15,6 +15,7 @@ export type ContextPanelMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | '
 export type MermaidRenderingMode = 'svg' | 'ascii';
 export type UserMessageRenderingMode = 'markdown' | 'plain';
 export type ChatRenderMode = 'sorted' | 'live';
+export type SessionScrollRestoreMode = 'restore' | 'jump-to-end';
 export type ActivityRenderMode = 'collapsed' | 'summary';
 export type SessionRetentionAction = 'archive' | 'delete';
 export type TimeFormatPreference = 'auto' | '12h' | '24h';
@@ -564,6 +565,7 @@ interface UIStore {
   groupReasoningBlocks: boolean;
   chatRenderMode: ChatRenderMode;
   activityRenderMode: ActivityRenderMode;
+  sessionScrollRestoreMode: SessionScrollRestoreMode;
   showDeletionDialog: boolean;
   autoDeleteEnabled: boolean;
   autoDeleteAfterDays: number;
@@ -711,6 +713,7 @@ interface UIStore {
   setCollapsibleThinkingBlocks: (value: boolean) => void;
   setChatRenderMode: (value: ChatRenderMode) => void;
   setActivityRenderMode: (value: ActivityRenderMode) => void;
+  setSessionScrollRestoreMode: (value: SessionScrollRestoreMode) => void;
   setShowDeletionDialog: (value: boolean) => void;
   setAutoDeleteEnabled: (value: boolean) => void;
   setAutoDeleteAfterDays: (days: number) => void;
@@ -855,6 +858,7 @@ export const useUIStore = create<UIStore>()(
         groupReasoningBlocks: true,
         chatRenderMode: 'live',
         activityRenderMode: 'summary',
+        sessionScrollRestoreMode: 'restore',
         showDeletionDialog: true,
         autoDeleteEnabled: false,
         autoDeleteAfterDays: 30,
@@ -1555,6 +1559,10 @@ export const useUIStore = create<UIStore>()(
           set({ activityRenderMode: value });
         },
 
+        setSessionScrollRestoreMode: (value) => {
+          set({ sessionScrollRestoreMode: value });
+        },
+
         setShowDeletionDialog: (value) => {
           set({ showDeletionDialog: value });
         },
@@ -2107,12 +2115,19 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 10,
+        version: 11,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
           }
           const state = persistedState as Record<string, unknown>;
+
+          // v10 -> v11: initialize session scroll restore mode
+          if (version < 11) {
+            if (state.sessionScrollRestoreMode !== 'restore' && state.sessionScrollRestoreMode !== 'jump-to-end') {
+              state.sessionScrollRestoreMode = 'restore';
+            }
+          }
 
           // v9 -> v10: remove obsolete single-file diff view mode setting
           if (version < 10) {
@@ -2230,6 +2245,7 @@ export const useUIStore = create<UIStore>()(
           collapsibleThinkingBlocks: state.collapsibleThinkingBlocks,
           chatRenderMode: state.chatRenderMode,
           activityRenderMode: state.activityRenderMode,
+          sessionScrollRestoreMode: state.sessionScrollRestoreMode,
           showDeletionDialog: state.showDeletionDialog,
           autoDeleteEnabled: state.autoDeleteEnabled,
           autoDeleteAfterDays: state.autoDeleteAfterDays,
