@@ -7,6 +7,8 @@ const replyCalls: Array<{ method: string; params: Record<string, unknown> }> = [
 const scopedClientDirectories: string[] = []
 const registeredSessionDirectories: Array<{ sessionID: string; directory: string }> = []
 let sessionRevertResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
+let sessionMessageResult: unknown = null
+let sessionPermissionRequestResult: unknown = null
 let questionReplyError: unknown | null = null
 let questionRejectError: unknown | null = null
 let sessionShareResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
@@ -110,6 +112,21 @@ mock.module("@/lib/opencode/client", () => ({
         throw new Error(`session.revert failed${status ? ` (${status})` : ""}: rejected`)
       }
       return Promise.resolve(sessionRevertResult.data)
+    }),
+    interruptSession: mock((sessionId: string, directory?: string | null) => {
+      replyCalls.push({ method: "session.interrupt", params: { sessionID: sessionId, directory } })
+      return Promise.resolve(true)
+    }),
+    getSessionMessage: mock((sessionId: string, messageId: string, directory?: string | null) => {
+      replyCalls.push({ method: "v2.session.message", params: { sessionID: sessionId, messageID: messageId, directory } })
+      if (!sessionMessageResult) {
+        return Promise.reject(new Error("message not found"))
+      }
+      return Promise.resolve(sessionMessageResult)
+    }),
+    getSessionPermissionRequest: mock((sessionId: string, requestId: string, directory?: string | null) => {
+      replyCalls.push({ method: "v2.session.permission.get", params: { sessionID: sessionId, requestID: requestId, directory } })
+      return Promise.resolve(sessionPermissionRequestResult)
     }),
   },
 }))
@@ -445,6 +462,7 @@ describe("respondToPermission passes directory", () => {
     replyCalls.length = 0
     scopedClientDirectories.length = 0
     sessionRevertResult = {}
+    sessionPermissionRequestResult = null
   })
 
   test("passes directory from child store when permission is found", async () => {
@@ -500,11 +518,32 @@ describe("respondToPermission passes directory", () => {
   })
 })
 
+describe("autoAcceptPermissionIfStillPending", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+    scopedClientDirectories.length = 0
+    sessionPermissionRequestResult = null
+  })
+
+  test("skips reply when the permission request is no longer pending", async () => {
+    const childStores = createChildStores([])
+
+    const { autoAcceptPermissionIfStillPending, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    const accepted = await autoAcceptPermissionIfStillPending("session-a", "perm-stale", { directory: "/test/project" })
+
+    expect(accepted).toBe(false)
+    expect(replyCalls.filter((call) => call.method === "permission.reply")).toHaveLength(0)
+  })
+})
+
 describe("revertToMessage passes session directory", () => {
   beforeEach(() => {
     replyCalls.length = 0
     scopedClientDirectories.length = 0
     sessionRevertResult = {}
+    sessionMessageResult = null
     Object.assign(inputState, {
       pendingInputText: "previous draft",
       pendingInputMode: "normal" as const,
@@ -537,6 +576,31 @@ describe("revertToMessage passes session directory", () => {
     expect((sessionStore.getState().session[0] as Session & { revert?: { messageID?: string } }).revert?.messageID).toBe("msg_2")
     expect(currentStore.getState().session).toHaveLength(0)
     expect(inputState.pendingInputText).toBe("edit this")
+  })
+
+  test("restores prompt text and files from Session3 fallback when the message is not in the local store", async () => {
+    const session = { id: "session-a", time: { created: 1 } } as Session
+    const sessionStore = createStore({}, { session: [session] })
+    const childStores = createChildStores([["/test/project", sessionStore]])
+    sessionRevertResult = { data: { id: "session-a", time: { created: 1, updated: 2 }, revert: { messageID: "msg_2" } } }
+    sessionMessageResult = {
+      id: "msg_2",
+      type: "user",
+      text: "restore from v2",
+      files: [{ uri: "file:///tmp/restore.txt", mime: "text/plain", name: "restore.txt" }],
+      time: { created: 2 },
+    }
+
+    const { setActionRefs, revertToMessage } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    await revertToMessage("session-a", "msg_2")
+
+    expect(replyCalls.find((call) => call.method === "v2.session.message")?.params.directory).toBe("/test/project")
+    expect(inputState.pendingInputText).toBe("restore from v2")
+    expect(inputState.attachedFiles).toEqual([
+      { url: "file:///tmp/restore.txt", mimeType: "text/plain", filename: "restore.txt" },
+    ])
   })
 
   test("rolls back optimistic revert when the SDK returns an error", async () => {

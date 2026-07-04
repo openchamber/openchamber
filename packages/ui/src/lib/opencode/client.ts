@@ -8,6 +8,8 @@ import type {
   Provider,
   Config,
   Agent,
+  SessionMessage,
+  PermissionV2Request,
   TextPartInput,
   FilePartInput,
 } from "@opencode-ai/sdk/v2";
@@ -292,6 +294,11 @@ class OpencodeService {
   /** Get a scoped SDK client for a specific directory */
   getScopedSdkClient(directory: string): OpencodeClient {
     return this.getScopedApiClient(directory);
+  }
+
+  private getScopedSessionV2Client(directory?: string | null): OpencodeClient {
+    const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
+    return requestDirectory ? this.getScopedSdkClient(requestDirectory) : this.client;
   }
 
   /**
@@ -957,15 +964,46 @@ class OpencodeService {
     return tempMessageId;
   }
 
-  async abortSession(id: string): Promise<boolean> {
-    const response = await this.client.session.abort(
-      {
-        sessionID: id,
-        ...(this.currentDirectory ? { directory: this.currentDirectory } : {})
-      },
-      { throwOnError: true }
-    );
-    return Boolean(response.data);
+  async interruptSession(id: string, directory?: string | null): Promise<boolean> {
+    const client = this.getScopedSessionV2Client(directory);
+    const response = await client.v2.session.interrupt({ sessionID: id });
+    if (response.error) {
+      throw new Error(`session.interrupt failed: ${formatSdkError(response.error)}`);
+    }
+    return true;
+  }
+
+  async abortSession(id: string, directory?: string | null): Promise<boolean> {
+    return this.interruptSession(id, directory);
+  }
+
+  async getSessionMessage(sessionId: string, messageId: string, directory?: string | null): Promise<SessionMessage> {
+    const client = this.getScopedSessionV2Client(directory);
+    const response = await client.v2.session.message({
+      sessionID: sessionId,
+      messageID: messageId,
+    });
+    return unwrapSdkData(response, 'v2.session.message').data;
+  }
+
+  async getSessionPermissionRequest(
+    sessionId: string,
+    requestId: string,
+    directory?: string | null,
+  ): Promise<PermissionV2Request | null> {
+    const client = this.getScopedSessionV2Client(directory);
+    const response = await client.v2.session.permission.get({
+      sessionID: sessionId,
+      requestID: requestId,
+    });
+    if (response.error) {
+      const status = response.response?.status;
+      if (status === 404) {
+        return null;
+      }
+      throw new Error(`session.permission.get failed${status ? ` (${status})` : ''}: ${formatSdkError(response.error)}`);
+    }
+    return response.data?.data ?? null;
   }
 
   async shellSession(params: {

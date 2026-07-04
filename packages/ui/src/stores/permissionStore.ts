@@ -8,7 +8,7 @@ import {
 import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
 import { getAllSyncSessions, getSyncChildStores } from "@/sync/sync-refs";
 import { opencodeClient } from "@/lib/opencode/client";
-import { respondToPermission } from "@/sync/session-actions";
+import { autoAcceptPermissionIfStillPending } from "@/sync/session-actions";
 import { useSessionUIStore } from "@/sync/session-ui-store";
 import { runtimeFetch } from "@/lib/runtime-fetch";
 
@@ -108,16 +108,32 @@ const normalizeDirectoryCandidate = (value: unknown): string | null => {
     return trimmed.length > 0 ? trimmed : null;
 };
 
-const collectPendingFromSyncStores = (): Array<{ id: string; sessionID: string }> => {
+type PendingPermissionCandidate = {
+    id: string;
+    sessionID: string;
+    directory?: string | null;
+};
+
+const resolvePendingPermissionDirectory = (sessionID: string, fallback?: string | null): string | null => {
+    return normalizeDirectoryCandidate(useSessionUIStore.getState().getDirectoryForSession(sessionID))
+        ?? normalizeDirectoryCandidate(fallback)
+        ?? null;
+};
+
+const collectPendingFromSyncStores = (): PendingPermissionCandidate[] => {
     try {
         const stores = getSyncChildStores();
-        const pending: Array<{ id: string; sessionID: string }> = [];
-        for (const store of stores.children.values()) {
+        const pending: PendingPermissionCandidate[] = [];
+        for (const [directory, store] of stores.children) {
             const permissionMap = store.getState().permission ?? {};
             for (const [sessionId, entries] of Object.entries(permissionMap)) {
                 for (const permission of entries ?? []) {
                     if (!permission?.id) continue;
-                    pending.push({ id: permission.id, sessionID: permission.sessionID || sessionId });
+                    pending.push({
+                        id: permission.id,
+                        sessionID: permission.sessionID || sessionId,
+                        directory,
+                    });
                 }
             }
         }
@@ -274,7 +290,7 @@ export const usePermissionStore = create<PermissionStore>()(
                     const pendingFromApi = await opencodeClient
                       .listPendingPermissions({ directories: Array.from(directories) })
                       .catch(() => []);
-                    const mergedPending = new Map<string, { id: string; sessionID: string }>();
+                    const mergedPending = new Map<string, PendingPermissionCandidate>();
 
                     for (const permission of pendingFromStores) {
                         if (sessionScope.has(permission.sessionID)) {
@@ -295,12 +311,20 @@ export const usePermissionStore = create<PermissionStore>()(
                                 continue;
                             }
                         }
-                        mergedPending.set(permission.id, { id: permission.id, sessionID: permission.sessionID });
+                        mergedPending.set(permission.id, {
+                            id: permission.id,
+                            sessionID: permission.sessionID,
+                            directory: resolvePendingPermissionDirectory(permission.sessionID, mappedSessionDirectory ?? currentDirectory),
+                        });
                     }
 
                     await Promise.all(
                         Array.from(mergedPending.values())
-                            .map((permission) => respondToPermission(permission.sessionID, permission.id, "once").catch(() => undefined)),
+                            .map((permission) => autoAcceptPermissionIfStillPending(
+                                permission.sessionID,
+                                permission.id,
+                                { directory: resolvePendingPermissionDirectory(permission.sessionID, permission.directory) },
+                            ).catch(() => false)),
                     );
                 },
             }),

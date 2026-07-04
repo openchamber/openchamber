@@ -3,7 +3,7 @@
  * Replaces the action methods from the old useSessionStore.
  */
 
-import type { OpencodeClient, Session, Message, Part } from "@opencode-ai/sdk/v2/client"
+import type { OpencodeClient, Session, Message, Part, SessionMessage } from "@opencode-ai/sdk/v2/client"
 import { Binary } from "./binary"
 import { useSessionUIStore } from "./session-ui-store"
 import { useInputStore } from "./input-store"
@@ -193,6 +193,15 @@ type SessionListSnapshot = {
 }
 
 type DirectoryStoreApi = ReturnType<ChildStoreManager["ensureChild"]>
+type RestorableUserMessageData = {
+  messageText: string
+  fileParts: Array<Record<string, unknown>>
+}
+
+const EMPTY_RESTORABLE_USER_MESSAGE_DATA: RestorableUserMessageData = {
+  messageText: "",
+  fileParts: [],
+}
 
 function getGlobalSessionSnapshot(sessionId: string): Session | null {
   const global = useGlobalSessionsStore.getState()
@@ -250,6 +259,64 @@ function restoreFilePartsToInput(fileParts: Array<Record<string, unknown>>): voi
       useInputStore.getState().addRestoredAttachment({ url, mimeType: mime, filename })
     }
   }
+}
+
+function getRestorableUserMessageDataFromStore(state: DirectoryStoreApi["getState"] extends () => infer T ? T : never, sessionId: string, messageId: string): RestorableUserMessageData | null {
+  const messages = state.message[sessionId] ?? []
+  const targetMsg = messages.find((message) => message.id === messageId)
+  if (!targetMsg || targetMsg.role !== "user") {
+    return null
+  }
+
+  const parts = state.part[messageId] ?? []
+  const textParts = parts.filter((part) => part.type === "text" && !isSyntheticPart(part))
+  const messageText = textParts
+    .map((part: Record<string, unknown>) => (part as { text?: string }).text || (part as { content?: string }).content || "")
+    .join("\n")
+    .trim()
+  const fileParts = parts.filter((part) => part.type === "file" && !isSyntheticPart(part)) as Array<Record<string, unknown>>
+
+  return { messageText, fileParts }
+}
+
+function getRestorableUserMessageDataFromSession3(message: SessionMessage): RestorableUserMessageData {
+  if (message.type !== "user") {
+    return EMPTY_RESTORABLE_USER_MESSAGE_DATA
+  }
+
+  return {
+    messageText: message.text.trim(),
+    fileParts: (message.files ?? []).map((file) => ({
+      url: file.uri,
+      mime: file.mime,
+      filename: file.name,
+    })),
+  }
+}
+
+async function getRestorableUserMessageData(
+  sessionId: string,
+  messageId: string,
+  directory: string | undefined,
+  state: DirectoryStoreApi["getState"] extends () => infer T ? T : never,
+): Promise<RestorableUserMessageData> {
+  const local = getRestorableUserMessageDataFromStore(state, sessionId, messageId)
+  if (local && (local.messageText.length > 0 || local.fileParts.length > 0)) {
+    return local
+  }
+
+  try {
+    const message = await opencodeClient.getSessionMessage(sessionId, messageId, directory)
+    const fallback = getRestorableUserMessageDataFromSession3(message)
+    if (fallback.messageText.length > 0 || fallback.fileParts.length > 0) {
+      return fallback
+    }
+  } catch {
+    // Preserve previous behavior: revert/fork should still work even if the
+    // targeted single-message lookup fails.
+  }
+
+  return local ?? EMPTY_RESTORABLE_USER_MESSAGE_DATA
 }
 
 function resolveDirectoryForBlockingRequest(
@@ -722,7 +789,7 @@ export async function optimisticSend(input: {
 
 export async function abortCurrentOperation(sessionId: string): Promise<void> {
   try {
-    await sdk().session.abort({ sessionID: sessionId, directory: dir() })
+    await opencodeClient.interruptSession(sessionId, dir())
   } catch (error) {
     console.error("[session-actions] abort failed", error)
   }
@@ -736,9 +803,11 @@ export async function respondToPermission(
   sessionId: string,
   requestId: string,
   response: "once" | "always" | "reject",
+  options?: { directory?: string | null },
 ): Promise<void> {
   await waitForConnectionOrThrow()
-  const directory = resolveDirectoryForBlockingRequest("permission", sessionId, requestId)
+  const directory = options?.directory
+    || resolveDirectoryForBlockingRequest("permission", sessionId, requestId)
     || getSessionDirectory(sessionId)
     || dir()
   const result = await getRequestReplyClient("permission", sessionId, requestId).permission.reply({
@@ -749,6 +818,19 @@ export async function respondToPermission(
   if (assertSdkData(result, "permission.reply") !== true) {
     throw new Error("Permission reply failed")
   }
+}
+
+export async function autoAcceptPermissionIfStillPending(
+  sessionId: string,
+  requestId: string,
+  options?: { directory?: string | null },
+): Promise<boolean> {
+  const pending = await opencodeClient.getSessionPermissionRequest(sessionId, requestId, options?.directory)
+  if (!pending) {
+    return false
+  }
+  await respondToPermission(sessionId, requestId, "once", options)
+  return true
 }
 
 export async function dismissPermission(
@@ -915,30 +997,18 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   const status = state.session_status[sessionId]
   if (status && status.type !== "idle") {
     try {
-      await sdk().session.abort({ sessionID: sessionId, directory })
+      await opencodeClient.interruptSession(sessionId, directory)
     } catch {
       // ignore abort errors
     }
   }
 
-  // Extract message text for prompt restoration (only non-synthetic text parts —
-  // the server adds file content as synthetic text parts that should not be restored)
-  const messages = state.message[sessionId] ?? []
-  const targetMsg = messages.find((m) => m.id === messageId)
-  let messageText = ""
-  let submittedFileParts: Array<Record<string, unknown>> = []
-  if (targetMsg && targetMsg.role === "user") {
-    const parts = state.part[messageId] ?? []
-    const textParts = parts.filter((p) => p.type === "text" && !isSyntheticPart(p))
-    messageText = textParts
-      .map((p: Record<string, unknown>) => (p as { text?: string }).text || (p as { content?: string }).content || "")
-      .join("\n")
-      .trim()
-    // Snapshot file parts for later restoration to the input.
-    // Exclude synthetic file parts (server-generated file content that should
-    // not be restored to the composer).
-    submittedFileParts = parts.filter((p) => p.type === "file" && !isSyntheticPart(p)) as Array<Record<string, unknown>>
-  }
+  const { messageText, fileParts: submittedFileParts } = await getRestorableUserMessageData(
+    sessionId,
+    messageId,
+    directory,
+    state,
+  )
 
   // Optimistically set only the revert marker. Keep messages and parts in the
   // local store; visible-message selectors derive the displayed timeline from
@@ -1047,7 +1117,7 @@ export async function unrevertSession(sessionId: string): Promise<void> {
   const status = state.session_status[sessionId]
   if (status && status.type !== "idle") {
     try {
-      await sdk().session.abort({ sessionID: sessionId, directory })
+      await opencodeClient.interruptSession(sessionId, directory)
     } catch {
       // ignore
     }
@@ -1082,18 +1152,12 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
   const { store, directory } = dirStoreForSession(sessionId)
   const state = store.getState()
 
-  // Extract message text and file attachments for input restoration.
-  // Only non-synthetic text parts — the server adds file content as synthetic
-  // text parts that should not be restored. File parts (images, pasted
-  // screenshots) are user-originated and must be restored.
-  const parts = state.part[messageId] ?? []
-  let messageText = ""
-  const textParts = parts.filter((p) => p.type === "text" && !isSyntheticPart(p))
-  messageText = textParts
-    .map((p: Part) => ((p as Record<string, unknown>).text as string) || ((p as Record<string, unknown>).content as string) || "")
-    .join("\n")
-    .trim()
-  const fileParts = parts.filter((p) => p.type === "file" && !isSyntheticPart(p)) as Array<Record<string, unknown>>
+  const { messageText, fileParts } = await getRestorableUserMessageData(
+    sessionId,
+    messageId,
+    directory,
+    state,
+  )
 
   const forkedSession = await opencodeClient.forkSession(sessionId, messageId, directory)
 

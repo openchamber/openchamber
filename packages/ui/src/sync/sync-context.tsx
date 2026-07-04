@@ -1183,7 +1183,7 @@ export async function resyncBlockingRequestsForDirectory(
       await Promise.all(autoAcceptingSessionIds.flatMap((sessionId) =>
         (grouped[sessionId] ?? []).map(async (permission) => {
           try {
-            await sessionActions.respondToPermission(permission.sessionID, permission.id, "once")
+            await sessionActions.autoAcceptPermissionIfStillPending(permission.sessionID, permission.id, { directory })
             const accepted = acceptedIdsBySession.get(sessionId) ?? new Set<string>()
             accepted.add(permission.id)
             acceptedIdsBySession.set(sessionId, accepted)
@@ -1431,7 +1431,7 @@ function handleEvent(
     const permissionStore = usePermissionStore.getState()
     if (permissionStore.isSessionAutoAccepting(permission.sessionID)) {
       updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
-      void sessionActions.respondToPermission(permission.sessionID, permission.id, "once").catch(() => undefined)
+      void sessionActions.autoAcceptPermissionIfStillPending(permission.sessionID, permission.id, { directory: resolvedDirectory }).catch(() => undefined)
       return
     }
 
