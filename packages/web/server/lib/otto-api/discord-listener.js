@@ -368,8 +368,8 @@ function dispatchThreadDelete(state, data, bridge, reason = 'deleted') {
  */
 const KNOWN_SLASH_COMMANDS = new Set([
   'help', 'status', 'abort', 'new', 'undo', 'redo',
-  'compact', 'summary', 'init', 'review',
-  'model', 'agent', 'verbosity', 'skill', 'sessions',
+  'compact', 'summary', 'init', 'review', 'shell',
+  'model', 'agent', 'verbosity', 'yolo', 'skill', 'sessions',
   'session', 'resume', 'fork', 'share', 'unshare',
   'queue', 'clear-queue', 'mention-mode',
   'new-worktree', 'merge-worktree', 'schedule',
@@ -398,6 +398,10 @@ async function handleApplicationCommand(state, interaction, broadcastEvent, brid
     }
     if (cmdName === 'skill') {
       await state.commandWizards.startSkill(state, interaction);
+      return;
+    }
+    if (cmdName === 'yolo') {
+      await state.commandWizards.startPermissions(state, interaction);
       return;
     }
   }

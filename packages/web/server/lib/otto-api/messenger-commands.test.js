@@ -7,6 +7,7 @@ function makeMutators() {
   return {
     setOverrides: vi.fn(async () => {}),
     setVerbosityDefault: vi.fn(async () => {}),
+    setPermissionModeDefault: vi.fn(async () => {}),
     setProjectDefaults: vi.fn(async () => {}),
     unbindSession: vi.fn(async () => {}),
   };
@@ -148,10 +149,58 @@ describe('/model + /status surface the OpenChamber default model', () => {
 });
 
 describe('/help includes verbosity and skill', () => {
-  it('lists the /verbosity and /skill commands', async () => {
+  it('lists the /verbosity, /skill and /yolo commands', async () => {
     const { result } = await run('/help');
     expect(result.reply).toContain('/verbosity');
     expect(result.reply).toContain('/skill');
+    expect(result.reply).toContain('/yolo');
+  });
+});
+
+describe('/yolo (permission mode) command', () => {
+  it('lists the modes and marks the effective one with no args', async () => {
+    const { result, surfaceMutators } = await run('/yolo', {
+      binding: { permissionModeDefault: 'auto-edit' },
+    });
+    expect(result.reply).toContain('Tool permission mode');
+    expect(result.reply).toContain('yolo');
+    expect(result.reply).toContain('➤ `auto-edit`');
+    expect(surfaceMutators.setOverrides).not.toHaveBeenCalled();
+  });
+
+  it('sets a conversation override', async () => {
+    const { surfaceMutators } = await run('/yolo yolo');
+    expect(surfaceMutators.setOverrides).toHaveBeenCalledWith({ permissionModeOverride: 'yolo' });
+  });
+
+  it('accepts aliases', async () => {
+    const a = await run('/yolo safe');
+    expect(a.surfaceMutators.setOverrides).toHaveBeenCalledWith({ permissionModeOverride: 'auto-edit' });
+    const b = await run('/yolo on');
+    expect(b.surfaceMutators.setOverrides).toHaveBeenCalledWith({ permissionModeOverride: 'yolo' });
+  });
+
+  it('sets the messenger default via `default`', async () => {
+    const { surfaceMutators } = await run('/yolo default yolo');
+    expect(surfaceMutators.setPermissionModeDefault).toHaveBeenCalledWith('yolo');
+  });
+
+  it('sets a project default via `project` when bound', async () => {
+    const { surfaceMutators } = await run('/yolo project yolo', {
+      binding: { projectPath: '/proj', projectLabel: 'Proj' },
+    });
+    expect(surfaceMutators.setProjectDefaults).toHaveBeenCalledWith({ permissionModeDefault: 'yolo' });
+  });
+
+  it('clears the conversation override via reset', async () => {
+    const { surfaceMutators } = await run('/yolo reset');
+    expect(surfaceMutators.setOverrides).toHaveBeenCalledWith({ permissionModeOverride: null });
+  });
+
+  it('rejects unknown modes without mutating', async () => {
+    const { result, surfaceMutators } = await run('/yolo maybe');
+    expect(result.reply).toMatch(/Unknown mode/);
+    expect(surfaceMutators.setOverrides).not.toHaveBeenCalled();
   });
 });
 

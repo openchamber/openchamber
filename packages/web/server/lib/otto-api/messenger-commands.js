@@ -31,6 +31,12 @@
 
 import crypto from 'node:crypto';
 import { parseVerbosityLevel, VERBOSITY_LEVELS } from './messenger-verbosity.js';
+import {
+  parsePermissionMode,
+  PERMISSION_MODES,
+  PERMISSION_MODE_DESCRIPTIONS,
+  PERMISSION_MODE_LABELS,
+} from './messenger-permissions.js';
 
 const VERBOSITY_DESCRIPTIONS = {
   quiet: 'final answer only — hides reasoning and tool activity',
@@ -94,6 +100,12 @@ const COMMAND_HELP = [
     usage: '/skill [name]',
     summary:
       'List the skills available to the agent / hand one to Otto for the next turn. On Discord, run `/skill` for a dropdown picker.',
+  },
+  {
+    name: 'yolo',
+    usage: '/yolo [ask | auto-edit | yolo | project <mode> | default <mode> | reset]',
+    summary:
+      'How Otto handles tool permissions: `ask` = Approve/Deny buttons, `auto-edit` = auto-approve edits/reads, `yolo` = auto-approve everything. On Discord, run `/yolo` for a dropdown. Stop any run with `/abort`.',
   },
   {
     name: 'sessions',
@@ -619,6 +631,98 @@ export async function executeMessengerCommand({
       await surfaceMutators.setOverrides({ verbosityOverride: level });
       return {
         reply: `✓ Verbosity set to \`${level}\` for this conversation — ${VERBOSITY_DESCRIPTIONS[level]}.`,
+      };
+    }
+
+    case 'yolo':
+    case 'permissions': {
+      const effective =
+        binding?.permissionModeOverride ??
+        binding?.projectDefaults?.permissionModeDefault ??
+        binding?.permissionModeDefault ??
+        'ask';
+      if (!command.args) {
+        const lines = [
+          '**Tool permission mode** — how Otto handles approval requests (shell, edits, …)',
+          '',
+        ];
+        for (const mode of PERMISSION_MODES) {
+          const marker = mode === effective ? '➤ ' : '· ';
+          lines.push(`${marker}\`${mode}\` — ${PERMISSION_MODE_DESCRIPTIONS[mode]}`);
+        }
+        lines.push('');
+        lines.push(
+          'Set with `/yolo yolo` (this conversation), `/yolo project yolo` (this project) or `/yolo default yolo` (every channel/chat on this bot). `/yolo reset` clears the conversation override. You can always stop a run with `/abort`.',
+        );
+        if (binding?.permissionModeOverride) {
+          lines.push('', `Conversation override: \`${binding.permissionModeOverride}\``);
+        }
+        if (binding?.projectDefaults?.permissionModeDefault) {
+          lines.push(`Project default: \`${binding.projectDefaults.permissionModeDefault}\``);
+        }
+        if (binding?.permissionModeDefault) {
+          lines.push(`Messenger default: \`${binding.permissionModeDefault}\``);
+        }
+        return { reply: lines.join('\n') };
+      }
+
+      const raw = command.args.trim();
+      const defaultMatch = raw.match(/^default\s+(.+)$/i);
+      if (defaultMatch) {
+        const value = defaultMatch[1].trim();
+        if (value === 'reset' || value === 'clear') {
+          await surfaceMutators.setPermissionModeDefault(null);
+          return { reply: '✓ Messenger default permission mode cleared — falling back to `ask`.' };
+        }
+        const mode = parsePermissionMode(value);
+        if (!mode) {
+          return { reply: `✗ Unknown mode. Use one of: ${PERMISSION_MODES.map((m) => `\`${m}\``).join(', ')}.` };
+        }
+        await surfaceMutators.setPermissionModeDefault(mode);
+        return {
+          reply: `✓ Messenger default permission mode set to \`${mode}\` (${PERMISSION_MODE_LABELS[mode]}).`,
+        };
+      }
+
+      const projectMatch = raw.match(/^project\s+(.+)$/i);
+      if (projectMatch) {
+        const value = projectMatch[1].trim();
+        if (!binding?.projectPath) {
+          return {
+            reply:
+              '✗ This conversation has no project bound yet. Send a regular message first before setting project defaults.',
+          };
+        }
+        if (value === 'reset' || value === 'clear') {
+          await surfaceMutators.setProjectDefaults({ permissionModeDefault: null });
+          return {
+            reply: `✓ Project default permission mode cleared for *${binding.projectLabel ?? binding.projectPath}*.`,
+          };
+        }
+        const mode = parsePermissionMode(value);
+        if (!mode) {
+          return { reply: `✗ Unknown mode. Use one of: ${PERMISSION_MODES.map((m) => `\`${m}\``).join(', ')}.` };
+        }
+        await surfaceMutators.setProjectDefaults({ permissionModeDefault: mode });
+        return {
+          reply: `✓ Project default permission mode set to \`${mode}\` for *${binding.projectLabel ?? binding.projectPath}* (${PERMISSION_MODE_LABELS[mode]}).`,
+        };
+      }
+
+      if (raw === 'reset' || raw === 'clear') {
+        await surfaceMutators.setOverrides({ permissionModeOverride: null });
+        return { reply: '✓ Conversation permission mode override cleared — falling back to the messenger default.' };
+      }
+
+      const mode = parsePermissionMode(raw);
+      if (!mode) {
+        return {
+          reply: `✗ Unknown mode. Use one of: ${PERMISSION_MODES.map((m) => `\`${m}\``).join(', ')}, or \`/yolo default <mode>\`.`,
+        };
+      }
+      await surfaceMutators.setOverrides({ permissionModeOverride: mode });
+      return {
+        reply: `✓ Permission mode set to \`${mode}\` for this conversation — ${PERMISSION_MODE_DESCRIPTIONS[mode]}.`,
       };
     }
 

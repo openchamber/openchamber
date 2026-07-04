@@ -2,9 +2,39 @@ import { describe, it, expect } from 'vitest';
 import {
   buildPagedOptions,
   modelsOf,
+  formatModelMeta,
   PAGE_SIZE,
   createDiscordModelWizard,
 } from './discord-model-wizard.js';
+
+describe('formatModelMeta', () => {
+  it('renders context window + input/output pricing', () => {
+    expect(
+      formatModelMeta({ limit: { context: 200000 }, cost: { input: 3, output: 15 } }),
+    ).toBe('200K ctx · in $3/out $15 /Mtok');
+  });
+
+  it('renders a compact millions context', () => {
+    expect(formatModelMeta({ limit: { context: 1000000 } })).toBe('1M ctx');
+    expect(formatModelMeta({ limit: { context: 1500000 } })).toBe('1.5M ctx');
+  });
+
+  it('shows context only when pricing is absent', () => {
+    expect(formatModelMeta({ limit: { context: 128000 } })).toBe('128K ctx');
+  });
+
+  it('handles fractional prices and only input cost', () => {
+    expect(formatModelMeta({ limit: { context: 8000 }, cost: { input: 0.15 } })).toBe(
+      '8K ctx · in $0.15 /Mtok',
+    );
+  });
+
+  it('never renders a date and returns empty when no metadata exists', () => {
+    expect(formatModelMeta({ release_date: '2024-01-01' })).toBe('');
+    expect(formatModelMeta({})).toBe('');
+    expect(formatModelMeta(null)).toBe('');
+  });
+});
 
 describe('buildPagedOptions', () => {
   const items = Array.from({ length: 60 }, (_, i) => ({
@@ -68,7 +98,7 @@ describe('modelsOf', () => {
 });
 
 /** A restCall recorder + a bridge stub. */
-function makeHarness(providers, { favorites = [], current = null, binding = null } = {}) {
+function makeHarness(providers, { favorites = [], hidden = [], current = null, binding = null } = {}) {
   const calls = [];
   const restCall = async (token, method, path, body) => {
     calls.push({ token, method, path, body });
@@ -81,6 +111,7 @@ function makeHarness(providers, { favorites = [], current = null, binding = null
   const bridge = {
     fetchProviders: async () => ({ all: providers, connected: providers.map((p) => p.id) }),
     getFavoriteModels: async () => favorites,
+    getHiddenModels: async () => hidden,
     getSurfaceModelInfo: async () => current,
     setSurfaceModel: (o) => setModels.push(o),
     setGlobalDefaultModel: async (o) => {
@@ -103,6 +134,10 @@ function makeHarness(providers, { favorites = [], current = null, binding = null
 function lastSelectValues(call) {
   const select = call.body?.data?.components?.[0]?.components?.[0];
   return select?.options?.map((o) => o.value) ?? [];
+}
+function lastSelectOptions(call) {
+  const select = call.body?.data?.components?.[0]?.components?.[0];
+  return select?.options ?? [];
 }
 function lastCustomId(call) {
   return call.body?.data?.components?.[0]?.components?.[0]?.custom_id;
@@ -231,5 +266,47 @@ describe('createDiscordModelWizard flow', () => {
     await wizard.handleComponent(state, { id: 'i5', token: 't5', data: {} }, buttonCustomId);
     expect(resends).toHaveLength(1);
     expect(resends[0]).toMatchObject({ type: 'discord', channelId: 'chan' });
+  });
+
+  it('hides models the UI hid and shows context/pricing in the description', async () => {
+    const richProviders = [
+      {
+        id: 'anthropic',
+        name: 'Anthropic',
+        models: [
+          { id: 'sonnet', name: 'Sonnet', limit: { context: 200000 }, cost: { input: 3, output: 15 } },
+          { id: 'legacy', name: 'Legacy' },
+        ],
+      },
+    ];
+    const { wizard, calls } = makeHarness(richProviders, {
+      hidden: [{ providerID: 'anthropic', modelID: 'legacy' }],
+    });
+    await wizard.start(state, { id: 'i1', token: 't1', channel_id: 'chan', application_id: 'app' });
+    // Provider count reflects only visible models (1, not 2).
+    const provOpts = lastSelectOptions(calls.at(-1));
+    expect(provOpts[0].description).toContain('1 model');
+    const provCustomId = lastCustomId(calls.at(-1));
+
+    await wizard.handleComponent(state, { id: 'i2', token: 't2', data: { values: ['anthropic'] } }, provCustomId);
+    const modelOpts = lastSelectOptions(calls.at(-1));
+    // The hidden model is gone; the visible one carries context + pricing.
+    expect(modelOpts.map((o) => o.value)).toEqual(['sonnet']);
+    expect(modelOpts[0].description).toBe('200K ctx · in $3/out $15 /Mtok');
+  });
+
+  it('drops a favourite that the UI hid', async () => {
+    const { wizard, calls } = makeHarness(providers, {
+      favorites: [
+        { providerID: 'anthropic', modelID: 'm5' },
+        { providerID: 'anthropic', modelID: 'm6' },
+      ],
+      hidden: [{ providerID: 'anthropic', modelID: 'm6' }],
+    });
+    await wizard.start(state, { id: 'i1', token: 't1', channel_id: 'chan', application_id: 'app' });
+    const provCustomId = lastCustomId(calls.at(-1));
+    await wizard.handleComponent(state, { id: 'i2', token: 't2', data: { values: ['__otto_favorites'] } }, provCustomId);
+    // Only the non-hidden favourite survives.
+    expect(lastSelectValues(calls.at(-1))).toEqual(['anthropic/m5']);
   });
 });

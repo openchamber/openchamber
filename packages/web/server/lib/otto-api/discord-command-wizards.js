@@ -8,6 +8,11 @@ import {
   createWizardStore,
 } from './discord-wizard-shared.js';
 import { VERBOSITY_LEVELS } from './messenger-verbosity.js';
+import {
+  PERMISSION_MODES,
+  PERMISSION_MODE_DESCRIPTIONS,
+  PERMISSION_MODE_LABELS,
+} from './messenger-permissions.js';
 
 /**
  * Interactive select-menu wizards for the Discord `/verbosity`, `/agent` and
@@ -29,6 +34,8 @@ const VERB_SCOPE_PREFIX = 'otto-verb-scope:';
 const AGENT_PICK_PREFIX = 'otto-agent-pick:';
 const AGENT_SCOPE_PREFIX = 'otto-agent-scope:';
 const SKILL_PICK_PREFIX = 'otto-skill-pick:';
+const PERM_MODE_PREFIX = 'otto-perm-mode:';
+const PERM_SCOPE_PREFIX = 'otto-perm-scope:';
 
 const VERBOSITY_DESCRIPTIONS = {
   quiet: 'Final answer only — hides reasoning + tool activity',
@@ -42,6 +49,8 @@ const PREFIXES = [
   AGENT_PICK_PREFIX,
   AGENT_SCOPE_PREFIX,
   SKILL_PICK_PREFIX,
+  PERM_MODE_PREFIX,
+  PERM_SCOPE_PREFIX,
 ];
 
 function isNav(value) {
@@ -179,11 +188,126 @@ export function createDiscordCommandWizards({ restCall, bridge }) {
         // best-effort — still confirm the user's choice below
       }
     }
+    // Apply the change to any turn already streaming on this surface so the new
+    // level takes effect immediately, not only on the next message.
+    try {
+      bridge?.applyPreferencesToActiveTurn?.({
+        type: 'discord',
+        token: wizard.token,
+        channelId: wizard.channelId,
+        threadId: null,
+      });
+    } catch {
+      // best-effort
+    }
     wizards.del(hash);
     await respond(wizard.token, interaction, {
       type: 7,
       data: {
         content: `✓ Verbosity set to **${level}** for ${scopeLabel}.\n_${VERBOSITY_DESCRIPTIONS[level] ?? ''}_`,
+        flags: 64,
+        components: [],
+      },
+    });
+  }
+
+  // ── /yolo (permission mode) ────────────────────────────────────────────────
+  function permissionModeSelect(hash) {
+    const options = PERMISSION_MODES.map((mode) => ({
+      label: PERMISSION_MODE_LABELS[mode] ?? mode,
+      value: mode,
+      description: (PERMISSION_MODE_DESCRIPTIONS[mode] ?? '').slice(0, 100),
+    }));
+    return stringSelect(`${PERM_MODE_PREFIX}${hash}`, options, 'Select a permission mode');
+  }
+
+  async function startPermissions(state, interaction) {
+    const hash = randomWizardHash();
+    wizards.set(hash, {
+      kind: 'permissions',
+      token: state.token,
+      channelId: interaction.channel_id,
+      guildId: interaction.guild_id,
+      appId: interaction.application_id,
+    });
+    await respond(state.token, interaction, {
+      type: 4,
+      data: {
+        content:
+          '**Set tool permission mode**\nHow should Otto handle approval requests (shell, edits, …)?\nYou can still stop any run with `/abort`.',
+        flags: 64,
+        components: [permissionModeSelect(hash)],
+      },
+    });
+  }
+
+  async function onPermissionsMode(token, interaction, hash) {
+    const wizard = wizards.get(hash);
+    if (!wizard) return expired(token, interaction);
+    const value = interaction.data?.values?.[0];
+    if (!value) return;
+    wizard.mode = value;
+    wizards.set(hash, wizard);
+
+    const scopeOptions = [
+      { label: 'This conversation', value: 'surface', description: 'Override for this channel/thread only' },
+      { label: 'This project', value: 'project', description: "Default for this conversation's project" },
+      { label: 'Whole system (default)', value: 'global', description: 'Default for every Discord conversation' },
+    ];
+    await respond(wizard.token, interaction, {
+      type: 7,
+      data: {
+        content: `**Set tool permission mode**\nMode: **${PERMISSION_MODE_LABELS[value] ?? value}** — ${PERMISSION_MODE_DESCRIPTIONS[value] ?? ''}\nApply to:`,
+        flags: 64,
+        components: [stringSelect(`${PERM_SCOPE_PREFIX}${hash}`, scopeOptions, 'Apply to…')],
+      },
+    });
+  }
+
+  async function onPermissionsScope(token, interaction, hash) {
+    const wizard = wizards.get(hash);
+    if (!wizard) return expired(token, interaction);
+    const scope = interaction.data?.values?.[0];
+    const mode = wizard.mode;
+    if (!scope || !mode) return;
+
+    let scopeLabel = 'this conversation';
+    if (bridge?.store) {
+      try {
+        const botTokenHash = botHashFor(wizard.token);
+        const targetKey = String(wizard.channelId);
+        const binding =
+          scope === 'project'
+            ? bridge.store.lookup?.({ type: 'discord', botTokenHash, targetKey })
+            : null;
+        if (scope === 'global') {
+          bridge.store.setPermissionModeDefault?.('discord', mode);
+          scopeLabel = 'every Discord conversation';
+        } else if (scope === 'project' && binding?.projectPath) {
+          bridge.store.setProjectDefaults?.({
+            projectPath: binding.projectPath,
+            projectLabel: binding.projectLabel,
+            permissionModeDefault: mode,
+          });
+          scopeLabel = `project *${binding.projectLabel ?? binding.projectPath}*`;
+        } else {
+          bridge.store.setOverrides?.({
+            type: 'discord',
+            botTokenHash,
+            targetKey,
+            permissionModeOverride: mode,
+          });
+          scopeLabel = scope === 'project' ? 'this conversation (no project bound yet)' : 'this conversation';
+        }
+      } catch {
+        // best-effort — still confirm the user's choice below
+      }
+    }
+    wizards.del(hash);
+    await respond(wizard.token, interaction, {
+      type: 7,
+      data: {
+        content: `✓ Permission mode set to **${PERMISSION_MODE_LABELS[mode] ?? mode}** for ${scopeLabel}.\n_${PERMISSION_MODE_DESCRIPTIONS[mode] ?? ''}_`,
         flags: 64,
         components: [],
       },
@@ -445,7 +569,11 @@ export function createDiscordCommandWizards({ restCall, bridge }) {
       return onAgentScope(token, interaction, customId.slice(AGENT_SCOPE_PREFIX.length));
     if (customId.startsWith(SKILL_PICK_PREFIX))
       return onSkillPick(token, interaction, customId.slice(SKILL_PICK_PREFIX.length));
+    if (customId.startsWith(PERM_MODE_PREFIX))
+      return onPermissionsMode(token, interaction, customId.slice(PERM_MODE_PREFIX.length));
+    if (customId.startsWith(PERM_SCOPE_PREFIX))
+      return onPermissionsScope(token, interaction, customId.slice(PERM_SCOPE_PREFIX.length));
   }
 
-  return { ownsComponent, handleComponent, startVerbosity, startAgent, startSkill };
+  return { ownsComponent, handleComponent, startVerbosity, startAgent, startSkill, startPermissions };
 }

@@ -78,15 +78,17 @@ export class MessengerBridgeStore {
       CREATE INDEX IF NOT EXISTS idx_messenger_session_session
         ON messenger_session_bindings (session_id);
     `);
-    // Per-surface preferences (model + agent override + verbosity) so /model,
-    // /agent and /verbosity commands can scope a choice to a channel/topic
-    // without touching the global OpenChamber settings. ALTER TABLE is run as
-    // separate statements and ignored when the column already exists.
+    // Per-surface preferences (model + agent override + verbosity + permission
+    // mode) so /model, /agent, /verbosity and /yolo commands can scope a choice
+    // to a channel/topic without touching the global OpenChamber settings.
+    // ALTER TABLE is run as separate statements and ignored when the column
+    // already exists.
     for (const col of [
       'model_override TEXT',
       'agent_override TEXT',
       'verbosity_override TEXT',
       'variant_override TEXT',
+      'permission_mode TEXT',
     ]) {
       try {
         this.db.exec(`ALTER TABLE messenger_session_bindings ADD COLUMN ${col}`);
@@ -122,7 +124,7 @@ export class MessengerBridgeStore {
     `);
     // Migrate older project-default tables that predate the verbosity/variant
     // (thinking-effort) project scopes. Ignored when the column already exists.
-    for (const col of ['verbosity_default TEXT', 'variant_default TEXT']) {
+    for (const col of ['verbosity_default TEXT', 'variant_default TEXT', 'permission_mode_default TEXT']) {
       try {
         this.db.exec(`ALTER TABLE messenger_project_defaults ADD COLUMN ${col}`);
       } catch {
@@ -169,6 +171,21 @@ export class MessengerBridgeStore {
     this.setSetting(`verbosity:${type}`, level ?? null);
   }
 
+  /**
+   * Per-messenger default permission mode (`ask` | `auto-edit` | `yolo`) used
+   * when a surface/project has no explicit override. Returns `null` when never
+   * configured so the caller can fall back to its own default.
+   */
+  getPermissionModeDefault(type) {
+    if (!type) return null;
+    return this.getSetting(`permission-mode:${type}`);
+  }
+
+  setPermissionModeDefault(type, mode) {
+    if (!type) return;
+    this.setSetting(`permission-mode:${type}`, mode ?? null);
+  }
+
   /** Read the project-wide defaults for a working directory. */
   getProjectDefaults(projectPath) {
     if (!projectPath) return null;
@@ -177,6 +194,7 @@ export class MessengerBridgeStore {
         `SELECT project_path AS projectPath, project_label AS projectLabel,
                 model_default AS modelDefault, agent_default AS agentDefault,
                 verbosity_default AS verbosityDefault, variant_default AS variantDefault,
+                permission_mode_default AS permissionModeDefault,
                 updated_at AS updatedAt
            FROM messenger_project_defaults
           WHERE project_path = ?`,
@@ -190,7 +208,7 @@ export class MessengerBridgeStore {
    * `verbosityDefault: null` / `variantDefault: null` to clear that field; pass
    * `undefined` to leave it untouched.
    */
-  setProjectDefaults({ projectPath, projectLabel, modelDefault, agentDefault, verbosityDefault, variantDefault }) {
+  setProjectDefaults({ projectPath, projectLabel, modelDefault, agentDefault, verbosityDefault, variantDefault, permissionModeDefault }) {
     if (!projectPath) return;
     const now = new Date().toISOString();
     const existing = this.getProjectDefaults(projectPath);
@@ -199,22 +217,25 @@ export class MessengerBridgeStore {
     const nextVerbosity =
       verbosityDefault === undefined ? existing?.verbosityDefault ?? null : verbosityDefault;
     const nextVariant = variantDefault === undefined ? existing?.variantDefault ?? null : variantDefault;
+    const nextPermissionMode =
+      permissionModeDefault === undefined ? existing?.permissionModeDefault ?? null : permissionModeDefault;
     const nextLabel = projectLabel ?? existing?.projectLabel ?? null;
     this.db
       .prepare(
         `INSERT INTO messenger_project_defaults
             (project_path, project_label, model_default, agent_default,
-             verbosity_default, variant_default, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
+             verbosity_default, variant_default, permission_mode_default, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(project_path)
-         DO UPDATE SET project_label     = excluded.project_label,
-                       model_default     = excluded.model_default,
-                       agent_default     = excluded.agent_default,
-                       verbosity_default = excluded.verbosity_default,
-                       variant_default   = excluded.variant_default,
-                       updated_at        = excluded.updated_at`,
+         DO UPDATE SET project_label           = excluded.project_label,
+                       model_default           = excluded.model_default,
+                       agent_default           = excluded.agent_default,
+                       verbosity_default       = excluded.verbosity_default,
+                       variant_default         = excluded.variant_default,
+                       permission_mode_default = excluded.permission_mode_default,
+                       updated_at              = excluded.updated_at`,
       )
-      .run(projectPath, nextLabel, nextModel, nextAgent, nextVerbosity, nextVariant, now);
+      .run(projectPath, nextLabel, nextModel, nextAgent, nextVerbosity, nextVariant, nextPermissionMode, now);
   }
 
   /** List every project that has bridge defaults configured. */
@@ -224,6 +245,7 @@ export class MessengerBridgeStore {
         `SELECT project_path AS projectPath, project_label AS projectLabel,
                 model_default AS modelDefault, agent_default AS agentDefault,
                 verbosity_default AS verbosityDefault, variant_default AS variantDefault,
+                permission_mode_default AS permissionModeDefault,
                 updated_at AS updatedAt
            FROM messenger_project_defaults
           ORDER BY updated_at DESC`,
@@ -246,7 +268,8 @@ export class MessengerBridgeStore {
                 model_override AS modelOverride,
                 agent_override AS agentOverride,
                 verbosity_override AS verbosityOverride,
-                variant_override AS variantOverride
+                variant_override AS variantOverride,
+                permission_mode AS permissionModeOverride
            FROM messenger_session_bindings
           WHERE type = ? AND bot_token_hash = ? AND target_key = ?`,
       )
@@ -258,7 +281,7 @@ export class MessengerBridgeStore {
    * Update per-surface preferences without touching the session binding.
    * Used by /model and /agent in-chat commands.
    */
-  setOverrides({ type, botTokenHash, targetKey, modelOverride, agentOverride, verbosityOverride, variantOverride }) {
+  setOverrides({ type, botTokenHash, targetKey, modelOverride, agentOverride, verbosityOverride, variantOverride, permissionModeOverride }) {
     const sets = [];
     const params = [];
     if (modelOverride !== undefined) {
@@ -276,6 +299,10 @@ export class MessengerBridgeStore {
     if (variantOverride !== undefined) {
       sets.push('variant_override = ?');
       params.push(variantOverride ?? null);
+    }
+    if (permissionModeOverride !== undefined) {
+      sets.push('permission_mode = ?');
+      params.push(permissionModeOverride ?? null);
     }
     if (sets.length === 0) return;
     params.push(type, botTokenHash, targetKey);

@@ -6,7 +6,7 @@ describe('buildSlashCommandDefinitions', () => {
 
   it('includes the interactive wizard commands and the new /skill command', () => {
     const names = defs.map((d) => d.name);
-    for (const name of ['model', 'agent', 'verbosity', 'skill', 'help', 'status', 'sessions']) {
+    for (const name of ['model', 'agent', 'verbosity', 'yolo', 'skill', 'help', 'status', 'sessions']) {
       expect(names).toContain(name);
     }
   });

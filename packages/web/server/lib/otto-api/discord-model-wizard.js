@@ -52,6 +52,48 @@ export function modelsOf(provider) {
   return Array.isArray(provider.models) ? provider.models : Object.values(provider.models);
 }
 
+/** Compact token count: 200000 → "200K", 1500000 → "1.5M". */
+function formatTokensCompact(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null;
+  if (value >= 1_000_000) {
+    const v = value / 1_000_000;
+    return `${Number.isInteger(v) ? v : v.toFixed(1)}M`;
+  }
+  if (value >= 1_000) {
+    const v = value / 1_000;
+    return `${Number.isInteger(v) ? v : Math.round(v)}K`;
+  }
+  return String(value);
+}
+
+/** Per-million-token USD price: 3 → "$3", 0.15 → "$0.15", 0 → "$0". */
+function formatCostPerMillion(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return null;
+  if (value === 0) return '$0';
+  const rounded = Number(value.toFixed(2));
+  return `$${rounded}`;
+}
+
+/**
+ * Build the Discord select-option description for a model: its context window
+ * and (when available) per-million-token input/output price — e.g.
+ * `200K ctx · in $3/out $15 /Mtok`. Returns '' when the model exposes no
+ * usable metadata. Replaces the old `release_date` formatting that showed a
+ * confusing bare date under every model name.
+ */
+export function formatModelMeta(model) {
+  if (!model || typeof model !== 'object') return '';
+  const parts = [];
+  const ctx = formatTokensCompact(model?.limit?.context);
+  if (ctx) parts.push(`${ctx} ctx`);
+  const input = formatCostPerMillion(model?.cost?.input);
+  const output = formatCostPerMillion(model?.cost?.output);
+  if (input && output) parts.push(`in ${input}/out ${output} /Mtok`);
+  else if (input) parts.push(`in ${input} /Mtok`);
+  else if (output) parts.push(`out ${output} /Mtok`);
+  return parts.join(' · ');
+}
+
 /** Normalise a model's reasoning `variants` (array or map) into a flat array of keys. */
 export function variantsOf(model) {
   const v = model?.variants;
@@ -103,6 +145,30 @@ export function createDiscordModelWizard({ restCall, bridge }) {
     return variantsOf(model);
   }
 
+  /** Stable `provider/model` key used to match the UI's hidden-model set. */
+  function modelKey(providerId, model) {
+    const id = model?.id ?? model?.name;
+    return id ? `${providerId}/${id}` : null;
+  }
+
+  /**
+   * A provider's models minus the ones the user hid in the OpenChamber UI, so
+   * the Discord `/model` list matches what the UI shows instead of exposing
+   * every model the provider advertises.
+   */
+  function visibleModelsOf(provider, hiddenSet) {
+    const all = modelsOf(provider);
+    if (!hiddenSet || hiddenSet.size === 0) return all;
+    return all.filter((m) => !hiddenSet.has(modelKey(provider.id, m)));
+  }
+
+  /** Find a model object across all providers (for enriching favourite rows). */
+  function findModel(providersById, providerId, modelId) {
+    const provider = providersById?.get(providerId);
+    if (!provider) return null;
+    return modelsOf(provider).find((m) => (m.id ?? m.name) === modelId) ?? null;
+  }
+
   // ── rendering ─────────────────────────────────────────────────────────────
   function providerOptions(entries) {
     return entries.map((e) => ({
@@ -121,10 +187,9 @@ export function createDiscordModelWizard({ restCall, bridge }) {
     return models.map((m) => ({
       label: (m.label ?? m.name ?? m.id ?? String(m)).slice(0, 100),
       value: m.value ?? m.id ?? m.name ?? String(m),
-      description: (
-        m.description ??
-        (m.release_date ? new Date(m.release_date).toLocaleDateString() : ' ')
-      ).slice(0, 100),
+      // Show context window + pricing under the model name (falling back to an
+      // explicit `description` when one is provided, e.g. favourites).
+      description: ((m.description || formatModelMeta(m)) || ' ').slice(0, 100),
     }));
   }
 
@@ -191,15 +256,31 @@ export function createDiscordModelWizard({ restCall, bridge }) {
     const connected = all.filter((p) => connectedSet.has(p.id));
     const realProviders = connected.length > 0 ? connected : all;
 
-    const favorites = (await bridge?.getFavoriteModels?.().catch(() => [])) ?? [];
+    const rawFavorites = (await bridge?.getFavoriteModels?.().catch(() => [])) ?? [];
+    const hiddenList = (await bridge?.getHiddenModels?.().catch(() => [])) ?? [];
+    const hiddenSet = new Set(
+      hiddenList.map(({ providerID, modelID }) => `${providerID}/${modelID}`),
+    );
 
-    // Provider menu entries: ⭐ Favourites first (when any), then real providers.
+    // Favourites mirror the UI: only models that still exist on a live provider
+    // and are NOT hidden. Prevents Discord from listing favourites the UI has
+    // dropped or hidden.
+    const favorites = rawFavorites.filter(({ providerID, modelID }) => {
+      const key = `${providerID}/${modelID}`;
+      if (hiddenSet.has(key)) return false;
+      return Boolean(findModel(providersById, providerID, modelID));
+    });
+
+    // Provider menu entries: ⭐ Favourites first (when any), then real providers
+    // that have at least one visible (non-hidden) model.
     const entries = [];
     if (favorites.length > 0) {
       entries.push({ id: FAVORITES_ID, name: '⭐ Favourites', count: favorites.length });
     }
     for (const p of realProviders) {
-      entries.push({ id: p.id, name: p.name ?? p.id, count: modelsOf(p).length });
+      const count = visibleModelsOf(p, hiddenSet).length;
+      if (count === 0) continue;
+      entries.push({ id: p.id, name: p.name ?? p.id, count });
     }
 
     const current = (await bridge?.getSurfaceModelInfo?.({
@@ -218,6 +299,7 @@ export function createDiscordModelWizard({ restCall, bridge }) {
       from: { id: user.id, username: user.username, firstName: user.global_name ?? null },
       providersById,
       favorites,
+      hiddenSet,
       entries,
       providerPage: 0,
       modelPage: 0,
@@ -280,18 +362,23 @@ export function createDiscordModelWizard({ restCall, bridge }) {
       wizard.providerName = '⭐ Favourites';
       // Favourite entries carry their full `provider/model` ref as the value so
       // a single menu can mix models from different providers.
-      models = wizard.favorites.map(({ providerID, modelID }) => ({
-        value: `${providerID}/${modelID}`,
-        label: modelID,
-        description: providerID,
-      }));
+      models = wizard.favorites.map(({ providerID, modelID }) => {
+        const model = findModel(wizard.providersById, providerID, modelID);
+        const meta = model ? formatModelMeta(model) : '';
+        return {
+          value: `${providerID}/${modelID}`,
+          label: modelID,
+          // Prefer context/pricing, fall back to the provider id for context.
+          description: meta || providerID,
+        };
+      });
     } else {
       const provider = wizard.providersById?.get(value);
       if (!provider) return;
       wizard.isFavorites = false;
       wizard.providerId = provider.id;
       wizard.providerName = provider.name ?? provider.id;
-      models = modelsOf(provider);
+      models = visibleModelsOf(provider, wizard.hiddenSet);
     }
 
     if (!models || models.length === 0) {

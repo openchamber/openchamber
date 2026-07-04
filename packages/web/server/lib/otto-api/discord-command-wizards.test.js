@@ -10,8 +10,10 @@ function makeHarness({ agents = [], skills = [] } = {}) {
   };
   const overrides = [];
   const verbosityDefaults = [];
+  const permissionModeDefaults = [];
   const projectDefaults = [];
   const routed = [];
+  const activeTurnRefreshes = [];
   const bridge = {
     listAgents: async () => agents,
     listSurfaceSkills: async () => skills,
@@ -19,15 +21,27 @@ function makeHarness({ agents = [], skills = [] } = {}) {
       routed.push(args);
       return { ok: true };
     },
+    applyPreferencesToActiveTurn: (o) => activeTurnRefreshes.push(o),
     store: {
       setOverrides: (o) => overrides.push(o),
       setVerbosityDefault: (type, level) => verbosityDefaults.push({ type, level }),
+      setPermissionModeDefault: (type, mode) => permissionModeDefaults.push({ type, mode }),
       setProjectDefaults: (o) => projectDefaults.push(o),
       lookup: () => null,
     },
   };
   const wizards = createDiscordCommandWizards({ restCall, bridge });
-  return { wizards, bridge, calls, overrides, verbosityDefaults, projectDefaults, routed };
+  return {
+    wizards,
+    bridge,
+    calls,
+    overrides,
+    verbosityDefaults,
+    permissionModeDefaults,
+    projectDefaults,
+    routed,
+    activeTurnRefreshes,
+  };
 }
 
 function customIdOf(call) {
@@ -85,6 +99,66 @@ describe('verbosity wizard', () => {
       { projectPath: '/proj', projectLabel: 'Proj', verbosityDefault: 'verbose' },
     ]);
     expect(overrides).toHaveLength(0);
+  });
+});
+
+describe('permissions (/yolo) wizard', () => {
+  it('mode → "this conversation" scope writes a surface override', async () => {
+    const { wizards, calls, overrides, permissionModeDefaults } = makeHarness();
+
+    await wizards.startPermissions(state, interaction);
+    const modeCustomId = customIdOf(calls.at(-1));
+    expect(wizards.ownsComponent(modeCustomId)).toBe(true);
+    expect(optionValues(calls.at(-1))).toEqual(['ask', 'auto-edit', 'yolo']);
+
+    await wizards.handleComponent(state, { id: 'i2', token: 't2', data: { values: ['yolo'] } }, modeCustomId);
+    const scopeCustomId = customIdOf(calls.at(-1));
+    expect(optionValues(calls.at(-1))).toEqual(['surface', 'project', 'global']);
+
+    await wizards.handleComponent(state, { id: 'i3', token: 't3', data: { values: ['surface'] } }, scopeCustomId);
+    expect(overrides).toEqual([
+      { type: 'discord', botTokenHash: expect.any(String), targetKey: 'chan-1', permissionModeOverride: 'yolo' },
+    ]);
+    expect(permissionModeDefaults).toHaveLength(0);
+    expect(calls.at(-1).body.data.content).toContain('YOLO');
+  });
+
+  it('mode → "whole system" scope writes the messenger default', async () => {
+    const { wizards, calls, overrides, permissionModeDefaults } = makeHarness();
+    await wizards.startPermissions(state, interaction);
+    const modeCustomId = customIdOf(calls.at(-1));
+    await wizards.handleComponent(state, { id: 'i2', token: 't2', data: { values: ['auto-edit'] } }, modeCustomId);
+    const scopeCustomId = customIdOf(calls.at(-1));
+    await wizards.handleComponent(state, { id: 'i3', token: 't3', data: { values: ['global'] } }, scopeCustomId);
+    expect(permissionModeDefaults).toEqual([{ type: 'discord', mode: 'auto-edit' }]);
+    expect(overrides).toHaveLength(0);
+  });
+
+  it('mode → "project" scope writes a project default when bound', async () => {
+    const { wizards, bridge, calls, projectDefaults } = makeHarness();
+    bridge.store.lookup = () => ({ projectPath: '/proj', projectLabel: 'Proj' });
+    await wizards.startPermissions(state, interaction);
+    const modeCustomId = customIdOf(calls.at(-1));
+    await wizards.handleComponent(state, { id: 'i2', token: 't2', data: { values: ['yolo'] } }, modeCustomId);
+    const scopeCustomId = customIdOf(calls.at(-1));
+    await wizards.handleComponent(state, { id: 'i3', token: 't3', data: { values: ['project'] } }, scopeCustomId);
+    expect(projectDefaults).toEqual([
+      { projectPath: '/proj', projectLabel: 'Proj', permissionModeDefault: 'yolo' },
+    ]);
+  });
+});
+
+describe('verbosity wizard applies to the active turn', () => {
+  it('refreshes the streaming turn after a scope is chosen', async () => {
+    const { wizards, calls, activeTurnRefreshes } = makeHarness();
+    await wizards.startVerbosity(state, interaction);
+    const levelCustomId = customIdOf(calls.at(-1));
+    await wizards.handleComponent(state, { id: 'i2', token: 't2', data: { values: ['verbose'] } }, levelCustomId);
+    const scopeCustomId = customIdOf(calls.at(-1));
+    await wizards.handleComponent(state, { id: 'i3', token: 't3', data: { values: ['surface'] } }, scopeCustomId);
+    expect(activeTurnRefreshes).toEqual([
+      { type: 'discord', token: 'bot-token', channelId: 'chan-1', threadId: null },
+    ]);
   });
 });
 
@@ -149,6 +223,8 @@ describe('component ownership', () => {
     expect(wizards.ownsComponent('otto-verb-level:abc')).toBe(true);
     expect(wizards.ownsComponent('otto-agent-scope:abc')).toBe(true);
     expect(wizards.ownsComponent('otto-skill-pick:abc')).toBe(true);
+    expect(wizards.ownsComponent('otto-perm-mode:abc')).toBe(true);
+    expect(wizards.ownsComponent('otto-perm-scope:abc')).toBe(true);
     expect(wizards.ownsComponent('otto-model-provider:abc')).toBe(false);
     expect(wizards.ownsComponent('otto-approve:abc')).toBe(false);
   });

@@ -5,6 +5,12 @@ import { MessengerBridgeStore } from './messenger-bridge-store.js';
 import { executeMessengerCommand, parseLeadingCommand, isKnownMessengerCommand } from './messenger-commands.js';
 import { DEFAULT_VERBOSITY, normalizeVerbosity } from './messenger-verbosity.js';
 import {
+  DEFAULT_PERMISSION_MODE,
+  PERMISSION_MODE_LABELS,
+  normalizePermissionMode,
+  shouldAutoApprove,
+} from './messenger-permissions.js';
+import {
   renderPartForMessenger,
   renderPermissionContext,
   renderQuestionForMessenger,
@@ -150,6 +156,20 @@ function formatSessionError(raw) {
   // Otherwise keep the first line and drop any stack-trace tail.
   const firstLine = msg.split('\n')[0].trim();
   return firstLine || 'OpenCode session error';
+}
+
+/**
+ * Heuristic: does an error text look like the transient teardown of a turn that
+ * was just aborted/superseded (rather than a genuine, actionable failure)?
+ * These are the exact symptoms users hit when they interrupt a turn or switch
+ * model mid-stream — the aborted turn's connection collapses and OpenCode
+ * reports a stream/provider error for work that was intentionally cancelled.
+ */
+function isTransientTurnError(text) {
+  if (typeof text !== 'string' || !text) return false;
+  return /aborted|abort|cancel|stream(ing)?\s+response\s+failed|provider\s+not\s+available|connection\s+(closed|reset|refused)|fetch failed|network|ECONNRESET|socket hang up|terminated/i.test(
+    text,
+  );
 }
 
 function pickProjectForName(projects, name) {
@@ -644,6 +664,12 @@ export function createMessengerOpencodeBridge({
   /** @type {Map<string, () => Promise<unknown>>} */
   const pendingSupersede = new Map();
   const SUPERSEDE_FALLBACK_MS = 8000;
+  // After a turn is superseded, OpenCode may emit a trailing abort `session.error`
+  // (e.g. "streaming response failed" / "provider not available") for the turn we
+  // just cancelled. If it lands AFTER the stashed send already fired (so it's no
+  // longer in `pendingSupersede`), suppress it within this grace window instead of
+  // surfacing the teardown of a turn the user intentionally interrupted.
+  const SUPERSEDE_ERROR_GRACE_MS = 6000;
 
   /** Run (and clear) a stashed superseding send for a session, if any. */
   function runSupersede(sessionId, ctx) {
@@ -653,6 +679,13 @@ export function createMessengerOpencodeBridge({
     if (ctx) {
       ctx.sentPartIds.clear();
       ctx.startedAt = Date.now();
+      // The resumed turn is now the active one — clear stale error/idle flags,
+      // remember when we superseded (grace window for the aborted turn's late
+      // error), and re-arm the typing pulse so the bot never looks unresponsive.
+      ctx.errored = false;
+      ctx.idleSettled = false;
+      ctx.supersededAt = Date.now();
+      startTypingPulse(ctx);
     }
     busySessions.delete(sessionId);
     void resume();
@@ -2020,6 +2053,40 @@ export function createMessengerOpencodeBridge({
     return normalizeVerbosity(level ?? DEFAULT_VERBOSITY);
   }
 
+  /**
+   * Resolve the effective permission mode for a surface (`ask` | `auto-edit` |
+   * `yolo`). Mirrors {@link resolveVerbosity}'s resolution order: surface
+   * override (`/yolo`) → parent-channel override → per-project default →
+   * per-messenger default → `ask`. Read fresh at each `permission.asked` event
+   * so a `/yolo` change applies without a restart.
+   */
+  function resolvePermissionMode({ type, token, channelId, threadId }) {
+    const hash = tokenHash(token);
+    const stableKey = targetKey({ type, channelId, threadId });
+    let mode = null;
+    try {
+      const row = bridgeStore.lookup({ type, botTokenHash: hash, targetKey: stableKey });
+      let projectPath = row?.projectPath ?? null;
+      mode = row?.permissionModeOverride ?? null;
+      if (!mode && stableKey !== String(channelId)) {
+        const parent = bridgeStore.lookup({
+          type,
+          botTokenHash: hash,
+          targetKey: String(channelId),
+        });
+        mode = parent?.permissionModeOverride ?? null;
+        if (!projectPath) projectPath = parent?.projectPath ?? null;
+      }
+      if (!mode && projectPath) {
+        mode = bridgeStore.getProjectDefaults?.(projectPath)?.permissionModeDefault ?? null;
+      }
+      if (!mode) mode = bridgeStore.getPermissionModeDefault?.(type) ?? null;
+    } catch {
+      // ignore — best-effort, fall back to the safe default (ask)
+    }
+    return normalizePermissionMode(mode ?? DEFAULT_PERMISSION_MODE);
+  }
+
   // --- Outbound: post one message per renderable part --------------------
   async function postToSurface(ctx, content) {
     return postMessengerSurface(ctx, content);
@@ -2580,13 +2647,25 @@ export function createMessengerOpencodeBridge({
         if (defaultCtx) await handleGlobalEvent(normalized);
         return;
       }
+      const errText = formatSessionError(props?.error);
+      const now = Date.now();
+      // A turn superseded moments ago can emit a trailing abort error for the
+      // cancelled work while the replacement turn is already streaming. Don't
+      // surface that teardown as a fault, and keep the typing pulse (the new
+      // turn owns the surface now).
+      if (
+        ctx.supersededAt &&
+        now - ctx.supersededAt < SUPERSEDE_ERROR_GRACE_MS &&
+        isTransientTurnError(errText)
+      ) {
+        ctx.sentPartIds.clear();
+        return;
+      }
       stopTypingPulse(ctx);
       // Mark the turn as errored so the trailing session.idle doesn't tack on a
       // misleading "done · …" footer. The flag clears when the next turn starts
       // producing output (see emitPart) or a new prompt is sent.
       ctx.errored = true;
-      const errText = formatSessionError(props?.error);
-      const now = Date.now();
       // OpenCode emits one session.error per failed write (message + each part),
       // so the same fault can arrive several times in a row. Collapse repeats so
       // the surface isn't spammed with three identical lines.
@@ -2677,6 +2756,37 @@ export function createMessengerOpencodeBridge({
       }
 
       console.log('[PERMISSION]', `session=${sessionId} tool=${permission.permission} dir=${replyDirectory ?? 'none'} patterns=${permission.patterns.join(',')}`);
+
+      // Permission mode (`/yolo`) — pre-decide approvals so the user isn't
+      // prompted for every tool. Enforced here in core logic (not only in the
+      // button UI) so it applies across every surface and execution path.
+      const permissionMode = resolvePermissionMode({
+        type: ctx.type,
+        token: ctx.token,
+        channelId: ctx.channelId,
+        threadId: ctx.threadId,
+      });
+      if (permissionMode !== 'ask' && shouldAutoApprove(permissionMode, permission.permission)) {
+        if (typeof _respondToOpenCode === 'function' && permission.id) {
+          _respondToOpenCode({
+            sessionID: sessionId,
+            requestID: permission.id,
+            reply: 'once',
+            directory: replyDirectory,
+          }).catch((err) =>
+            console.error('[PERMISSION] auto-approve reply failed:', err?.message ?? err),
+          );
+        }
+        // The turn keeps running after an auto-approval — re-arm the typing
+        // pulse that this handler stopped so the bot doesn't look idle.
+        if (startTypingPulse) startTypingPulse(ctx);
+        const label = PERMISSION_MODE_LABELS[permissionMode] ?? permissionMode;
+        void postToSurface(
+          ctx,
+          `⚡ _Auto-approved (${escapeMd(label)}): \`${escapeMd(String(permission.permission))}\`_`,
+        );
+        return;
+      }
 
       sendApprovalToSurface({
         type: ctx.type,
@@ -3452,6 +3562,8 @@ export function createMessengerOpencodeBridge({
         variantOverride: stored?.variantOverride ?? null,
         verbosityOverride: stored?.verbosityOverride ?? null,
         verbosityDefault: bridgeStore.getVerbosityDefault?.(type) ?? null,
+        permissionModeOverride: stored?.permissionModeOverride ?? null,
+        permissionModeDefault: bridgeStore.getPermissionModeDefault?.(type) ?? null,
         projectDefaults,
         globalDefaultModel: globals.model,
         globalDefaultAgent: globals.agent,
@@ -3459,9 +3571,16 @@ export function createMessengerOpencodeBridge({
       surfaceMutators: {
         async setOverrides(changes) {
           bridgeStore.setOverrides({ type, botTokenHash: hash, targetKey: stableKey, ...changes });
+          if (changes.verbosityOverride !== undefined) {
+            applyPreferencesToActiveTurn({ type, token, channelId, threadId });
+          }
         },
         async setVerbosityDefault(level) {
           bridgeStore.setVerbosityDefault(type, level);
+          applyPreferencesToActiveTurn({ type, token, channelId, threadId });
+        },
+        async setPermissionModeDefault(mode) {
+          bridgeStore.setPermissionModeDefault(type, mode);
         },
         async unbindSession() {
           bridgeStore.unbindSession({ type, botTokenHash: hash, targetKey: stableKey });
@@ -3473,6 +3592,9 @@ export function createMessengerOpencodeBridge({
             projectLabel: stored.projectLabel,
             ...changes,
           });
+          if (changes.verbosityDefault !== undefined) {
+            applyPreferencesToActiveTurn({ type, token, channelId, threadId });
+          }
         },
       },
       bridgeOps,
@@ -4368,6 +4490,34 @@ export function createMessengerOpencodeBridge({
   }
 
   /**
+   * The user's UI hidden models (Settings → Providers → hide model). Read from
+   * the SAME `settings.json` the web UI persists to, so the Discord `/model`
+   * wizard hides exactly what the UI hides instead of listing every model the
+   * provider exposes. Returns an array of `{ providerID, modelID }`.
+   */
+  async function getHiddenModels() {
+    if (typeof readSettings !== 'function') return [];
+    try {
+      const settings = await readSettings();
+      const list = Array.isArray(settings?.hiddenModels) ? settings.hiddenModels : [];
+      const out = [];
+      const seen = new Set();
+      for (const m of list) {
+        const providerID = typeof m?.providerID === 'string' ? m.providerID.trim() : '';
+        const modelID = typeof m?.modelID === 'string' ? m.modelID.trim() : '';
+        if (!providerID || !modelID) continue;
+        const key = `${providerID}/${modelID}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({ providerID, modelID });
+      }
+      return out;
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * Resolve the effective model + thinking-effort (variant) for a surface, the
    * same way {@link routeInbound} does, so the `/model` wizard can show what's
    * currently in effect before the user changes it.
@@ -4526,6 +4676,41 @@ export function createMessengerOpencodeBridge({
    * last message" button). Goes through {@link routeInbound} so the new model /
    * effort apply and any in-flight turn is superseded.
    */
+  /**
+   * Apply a just-changed preference (verbosity, permission mode) to the turn
+   * that is streaming RIGHT NOW on a surface, instead of only the next one.
+   *
+   * `emitPart` already re-resolves verbosity live per part, but a mid-turn
+   * increase (e.g. `normal` → `verbose`) is otherwise held back by the
+   * one-shot thinking-marker dedup. Refreshing `ctx.verbosity` and clearing
+   * `lastPostedMarker` lets the remainder of the active turn render at the new
+   * level immediately. Best-effort and a no-op when nothing is streaming.
+   */
+  function applyPreferencesToActiveTurn({ type, token, channelId, threadId = null }) {
+    try {
+      const hash = tokenHash(token);
+      const stableKey = targetKey({ type, channelId, threadId });
+      let sessionId = bridgeStore.lookup({ type, botTokenHash: hash, targetKey: stableKey })?.sessionId || null;
+      if (!sessionId && stableKey !== String(channelId)) {
+        sessionId = bridgeStore.lookup({ type, botTokenHash: hash, targetKey: String(channelId) })?.sessionId || null;
+      }
+      if (!sessionId) return;
+      const ctx = sessionContexts.get(sessionId);
+      if (!ctx) return;
+      ctx.verbosity = resolveVerbosity({
+        type: ctx.type,
+        token: ctx.token,
+        channelId: ctx.channelId,
+        threadId: ctx.threadId,
+      });
+      // Let a mid-turn verbosity increase re-post the thinking marker / expand
+      // reasoning on the rest of the current turn.
+      ctx.lastPostedMarker = null;
+    } catch {
+      // best-effort — preferences still apply on the next part / turn
+    }
+  }
+
   async function resendLastMessage({ type, token, channelId, threadId = null, from = null }) {
     const key = lastPromptKey({ type, token, channelId, threadId });
     const text = lastPromptBySurface.get(key) ?? null;
@@ -4548,6 +4733,8 @@ export function createMessengerOpencodeBridge({
     setSurfaceModel,
     setGlobalDefaultModel,
     resendLastMessage,
+    applyPreferencesToActiveTurn,
+    getHiddenModels,
     statusSnapshot,
     isEnabled,
     ensureSubscribed,

@@ -135,6 +135,96 @@ describe('approval flow — reply directory', () => {
   });
 });
 
+describe('permission mode (/yolo) auto-approve', () => {
+  let originalFetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: 'discord-msg-1' }),
+      text: async () => '',
+    }));
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  function makeBridgeWithMode(mode) {
+    return makeBridge({
+      store: {
+        ...makeFakeStore(),
+        lookup: () => (mode ? { permissionModeOverride: mode } : null),
+        getPermissionModeDefault: () => null,
+      },
+    });
+  }
+
+  async function askPermission(bridge, permissionName) {
+    bridge._handleGlobalEvent({
+      directory: '/envelope/project',
+      payload: {
+        type: 'permission.asked',
+        properties: {
+          id: 'req-1',
+          sessionID: 'ses-1',
+          permission: permissionName,
+          patterns: [],
+          always: [],
+          metadata: {},
+        },
+      },
+    });
+    await flush();
+  }
+
+  it('yolo mode auto-approves without posting buttons', async () => {
+    const bridge = makeBridgeWithMode('yolo');
+    const respond = vi.fn(async () => {});
+    bridge.initApprovalListener(respond);
+
+    await askPermission(bridge, 'bash');
+
+    // No interactive approval message was tracked (auto-approved instead).
+    expect([...bridge.approvalContexts.keys()]).toHaveLength(0);
+    expect(respond).toHaveBeenCalledWith({
+      sessionID: 'ses-1',
+      requestID: 'req-1',
+      reply: 'once',
+      directory: '/envelope/project',
+    });
+  });
+
+  it('auto-edit mode auto-approves edits but still prompts for shell', async () => {
+    const respond1 = vi.fn(async () => {});
+    const editBridge = makeBridgeWithMode('auto-edit');
+    editBridge.initApprovalListener(respond1);
+    await askPermission(editBridge, 'edit');
+    expect(respond1).toHaveBeenCalledWith(expect.objectContaining({ reply: 'once' }));
+    expect([...editBridge.approvalContexts.keys()]).toHaveLength(0);
+
+    const respond2 = vi.fn(async () => {});
+    const shellBridge = makeBridgeWithMode('auto-edit');
+    shellBridge.initApprovalListener(respond2);
+    await askPermission(shellBridge, 'bash');
+    // Shell still requires an explicit decision → an approval message is posted.
+    expect(respond2).not.toHaveBeenCalled();
+    expect([...shellBridge.approvalContexts.keys()]).toHaveLength(1);
+  });
+
+  it('ask mode (default) always posts buttons', async () => {
+    const bridge = makeBridgeWithMode(null);
+    const respond = vi.fn(async () => {});
+    bridge.initApprovalListener(respond);
+    await askPermission(bridge, 'edit');
+    expect(respond).not.toHaveBeenCalled();
+    expect([...bridge.approvalContexts.keys()]).toHaveLength(1);
+  });
+});
+
 describe('discord project sync persistence', () => {
   let originalFetch;
 
@@ -1709,6 +1799,89 @@ describe('plain message supersedes an in-flight turn', () => {
     const sentBodies = promptCalls().map((c) => JSON.parse(c.body).parts[0].text);
     expect(sentBodies).toContain('second');
     expect(promptCalls()).toHaveLength(2);
+  });
+
+  it('suppresses a trailing abort error from the superseded turn (no false failure)', async () => {
+    const calls = [];
+    globalThis.fetch = vi.fn(async (url, init = {}) => {
+      calls.push({ url: String(url), method: init.method ?? 'GET', body: init.body });
+      return { ok: true, status: 200, json: async () => ({}), text: async () => '' };
+    });
+
+    const bridge = makeBridge({
+      store: {
+        ...makeFakeStore(),
+        lookup: ({ targetKey }) =>
+          targetKey === 'chan-sup2'
+            ? { sessionId: 'ses-sup2', projectPath: '/p', projectLabel: 'P' }
+            : null,
+      },
+    });
+
+    await bridge.routeInbound({
+      type: 'discord', token: 'bot-token', channelId: 'chan-sup2', threadId: null, text: 'first',
+    });
+    await bridge.routeInbound({
+      type: 'discord', token: 'bot-token', channelId: 'chan-sup2', threadId: null, text: 'second',
+    });
+
+    // The aborted turn settles via idle → the deferred prompt fires and the
+    // session is marked recently-superseded.
+    await bridge._handleGlobalEvent({
+      directory: '/p',
+      payload: { type: 'session.idle', properties: { sessionID: 'ses-sup2' } },
+    });
+    await flush();
+
+    // A LATE abort error arrives for the cancelled turn (after supersede cleared).
+    await bridge._handleGlobalEvent({
+      directory: '/p',
+      payload: {
+        type: 'session.error',
+        properties: { sessionID: 'ses-sup2', error: { data: { message: 'streaming response failed' } } },
+      },
+    });
+    await flush();
+
+    const errorLines = calls
+      .filter((c) => c.method === 'POST' && c.url.includes('/channels/chan-sup2/messages'))
+      .map((c) => JSON.parse(c.body).content)
+      .filter((p) => p.startsWith('✗'));
+    expect(errorLines).toHaveLength(0); // the abort teardown is not surfaced as a fault
+  });
+
+  it('still surfaces a genuine error once the supersede grace window passes', async () => {
+    const calls = [];
+    globalThis.fetch = vi.fn(async (url, init = {}) => {
+      calls.push({ url: String(url), method: init.method ?? 'GET', body: init.body });
+      return { ok: true, status: 200, json: async () => ({}), text: async () => '' };
+    });
+    const bridge = makeBridge({
+      store: {
+        ...makeFakeStore(),
+        lookup: ({ targetKey }) =>
+          targetKey === 'chan-sup3' ? { sessionId: 'ses-sup3', projectPath: '/p' } : null,
+      },
+    });
+
+    await bridge.routeInbound({
+      type: 'discord', token: 'bot-token', channelId: 'chan-sup3', threadId: null, text: 'go',
+    });
+    // A genuine, non-transient error (not an abort teardown) is always shown.
+    await bridge._handleGlobalEvent({
+      directory: '/p',
+      payload: {
+        type: 'session.error',
+        properties: { sessionID: 'ses-sup3', error: { data: { message: 'Model returned an invalid tool call' } } },
+      },
+    });
+    await flush();
+
+    const errorLines = calls
+      .filter((c) => c.method === 'POST' && c.url.includes('/channels/chan-sup3/messages'))
+      .map((c) => JSON.parse(c.body).content)
+      .filter((p) => p.startsWith('✗'));
+    expect(errorLines).toHaveLength(1);
   });
 });
 
