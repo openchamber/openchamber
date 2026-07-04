@@ -11,6 +11,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { MarkdownRenderer } from '../../MarkdownRenderer';
 import { useStreamingTextThrottle } from '../../hooks/useStreamingTextThrottle';
 import type { StreamPhase } from '../types';
+import { isPartStreaming } from './partStreaming';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
@@ -450,8 +451,8 @@ const ReasoningPart = React.memo(({
     const rawText = partWithText.text || partWithText.content || '';
     const textContent = React.useMemo(() => cleanReasoningText(rawText), [rawText]);
     const time = partWithText.time;
-    const canBeStreaming = streamPhase === undefined || streamPhase !== 'completed';
-    const isStreaming = chatRenderMode === 'live' && canBeStreaming && typeof time?.end !== 'number';
+    const hasEnded = typeof time?.end === 'number';
+    const isStreaming = isPartStreaming(chatRenderMode, streamPhase, hasEnded);
     const throttledText = useStreamingTextThrottle({
         text: textContent,
         isStreaming,
@@ -527,10 +528,8 @@ export const MergedReasoningPart = React.memo(({
         return earliestStart !== undefined ? { start: earliestStart, end: latestEnd } : undefined;
     }, [parts]);
 
-    const canBeStreaming = streamPhase === undefined || streamPhase !== 'completed';
-    const isStreaming = chatRenderMode === 'live' && canBeStreaming && parts.some(
-        (part) => typeof (part as PartWithText).time?.end !== 'number',
-    );
+    const hasEnded = typeof mergedTime?.end === 'number';
+    const isStreaming = isPartStreaming(chatRenderMode, streamPhase, hasEnded);
 
     const throttledMergedText = useStreamingTextThrottle({
         text: mergedText,

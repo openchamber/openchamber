@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 import { I18nProvider } from '@/lib/i18n';
 import { ReasoningTimelineBlock } from './ReasoningPart';
+import { isPartStreaming } from './partStreaming';
 
 // A reasoning text whose summary (first 120 chars) fits in the header but
 // whose expanded body content should only appear when the disclosure is open.
@@ -95,5 +96,61 @@ describe('ReasoningTimelineBlock', () => {
     expect(markup).not.toContain('remain hidden in the collapsed header view');
     // The ellipsis character marks that the text was truncated
     expect(markup).toContain('…');
+  });
+
+  test('a completed reasoning block mounts its expanded body content (no streaming gate)', () => {
+    // The expanded body container is present for a completed (non-streaming)
+    // block, confirming it is not held in a paced/sliced streaming state.
+    // (MarkdownRenderer fills its DOM via a client-side morphdom effect, so the
+    // streamed-vs-full text decision is covered by the isPartStreaming
+    // unit tests below.)
+    const markup = renderToStaticMarkup(
+      <I18nProvider>
+        <ReasoningTimelineBlock
+          text={LONG_REASONING}
+          variant="thinking"
+          blockId="reasoning-completed"
+          showDuration={false}
+          isStreaming={false}
+          time={{ start: 1, end: 2 }}
+          defaultExpanded={true}
+        />
+      </I18nProvider>,
+    );
+
+    expect(markup).toContain('data-message-text-export-source');
+  });
+});
+
+describe('isPartStreaming', () => {
+  test('a part whose time.end is set is never streaming', () => {
+    // Even mid-stream phase, an ended part renders in full. This covers
+    // reasoning (AC #2) and assistant text that is complete while the turn
+    // stays busy with a later tool call or pending question/permission.
+    expect(isPartStreaming('live', 'streaming', true)).toBe(false);
+    expect(isPartStreaming('live', 'cooldown', true)).toBe(false);
+    expect(isPartStreaming('live', 'completed', true)).toBe(false);
+    expect(isPartStreaming('live', undefined, true)).toBe(false);
+  });
+
+  test('a completed session (completed phase) does not stream', () => {
+    // AC #1: opening an already-completed session renders content in full.
+    expect(isPartStreaming('live', 'completed', false)).toBe(false);
+  });
+
+  test('an unknown phase is not treated as streaming', () => {
+    // Do not infer live activity from a missing phase signal (regression guard
+    // for the old `streamPhase === undefined || ...` permissive default).
+    expect(isPartStreaming('live', undefined, false)).toBe(false);
+  });
+
+  test('live, in-progress content still streams', () => {
+    // AC #3: progressive reveal is preserved for genuinely streaming turns.
+    expect(isPartStreaming('live', 'streaming', false)).toBe(true);
+    expect(isPartStreaming('live', 'cooldown', false)).toBe(true);
+  });
+
+  test('sorted render mode never streams', () => {
+    expect(isPartStreaming('sorted', 'streaming', false)).toBe(false);
   });
 });
