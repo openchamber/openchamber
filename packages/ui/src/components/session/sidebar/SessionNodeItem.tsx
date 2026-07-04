@@ -806,7 +806,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
         {isPinnedSession ? t('sessions.sidebar.session.menu.unpin') : t('sessions.sidebar.session.menu.pin')}
       </Item>
       {!isActive ? (
-        needsAttention ? (
+        unseenCount > 0 ? (
           <Item onClick={() => markSessionViewed(session.id)} className="[&>svg]:mr-1">
             <Icon name="checkbox-circle" className="mr-1 h-4 w-4" />
             {t('sessions.sidebar.session.menu.markRead')}
