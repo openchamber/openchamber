@@ -1778,21 +1778,18 @@ export function SyncProvider(props: {
                 .filter((s) => !!s?.id)
                 .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
 
-              // Also load child sessions (sub-agent delegations) so they
-              // appear in the sidebar immediately instead of relying on
-              // the async global session store.
+              // Also load child sessions (sub-agent delegations) with pagination
+              // so pending questions can scope to them immediately after restart.
               let allSessions: typeof rootSessions = []
               try {
-                const allResult = await props.sdk.session.list({
+                allSessions = await listGlobalSessionPages(props.sdk, {
                   directory: dir,
-                  limit: 200,
+                  archived: false,
+                  roots: false,
+                  pageSize: 500,
                 })
-                const allError = (allResult as { error?: unknown }).error
-                if (!allError) {
-                  allSessions = ((allResult as { data?: unknown }).data ?? []) as typeof rootSessions
-                }
               } catch {
-                // Child load is best-effort; fall back to roots only
+                // Child load is best-effort; fall back to roots only.
               }
 
               // Merge: keep root sessions from the first query (for accurate
