@@ -51,6 +51,7 @@ export type DesktopSettings = {
   // Optional absolute path to `opencode` binary.
   opencodeBinary?: string;
   desktopLanAccessEnabled?: boolean;
+  desktopKeepAwakeEnabled?: boolean;
   desktopUiPassword?: string;
   projects?: ProjectEntry[];
   activeProjectId?: string;
@@ -177,14 +178,12 @@ export type DesktopSettings = {
   responseStyleEnabled?: boolean;
   responseStylePreset?: 'concise' | 'detailed' | 'mentor' | 'pushback' | 'noFiller' | 'matchEnergy' | 'warmPeer' | 'custom';
   responseStyleCustomInstructions?: string;
-  sttProvider?: 'browser' | 'server' | 'wasm';
+  dictationEnabled?: boolean;
+  sttProvider?: 'local' | 'openai-compatible';
   sttServerUrl?: string;
   sttModel?: string;
-  wasmSttModel?: string;
+  sttLocalModel?: string;
   sttLanguage?: string;
-  sttSilenceThresholdDb?: number;
-  sttSilenceHoldMs?: number;
-  sttTranscribeOnStop?: boolean;
   // Global draft welcome starters (pinned commands/skills), persisted to settings.json
   draftStarters?: DraftStarterRef[];
 };
@@ -235,6 +234,12 @@ type LaunchAtLoginStatus = {
   enabled: boolean;
 };
 
+type KeepAwakeStatus = {
+  supported: boolean;
+  enabled: boolean;
+  active: boolean;
+};
+
 export const getDesktopLaunchAtLogin = async (): Promise<LaunchAtLoginStatus | null> => {
   if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
     return null;
@@ -265,6 +270,40 @@ export const setDesktopLaunchAtLogin = async (enabled: boolean): Promise<LaunchA
     return result;
   } catch (error) {
     console.warn('Failed to set launch at login status', error);
+    return null;
+  }
+};
+
+export const getDesktopKeepAwake = async (): Promise<KeepAwakeStatus | null> => {
+  if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
+    return null;
+  }
+
+  try {
+    const result = await invokeDesktop<KeepAwakeStatus>('desktop_get_keep_awake');
+    if (!result || typeof result.supported !== 'boolean' || typeof result.enabled !== 'boolean' || typeof result.active !== 'boolean') {
+      return null;
+    }
+    return result;
+  } catch (error) {
+    console.warn('Failed to get keep awake status', error);
+    return null;
+  }
+};
+
+export const setDesktopKeepAwake = async (enabled: boolean): Promise<KeepAwakeStatus | null> => {
+  if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
+    return null;
+  }
+
+  try {
+    const result = await invokeDesktop<KeepAwakeStatus>('desktop_set_keep_awake', { enabled });
+    if (!result || typeof result.supported !== 'boolean' || typeof result.enabled !== 'boolean' || typeof result.active !== 'boolean') {
+      return null;
+    }
+    return result;
+  } catch (error) {
+    console.warn('Failed to set keep awake status', error);
     return null;
   }
 };
@@ -819,4 +858,3 @@ export const fetchDesktopInstalledApps = async (
     return { apps: [], success: false, hasCache: false, isCacheStale: false };
   }
 };
-

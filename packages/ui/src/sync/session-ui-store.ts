@@ -190,7 +190,6 @@ function notifyMessageSent(sessionId: string): void {
 
 export type { SyntheticContextPart } from "./input-store"
 export type { SessionMemoryState } from "./viewport-store"
-export type { VoiceStatus, VoiceMode } from "./voice-store"
 
 export type NewSessionDraftState = {
   open: boolean

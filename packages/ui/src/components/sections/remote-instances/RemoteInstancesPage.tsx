@@ -46,7 +46,8 @@ import {
   resolveDesktopHostUrl,
   type DesktopHost,
 } from '@/lib/desktopHosts';
-import { isDesktopShell } from '@/lib/desktop';
+import { getDesktopLanAddress, isDesktopLocalOriginActive, isDesktopShell } from '@/lib/desktop';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeApiBaseUrl, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 
 const randomPort = (): number => {
@@ -227,6 +228,55 @@ const buildRequestHeaders = (headers: HeaderDraft[]): Record<string, string> | u
 
 const readRequestHeaderDrafts = (headers: Record<string, string> | undefined): HeaderDraft[] => {
   return Object.entries(headers || {}).map(([name, value]) => createHeaderDraft(name, value));
+};
+
+const getRuntimePort = (): number | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const runtimeApiBaseUrl = getRuntimeApiBaseUrl();
+  const portSource = runtimeApiBaseUrl || window.location.href;
+  try {
+    const port = Number(new URL(portSource).port || window.location.port);
+    return Number.isFinite(port) && port > 0 ? port : null;
+  } catch {
+    const port = Number(window.location.port);
+    return Number.isFinite(port) && port > 0 ? port : null;
+  }
+};
+
+const resolvePairingServerUrl = async (): Promise<string> => {
+  const fallback = normalizeHostUrl(getRuntimeApiBaseUrl()) || window.location.origin;
+  if (!isDesktopShell() || !isDesktopLocalOriginActive()) {
+    return fallback;
+  }
+
+  let response: Response;
+  try {
+    response = await runtimeFetch('/api/config/settings', {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+  } catch {
+    return fallback;
+  }
+  if (!response.ok) return fallback;
+
+  const settings = (await response.json().catch(() => null)) as null | {
+    desktopLanAccessActive?: unknown;
+  };
+  if (settings?.desktopLanAccessActive !== true) {
+    return fallback;
+  }
+
+  const address = await getDesktopLanAddress();
+  const port = getRuntimePort();
+  if (!address || !port) {
+    return fallback;
+  }
+
+  return `http://${address}:${port}`;
 };
 
 const navigateToUrl = (rawUrl: string): void => {
@@ -549,7 +599,7 @@ export const RemoteInstancesPage: React.FC = () => {
     if (!clientAuth) return;
     setRemoteClientError(null);
     try {
-      const serverUrl = normalizeHostUrl(getRuntimeApiBaseUrl()) || window.location.origin;
+      const serverUrl = await resolvePairingServerUrl();
       const result = await clientAuth.createClient({ label: remoteClientLabel.trim() || 'Paired client' });
       const payload = buildClientConnectionPayload({ serverUrl, token: result.token, label: remoteClientLabel || 'OpenChamber' });
       const encoded = encodeClientConnectionPayload(payload);

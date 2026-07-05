@@ -404,7 +404,12 @@ export function useSync() {
           complete: merged.complete,
           loading: false,
         })
-        store.setState({ message: materialized.message, part: materialized.part })
+        if (materialized.messagesChanged || materialized.partsChanged) {
+          store.setState({
+            ...(materialized.messagesChanged ? { message: materialized.message } : {}),
+            ...(materialized.partsChanged ? { part: materialized.part } : {}),
+          })
+        }
         setSessionPrefetch({
           directory,
           sessionID,
@@ -503,13 +508,16 @@ export function useSync() {
           shouldLoadMessages ? loadMessages(sessionID, { isStale }) : Promise.resolve(),
         ])
 
-        // Progressive mount: after the initial page resolves, if the session
-        // isn't stale and the server indicated more messages, dispatch a
-        // second fetch to prepend older history. The user sees the first page
-        // immediately; the rest arrive shortly after. This gives the scroll
-        // container headroom above the viewport so the "load older on
-        // scroll-up" trigger fires before the user hits the absolute top.
-        if (!isStale()) {
+        // Progressive mount (desktop/VS Code): after the initial page
+        // resolves, if the session isn't stale and the server indicated more
+        // messages, dispatch a second fetch to prepend older history — it
+        // gives the scroll container headroom so the scroll-up trigger fires
+        // seamlessly. Mobile deliberately opts out: it has no scroll-position
+        // trigger at all — ALL older history loads happen through the
+        // explicit "load older" button at the top, so every prepend lands
+        // from a resting state the user initiated. (The initial page itself,
+        // including the turn-boundary extension, is unaffected.)
+        if (!isStale() && !isMobileSurfaceRuntime()) {
           const currentMeta = getMetaFor(sessionID)
           if (currentMeta.cursor && !currentMeta.complete) {
             loadMessages(sessionID, { cursor: currentMeta.cursor, mode: "prepend", isStale })
@@ -549,6 +557,14 @@ export function useSync() {
 
   const isLoading = useCallback(
     (sessionID: string) => getMetaFor(sessionID).loading,
+    [getMetaFor],
+  )
+
+  // True only when a fetch has positively confirmed the history is fully
+  // loaded (no next cursor). Distinct from !hasMore(), which is also true for
+  // sessions whose meta simply hasn't been populated yet.
+  const isComplete = useCallback(
+    (sessionID: string) => getMetaFor(sessionID).complete,
     [getMetaFor],
   )
 
@@ -607,11 +623,12 @@ export function useSync() {
       loadMore,
       hasMore,
       isLoading,
+      isComplete,
       optimistic: {
         add: optimisticAdd,
         remove: optimisticRemove,
       },
     }),
-    [syncSession, loadMore, hasMore, isLoading, optimisticAdd, optimisticRemove],
+    [syncSession, loadMore, hasMore, isLoading, isComplete, optimisticAdd, optimisticRemove],
   )
 }

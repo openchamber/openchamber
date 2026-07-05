@@ -51,7 +51,12 @@ const MODULE_INSTALL_TIMEOUT_MS = 90_000;
 // where these methods don't exist (iOS) or when it's already available. Resolves once the module
 // is usable; rejects if the install is canceled, fails, or times out.
 const ensureScannerModule = async (plugin: BarcodeScannerPlugin): Promise<void> => {
-  if (!plugin.isGoogleBarcodeScannerModuleAvailable || !plugin.installGoogleBarcodeScannerModule) {
+  const capacitor = (window as typeof window & { Capacitor?: { getPlatform?: () => string } }).Capacitor;
+  if (
+    capacitor?.getPlatform?.() !== 'android' ||
+    !plugin.isGoogleBarcodeScannerModuleAvailable ||
+    !plugin.installGoogleBarcodeScannerModule
+  ) {
     return;
   }
   const status = await plugin.isGoogleBarcodeScannerModuleAvailable().catch(() => undefined);

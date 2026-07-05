@@ -51,11 +51,30 @@ const shouldIssueDesktopClientToken = (): boolean => {
   return isDesktopShell();
 };
 
+const isLoopbackHostname = (hostname: string): boolean => {
+  const clean = hostname.replace(/^\[|\]$/g, '');
+  return clean === 'localhost' || clean === '127.0.0.1' || clean === '::1';
+};
+
 const isLocalDesktopRuntime = (): boolean => {
   if (!isDesktopShell()) return false;
-  const apiBaseUrl = getRuntimeApiBaseUrl();
   const localOrigin = readLocalOrigin();
-  return Boolean(localOrigin && sameOrigin(localOrigin, apiBaseUrl));
+  if (!localOrigin) return false;
+  // An empty api base means same-origin requests against the page itself —
+  // which on desktop IS the embedded local server. Requiring an exact origin
+  // match here used to leave local client tokens untagged (no desktop-local
+  // clientKind), and the server's client-create gate then 403'd them.
+  const apiBaseUrl = getRuntimeApiBaseUrl();
+  const effectiveTarget = apiBaseUrl || (typeof window !== 'undefined' ? window.location.origin : '');
+  if (sameOrigin(localOrigin, effectiveTarget)) return true;
+  // Loopback aliases (localhost vs 127.0.0.1) still address this machine's
+  // own server.
+  try {
+    const normalized = normalizeHostUrl(effectiveTarget);
+    return Boolean(normalized && isLoopbackHostname(new URL(normalized).hostname));
+  } catch {
+    return false;
+  }
 };
 
 const desktopClientAuthMetadata = (): { clientKind?: string; dedupeKey?: string } => {

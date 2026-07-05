@@ -1,6 +1,8 @@
 import React from 'react';
+import { flushSync } from 'react-dom';
+import { isCapacitorApp } from '@/lib/platform';
 import { Textarea } from '@/components/ui/textarea';
-import { BrowserVoiceButton } from '@/components/voice';
+import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 // sessionStore removed — currentSessionId comes from useSessionUIStore
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -53,6 +55,8 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
+import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { GitHubIssuePickerDialog } from '@/components/session/GitHubIssuePickerDialog';
 import { GitHubPrPickerDialog } from '@/components/session/GitHubPrPickerDialog';
@@ -381,7 +385,7 @@ const getProjectIconColor = (projectColor?: string | null): string | undefined =
 };
 
 const MemoModelControls = React.memo(ModelControls);
-const MemoBrowserVoiceButton = React.memo(BrowserVoiceButton);
+const MemoComposerDictation = React.memo(ComposerDictation);
 const MemoMobileAgentButton = React.memo(MobileAgentButton);
 const MemoMobileModelButton = React.memo(MobileModelButton);
 const MemoStatusRow = React.memo(StatusRow);
@@ -528,6 +532,9 @@ type ComposerAttachmentControlsProps = {
     openIssuePicker: () => void;
     openPrPicker: () => void;
     onOpenSettings?: () => void;
+    onMenuOpenChange?: (open: boolean) => void;
+    /** Mobile: open the attachment bottom sheet instead of the dropdown menu. */
+    onOpenMobileSheet?: () => void;
 };
 
 const ComposerAttachmentControls = React.memo(function ComposerAttachmentControls(props: ComposerAttachmentControlsProps) {
@@ -556,7 +563,17 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
             />
 
             <div className="relative inline-flex">
-                {isVSCode ? (
+                {props.onOpenMobileSheet ? (
+                    <button
+                        type="button"
+                        className={footerIconButtonClass}
+                        onClick={props.onOpenMobileSheet}
+                        title={t('chat.chatInput.actions.addAttachment')}
+                        aria-label={t('chat.chatInput.actions.addAttachment')}
+                    >
+                        <Icon name="add-circle" className={cn(iconSizeClass, 'text-current')} />
+                    </button>
+                ) : isVSCode ? (
                     <button
                         type="button"
                         className={footerIconButtonClass}
@@ -567,7 +584,7 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
                         <Icon name="attachment-2" className={cn(iconSizeClass, 'text-current')} />
                     </button>
                 ) : (
-                    <DropdownMenu>
+                    <DropdownMenu onOpenChange={props.onMenuOpenChange}>
                         <DropdownMenuTrigger asChild>
                             <button
                                 type="button"
@@ -626,6 +643,8 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
     && prev.footerIconButtonClass === next.footerIconButtonClass
     && prev.iconSizeClass === next.iconSizeClass
     && prev.onOpenSettings === next.onOpenSettings
+    && prev.onMenuOpenChange === next.onMenuOpenChange
+    && prev.onOpenMobileSheet === next.onOpenMobileSheet
 ));
 
 type PermissionAutoAcceptButtonProps = {
@@ -989,6 +1008,31 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const [snippetQuery, setSnippetQuery] = React.useState('');
     const [textareaSize, setTextareaSize] = React.useState<{ height: number; maxHeight: number } | null>(null);
     const [mobileControlsPanel, setMobileControlsPanel] = React.useState<MobileControlsPanel>(null);
+    // Mobile pill composer: when the keyboard is closed the composer collapses
+    // into a narrow pill (+ / placeholder / mic) with a round new-session button
+    // beside it. Any interaction expands back into the full composer. The swap
+    // is deliberately INSTANT and synchronized with the keyboard choreography,
+    // so the chat compensates keyboard + composer height in a single motion.
+    const [mobileComposerExpanded, setMobileComposerExpanded] = React.useState(false);
+    const [mobileTextareaFocused, setMobileTextareaFocused] = React.useState(false);
+    const [mobileDictationActive, setMobileDictationActive] = React.useState(false);
+    const [mobileAttachMenuOpen, setMobileAttachMenuOpen] = React.useState(false);
+    const [mobileDraftPicker, setMobileDraftPicker] = React.useState<'project' | 'branch' | null>(null);
+    const [mobileDraftPickerQuery, setMobileDraftPickerQuery] = React.useState('');
+    // True while ANY MobileOverlayPanel is open (sessions sheet, model/agent
+    // panels, pickers...). Opening one closes the keyboard, which must not
+    // collapse the composer into the pill under the overlay.
+    const [mobileOverlayHostBusy, setMobileOverlayHostBusy] = React.useState(false);
+    // Set while an expansion is settling (focus/dictation not yet active) so the
+    // collapse watcher doesn't immediately fold the composer back into the pill.
+    const mobileExpandIntentRef = React.useRef<'focus' | null>(null);
+    // Keyboard restore across overlays: opening an overlay closes the keyboard;
+    // if it was open at that moment, reopen it when the overlay closes.
+    const lastMobileBlurAtRef = React.useRef(0);
+    const restoreKeyboardAfterOverlayRef = React.useRef(false);
+    // Pill ↔ full composer morph: the wrapper FLIP-animates its height between
+    // the two shapes while the swapped content fades in.
+    const composerHandleTouchRef = React.useRef<{ startY: number; fired: boolean } | null>(null);
     // Message history navigation state (up/down arrow to recall previous messages)
     const [historyIndex, setHistoryIndex] = React.useState(-1); // -1 = not browsing, 0+ = index from most recent
     const [draftMessage, setDraftMessage] = React.useState(''); // Preserves input when entering history mode
@@ -1029,6 +1073,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
     const newSessionDraftOpen = Boolean(newSessionDraft?.open);
     const setNewSessionDraftTarget = useSessionUIStore((s) => s.setNewSessionDraftTarget);
+    const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
     const availableWorktreesByProject = useSessionUIStore((s) => s.availableWorktreesByProject);
     const abortPromptSessionId = useSessionUIStore((s) => s.abortPromptSessionId);
     const clearAbortPrompt = useSessionUIStore((s) => s.clearAbortPrompt);
@@ -1146,6 +1191,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, [currentSessionId, currentDirectory, t]);
 
     const isDesktopExpanded = isExpandedInput && !isMobile;
+    // Mobile fullscreen composer (entered via the drag handle's swipe-up).
+    const isMobileExpanded = isExpandedInput && isMobile;
+    const isComposerExpanded = isDesktopExpanded || isMobileExpanded;
     // Rounder composer on mobile (touch UI reads better with a softer corner).
     const chatInputRadius = isMobile ? '1.5rem' : 'var(--radius-xl)';
     const useCompactChatPlaceholder = isMobile || isNarrowComposer;
@@ -1650,10 +1698,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!isMobile) {
             return;
         }
+        // Set the panel state BEFORE blurring: the collapse watcher and the
+        // overlay-host observer must already see the overlay as open when the
+        // keyboard-close lands, otherwise the composer folds into the pill
+        // under the sheet.
+        setMobileControlsPanel(panel);
         textareaRef.current?.blur();
-        requestAnimationFrame(() => {
-            setMobileControlsPanel(panel);
-        });
     }, [isMobile]);
 
     // Consume pending input text (e.g., from revert action)
@@ -1699,6 +1749,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         queuedOnly?: boolean;
         queuedMessageId?: string;
         delivery?: 'steer';
+        /** Submit this text instead of the composer input. Used by preset
+            starter chips: on mobile the collapsed pill has no mounted textarea,
+            so the DOM-first input snapshot would read empty content. */
+        presetText?: string;
     };
     const handleSubmitRef = React.useRef<(options?: SubmitOptions) => Promise<void>>(async () => {});
 
@@ -1772,7 +1826,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         const queuedOnly = options?.queuedOnly ?? false;
         const queuedMessageId = options?.queuedMessageId;
         const delivery = options?.delivery === 'steer' && sessionPhase !== 'idle' ? 'steer' : undefined;
-        const inputSnapshot = getCurrentInputSnapshot();
+        const inputSnapshot = options?.presetText != null
+            ? {
+                message: options.presetText,
+                hasContent: options.presetText.trim().length > 0 || sendableAttachedFiles.length > 0 || hasDrafts,
+            }
+            : getCurrentInputSnapshot();
         const queuedMessagesToSend = queuedMessageId
             ? queuedMessages.filter((message) => message.id === queuedMessageId)
             : queuedMessages;
@@ -2306,16 +2365,37 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
     }, [inputMode, getCurrentInputSnapshot, currentSessionId, sessionPhase, autoReviewRunning, followUpBehavior, handleQueueMessage]);
 
-    // Draft welcome presets: populate the composer and submit immediately.
-    // getCurrentInputSnapshot reads textareaRef.current.value first, so setting it
-    // synchronously lets handleSubmit pick up the preset text in the same tick.
+    // Draft welcome presets: submit immediately.
     const submitPresetPrompt = React.useCallback((text: string) => {
-        const textarea = textareaRef.current;
-        if (textarea) {
-            textarea.value = text;
-        }
-        setMessage(text);
-        void handleSubmitRef.current();
+        // The text goes straight into the submit (see SubmitOptions.presetText)
+        // instead of through the composer input — the collapsed mobile pill has
+        // no mounted textarea to stage it in.
+        void handleSubmitRef.current({ presetText: text });
+    }, []);
+
+    // Dictation: insert the transcript inline; optionally submit immediately.
+    // getCurrentInputSnapshot reads textareaRef.current.value first, so setting
+    // it synchronously lets handleSubmit pick up the text in the same tick.
+    const handleDictationInsert = React.useCallback((text: string) => {
+        setMessage((prev) => {
+            const next = appendInlineText(prev, text);
+            const textarea = textareaRef.current;
+            if (textarea) {
+                textarea.value = next;
+            }
+            return next;
+        });
+        setTimeout(() => {
+            textareaRef.current?.focus();
+        }, 0);
+    }, []);
+
+    const handleDictationInsertAndSend = React.useCallback((text: string) => {
+        // Same as preset chips: the composed text goes into the submit as an
+        // explicit override instead of being staged in the textarea, which may
+        // not be mounted (collapsed mobile pill).
+        const next = appendInlineText(textareaRef.current?.value ?? messageRef.current, text);
+        void handleSubmitRef.current({ presetText: next });
     }, []);
 
     // Preset chips rendered outside this component (e.g. under the welcome
@@ -2733,7 +2813,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         const previousScrollTop = textarea.scrollTop;
 
-        if (isDesktopExpanded) {
+        if (isComposerExpanded) {
             textarea.style.height = '100%';
             textarea.style.maxHeight = 'none';
             setTextareaSize(null);
@@ -2774,7 +2854,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
             return { height: nextHeight, maxHeight };
         });
-    }, [isDesktopExpanded]);
+    }, [isComposerExpanded]);
 
     React.useLayoutEffect(() => {
         const allowShrink = message.length < previousMessageLengthRef.current;
@@ -3956,6 +4036,337 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         });
     }, [draftBranchItems, newSessionDraft?.bootstrapPendingDirectory, newSessionDraft?.pendingWorktreeRequestId, newSessionDraft?.preserveDirectoryOverride, selectedDraftDirectory, selectedDraftProject, setNewSessionDraftTarget, showDraftTargetSelectors]);
 
+    // ── Mobile pill composer state machine ─────────────────────────────────
+    const expandMobileComposer = React.useCallback((intent: 'focus') => {
+        mobileExpandIntentRef.current = intent;
+        // flushSync so the textarea exists NOW and focus() still runs inside
+        // the user gesture's call stack: mobile browsers only open the soft
+        // keyboard for focus calls made synchronously from the tap (an rAF
+        // here worked in the Capacitor WebView but not in Safari/Chrome).
+        flushSync(() => {
+            setMobileComposerExpanded(true);
+        });
+        // Capacitor: our keyboard choreography positions everything, so the
+        // browser's own scroll-into-view must stay off. Mobile BROWSERS have no
+        // choreography — the native reveal (viewport pan that lifts the focused
+        // field above the keyboard) is the only thing that moves the composer.
+        textareaRef.current?.focus({ preventScroll: isCapacitorApp() });
+    }, []);
+
+    const handleMobileNewSession = React.useCallback(() => {
+        if (newSessionDraftOpen) return;
+        openNewSessionDraft(currentDirectory ? { directoryOverride: currentDirectory } : undefined);
+    }, [newSessionDraftOpen, openNewSessionDraft, currentDirectory]);
+
+    const openMobileAttachSheet = React.useCallback(() => {
+        setMobileAttachMenuOpen(true);
+    }, []);
+
+    const mobileComposerExpandedRef = React.useRef(mobileComposerExpanded);
+    React.useEffect(() => {
+        mobileComposerExpandedRef.current = mobileComposerExpanded;
+    });
+
+    const handleMobileDictationActiveChange = React.useCallback((active: boolean) => {
+        setMobileDictationActive(active);
+        if (active) {
+            mobileExpandIntentRef.current = null;
+            // Dictation engine went live (possibly started from the pill):
+            // switch straight into the voice variant of the full composer.
+            if (!mobileComposerExpandedRef.current) {
+                setMobileComposerExpanded(true);
+            }
+            return;
+        }
+        // Dictation ended. The insert flow hands focus back to the textarea a
+        // tick later — if that happened, stay expanded; otherwise (cancel,
+        // discard, insert-and-send) collapse straight back to the pill without
+        // parking on the normal composer for the usual grace period.
+        window.setTimeout(() => {
+            if (!mobileComposerExpandedRef.current) return;
+            if (document.activeElement === textareaRef.current) return;
+            setMobileComposerExpanded(false);
+            setExpandedInput(false);
+        }, 30);
+    }, [setExpandedInput]);
+
+    // Watch the shared overlay portal root: any mounted MobileOverlayPanel
+    // (sessions sheet, model/agent panels, draft pickers, ...) counts as busy.
+    // Observing the host catches overlays whose open-state lives in other
+    // components without threading their state here.
+    React.useEffect(() => {
+        if (!isMobile || typeof document === 'undefined') return;
+        let host = document.getElementById('mobile-overlay-root');
+        if (!host) {
+            // Same lazy-create contract as MobileOverlayPanel's ensureOverlayRoot.
+            host = document.createElement('div');
+            host.id = 'mobile-overlay-root';
+            document.body.appendChild(host);
+        }
+        const hostEl = host;
+        const update = () => setMobileOverlayHostBusy(hostEl.childElementCount > 0);
+        update();
+        const observer = new MutationObserver(update);
+        observer.observe(hostEl, { childList: true });
+        return () => observer.disconnect();
+    }, [isMobile]);
+
+    // If the keyboard was open (or closed just moments ago by the overlay's own
+    // blur) when an overlay appeared, bring it back once every overlay is gone.
+    // The attach dropdown and the GitHub issue/PR pickers join the same chain,
+    // so menu → picker → close restores the keyboard at the end of the flow.
+    const mobileOverlayOpen = mobileOverlayHostBusy
+        || Boolean(mobileControlsPanel)
+        || mobileAttachMenuOpen
+        || issuePickerOpen
+        || prPickerOpen;
+    React.useEffect(() => {
+        if (!isMobile) return;
+        if (mobileOverlayOpen) {
+            if (mobileTextareaFocused || Date.now() - lastMobileBlurAtRef.current < 800) {
+                restoreKeyboardAfterOverlayRef.current = true;
+            }
+            return;
+        }
+        if (!restoreKeyboardAfterOverlayRef.current) return;
+        // Debounced: overlay chains hand off with a frame of "nothing open"
+        // between steps (attach sheet closes → issue/PR picker opens a frame
+        // later). Restoring instantly in that gap would pop the keyboard open
+        // inside the next overlay — wait out the gap and cancel if another
+        // overlay appears.
+        const timer = window.setTimeout(() => {
+            restoreKeyboardAfterOverlayRef.current = false;
+            // Browsers need their native scroll-into-view (see expandMobileComposer).
+            textareaRef.current?.focus({ preventScroll: isCapacitorApp() });
+        }, 180);
+        return () => window.clearTimeout(timer);
+    }, [isMobile, mobileOverlayOpen, mobileTextareaFocused]);
+
+    // Fold the full composer back into the pill once nothing keeps it open:
+    // keyboard closed (textarea blurred), no dictation, no sheet/menu/dialog.
+    // The short delay bridges focus moving between composer controls.
+    const mobileComposerBusy = mobileTextareaFocused
+        || mobileOverlayHostBusy
+        || mobileDictationActive
+        || Boolean(mobileControlsPanel)
+        || mobileAttachMenuOpen
+        || mobileDraftPicker !== null
+        || issuePickerOpen
+        || prPickerOpen
+        || isDragging;
+    React.useEffect(() => {
+        if (!isMobile || !mobileComposerExpanded || mobileComposerBusy) return;
+        const timer = window.setTimeout(() => {
+            mobileExpandIntentRef.current = null;
+            setMobileComposerExpanded(false);
+            setExpandedInput(false);
+        }, 250);
+        return () => window.clearTimeout(timer);
+    }, [isMobile, mobileComposerExpanded, mobileComposerBusy, setExpandedInput]);
+
+    const mobileComposerBusyRef = React.useRef(false);
+    mobileComposerBusyRef.current = mobileComposerBusy;
+
+    // Browser counterpart of Capacitor's oc-keyboard-open root class (which is
+    // driven by native keyboard events): the focused composer textarea is the
+    // best keyboard proxy a browser has. CSS keyed on it hides the draft
+    // starters while typing, mirroring the native app.
+    React.useEffect(() => {
+        if (!isMobile || isCapacitorApp() || typeof document === 'undefined') return;
+        const root = document.documentElement;
+        if (mobileTextareaFocused) {
+            root.classList.add('oc-browser-keyboard-open');
+        } else {
+            root.classList.remove('oc-browser-keyboard-open');
+        }
+        return () => root.classList.remove('oc-browser-keyboard-open');
+    }, [isMobile, mobileTextareaFocused]);
+
+    // Capacitor: collapse in the SAME frame the keyboard starts hiding. The
+    // hide choreography dispatches oc:keyboard-intent BEFORE restoring the
+    // shell layout and measuring the chat compensation; flushSync commits the
+    // pill swap first, so keyboard land + composer shrink are measured (and
+    // compensated) as ONE motion instead of a two-step staircase. The delayed
+    // effect above stays as the fallback for non-Capacitor and for overlays
+    // closing without a keyboard transition.
+    React.useEffect(() => {
+        if (!isMobile || typeof window === 'undefined') return;
+        const handleIntent = (event: Event) => {
+            const detail = (event as CustomEvent<{ open?: boolean }>).detail;
+            if (!detail || detail.open !== false) return;
+            if (!mobileComposerExpandedRef.current) return;
+            // Something still holds the composer open (dictation, an overlay
+            // that closed the keyboard, drag) — the fallback path handles it.
+            if (mobileComposerBusyRef.current) return;
+            mobileExpandIntentRef.current = null;
+            flushSync(() => {
+                setMobileComposerExpanded(false);
+                setExpandedInput(false);
+            });
+        };
+        window.addEventListener('oc:keyboard-intent', handleIntent);
+        return () => window.removeEventListener('oc:keyboard-intent', handleIntent);
+    }, [isMobile, setExpandedInput]);
+
+    // Reset the picker search whenever a draft picker sheet opens/closes.
+    React.useEffect(() => {
+        setMobileDraftPickerQuery('');
+    }, [mobileDraftPicker]);
+
+
+    // ── Composer drag handle (mobile): swipe up = fullscreen, swipe down =
+    // leave fullscreen or dismiss the keyboard. ────────────────────────────
+    const handleComposerHandleTouchStart = React.useCallback((event: React.TouchEvent) => {
+        const touch = event.touches.item(0);
+        composerHandleTouchRef.current = touch ? { startY: touch.clientY, fired: false } : null;
+    }, []);
+    const handleComposerHandleTouchMove = React.useCallback((event: React.TouchEvent) => {
+        const state = composerHandleTouchRef.current;
+        if (!state || state.fired) return;
+        const touch = event.touches.item(0);
+        if (!touch) return;
+        const dy = touch.clientY - state.startY;
+        if (dy <= -28) {
+            state.fired = true;
+            if (!isExpandedInput) setExpandedInput(true);
+        } else if (dy >= 28) {
+            state.fired = true;
+            if (isExpandedInput) {
+                setExpandedInput(false);
+            } else {
+                textareaRef.current?.blur();
+            }
+        }
+    }, [isExpandedInput, setExpandedInput]);
+    const handleComposerHandleTouchEnd = React.useCallback(() => {
+        composerHandleTouchRef.current = null;
+    }, []);
+
+    // Fullscreen composer in a mobile BROWSER: the page layout doesn't shrink
+    // for the keyboard there — Safari pans/scrolls instead, so any flow-based
+    // sizing ends up partly off-screen or under the keyboard (the chat page is
+    // usually already panned when fullscreen is entered). Pin the form to the
+    // VISUAL viewport directly: fixed at its offset with its height, updated
+    // as the browser pans. Capacitor is excluded — its shell already resizes
+    // via the keyboard choreography.
+    const composerFormRef = React.useRef<HTMLFormElement | null>(null);
+    React.useLayoutEffect(() => {
+        if (!isMobile || !isMobileExpanded || isCapacitorApp()) return;
+        const vv = window.visualViewport;
+        const form = composerFormRef.current;
+        if (!vv || !form) return;
+        // The form is trapped inside lower stacking contexts (the composer
+        // wrapper's z-10), so it cannot out-stack the app header with z-index
+        // alone — hide the header for the duration via a root class instead.
+        document.documentElement.classList.add('oc-browser-kb-fullscreen');
+        const apply = () => {
+            form.style.position = 'fixed';
+            form.style.left = '0';
+            form.style.right = '0';
+            form.style.top = `${Math.max(0, Math.floor(vv.offsetTop))}px`;
+            form.style.height = `${Math.floor(vv.height)}px`;
+            form.style.zIndex = '40';
+            form.style.background = 'var(--background)';
+        };
+        apply();
+        vv.addEventListener('resize', apply);
+        vv.addEventListener('scroll', apply);
+        window.addEventListener('scroll', apply, true);
+        return () => {
+            vv.removeEventListener('resize', apply);
+            vv.removeEventListener('scroll', apply);
+            window.removeEventListener('scroll', apply, true);
+            document.documentElement.classList.remove('oc-browser-kb-fullscreen');
+            form.style.position = '';
+            form.style.left = '';
+            form.style.right = '';
+            form.style.top = '';
+            form.style.height = '';
+            form.style.zIndex = '';
+            form.style.background = '';
+            // Back in flow: the browser panned/scrolled for the fullscreen
+            // session and won't re-reveal the (still focused) field on its own,
+            // which left the composer parked behind the keyboard.
+            requestAnimationFrame(() => {
+                const textarea = textareaRef.current;
+                if (textarea && document.activeElement === textarea) {
+                    textarea.scrollIntoView({ block: 'nearest' });
+                }
+            });
+        };
+    }, [isMobile, isMobileExpanded]);
+
+    // Draft screen in a mobile BROWSER with the keyboard open: Safari's own
+    // focused-field reveal is unreliable there (leaving the composer behind
+    // the keyboard, e.g. after collapsing from fullscreen), so the NORMAL
+    // composer is pinned to the visual viewport too — anchored to its visible
+    // bottom at its natural height. The chat screen doesn't need this (its
+    // reveal works) and Capacitor has the keyboard choreography.
+    React.useLayoutEffect(() => {
+        if (!isMobile || isCapacitorApp()) return;
+        if (!newSessionDraftOpen || isMobileExpanded || !mobileTextareaFocused) return;
+        const vv = window.visualViewport;
+        const form = composerFormRef.current;
+        if (!vv || !form) return;
+        // Keep the in-flow horizontal geometry (page paddings) while fixed.
+        const rect = form.getBoundingClientRect();
+        form.style.position = 'fixed';
+        form.style.left = `${Math.floor(rect.left)}px`;
+        form.style.width = `${Math.floor(rect.width)}px`;
+        form.style.zIndex = '40';
+        form.style.background = 'var(--background)';
+        // Safari's visualViewport events are unreliable mid keyboard pan (they
+        // can simply not fire), so track the pan with a rAF loop instead —
+        // cheap math per frame, a style write only when the value changes.
+        let lastTop = Number.NaN;
+        let frame = 0;
+        const track = () => {
+            const top = Math.max(0, Math.floor(vv.offsetTop + vv.height - form.offsetHeight));
+            if (top !== lastTop) {
+                lastTop = top;
+                form.style.top = `${top}px`;
+            }
+            frame = requestAnimationFrame(track);
+        };
+        track();
+        return () => {
+            cancelAnimationFrame(frame);
+            form.style.position = '';
+            form.style.left = '';
+            form.style.width = '';
+            form.style.top = '';
+            form.style.zIndex = '';
+            form.style.background = '';
+        };
+    }, [isMobile, isMobileExpanded, newSessionDraftOpen, mobileTextareaFocused]);
+
+    // Shared drag handle: rendered at the top of the full composer AND inside
+    // the dictation overlay, so swipe-expand/collapse works in Listening mode.
+    // Memoized so the always-mounted dictation instance's memo stays effective.
+    const mobileComposerHandle = React.useMemo(() => isMobile ? (
+        <div
+            // Generous hit area (~28px tall, full width); the visible bar stays
+            // slim inside it.
+            className="relative z-10 flex touch-none items-center justify-center py-2"
+            onTouchStart={handleComposerHandleTouchStart}
+            onTouchMove={handleComposerHandleTouchMove}
+            onTouchEnd={handleComposerHandleTouchEnd}
+            onTouchCancel={handleComposerHandleTouchEnd}
+            aria-hidden="true"
+        >
+            <div
+                className="h-1.5 w-12 rounded-full"
+                style={{ backgroundColor: currentTheme.colors.interactive.border }}
+            />
+        </div>
+    ) : null, [
+        isMobile,
+        handleComposerHandleTouchStart,
+        handleComposerHandleTouchMove,
+        handleComposerHandleTouchEnd,
+        currentTheme.colors.interactive.border,
+    ]);
+
     const footerPaddingClass = isMobile ? 'px-1.5 py-1.5' : (isVSCode ? 'px-1.5 py-1' : 'px-2.5 py-1.5');
     const buttonSizeClass = isMobile ? 'h-8 w-8' : (isVSCode ? 'h-5 w-5' : 'h-6 w-6');
     const sendIconSizeClass = isMobile ? 'h-4 w-4' : (isVSCode ? 'h-3.5 w-3.5' : 'h-4 w-4');
@@ -4013,10 +4424,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     return (
         <>
         <form
+            ref={composerFormRef}
             onSubmit={(e) => { e.preventDefault(); handlePrimaryAction(); }}
             className={cn(
                 "relative w-full pt-0 pb-4",
                 isDesktopExpanded && 'flex h-full min-h-0 flex-col pt-4',
+                isMobileExpanded && 'flex h-full min-h-0 flex-col pt-2',
                 isMobile && 'bottom-safe-area oc-mobile-composer'
             )}
             style={isMobile && inputBarOffset > 0 ? { marginBottom: `${inputBarOffset}px` } : undefined}
@@ -4033,7 +4446,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     </h1>
                 </div>
             ) : null}
-            <div className={cn('chat-input-column relative overflow-visible', isDesktopExpanded && 'flex flex-1 min-h-0 flex-col')}>
+            <div className={cn('chat-input-column relative overflow-visible', isComposerExpanded && 'flex flex-1 min-h-0 flex-col')}>
                 <AttachedFilesList onShowPopup={handleShowAttachmentPreview} />
                 <QueuedMessageChips
                     onEditMessage={handleQueuedMessageEdit}
@@ -4225,7 +4638,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     showTodos
                     leftAccessory={newSessionDraftOpen || !hasPendingChanges ? null : <PendingChangesBar />}
                 />
-                {showDraftTargetSelectors && selectedDraftProject ? (
+                {!isMobile && showDraftTargetSelectors && selectedDraftProject ? (
                     <div className="mb-1.5 flex min-w-0 items-center gap-1.5 px-0.5">
                         <Select
                             value={selectedDraftProject.id}
@@ -4299,10 +4712,117 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         ) : null}
                     </div>
                 ) : null}
+                {isMobile && showDraftTargetSelectors && selectedDraftProject ? (
+                    <div className="mb-1.5 flex min-w-0 items-center gap-x-2 px-0.5">
+                        <button
+                            type="button"
+                            className="inline-flex h-7 min-w-0 max-w-[42vw] flex-shrink cursor-pointer items-center gap-1 rounded-lg px-1.5 typography-micro font-medium text-foreground/80 hover:bg-[var(--interactive-hover)]"
+                            onClick={() => setMobileDraftPicker('project')}
+                        >
+                            {renderProjectLabelWithIcon(selectedDraftProject)}
+                            <Icon name="arrow-down-s" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+                        </button>
+                        {shouldShowDraftBranchSelector ? (
+                            <button
+                                type="button"
+                                className="inline-flex h-7 min-w-0 max-w-[48vw] flex-shrink cursor-pointer items-center gap-1 rounded-lg px-1.5 typography-micro font-medium text-foreground/80 hover:bg-[var(--interactive-hover)]"
+                                onClick={() => setMobileDraftPicker('branch')}
+                            >
+                                <span className="truncate">{selectedDraftBranchLabel ?? t('chat.chatInput.branch')}</span>
+                                <Icon name="arrow-down-s" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+                            </button>
+                        ) : null}
+                    </div>
+                ) : null}
+                <div
+                    // Desktop: layout-transparent. Mobile: positioning host for
+                    // the wrapper-level dictation overlay across pill/full states.
+                    className={cn(
+                        !isMobile && 'contents',
+                        isMobile && 'relative',
+                        isMobileExpanded && 'flex min-h-0 flex-1 flex-col',
+                    )}
+                >
+                {isMobile && !mobileComposerExpanded ? (
+                    <div className="flex items-center gap-2">
+                        <div
+                            className="flex h-11 min-w-0 flex-1 items-center gap-x-0.5 rounded-full border border-border/80 pl-2 pr-1"
+                            style={{ backgroundColor: currentTheme?.colors?.surface?.subtle }}
+                        >
+                            <MobileSessionPanelTrigger
+                                footerIconButtonClass={footerIconButtonClass}
+                                iconSizeClass={iconSizeClass}
+                            />
+                            <ComposerAttachmentControls
+                                isVSCode={isVSCode}
+                                footerIconButtonClass={footerIconButtonClass}
+                                iconSizeClass={iconSizeClass}
+                                fileInputRef={fileInputRef}
+                                handleLocalFileSelect={handleLocalFileSelect}
+                                handlePickLocalFiles={handlePickLocalFiles}
+                                openIssuePicker={openIssuePicker}
+                                openPrPicker={openPrPicker}
+                                onOpenMobileSheet={openMobileAttachSheet}
+                            />
+                            <button
+                                type="button"
+                                className="flex h-full min-w-0 flex-1 cursor-text items-center px-1.5 text-left"
+                                onClick={() => expandMobileComposer('focus')}
+                            >
+                                <span
+                                    className={cn(
+                                        'truncate typography-ui-label',
+                                        message.trim() ? 'text-foreground' : 'text-muted-foreground',
+                                    )}
+                                >
+                                    {message.trim()
+                                        ? message
+                                        : currentSessionId || newSessionDraftOpen
+                                            ? t('chat.chatInput.placeholder.chatCompact')
+                                            : t('chat.chatInput.placeholder.selectSession')}
+                                </span>
+                            </button>
+                            <button
+                                type="button"
+                                className={footerIconButtonClass}
+                                onClick={() => {
+                                    // Start recording in place; the composer morphs
+                                    // into the voice variant once dictation is live
+                                    // (handleMobileDictationActiveChange).
+                                    window.dispatchEvent(new CustomEvent('openchamber:dictation-toggle'));
+                                }}
+                                title={t('chat.dictation.start')}
+                                aria-label={t('chat.dictation.start')}
+                            >
+                                <Icon name="mic" className={cn(iconSizeClass, 'text-current')} />
+                            </button>
+                        </div>
+                        {/* New-session button: fades/shrinks away when the draft is
+                            already open, letting the pill expand into its place. */}
+                        <div
+                            className={cn(
+                                'flex-shrink-0 overflow-hidden transition-all duration-200 ease-out',
+                                newSessionDraftOpen ? 'w-0 opacity-0' : 'w-11 opacity-100',
+                            )}
+                        >
+                            <button
+                                type="button"
+                                className="flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border border-border/80 text-foreground"
+                                style={{ backgroundColor: currentTheme?.colors?.surface?.subtle }}
+                                onClick={handleMobileNewSession}
+                                disabled={newSessionDraftOpen}
+                                title={t('mobile.sessions.newChat')}
+                                aria-label={t('mobile.sessions.newChat')}
+                            >
+                                <Icon name="add" className="h-5 w-5 text-current" />
+                            </button>
+                        </div>
+                    </div>
+                ) : (
                 <div
                     className={cn(
                         "flex flex-col relative overflow-visible",
-                        isDesktopExpanded && 'flex-1 min-h-0',
+                        isComposerExpanded && 'flex-1 min-h-0',
                         "border border-border/80",
                         "focus-within:ring-1",
                         inputMode === 'shell'
@@ -4420,19 +4940,37 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                 : undefined}
                         />
                     )}
-                    <div className={cn("overflow-hidden", isDesktopExpanded && 'flex flex-1 min-h-0 flex-col')}>
+                    {/* Positioning context for the dictation overlay: covers the
+                        text area + footer exactly, excluding MobileSessionStatusBar. */}
+                    <div className={cn('relative flex flex-col', isComposerExpanded && 'flex-1 min-h-0')}>
+                    <div className={cn("overflow-hidden", isComposerExpanded && 'flex flex-1 min-h-0 flex-col')}>
+                        {mobileComposerHandle}
+                        {isMobile ? (
+                            <div className="scrollbar-none relative z-10 flex items-center gap-x-2 overflow-x-auto px-3 pb-0.5 pt-1.5">
+                                <MemoMobileModelButton onOpenModel={() => handleOpenMobilePanel('model')} className="flex-shrink-0" />
+                                <MemoMobileAgentButton
+                                    onOpenAgentPanel={handleOpenAgentPanel}
+                                    onCycleAgent={handleCycleAgent}
+                                    className="flex-shrink-0"
+                                />
+                            </div>
+                        ) : null}
                         <div className="flex items-center gap-1 px-3 pt-1 flex-wrap relative z-10">
                             <AttachedVSCodeFileChips onShowPopup={handleShowAttachmentPreview} />
                             <ActiveEditorFileSuggestion />
                         </div>
-                        <div className={cn("relative overflow-hidden", isDesktopExpanded && 'flex flex-1 min-h-0 flex-col')}>
-                            {highlightedComposerContent && (
+                        <div className={cn("relative overflow-hidden", isComposerExpanded && 'flex flex-1 min-h-0 flex-col')}>
+                            {/* No highlight mirror on mobile: over wrapped text its
+                                layout drifts from the real textarea, which visually
+                                misplaces the caret. Plain textarea text keeps caret
+                                and text in the same layout. */}
+                            {highlightedComposerContent && !isMobile && (
                                 <div
                                     aria-hidden
                                     className={cn(
                                         'pointer-events-none absolute inset-0 z-0 whitespace-pre-wrap break-words px-3 rounded-b-none',
-                                        isDesktopExpanded
-                                            ? 'h-full min-h-0 py-4'
+                                        isComposerExpanded
+                                            ? cn('h-full min-h-0', isMobile ? 'py-2.5' : 'py-4')
                                             : isMobile
                                                 ? 'py-2.5'
                                                 : 'pt-4 pb-2',
@@ -4478,6 +5016,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                     cursorPosRef.current = ta.selectionStart ?? 0;
                                     updateAutocompleteOverlayPosition();
                                 }}
+                                onFocus={() => {
+                                    if (!isMobile) return;
+                                    mobileExpandIntentRef.current = null;
+                                    setMobileTextareaFocused(true);
+                                }}
+                                onBlur={() => {
+                                    if (!isMobile) return;
+                                    lastMobileBlurAtRef.current = Date.now();
+                                    setMobileTextareaFocused(false);
+                                }}
                                 placeholder={currentSessionId || newSessionDraftOpen
                                     ? inputMode === 'shell'
                                         ? t('chat.chatInput.placeholder.shell')
@@ -4487,22 +5035,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                 autoCorrect={isMobile ? "on" : "off"}
                                 autoCapitalize={isMobile ? "sentences" : "off"}
                                 spellCheck={isMobile || inputSpellcheckEnabled}
-                                fillContainer={isDesktopExpanded}
-                                outerClassName={cn('ring-0 bg-transparent shadow-none hover:bg-transparent focus-within:ring-0', isDesktopExpanded && 'flex-1 min-h-0')}
+                                fillContainer={isComposerExpanded}
+                                outerClassName={cn('ring-0 bg-transparent shadow-none hover:bg-transparent focus-within:ring-0', isComposerExpanded && 'flex-1 min-h-0')}
                                 className={cn(
                                     'min-h-[52px] resize-none border-0 px-3 rounded-b-none appearance-none hover:border-transparent bg-transparent relative z-10',
-                                    isDesktopExpanded
-                                        ? 'h-full min-h-0 py-4'
+                                    isComposerExpanded
+                                        ? cn('h-full min-h-0', isMobile ? 'py-2.5' : 'py-4')
                                         : isMobile
                                             ? 'py-2.5'
                                             : 'pt-4 pb-2',
                                     inputMode === 'shell' && 'font-mono',
-                                    highlightedComposerContent && 'text-transparent caret-[var(--surface-foreground)]',
+                                    highlightedComposerContent && !isMobile && 'text-transparent caret-[var(--surface-foreground)]',
                                 )}
                                 style={{
-                                    flex: isDesktopExpanded ? '1 1 auto' : 'none',
-                                    height: !isDesktopExpanded && textareaSize ? `${textareaSize.height}px` : undefined,
-                                    maxHeight: !isDesktopExpanded && textareaSize ? `${textareaSize.maxHeight}px` : undefined,
+                                    flex: isComposerExpanded ? '1 1 auto' : 'none',
+                                    height: !isComposerExpanded && textareaSize ? `${textareaSize.height}px` : undefined,
+                                    maxHeight: !isComposerExpanded && textareaSize ? `${textareaSize.maxHeight}px` : undefined,
                                     borderTopLeftRadius: chatInputRadius,
                                     borderTopRightRadius: chatInputRadius,
                                 }}
@@ -4540,6 +5088,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                             openIssuePicker={openIssuePicker}
                                             openPrPicker={openPrPicker}
                                             onOpenSettings={onOpenSettings}
+                                            onOpenMobileSheet={openMobileAttachSheet}
                                         />
                                         <PermissionAutoAcceptButton
                                             footerIconButtonClass={footerIconButtonClass}
@@ -4550,16 +5099,29 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         />
                                     </div>
                                     <div className="flex items-center min-w-0 gap-x-1 justify-end">
-                                        <div className="flex items-center gap-x-2 min-w-0 max-w-[60vw] flex-shrink">
-                                            <MemoMobileModelButton onOpenModel={() => handleOpenMobilePanel('model')} className="min-w-0 flex-shrink" />
-                                            <MemoMobileAgentButton
-                                                onOpenAgentPanel={handleOpenAgentPanel}
-                                                onCycleAgent={handleCycleAgent}
-                                                className="min-w-0 flex-shrink"
-                                            />
-                                        </div>
                                         <div className="flex items-center gap-x-1 flex-shrink-0">
-                                            <MemoBrowserVoiceButton />
+                                            <button
+                                                type="button"
+                                                className={footerIconButtonClass}
+                                                // Keep the soft keyboard open (same guard as
+                                                // PermissionAutoAcceptButton); the recording
+                                                // engine lives in the wrapper-level
+                                                // ComposerDictation instance.
+                                                onMouseDown={(event) => event.preventDefault()}
+                                                onPointerDownCapture={(event) => {
+                                                    if (event.pointerType === 'touch') {
+                                                        event.preventDefault();
+                                                    }
+                                                }}
+                                                onClick={() => {
+                                                    window.dispatchEvent(new CustomEvent('openchamber:dictation-toggle'));
+                                                }}
+                                                disabled={mobileDictationActive}
+                                                title={t('chat.dictation.start')}
+                                                aria-label={t('chat.dictation.start')}
+                                            >
+                                                <Icon name="mic" className={cn(iconSizeClass, 'text-current')} />
+                                            </button>
                                             <ComposerActionButtons
                                                 isMobile={isMobile}
                                                 footerIconButtonClass={footerIconButtonClass}
@@ -4577,11 +5139,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         </div>
                                     </div>
                                 </div>
-                                <MemoModelControls
-                                    className="hidden"
-                                    mobilePanel={mobileControlsPanel}
-                                    onMobilePanelChange={setMobileControlsPanel}
-                                />
                             </>
                         ) : (
                             <>
@@ -4614,7 +5171,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                 </div>
                                 <div className={cn('flex items-center flex-1 justify-end', footerGapClass, 'md:gap-x-3')}>
                                     <MemoModelControls className={cn('flex-1 min-w-0 justify-end')} />
-                                    <MemoBrowserVoiceButton />
+                                    <MemoComposerDictation
+                                        radius={chatInputRadius}
+                                        isMobile={isMobile}
+                                        footerIconButtonClass={footerIconButtonClass}
+                                        footerPaddingClass={footerPaddingClass}
+                                        iconSizeClass={iconSizeClass}
+                                        sendIconSizeClass={sendIconSizeClass}
+                                        onInsert={handleDictationInsert}
+                                        onInsertAndSend={handleDictationInsertAndSend}
+                                    />
                                     <ComposerActionButtons
                                         isMobile={isMobile}
                                         footerIconButtonClass={footerIconButtonClass}
@@ -4633,10 +5199,44 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             </>
                         )}
                     </div>
+                    </div>
 
-                    {/* Mobile session panel: slide-up overlay toggled by MobileSessionPanelTrigger. */}
-                    {isMobile && <MobileSessionStatusBar />}
                 </div>
+                )}
+                {/* Wrapper-level dictation engine + overlay: stays mounted across
+                    the pill ↔ composer swap so a recording started from the pill
+                    survives the morph. Its absolute overlay covers whichever
+                    shape the wrapper currently has. */}
+                {isMobile ? (
+                    <MemoComposerDictation
+                        radius={chatInputRadius}
+                        isMobile={isMobile}
+                        footerIconButtonClass={footerIconButtonClass}
+                        footerPaddingClass={footerPaddingClass}
+                        iconSizeClass={iconSizeClass}
+                        sendIconSizeClass={sendIconSizeClass}
+                        onInsert={handleDictationInsert}
+                        onInsertAndSend={handleDictationInsertAndSend}
+                        onActiveChange={handleMobileDictationActiveChange}
+                        renderTrigger={false}
+                        topAccessory={mobileComposerHandle}
+                    />
+                ) : null}
+                </div>
+                {/* Mobile session panel: slide-up overlay toggled by
+                    MobileSessionPanelTrigger. Mounted outside the pill
+                    conditional so the pill's trigger works too. */}
+                {isMobile && <MobileSessionStatusBar />}
+                {/* Hidden host for the model/agent/variant bottom sheets. Kept
+                    outside the pill conditional so an open panel survives (and
+                    stays visible over) the collapsed composer. */}
+                {isMobile ? (
+                    <MemoModelControls
+                        className="hidden"
+                        mobilePanel={mobileControlsPanel}
+                        onMobilePanelChange={setMobileControlsPanel}
+                    />
+                ) : null}
             </div>
             {newSessionDraftOpen && !isDesktopExpanded && !isMobile && !isVSCode && !isMiniChatSurface ? (
                 <DraftPresetChips onSubmit={submitPresetPrompt} className="chat-input-column mt-4" />
@@ -4673,6 +5273,172 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             onOpenChange={handleAttachmentPreviewOpenChange}
             isMobile={isMobile}
         />
+
+        {/* Mobile attachment sheet: replaces the dropdown (which stole focus and
+            dismissed the keyboard) and leaves room for more actions later. */}
+        {isMobile ? (
+            <MobileOverlayPanel
+                open={mobileAttachMenuOpen}
+                title={t('chat.chatInput.actions.addAttachment')}
+                onClose={() => setMobileAttachMenuOpen(false)}
+            >
+                <div className="flex flex-col px-3 pb-4 pt-1">
+                    <button
+                        type="button"
+                        className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-3 text-left typography-ui-label hover:bg-[var(--interactive-hover)]"
+                        onClick={() => {
+                            // The native file/photo picker takes over next — restoring
+                            // the keyboard in between would flash it open and shut.
+                            restoreKeyboardAfterOverlayRef.current = false;
+                            setMobileAttachMenuOpen(false);
+                            requestAnimationFrame(handlePickLocalFiles);
+                        }}
+                    >
+                        <Icon name="attachment-2" className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
+                        {t('chat.chatInput.actions.attachFiles')}
+                    </button>
+                    <button
+                        type="button"
+                        className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-3 text-left typography-ui-label hover:bg-[var(--interactive-hover)]"
+                        onClick={() => {
+                            setMobileAttachMenuOpen(false);
+                            requestAnimationFrame(openIssuePicker);
+                        }}
+                    >
+                        <Icon name="github" className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
+                        {t('chat.chatInput.actions.linkGithubIssue')}
+                    </button>
+                    <button
+                        type="button"
+                        className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-3 text-left typography-ui-label hover:bg-[var(--interactive-hover)]"
+                        onClick={() => {
+                            setMobileAttachMenuOpen(false);
+                            requestAnimationFrame(openPrPicker);
+                        }}
+                    >
+                        <Icon name="git-pull-request" className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
+                        {t('chat.chatInput.actions.linkGithubPr')}
+                    </button>
+                </div>
+            </MobileOverlayPanel>
+        ) : null}
+
+        {/* Mobile draft target pickers: bottom sheets replacing the inline
+            project/branch Selects (which desktop keeps). */}
+        {isMobile && showDraftTargetSelectors && selectedDraftProject ? (
+            <>
+                <MobileOverlayPanel
+                    open={mobileDraftPicker === 'project'}
+                    title={t('chat.chatInput.draftPicker.projectTitle')}
+                    onClose={() => setMobileDraftPicker(null)}
+                >
+                    <div className="flex flex-col gap-2 px-3 pb-4 pt-1">
+                        <Input
+                            value={mobileDraftPickerQuery}
+                            onChange={(event) => setMobileDraftPickerQuery(event.target.value)}
+                            placeholder={t('chat.chatInput.draftPicker.searchProjects')}
+                            className="h-9"
+                        />
+                        <div className="flex flex-col">
+                            {projects
+                                .filter((project) => {
+                                    const query = mobileDraftPickerQuery.trim().toLowerCase();
+                                    if (!query) return true;
+                                    return getProjectDisplayLabel(project).toLowerCase().includes(query)
+                                        || project.path.toLowerCase().includes(query);
+                                })
+                                .map((project) => (
+                                    <button
+                                        key={project.id}
+                                        type="button"
+                                        className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2.5 text-left typography-ui-label hover:bg-[var(--interactive-hover)]"
+                                        onClick={() => {
+                                            handleDraftProjectChange(project.id);
+                                            setMobileDraftPicker(null);
+                                        }}
+                                    >
+                                        <span className="min-w-0 flex-1">{renderProjectLabelWithIcon(project)}</span>
+                                        {project.id === selectedDraftProject.id ? (
+                                            <Icon name="check" className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                                        ) : null}
+                                    </button>
+                                ))}
+                        </div>
+                    </div>
+                </MobileOverlayPanel>
+                <MobileOverlayPanel
+                    open={mobileDraftPicker === 'branch'}
+                    title={t('chat.chatInput.branch')}
+                    onClose={() => setMobileDraftPicker(null)}
+                >
+                    <div className="flex flex-col gap-2 px-3 pb-4 pt-1">
+                        <Input
+                            value={mobileDraftPickerQuery}
+                            onChange={(event) => setMobileDraftPickerQuery(event.target.value)}
+                            placeholder={t('chat.chatInput.draftPicker.searchBranches')}
+                            className="h-9"
+                        />
+                        <div className="flex flex-col">
+                            {(() => {
+                                const query = mobileDraftPickerQuery.trim().toLowerCase();
+                                const matches = (label: string) => !query || label.toLowerCase().includes(query);
+                                const selectedValue = selectedDraftDirectory
+                                    ?? draftBranchItems[0]?.value
+                                    ?? normalizePath(selectedDraftProject.path)
+                                    ?? '';
+                                const renderRow = (value: string, label: React.ReactNode, key?: string) => (
+                                    <button
+                                        key={key ?? value}
+                                        type="button"
+                                        className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2.5 text-left typography-ui-label hover:bg-[var(--interactive-hover)]"
+                                        onClick={() => {
+                                            handleDraftDirectoryChange(value);
+                                            setMobileDraftPicker(null);
+                                        }}
+                                    >
+                                        <span className="min-w-0 flex-1 truncate">{label}</span>
+                                        {value === selectedValue ? (
+                                            <Icon name="check" className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                                        ) : null}
+                                    </button>
+                                );
+                                return (
+                                    <>
+                                        {projectRootBranchOption && matches(projectRootBranchOption.label) ? (
+                                            <>
+                                                <div className="px-2 pb-1 pt-1.5 text-muted-foreground typography-meta">
+                                                    {t('chat.chatInput.projectRoot')}
+                                                </div>
+                                                {renderRow(projectRootBranchOption.value, projectRootBranchOption.label)}
+                                            </>
+                                        ) : null}
+                                        <div className="flex items-center justify-between px-2 pb-1 pt-2">
+                                            <span className="text-muted-foreground typography-meta">{t('chat.chatInput.worktrees')}</span>
+                                            <button
+                                                type="button"
+                                                className="cursor-pointer text-muted-foreground typography-meta hover:text-foreground"
+                                                onClick={() => {
+                                                    setMobileDraftPicker(null);
+                                                    void createWorktreeDraft();
+                                                }}
+                                            >
+                                                {t('chat.chatInput.worktreeNew')}
+                                            </button>
+                                        </div>
+                                        {worktreeBranchOptions
+                                            .filter((option) => matches(option.label))
+                                            .map((option) => renderRow(option.value, `${option.pending ? '⏳ ' : ''}${option.label}`))}
+                                        {selectedDraftDirectory && !selectedDraftBranchIsKnown && matches(selectedDraftBranchLabel ?? '')
+                                            ? renderRow(selectedDraftDirectory, selectedDraftBranchLabel, 'unknown-current')
+                                            : null}
+                                    </>
+                                );
+                            })()}
+                        </div>
+                    </div>
+                </MobileOverlayPanel>
+            </>
+        ) : null}
         </>
     );
 };

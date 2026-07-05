@@ -38,6 +38,7 @@ import { prepareNotificationLastMessage } from './lib/notifications/index.js';
 import { registerTtsRoutes } from './lib/tts/routes.js';
 import { detectSayTtsCapability } from './lib/tts/capability-runtime.js';
 import { createTerminalRuntime } from './lib/terminal/runtime.js';
+import { createDictationRuntime } from './lib/dictation/runtime.js';
 import {
   createGlobalUiEventBroadcaster,
   createGlobalMessageStreamHub,
@@ -495,6 +496,7 @@ const tunnelAuthController = createTunnelAuth();
 let runtimeManagedRemoteTunnelToken = '';
 let runtimeManagedRemoteTunnelHostname = '';
 let terminalRuntime = null;
+let dictationRuntime = null;
 let messageStreamRuntime = null;
 const userProvidedOpenCodePassword = hmrStateRuntime.getUserProvidedOpenCodePassword(hmrState);
 const initialOpenCodeAuthState = hmrStateRuntime.resolveOpenCodeAuthFromState({
@@ -898,6 +900,7 @@ const tunnelWiringRuntime = createTunnelWiringRuntime({
 });
 const startupPipelineRuntime = createStartupPipelineRuntime({
   createTerminalRuntime,
+  createDictationRuntime,
   createMessageStreamWsRuntime,
   createServerStartupRuntime,
 });
@@ -1357,8 +1360,10 @@ async function main(options = {}) {
     tunnelRuntimeContext,
     attachSignals,
     apiOnly,
+    dictationModelsDir: path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'speech-models'),
   });
   terminalRuntime = startupPipelineResult.terminalRuntime;
+  dictationRuntime = startupPipelineResult.dictationRuntime;
   messageStreamRuntime = startupPipelineResult.messageStreamRuntime;
 
   try {
@@ -1397,6 +1402,11 @@ async function main(options = {}) {
     },
     stop: (shutdownOptions = {}) => {
       realtimeProxyRuntime.stop();
+      try {
+        dictationRuntime?.stop?.();
+      } catch {
+        // best-effort shutdown of the dictation worker
+      }
       return gracefulShutdown({ exitProcess: shutdownOptions.exitProcess ?? false });
     }
   };

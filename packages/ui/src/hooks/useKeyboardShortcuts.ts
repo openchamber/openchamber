@@ -474,6 +474,18 @@ export const useKeyboardShortcuts = () => {
         return;
       }
 
+      if (eventMatchesShortcut(e, combo('toggle_dictation'))) {
+        const { activeMainTab, isCommandPaletteOpen, isHelpDialogOpen, isSessionSwitcherOpen, isSettingsDialogOpen } = useUIStore.getState();
+        if (activeMainTab !== 'chat' || isCommandPaletteOpen || isHelpDialogOpen || isSessionSwitcherOpen || isSettingsDialogOpen) {
+          return;
+        }
+        e.preventDefault();
+        // Dictation state lives inside the composer's isolated component;
+        // toggle it via an event instead of subscribing this hot hook to it.
+        window.dispatchEvent(new CustomEvent('openchamber:dictation-toggle'));
+        return;
+      }
+
       if (e.key === 'Escape') {
         const target = e.target as Element | null;
         const isInsideDialog = Boolean(target?.closest('[role="dialog"]'));

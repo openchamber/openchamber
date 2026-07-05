@@ -708,11 +708,11 @@ html:not(.dark) .chat-scroll {
 
 /* Pierre diff viewer styling */
 .pierre-diff-wrapper {
-  --diffs-font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  --diffs-font-family: var(--font-mono, ui-monospace, monospace);
   --diffs-font-size: var(--text-code);
   --diffs-line-height: 24px;
   --diffs-tab-size: 2;
-  --diffs-header-font-family: var(--font-sans, 'IBM Plex Sans', sans-serif);
+  --diffs-header-font-family: var(--font-sans, system-ui, sans-serif);
   --diffs-min-number-column-width: 4ch;
   --diffs-gap-inline: 0;
   --diffs-gap-block: 0;
@@ -923,7 +923,7 @@ html:not(.dark) .chat-scroll {
   }
 }
 
-/* Text font: IBM Plex Sans */
+/* Text font */
 .markdown-content {
   font-family: var(--font-sans);
   font-size: var(--text-markdown);
@@ -1057,7 +1057,7 @@ html:not(.dark) .chat-scroll {
   margin-bottom: 0.25em;
 }
 
-/* Code font: IBM Plex Mono */
+/* Code font */
 .markdown-content code,
 .markdown-content pre {
   font-family: var(--font-mono);
@@ -1331,7 +1331,7 @@ html:not(.dark) .chat-scroll {
   white-space: pre;
   width: max-content;
   min-width: 100%;
-  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   color: var(--surface-foreground);
   background: transparent;
 }
@@ -1388,7 +1388,7 @@ html:not(.dark) .chat-scroll {
   width: max-content;
   min-width: 100%;
   min-height: 100%;
-  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   color: var(--surface-foreground);
   background: transparent;
 }
