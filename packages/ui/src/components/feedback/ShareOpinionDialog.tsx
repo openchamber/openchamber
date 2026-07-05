@@ -31,7 +31,7 @@ What you get:
 
 **This project is what it is because of your feedback. Thank you, genuinely.**
 
-I'll remove this button in two weeks 🙂`;
+I'll remove this button in 10 days 🙂`;
 
 export function ShareOpinionDialog({ open, onOpenChange }: ShareOpinionDialogProps): React.ReactNode {
   const { t } = useI18n();
