@@ -488,10 +488,6 @@ export async function materializeOpenDraftSession(selection: {
     useSelectionStore.getState().saveAgentModelVariantForSession(created.id, effectiveDraftAgent, selection.providerID, selection.modelID, selection.variant)
   }
 
-  store.initializeNewOpenChamberSession(created.id, configState.agents ?? [])
-
-  store.setCurrentSession(created.id, createdDirectory)
-
   if (draftPermissionAutoAcceptEnabled) {
     try {
       const { usePermissionStore } = await import("@/stores/permissionStore")
@@ -500,6 +496,10 @@ export async function materializeOpenDraftSession(selection: {
       console.warn("Failed to apply draft permission auto-accept to new session:", error)
     }
   }
+
+  store.initializeNewOpenChamberSession(created.id, configState.agents ?? [])
+
+  store.setCurrentSession(created.id, createdDirectory)
 
   return {
     sessionId: created.id,
