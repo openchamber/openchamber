@@ -15,6 +15,7 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeExtraHeadersSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { desktopHostsGet, desktopHostsSet, getDesktopHostApiUrl, normalizeHostUrl } from '@/lib/desktopHosts';
+import { resolveStatusCheckFailureState, type GateState } from './sessionAuthGateState';
 import {
   authenticateWithPasskey,
   cancelPasskeyCeremony,
@@ -292,8 +293,6 @@ interface SessionAuthGateProps {
   children: React.ReactNode;
 }
 
-type GateState = 'pending' | 'authenticated' | 'locked' | 'error' | 'rate-limited';
-
 interface ErrorScreenProps {
   onRetry: () => void;
   errorType?: 'network' | 'rate-limit';
@@ -301,7 +300,9 @@ interface ErrorScreenProps {
   children?: React.ReactNode;
 }
 
-export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) => {
+export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
+  children,
+}) => {
   const { t } = useI18n();
   const vscodeRuntime = React.useMemo(() => isVSCodeRuntime(), []);
   const skipAuth = vscodeRuntime;
@@ -422,7 +423,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
       setIsTunnelLocked(false);
     } catch (error) {
       console.warn('Failed to check session status:', error);
-      if (shouldUseDesktopShellPasswordLogin()) {
+      if (resolveStatusCheckFailureState({ shouldUseDesktopShellPasswordLogin: shouldUseDesktopShellPasswordLogin() }) === 'locked') {
         setState('locked');
         setRetryAfter(undefined);
         setIsTunnelLocked(false);
