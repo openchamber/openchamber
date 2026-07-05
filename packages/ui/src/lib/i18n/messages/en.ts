@@ -2296,7 +2296,7 @@ export const dict = {
   'sessionAuth.error.networkTitle': 'Unable to reach server',
   'sessionAuth.error.rateLimitDescriptionSingle': 'Please wait {minutes} minute before trying again.',
   'sessionAuth.error.rateLimitDescriptionPlural': 'Please wait {minutes} minutes before trying again.',
-  'sessionAuth.error.networkDescription': 'We could not verify the UI session. Check that the service is running and try again.',
+  'sessionAuth.error.networkDescription': 'We could not verify the UI session. If you\'re opening OpenChamber from another device on your local network, make sure Desktop Network Access is enabled on the desktop app and use the LAN address shown in Settings.',
   'sessionAuth.error.retry': 'Retry',
   'sessionAuth.error.passkeySetupFailed': 'Passkey setup failed.',
   'sessionAuth.error.incorrectPassword': 'Incorrect password. Try again.',

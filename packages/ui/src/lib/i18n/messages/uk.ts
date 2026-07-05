@@ -2262,7 +2262,7 @@ export const dict: Record<I18nKey, string> = {
   "sessionAuth.error.networkTitle": "Неможливо отримати доступ до сервера",
   "sessionAuth.error.rateLimitDescriptionSingle": "Зачекайте {minutes} хвилину перед повторною спробою.",
   "sessionAuth.error.rateLimitDescriptionPlural": "Зачекайте {minutes} хвилин, перш ніж повторити спробу.",
-  "sessionAuth.error.networkDescription": "Нам не вдалося перевірити сесію інтерфейсу. Перевірте, чи працює сервіс, і повторіть спробу.",
+  "sessionAuth.error.networkDescription": "Нам не вдалося перевірити сесію інтерфейсу. Якщо ви відкриваєте OpenChamber з іншого пристрою у локальній мережі, увімкніть Desktop Network Access у настільному застосунку та використайте LAN-адресу, показану в налаштуваннях.",
   "sessionAuth.error.retry": "Повторити спробу",
   "sessionAuth.error.passkeySetupFailed": "Помилка налаштування ключа доступу.",
   "sessionAuth.error.incorrectPassword": "Невірний пароль. Спробуйте знову.",

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import { createTunnelAuth } from './tunnel-auth.js';
 import { registerAuthAndAccessRoutes, registerCommonRequestMiddleware, registerServerStatusRoutes } from './core-routes.js';
 
 describe('core-routes', () => {
@@ -439,5 +440,25 @@ describe('client auth routes', () => {
 
     expect(dependencies.testHooks.requireSessionAuth).toHaveBeenCalledTimes(2);
     expect(dependencies.testHooks.requireAuth).not.toHaveBeenCalled();
+  });
+
+  it('treats private LAN hosts as local even when a tunnel is active', async () => {
+    const app = express();
+    const dependencies = createDependencies();
+    const tunnelAuthController = createTunnelAuth();
+    tunnelAuthController.setActiveTunnel({ tunnelId: 'tunnel-1', publicUrl: 'https://tunnel.example.com' });
+    dependencies.tunnelAuthController = tunnelAuthController;
+    dependencies.uiAuthController.handlePasskeyStatus = vi.fn((_req, res) => {
+      res.json({ enabled: true, hasPasskeys: true, passkeyCount: 1, rpID: 'example.com' });
+    });
+
+    registerAuthAndAccessRoutes(app, dependencies);
+
+    await request(app)
+      .get('/auth/passkey/status')
+      .set('Host', '192.168.1.5:57123')
+      .expect(200, { enabled: true, hasPasskeys: true, passkeyCount: 1, rpID: 'example.com' });
+
+    expect(dependencies.uiAuthController.handlePasskeyStatus).toHaveBeenCalledTimes(1);
   });
 });

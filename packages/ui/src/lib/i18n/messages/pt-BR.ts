@@ -2262,7 +2262,7 @@ export const dict: Record<I18nKey, string> = {
   "sessionAuth.error.networkTitle": "Não é possível acessar o servidor",
   "sessionAuth.error.rateLimitDescriptionSingle": "Aguarde {minutes} minuto antes de tentar novamente.",
   "sessionAuth.error.rateLimitDescriptionPlural": "Aguarde {minutes} minutos antes de tentar novamente.",
-  "sessionAuth.error.networkDescription": "Não foi possível verificar a sessão da interface. Confira se o serviço está em execução e tente novamente.",
+  "sessionAuth.error.networkDescription": "Não foi possível verificar a sessão da interface. Se você estiver abrindo o OpenChamber de outro dispositivo na sua rede local, ative o Desktop Network Access no app para desktop e use o endereço LAN mostrado em Configurações.",
   "sessionAuth.error.retry": "Tentar novamente",
   "sessionAuth.error.passkeySetupFailed": "Não foi possível configurar a chave de acesso.",
   "sessionAuth.error.incorrectPassword": "Senha incorreta. Tente novamente.",

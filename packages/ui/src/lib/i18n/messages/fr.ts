@@ -2079,7 +2079,7 @@ export const dict = {
   'sessionAuth.error.networkTitle': 'Impossible d\'atteindre le serveur',
   'sessionAuth.error.rateLimitDescriptionSingle': 'Veuillez attendre {minutes} minute avant de réessayer.',
   'sessionAuth.error.rateLimitDescriptionPlural': 'Veuillez attendre {minutes} minutes avant de réessayer.',
-  'sessionAuth.error.networkDescription': 'Nous n\'avons pas pu vérifier la session d\'interface utilisateur. Vérifiez que le service est en cours d\'exécution et réessayez.',
+  'sessionAuth.error.networkDescription': 'Nous n\'avons pas pu vérifier la session d\'interface utilisateur. Si vous ouvrez OpenChamber depuis un autre appareil sur votre réseau local, activez l\'accès au réseau du bureau dans l\'application de bureau et utilisez l\'adresse LAN indiquée dans les paramètres.',
   'sessionAuth.error.retry': 'Réessayer',
   'sessionAuth.error.passkeySetupFailed': 'La configuration du mot de passe a échoué.',
   'sessionAuth.error.incorrectPassword': 'Mot de passe incorrect. Essayer à nouveau.',

@@ -2266,7 +2266,7 @@ export const dict: Record<I18nKey, string> = {
   'sessionAuth.error.networkTitle': '無法連線伺服器',
   'sessionAuth.error.rateLimitDescriptionSingle': '請等待 {minutes} 分鐘後再試。',
   'sessionAuth.error.rateLimitDescriptionPlural': '請等待 {minutes} 分鐘後再試。',
-  'sessionAuth.error.networkDescription': '無法驗證 UI 會話。請檢查服務是否執行後重試。',
+  'sessionAuth.error.networkDescription': '無法驗證 UI 會話。如果你是從本機網路中的其他裝置開啟 OpenChamber，請在桌面應用程式中啟用 Desktop Network Access，並使用設定中顯示的 LAN 位址。',
   'sessionAuth.error.retry': '重試',
   'sessionAuth.error.passkeySetupFailed': 'Passkey 設定失敗。',
   'sessionAuth.error.incorrectPassword': '密碼錯誤，請重試。',

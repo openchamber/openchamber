@@ -2447,7 +2447,7 @@ export const dict: Record<I18nKey, string> = {
   'sessionAuth.actions.usePasskey': 'Użyj klucza dostępu',
   'sessionAuth.error.enterPasswordForPasskey': 'Wpisz hasło, aby dodać klucz dostępu.',
   'sessionAuth.error.incorrectPassword': 'Nieprawidłowe hasło. Spróbuj ponownie.',
-  'sessionAuth.error.networkDescription': 'Nie udało się zweryfikować sesji UI. Sprawdź, czy usługa działa, i spróbuj ponownie.',
+  'sessionAuth.error.networkDescription': 'Nie udało się zweryfikować sesji UI. Jeśli otwierasz OpenChamber z innego urządzenia w sieci lokalnej, włącz Desktop Network Access w aplikacji desktopowej i użyj adresu LAN widocznego w Ustawieniach.',
   'sessionAuth.error.networkRetry': 'Błąd sieci. Sprawdź połączenie i spróbuj ponownie.',
   'sessionAuth.error.networkTitle': 'Nie można połączyć się z serwerem',
   'sessionAuth.error.passkeySetupFailed': 'Nie udało się skonfigurować klucza dostępu.',

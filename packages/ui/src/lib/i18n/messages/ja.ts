@@ -2295,7 +2295,7 @@ export const dict: Record<I18nKey, string> = {
   'sessionAuth.error.networkTitle': 'サーバーに到達できません',
   'sessionAuth.error.rateLimitDescriptionSingle': '再試行まで{minutes}分お待ちください。',
   'sessionAuth.error.rateLimitDescriptionPlural': '再試行まで{minutes}分お待ちください。',
-  'sessionAuth.error.networkDescription': 'UIセッションを確認できませんでした。サービスが実行中であることを確認して再試行してください。',
+  'sessionAuth.error.networkDescription': 'UI セッションを確認できませんでした。ローカルネットワーク上の別のデバイスから OpenChamber を開く場合は、デスクトップアプリで Desktop Network Access を有効にし、設定に表示される LAN アドレスを使用してください。',
   'sessionAuth.error.retry': '再試行',
   'sessionAuth.error.passkeySetupFailed': 'パスキーの設定に失敗しました。',
   'sessionAuth.error.incorrectPassword': 'パスワードが間違っています。もう一度お試しください。',

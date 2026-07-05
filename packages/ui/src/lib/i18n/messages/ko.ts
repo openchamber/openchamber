@@ -2296,7 +2296,7 @@ export const dict: Record<I18nKey, string> = {
   'sessionAuth.error.networkTitle': '서버에 연결할 수 없습니다',
   'sessionAuth.error.rateLimitDescriptionSingle': '{minutes}분 후 다시 시도하세요.',
   'sessionAuth.error.rateLimitDescriptionPlural': '{minutes}분 후 다시 시도하세요.',
-  'sessionAuth.error.networkDescription': 'UI 세션을 확인할 수 없습니다. 서비스가 실행 중인지 확인하고 다시 시도하세요.',
+  'sessionAuth.error.networkDescription': 'UI 세션을 확인할 수 없습니다. 로컬 네트워크의 다른 기기에서 OpenChamber를 열고 있다면 데스크톱 앱에서 Desktop Network Access를 활성화하고 설정에 표시되는 LAN 주소를 사용하세요.',
   'sessionAuth.error.retry': '다시 시도',
   'sessionAuth.error.passkeySetupFailed': '패스키 설정에 실패했습니다.',
   'sessionAuth.error.incorrectPassword': '비밀번호가 올바르지 않습니다. 다시 시도하세요.',

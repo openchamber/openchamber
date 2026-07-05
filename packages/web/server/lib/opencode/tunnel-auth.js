@@ -176,6 +176,10 @@ const isLocalHost = (host, req) => {
     return true;
   }
 
+  if (isPrivateOrLoopbackIp(host)) {
+    return true;
+  }
+
   if (host === 'host.docker.internal') {
     return isPrivateOrLoopbackIp(getSocketRemoteIp(req));
   }

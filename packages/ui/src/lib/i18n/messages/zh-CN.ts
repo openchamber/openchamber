@@ -2262,7 +2262,7 @@ export const dict: Record<I18nKey, string> = {
   'sessionAuth.error.networkTitle': '无法连接服务器',
   'sessionAuth.error.rateLimitDescriptionSingle': '请等待 {minutes} 分钟后再试。',
   'sessionAuth.error.rateLimitDescriptionPlural': '请等待 {minutes} 分钟后再试。',
-  'sessionAuth.error.networkDescription': '无法验证 UI 会话。请检查服务是否运行后重试。',
+  'sessionAuth.error.networkDescription': '无法验证 UI 会话。如果你是从本地网络中的另一台设备打开 OpenChamber，请在桌面端应用中启用 Desktop Network Access，并使用设置中显示的 LAN 地址。',
   'sessionAuth.error.retry': '重试',
   'sessionAuth.error.passkeySetupFailed': 'Passkey 设置失败。',
   'sessionAuth.error.incorrectPassword': '密码错误，请重试。',

@@ -2262,7 +2262,7 @@ export const dict: Record<I18nKey, string> = {
   "sessionAuth.error.networkTitle": "No se puede alcanzar el servidor",
   "sessionAuth.error.rateLimitDescriptionSingle": "Por favor, espera {minutes} minuto antes de intentarlo de nuevo.",
   "sessionAuth.error.rateLimitDescriptionPlural": "Por favor, espera {minutes} minutos antes de intentarlo de nuevo.",
-  "sessionAuth.error.networkDescription": "No pudimos verificar la sesión de la UI. Comprueba que el servicio esté en funcionamiento y vuelve a intentarlo.",
+  "sessionAuth.error.networkDescription": "No pudimos verificar la sesión de la UI. Si abres OpenChamber desde otro dispositivo en tu red local, activa Desktop Network Access en la app de escritorio y usa la dirección LAN que aparece en Ajustes.",
   "sessionAuth.error.retry": "Volver a intentar",
   "sessionAuth.error.passkeySetupFailed": "No se pudo configurar la clave de paso.",
   "sessionAuth.error.incorrectPassword": "Contraseña incorrecta. Inténtalo de nuevo.",
