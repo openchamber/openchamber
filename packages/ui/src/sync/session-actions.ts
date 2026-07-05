@@ -152,6 +152,11 @@ function updateLiveSession(session: Session, directory?: string): void {
   }
 }
 
+export function mirrorSessionIntoLiveStores(session: Session, directory?: string): void {
+  updateLiveSession(session, directory)
+  updateLiveSession(session)
+}
+
 function dir() {
   return _getDirectory() || undefined
 }
@@ -564,6 +569,7 @@ export async function updateSessionTitle(sessionId: string, title: string): Prom
   const sessionDirectory = getSessionDirectory(sessionId)
   const session = await opencodeClient.updateSession(sessionId, { title }, sessionDirectory)
   useGlobalSessionsStore.getState().upsertSession(session)
+  mirrorSessionIntoLiveStores(session, sessionDirectory)
 }
 
 export async function shareSession(sessionId: string): Promise<Session | null> {

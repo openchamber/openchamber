@@ -10,6 +10,7 @@ let sessionRevertResult: { data?: unknown; error?: unknown; response?: { status?
 let questionReplyError: unknown | null = null
 let questionRejectError: unknown | null = null
 let sessionShareResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
+let sessionUpdateResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
 const globalUpsertedSessions: unknown[] = []
 
 const mockScopedClient = {
@@ -50,6 +51,14 @@ const mockSdk = {
     abort: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "session.abort", params })
       return Promise.resolve({ data: true })
+    }),
+    updateSession: mock((sessionId: string, changes: Record<string, unknown>, directory?: string | null) => {
+      replyCalls.push({ method: "session.update", params: { sessionID: sessionId, ...changes, directory } })
+      return Promise.resolve(sessionUpdateResult.data as Session)
+    }),
+    update: mock((params: Record<string, unknown>) => {
+      replyCalls.push({ method: "session.update", params })
+      return Promise.resolve(sessionUpdateResult)
     }),
     share: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "session.share", params })
@@ -110,6 +119,10 @@ mock.module("@/lib/opencode/client", () => ({
         throw new Error(`session.revert failed${status ? ` (${status})` : ""}: rejected`)
       }
       return Promise.resolve(sessionRevertResult.data)
+    }),
+    updateSession: mock((sessionId: string, changes: Record<string, unknown>, directory?: string | null) => {
+      replyCalls.push({ method: "session.update", params: { sessionID: sessionId, ...changes, directory } })
+      return Promise.resolve(sessionUpdateResult.data)
     }),
   },
 }))
@@ -336,6 +349,34 @@ describe("shareSession live state", () => {
     expect(storedDiff.after).toBe(undefined)
     expect(globalDiff.before).toBe(undefined)
     expect(resultDiff.after).toBe(undefined)
+  })
+})
+
+describe("updateSessionTitle live state", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+    globalUpsertedSessions.length = 0
+    sessionUpdateResult = {}
+  })
+
+  test("updates the live directory store after renaming", async () => {
+    const oldSession = { id: "session-a", title: "Old Title", time: { created: 1, updated: 1 } } as Session
+    const updatedSession = { id: "session-a", title: "New Title", time: { created: 1, updated: 2 } } as Session
+    const sessionStore = createStore({}, { session: [oldSession] })
+    const childStores = createChildStores([["/test/project", sessionStore]])
+    sessionUpdateResult = { data: updatedSession }
+
+    const { setActionRefs, updateSessionTitle } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/current/project")
+
+    await updateSessionTitle("session-a", "New Title")
+
+    const updateCall = replyCalls.find((call) => call.method === "session.update")
+    expect(updateCall?.params.sessionID).toBe("session-a")
+    expect(updateCall?.params.title).toBe("New Title")
+    expect(updateCall?.params.directory).toBe("/test/project")
+    expect(globalUpsertedSessions).toEqual([updatedSession])
+    expect(sessionStore.getState().session[0].title).toBe("New Title")
   })
 })
 
