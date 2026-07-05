@@ -245,8 +245,9 @@ export function applyDirectoryEvent(
       const sessions = draft.session
       const result = Binary.search(sessions, info.id, (s) => s.id)
       // Keep the freshness check ahead of the archive branch: direct archive
-      // responses are mirrored into the store already, so stale SSE echoes
-      // should never win just because they mark the session archived.
+      // responses handle the store update on their own (optimistic removal +
+      // SDK response), so stale SSE echoes should not win just because they
+      // mark the session archived.
       if (result.found && shouldSkipStaleSessionEvent(sessions[result.index], info)) {
         return false
       }
