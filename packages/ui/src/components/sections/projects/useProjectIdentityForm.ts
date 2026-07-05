@@ -183,7 +183,8 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
     }
   }, [clearPendingUploadIcon, discoverProjectIcon, isDiscoveringIcon, project, t]);
 
-  const prepareSaveData = React.useCallback(async (): Promise<ProjectIdentitySaveData | null> => {
+  const prepareSaveData = React.useCallback(async (options?: { silent?: boolean }): Promise<ProjectIdentitySaveData | null> => {
+    const silent = options?.silent === true;
     if (!project) {
       return null;
     }
@@ -201,7 +202,9 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
         toast.error(uploadResult.error || t('settings.projects.page.toast.uploadIconFailed'));
         return null;
       }
-      toast.success(t('settings.projects.page.toast.iconUpdated'));
+      if (!silent) {
+        toast.success(t('settings.projects.page.toast.iconUpdated'));
+      }
       clearPendingUploadIcon();
       setPendingRemoveImageIcon(false);
     }
@@ -216,7 +219,9 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
         toast.error(removeResult.error || t('settings.projects.page.toast.removeIconFailed'));
         return null;
       }
-      toast.success(t('settings.projects.page.toast.iconRemoved'));
+      if (!silent) {
+        toast.success(t('settings.projects.page.toast.iconRemoved'));
+      }
       setPendingRemoveImageIcon(false);
       setIconBackground(null);
     }

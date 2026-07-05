@@ -1,24 +1,23 @@
 import React from 'react';
 import { WorktreeSectionContent } from '@/components/sections/openchamber/WorktreeSectionContent';
 import { ProjectActionsSection } from '@/components/sections/projects/ProjectActionsSection';
-import { ProjectIdentityEditor } from '@/components/sections/projects/ProjectIdentityEditor';
+import { ProjectIdentityFields } from '@/components/sections/projects/ProjectIdentityFields';
 import {
   useProjectIdentityForm,
   type ProjectIdentitySaveData,
 } from '@/components/sections/projects/useProjectIdentityForm';
+import { useProjectIdentityAutoSave } from '@/components/sections/projects/useProjectIdentityAutoSave';
 import type { ProjectEntry } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 
 type ProjectSettingsPanelProps = {
   project: ProjectEntry | null;
   onIdentitySave: (data: ProjectIdentitySaveData) => void | Promise<void>;
-  identityEditorClassName?: string;
 };
 
 export const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
   project,
   onIdentitySave,
-  identityEditorClassName,
 }) => {
   const { t } = useI18n();
   const form = useProjectIdentityForm(project);
@@ -30,42 +29,32 @@ export const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
     return { id: project.id, path: project.path };
   }, [project]);
 
-  const handleIdentitySave = React.useCallback(async () => {
-    const data = await form.prepareSaveData();
-    if (!data) {
-      return;
-    }
+  const handleIdentitySave = React.useCallback(async (data: ProjectIdentitySaveData) => {
     await onIdentitySave(data);
-  }, [form, onIdentitySave]);
+  }, [onIdentitySave]);
+
+  useProjectIdentityAutoSave(form, handleIdentitySave);
 
   if (!project || !projectRef) {
     return null;
   }
 
+  const headerLabel = project.label ?? t('settings.projects.page.title.default');
+
   return (
-    <>
-      <ProjectIdentityEditor
-        form={form}
-        onSave={handleIdentitySave}
-        className={identityEditorClassName}
-      />
-
-      <div data-settings-item="projects.actions" className="mb-8">
-        <section className="px-2 pb-2 pt-0">
-          <ProjectActionsSection projectRef={projectRef} />
-        </section>
+    <div className="space-y-0">
+      <div className="mb-5 px-1">
+        <h2 className="typography-ui-header font-semibold text-foreground truncate">
+          {headerLabel}
+        </h2>
+        <p className="typography-meta text-muted-foreground truncate" title={project.path}>
+          {project.path}
+        </p>
       </div>
 
-      <div data-settings-item="projects.worktree" className="mb-8">
-        <div className="mb-1 px-1">
-          <h3 className="typography-ui-header font-medium text-foreground">
-            {t('settings.projects.page.section.worktree')}
-          </h3>
-        </div>
-        <section className="px-2 pb-2 pt-0">
-          <WorktreeSectionContent projectRef={projectRef} />
-        </section>
-      </div>
-    </>
+      <ProjectIdentityFields form={form} />
+      <ProjectActionsSection projectRef={projectRef} />
+      <WorktreeSectionContent projectRef={projectRef} />
+    </div>
   );
 };

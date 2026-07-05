@@ -7,6 +7,10 @@ import { PROJECT_COLORS, PROJECT_ICONS, PROJECT_COLOR_MAP as COLOR_MAP, ProjectI
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import {
+  PROJECT_SETTINGS_CONTROL_WIDTH,
+  ProjectSettingsSubsection,
+} from '@/components/sections/projects/ProjectSettingsSubsection';
 import type { useProjectIdentityForm } from './useProjectIdentityForm';
 
 type ProjectIdentityFormState = ReturnType<typeof useProjectIdentityForm>;
@@ -56,40 +60,37 @@ export const ProjectIdentityFields: React.FC<ProjectIdentityFieldsProps> = ({ fo
   const currentColorVar = color ? (COLOR_MAP[color] ?? null) : null;
 
   return (
-    <section className="px-2 pb-2 pt-0 space-y-0.5">
-      <div data-settings-item="projects.name" className="py-1.5">
-        <div className="flex min-w-0 flex-col">
-          <span className="typography-ui-label text-foreground">{t('settings.projects.page.field.projectName')}</span>
-        </div>
-        <div className="mt-1.5 flex min-w-0 items-center gap-2">
-          <Input
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder={t('settings.projects.page.field.projectNamePlaceholder')}
-            className="h-7 min-w-0 w-full sm:max-w-[19rem]"
-          />
-        </div>
-      </div>
+    <>
+      <ProjectSettingsSubsection
+        title={t('settings.projects.page.field.projectName')}
+        settingsItem="projects.name"
+      >
+        <Input
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder={t('settings.projects.page.field.projectNamePlaceholder')}
+          className={cn('h-7', PROJECT_SETTINGS_CONTROL_WIDTH)}
+        />
+      </ProjectSettingsSubsection>
 
-      <div data-settings-item="projects.default-model" className="py-1.5">
-        <div className="flex min-w-0 flex-col">
-          <span className="typography-ui-label text-foreground">{t('settings.projects.page.field.defaultModel')}</span>
-          <span className="typography-meta text-muted-foreground">{t('settings.projects.page.field.defaultModelDescription')}</span>
-        </div>
-        <div className="mt-1.5 flex min-w-0 items-center gap-2">
-          <ModelSelector
-            providerId={parsedDefaultModel.providerId}
-            modelId={parsedDefaultModel.modelId}
-            onChange={handleDefaultModelChange}
-          />
-        </div>
-      </div>
+      <ProjectSettingsSubsection
+        title={t('settings.projects.page.field.defaultModel')}
+        description={t('settings.projects.page.field.defaultModelDescription')}
+        settingsItem="projects.default-model"
+      >
+        <ModelSelector
+          providerId={parsedDefaultModel.providerId}
+          modelId={parsedDefaultModel.modelId}
+          onChange={handleDefaultModelChange}
+          className={PROJECT_SETTINGS_CONTROL_WIDTH}
+        />
+      </ProjectSettingsSubsection>
 
-      <div data-settings-item="projects.accent-color" className="py-1.5">
-        <div className="flex min-w-0 flex-col">
-          <span className="typography-ui-label text-foreground">{t('settings.projects.page.field.accentColor')}</span>
-        </div>
-        <div className="mt-1.5 flex flex-wrap items-center gap-2">
+      <ProjectSettingsSubsection
+        title={t('settings.projects.page.field.accentColor')}
+        settingsItem="projects.accent-color"
+      >
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => setColor(null)}
@@ -119,12 +120,12 @@ export const ProjectIdentityFields: React.FC<ProjectIdentityFieldsProps> = ({ fo
             />
           ))}
         </div>
-      </div>
+      </ProjectSettingsSubsection>
 
-      <div data-settings-item="projects.icon" className="py-1.5">
-        <div className="flex min-w-0 flex-col">
-          <span className="typography-ui-label text-foreground">{t('settings.projects.page.field.projectIcon')}</span>
-        </div>
+      <ProjectSettingsSubsection
+        title={t('settings.projects.page.field.projectIcon')}
+        settingsItem="projects.icon"
+      >
         <input
           ref={fileInputRef}
           type="file"
@@ -136,7 +137,7 @@ export const ProjectIdentityFields: React.FC<ProjectIdentityFieldsProps> = ({ fo
             event.currentTarget.value = '';
           }}
         />
-        <div className="mt-1.5 flex max-w-[22rem] flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => setIcon(null)}
@@ -175,7 +176,7 @@ export const ProjectIdentityFields: React.FC<ProjectIdentityFieldsProps> = ({ fo
           })}
         </div>
         {effectiveHasImageIcon && showImagePreview && (
-          <div className="mt-2 flex items-center gap-2">
+          <div className="flex items-center gap-2 pt-1">
             <span className="typography-meta text-muted-foreground">{t('settings.projects.page.field.preview')}</span>
             <span className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border/60 bg-[var(--surface-elevated)] p-1">
               <span
@@ -206,7 +207,7 @@ export const ProjectIdentityFields: React.FC<ProjectIdentityFieldsProps> = ({ fo
           </div>
         )}
         {effectiveHasImageIcon && (
-          <div className="mt-2 flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <input
               type="color"
               value={iconBackground ?? '#000000'}
@@ -234,7 +235,7 @@ export const ProjectIdentityFields: React.FC<ProjectIdentityFieldsProps> = ({ fo
             </Button>
           </div>
         )}
-        <div className="mt-2 flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {!hasCustomIcon && (
             <>
               <Button
@@ -279,7 +280,7 @@ export const ProjectIdentityFields: React.FC<ProjectIdentityFieldsProps> = ({ fo
             </Button>
           )}
         </div>
-      </div>
-    </section>
+      </ProjectSettingsSubsection>
+    </>
   );
 };
