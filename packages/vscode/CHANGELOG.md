@@ -1,4 +1,4 @@
-## [Unreleased]
+## [1.14.0] - 2026-07-05
 
 - Chat: loading older messages keeps your scroll position steady.
 - Chat: the stop button now aborts sessions running in a different project or worktree than the currently open one — previously those aborts silently did nothing.
