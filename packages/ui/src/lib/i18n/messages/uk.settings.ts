@@ -972,6 +972,7 @@ export const settingsDict = {
   "settings.projects.page.toast.discoverIconFailed": "Не вдалося знайти значок проєкту",
   "settings.projects.page.toast.customIconAlreadySet": "Спеціальна піктограма вже встановлена для цього проєкту",
   "settings.projects.page.toast.iconDiscovered": "Виявлено значок проєкту",
+  "settings.projects.page.toast.saveFailed": "Не вдалося зберегти налаштування проєкту",
   "settings.usage.sidebar.title": "Використання",
   "settings.usage.sidebar.total": "Усього {count}",
   "settings.usage.sidebar.actions.toggleAutoRefreshAria": "Увімкнути автоматичне оновлення",

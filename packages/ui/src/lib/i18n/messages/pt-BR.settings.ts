@@ -972,6 +972,7 @@ export const settingsDict = {
   "settings.projects.page.toast.discoverIconFailed": "Não foi possível descobrir o ícone do projeto",
   "settings.projects.page.toast.customIconAlreadySet": "Ícone personalizado já definido para este projeto",
   "settings.projects.page.toast.iconDiscovered": "Ícone do projeto descoberto",
+  "settings.projects.page.toast.saveFailed": "Falha ao salvar as configurações do projeto",
   "settings.usage.sidebar.title": "Uso",
   "settings.usage.sidebar.total": "Total {count}",
   "settings.usage.sidebar.actions.toggleAutoRefreshAria": "Alternar atualização automática",

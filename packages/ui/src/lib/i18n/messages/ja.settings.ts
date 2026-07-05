@@ -1005,6 +1005,7 @@ export const settingsDict = {
   'settings.projects.page.toast.discoverIconFailed': 'プロジェクトアイコンの検出に失敗しました',
   'settings.projects.page.toast.customIconAlreadySet': 'このプロジェクトには既にカスタムアイコンが設定されています',
   'settings.projects.page.toast.iconDiscovered': 'プロジェクトアイコンを検出しました',
+  'settings.projects.page.toast.saveFailed': 'プロジェクト設定の保存に失敗しました',
   'settings.usage.sidebar.title': '使用量',
   'settings.usage.sidebar.total': '合計 {count}',
   'settings.usage.sidebar.actions.toggleAutoRefreshAria': '自動更新の切替',

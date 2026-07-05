@@ -889,6 +889,7 @@
   'settings.projects.page.toast.discoverIconFailed': '發現專案圖示失敗',
   'settings.projects.page.toast.customIconAlreadySet': '該專案已設定自訂圖示',
   'settings.projects.page.toast.iconDiscovered': '專案圖示已發現',
+  'settings.projects.page.toast.saveFailed': '儲存專案設定失敗',
   'settings.usage.sidebar.title': '用量',
   'settings.usage.sidebar.total': '總計 {count}',
   'settings.usage.sidebar.actions.toggleAutoRefreshAria': '切換自動重新整理',

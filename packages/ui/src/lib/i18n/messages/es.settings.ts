@@ -972,6 +972,7 @@ export const settingsDict = {
   "settings.projects.page.toast.discoverIconFailed": "No se pudo descubrir el icono del proyecto",
   "settings.projects.page.toast.customIconAlreadySet": "Icono personalizado ya establecido para este proyecto",
   "settings.projects.page.toast.iconDiscovered": "Icono del proyecto descubierto",
+  "settings.projects.page.toast.saveFailed": "Error al guardar la configuración del proyecto",
   "settings.usage.sidebar.title": "Uso",
   "settings.usage.sidebar.total": "Total {count}",
   "settings.usage.sidebar.actions.toggleAutoRefreshAria": "Alternar refresco automático",

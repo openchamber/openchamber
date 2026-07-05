@@ -1,4 +1,6 @@
 import React from 'react';
+import { toast } from '@/components/ui';
+import { useI18n } from '@/lib/i18n';
 import type { ProjectIdentitySaveData } from './useProjectIdentityForm';
 import type { useProjectIdentityForm } from './useProjectIdentityForm';
 
@@ -10,6 +12,7 @@ export const useProjectIdentityAutoSave = (
   form: ProjectIdentityFormState,
   onSave: (data: ProjectIdentitySaveData) => void | Promise<void>,
 ) => {
+  const { t } = useI18n();
   const {
     hasChanges,
     name,
@@ -40,7 +43,11 @@ export const useProjectIdentityAutoSave = (
         try {
           const data = await prepareSaveData({ silent: true });
           if (data) {
-            await onSave(data);
+            try {
+              await onSave(data);
+            } catch {
+              toast.error(t('settings.projects.page.toast.saveFailed'));
+            }
           }
         } finally {
           isSavingRef.current = false;
@@ -64,5 +71,6 @@ export const useProjectIdentityAutoSave = (
     pendingRemoveImageIcon,
     pendingUploadIconFile,
     prepareSaveData,
+    t,
   ]);
 };

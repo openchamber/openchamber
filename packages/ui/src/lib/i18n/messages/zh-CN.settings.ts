@@ -972,6 +972,7 @@ export const settingsDict = {
   'settings.projects.page.toast.discoverIconFailed': '发现项目图标失败',
   'settings.projects.page.toast.customIconAlreadySet': '该项目已设置自定义图标',
   'settings.projects.page.toast.iconDiscovered': '项目图标已发现',
+  'settings.projects.page.toast.saveFailed': '保存项目设置失败',
   'settings.usage.sidebar.title': '用量',
   'settings.usage.sidebar.total': '总计 {count}',
   'settings.usage.sidebar.actions.toggleAutoRefreshAria': '切换自动刷新',

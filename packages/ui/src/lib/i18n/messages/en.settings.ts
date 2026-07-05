@@ -1005,6 +1005,7 @@ export const settingsDict = {
   'settings.projects.page.toast.discoverIconFailed': 'Failed to discover project icon',
   'settings.projects.page.toast.customIconAlreadySet': 'Custom icon already set for this project',
   'settings.projects.page.toast.iconDiscovered': 'Project icon discovered',
+  'settings.projects.page.toast.saveFailed': 'Failed to save project settings',
   'settings.usage.sidebar.title': 'Usage',
   'settings.usage.sidebar.total': 'Total {count}',
   'settings.usage.sidebar.actions.toggleAutoRefreshAria': 'Toggle auto refresh',

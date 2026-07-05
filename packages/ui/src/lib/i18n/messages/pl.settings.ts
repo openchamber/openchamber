@@ -1211,6 +1211,7 @@ export const settingsDict = {
   'settings.projects.page.toast.customIconAlreadySet': 'Dla tego projektu ustawiono już własną ikonę',
   'settings.projects.page.toast.discoverIconFailed': 'Nie udało się wykryć ikony projektu',
   'settings.projects.page.toast.iconDiscovered': 'Wykryto ikonę projektu',
+  'settings.projects.page.toast.saveFailed': 'Nie udało się zapisać ustawień projektu',
   'settings.projects.page.toast.iconRemoved': 'Ikona projektu została usunięta',
   'settings.projects.page.toast.iconUpdated': 'Ikona projektu została zaktualizowana',
   'settings.projects.page.toast.removeIconFailed': 'Nie udało się usunąć ikony projektu',

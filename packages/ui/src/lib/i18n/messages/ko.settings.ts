@@ -972,6 +972,7 @@ export const settingsDict = {
   'settings.projects.page.toast.discoverIconFailed': '프로젝트 아이콘을 찾지 못했습니다',
   'settings.projects.page.toast.customIconAlreadySet': '이 프로젝트에는 이미 사용자 정의 아이콘이 설정되어 있습니다',
   'settings.projects.page.toast.iconDiscovered': '프로젝트 아이콘을 찾았습니다',
+  'settings.projects.page.toast.saveFailed': '프로젝트 설정 저장에 실패했습니다',
   'settings.usage.sidebar.title': '사용량',
   'settings.usage.sidebar.total': '총 {count}개',
   'settings.usage.sidebar.actions.toggleAutoRefreshAria': '자동 새로고침 토글',
