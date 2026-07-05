@@ -5,6 +5,8 @@ const storage = new Map<string, string>()
 const createSessionCalls: Array<{ title?: string; directory: string | null; parentID: string | null; metadata?: unknown }> = []
 const permissionAutoAcceptCalls: Array<[string, boolean]> = []
 
+const getMockCalls = (fn: unknown): unknown[][] => ((fn as { mock?: { calls: unknown[][] } }).mock?.calls ?? [])
+
 mock.module("zustand", () => ({
   create: () => (initializer: (set: (patch: unknown | ((state: unknown) => unknown)) => void, get: () => unknown) => Record<string, unknown>) => {
     let state: Record<string, unknown>
@@ -262,11 +264,11 @@ describe("issue 2039 draft auto-accept", () => {
       onToggleFailed,
     })
 
-    expect(setDraftPermissionAutoAcceptEnabled).toHaveBeenCalledTimes(1)
-    expect(setDraftPermissionAutoAcceptEnabled).toHaveBeenCalledWith(true)
-    expect(setSessionAutoAccept).toHaveBeenCalledTimes(0)
-    expect(onOpenSessionFirst).toHaveBeenCalledTimes(0)
-    expect(onToggleFailed).toHaveBeenCalledTimes(0)
+    expect(getMockCalls(setDraftPermissionAutoAcceptEnabled).length).toBe(1)
+    expect(getMockCalls(setDraftPermissionAutoAcceptEnabled)[0]).toEqual([true])
+    expect(getMockCalls(setSessionAutoAccept).length).toBe(0)
+    expect(getMockCalls(onOpenSessionFirst).length).toBe(0)
+    expect(getMockCalls(onToggleFailed).length).toBe(0)
   })
 
   test("guards the toggle when no draft is open", () => {
@@ -286,10 +288,10 @@ describe("issue 2039 draft auto-accept", () => {
       onToggleFailed,
     })
 
-    expect(setDraftPermissionAutoAcceptEnabled).toHaveBeenCalledTimes(0)
-    expect(setSessionAutoAccept).toHaveBeenCalledTimes(0)
-    expect(onOpenSessionFirst).toHaveBeenCalledTimes(1)
-    expect(onToggleFailed).toHaveBeenCalledTimes(0)
+    expect(getMockCalls(setDraftPermissionAutoAcceptEnabled).length).toBe(0)
+    expect(getMockCalls(setSessionAutoAccept).length).toBe(0)
+    expect(getMockCalls(onOpenSessionFirst).length).toBe(1)
+    expect(getMockCalls(onToggleFailed).length).toBe(0)
   })
 
   beforeEach(() => {
@@ -334,7 +336,7 @@ describe("issue 2039 draft auto-accept", () => {
     useSessionUIStore.getState().closeNewSessionDraft()
 
     expect(useSessionUIStore.getState().newSessionDraft.open).toBe(false)
-    expect(useSessionUIStore.getState().newSessionDraft.permissionAutoAcceptEnabled).toBeUndefined()
+    expect(useSessionUIStore.getState().newSessionDraft.permissionAutoAcceptEnabled === undefined).toBe(true)
 
     const result = await materializeOpenDraftSession({
       providerID: "provider",
