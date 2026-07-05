@@ -236,9 +236,11 @@ async function materializeSessionFromServer(
   store: StoreApi<DirectoryStore>,
   options?: { isStale?: () => boolean },
 ) {
-  const scopedClient = opencodeClient.getScopedSdkClient(directory)
   const result = await retry(async () => {
-    const response = await scopedClient.session.messages({ sessionID, limit: SESSION_MATERIALIZATION_MESSAGE_LIMIT })
+    const response = await opencodeClient.getSessionMessagesResponseForDirectory(directory, sessionID, {
+      limit: SESSION_MATERIALIZATION_MESSAGE_LIMIT,
+      order: "asc",
+    })
     assertSdkSuccess(response, "session.messages")
     return response
   })
@@ -1196,16 +1198,18 @@ async function resyncDirectoryAfterReconnect(
 
   await resyncDirectorySessionStatuses(directory, store, candidateSessionIds, "authoritative")
 
-  const scopedClient = opencodeClient.getScopedSdkClient(directory)
   await Promise.all(candidateSessionIds.map(async (sessionId) => {
     const [sessionResponse, messageResponse] = await Promise.all([
       retry(async () => {
-        const response = await scopedClient.session.get({ sessionID: sessionId })
+        const response = await opencodeClient.getScopedSdkClient(directory).session.get({ sessionID: sessionId })
         assertSdkSuccess(response, "session.get")
         return response
       }).catch(() => null),
       retry(async () => {
-        const response = await scopedClient.session.messages({ sessionID: sessionId, limit: RECONNECT_MESSAGE_LIMIT })
+        const response = await opencodeClient.getSessionMessagesResponseForDirectory(directory, sessionId, {
+          limit: RECONNECT_MESSAGE_LIMIT,
+          order: "asc",
+        })
         assertSdkSuccess(response, "session.messages")
         return response
       }).catch(() => null),

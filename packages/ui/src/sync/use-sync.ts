@@ -20,6 +20,7 @@ import {
   clearSessionPrefetch,
 } from "./session-prefetch-cache"
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
+import { opencodeClient } from "@/lib/opencode/client"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const INITIAL_MESSAGE_PAGE_SIZE = 50
@@ -321,9 +322,13 @@ export function useSync() {
 
   // Fetch messages from API
   const fetchMessages = useCallback(
-    async (sessionID: string, limit: number, before?: string) => {
+    async (sessionID: string, limit: number, cursor?: string) => {
       const result = await retry(async () => {
-        const response = await sdk.session.messages({ sessionID, directory, limit, before })
+        const response = await opencodeClient.getSessionMessagesResponseForDirectory(directory, sessionID, {
+          limit,
+          ...(cursor ? { cursor } : {}),
+          ...(!cursor ? { order: "asc" } : {}),
+        })
         assertSdkSuccess(response, "session.messages")
         return response
       })
@@ -335,29 +340,29 @@ export function useSync() {
         id: x.info.id,
         part: sortParts(x.parts),
       }))
-      const cursor = result.response?.headers?.get?.("x-next-cursor") ?? undefined
-      return { session, part, cursor, complete: !cursor }
+      const nextCursor = result.response?.headers?.get?.("x-next-cursor") ?? undefined
+      return { session, part, cursor: nextCursor, complete: !nextCursor }
     },
-    [sdk, directory],
+    [directory],
   )
 
   // Load messages for a session
   const loadMessages = useCallback(
-    async (sessionID: string, options?: { before?: string; mode?: "replace" | "prepend"; isStale?: () => boolean }) => {
+    async (sessionID: string, options?: { cursor?: string; mode?: "replace" | "prepend"; isStale?: () => boolean }) => {
       const m = getMetaFor(sessionID)
       if (m.loading) return
       setMetaFor(sessionID, { loading: true })
 
       try {
-        const limit = options?.before ? HISTORY_MESSAGE_PAGE_SIZE : m.limit
-        let page = await fetchMessages(sessionID, limit, options?.before)
+        const limit = options?.cursor ? HISTORY_MESSAGE_PAGE_SIZE : m.limit
+        let page = await fetchMessages(sessionID, limit, options?.cursor)
 
         // Keep the initial page small for switch performance. Some sessions
         // have a very large final turn, so the latest records can
         // contain only assistant/tool records and no user boundary. That makes
         // turn projection render an empty chat until the user manually loads
         // older messages. Expand only this initial tail fetch, with a hard cap.
-        if (!options?.before && !page.complete && !hasUserMessage(page.session)) {
+        if (!options?.cursor && !page.complete && !hasUserMessage(page.session)) {
           for (const nextLimit of getInitialPageExpansionLimits()) {
             if (nextLimit <= limit) continue
             page = await fetchMessages(sessionID, nextLimit)
@@ -507,7 +512,7 @@ export function useSync() {
         if (!isStale()) {
           const currentMeta = getMetaFor(sessionID)
           if (currentMeta.cursor && !currentMeta.complete) {
-            loadMessages(sessionID, { before: currentMeta.cursor, mode: "prepend", isStale })
+            loadMessages(sessionID, { cursor: currentMeta.cursor, mode: "prepend", isStale })
           }
         }
       })()
@@ -529,7 +534,7 @@ export function useSync() {
       touch(sessionID)
       const m = getMetaFor(sessionID)
       if (m.loading || m.complete || !m.cursor) return
-      await loadMessages(sessionID, { before: m.cursor, mode: "prepend" })
+      await loadMessages(sessionID, { cursor: m.cursor, mode: "prepend" })
     },
     [touch, getMetaFor, loadMessages],
   )

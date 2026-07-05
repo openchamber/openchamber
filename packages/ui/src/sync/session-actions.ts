@@ -10,10 +10,10 @@ import { useInputStore } from "./input-store"
 import type { ChildStoreManager } from "./child-store"
 import { computeSubtreeIds } from "./scoped-blocking-requests"
 import { opencodeClient } from "@/lib/opencode/client"
+import { extractRestorableMessagePayload } from "@/lib/messages/messageRestore"
 import { mergeSessionDirectoryMetadata, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { registerSessionDirectory } from "./sync-refs"
-import { isSyntheticPart } from "@/lib/messages/synthetic"
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
 import { retry } from "./retry"
 import { isVSCodeRuntime } from "@/lib/desktop"
@@ -44,6 +44,18 @@ let _optimisticAdd: ((input: OptimisticAddInput) => void) | null = null
 let _optimisticRemove: ((input: OptimisticRemoveInput) => void) | null = null
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+async function lookupSessionMessageForRestore(
+  sessionId: string,
+  messageId: string,
+  directory: string | null | undefined,
+): Promise<{ info: Message; parts?: Part[] } | null> {
+  try {
+    return await opencodeClient.getMessage(sessionId, messageId, directory)
+  } catch {
+    return null
+  }
+}
 
 type SdkResult<T> = {
   data?: T
@@ -924,21 +936,21 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   // Extract message text for prompt restoration (only non-synthetic text parts —
   // the server adds file content as synthetic text parts that should not be restored)
   const messages = state.message[sessionId] ?? []
-  const targetMsg = messages.find((m) => m.id === messageId)
-  let messageText = ""
-  let submittedFileParts: Array<Record<string, unknown>> = []
-  if (targetMsg && targetMsg.role === "user") {
-    const parts = state.part[messageId] ?? []
-    const textParts = parts.filter((p) => p.type === "text" && !isSyntheticPart(p))
-    messageText = textParts
-      .map((p: Record<string, unknown>) => (p as { text?: string }).text || (p as { content?: string }).content || "")
-      .join("\n")
-      .trim()
-    // Snapshot file parts for later restoration to the input.
-    // Exclude synthetic file parts (server-generated file content that should
-    // not be restored to the composer).
-    submittedFileParts = parts.filter((p) => p.type === "file" && !isSyntheticPart(p)) as Array<Record<string, unknown>>
+  let targetMsg = messages.find((m) => m.id === messageId)
+  let targetParts = state.part[messageId] ?? []
+
+  if (!targetMsg || targetParts.length === 0) {
+    const fetched = await lookupSessionMessageForRestore(sessionId, messageId, directory)
+    if (fetched) {
+      if (!targetMsg) targetMsg = fetched.info
+      if (targetParts.length === 0) targetParts = fetched.parts ?? []
+    }
   }
+
+  const restorePayload = extractRestorableMessagePayload(targetMsg, targetParts)
+
+  const messageText = restorePayload?.messageText ?? ""
+  const submittedFileParts = restorePayload?.fileParts ?? []
 
   // Optimistically set only the revert marker. Keep messages and parts in the
   // local store; visible-message selectors derive the displayed timeline from
@@ -1015,9 +1027,14 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
 
 export async function refetchSessionMessages(sessionId: string): Promise<void> {
   const { store, directory } = dirStoreForSession(sessionId)
-  const result = await sdk().session.messages({ sessionID: sessionId, directory, limit: MESSAGE_REFETCH_LIMIT })
-  const records = (assertSdkSuccess(result, "session.messages") ?? [])
-    .filter((record: { info?: { id?: string } }) => !!record?.info?.id)
+  const scopedDirectory = directory ?? dir()
+  if (!scopedDirectory) return
+
+  const result = await opencodeClient.getSessionMessagesForDirectory(scopedDirectory, sessionId, {
+    limit: MESSAGE_REFETCH_LIMIT,
+    order: "asc",
+  })
+  const records = result.filter((record: { info?: { id?: string } }) => !!record?.info?.id)
   if (records.length === 0) return
 
   store.setState((state) => {
@@ -1086,14 +1103,22 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
   // Only non-synthetic text parts — the server adds file content as synthetic
   // text parts that should not be restored. File parts (images, pasted
   // screenshots) are user-originated and must be restored.
-  const parts = state.part[messageId] ?? []
-  let messageText = ""
-  const textParts = parts.filter((p) => p.type === "text" && !isSyntheticPart(p))
-  messageText = textParts
-    .map((p: Part) => ((p as Record<string, unknown>).text as string) || ((p as Record<string, unknown>).content as string) || "")
-    .join("\n")
-    .trim()
-  const fileParts = parts.filter((p) => p.type === "file" && !isSyntheticPart(p)) as Array<Record<string, unknown>>
+  const messages = state.message[sessionId] ?? []
+  let targetMsg = messages.find((m) => m.id === messageId)
+  let parts = state.part[messageId] ?? []
+
+  if (!targetMsg || parts.length === 0) {
+    const fetched = await lookupSessionMessageForRestore(sessionId, messageId, directory)
+    if (fetched) {
+      if (!targetMsg) targetMsg = fetched.info
+      if (parts.length === 0) parts = fetched.parts ?? []
+    }
+  }
+
+  const restorePayload = extractRestorableMessagePayload(targetMsg, parts)
+
+  const messageText = restorePayload?.messageText ?? ""
+  const fileParts = restorePayload?.fileParts ?? []
 
   const forkedSession = await opencodeClient.forkSession(sessionId, messageId, directory)
 
@@ -1144,7 +1169,6 @@ export async function fetchMessagesForSession(sessionID: string, directory?: str
   FETCH_MESSAGES_LOADING.add(loadingKey)
 
   try {
-    const s = sdk()
     const store = directory
       ? dirStoreForDirectory(directory)
       : dirStore()
@@ -1152,16 +1176,14 @@ export async function fetchMessagesForSession(sessionID: string, directory?: str
     if (getSessionMaterializationStatus(store.getState(), sessionID).renderable) return
 
     const result = await retry(async () => {
-      const response = await s.session.messages({
-        sessionID,
-        directory: resolvedDir,
+      const response = await opencodeClient.getSessionMessagesForDirectory(resolvedDir, sessionID, {
         limit: getFetchPageSize(),
+        order: "asc",
       })
       return response
     })
 
-    const records = (assertSdkSuccess(result, "session.messages") ?? [])
-      .filter((record: { info?: { id?: string } }) => !!record?.info?.id)
+    const records = result.filter((record: { info?: { id?: string } }) => !!record?.info?.id)
     if (records.length === 0) return
 
     // Staleness guard: a rapid session switch may have moved the user off this

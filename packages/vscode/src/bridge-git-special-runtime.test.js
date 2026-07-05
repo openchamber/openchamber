@@ -95,21 +95,20 @@ describe('bridge git special runtime', () => {
     expect(createOpencodeClient).toHaveBeenCalledWith({
       baseUrl: 'http://opencode.test',
       headers: { Authorization: 'Bearer test' },
+      directory: '/repo',
     });
     expect(sdkClient.v2.model.list).toHaveBeenCalled();
     expect(sdkClient.session.create).toHaveBeenCalledWith({
-      directory: '/repo',
       title: 'Git Generation',
     }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(sdkClient.session.promptAsync).toHaveBeenCalledWith(expect.objectContaining({
       sessionID: 'ses_1',
-      directory: '/repo',
       model: { providerID: 'anthropic', modelID: 'claude-sonnet-4-5' },
     }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(sdkClient.session.messages).toHaveBeenCalledWith({
       sessionID: 'ses_1',
-      directory: '/repo',
       limit: 10,
+      order: 'asc',
     }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(sdkClient.session.delete).toHaveBeenCalledWith({ sessionID: 'ses_1' }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });

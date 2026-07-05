@@ -66,9 +66,10 @@ const assertBridgeSdkSuccess = (result: BridgeSdkResult<unknown>, operation: str
   }
 };
 
-const createBridgeGitClient = (apiUrl: string, authHeaders?: Record<string, string>) => createOpencodeClient({
+const createBridgeGitClient = (apiUrl: string, authHeaders?: Record<string, string>, directory?: string) => createOpencodeClient({
   baseUrl: apiUrl.replace(/\/+$/, ''),
   headers: authHeaders || {},
+  ...(directory ? { directory } : {}),
 });
 
 const readStringField = (value: unknown, key: string): string => {
@@ -187,7 +188,7 @@ const generateBridgeTextWithSessionFlow = async ({
   modelID: string;
   authHeaders?: Record<string, string>;
 }): Promise<string> => {
-  const client = createBridgeGitClient(apiUrl, authHeaders);
+  const client = createBridgeGitClient(apiUrl, authHeaders, directory);
   const deadlineAt = Date.now() + BRIDGE_GIT_GENERATION_TIMEOUT_MS;
   const remainingMs = () => Math.max(1_000, deadlineAt - Date.now());
   let sessionId: string | null = null;
@@ -195,7 +196,6 @@ const generateBridgeTextWithSessionFlow = async ({
   try {
     const session = unwrapBridgeSdkData(
       await client.session.create({
-        ...(directory ? { directory } : {}),
         title: 'Git Generation',
       }, { signal: AbortSignal.timeout(remainingMs()) }),
       'session.create'
@@ -210,7 +210,6 @@ const generateBridgeTextWithSessionFlow = async ({
     assertBridgeSdkSuccess(
       await client.session.promptAsync({
         sessionID: sessionId,
-        ...(directory ? { directory } : {}),
         model: {
           providerID,
           modelID,
@@ -223,10 +222,13 @@ const generateBridgeTextWithSessionFlow = async ({
     while (Date.now() < deadlineAt) {
       await sleep(BRIDGE_GIT_GENERATION_POLL_INTERVAL_MS);
 
-      const messagesResponse = await client.session.messages({
+      const messagesResponse = await (client.session.messages as unknown as (
+        params: { sessionID: string; limit: number; order?: 'asc' | 'desc' },
+        options?: { signal?: AbortSignal },
+      ) => Promise<BridgeSdkResult<unknown>>)({
         sessionID: sessionId,
-        ...(directory ? { directory } : {}),
         limit: 10,
+        order: 'asc',
       }, { signal: AbortSignal.timeout(remainingMs()) });
 
       if (messagesResponse.error) {
