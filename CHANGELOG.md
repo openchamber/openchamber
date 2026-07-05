@@ -16,6 +16,12 @@ All notable changes to this project will be documented in this file.
 - Mobile: returning to the app no longer briefly flickers the session list.
 - Mobile: continued polish ahead of the native app release — the chat and composer ride the keyboard in one smooth motion (including in long conversations), bottom sheets enter cleanly while the keyboard dismisses, the text cursor stays in place when the keyboard opens, starter suggestions on the new-session screen step aside while the keyboard is up, and switching instances no longer leaves the previous instance's sessions in the sessions list.
 - UI: lists across the app were moved to one virtualization engine, so long lists scroll more consistently.
+- Mobile: the slash-command, file/agent, skill, and snippet autocompletes were tuned for touch — they can grow up to the top of the chat area, the keyboard-hint footer and description lines are gone, row icons line up, list scrolling no longer bounces the page behind, and picking a command keeps the keyboard open.
+- Mobile: in phone browsers the composer now keeps itself above the keyboard on the new-session screen and in the fullscreen editor, and opening the app shows the logo while it connects instead of flashing an unreachable-server error.
+- Chat: the stop button now aborts sessions running in a different project or worktree than the currently open one — previously those aborts silently did nothing.
+- Desktop: a local instance with a UI password and LAN access no longer gets stuck on "Auth required" and an unreachable-server screen (the app's client tokens are now reliably recognized as local, including for 0.0.0.0-bound servers).
+- Desktop: the app prefers your own OpenCode install again — the bundled CLI is used only when no OpenCode is installed anywhere on the machine.
+- Windows: OpenCode installed via npm now launches from paths with spaces (such as C:\Program Files\nodejs), binary paths pasted with surrounding quotes work, and discovery also checks the system-wide npm prefix and Scoop's shims — in the web/desktop app and the VS Code extension.
 
 ## [1.13.9] - 2026-07-02
 
