@@ -41,6 +41,7 @@ export const DefaultsSettings: React.FC = () => {
   const [defaultAgent, setDefaultAgent] = React.useState<string | undefined>();
   const [smallModelUseDefault, setSmallModelUseDefault] = React.useState(true);
   const [smallModelOverride, setSmallModelOverride] = React.useState<string | undefined>();
+  const [smallModelProviders, setSmallModelProviders] = React.useState<string[] | undefined>();
   const [isLoading, setIsLoading] = React.useState(true);
 
   const parsedModel = React.useMemo(() => getDisplayModel(defaultModel), [defaultModel]);
@@ -227,6 +228,26 @@ export const DefaultsSettings: React.FC = () => {
 
   const parsedSmallModel = React.useMemo(() => getDisplayModel(smallModelOverride), [smallModelOverride]);
 
+  React.useEffect(() => {
+    if (smallModelUseDefault || smallModelProviders !== undefined) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await runtimeFetch('/api/small-model', { method: 'GET', headers: { Accept: 'application/json' } });
+        if (!response.ok) return;
+        const payload = await response.json().catch(() => null) as { authenticatedProviders?: unknown } | null;
+        if (!cancelled && Array.isArray(payload?.authenticatedProviders)) {
+          setSmallModelProviders(payload.authenticatedProviders.filter((id): id is string => typeof id === 'string'));
+        }
+      } catch {
+        // leave undefined — picker falls back to showing all providers
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [smallModelUseDefault, smallModelProviders]);
+
   const availableVariants = React.useMemo(() => {
     if (!parsedModel.providerId || !parsedModel.modelId) return [];
     const provider = providers.find((p) => p.id === parsedModel.providerId);
@@ -387,6 +408,7 @@ export const DefaultsSettings: React.FC = () => {
                 providerId={parsedSmallModel.providerId}
                 modelId={parsedSmallModel.modelId}
                 onChange={handleSmallModelOverrideChange}
+                allowedProviderIds={smallModelProviders}
               />
             </div>
           </div>

@@ -4,7 +4,7 @@ import path from 'path';
 import { readAuthFile } from '../opencode/auth.js';
 import { readConfigLayers } from '../opencode/shared.js';
 import { getModelCatalog } from './catalog.js';
-import { resolveSmallModel, parseModelRef } from './resolve.js';
+import { resolveSmallModel, parseModelRef, isUsableAuthEntry, getAuthEntryForProvider } from './resolve.js';
 import { callSmallModel } from './call.js';
 
 const OPENCHAMBER_SETTINGS_FILE = path.join(
@@ -125,6 +125,28 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
     source: resolved.source,
     ...(clamped.truncated ? { inputTruncated: true } : {}),
   };
+}
+
+/**
+ * Provider ids with a usable OpenCode login — the set the small model can
+ * actually call. Used by the settings override picker to hide providers that
+ * would only ever fail (e.g. opencode free models without a token).
+ */
+export function listAuthenticatedProviders() {
+  try {
+    const auth = readAuthFile();
+    const ids = new Set(
+      Object.keys(auth || {}).filter((providerID) => isUsableAuthEntry(auth[providerID])),
+    );
+    // The catalog id is github-copilot while legacy auth entries may sit
+    // under the copilot alias.
+    if (isUsableAuthEntry(getAuthEntryForProvider(auth, 'github-copilot'))) {
+      ids.add('github-copilot');
+    }
+    return Array.from(ids);
+  } catch {
+    return [];
+  }
 }
 
 /**
