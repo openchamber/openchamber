@@ -1188,7 +1188,12 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       }
     }
 
-    // 2. Pin projects with recent sessions to the top
+    // 2. Pin projects with recent sessions to the top in non-manual modes.
+    // Manual mode must preserve the user's explicit order snapshot exactly.
+    if (projectSortOrder === 'manual') {
+      return list;
+    }
+
     const recent = list.filter((p) => recentProjectIds.has(p.id));
     const rest = list.filter((p) => !recentProjectIds.has(p.id));
     return [...recent, ...rest];
