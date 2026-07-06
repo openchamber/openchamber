@@ -1682,6 +1682,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.draftStarters.sectionSkills": "Skills",
   "chat.draftStarters.remove": "Remove",
   "chat.scrollToBottom.aria": "Ir al final",
+  "chat.promptNavigator.aria": "Navegación de prompts",
+  "chat.promptNavigator.goToPrompt": "Ir al prompt {number}",
   "chat.timeline.relative.justNow": "ahora mismo",
   "chat.timeline.relative.minutesAgo": "hace {count}m",
   "chat.timeline.relative.hoursAgo": "hace {count}h",

@@ -1682,6 +1682,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.draftStarters.sectionSkills": "Скіли",
   "chat.draftStarters.remove": "Прибрати",
   "chat.scrollToBottom.aria": "Прокрутити вниз",
+  "chat.promptNavigator.aria": "Навігація за промптами",
+  "chat.promptNavigator.goToPrompt": "Перейти до промпту {number}",
   "chat.timeline.relative.justNow": "щойно",
   "chat.timeline.relative.minutesAgo": "{count} хв тому",
   "chat.timeline.relative.hoursAgo": "{count} год тому",

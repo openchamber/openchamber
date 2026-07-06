@@ -11,8 +11,8 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionMessageRecords } from '@/sync/sync-context';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
-import type { Part } from '@opencode-ai/sdk/v2';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
+import { getFullText, getMessagePreview } from './lib/messagePreview';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
 
@@ -312,19 +312,6 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
         </Dialog>
     );
 };
-
-function getFullText(parts: Part[]): string {
-    return parts
-        .filter((p): p is Part & { type: 'text'; text: string } => p.type === 'text' && typeof p.text === 'string')
-        .map((p) => p.text)
-        .join('\n');
-}
-
-function getMessagePreview(parts: Part[]): string {
-    const full = getFullText(parts);
-    const singleLine = full.replace(/\n/g, ' ');
-    return singleLine.length > 80 ? singleLine.slice(0, 80) : singleLine;
-}
 
 function getSearchSnippet(text: string, query: string, contextChars: number = 30): string | null {
     const lowerText = text.toLowerCase();

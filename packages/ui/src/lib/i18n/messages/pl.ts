@@ -636,6 +636,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.draftStarters.sectionSkills': 'Skills',
   'chat.draftStarters.remove': 'Remove',
   'chat.scrollToBottom.aria': 'Przewiń na dół',
+  'chat.promptNavigator.aria': 'Nawigacja promptów',
+  'chat.promptNavigator.goToPrompt': 'Przejdź do promptu {number}',
   'chat.timeline.relative.justNow': 'przed chwilą',
   'chat.timeline.relative.minutesAgo': '{count}m temu',
   'chat.timeline.relative.hoursAgo': '{count}h temu',

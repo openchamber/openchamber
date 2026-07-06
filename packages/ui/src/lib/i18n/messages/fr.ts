@@ -1517,6 +1517,8 @@ export const dict = {
   'chat.emptyState.draftTitle': 'Sur quoi travaillons-nous ?',
   'chat.emptyState.draftTitleWithProject': 'Sur quoi travaillons-nous dans {project} ?',
   'chat.scrollToBottom.aria': 'Faire défiler vers le bas',
+  'chat.promptNavigator.aria': 'Navigation des prompts',
+  'chat.promptNavigator.goToPrompt': 'Aller au prompt {number}',
   'chat.timeline.relative.justNow': 'à l’instant',
   'chat.timeline.relative.minutesAgo': 'il y a {count} min',
   'chat.timeline.relative.hoursAgo': 'il y a {count} h',

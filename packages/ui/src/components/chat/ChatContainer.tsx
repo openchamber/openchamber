@@ -16,6 +16,7 @@ import { QuestionCard } from './QuestionCard';
 import { StatusRowContainer } from './StatusRowContainer';
 import { SessionRecapNote } from '@/components/chat/SessionRecapSpacer';
 import ScrollToBottomButton from './components/ScrollToBottomButton';
+import { PromptNavigatorRail } from './components/PromptNavigatorRail';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { useChatAutoFollow, type AnimationHandlers, type ContentChangeReason } from '@/hooks/useChatAutoFollow';
 import { useChatTimelineController } from './hooks/useChatTimelineController';
@@ -162,6 +163,11 @@ type ChatViewportProps = {
     isProgrammaticFollowActive: boolean;
     showLoadOlderButton: boolean;
     onLoadOlder: () => void;
+    turnIds: string[];
+    turnMessageStartIndexes: number[];
+    activeTurnId: string | null;
+    onSelectTurn: (turnId: string) => void;
+    showPromptNavigator: boolean;
 };
 
 const ChatViewport = React.memo(({
@@ -188,8 +194,23 @@ const ChatViewport = React.memo(({
     isProgrammaticFollowActive,
     showLoadOlderButton,
     onLoadOlder,
+    turnIds,
+    turnMessageStartIndexes,
+    activeTurnId,
+    onSelectTurn,
+    showPromptNavigator,
 }: ChatViewportProps) => {
     const { t } = useI18n();
+    const promptPreviewsByTurnId = React.useMemo(() => {
+        const previews = new Map<string, Part[]>();
+        for (const message of renderedMessages) {
+            if (message.info.role !== 'user') {
+                continue;
+            }
+            previews.set(message.info.id, message.parts);
+        }
+        return previews;
+    }, [renderedMessages]);
     const focusScrollContainer = React.useCallback((event: React.MouseEvent<HTMLElement>) => {
         if (event.defaultPrevented || shouldIgnoreChatNavigationTarget(event.target)) {
             return;
@@ -278,6 +299,17 @@ const ChatViewport = React.memo(({
                     </div>
                 </ScrollShadow>
                 <OverlayScrollbar containerRef={scrollRef} suppressVisibility={isProgrammaticFollowActive} userIntentOnly observeMutations={false} />
+                {showPromptNavigator ? (
+                    <PromptNavigatorRail
+                        turnIds={turnIds}
+                        turnMessageStartIndexes={turnMessageStartIndexes}
+                        messageCount={renderedMessages.length}
+                        previewsByTurnId={promptPreviewsByTurnId}
+                        activeTurnId={activeTurnId}
+                        scrollRef={scrollRef}
+                        onSelectTurn={onSelectTurn}
+                    />
+                ) : null}
             </div>
         </div>
     );
@@ -304,7 +336,12 @@ const ChatViewport = React.memo(({
         && prev.sessionPermissions === next.sessionPermissions
         && prev.isProgrammaticFollowActive === next.isProgrammaticFollowActive
         && prev.showLoadOlderButton === next.showLoadOlderButton
-        && prev.onLoadOlder === next.onLoadOlder;
+        && prev.onLoadOlder === next.onLoadOlder
+        && prev.turnIds === next.turnIds
+        && prev.turnMessageStartIndexes === next.turnMessageStartIndexes
+        && prev.activeTurnId === next.activeTurnId
+        && prev.onSelectTurn === next.onSelectTurn
+        && prev.showPromptNavigator === next.showPromptNavigator;
 });
 
 ChatViewport.displayName = 'ChatViewport';
@@ -718,6 +755,10 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         scrollToMessage: timelineController.scrollToMessage,
         resumeToBottom: timelineController.resumeToBottomInstant,
     });
+    const handlePromptNavigatorSelect = React.useCallback((turnId: string) => {
+        void navigation.scrollToTurnId(turnId, { behavior: 'smooth' });
+    }, [navigation]);
+    const showPromptNavigator = !isMobile && !isDesktopExpandedInput && timelineController.turnIds.length >= 2;
 
     React.useEffect(() => {
         if (typeof window === 'undefined' || !currentSessionId) return;
@@ -1024,6 +1065,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 isProgrammaticFollowActive={isFollowingProgrammatically}
                 showLoadOlderButton={showLoadOlderButton}
                 onLoadOlder={handleLoadOlderClick}
+                turnIds={timelineController.turnIds}
+                turnMessageStartIndexes={timelineController.turnWindowModel.turnMessageStartIndexes}
+                activeTurnId={timelineController.activeTurnId}
+                onSelectTurn={handlePromptNavigatorSelect}
+                showPromptNavigator={showPromptNavigator}
             />
 
             <div
