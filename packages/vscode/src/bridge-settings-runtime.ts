@@ -291,12 +291,20 @@ export const persistSettings = async (changes: Record<string, unknown>, ctx?: Br
 
   const keysToClear = new Set<string>();
 
-  for (const key of ['defaultModel', 'defaultVariant', 'defaultAgent', 'defaultGitIdentityId', 'opencodeBinary']) {
+  for (const key of ['defaultModel', 'defaultVariant', 'defaultAgent', 'defaultGitIdentityId', 'opencodeBinary', 'smallModelOverride']) {
     const value = restChanges[key];
     if (typeof value === 'string' && value.trim().length === 0) {
       keysToClear.add(key);
       delete restChanges[key];
     }
+  }
+
+  if ('smallModelUseDefault' in restChanges && typeof restChanges.smallModelUseDefault !== 'boolean') {
+    delete restChanges.smallModelUseDefault;
+  }
+
+  if ('sessionAssistEnabled' in restChanges && typeof restChanges.sessionAssistEnabled !== 'boolean') {
+    delete restChanges.sessionAssistEnabled;
   }
 
   if (typeof restChanges.usageAutoRefresh !== 'boolean') {

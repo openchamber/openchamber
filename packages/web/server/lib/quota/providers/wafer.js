@@ -12,7 +12,7 @@ import {
 
 export const providerId = 'wafer';
 export const providerName = 'Wafer.ai';
-export const aliases = ['wafer', 'wafer-ai', 'wafer_ai', 'wafer.ai'];
+const aliases = ['wafer', 'wafer-ai', 'wafer_ai', 'wafer.ai'];
 
 const WAFER_QUOTA_URL = 'https://pass.wafer.ai/v1/inference/quota';
 const WAFER_WINDOW_SECONDS = 5 * 3600;

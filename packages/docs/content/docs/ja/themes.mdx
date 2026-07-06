@@ -1,0 +1,30 @@
+---
+title: テーマ
+description: 組み込みテーマとユーザー定義テーマで OpenChamber をカスタマイズします。
+---
+
+# テーマ
+
+OpenChamber は組み込みテーマとカスタムテーマ JSON ファイルに対応しています。
+
+## カスタムテーマを追加する
+
+1. テーマディレクトリを作成します。
+
+```bash
+mkdir -p ~/.config/openchamber/themes
+```
+
+2. そのディレクトリに JSON ファイルを追加します（例: `my-theme.json`）。
+3. OpenChamber を開き、**Settings -> Theme -> Reload themes** に移動します。
+4. ドロップダウンからテーマを選びます。すぐに適用されます。
+
+## テーマの場所
+
+- macOS/Linux: `~/.config/openchamber/themes/`
+
+## 完全な JSON 形式リファレンス
+
+メインリポジトリのドキュメントにある完全な形式ガイドを使ってください。
+
+- [`docs/CUSTOM_THEMES.md`](https://github.com/openchamber/openchamber/blob/main/docs/CUSTOM_THEMES.md)

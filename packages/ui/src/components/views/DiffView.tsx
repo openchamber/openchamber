@@ -2,7 +2,7 @@ import React from 'react';
 
 import { useUIStore } from '@/stores/useUIStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
-import { useGitStore, useGitStatus, useIsGitRepo, useGitFileCount, useGitLoadingStatus } from '@/stores/useGitStore';
+import { useGitStore, useGitStatus, useIsGitRepo, useGitLoadingStatus } from '@/stores/useGitStore';
 import { cn } from '@/lib/utils';
 import type { GitStatus } from '@/lib/api/types';
 import {
@@ -39,6 +39,7 @@ import { fileDiffFromPatch } from '@/lib/diff/patchFileDiff';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { startReviewFlow } from '@/lib/reviewFlow';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { getFirstChangedModifiedLineFromPatch } from './diffPatchUtils';
 import type { FileDiffMetadata } from '@pierre/diffs';
 
 // Minimum width for side-by-side diff view (px)
@@ -158,24 +159,6 @@ const getFirstChangedModifiedLine = (original: string, modified: string): number
     }
 
     return 1;
-};
-
-const getFirstVisibleModifiedLineFromPatch = (patch: string): number | null => {
-    if (!patch) {
-        return null;
-    }
-
-    const match = patch.match(/@@\s*-\d+(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s*@@/m);
-    if (!match) {
-        return null;
-    }
-
-    const parsed = Number.parseInt(match[1], 10);
-    if (!Number.isFinite(parsed) || parsed < 1) {
-        return null;
-    }
-
-    return parsed;
 };
 
 const isBinaryPatch = (patch: string): boolean =>
@@ -1297,6 +1280,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 variant: execution.variant || undefined,
                 generateHandoff: execution.generateHandoff,
                 returnAfterHandoffRequest: execution.generateHandoff,
+                autoReview: execution.autoReview,
             });
             setReviewDialogOpen(false);
         } catch (error) {
@@ -1421,7 +1405,9 @@ export const DiffView: React.FC<DiffViewProps> = ({
         try {
             let targetLine: number | null = null;
 
-            if (cachedDiffData && !cachedDiffData.isBinary && !isImageFile(filePath)) {
+            if (cachedDiffData?.patch && !cachedDiffData.isBinary && !isImageFile(filePath)) {
+                targetLine = getFirstChangedModifiedLineFromPatch(cachedDiffData.patch);
+            } else if (cachedDiffData && cachedDiffData.contextMode === 'full' && !cachedDiffData.isBinary && !isImageFile(filePath)) {
                 targetLine = getFirstChangedModifiedLine(cachedDiffData.original, cachedDiffData.modified);
             }
 
@@ -1432,7 +1418,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                         staged: activeDiffStaged,
                         contextLines: 3,
                     });
-                    targetLine = getFirstVisibleModifiedLineFromPatch(patchResponse.diff);
+                    targetLine = getFirstChangedModifiedLineFromPatch(patchResponse.diff);
                 } catch {
                     targetLine = null;
                 }
@@ -1693,23 +1679,4 @@ export const DiffView: React.FC<DiffViewProps> = ({
             {renderContent()}
         </div>
     );
-};
-
-// eslint-disable-next-line react-refresh/only-export-components
-export const useDiffFileCount = (): number => {
-    const { git } = useRuntimeAPIs();
-    const effectiveDirectory = useEffectiveDirectory();
-
-    const setActiveDirectory = useGitStore((state) => state.setActiveDirectory);
-    const ensureStatus = useGitStore((state) => state.ensureStatus);
-    const fileCount = useGitFileCount(effectiveDirectory ?? null);
-
-    React.useEffect(() => {
-        if (effectiveDirectory) {
-            setActiveDirectory(effectiveDirectory);
-            void ensureStatus(effectiveDirectory, git);
-        }
-    }, [effectiveDirectory, setActiveDirectory, ensureStatus, git]);
-
-    return fileCount;
 };

@@ -120,6 +120,17 @@ export function createGlobalMessageStreamWsBridge({
       for (const socket of Array.from(clients)) {
         if (!readyClients.has(socket)) {
           markReady(socket, clientLastEventIds.get(socket) ?? '');
+          continue;
+        }
+
+        if (status.wasReady) {
+          const sent = sendMessageStreamWsFrame(socket, {
+            type: 'ready',
+            scope: 'global',
+          });
+          if (!sent) {
+            removeClient(socket);
+          }
         }
       }
       return;

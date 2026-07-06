@@ -10,6 +10,7 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import { OPENCHAMBER_PROJECT_NOTES_MAX_LENGTH, getProjectNotesAndTodos, saveProjectNotesAndTodos } from '@/lib/openchamberConfig';
+import { summarizeSelectionForNotes } from '@/lib/smallModel';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -518,7 +519,9 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
 
     try {
       setIsAddingToNotes(true);
-      const noteText = selectedTextMarkdown || selectedText;
+      // Long selections are distilled into a compact note by the small model;
+      // short ones (and any generation failure) go in verbatim.
+      const noteText = await summarizeSelectionForNotes(selectedTextMarkdown || selectedText, currentSessionId);
       const projectData = await getProjectNotesAndTodos(currentProjectRef);
       const nextNotes = appendDistilledInsightToNotes(projectData.notes, noteText);
       const saved = await saveProjectNotesAndTodos(currentProjectRef, {
@@ -541,7 +544,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     } finally {
       setIsAddingToNotes(false);
     }
-  }, [currentProjectRef, hideMenu, selectedText, selectedTextMarkdown, t]);
+  }, [currentProjectRef, currentSessionId, hideMenu, selectedText, selectedTextMarkdown, t]);
 
   if (!position.show) return null;
 
@@ -717,5 +720,3 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     document.body
   );
 };
-
-export default TextSelectionMenu;

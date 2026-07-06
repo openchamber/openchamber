@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/electron",
-  "version": "1.13.2",
+  "version": "1.14.0",
   "private": true,
   "description": "Electron desktop runtime for OpenChamber",
   "author": "OpenChamber",
@@ -27,10 +27,13 @@
     "dev": "node ./scripts/electron-dev.mjs",
     "build:web-assets": "node ./scripts/build-web-assets.mjs",
     "build": "bun -e \"process.exit(0)\"",
+    "prepare:opencode-cli": "node ./scripts/prepare-opencode-cli.mjs",
+    "verify:opencode-cli": "node ./scripts/verify-opencode-cli.mjs --staged",
+    "verify:opencode-cli:packaged": "node ./scripts/verify-opencode-cli.mjs --packaged",
     "bundle:main": "bun ./scripts/bundle-main.mjs",
     "generate:macos-icon": "node ./scripts/generate-macos-icon-assets.cjs",
     "rebuild:native": "node ./scripts/rebuild-native.mjs",
-    "package": "bun run build:web-assets && bun run bundle:main && bun run rebuild:native && node ./scripts/package.mjs",
+    "package": "bun run build:web-assets && bun run prepare:opencode-cli && bun run bundle:main && bun run rebuild:native && node ./scripts/package.mjs",
     "finalize:latest-yml": "node ./scripts/finalize-latest-yml.mjs",
     "type-check": "node --check ./main.mjs && node --check ./preload.mjs",
     "lint": "node -e \"process.exit(0)\""
@@ -54,6 +57,10 @@
       {
         "from": "resources/icons/tray",
         "to": "icons/tray"
+      },
+      {
+        "from": "resources/opencode-cli",
+        "to": "opencode-cli"
       }
     ],
     "afterPack": "scripts/after-pack.cjs",

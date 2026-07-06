@@ -2,7 +2,7 @@ import type { I18nKey } from '@/lib/i18n/store';
 import type { SettingsPageSlug, SettingsRuntimeContext } from './metadata';
 import { getSettingsPageMeta } from './metadata';
 
-export interface SettingsSearchItem {
+interface SettingsSearchItem {
   id: string;
   page: SettingsPageSlug;
   titleKey: I18nKey;
@@ -17,12 +17,14 @@ export interface SettingsSearchResult extends SettingsSearchItem {
   pageTitle: string;
 }
 
-export interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
+interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
   isMobile: boolean;
   isDesktopLocalOrigin: boolean;
+  // macOS desktop shell — for controls that only render on darwin (e.g. dock badge).
+  isMac: boolean;
 }
 
-export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
+const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   {
     id: 'appearance.language',
     page: 'appearance',
@@ -71,6 +73,16 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     descriptionKey: 'settings.openchamber.visual.field.macVibrancyHint',
     keywords: ['transparent', 'transparency', 'vibrancy', 'blur', 'macos', 'opaque'],
     isAvailable: (ctx) => ctx.isDesktopLocalOrigin,
+  },
+  {
+    id: 'appearance.dock-badge',
+    page: 'appearance',
+    titleKey: 'settings.openchamber.visual.field.dockBadge',
+    descriptionKey: 'settings.openchamber.visual.field.dockBadgeHint',
+    keywords: ['dock', 'badge', 'unread', 'unseen', 'counter', 'count', 'notification', 'macos'],
+    // Exactly matches the render guard in OpenChamberVisualSettings: any darwin
+    // Electron shell (isMac already implies isDesktopShell), local or remote host.
+    isAvailable: (ctx) => ctx.isMac,
   },
   {
     id: 'appearance.pwa-install-name',
@@ -162,6 +174,12 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['streaming', 'sse', 'websocket'],
   },
   {
+    id: 'chat.session-assist',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.sessionAssist',
+    keywords: ['recap', 'suggestion', 'assist', 'small model', 'summary'],
+  },
+  {
     id: 'chat.reasoning-traces',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.showReasoningTraces',
@@ -212,11 +230,11 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
-    id: 'chat.queue-mode',
+    id: 'chat.follow-up-behavior',
     page: 'chat',
-    titleKey: 'settings.openchamber.visual.field.queueMessagesByDefault',
-    descriptionKey: 'settings.openchamber.visual.field.queueMessagesByDefaultTooltip',
-    keywords: ['queue', 'enter', 'send'],
+    titleKey: 'settings.openchamber.visual.section.followUpBehavior',
+    descriptionKey: 'settings.openchamber.visual.field.followUpBehaviorDescription',
+    keywords: ['follow up', 'queue', 'steer', 'send immediately'],
   },
   {
     id: 'chat.persist-drafts',
@@ -256,6 +274,13 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['delete', 'confirmation'],
   },
   {
+    id: 'sessions.small-model',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.defaults.smallModel.title',
+    descriptionKey: 'settings.openchamber.defaults.smallModel.description',
+    keywords: ['small model', 'utility', 'summary', 'recap', 'cheap', 'override'],
+  },
+  {
     id: 'sessions.auto-cleanup',
     page: 'sessions',
     titleKey: 'settings.openchamber.sessionRetention.field.enableAutoCleanup',
@@ -280,6 +305,14 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.desktopNetwork.field.launchAtLogin',
     descriptionKey: 'settings.openchamber.desktopNetwork.field.launchAtLoginDescription',
     keywords: ['desktop', 'startup', 'login'],
+    isAvailable: (ctx) => ctx.isDesktopLocalOrigin,
+  },
+  {
+    id: 'sessions.desktop-keep-awake',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.desktopNetwork.field.keepAwake',
+    descriptionKey: 'settings.openchamber.desktopNetwork.field.keepAwakeDescription',
+    keywords: ['desktop', 'sleep', 'awake', 'server', 'mobile', 'phone'],
     isAvailable: (ctx) => ctx.isDesktopLocalOrigin,
   },
   {
@@ -323,7 +356,7 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'git',
     titleKey: 'settings.gitIdentities.page.section.title',
     descriptionKey: 'settings.gitIdentities.page.empty.description',
-    keywords: ['identity', 'profile', 'author', 'email', 'credentials'],
+    keywords: ['identity', 'profile', 'author', 'email', 'credentials', 'signing', 'commit signing', 'ssh signing', 'gpg'],
   },
   {
     id: 'git.changes-view',
@@ -381,6 +414,12 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['worktree', 'branch', 'repository'],
   },
   {
+    id: 'projects.worktree.setup.wait',
+    page: 'projects',
+    titleKey: 'settings.openchamber.worktrees.setup.waitForCommands',
+    keywords: ['worktree', 'setup commands', 'bootstrap', 'wait'],
+  },
+  {
     id: 'remote-instances.client-auth',
     page: 'remote-instances',
     titleKey: 'settings.remoteInstances.clientAuth.title',
@@ -393,7 +432,7 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'remote-instances',
     titleKey: 'settings.remoteInstances.direct.title',
     descriptionKey: 'settings.remoteInstances.direct.description',
-    keywords: ['server url', 'connection token', 'import link', 'host switcher'],
+    keywords: ['server url', 'connection token', 'import link', 'host switcher', 'additional headers', 'request headers', 'cloudflare access', 'service token'],
     isAvailable: (ctx) => ctx.isDesktop,
   },
   {
@@ -434,6 +473,13 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'agents',
     titleKey: 'settings.agents.page.field.overrideModel',
     keywords: ['model', 'provider'],
+  },
+  {
+    id: 'agents.variant',
+    page: 'agents',
+    titleKey: 'settings.agents.page.field.variant',
+    descriptionKey: 'settings.agents.page.field.variantTooltip',
+    keywords: ['thinking', 'reasoning', 'variant', 'depth'],
   },
   {
     id: 'agents.temperature',
@@ -652,22 +698,16 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['keyboard', 'hotkeys', 'bindings'],
   },
   {
-    id: 'voice.voice-setup',
+    id: 'voice.playback',
     page: 'voice',
-    titleKey: 'settings.voice.page.section.voiceSetup',
-    keywords: ['tts', 'voice mode', 'provider', 'speech rate', 'speech pitch', 'speech volume', 'language'],
+    titleKey: 'settings.voice.page.section.playbackAndSummary',
+    keywords: ['tts', 'read aloud', 'voice', 'provider', 'speech rate', 'speech pitch', 'speech volume', 'tts input mode', 'markdown'],
   },
   {
     id: 'voice.speech-recognition',
     page: 'voice',
     titleKey: 'settings.voice.page.section.speechRecognition',
-    keywords: ['stt', 'transcribe', 'whisper', 'microphone', 'silence threshold'],
-  },
-  {
-    id: 'voice.playback',
-    page: 'voice',
-    titleKey: 'settings.voice.page.section.playbackAndSummary',
-    keywords: ['read aloud', 'tts input mode', 'summary', 'markdown'],
+    keywords: ['stt', 'dictation', 'voice input', 'transcribe', 'whisper', 'parakeet', 'microphone'],
   },
   {
     id: 'tunnel.provider',

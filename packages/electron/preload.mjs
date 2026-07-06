@@ -14,6 +14,7 @@ const readArgValue = (name) => {
 const localOrigin = readArgValue('--openchamber-local-origin');
 const apiBaseUrl = readArgValue('--openchamber-api-base-url');
 const clientToken = readArgValue('--openchamber-client-token');
+const runtimeHeadersRaw = readArgValue('--openchamber-runtime-headers');
 const homeDirectory = readArgValue('--openchamber-home');
 const macosMajorRaw = readArgValue('--openchamber-macos-major');
 const macosMajor = Number.parseInt(macosMajorRaw, 10);
@@ -59,6 +60,16 @@ if (apiBaseUrl) {
 
 if (clientToken && isLocalPage) {
   contextBridge.exposeInMainWorld('__OPENCHAMBER_CLIENT_TOKEN__', clientToken);
+}
+
+if (runtimeHeadersRaw && isLocalPage) {
+  try {
+    const runtimeHeaders = JSON.parse(runtimeHeadersRaw);
+    if (runtimeHeaders && typeof runtimeHeaders === 'object') {
+      contextBridge.exposeInMainWorld('__OPENCHAMBER_RUNTIME_HEADERS__', runtimeHeaders);
+    }
+  } catch {
+  }
 }
 
 // Home directory leaks the OS username — keep local-only. Remote pages

@@ -13,7 +13,7 @@ import { useSync } from '@/sync/use-sync';
 import { useSessionPrefetch } from './sidebar/hooks/useSessionPrefetch';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { getSafeStorage } from '@/stores/utils/safeStorage';
+import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { useGitStore, useGitAllBranches, useGitRepoStatusMap } from '@/stores/useGitStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { NewWorktreeDialog } from './NewWorktreeDialog';
@@ -35,6 +35,7 @@ import { useStickyProjectHeaders } from './sidebar/hooks/useStickyProjectHeaders
 import { getGitHubPrStatusKey, usePrVisualSummaryByKeys, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 import { ProjectEditDialog } from '@/components/layout/ProjectEditDialog';
 import { UpdateDialog } from '@/components/ui/UpdateDialog';
+import { ShareOpinionDialog } from '@/components/feedback/ShareOpinionDialog';
 import { SessionGroupSection } from './sidebar/SessionGroupSection';
 import { SidebarHeader } from './sidebar/SidebarHeader';
 import { SidebarActivitySections } from './sidebar/SidebarActivitySections';
@@ -70,7 +71,7 @@ import {
   normalizePath,
 } from './sidebar/utils';
 import {
-  mergeSessionDirectoryMetadata,
+  mergeLiveSessionWithGlobalSession,
   refreshGlobalSessions,
   refreshGlobalSessionsForDirectories,
   resolveGlobalSessionDirectory,
@@ -80,6 +81,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 
+const SHARE_OPINION_TOAST_STORAGE_KEY = 'openchamber.shareOpinionToast.dismissed.v2';
 const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
 const GROUP_COLLAPSE_STORAGE_KEY = 'oc.sessions.groupCollapse';
@@ -188,7 +190,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const [editTitle, setEditTitle] = React.useState('');
   const [editingProjectDialogId, setEditingProjectDialogId] = React.useState<string | null>(null);
   const [expandedParents, setExpandedParents] = React.useState<Set<string>>(new Set());
-  const safeStorage = React.useMemo(() => getSafeStorage(), []);
+  const safeStorage = React.useMemo(() => getDeferredSafeStorage(), []);
   const [collapsedProjects, setCollapsedProjects] = React.useState<Set<string>>(new Set());
 
   const [projectRepoStatus, setProjectRepoStatus] = React.useState<Map<string, boolean | null>>(new Map());
@@ -196,6 +198,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const newWorktreeDialogOpen = useUIStore((state) => state.isNewWorktreeDialogOpen);
   const setNewWorktreeDialogOpen = useUIStore((state) => state.setNewWorktreeDialogOpen);
   const [updateDialogOpen, setUpdateDialogOpen] = React.useState(false);
+  const [shareOpinionDialogOpen, setShareOpinionDialogOpen] = React.useState(false);
   const [openSidebarMenuKey, setOpenSidebarMenuKey] = React.useState<string | null>(null);
   const [renamingFolderId, setRenamingFolderId] = React.useState<string | null>(null);
   const [renameFolderDraft, setRenameFolderDraft] = React.useState('');
@@ -207,7 +210,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const togglePinnedSession = useSessionPinnedStore((state) => state.toggle);
   const [collapsedGroups, setCollapsedGroups] = React.useState<Set<string>>(() => {
     try {
-      const raw = getSafeStorage().getItem(GROUP_COLLAPSE_STORAGE_KEY);
+      const raw = getDeferredSafeStorage().getItem(GROUP_COLLAPSE_STORAGE_KEY);
       if (!raw) {
         return new Set();
       }
@@ -219,7 +222,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   });
   const [groupOrderByProject, setGroupOrderByProject] = React.useState<Map<string, string[]>>(() => {
     try {
-      const raw = getSafeStorage().getItem(GROUP_ORDER_STORAGE_KEY);
+      const raw = getDeferredSafeStorage().getItem(GROUP_ORDER_STORAGE_KEY);
       if (!raw) {
         return new Map();
       }
@@ -237,7 +240,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   });
   const [activeSessionByProject, setActiveSessionByProject] = React.useState<Map<string, string>>(() => {
     try {
-      const raw = getSafeStorage().getItem(PROJECT_ACTIVE_SESSION_STORAGE_KEY);
+      const raw = getDeferredSafeStorage().getItem(PROJECT_ACTIVE_SESSION_STORAGE_KEY);
       if (!raw) {
         return new Map();
       }
@@ -361,7 +364,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     const liveById = new Map(liveSessions.map((session) => [session.id, session]));
     const merged = globalActiveSessions.map((session) => {
       const liveSession = liveById.get(session.id);
-      return liveSession ? mergeSessionDirectoryMetadata(liveSession, session) : session;
+      return liveSession ? mergeLiveSessionWithGlobalSession(liveSession, session) : session;
     });
     const seenIds = new Set(merged.map((session) => session.id));
 
@@ -634,6 +637,36 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       setUpdateDialogOpen(true);
     });
   }, [t, updateStore]);
+
+  const handleOpenShareOpinionDialog = React.useCallback(() => {
+    setShareOpinionDialogOpen(true);
+  }, []);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    try {
+      if (window.localStorage.getItem(SHARE_OPINION_TOAST_STORAGE_KEY) === 'true') {
+        return;
+      }
+      window.localStorage.setItem(SHARE_OPINION_TOAST_STORAGE_KEY, 'true');
+    } catch {
+      // If storage is unavailable, still show once for this sidebar mount.
+    }
+    const timeoutId = window.setTimeout(() => {
+      toast.info(t('shareOpinion.toast.title'), {
+        description: t('shareOpinion.toast.description'),
+        action: {
+          label: t('shareOpinion.actions.shareOpinion'),
+          onClick: () => setShareOpinionDialogOpen(true),
+        },
+        duration: 12_000,
+      });
+    }, 1_000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [t]);
 
   const handleOpenSettings = React.useCallback(() => {
     if (mobileVariant) {
@@ -1619,8 +1652,14 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         onOpenShortcuts={toggleHelpDialog}
         onOpenAbout={() => setAboutDialogOpen(true)}
         onOpenUpdate={handleOpenUpdateDialog}
+        onOpenShareOpinion={handleOpenShareOpinionDialog}
         showRuntimeButtons={!isVSCode}
         showUpdateButton={showSidebarUpdateButton}
+      />
+
+      <ShareOpinionDialog
+        open={shareOpinionDialogOpen}
+        onOpenChange={setShareOpinionDialogOpen}
       />
 
       <UpdateDialog

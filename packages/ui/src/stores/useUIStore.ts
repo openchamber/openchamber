@@ -1,7 +1,7 @@
 import { create } from 'zustand';
-import { devtools, persist, createJSONStorage } from 'zustand/middleware';
+import { devtools, persist } from 'zustand/middleware';
 import type { SidebarSection } from '@/constants/sidebar';
-import { getSafeStorage } from './utils/safeStorage';
+import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import { SEMANTIC_TYPOGRAPHY, getTypographyVariable, type SemanticTypographyKey } from '@/lib/typography';
 import type { ShortcutCombo } from '@/lib/shortcuts';
 import type { DraftStarterRef } from '@/lib/draftStarters';
@@ -40,6 +40,7 @@ type ContextPanelTab = {
   targetPath: string | null;
   dedupeKey: string;
   label: string | null;
+  sessionTitleFallback: string | null;
   readOnly: boolean;
   stagedDiff: boolean;
   touchedAt: number;
@@ -50,6 +51,7 @@ type ContextPanelTabDescriptor = {
   targetPath?: string | null;
   dedupeKey?: string | null;
   label?: string | null;
+  sessionTitleFallback?: string | null;
   readOnly?: boolean;
   stagedDiff?: boolean;
 };
@@ -232,6 +234,7 @@ const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPa
     targetPath: normalizedTargetPath,
     dedupeKey,
     label: normalizeContextTabLabel(descriptor.label),
+    sessionTitleFallback: normalizeContextTabLabel(descriptor.sessionTitleFallback),
     readOnly: descriptor.readOnly === true,
     stagedDiff: descriptor.stagedDiff === true,
     touchedAt: Date.now(),
@@ -272,6 +275,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       targetPath?: unknown;
       dedupeKey?: unknown;
       label?: unknown;
+      sessionTitleFallback?: unknown;
       readOnly?: unknown;
       stagedDiff?: unknown;
       touchedAt?: unknown;
@@ -299,6 +303,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       targetPath,
       dedupeKey,
       label: normalizeContextTabLabel(typeof candidate.label === 'string' ? candidate.label : null),
+      sessionTitleFallback: normalizeContextTabLabel(typeof candidate.sessionTitleFallback === 'string' ? candidate.sessionTitleFallback : null),
       readOnly: candidate.readOnly === true,
       stagedDiff: candidate.stagedDiff === true,
       touchedAt: typeof candidate.touchedAt === 'number' && Number.isFinite(candidate.touchedAt)
@@ -359,6 +364,7 @@ const upsertContextPanelTab = (
           targetPath: nextTab.targetPath || tab.targetPath,
           dedupeKey: nextTab.dedupeKey,
           label: nextTab.label,
+          sessionTitleFallback: nextTab.sessionTitleFallback || tab.sessionTitleFallback,
           stagedDiff: nextTab.stagedDiff,
           readOnly: nextTab.readOnly,
           touchedAt: Date.now(),
@@ -563,6 +569,7 @@ interface UIStore {
   eventStreamStatus: EventStreamStatus;
   eventStreamHint: string | null;
   showReasoningTraces: boolean;
+  sessionAssistEnabled: boolean;
   collapsibleThinkingBlocks: boolean;
   groupReasoningBlocks: boolean;
   chatRenderMode: ChatRenderMode;
@@ -586,6 +593,7 @@ interface UIStore {
 
   favoriteModels: Array<{ providerID: string; modelID: string }>;
   hiddenModels: Array<{ providerID: string; modelID: string }>;
+  providerOrder: string[];
   collapsedModelProviders: string[];
   recentModels: Array<{ providerID: string; modelID: string }>;
   recentAgents: string[];
@@ -600,6 +608,8 @@ interface UIStore {
   nativeNotificationsEnabled: boolean;
   notificationMode: 'always' | 'hidden-only';
   notifyOnSubtasks: boolean;
+  // Desktop dock badge showing the count of sessions with unseen activity (macOS).
+  dockBadgeEnabled: boolean;
 
   // Event toggles (which events trigger notifications)
   notifyOnCompletion: boolean;
@@ -710,6 +720,7 @@ interface UIStore {
   setSettingsRemoteInstancesSelectedId: (instanceId: string | null) => void;
   setEventStreamStatus: (status: EventStreamStatus, hint?: string | null) => void;
   setShowReasoningTraces: (value: boolean) => void;
+  setSessionAssistEnabled: (value: boolean) => void;
   setCollapsibleThinkingBlocks: (value: boolean) => void;
   setChatRenderMode: (value: ChatRenderMode) => void;
   setActivityRenderMode: (value: ActivityRenderMode) => void;
@@ -738,6 +749,7 @@ interface UIStore {
     overProviderID: string,
     overModelID: string,
   ) => void;
+  setProviderOrder: (orderedProviderIDs: string[]) => void;
   toggleHiddenModel: (providerID: string, modelID: string) => void;
   isHiddenModel: (providerID: string, modelID: string) => boolean;
   hideAllModels: (providerID: string, modelIDs: string[]) => void;
@@ -759,6 +771,7 @@ interface UIStore {
   setNotificationMode: (mode: 'always' | 'hidden-only') => void;
   setShowTerminalQuickKeysOnDesktop: (value: boolean) => void;
   setNotifyOnSubtasks: (value: boolean) => void;
+  setDockBadgeEnabled: (value: boolean) => void;
   setNotifyOnCompletion: (value: boolean) => void;
   setNotifyOnError: (value: boolean) => void;
   setNotifyOnQuestion: (value: boolean) => void;
@@ -853,6 +866,7 @@ export const useUIStore = create<UIStore>()(
         eventStreamStatus: 'idle',
         eventStreamHint: null,
         showReasoningTraces: true,
+        sessionAssistEnabled: true,
         collapsibleThinkingBlocks: true,
         groupReasoningBlocks: true,
         chatRenderMode: 'live',
@@ -874,6 +888,7 @@ export const useUIStore = create<UIStore>()(
         mobileKeyboardMode: getStoredMobileKeyboardMode(),
         favoriteModels: [],
         hiddenModels: [],
+        providerOrder: [],
         collapsedModelProviders: [],
         recentModels: [],
         recentAgents: [],
@@ -887,6 +902,7 @@ export const useUIStore = create<UIStore>()(
         nativeNotificationsEnabled: false,
         notificationMode: 'hidden-only',
         notifyOnSubtasks: true,
+        dockBadgeEnabled: true,
 
         // Event toggles (which events trigger notifications)
         notifyOnCompletion: true,
@@ -1545,6 +1561,10 @@ export const useUIStore = create<UIStore>()(
           set({ showReasoningTraces: value });
         },
 
+        setSessionAssistEnabled: (value) => {
+          set({ sessionAssistEnabled: value });
+        },
+
         setCollapsibleThinkingBlocks: (value) => {
           set({ collapsibleThinkingBlocks: value });
         },
@@ -1747,6 +1767,17 @@ export const useUIStore = create<UIStore>()(
             }
             nextFavorites.splice(newIndex, 0, moved);
             return { favoriteModels: nextFavorites };
+          });
+        },
+
+        setProviderOrder: (orderedProviderIDs) => {
+          set((state) => {
+            const next = orderedProviderIDs.filter((id) => typeof id === 'string' && id.length > 0);
+            const current = state.providerOrder;
+            if (current.length === next.length && current.every((id, index) => id === next[index])) {
+              return state;
+            }
+            return { providerOrder: next };
           });
         },
 
@@ -1976,6 +2007,10 @@ export const useUIStore = create<UIStore>()(
           set({ notifyOnSubtasks: value });
         },
 
+        setDockBadgeEnabled: (value) => {
+          set({ dockBadgeEnabled: value });
+        },
+
         setNotifyOnCompletion: (value) => { set({ notifyOnCompletion: value }); },
         setNotifyOnError: (value) => { set({ notifyOnError: value }); },
         setNotifyOnQuestion: (value) => { set({ notifyOnQuestion: value }); },
@@ -2101,7 +2136,7 @@ export const useUIStore = create<UIStore>()(
       }),
       {
         name: 'ui-store',
-        storage: createJSONStorage(() => getSafeStorage()),
+        storage: createDeferredSafeJSONStorage(),
         version: 10,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
@@ -2222,6 +2257,7 @@ export const useUIStore = create<UIStore>()(
           isSessionCreateDialogOpen: state.isSessionCreateDialogOpen,
           // Note: isSettingsDialogOpen intentionally NOT persisted
           showReasoningTraces: state.showReasoningTraces,
+          sessionAssistEnabled: state.sessionAssistEnabled,
           collapsibleThinkingBlocks: state.collapsibleThinkingBlocks,
           chatRenderMode: state.chatRenderMode,
           activityRenderMode: state.activityRenderMode,
@@ -2240,6 +2276,7 @@ export const useUIStore = create<UIStore>()(
           cornerRadius: state.cornerRadius,
           favoriteModels: state.favoriteModels,
           hiddenModels: state.hiddenModels,
+          providerOrder: state.providerOrder,
           collapsedModelProviders: state.collapsedModelProviders,
           recentModels: state.recentModels,
           recentAgents: state.recentAgents,
@@ -2251,6 +2288,7 @@ export const useUIStore = create<UIStore>()(
           notificationMode: state.notificationMode,
           showTerminalQuickKeysOnDesktop: state.showTerminalQuickKeysOnDesktop,
           notifyOnSubtasks: state.notifyOnSubtasks,
+          dockBadgeEnabled: state.dockBadgeEnabled,
           notifyOnCompletion: state.notifyOnCompletion,
           notifyOnError: state.notifyOnError,
           notifyOnQuestion: state.notifyOnQuestion,

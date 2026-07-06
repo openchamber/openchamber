@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Part } from '@opencode-ai/sdk/v2';
-import { Virtualizer, type CacheSnapshot, type VirtualizerHandle } from 'virtua';
+import { elementScroll, useVirtualizer as useTanstackVirtualizer, type ReactVirtualizer, type VirtualItem } from '@tanstack/react-virtual';
 
 import ChatMessage from './ChatMessage';
 import { areOptionalRenderRelevantMessagesEqual, areRelevantTurnGroupingContextsEqual, areRenderRelevantMessagesEqual } from './message/renderCompare';
@@ -18,25 +18,13 @@ import { streamPerfCount, streamPerfMeasure } from '@/stores/utils/streamDebug';
 import type { StreamPhase } from './message/types';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionParts } from '@/sync/sync-context';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import type { ReviewTransferDirection } from '@/lib/reviewFlow';
 
 const MESSAGE_LIST_VIRTUALIZE_THRESHOLD = 5;
 const EMPTY_STATIC_ENTRY_MESSAGES: ChatMessageEntry[] = [];
 const EMPTY_UNGROUPED_MESSAGE_IDS = new Set<string>();
-const MESSAGE_LIST_BUFFER_SIZE = 900;
 const TIMELINE_CACHE_LIMIT = 16;
-
-const estimateHistoryEntryHeight = (entry: RenderEntry | undefined): number => {
-    if (!entry) {
-        return 160;
-    }
-
-    if (entry.kind === 'turn') {
-        return 180 + Math.min(entry.turn.assistantMessages.length, 4) * 100;
-    }
-
-    return 140;
-};
 
 const sameKeys = (a: readonly string[] | undefined, b: readonly string[] | undefined): boolean => {
     if (a === b) return true;
@@ -45,28 +33,83 @@ const sameKeys = (a: readonly string[] | undefined, b: readonly string[] | undef
     return a.every((key, index) => key === b[index]);
 };
 
-const timelineCache = new Map<string, { keys: readonly string[]; cache: CacheSnapshot }>();
+// --- History virtualization (@tanstack/react-virtual) ----------------------
+// The history list virtualizes with @tanstack/react-virtual on all surfaces:
+// its core has bottom anchoring (anchorTo: 'end'), key-stable prepend
+// preservation, and native iOS touch/momentum deferral for scroll
+// adjustments — the failure modes that historically forced virtua off on
+// mobile and required manual prepend compensation on desktop.
+type TanstackVirtualizerInstance = ReactVirtualizer<HTMLDivElement, HTMLDivElement>;
+type HistoryEngine = 'none' | 'tanstack';
 
-const readTimelineCache = (sessionKey: string, keys: readonly string[]): CacheSnapshot | undefined => {
-    const entry = timelineCache.get(sessionKey);
+const TANSTACK_ESTIMATED_ENTRY_SIZE = 320;
+const TANSTACK_OVERSCAN = 8;
+// Touch flings cover more distance between paints than desktop wheels; a
+// larger window keeps fast mobile scrolling over mounted rows.
+const TANSTACK_MOBILE_OVERSCAN = 16;
+const resolveTanstackOverscan = (): number => (
+    isMobileSurfaceRuntime() ? TANSTACK_MOBILE_OVERSCAN : TANSTACK_OVERSCAN
+);
+// Post-prepend anchor hold: measurements of freshly
+// prepended rows settle over multiple frames, so a single restore can be
+// invalidated by the next measurement pass. Re-assert the anchor until it
+// holds still for STABLE_FRAMES consecutive frames, giving up at MAX_FRAMES.
+const ANCHOR_HOLD_STABLE_FRAMES = 30;
+const ANCHOR_HOLD_MAX_FRAMES = 180;
+// Adaptive estimate bounds: only trust the session average once a few rows
+// are measured, and keep it inside sane turn-height bounds.
+const TANSTACK_ESTIMATE_MIN_SAMPLES = 5;
+const TANSTACK_ESTIMATE_MIN = 120;
+const TANSTACK_ESTIMATE_MAX = 1200;
+// "At bottom" tolerance for resize-adjustment decisions.
+const TANSTACK_AT_END_THRESHOLD_PX = 80;
+
+// Quiet-window prepend on mobile: while a touch drag or momentum scroll is
+// active, iOS owns the scroll position and ANY geometry change above the
+// viewport races against the native animation — a race that compensation
+// logic can only lose sometimes. So freshly loaded older history is held
+// (data already fetched, store already updated) and inserted into the
+// rendered list only once the gesture goes quiet. Safety valves: flush when
+// the user gets close to the top (a blank top is worse than a small hop) or
+// after MAX_HOLD_MS.
+const HISTORY_PREPEND_QUIET_MS = 160;
+const HISTORY_PREPEND_MAX_HOLD_MS = 1500;
+const HISTORY_PREPEND_NEAR_TOP_VIEWPORTS = 1.5;
+const HISTORY_PREPEND_MONITOR_INTERVAL_MS = 90;
+
+// A commit is a deferable prepend when older entries were inserted strictly
+// above the known content: the previous first key still exists deeper in the
+// list and the tail is unchanged. Anything else renders immediately.
+const isPrependAboveCommit = (previous: RenderEntry[], next: RenderEntry[]): boolean => {
+    if (previous.length === 0 || next.length <= previous.length) return false;
+    if (previous[previous.length - 1]?.key !== next[next.length - 1]?.key) return false;
+    const previousFirstKey = previous[0]?.key;
+    const insertedIndex = next.findIndex((entry) => entry.key === previousFirstKey);
+    return insertedIndex > 0;
+};
+
+const tanstackTimelineCache = new Map<string, { keys: readonly string[]; items: VirtualItem[] }>();
+
+const readTanstackTimelineCache = (sessionKey: string, keys: readonly string[]): VirtualItem[] | undefined => {
+    const entry = tanstackTimelineCache.get(sessionKey);
     if (!entry) return undefined;
-    if (sameKeys(entry.keys, keys)) return entry.cache;
-    timelineCache.delete(sessionKey);
+    if (sameKeys(entry.keys, keys)) return entry.items;
+    tanstackTimelineCache.delete(sessionKey);
     return undefined;
 };
 
-const writeTimelineCache = (
+const writeTanstackTimelineCache = (
     sessionKey: string,
     keys: readonly string[],
-    handle: VirtualizerHandle | null | undefined,
+    virtualizer: TanstackVirtualizerInstance | null | undefined,
 ): void => {
-    if (!handle || keys.length === 0) return;
-    timelineCache.delete(sessionKey);
-    timelineCache.set(sessionKey, { keys: keys.slice(), cache: handle.cache });
-    while (timelineCache.size > TIMELINE_CACHE_LIMIT) {
-        const oldest = timelineCache.keys().next().value;
+    if (!virtualizer || keys.length === 0) return;
+    tanstackTimelineCache.delete(sessionKey);
+    tanstackTimelineCache.set(sessionKey, { keys: keys.slice(), items: virtualizer.takeSnapshot() });
+    while (tanstackTimelineCache.size > TIMELINE_CACHE_LIMIT) {
+        const oldest = tanstackTimelineCache.keys().next().value;
         if (typeof oldest !== 'string') break;
-        timelineCache.delete(oldest);
+        tanstackTimelineCache.delete(oldest);
     }
 };
 
@@ -156,6 +199,21 @@ const getMessageId = (message: ChatMessageEntry | undefined): string | null => {
 const getMessageParentId = (message: ChatMessageEntry): string | null => {
     const parentID = (message.info as unknown as { parentID?: unknown }).parentID;
     return typeof parentID === 'string' && parentID.trim().length > 0 ? parentID : null;
+};
+
+const isInsideStuckSticky = (node: HTMLElement, container: HTMLElement, containerTop: number): boolean => {
+    if (typeof window === 'undefined') return false;
+
+    let current: HTMLElement | null = node;
+    while (current && current !== container) {
+        const computed = window.getComputedStyle(current);
+        if (computed.position === 'sticky' && current.getBoundingClientRect().top <= containerTop + 1) {
+            return true;
+        }
+        current = current.parentElement;
+    }
+
+    return false;
 };
 
 const isUserShellMarkerMessage = (message: ChatMessageEntry | undefined): boolean => {
@@ -376,6 +434,8 @@ export interface MessageListHandle {
     scrollToMessageId: (messageId: string, options?: { behavior?: ScrollBehavior }) => boolean;
     captureViewportAnchor: () => { messageId: string; offsetTop: number } | null;
     restoreViewportAnchor: (anchor: { messageId: string; offsetTop: number }) => boolean;
+    holdViewportAnchor: (anchor: { messageId: string; offsetTop: number }) => void;
+    isHistoryVirtualized: () => boolean;
     scrollToBottom: () => void;
 }
 
@@ -917,13 +977,11 @@ MessageListEntry.displayName = 'MessageListEntry';
 // Inner component that renders staged turn entries.
 type StaticHistoryListProps = {
     entries: RenderEntry[];
-    shouldVirtualize: boolean;
+    engine: HistoryEngine;
     contentRef: React.RefObject<HTMLDivElement | null>;
     scrollRef?: React.RefObject<HTMLDivElement | null>;
-    virtualizerRef: React.Ref<VirtualizerHandle>;
+    registerTanstackVirtualizer?: (virtualizer: TanstackVirtualizerInstance | null) => void;
     virtualizerKey: string;
-    virtualCache?: CacheSnapshot;
-    shift: boolean;
     onMessageContentChange: (reason?: ContentChangeReason) => void;
     getAnimationHandlers: (messageId: string) => AnimationHandlers;
     scrollToBottom?: () => void;
@@ -937,7 +995,162 @@ type StaticHistoryListProps = {
     reviewTransferDirection?: ReviewTransferDirection | null;
 };
 
-const StaticHistoryList = React.memo(({ entries, shouldVirtualize, contentRef, scrollRef, virtualizerRef, virtualizerKey, virtualCache, shift, onMessageContentChange, getAnimationHandlers, scrollToBottom, stickyUserHeader, defaultActivityExpanded, turnUiStates, onToggleTurnGroup, chatRenderMode, shouldAnimateUserMessage, onUserAnimationConsumed, reviewTransferDirection }: StaticHistoryListProps) => {
+const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, registerTanstackVirtualizer, virtualizerKey, onMessageContentChange, getAnimationHandlers, scrollToBottom, stickyUserHeader, defaultActivityExpanded, turnUiStates, onToggleTurnGroup, chatRenderMode, shouldAnimateUserMessage, onUserAnimationConsumed, reviewTransferDirection }: StaticHistoryListProps) => {
+    const isTanstack = engine === 'tanstack';
+
+    // --- Quiet-window prepend (mobile) --------------------------------------
+    // Gesture tracking for the deferred-prepend decision. Refs only: reading
+    // them never re-renders, and the render-phase reconcile below needs them.
+    const touchActiveRef = React.useRef(false);
+    const lastScrollAtRef = React.useRef(0);
+    const holdSinceRef = React.useRef<number | null>(null);
+    const deferPrepends = isTanstack && isMobileSurfaceRuntime();
+
+    React.useEffect(() => {
+        if (!deferPrepends) return;
+        const element = scrollRef?.current;
+        if (!element) return;
+        const onTouchStart = () => { touchActiveRef.current = true; };
+        const onTouchEnd = () => { touchActiveRef.current = false; };
+        const onScroll = () => { lastScrollAtRef.current = performance.now(); };
+        element.addEventListener('touchstart', onTouchStart, { passive: true });
+        element.addEventListener('touchend', onTouchEnd, { passive: true });
+        element.addEventListener('touchcancel', onTouchEnd, { passive: true });
+        element.addEventListener('scroll', onScroll, { passive: true });
+        return () => {
+            element.removeEventListener('touchstart', onTouchStart);
+            element.removeEventListener('touchend', onTouchEnd);
+            element.removeEventListener('touchcancel', onTouchEnd);
+            element.removeEventListener('scroll', onScroll);
+        };
+    }, [deferPrepends, scrollRef]);
+
+    const isGestureActive = React.useCallback(() => (
+        touchActiveRef.current
+        || performance.now() - lastScrollAtRef.current < HISTORY_PREPEND_QUIET_MS
+    ), []);
+
+    const isNearTop = React.useCallback(() => {
+        const element = scrollRef?.current;
+        if (!element) return true;
+        return element.scrollTop < element.clientHeight * HISTORY_PREPEND_NEAR_TOP_VIEWPORTS;
+    }, [scrollRef]);
+
+    const [displayEntries, setDisplayEntries] = React.useState(entries);
+    // Render-phase reconcile (official derived-state pattern): adopt the new
+    // entries immediately unless this commit is a pure prepend-above landing
+    // in the middle of an active touch gesture — those wait for quiet.
+    let renderEntries = displayEntries;
+    if (entries !== displayEntries) {
+        const shouldHold = deferPrepends
+            && isPrependAboveCommit(displayEntries, entries)
+            && isGestureActive()
+            && !isNearTop()
+            && (holdSinceRef.current === null
+                || performance.now() - holdSinceRef.current < HISTORY_PREPEND_MAX_HOLD_MS);
+        if (shouldHold) {
+            if (holdSinceRef.current === null) holdSinceRef.current = performance.now();
+        } else {
+            holdSinceRef.current = null;
+            setDisplayEntries(entries);
+            renderEntries = entries;
+        }
+    } else if (holdSinceRef.current !== null) {
+        holdSinceRef.current = null;
+    }
+
+    // While a prepend is held, poll for the quiet window (touch/momentum have
+    // no completion event we can await) and flush by re-rendering.
+    const [, forceFlushTick] = React.useReducer((tick: number) => tick + 1, 0);
+    React.useEffect(() => {
+        if (!deferPrepends) return;
+        const timer = window.setInterval(() => {
+            if (holdSinceRef.current === null) return;
+            const expired = performance.now() - holdSinceRef.current >= HISTORY_PREPEND_MAX_HOLD_MS;
+            if (!isGestureActive() || isNearTop() || expired) {
+                forceFlushTick();
+            }
+        }, HISTORY_PREPEND_MONITOR_INTERVAL_MS);
+        return () => window.clearInterval(timer);
+    }, [deferPrepends, isGestureActive, isNearTop]);
+
+    const entriesRef = React.useRef(renderEntries);
+    entriesRef.current = renderEntries;
+    // Initial-only read: measurement cache restore is a mount-time concern;
+    // afterwards the live virtualizer owns measurements.
+    const [initialMeasurements] = React.useState(() => (
+        isTanstack
+            ? readTanstackTimelineCache(virtualizerKey, entries.map((entry) => entry.key))
+            : undefined
+    ));
+
+    const sizeContainerRef = React.useRef<HTMLDivElement | null>(null);
+    // Adaptive estimate: rows this session has actually measured are a far
+    // better predictor for the still-unmeasured ones than a fixed constant.
+    // Smaller estimate error → smaller anchor corrections when prepended rows
+    // measure in → less visible drift. The ref keeps estimateSize's identity
+    // stable so updating the average never triggers a global remeasure.
+    const estimatedEntrySizeRef = React.useRef(TANSTACK_ESTIMATED_ENTRY_SIZE);
+    const tanstackVirtualizer = useTanstackVirtualizer<HTMLDivElement, HTMLDivElement>({
+        count: renderEntries.length,
+        enabled: isTanstack,
+        getScrollElement: () => scrollRef?.current ?? null,
+        estimateSize: () => estimatedEntrySizeRef.current,
+        overscan: resolveTanstackOverscan(),
+        scrollToFn: (offset, options, instance) => {
+            // Expose the new total height before core writes an anchor
+            // correction so the browser does not clamp the offset to the old
+            // height.
+            const sizeElement = sizeContainerRef.current;
+            if (sizeElement) sizeElement.style.height = `${instance.getTotalSize()}px`;
+            elementScroll(offset, options, instance);
+        },
+        getItemKey: (index) => entriesRef.current[index]?.key ?? `index:${index}`,
+        // Bottom-anchored chat semantics: prepending older entries above the
+        // viewport must not move what the user is reading, and iOS-specific
+        // touch/momentum deferral for those adjustments lives in the core.
+        anchorTo: 'end',
+        initialOffset: () => Number.MAX_SAFE_INTEGER,
+        initialMeasurementsCache: initialMeasurements,
+    });
+    // Only compensate scroll for rows growing ABOVE the viewport (history
+    // remeasures, prepended pages). A row growing inside the viewport —
+    // expanding a tool call or thinking block — must grow DOWNWARD naturally;
+    // the end-anchored default made it expand upward. At the bottom,
+    // app-level auto-follow owns pinning, so skip there too instead of
+    // double-writing. (This is an instance field, not a constructor option.)
+    tanstackVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
+        if (instance.isAtEnd(TANSTACK_AT_END_THRESHOLD_PX)) return false;
+        const firstVisibleIndex = instance.range?.startIndex;
+        return firstVisibleIndex !== undefined && item.index < firstVisibleIndex;
+    };
+
+    React.useEffect(() => {
+        if (!isTanstack) return;
+        const sizes = tanstackVirtualizer.itemSizeCache;
+        if (sizes.size >= TANSTACK_ESTIMATE_MIN_SAMPLES) {
+            let total = 0;
+            for (const size of sizes.values()) total += size;
+            estimatedEntrySizeRef.current = Math.min(
+                TANSTACK_ESTIMATE_MAX,
+                Math.max(TANSTACK_ESTIMATE_MIN, Math.round(total / sizes.size)),
+            );
+        }
+    });
+
+    React.useEffect(() => {
+        if (!isTanstack) return;
+        registerTanstackVirtualizer?.(tanstackVirtualizer);
+        return () => {
+            writeTanstackTimelineCache(
+                virtualizerKey,
+                entriesRef.current.map((entry) => entry.key),
+                tanstackVirtualizer,
+            );
+            registerTanstackVirtualizer?.(null);
+        };
+    }, [isTanstack, registerTanstackVirtualizer, tanstackVirtualizer, virtualizerKey]);
+
     const renderEntry = React.useCallback((entry: RenderEntry) => {
         return (
             <MessageListEntry
@@ -961,10 +1174,10 @@ const StaticHistoryList = React.memo(({ entries, shouldVirtualize, contentRef, s
         );
     }, [chatRenderMode, defaultActivityExpanded, getAnimationHandlers, onMessageContentChange, onToggleTurnGroup, onUserAnimationConsumed, reviewTransferDirection, scrollToBottom, shouldAnimateUserMessage, stickyUserHeader, turnUiStates]);
 
-    if (!shouldVirtualize) {
+    if (engine === 'none') {
         return (
             <div ref={contentRef} className="relative w-full">
-                {entries.map((entry) => (
+                {renderEntries.map((entry) => (
                     <div
                         key={entry.key}
                         data-turn-entry={entry.key}
@@ -976,24 +1189,35 @@ const StaticHistoryList = React.memo(({ entries, shouldVirtualize, contentRef, s
         );
     }
 
-    return (
-        <Virtualizer
-            key={virtualizerKey}
-            ref={virtualizerRef}
-            data={entries}
-            cache={virtualCache}
-            itemSize={virtualCache ? undefined : estimateHistoryEntryHeight(undefined)}
-            bufferSize={MESSAGE_LIST_BUFFER_SIZE}
-            shift={shift}
-            scrollRef={scrollRef}
-        >
-            {(entry) => (
-                <div key={entry.key} data-turn-entry={entry.key}>
-                    {renderEntry(entry)}
+    if (engine === 'tanstack') {
+        const virtualItems = tanstackVirtualizer.getVirtualItems();
+        const startOffset = virtualItems[0]?.start ?? 0;
+        // Rendered rows stay in normal flow inside a single translated wrapper
+        // (not per-row absolute positioning) so per-turn sticky user headers
+        // keep working against the scroll container.
+        return (
+            <div ref={sizeContainerRef} className="relative w-full" style={{ height: tanstackVirtualizer.getTotalSize() }}>
+                <div style={{ transform: `translateY(${startOffset}px)` }}>
+                    {virtualItems.map((item) => {
+                        const entry = renderEntries[item.index];
+                        if (!entry) return null;
+                        return (
+                            <div
+                                key={entry.key}
+                                data-index={item.index}
+                                ref={tanstackVirtualizer.measureElement}
+                                data-turn-entry={entry.key}
+                            >
+                                {renderEntry(entry)}
+                            </div>
+                        );
+                    })}
                 </div>
-            )}
-        </Virtualizer>
-    );
+            </div>
+        );
+    }
+
+    return null;
 });
 
 StaticHistoryList.displayName = 'StaticHistoryList';
@@ -1066,9 +1290,8 @@ const StreamingTailContent: React.FC<{
 
 StreamingTailContent.displayName = 'StreamingTailContent';
 
-const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({ 
+const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     sessionKey,
-    disableStaging = false,
     messages,
     sessionIsWorking = false,
     activeStreamingMessageId = null,
@@ -1076,7 +1299,6 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     retryOverlay = null,
     onMessageContentChange,
     getAnimationHandlers,
-    isLoadingOlder,
     scrollToBottom,
     scrollRef,
     directory,
@@ -1164,7 +1386,6 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     }), [messages]);
 
     const historyContentRef = React.useRef<HTMLDivElement | null>(null);
-    const historyVirtualizerRef = React.useRef<VirtualizerHandle | null>(null);
     const resolveScrollContainer = React.useCallback((): HTMLDivElement | null => {
         if (scrollRef?.current) {
             return scrollRef.current;
@@ -1266,38 +1487,14 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     }
 
     const historyEntries = staticRenderEntries;
+    // All surfaces virtualize with @tanstack/react-virtual (see the engine
+    // note at the top of the file). An unvirtualized list is kept only for
+    // tiny histories where windowing overhead is not worth it.
     const shouldVirtualizeHistory = historyEntries.length >= MESSAGE_LIST_VIRTUALIZE_THRESHOLD;
-    const historyEntryKeys = React.useMemo(() => historyEntries.map((entry) => entry.key), [historyEntries]);
-    const virtualCache = React.useMemo(
-        () => (shouldVirtualizeHistory ? readTimelineCache(sessionKey, historyEntryKeys) : undefined),
-        [historyEntryKeys, sessionKey, shouldVirtualizeHistory],
-    );
-    const virtualCacheSessionRef = React.useRef(sessionKey);
-    const virtualCacheKeysRef = React.useRef(historyEntryKeys);
-    const setHistoryVirtualizer = React.useCallback((handle: VirtualizerHandle | null) => {
-        if (!handle) {
-            writeTimelineCache(
-                virtualCacheSessionRef.current,
-                virtualCacheKeysRef.current,
-                historyVirtualizerRef.current,
-            );
-            historyVirtualizerRef.current = null;
-            return;
-        }
-
-        historyVirtualizerRef.current = handle;
-    }, []);
-
-    React.useEffect(() => {
-        virtualCacheSessionRef.current = sessionKey;
-        virtualCacheKeysRef.current = historyEntryKeys;
-    }, [historyEntryKeys, sessionKey]);
-
-    React.useEffect(() => {
-        const virtualizerForCleanup = historyVirtualizerRef.current;
-        return () => {
-            writeTimelineCache(virtualCacheSessionRef.current, virtualCacheKeysRef.current, virtualizerForCleanup);
-        };
+    const historyEngine: HistoryEngine = shouldVirtualizeHistory ? 'tanstack' : 'none';
+    const tanstackVirtualizerRef = React.useRef<TanstackVirtualizerInstance | null>(null);
+    const registerTanstackVirtualizer = React.useCallback((virtualizer: TanstackVirtualizerInstance | null) => {
+        tanstackVirtualizerRef.current = virtualizer;
     }, []);
 
     const allEntries = React.useMemo(() => {
@@ -1395,16 +1592,20 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     }, [resolveScrollContainer]);
 
     const scrollHistoryIndexIntoView = React.useCallback((index: number, behavior: ScrollBehavior = 'auto') => {
-        if (!shouldVirtualizeHistory || index < 0 || index >= historyEntries.length) {
+        if (index < 0 || index >= historyEntries.length) {
             return false;
         }
 
-        const virtualizer = historyVirtualizerRef.current;
+        if (!shouldVirtualizeHistory) {
+            return false;
+        }
+
+        const virtualizer = tanstackVirtualizerRef.current;
         if (!virtualizer) {
             return false;
         }
 
-        virtualizer.scrollToIndex(index, { align: 'start', smooth: behavior === 'smooth' });
+        virtualizer.scrollToIndex(index, { align: 'start', behavior: behavior === 'smooth' ? 'smooth' : 'auto' });
         return true;
     }, [historyEntries.length, shouldVirtualizeHistory]);
 
@@ -1472,6 +1673,49 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     );
             },
 
+            holdViewportAnchor: (anchor) => {
+                const container = resolveScrollContainer();
+                if (!container || typeof window === 'undefined') {
+                    return;
+                }
+
+                let frames = 0;
+                let stable = 0;
+                let cancelled = false;
+                const cancelOnUserInput = () => {
+                    cancelled = true;
+                    container.removeEventListener('touchstart', cancelOnUserInput);
+                    container.removeEventListener('wheel', cancelOnUserInput);
+                };
+                container.addEventListener('touchstart', cancelOnUserInput, { passive: true });
+                container.addEventListener('wheel', cancelOnUserInput, { passive: true });
+                const step = () => {
+                    if (cancelled) return;
+                    const element = findMessageElement(anchor.messageId);
+                    if (element) {
+                        const delta = element.getBoundingClientRect().top
+                            - container.getBoundingClientRect().top
+                            - anchor.offsetTop;
+                        if (Math.abs(delta) > 0.5) {
+                            container.scrollTop += delta;
+                            stable = 0;
+                        } else {
+                            stable += 1;
+                        }
+                    }
+                    frames += 1;
+                    if (stable >= ANCHOR_HOLD_STABLE_FRAMES || frames >= ANCHOR_HOLD_MAX_FRAMES) {
+                        container.removeEventListener('touchstart', cancelOnUserInput);
+                        container.removeEventListener('wheel', cancelOnUserInput);
+                        return;
+                    }
+                    window.requestAnimationFrame(step);
+                };
+                window.requestAnimationFrame(step);
+            },
+
+            isHistoryVirtualized: () => shouldVirtualizeHistory,
+
             captureViewportAnchor: () => {
                 const container = resolveScrollContainer();
                 if (!container) {
@@ -1490,9 +1734,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                         return true;
                     }
 
-                    const computed = window.getComputedStyle(node);
-                    const isStuckSticky = computed.position === 'sticky' && rect.top <= containerRect.top + 1;
-                    return !isStuckSticky;
+                    return !isInsideStuckSticky(node, container, containerRect.top);
                 }) ?? nodes.find((node) => node.getBoundingClientRect().bottom > containerRect.top + 1);
                 if (!firstVisible) {
                     return null;
@@ -1544,8 +1786,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             },
 
             scrollToBottom: () => {
-                if (shouldVirtualizeHistory && historyEntries.length > 0) {
-                    historyVirtualizerRef.current?.scrollToIndex(historyEntries.length - 1, { align: 'end' });
+                if (shouldVirtualizeHistory && historyEntries.length > 0 && tanstackVirtualizerRef.current) {
+                    tanstackVirtualizerRef.current.scrollToEnd();
                     return;
                 }
                 const container = resolveScrollContainer();
@@ -1574,27 +1816,32 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         <div>
                 <FadeInDisabledProvider disabled={disableFadeIn}>
                     <div className="relative w-full">
-                        <StaticHistoryList
-                            entries={historyEntries}
-                            shouldVirtualize={shouldVirtualizeHistory}
-                            contentRef={historyContentRef}
-                            scrollRef={scrollRef}
-                            virtualizerRef={setHistoryVirtualizer}
-                            virtualizerKey={sessionKey}
-                            virtualCache={virtualCache}
-                            shift={isLoadingOlder || disableStaging}
-                            onMessageContentChange={stableHistoryContentChange}
-                            getAnimationHandlers={stableGetAnimationHandlers}
-                            scrollToBottom={stableScrollToBottom}
-                            stickyUserHeader={stickyUserHeader}
-                            defaultActivityExpanded={defaultActivityExpanded}
-                            turnUiStates={turnUiStates}
-                            onToggleTurnGroup={toggleTurnGroup}
-                            chatRenderMode={chatRenderMode}
-                            shouldAnimateUserMessage={shouldAnimateUserMessage}
-                            onUserAnimationConsumed={onUserAnimationConsumed}
-                            reviewTransferDirection={reviewTransferDirection}
-                        />
+                        {/* Virtualized history rows unmount/remount during scroll;
+                            re-running the reveal fade on every remount reads as
+                            blinking. History content is never "new", so fade-in
+                            is disabled there — the streaming tail keeps it. */}
+                        <FadeInDisabledProvider disabled={shouldVirtualizeHistory}>
+                            <StaticHistoryList
+                                key={sessionKey}
+                                entries={historyEntries}
+                                engine={historyEngine}
+                                contentRef={historyContentRef}
+                                scrollRef={scrollRef}
+                                registerTanstackVirtualizer={registerTanstackVirtualizer}
+                                virtualizerKey={sessionKey}
+                                onMessageContentChange={stableHistoryContentChange}
+                                getAnimationHandlers={stableGetAnimationHandlers}
+                                scrollToBottom={stableScrollToBottom}
+                                stickyUserHeader={stickyUserHeader}
+                                defaultActivityExpanded={defaultActivityExpanded}
+                                turnUiStates={turnUiStates}
+                                onToggleTurnGroup={toggleTurnGroup}
+                                chatRenderMode={chatRenderMode}
+                                shouldAnimateUserMessage={shouldAnimateUserMessage}
+                                onUserAnimationConsumed={onUserAnimationConsumed}
+                                reviewTransferDirection={reviewTransferDirection}
+                            />
+                        </FadeInDisabledProvider>
                         {trailingStreamingEntry ? (
                             <StreamingTailContent
                                 entry={trailingStreamingEntry}

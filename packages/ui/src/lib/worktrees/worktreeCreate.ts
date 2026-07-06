@@ -65,7 +65,7 @@ export const resolveRootTrackingRemote = async (projectDirectory: string): Promi
   return null;
 };
 
-export const resolveWorktreeUpstreamDefaults = async (
+const resolveWorktreeUpstreamDefaults = async (
   projectDirectory: string,
   localBranch: string
 ): Promise<{ setUpstream: true; upstreamRemote: string; upstreamBranch: string } | null> => {

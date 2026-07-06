@@ -54,7 +54,7 @@ const postJson = async (url: string, body?: unknown): Promise<Response> => runti
   body: body === undefined ? undefined : JSON.stringify(body),
 });
 
-export const getPasskeyErrorMessage = async (response: Response, fallback: string): Promise<string> => {
+const getPasskeyErrorMessage = async (response: Response, fallback: string): Promise<string> => {
   try {
     const payload = await response.json();
     if (payload && typeof payload.error === 'string' && payload.error.trim()) {

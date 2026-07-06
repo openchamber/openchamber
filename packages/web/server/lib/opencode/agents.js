@@ -409,7 +409,10 @@ function createAgent(agentName, config, workingDirectory, scope) {
     targetScope = AGENT_SCOPE.USER;
   }
 
-  const { prompt, scope: _scopeFromConfig, ...frontmatter } = config;
+  const { prompt, scope: _scopeFromConfig, ...rawFrontmatter } = config;
+  const frontmatter = Object.fromEntries(
+    Object.entries(rawFrontmatter).filter(([, value]) => value !== null && value !== undefined)
+  );
 
   writeMdFile(targetPath, frontmatter, prompt || '');
   console.log(`Created new agent: ${agentName} (scope: ${targetScope}, path: ${targetPath})`);
@@ -685,12 +688,6 @@ function deleteAgent(agentName, workingDirectory, scope) {
 }
 
 export {
-  ensureProjectAgentDir,
-  getProjectAgentPath,
-  getUserAgentPath,
-  getAgentScope,
-  getAgentWritePath,
-  getAgentPermissionSource,
   getAgentSources,
   getAgentConfig,
   createAgent,

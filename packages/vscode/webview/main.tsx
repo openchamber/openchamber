@@ -4,6 +4,7 @@ import { vscodeStreamPerfCount, vscodeStreamPerfMeasure, vscodeStreamPerfObserve
 import { extractBodyBase64, extractBodyText, extractJsonBody, hasInitBody } from './requestBodyTransport';
 import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
 import { opencodeClient } from '@openchamber/ui/lib/opencode/client';
+import { sanitizeHeadersForBrowser } from '@openchamber/ui/lib/runtime-fetch';
 import {
   buildVSCodeThemeFromPalette,
   readVSCodeThemePalette,
@@ -279,7 +280,7 @@ const normalizeUrl = (input: string | URL) => {
 
 const headersToRecord = (headers: HeadersInit | undefined): Record<string, string> => {
   if (!headers) return {};
-  const normalized = headers instanceof Headers ? headers : new Headers(headers);
+  const normalized = new Headers(sanitizeHeadersForBrowser(headers) ?? headers);
   const result: Record<string, string> = {};
   normalized.forEach((value, key) => {
     result[key] = value;
@@ -297,8 +298,14 @@ const getRequestDirectoryHint = (url: URL, input?: RequestInfo | URL, init?: Req
   const queryDirectory = url.searchParams.get('directory') || undefined;
   if (queryDirectory) return queryDirectory;
   const headers = getRequestHeaders(input, init);
+  const directoryEncoding = Object.entries(headers).find(([key]) => key.toLowerCase() === 'x-opencode-directory-encoding')?.[1];
   for (const [key, value] of Object.entries(headers)) {
-    if (key.toLowerCase() === 'x-opencode-directory') return value;
+    if (key.toLowerCase() === 'x-opencode-directory') {
+      // headersToRecord marks encoded directory hints so direct/raw percent
+      // sequences from other callers are not decoded accidentally.
+      if (directoryEncoding !== 'uri') return value;
+      try { return decodeURIComponent(value); } catch { return value; }
+    }
   }
   return undefined;
 };
@@ -508,6 +515,23 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
 
   if ((pathname === '/api/tts/speak' || pathname === '/api/tts/say/speak') && method === 'POST') {
     return new Response(JSON.stringify({ error: 'TTS endpoints are not available in VS Code runtime' }), {
+      status: 501,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Dictation runs on the OpenChamber web server (WebSocket + worker); the VS
+  // Code bridge has no server process, so report it deterministically
+  // unavailable. The mic button hides itself when capture is unsupported.
+  if (normalizedPathname === '/api/dictation/status' && method === 'GET') {
+    return new Response(JSON.stringify({ provider: 'local', available: false, reasonCode: 'unsupported_runtime', models: [] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (normalizedPathname.startsWith('/api/dictation/') ) {
+    return new Response(JSON.stringify({ error: 'Dictation is not available in VS Code runtime' }), {
       status: 501,
       headers: { 'Content-Type': 'application/json' },
     });

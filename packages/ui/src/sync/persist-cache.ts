@@ -65,20 +65,6 @@ function writeCache<T>(directory: string, key: CacheKey, value: T | undefined): 
   }
 }
 
-function clearCache(directory: string): void {
-  try {
-    const prefix = storagePrefix(directory)
-    const keys: string[] = []
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i)
-      if (k?.startsWith(prefix)) keys.push(k)
-    }
-    for (const k of keys) localStorage.removeItem(k)
-  } catch {
-    // ignore
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -129,9 +115,4 @@ export function persistProjectMeta(directory: string, meta: ProjectMeta | undefi
 /** Write icon to cache */
 export function persistIcon(directory: string, icon: string | undefined): void {
   writeCache(directory, "icon", icon)
-}
-
-/** Clear all cached metadata for a directory */
-export function clearDirCache(directory: string): void {
-  clearCache(directory)
 }
