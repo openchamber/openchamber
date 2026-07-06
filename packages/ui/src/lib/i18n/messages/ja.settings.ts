@@ -1706,6 +1706,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.collapsibleUserMessages': '長いユーザーメッセージを折りたたむ',
   'settings.openchamber.visual.field.stickyUserHeaderAria': 'ユーザーヘッダー固定',
   'settings.openchamber.visual.field.stickyUserHeader': 'ユーザーヘッダー固定',
+  'settings.openchamber.visual.field.promptNavigatorEnabledAria': 'プロンプトナビゲーター',
+  'settings.openchamber.visual.field.promptNavigatorEnabled': 'プロンプトナビゲーター',
   'settings.openchamber.visual.field.expandedEditorToolbarAria': 'エディターツールバーを常に表示',
   'settings.openchamber.visual.field.expandedEditorToolbar': 'エディターツールバーを常に表示（ファイルタブの下にドッキング）',
   'settings.openchamber.visual.field.wideChatLayoutAria': 'ワイドチャットレイアウト',

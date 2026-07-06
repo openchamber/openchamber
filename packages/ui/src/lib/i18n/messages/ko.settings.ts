@@ -1673,6 +1673,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.collapsibleUserMessages': '긴 사용자 메시지 접기',
   'settings.openchamber.visual.field.stickyUserHeaderAria': '고정 사용자 헤더',
   'settings.openchamber.visual.field.stickyUserHeader': '고정 사용자 헤더',
+  'settings.openchamber.visual.field.promptNavigatorEnabledAria': '프롬프트 탐색기',
+  'settings.openchamber.visual.field.promptNavigatorEnabled': '프롬프트 탐색기',
   'settings.openchamber.visual.field.expandedEditorToolbarAria': 'Always show editor toolbar',
   'settings.openchamber.visual.field.expandedEditorToolbar': 'Always show editor toolbar (docked under the file tabs)',
   'settings.openchamber.visual.field.wideChatLayoutAria': '넓은 채팅 레이아웃',

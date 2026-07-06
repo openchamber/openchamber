@@ -1673,6 +1673,8 @@ export const settingsDict = {
   "settings.openchamber.visual.field.collapsibleUserMessages": "Contraer mensajes largos del usuario",
   "settings.openchamber.visual.field.stickyUserHeaderAria": "Encabezado del usuario fijo",
   "settings.openchamber.visual.field.stickyUserHeader": "Encabezado de usuario fijo",
+  "settings.openchamber.visual.field.promptNavigatorEnabledAria": "Navegador de prompts",
+  "settings.openchamber.visual.field.promptNavigatorEnabled": "Navegador de prompts",
   "settings.openchamber.visual.field.expandedEditorToolbarAria": "Mostrar siempre la barra de herramientas del editor",
   "settings.openchamber.visual.field.expandedEditorToolbar": "Mostrar siempre la barra de herramientas del editor (anclada bajo las pestañas)",
   "settings.openchamber.visual.field.wideChatLayoutAria": "Diseño de chat ancho",

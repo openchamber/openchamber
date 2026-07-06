@@ -1706,6 +1706,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.collapsibleUserMessages': 'Collapse Long User Messages',
   'settings.openchamber.visual.field.stickyUserHeaderAria': 'Sticky user header',
   'settings.openchamber.visual.field.stickyUserHeader': 'Sticky User Header',
+  'settings.openchamber.visual.field.promptNavigatorEnabledAria': 'Prompt navigator',
+  'settings.openchamber.visual.field.promptNavigatorEnabled': 'Prompt Navigator',
   'settings.openchamber.visual.field.expandedEditorToolbarAria': 'Always show editor toolbar',
   'settings.openchamber.visual.field.expandedEditorToolbar': 'Always show editor toolbar (docked under the file tabs)',
   'settings.openchamber.visual.field.wideChatLayoutAria': 'Wide chat layout',

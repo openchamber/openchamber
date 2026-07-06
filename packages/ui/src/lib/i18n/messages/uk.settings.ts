@@ -1673,6 +1673,8 @@ export const settingsDict = {
   "settings.openchamber.visual.field.collapsibleUserMessages": "Згортати довгі повідомлення користувача",
   "settings.openchamber.visual.field.stickyUserHeaderAria": "Закріплений заголовок користувача",
   "settings.openchamber.visual.field.stickyUserHeader": "Закріплений заголовок користувача",
+  "settings.openchamber.visual.field.promptNavigatorEnabledAria": "Навігатор промптів",
+  "settings.openchamber.visual.field.promptNavigatorEnabled": "Навігатор промптів",
   "settings.openchamber.visual.field.expandedEditorToolbarAria": "Завжди показувати панель інструментів редактора",
   "settings.openchamber.visual.field.expandedEditorToolbar": "Завжди показувати панель інструментів редактора (закріплена під вкладками)",
   "settings.openchamber.visual.field.wideChatLayoutAria": "Широкий макет чату",

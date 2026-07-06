@@ -436,6 +436,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     // UI store
     const isExpandedInput = useUIStore((state) => state.isExpandedInput);
     const stickyUserHeader = useUIStore((state) => state.stickyUserHeader);
+    const promptNavigatorEnabled = useUIStore((state) => state.promptNavigatorEnabled);
     const isTimelineDialogOpen = useUIStore((s) => s.isTimelineDialogOpen);
     const setTimelineDialogOpen = useUIStore((s) => s.setTimelineDialogOpen);
 
@@ -752,7 +753,10 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     const handlePromptNavigatorSelect = React.useCallback((turnId: string) => {
         void navigation.scrollToTurnId(turnId, { behavior: 'smooth' });
     }, [navigation]);
-    const showPromptNavigator = !isMobile && !isDesktopExpandedInput && timelineController.turnIds.length >= 1;
+    const showPromptNavigator = !isMobile
+        && !isDesktopExpandedInput
+        && promptNavigatorEnabled
+        && timelineController.turnIds.length >= 2;
 
     React.useEffect(() => {
         if (typeof window === 'undefined' || !currentSessionId) return;
