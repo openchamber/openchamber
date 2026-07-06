@@ -114,7 +114,8 @@ export type DesktopSettings = {
   defaultVariant?: string;
   defaultAgent?: string;
   smallModelUseDefault?: boolean;
-  sessionAssistEnabled?: boolean;
+  sessionRecapEnabled?: boolean;
+  sessionSuggestionEnabled?: boolean;
   smallModelOverride?: string; // format: "provider/model"
   defaultGitIdentityId?: string; // ''/undefined = unset, 'global' or profile id
   openInAppId?: string;

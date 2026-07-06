@@ -303,8 +303,12 @@ export const persistSettings = async (changes: Record<string, unknown>, ctx?: Br
     delete restChanges.smallModelUseDefault;
   }
 
-  if ('sessionAssistEnabled' in restChanges && typeof restChanges.sessionAssistEnabled !== 'boolean') {
-    delete restChanges.sessionAssistEnabled;
+  if ('sessionRecapEnabled' in restChanges && typeof restChanges.sessionRecapEnabled !== 'boolean') {
+    delete restChanges.sessionRecapEnabled;
+  }
+
+  if ('sessionSuggestionEnabled' in restChanges && typeof restChanges.sessionSuggestionEnabled !== 'boolean') {
+    delete restChanges.sessionSuggestionEnabled;
   }
 
   if (typeof restChanges.usageAutoRefresh !== 'boolean') {
