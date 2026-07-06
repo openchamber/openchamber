@@ -1502,15 +1502,35 @@ function handleEvent(
     if (session && (session as { parentID?: string }).parentID) {
       // subtask — skip notification
     } else if (sessionID) {
+      const viewed = isViewedInCurrentSession(resolvedDirectory, sessionID)
       appendNotification({
         directory: resolvedDirectory,
         session: sessionID,
         time: Date.now(),
-        viewed: isViewedInCurrentSession(resolvedDirectory, sessionID),
+        viewed,
         ...(payload.type === "session.error"
           ? { type: "error" as const, error: props.error }
           : { type: "turn-complete" as const }),
       })
+      // For the session currently being viewed, this toast is the ONLY surface
+      // for session.error: the event reducer drops the error payload (it only
+      // flips status back to idle) and the notification above is born viewed,
+      // so it never produces a badge. Without it a provider 401 / network
+      // failure ends the turn in total silence for the user watching the chat.
+      if (payload.type === "session.error" && viewed) {
+        const err = props.error as
+          | { name?: string; message?: string; data?: { message?: string; statusCode?: number } }
+          | undefined
+        const detail = err?.data?.message?.trim()
+          || err?.message?.trim()
+          || (err?.data?.statusCode ? `HTTP ${err.data.statusCode}` : "")
+          || err?.name
+          || "Unknown error"
+        toast.error("Agent stopped with an error", {
+          id: `session-error-${sessionID}`,
+          description: detail,
+        })
+      }
     }
   }
 
