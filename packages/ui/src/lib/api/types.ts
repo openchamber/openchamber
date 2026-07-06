@@ -655,6 +655,7 @@ export interface SettingsPayload {
   showSplitAssistantMessageActions?: boolean;
   fontSize?: number;
   terminalFontSize?: number;
+  editorFontSize?: number;
   uiFont?: string;
   monoFont?: string;
   padding?: number;

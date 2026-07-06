@@ -30,6 +30,7 @@ type AppearanceSlice = {
   sessionRetentionAction: 'archive' | 'delete';
   fontSize: number;
   terminalFontSize: number;
+  editorFontSize: number;
   uiFont: UiFontOption;
   monoFont: MonoFontOption;
   padding: number;
@@ -70,6 +71,7 @@ export const startAppearanceAutoSave = (): void => {
     sessionRetentionAction: useUIStore.getState().sessionRetentionAction,
     fontSize: useUIStore.getState().fontSize,
     terminalFontSize: useUIStore.getState().terminalFontSize,
+    editorFontSize: useUIStore.getState().editorFontSize,
     uiFont: useUIStore.getState().uiFont,
     monoFont: useUIStore.getState().monoFont,
     padding: useUIStore.getState().padding,
@@ -122,6 +124,7 @@ export const startAppearanceAutoSave = (): void => {
       sessionRetentionAction: state.sessionRetentionAction,
       fontSize: state.fontSize,
       terminalFontSize: state.terminalFontSize,
+      editorFontSize: state.editorFontSize,
       uiFont: state.uiFont,
       monoFont: state.monoFont,
       padding: state.padding,
@@ -193,6 +196,9 @@ export const startAppearanceAutoSave = (): void => {
     }
     if (current.terminalFontSize !== previous.terminalFontSize) {
       diff.terminalFontSize = current.terminalFontSize;
+    }
+    if (current.editorFontSize !== previous.editorFontSize) {
+      diff.editorFontSize = current.editorFontSize;
     }
     if (current.uiFont !== previous.uiFont) {
       diff.uiFont = current.uiFont;

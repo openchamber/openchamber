@@ -115,6 +115,12 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['terminal', 'font', 'text size'],
   },
   {
+    id: 'appearance.editor-font-size',
+    page: 'appearance',
+    titleKey: 'settings.openchamber.visual.field.editorFontSize',
+    keywords: ['editor', 'font', 'text size', 'code'],
+  },
+  {
     id: 'appearance.spacing-density',
     page: 'appearance',
     titleKey: 'settings.openchamber.visual.field.spacingDensity',
