@@ -79,6 +79,8 @@ mock.module('@/lib/persistence', () => ({
 
 const { useSidebarPersistence } = await import('./useSidebarPersistence');
 
+type SidebarPersistenceArgs = Parameters<typeof useSidebarPersistence>[0];
+
 const flushEffects = async () => {
   while (pendingEffects.length > 0) {
     const effects = pendingEffects;
@@ -90,7 +92,7 @@ const flushEffects = async () => {
   }
 };
 
-const renderHook = (args: Parameters<typeof useSidebarPersistence>[0]) => {
+const renderHook = (args: SidebarPersistenceArgs) => {
   hookIndex = 0;
   const result = useSidebarPersistence(args);
   return result;
@@ -126,7 +128,7 @@ describe('useSidebarPersistence', () => {
       pinnedSessionIds = typeof next === 'function' ? next(pinnedSessionIds) : next;
     };
 
-    const baseArgs = {
+    const baseArgs: SidebarPersistenceArgs = {
       isVSCode: false,
       hasLoadedGlobalSessions: true,
       safeStorage: {
@@ -160,7 +162,7 @@ describe('useSidebarPersistence', () => {
 
     renderHook({
       ...baseArgs,
-      sessions: [],
+      sessions: [] as Session[],
       pinnedSessionIds,
     });
     await flushEffects();
