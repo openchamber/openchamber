@@ -26,7 +26,7 @@ export function createFlexokiCodeMirrorTheme(
       backgroundColor: 'var(--background)',
       color: theme.colors.syntax.base.foreground,
       fontSize: contentFontSize,
-      lineHeight: '1.5rem',
+      lineHeight: '1.5',
       position: 'relative' as const,
     },
     '.cm-scroller': {
