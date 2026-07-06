@@ -46,6 +46,7 @@ interface VSCodeWorkspaceFolderConfig {
 interface ProjectsStore {
   projects: ProjectEntry[];
   activeProjectId: string | null;
+  manualProjectOrder: string[];
 
   addProject: (path: string, options?: { label?: string; id?: string }) => ProjectEntry | null;
   removeProject: (id: string) => void;
@@ -57,6 +58,7 @@ interface ProjectsStore {
   removeProjectIcon: (id: string) => Promise<{ ok: boolean; error?: string }>;
   discoverProjectIcon: (id: string, options?: { force?: boolean }) => Promise<{ ok: boolean; skipped?: boolean; reason?: string; error?: string }>;
   reorderProjects: (fromIndex: number, toIndex: number) => void;
+  setManualProjectOrder: (order: string[]) => void;
   resetForRuntimeSwitch: () => void;
   validateProjectPath: (path: string) => ProjectPathValidationResult;
   synchronizeFromSettings: (settings: DesktopSettings) => void;
@@ -290,6 +292,17 @@ const readPersistedProjects = (): ProjectEntry[] => {
   }
 };
 
+const readPersistedManualOrder = (): string[] => {
+  try {
+    const raw = safeStorage.getItem(getProjectsStorageKey() + ':manualOrder');
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+};
+
 const readPersistedActiveProjectId = (): string | null => {
   try {
     const raw = safeStorage.getItem(getActiveProjectStorageKey())
@@ -322,8 +335,15 @@ const cacheProjects = (projects: ProjectEntry[], activeProjectId: string | null)
   }
 };
 
-const persistProjects = (projects: ProjectEntry[], activeProjectId: string | null) => {
+const persistProjects = (projects: ProjectEntry[], activeProjectId: string | null, manualOrder?: string[]) => {
   cacheProjects(projects, activeProjectId);
+  if (manualOrder) {
+    try {
+      safeStorage.setItem(getProjectsStorageKey() + ':manualOrder', JSON.stringify(manualOrder));
+    } catch {
+      // ignored
+    }
+  }
   void updateDesktopSettings({ projects, activeProjectId: activeProjectId ?? undefined });
 };
 
@@ -510,6 +530,7 @@ export const useProjectsStore = create<ProjectsStore>()(
   devtools((set, get) => ({
     projects: effectiveInitialProjects,
     activeProjectId: initialActiveProjectId,
+    manualProjectOrder: readPersistedManualOrder(),
 
     validateProjectPath: (path: string): ProjectPathValidationResult => {
       if (typeof path !== 'string' || path.trim().length === 0) {
@@ -578,8 +599,9 @@ export const useProjectsStore = create<ProjectsStore>()(
         nextActiveId = nextProjects[0]?.id ?? null;
       }
 
-      set({ projects: nextProjects, activeProjectId: nextActiveId });
-      persistProjects(nextProjects, nextActiveId);
+      const nextManualOrder = get().manualProjectOrder.filter((oid) => oid !== id);
+      set({ projects: nextProjects, activeProjectId: nextActiveId, manualProjectOrder: nextManualOrder });
+      persistProjects(nextProjects, nextActiveId, nextManualOrder);
 
       // Clean up worktree entries for the removed project
       if (project) {
@@ -621,7 +643,7 @@ export const useProjectsStore = create<ProjectsStore>()(
       );
 
       set({ projects: nextProjects, activeProjectId: id });
-      persistProjects(nextProjects, id);
+      persistProjects(nextProjects, id, get().manualProjectOrder);
 
       opencodeClient.setDirectory(target.path);
       useDirectoryStore.getState().setDirectory(target.path, { showOverlay: false });
@@ -646,7 +668,7 @@ export const useProjectsStore = create<ProjectsStore>()(
       );
 
       set({ projects: nextProjects, activeProjectId: id });
-      persistProjects(nextProjects, id);
+      persistProjects(nextProjects, id, get().manualProjectOrder);
     },
 
     renameProject: (id: string, label: string) => {
@@ -663,7 +685,7 @@ export const useProjectsStore = create<ProjectsStore>()(
         project.id === id ? { ...project, label: trimmed } : project
       );
       set({ projects: nextProjects });
-      persistProjects(nextProjects, activeProjectId);
+      persistProjects(nextProjects, activeProjectId, get().manualProjectOrder);
     },
 
     updateProjectMeta: (id: string, meta: { label?: string; icon?: string | null; color?: string | null; iconBackground?: string | null }) => {
@@ -686,7 +708,7 @@ export const useProjectsStore = create<ProjectsStore>()(
         return updated;
       });
       set({ projects: nextProjects });
-      persistProjects(nextProjects, activeProjectId);
+      persistProjects(nextProjects, activeProjectId, get().manualProjectOrder);
     },
 
     uploadProjectIcon: async (id: string, file: File) => {
@@ -823,8 +845,14 @@ export const useProjectsStore = create<ProjectsStore>()(
       const [moved] = nextProjects.splice(fromIndex, 1);
       nextProjects.splice(toIndex, 0, moved);
 
-      set({ projects: nextProjects });
-      persistProjects(nextProjects, activeProjectId);
+      const newOrder = nextProjects.map((p) => p.id);
+      set({ projects: nextProjects, manualProjectOrder: newOrder });
+      persistProjects(nextProjects, activeProjectId, newOrder);
+    },
+
+    setManualProjectOrder: (order: string[]) => {
+      set({ manualProjectOrder: order });
+      persistProjects(get().projects, get().activeProjectId, order);
     },
 
     resetForRuntimeSwitch: () => {
@@ -836,7 +864,7 @@ export const useProjectsStore = create<ProjectsStore>()(
       const nextActiveProjectId = projects.some((project) => project.id === activeProjectId)
         ? activeProjectId
         : projects[0]?.id ?? null;
-      set({ projects, activeProjectId: nextActiveProjectId });
+      set({ projects, activeProjectId: nextActiveProjectId, manualProjectOrder: [] });
     },
 
     synchronizeFromSettings: (settings: DesktopSettings) => {
@@ -862,7 +890,7 @@ export const useProjectsStore = create<ProjectsStore>()(
             : true;
           if (activeExists) {
             set({ activeProjectId: incomingActive });
-            cacheProjects(current.projects, incomingActive);
+            persistProjects(current.projects, incomingActive, get().manualProjectOrder);
           }
         }
         return;
@@ -875,8 +903,10 @@ export const useProjectsStore = create<ProjectsStore>()(
         return;
       }
 
-      set({ projects: incomingProjects, activeProjectId: incomingActive });
-      cacheProjects(incomingProjects, incomingActive);
+      const incomingIds = new Set(incomingProjects.map((p) => p.id));
+      const cleanedOrder = get().manualProjectOrder.filter((id) => incomingIds.has(id));
+      set({ projects: incomingProjects, activeProjectId: incomingActive, manualProjectOrder: cleanedOrder });
+      persistProjects(incomingProjects, incomingActive, cleanedOrder);
 
       if (incomingActive) {
         const activeProject = incomingProjects.find((project) => project.id === incomingActive);
