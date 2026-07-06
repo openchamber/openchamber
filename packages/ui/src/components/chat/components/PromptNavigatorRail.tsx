@@ -177,7 +177,7 @@ export const PromptNavigatorRail: React.FC<PromptNavigatorRailProps> = ({
                                 <button
                                     type="button"
                                     className={cn(
-                                        'pointer-events-auto absolute left-1/2 flex -translate-x-1/2 items-center justify-center rounded-full',
+                                        'group pointer-events-auto absolute left-1/2 flex -translate-x-1/2 items-center justify-center rounded-full',
                                         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focusRing)]',
                                     )}
                                     style={{
@@ -196,7 +196,7 @@ export const PromptNavigatorRail: React.FC<PromptNavigatorRailProps> = ({
                                             'block rounded-full transition-colors',
                                             isActive
                                                 ? 'h-0.5 w-3.5 bg-[var(--surface-foreground)]'
-                                                : 'h-px w-2.5 bg-[var(--surface-mutedForeground)]/45 hover:bg-[var(--surface-mutedForeground)]/80',
+                                                : 'h-px w-2.5 bg-[var(--surface-mutedForeground)]/45 group-hover:bg-[var(--surface-mutedForeground)]/80',
                                         )}
                                     />
                                 </button>
