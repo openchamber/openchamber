@@ -143,10 +143,10 @@ export const PromptNavigatorRail: React.FC<PromptNavigatorRailProps> = ({
                                 <span
                                     aria-hidden="true"
                                     className={cn(
-                                        'block rounded-full transition-colors',
+                                        'block h-0.5 rounded-full transition-colors',
                                         isActive
-                                            ? 'h-0.5 w-3.5 bg-[var(--surface-foreground)]'
-                                            : 'h-px w-2.5 bg-[var(--surface-mutedForeground)]/25',
+                                            ? 'w-3.5 bg-[var(--surface-foreground)]'
+                                            : 'w-3 bg-[var(--surface-foreground)]/40',
                                     )}
                                 />
                             </button>
