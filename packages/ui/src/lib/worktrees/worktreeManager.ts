@@ -234,10 +234,15 @@ const toCreatePayload = (args: {
  * Uses path-based comparison for entries (not reference equality)
  * because readStableProjectWorktrees creates new object instances
  * on each call, making reference checks always report changed.
+ *
+ * Generic over `T extends { path: string }` so the helper documents
+ * its equality contract at the type level (it compares arrays element
+ * by element on the `path` field) and stays reusable for any future
+ * map-of-arrays shape that has a `path` field.
  */
-export const worktreeMapsEqual = (
-  a: Map<string, WorktreeMetadata[]>,
-  b: Map<string, WorktreeMetadata[]>,
+export const worktreeMapsEqual = <T extends { path: string }>(
+  a: Map<string, T[]>,
+  b: Map<string, T[]>,
 ): boolean => {
   if (a.size !== b.size) return false;
   for (const [key, value] of a) {
