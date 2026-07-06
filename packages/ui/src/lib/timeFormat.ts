@@ -1,3 +1,4 @@
+import { getCurrentIntlLocale } from '@/lib/i18n';
 import type { TimeFormatPreference } from '@/stores/useUIStore';
 
 type TimePrecision = 'minute' | 'second';
@@ -6,21 +7,6 @@ const getHour12Option = (preference: TimeFormatPreference): boolean | undefined 
   if (preference === '12h') return true;
   if (preference === '24h') return false;
   return undefined;
-};
-
-export const getUses24HourForPreference = (preference: TimeFormatPreference, locale: string): boolean => {
-  if (preference === '24h') return true;
-  if (preference === '12h') return false;
-
-  try {
-    const options = new Intl.DateTimeFormat(locale, { hour: 'numeric' }).resolvedOptions();
-    if (typeof options.hour12 === 'boolean') {
-      return !options.hour12;
-    }
-    return options.hourCycle === 'h23' || options.hourCycle === 'h24';
-  } catch {
-    return true;
-  }
 };
 
 export const formatTimeForPreference = (
@@ -33,7 +19,7 @@ export const formatTimeForPreference = (
     return options.fallback ?? '';
   }
 
-  return date.toLocaleTimeString(undefined, {
+  return date.toLocaleTimeString(getCurrentIntlLocale(), {
     hour: options.hour ?? 'numeric',
     minute: '2-digit',
     second: options.precision === 'second' ? '2-digit' : undefined,
@@ -51,7 +37,7 @@ export const formatDateTimeForPreference = (
     return '';
   }
 
-  return date.toLocaleString(undefined, {
+  return date.toLocaleString(getCurrentIntlLocale(), {
     ...options,
     hour12: options.hour ? getHour12Option(preference) : options.hour12,
   });

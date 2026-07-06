@@ -8,7 +8,9 @@
         "es": "Empieza aquí",
         "pt-BR": "Comece aqui",
         "ko": "여기서 시작",
-        "pl": "Zacznij tutaj"
+        "pl": "Zacznij tutaj",
+        "fr": "Commencer ici",
+        "ja": "ここから開始"
       },
       "items": [
         {
@@ -20,7 +22,9 @@
             "es": "Visión general",
             "pt-BR": "Visão geral",
             "ko": "개요",
-            "pl": "Przegląd"
+            "pl": "Przegląd",
+            "fr": "Vue d’ensemble",
+            "ja": "概要"
           }
         },
         {
@@ -32,7 +36,9 @@
             "es": "Instalación",
             "pt-BR": "Instalação",
             "ko": "설치",
-            "pl": "Instalacja"
+            "pl": "Instalacja",
+            "fr": "Installation",
+            "ja": "インストール"
           }
         },
         {
@@ -44,7 +50,9 @@
             "es": "Inicio rápido",
             "pt-BR": "Início rápido",
             "ko": "빠른 시작",
-            "pl": "Szybki start"
+            "pl": "Szybki start",
+            "fr": "Démarrage rapide",
+            "ja": "クイックスタート"
           }
         },
         {
@@ -56,7 +64,9 @@
             "es": "Servidor OpenCode",
             "pt-BR": "Servidor OpenCode",
             "ko": "OpenCode 서버",
-            "pl": "Serwer OpenCode"
+            "pl": "Serwer OpenCode",
+            "fr": "Serveur OpenCode",
+            "ja": "OpenCode サーバー"
           }
         },
         {
@@ -68,7 +78,9 @@
             "es": "Variables de entorno",
             "pt-BR": "Variáveis de ambiente",
             "ko": "환경 변수",
-            "pl": "Zmienne środowiskowe"
+            "pl": "Zmienne środowiskowe",
+            "fr": "Variables d’environnement",
+            "ja": "環境変数"
           }
         }
       ]
@@ -81,7 +93,9 @@
         "es": "Flujos de trabajo",
         "pt-BR": "Fluxos de trabalho",
         "ko": "워크플로",
-        "pl": "Przepływy pracy"
+        "pl": "Przepływy pracy",
+        "fr": "Workflows",
+        "ja": "ワークフロー"
       },
       "items": [
         {
@@ -93,7 +107,9 @@
             "es": "Proyectos",
             "pt-BR": "Projetos",
             "ko": "프로젝트",
-            "pl": "Projekty"
+            "pl": "Projekty",
+            "fr": "Projets",
+            "ja": "プロジェクト"
           }
         },
         {
@@ -105,7 +121,9 @@
             "es": "Contexto",
             "pt-BR": "Contexto",
             "ko": "컨텍스트",
-            "pl": "Kontekst"
+            "pl": "Kontekst",
+            "fr": "Contexte",
+            "ja": "コンテキスト"
           }
         },
         {
@@ -117,7 +135,9 @@
             "es": "Notas, tareas y planes",
             "pt-BR": "Notas, tarefas e planos",
             "ko": "메모, 할 일, 계획",
-            "pl": "Notatki, zadania i plany"
+            "pl": "Notatki, zadania i plany",
+            "fr": "Notes, todos et plans",
+            "ja": "メモ、Todo、計画"
           }
         },
         {
@@ -129,7 +149,9 @@
             "es": "Tareas programadas",
             "pt-BR": "Tarefas agendadas",
             "ko": "예약 작업",
-            "pl": "Zaplanowane zadania"
+            "pl": "Zaplanowane zadania",
+            "fr": "Tâches planifiées",
+            "ja": "スケジュールタスク"
           }
         },
         {
@@ -141,7 +163,9 @@
             "es": "Acciones del proyecto",
             "pt-BR": "Ações do projeto",
             "ko": "프로젝트 작업",
-            "pl": "Akcje projektu"
+            "pl": "Akcje projektu",
+            "fr": "Actions de projet",
+            "ja": "プロジェクトアクション"
           }
         },
         {
@@ -153,7 +177,9 @@
             "es": "Vista previa y servidores de desarrollo",
             "pt-BR": "Pré-visualização e servidores de desenvolvimento",
             "ko": "미리보기 및 개발 서버",
-            "pl": "Podgląd i serwery deweloperskie"
+            "pl": "Podgląd i serwery deweloperskie",
+            "fr": "Aperçu et serveurs de dev",
+            "ja": "プレビューと開発サーバー"
           }
         },
         {
@@ -165,16 +191,26 @@
             "es": "Sesiones de worktree",
             "pt-BR": "Sessões de worktree",
             "ko": "Worktree 세션",
-            "pl": "Sesje worktree"
+            "pl": "Sesje worktree",
+            "fr": "Sessions worktree",
+            "ja": "Worktree セッション"
           }
         },
         {
           "label": "Multi-run",
-          "link": "/multi-run/"
+          "link": "/multi-run/",
+          "translations": {
+            "fr": "Multi-run",
+            "ja": "Multi-run"
+          }
         },
         {
           "label": "Git & GitHub",
-          "link": "/git/"
+          "link": "/git/",
+          "translations": {
+            "fr": "Git et GitHub",
+            "ja": "Git と GitHub"
+          }
         },
         {
           "label": "GitHub Issues & PRs",
@@ -185,7 +221,9 @@
             "es": "Issues y PRs de GitHub",
             "pt-BR": "Issues e PRs do GitHub",
             "ko": "GitHub 이슈 및 PR",
-            "pl": "Zgłoszenia i PR-y GitHub"
+            "pl": "Zgłoszenia i PR-y GitHub",
+            "fr": "Issues et PR GitHub",
+            "ja": "GitHub Issues と PR"
           }
         },
         {
@@ -197,7 +235,9 @@
             "es": "Prompts mágicos",
             "pt-BR": "Prompts mágicos",
             "ko": "매직 프롬프트",
-            "pl": "Magiczne prompty"
+            "pl": "Magiczne prompty",
+            "fr": "Magic Prompts",
+            "ja": "マジックプロンプト"
           }
         },
         {
@@ -209,7 +249,9 @@
             "es": "Identidades de Git",
             "pt-BR": "Identidades do Git",
             "ko": "Git 아이덴티티",
-            "pl": "Tożsamości Git"
+            "pl": "Tożsamości Git",
+            "fr": "Identités Git",
+            "ja": "Git ID"
           }
         }
       ]
@@ -222,7 +264,9 @@
         "es": "Configuración de OpenCode",
         "pt-BR": "Configuração do OpenCode",
         "ko": "OpenCode 설정",
-        "pl": "Konfiguracja OpenCode"
+        "pl": "Konfiguracja OpenCode",
+        "fr": "Configuration OpenCode",
+        "ja": "OpenCode 設定"
       },
       "items": [
         {
@@ -234,7 +278,9 @@
             "es": "Proveedores, modelos y agentes",
             "pt-BR": "Provedores, modelos e agentes",
             "ko": "공급자, 모델, 에이전트",
-            "pl": "Dostawcy, modele i agenci"
+            "pl": "Dostawcy, modele i agenci",
+            "fr": "Fournisseurs, modèles et agents",
+            "ja": "プロバイダー、モデル、エージェント"
           }
         },
         {
@@ -246,7 +292,9 @@
             "es": "Servidores MCP",
             "pt-BR": "Servidores MCP",
             "ko": "MCP 서버",
-            "pl": "Serwery MCP"
+            "pl": "Serwery MCP",
+            "fr": "Serveurs MCP",
+            "ja": "MCP サーバー"
           }
         },
         {
@@ -258,7 +306,9 @@
             "es": "Habilidades",
             "pt-BR": "Habilidades",
             "ko": "스킬",
-            "pl": "Umiejętności"
+            "pl": "Umiejętności",
+            "fr": "Skills",
+            "ja": "スキル"
           }
         },
         {
@@ -270,7 +320,9 @@
             "es": "Catálogo de habilidades",
             "pt-BR": "Catálogo de habilidades",
             "ko": "스킬 카탈로그",
-            "pl": "Katalog umiejętności"
+            "pl": "Katalog umiejętności",
+            "fr": "Catalogue de skills",
+            "ja": "スキルカタログ"
           }
         },
         {
@@ -282,7 +334,9 @@
             "es": "Comandos y fragmentos",
             "pt-BR": "Comandos e trechos",
             "ko": "명령 및 스니펫",
-            "pl": "Polecenia i fragmenty"
+            "pl": "Polecenia i fragmenty",
+            "fr": "Commandes et snippets",
+            "ja": "コマンドとスニペット"
           }
         },
         {
@@ -294,7 +348,9 @@
             "es": "Uso y cuotas",
             "pt-BR": "Uso e cotas",
             "ko": "사용량 및 할당량",
-            "pl": "Zużycie i limity"
+            "pl": "Zużycie i limity",
+            "fr": "Utilisation et quotas",
+            "ja": "使用量とクォータ"
           }
         }
       ]
@@ -307,7 +363,9 @@
         "es": "Acceso remoto",
         "pt-BR": "Acesso remoto",
         "ko": "원격 접속",
-        "pl": "Dostęp zdalny"
+        "pl": "Dostęp zdalny",
+        "fr": "Accès distant",
+        "ja": "リモートアクセス"
       },
       "items": [
         {
@@ -319,7 +377,9 @@
             "es": "Túneles",
             "pt-BR": "Túneis",
             "ko": "터널",
-            "pl": "Tunele"
+            "pl": "Tunele",
+            "fr": "Tunnels",
+            "ja": "トンネル"
           }
         },
         {
@@ -331,7 +391,9 @@
             "es": "Proxy inverso",
             "pt-BR": "Proxy reverso",
             "ko": "리버스 프록시",
-            "pl": "Reverse proxy"
+            "pl": "Reverse proxy",
+            "fr": "Reverse proxy",
+            "ja": "リバースプロキシ"
           }
         },
         {
@@ -343,7 +405,9 @@
             "es": "PWA y móvil",
             "pt-BR": "PWA e celular",
             "ko": "PWA 및 모바일",
-            "pl": "PWA i urządzenia mobilne"
+            "pl": "PWA i urządzenia mobilne",
+            "fr": "PWA et mobile",
+            "ja": "PWA とモバイル"
           }
         },
         {
@@ -355,7 +419,9 @@
             "es": "Seguridad",
             "pt-BR": "Segurança",
             "ko": "보안",
-            "pl": "Bezpieczeństwo"
+            "pl": "Bezpieczeństwo",
+            "fr": "Sécurité",
+            "ja": "セキュリティ"
           }
         }
       ]
@@ -368,7 +434,9 @@
         "es": "Personalizar",
         "pt-BR": "Personalizar",
         "ko": "맞춤 설정",
-        "pl": "Dostosuj"
+        "pl": "Dostosuj",
+        "fr": "Personnaliser",
+        "ja": "カスタマイズ"
       },
       "items": [
         {
@@ -380,7 +448,9 @@
             "es": "Temas",
             "pt-BR": "Temas",
             "ko": "테마",
-            "pl": "Motywy"
+            "pl": "Motywy",
+            "fr": "Thèmes",
+            "ja": "テーマ"
           }
         },
         {
@@ -392,7 +462,9 @@
             "es": "Notificaciones",
             "pt-BR": "Notificações",
             "ko": "알림",
-            "pl": "Powiadomienia"
+            "pl": "Powiadomienia",
+            "fr": "Notifications",
+            "ja": "通知"
           }
         },
         {
@@ -404,7 +476,9 @@
             "es": "Modo de voz",
             "pt-BR": "Modo de voz",
             "ko": "음성 모드",
-            "pl": "Tryb głosowy"
+            "pl": "Tryb głosowy",
+            "fr": "Mode vocal",
+            "ja": "音声モード"
           }
         },
         {
@@ -416,7 +490,9 @@
             "es": "Iconos de proyecto",
             "pt-BR": "Ícones de projeto",
             "ko": "프로젝트 아이콘",
-            "pl": "Ikony projektów"
+            "pl": "Ikony projektów",
+            "fr": "Icônes de projet",
+            "ja": "プロジェクトアイコン"
           }
         }
       ]
@@ -429,7 +505,9 @@
         "es": "Escritorio",
         "pt-BR": "Desktop",
         "ko": "데스크톱",
-        "pl": "Pulpit"
+        "pl": "Pulpit",
+        "fr": "Desktop",
+        "ja": "デスクトップ"
       },
       "items": [
         {
@@ -441,7 +519,9 @@
             "es": "Instancias remotas",
             "pt-BR": "Instâncias remotas",
             "ko": "원격 인스턴스",
-            "pl": "Zdalne instancje"
+            "pl": "Zdalne instancje",
+            "fr": "Instances distantes",
+            "ja": "リモートインスタンス"
           }
         },
         {
@@ -453,7 +533,9 @@
             "es": "Navegador de escritorio",
             "pt-BR": "Navegador desktop",
             "ko": "데스크톱 브라우저",
-            "pl": "Przeglądarka na pulpicie"
+            "pl": "Przeglądarka na pulpicie",
+            "fr": "Navigateur desktop",
+            "ja": "デスクトップブラウザ"
           }
         },
         {
@@ -465,7 +547,9 @@
             "es": "Túneles de escritorio",
             "pt-BR": "Túneis no desktop",
             "ko": "데스크톱 터널",
-            "pl": "Tunele w aplikacji desktopowej"
+            "pl": "Tunele w aplikacji desktopowej",
+            "fr": "Tunnels desktop",
+            "ja": "デスクトップトンネル"
           }
         },
         {
@@ -477,7 +561,9 @@
             "es": "Hosts SSH y proxy",
             "pt-BR": "Hosts SSH e proxy",
             "ko": "SSH 호스트 및 프록시",
-            "pl": "Hosty SSH i proxy"
+            "pl": "Hosty SSH i proxy",
+            "fr": "Hosts SSH et proxy",
+            "ja": "SSH ホストとプロキシ"
           }
         },
         {
@@ -489,7 +575,9 @@
             "es": "Actualizaciones",
             "pt-BR": "Atualizações",
             "ko": "업데이트",
-            "pl": "Aktualizacje"
+            "pl": "Aktualizacje",
+            "fr": "Mises à jour",
+            "ja": "更新"
           }
         }
       ]
@@ -502,7 +590,9 @@
         "es": "Ayuda",
         "pt-BR": "Ajuda",
         "ko": "도움말",
-        "pl": "Pomoc"
+        "pl": "Pomoc",
+        "fr": "Aide",
+        "ja": "ヘルプ"
       },
       "items": [
         {
@@ -514,7 +604,9 @@
             "es": "Resolución de problemas",
             "pt-BR": "Solução de problemas",
             "ko": "문제 해결",
-            "pl": "Rozwiązywanie problemów"
+            "pl": "Rozwiązywanie problemów",
+            "fr": "Dépannage",
+            "ja": "トラブルシューティング"
           }
         },
         {
@@ -526,7 +618,9 @@
             "es": "Conexión con OpenCode",
             "pt-BR": "Conexão com o OpenCode",
             "ko": "OpenCode 연결",
-            "pl": "Połączenie z OpenCode"
+            "pl": "Połączenie z OpenCode",
+            "fr": "Connexion à OpenCode",
+            "ja": "OpenCode 接続"
           }
         },
         {
@@ -538,7 +632,9 @@
             "es": "Worktrees y Git",
             "pt-BR": "Worktrees e Git",
             "ko": "Worktree 및 Git",
-            "pl": "Worktree i Git"
+            "pl": "Worktree i Git",
+            "fr": "Worktrees et Git",
+            "ja": "Worktrees と Git"
           }
         },
         {
@@ -550,7 +646,9 @@
             "es": "Acceso remoto",
             "pt-BR": "Acesso remoto",
             "ko": "원격 접속",
-            "pl": "Dostęp zdalny"
+            "pl": "Dostęp zdalny",
+            "fr": "Accès distant",
+            "ja": "リモートアクセス"
           }
         }
       ]

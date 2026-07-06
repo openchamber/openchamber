@@ -1,0 +1,32 @@
+---
+title: Aperçu et serveurs de dev
+description: Ouvrez un serveur de dev en cours d’exécution dans OpenChamber.
+---
+
+# Aperçu et serveurs de dev
+
+Quand vous démarrez un serveur de dev, OpenChamber peut l’ouvrir directement dans l’application au lieu d’un onglet de navigateur séparé — vous voyez ainsi votre site à côté du chat, vous capturez sa console et vous pouvez pointer des éléments pour poser des questions à leur sujet.
+
+## Ouvrir un aperçu
+
+OpenChamber surveille la sortie du terminal pour détecter une adresse locale (la ligne `Local:` affichée par des outils comme Vite, Next.js ou Astro). Quand il en trouve une :
+
+- dans le terminal, un bouton **Ouvrir l’aperçu** apparaît
+- une [action de projet](/project-actions/) avec l’ouverture automatique activée l’ouvre pour vous
+- un lien local dans un message de chat peut aussi l’ouvrir
+
+Le site se charge dans le panneau latéral. Seules les adresses locales (sur votre propre machine) peuvent être prévisualisées.
+
+## Console et inspection
+
+Dans le panneau d’aperçu, vous pouvez :
+
+- regarder la **console** de la page — erreurs, avertissements et logs, filtrés comme vous le voulez
+- activer **inspect**, cliquer sur n’importe quel élément et envoyer une note à son sujet — sélecteur, styles, position et capture d’écran — directement dans le chat
+
+C’est le moyen le plus rapide de dire à l’agent « ce bouton, ici » sans devoir le décrire.
+
+## Pages liées
+
+- [Actions de projet](/project-actions/) — ouvrir automatiquement un serveur quand vous le démarrez
+- [Navigateur desktop](/desktop-browser/) — les mêmes outils pour n’importe quelle page, sur desktop

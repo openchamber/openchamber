@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net as electronNet, Notification, powerMonitor, protocol, screen, session, shell, webContents } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net as electronNet, Notification, powerMonitor, powerSaveBlocker, protocol, screen, session, shell, webContents } from 'electron';
 import contextMenu from 'electron-context-menu';
 import log from 'electron-log/main.js';
 import dgram from 'node:dgram';
@@ -11,6 +11,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import updaterPkg from 'electron-updater';
 import { ElectronSshManager } from './ssh-manager.mjs';
+import { createTrayController } from './tray.mjs';
+import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
+import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
+import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -167,6 +171,7 @@ const state = {
   localOrigin: null,
   apiBaseUrl: null,
   clientToken: null,
+  requestHeaders: {},
   bootOutcome: null,
   initScript: null,
   mainWindow: null,
@@ -186,6 +191,34 @@ const state = {
   miniChatWindowsBySession: new Map(),
   sshStatuses: new Map(),
   sshLogs: new Map(),
+  trayController: null,
+  lastFocusedWindowId: null,
+  keepAwakeBlockerId: null,
+};
+
+const setDesktopKeepAwakeActive = (enabled) => {
+  const currentId = state.keepAwakeBlockerId;
+  const isActive = Number.isInteger(currentId) && powerSaveBlocker.isStarted(currentId);
+
+  if (enabled) {
+    if (!isActive) {
+      state.keepAwakeBlockerId = powerSaveBlocker.start('prevent-app-suspension');
+    }
+    return Number.isInteger(state.keepAwakeBlockerId) && powerSaveBlocker.isStarted(state.keepAwakeBlockerId);
+  }
+
+  if (isActive) {
+    powerSaveBlocker.stop(currentId);
+  }
+  state.keepAwakeBlockerId = null;
+  return false;
+};
+
+const readDesktopKeepAwakeStatus = () => {
+  const enabled = readSettingsRoot().desktopKeepAwakeEnabled === true;
+  const currentId = state.keepAwakeBlockerId;
+  const active = Number.isInteger(currentId) && powerSaveBlocker.isStarted(currentId);
+  return { supported: true, enabled, active };
 };
 
 const quitRisk = {
@@ -221,6 +254,7 @@ const quitConfirmationMessage = () => {
 const shutdownBackgroundServices = () => {
   if (state.backgroundShutdownComplete) return;
   state.backgroundShutdownComplete = true;
+  setDesktopKeepAwakeActive(false);
   if (state.installingUpdate) return;
   killSidecar();
   setImmediate(() => {
@@ -249,12 +283,22 @@ const prepareForQuit = ({ installingUpdate = false } = {}) => {
   state.installingUpdate = installingUpdate;
   state.quitConfirmationPending = false;
 
+  if (state.trayController) {
+    try {
+      state.trayController.destroy();
+    } catch {
+    }
+    state.trayController = null;
+  }
+
   if (state.mainWindow && !state.mainWindow.isDestroyed()) {
     try {
       debounceWindowStatePersist(state.mainWindow, true);
     } catch {
     }
   }
+
+  setDesktopKeepAwakeActive(false);
 
   if (installingUpdate) {
     state.backgroundShutdownComplete = true;
@@ -271,6 +315,22 @@ const performConfirmedQuit = () => {
   prepareForQuit();
   app.exit(0);
 };
+
+// Hard-stop signals (`Ctrl+C` on `electron:dev`, an external `kill`/SIGTERM,
+// terminal close) bypass the normal app-quit flow — which would orphan the
+// in-process web server's managed OpenCode child. Run the same background
+// teardown the quit path uses (which kills the sidecar), then exit. The startup
+// reaper remains the backstop for an unhandled hard crash (SIGKILL).
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+  process.on(signal, () => {
+    try {
+      shutdownBackgroundServices();
+    } catch (error) {
+      log.warn(`[electron] ${signal} shutdown failed:`, error);
+    }
+    app.exit(0);
+  });
+}
 
 const requestQuitWithConfirmation = async () => {
   await refreshQuitRiskFlags();
@@ -454,13 +514,60 @@ const sameOrigin = (left, right) => {
   }
 };
 
+const shouldUseSameOriginDevProxy = (uiUrl, apiBaseUrl) => (
+  isDev
+  && uiUrl
+  && apiBaseUrl
+  && !shouldUsePackagedUi()
+  && !sameOrigin(uiUrl, apiBaseUrl)
+  && isLocalRuntimeUrl(apiBaseUrl)
+);
+
+const buildRendererRuntimeConfig = (uiUrl, runtimeConfig = {}) => {
+  const apiBaseUrl = typeof runtimeConfig.apiBaseUrl === 'string' ? runtimeConfig.apiBaseUrl : (state.apiBaseUrl || '');
+  const clientToken = typeof runtimeConfig.clientToken === 'string' ? runtimeConfig.clientToken : (state.clientToken || '');
+  const requestHeaders = sanitizeRuntimeRequestHeaders(runtimeConfig.requestHeaders || state.requestHeaders || {});
+  if (shouldUseSameOriginDevProxy(uiUrl, apiBaseUrl)) {
+    return { apiBaseUrl: '', clientToken: '', requestHeaders: {} };
+  }
+  return { apiBaseUrl, clientToken, requestHeaders };
+};
+
 const readDesktopLocalClientToken = () => {
   return sanitizeClientTokenForStorage(readSettingsRoot().desktopLocalClientToken) || '';
 };
 
+const isMachineLocalHostname = (hostname) => {
+  const clean = String(hostname || '').replace(/^\[|\]$/g, '');
+  if (!clean) return false;
+  if (clean === 'localhost' || clean === '127.0.0.1' || clean === '::1' || clean === '0.0.0.0' || clean === '::') {
+    return true;
+  }
+  try {
+    return Object.values(os.networkInterfaces()).some((entries) =>
+      (entries || []).some((entry) => entry?.address === clean));
+  } catch {
+    return false;
+  }
+};
+
 const isLocalRuntimeUrl = (targetUrl) => {
   const localUrl = state.sidecarUrl || state.localOrigin || '';
-  return Boolean(localUrl && sameOrigin(targetUrl, localUrl));
+  if (!localUrl) return false;
+  if (sameOrigin(targetUrl, localUrl)) return true;
+  // The embedded server bound to 0.0.0.0 for LAN access is still THIS
+  // machine's server when addressed via any of its own interfaces on the same
+  // port — the minted client token must carry the desktop-local kind, or the
+  // server's client-create gate rejects it (the "Local — Auth required" +
+  // unreachable-screen regression).
+  try {
+    const target = new URL(targetUrl);
+    const local = new URL(localUrl);
+    const portOf = (url) => url.port || (url.protocol === 'https:' ? '443' : '80');
+    return portOf(target) === portOf(local) && isMachineLocalHostname(target.hostname);
+  } catch {
+    return false;
+  }
 };
 
 const readDesktopHostsConfig = () => {
@@ -473,8 +580,9 @@ const readDesktopHostsConfig = () => {
       if (!id || id === LOCAL_HOST_ID || !url) return null;
       const apiUrl = sanitizeHostUrlForStorage(entry?.apiUrl) || url;
       const clientToken = sanitizeClientTokenForStorage(entry?.clientToken);
+      const requestHeaders = sanitizeRuntimeRequestHeaders(entry?.requestHeaders);
       const label = typeof entry?.label === 'string' && entry.label.trim() ? entry.label.trim() : url;
-      return { id, label, url, apiUrl, ...(clientToken ? { clientToken } : {}) };
+      return { id, label, url, apiUrl, ...(clientToken ? { clientToken } : {}), ...(Object.keys(requestHeaders).length > 0 ? { requestHeaders } : {}) };
     })
     .filter(Boolean);
 
@@ -497,12 +605,14 @@ const writeDesktopHostsConfig = async (config) => {
             if (!id || id === LOCAL_HOST_ID || !url) return null;
             const apiUrl = sanitizeHostUrlForStorage(entry?.apiUrl) || url;
             const clientToken = sanitizeClientTokenForStorage(entry?.clientToken);
+            const requestHeaders = sanitizeRuntimeRequestHeaders(entry?.requestHeaders);
             return {
               id,
               label: typeof entry?.label === 'string' && entry.label.trim() ? entry.label.trim() : url,
               url,
               apiUrl,
               ...(clientToken ? { clientToken } : {}),
+              ...(Object.keys(requestHeaders).length > 0 ? { requestHeaders } : {}),
             };
           })
           .filter(Boolean)
@@ -657,7 +767,7 @@ const fetchVersionPayload = async (versionUrl, { headers, timeoutMs }) => {
   }
 };
 
-const probeHostWithTimeout = async (url, timeoutMs, clientToken = '') => {
+const probeHostWithTimeout = async (url, timeoutMs, clientToken = '', requestHeaders = {}) => {
   const versionUrl = buildVersionUrl(url);
   if (!versionUrl) {
     throw new Error('Invalid URL');
@@ -665,7 +775,7 @@ const probeHostWithTimeout = async (url, timeoutMs, clientToken = '') => {
 
   const started = Date.now();
   try {
-    const headers = { Accept: 'application/json' };
+    const headers = { ...sanitizeRuntimeRequestHeaders(requestHeaders), Accept: 'application/json' };
     const token = typeof clientToken === 'string' ? clientToken.trim() : '';
     if (token) {
       headers.Authorization = `Bearer ${token}`;
@@ -879,6 +989,37 @@ const focusForegroundWindow = () => {
 // click events to silently stop firing after ~1 min.
 // See https://blog.bloomca.me/2025/02/22/electron-mac-notifications
 const activeNotifications = new Set();
+const nativeNotificationClaims = new Map();
+const NATIVE_NOTIFICATION_DEDUPE_TTL_MS = 5000;
+
+const getNativeNotificationClaimKey = (payload) => {
+  const tag = typeof payload?.tag === 'string' ? payload.tag.trim() : '';
+  if (tag) return tag;
+  return [payload?.sessionId, payload?.kind, payload?.title, payload?.body]
+    .filter((value) => typeof value === 'string' && value.trim())
+    .map((value) => value.trim())
+    .join('|');
+};
+
+const claimNativeNotification = (payload) => {
+  const key = getNativeNotificationClaimKey(payload);
+  if (!key) return true;
+
+  const now = Date.now();
+  for (const [claimKey, claimedAt] of nativeNotificationClaims) {
+    if (now - claimedAt > NATIVE_NOTIFICATION_DEDUPE_TTL_MS) {
+      nativeNotificationClaims.delete(claimKey);
+    }
+  }
+
+  const claimedAt = nativeNotificationClaims.get(key) ?? 0;
+  if (now - claimedAt < NATIVE_NOTIFICATION_DEDUPE_TTL_MS) {
+    return false;
+  }
+
+  nativeNotificationClaims.set(key, now);
+  return true;
+};
 
 const maybeShowNativeNotification = (rawInput) => {
   const payload = normalizeNotificationInput(rawInput);
@@ -889,6 +1030,10 @@ const maybeShowNativeNotification = (rawInput) => {
   }
 
   if (!Notification.isSupported()) {
+    return;
+  }
+
+  if (!claimNativeNotification(payload)) {
     return;
   }
 
@@ -1053,8 +1198,14 @@ const spawnLocalServer = async () => {
   // so phones/tablets on the same Wi-Fi can reach the app. UI shows a clear
   // warning and persists the flag via /api/config/settings.
   const lanAccessEnabled = settings.desktopLanAccessEnabled === true;
-  const bindHost = lanAccessEnabled ? LAN_BIND_HOST : LOOPBACK_BIND_HOST;
+  setDesktopKeepAwakeActive(settings.desktopKeepAwakeEnabled === true);
   const desktopUiPassword = typeof settings.desktopUiPassword === 'string' ? settings.desktopUiPassword.trim() : '';
+  const lanAccessBlockedByMissingPassword = lanAccessEnabled && !desktopUiPassword;
+  const effectiveLanAccessEnabled = lanAccessEnabled && !lanAccessBlockedByMissingPassword;
+  const bindHost = effectiveLanAccessEnabled ? LAN_BIND_HOST : LOOPBACK_BIND_HOST;
+  if (lanAccessBlockedByMissingPassword) {
+    log.warn('[desktop] LAN access was requested without a desktop UI password; starting on loopback only.');
+  }
 
   // Probe before starting the server — main() in the server module sets up a
   // lot of global state before binding, and calling it twice after a listen
@@ -1076,8 +1227,20 @@ const spawnLocalServer = async () => {
   // set before the first import. After this point, the same env is used by
   // both the Electron main and the server running inside it.
   process.env.OPENCHAMBER_HOST = bindHost;
+  process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_ACTIVE = effectiveLanAccessEnabled ? 'true' : 'false';
+  if (lanAccessBlockedByMissingPassword) {
+    process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_BLOCKED_REASON = 'missing-password';
+  } else {
+    delete process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_BLOCKED_REASON;
+  }
   process.env.OPENCHAMBER_DIST_DIR = resolveWebDistDir();
   process.env.OPENCHAMBER_RUNTIME = 'desktop';
+  // OpenCode uses process cwd as a fallback directory; app userData would make
+  // packaged desktop look like a separate empty workspace.
+  process.env.OPENCHAMBER_OPENCODE_CWD = resolveManagedOpenCodeCwd({
+    env: process.env,
+    homedir: () => os.homedir(),
+  });
   process.env.OPENCHAMBER_DESKTOP_NOTIFY = 'true';
   if (desktopUiPassword) {
     process.env.OPENCHAMBER_UI_PASSWORD = desktopUiPassword;
@@ -1099,6 +1262,10 @@ const spawnLocalServer = async () => {
     apiOnly: false,
     onDesktopNotification: (payload) => maybeShowNativeNotification(payload),
     getIsWindowFocused: isAnyWindowFocused,
+    getDesktopRuntimeConfig: () => ({
+      apiBaseUrl: state.apiBaseUrl || '',
+      requestHeaders: sanitizeRuntimeRequestHeaders(state.requestHeaders || {}),
+    }),
   });
 
   const port = handle.getPort();
@@ -1218,17 +1385,18 @@ const macosMajorVersion = () => {
   return major === 10 ? minor : major;
 };
 
-const buildInitScript = (localOrigin, bootOutcome, apiBaseUrl = '', clientToken = '') => {
+const buildInitScript = (localOrigin, bootOutcome, apiBaseUrl = '', clientToken = '', requestHeaders = {}) => {
   const home = JSON.stringify(os.homedir() || '');
   const local = JSON.stringify(localOrigin || '');
   const apiBase = JSON.stringify(apiBaseUrl || '');
   const token = JSON.stringify(clientToken || '');
+  const headers = JSON.stringify(sanitizeRuntimeRequestHeaders(requestHeaders));
   const packagedOrigin = JSON.stringify(packagedUiOrigin());
   const macVersion = macosMajorVersion();
   const outcome = JSON.stringify(bootOutcome ?? null);
   return [
     '(function(){',
-    `try{var __oc_local=${local};var __oc_api=${apiBase};var __oc_packaged=${packagedOrigin};var __oc_origin=window.location&&window.location.origin||'';var __oc_is_packaged=__oc_origin===__oc_packaged;var __oc_is_local=__oc_local&&__oc_origin===new URL(__oc_local).origin;window.__OPENCHAMBER_MACOS_MAJOR__=${macVersion};window.__OPENCHAMBER_LOCAL_ORIGIN__=__oc_local;window.__OPENCHAMBER_API_BASE_URL__=__oc_api;if(__oc_is_local||__oc_is_packaged){window.__OPENCHAMBER_HOME__=${home};}if((__oc_is_local||__oc_is_packaged)&&${token}){window.__OPENCHAMBER_CLIENT_TOKEN__=${token};}var __oc_bo=${outcome};if(__oc_bo){window.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__=__oc_bo;}}catch(_e){}`,
+    `try{var __oc_local=${local};var __oc_api=${apiBase};var __oc_headers=${headers};var __oc_packaged=${packagedOrigin};var __oc_origin=window.location&&window.location.origin||'';var __oc_is_packaged=__oc_origin===__oc_packaged;var __oc_is_local=__oc_local&&__oc_origin===new URL(__oc_local).origin;window.__OPENCHAMBER_MACOS_MAJOR__=${macVersion};window.__OPENCHAMBER_LOCAL_ORIGIN__=__oc_local;window.__OPENCHAMBER_API_BASE_URL__=__oc_api;if(__oc_is_local||__oc_is_packaged){window.__OPENCHAMBER_HOME__=${home};window.__OPENCHAMBER_RUNTIME_HEADERS__=__oc_headers;}if((__oc_is_local||__oc_is_packaged)&&${token}){window.__OPENCHAMBER_CLIENT_TOKEN__=${token};}var __oc_bo=${outcome};if(__oc_bo){window.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__=__oc_bo;}}catch(_e){}`,
     '}())',
   ].join('');
 };
@@ -1294,7 +1462,7 @@ const buildStartupSplashHtml = () => {
       }
       body {
         margin: 0;
-        font-family: "IBM Plex Sans", sans-serif;
+        font-family: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
         display: grid;
         place-items: center;
         height: 100vh;
@@ -1407,9 +1575,10 @@ const extractCookieHeader = (response) => {
     .join('; ');
 };
 
-const loginRemoteAndIssueClientToken = async ({ url, password, trustDevice }) => {
+const loginRemoteAndIssueClientToken = async ({ url, password, trustDevice, requestHeaders }) => {
   const baseUrl = normalizeHostUrl(String(url || ''));
   const candidatePassword = typeof password === 'string' ? password : '';
+  const safeRequestHeaders = sanitizeRuntimeRequestHeaders(requestHeaders || {});
   if (!baseUrl) throw new Error('Invalid URL');
   if (!candidatePassword) throw new Error('Password is required');
 
@@ -1417,6 +1586,7 @@ const loginRemoteAndIssueClientToken = async ({ url, password, trustDevice }) =>
     method: 'POST',
     signal: AbortSignal.timeout(10_000),
     headers: {
+      ...safeRequestHeaders,
       Accept: 'application/json',
       'Content-Type': 'application/json',
     },
@@ -1449,6 +1619,7 @@ const loginRemoteAndIssueClientToken = async ({ url, password, trustDevice }) =>
     method: 'POST',
     signal: AbortSignal.timeout(10_000),
     headers: {
+      ...safeRequestHeaders,
       Accept: 'application/json',
       'Content-Type': 'application/json',
       Cookie: cookie,
@@ -1479,6 +1650,36 @@ const emitToAllWindows = (event, detail) => {
     emitToWindow(browserWindow, event, detail);
   }
 };
+
+// macOS vibrancy: the native NSVisualEffectView needs a moment to settle after
+// the window is shown/restored. Until then the renderer keeps the sidebar solid
+// to avoid a flash of raw transparency; once ready it switches to the
+// translucent overlay. We toggle this readiness over the same IPC bridge.
+// Apply vibrancy to a live, on-screen window. Done after show (not in the
+// BrowserWindow constructor) because macOS otherwise leaves the material
+// uncomposited on a cold launch until the window gets a state change.
+const applyMacVibrancy = (browserWindow) => {
+  if (process.platform !== 'darwin' || !browserWindow || browserWindow.isDestroyed()) return;
+  try {
+    browserWindow.setVibrancy('sidebar');
+  } catch {}
+};
+
+const setMacVibrancyReady = (browserWindow, ready) => {
+  if (process.platform !== 'darwin' || !browserWindow || browserWindow.isDestroyed()) return;
+  emitToWindow(browserWindow, 'openchamber:vibrancy-ready', { ready });
+};
+
+const scheduleMacVibrancyReady = (browserWindow, delayMs = 160) => {
+  if (process.platform !== 'darwin' || !browserWindow || browserWindow.isDestroyed()) return;
+  setMacVibrancyReady(browserWindow, false);
+  const timer = setTimeout(() => {
+    if (browserWindow.isDestroyed() || browserWindow.isMinimized() || !browserWindow.isVisible()) return;
+    setMacVibrancyReady(browserWindow, true);
+  }, delayMs);
+  if (typeof timer?.unref === 'function') timer.unref();
+};
+
 
 const setTaskbarProgress = (value) => {
   if (process.platform !== 'win32') return;
@@ -1565,10 +1766,12 @@ const switchToHostById = async (rawId) => {
   let targetUrl = null;
   let apiBaseUrl = null;
   let clientToken = '';
+  let requestHeaders = {};
   if (id === LOCAL_HOST_ID) {
     targetUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : (state.sidecarUrl || state.localOrigin);
     apiBaseUrl = state.sidecarUrl;
     clientToken = readDesktopLocalClientToken();
+    requestHeaders = {};
   } else {
     const host = config.hosts.find((entry) => entry.id === id);
     if (!host) {
@@ -1578,6 +1781,7 @@ const switchToHostById = async (rawId) => {
     targetUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : host.url;
     apiBaseUrl = host.apiUrl || host.url;
     clientToken = host.clientToken || '';
+    requestHeaders = sanitizeRuntimeRequestHeaders(host.requestHeaders || {});
   }
   if (!targetUrl || !apiBaseUrl) {
     log.warn('[electron] deep-link host has no target URL:', id);
@@ -1587,7 +1791,7 @@ const switchToHostById = async (rawId) => {
     ? { target: 'local', status: 'ok' }
     : { target: 'remote', status: 'ok', hostId: id, url: apiBaseUrl };
   log.info('[electron] switching to host', { id, bootOutcome });
-  await activateMainWindow(targetUrl, state.localOrigin, bootOutcome, { apiBaseUrl, clientToken });
+  await activateMainWindow(targetUrl, state.localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
 };
 
 const confirmConnectDeepLink = async (payload) => {
@@ -1708,6 +1912,14 @@ const dispatchMenuAction = (action) => {
   dispatchDomEventToWindow(target, 'openchamber:menu-action', action);
 };
 
+// Mini-chat draft windows are not deduplicated, so this must reach the renderer
+// exactly once — emitToWindow alone (no DOM-event double dispatch). The renderer
+// resolves the active directory/project and opens the window.
+const dispatchOpenMiniChat = (browserWindow) => {
+  const target = browserWindow && !browserWindow.isDestroyed() ? browserWindow : getMenuTargetWindow();
+  if (target) emitToWindow(target, 'openchamber:open-mini-chat');
+};
+
 const dispatchCheckForUpdates = () => {
   emitToAllWindows('openchamber:check-for-updates');
   for (const browserWindow of BrowserWindow.getAllWindows()) {
@@ -1719,6 +1931,12 @@ const reloadMenuTargetWindow = () => {
   const target = getMenuTargetWindow();
   if (!target || target.isDestroyed()) return;
   target.webContents.reload();
+};
+
+const openDevToolsForMenuTarget = () => {
+  const target = getMenuTargetWindow();
+  if (!target || target.isDestroyed()) return;
+  target.webContents.toggleDevTools();
 };
 
 const relaunchFromMenu = () => {
@@ -1767,11 +1985,15 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   const useSaved = saved && typeof saved.width === 'number' && typeof saved.height === 'number';
   const restoredBounds = useSaved ? clampWindowBoundsToVisibleWorkArea(saved) : null;
   const desktopLocalOrigin = state.localOrigin || state.sidecarUrl || '';
-  const desktopApiBaseUrl = typeof runtimeConfig.apiBaseUrl === 'string' ? runtimeConfig.apiBaseUrl : (state.apiBaseUrl || '');
-  const desktopClientToken = typeof runtimeConfig.clientToken === 'string' ? runtimeConfig.clientToken : (state.clientToken || '');
+  const rendererRuntimeConfig = buildRendererRuntimeConfig(url, runtimeConfig);
+  const desktopApiBaseUrl = rendererRuntimeConfig.apiBaseUrl;
+  const desktopClientToken = rendererRuntimeConfig.clientToken;
+  const desktopRequestHeaders = rendererRuntimeConfig.requestHeaders || {};
   const desktopHome = os.homedir() || '';
   const desktopMacosMajor = String(macosMajorVersion());
   const usesCustomTitleBar = process.platform === 'darwin' || process.platform === 'win32';
+  // macOS vibrancy, on by default; users can disable it (Appearance settings).
+  const useVibrancy = process.platform === 'darwin' && readSettingsRoot().desktopVibrancy !== false;
   const titleBarOverlayEnabled = false;
   const autoHidesNativeMenuBar = process.platform !== 'darwin';
   const windowIconPath = getWindowIconPath();
@@ -1786,7 +2008,11 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
     minHeight: MIN_WINDOW_HEIGHT,
     icon: windowIconPath,
     show: false,
-    backgroundColor: '#151313',
+    backgroundColor: useVibrancy ? '#00000000' : '#151313',
+    // Vibrancy is applied after the window is shown (see applyMacVibrancy), not
+    // here: setting it in the constructor leaves the material uncomposited on a
+    // cold launch until a window event. No `transparent: true` either — vibrancy
+    // alone is enough and composites reliably once applied to a live window.
     frame: process.platform === 'win32' ? false : undefined,
     autoHideMenuBar: autoHidesNativeMenuBar,
     // Electron's hiddenInset adds its own extra inset, which leaves the controls
@@ -1799,8 +2025,10 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
         `--openchamber-local-origin=${desktopLocalOrigin}`,
         `--openchamber-api-base-url=${desktopApiBaseUrl}`,
         `--openchamber-client-token=${desktopClientToken}`,
+        `--openchamber-runtime-headers=${JSON.stringify(desktopRequestHeaders)}`,
         `--openchamber-home=${desktopHome}`,
         `--openchamber-macos-major=${desktopMacosMajor}`,
+        `--openchamber-mac-vibrancy=${useVibrancy ? '1' : '0'}`,
         `--openchamber-boot-outcome=${JSON.stringify(state.bootOutcome || null)}`,
       ],
       preload: isDev ? path.join(__dirname, 'preload.mjs') : path.join(app.getAppPath(), 'preload.mjs'),
@@ -1818,8 +2046,8 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
 
   const browserWindow = new BrowserWindow(options);
   browserWindow.__ocLabel = label || nextWindowLabel();
-  browserWindow.__ocRuntimeConfig = { apiBaseUrl: desktopApiBaseUrl, clientToken: desktopClientToken };
-  browserWindow.__ocInitScript = buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken);
+  browserWindow.__ocRuntimeConfig = { apiBaseUrl: desktopApiBaseUrl, clientToken: desktopClientToken, requestHeaders: desktopRequestHeaders };
+  browserWindow.__ocInitScript = buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
   browserWindow.__ocTitleBarOverlayEnabled = titleBarOverlayEnabled;
 
   if (useSaved && saved.maximized) {
@@ -1847,11 +2075,20 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
         browserWindow.setTrafficLightPosition({ x: 16, y: 17 });
       } catch {}
     };
-    browserWindow.on('minimize', refreshTrafficLights);
+    browserWindow.on('minimize', () => {
+      refreshTrafficLights();
+      setMacVibrancyReady(browserWindow, false);
+    });
     browserWindow.on('restore', () => {
       refreshTrafficLights();
       setTimeout(refreshTrafficLights, 250);
+      scheduleMacVibrancyReady(browserWindow, 180);
     });
+    // Only suppress vibrancy around the minimize/restore cycle (it flashes raw
+    // transparency during the genie animation). A plain show — cold launch from
+    // the dock, un-hide — must NOT suppress, or the sidebar gets stuck solid
+    // when the post-show `ready` re-enable is skipped while the window is still
+    // animating in.
     browserWindow.on('show', refreshTrafficLights);
     browserWindow.on('focus', refreshTrafficLights);
   }
@@ -1976,6 +2213,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   browserWindow.once('ready-to-show', () => {
     browserWindow.show();
     browserWindow.focus();
+    if (useVibrancy) applyMacVibrancy(browserWindow);
   });
 
   if (url) {
@@ -1995,12 +2233,24 @@ const activateMainWindow = async (url, localOrigin, bootOutcome, runtimeConfig =
   state.localOrigin = localOrigin;
   state.apiBaseUrl = typeof runtimeConfig.apiBaseUrl === 'string' ? runtimeConfig.apiBaseUrl : state.apiBaseUrl;
   state.clientToken = typeof runtimeConfig.clientToken === 'string' ? runtimeConfig.clientToken : '';
+  state.requestHeaders = sanitizeRuntimeRequestHeaders(runtimeConfig.requestHeaders || {});
   state.bootOutcome = bootOutcome ?? null;
-  state.initScript = buildInitScript(localOrigin, state.bootOutcome, state.apiBaseUrl, state.clientToken);
+  const rendererRuntimeConfig = buildRendererRuntimeConfig(url, {
+    apiBaseUrl: state.apiBaseUrl || '',
+    clientToken: state.clientToken || '',
+    requestHeaders: state.requestHeaders || {},
+  });
+  state.initScript = buildInitScript(
+    localOrigin,
+    state.bootOutcome,
+    rendererRuntimeConfig.apiBaseUrl,
+    rendererRuntimeConfig.clientToken,
+    rendererRuntimeConfig.requestHeaders,
+  );
 
   const mainWindow = state.mainWindow;
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.__ocRuntimeConfig = { apiBaseUrl: state.apiBaseUrl || '', clientToken: state.clientToken || '' };
+    mainWindow.__ocRuntimeConfig = rendererRuntimeConfig;
     mainWindow.__ocInitScript = state.initScript;
     await navigateWindow(mainWindow, url, { allowAbort: true });
     mainWindow.show();
@@ -2019,8 +2269,8 @@ const activateMainWindow = async (url, localOrigin, bootOutcome, runtimeConfig =
 
 const openMainWindow = async () => {
   if (!state.localOrigin) {
-    const { initialUrl, localOrigin, bootOutcome, apiBaseUrl, clientToken } = await resolveInitialUrl();
-    return activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken });
+    const { initialUrl, localOrigin, bootOutcome, apiBaseUrl, clientToken, requestHeaders } = await resolveInitialUrl();
+    return activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
   }
 
   const config = readDesktopHostsConfig();
@@ -2030,10 +2280,11 @@ const openMainWindow = async () => {
     : null;
   const apiBaseUrl = host?.apiUrl || host?.url || state.sidecarUrl || state.apiBaseUrl || '';
   const clientToken = host?.clientToken || resolveStoredClientTokenForUrl(apiBaseUrl, config) || state.clientToken || '';
+  const requestHeaders = sanitizeRuntimeRequestHeaders(host?.requestHeaders || {});
   const targetUrl = host?.url && apiBaseUrl && !state.unreachableHosts.has(apiBaseUrl)
     ? (shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : host.url)
     : localUiUrl;
-  return activateMainWindow(targetUrl, state.localOrigin, state.bootOutcome, { apiBaseUrl, clientToken });
+  return activateMainWindow(targetUrl, state.localOrigin, state.bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
 };
 
 const createAdditionalWindow = async (url, runtimeConfig = {}) => {
@@ -2072,12 +2323,14 @@ const getWindowRuntimeConfig = (browserWindow) => {
   const fallback = {
     apiBaseUrl: state.apiBaseUrl || state.localOrigin || state.sidecarUrl || '',
     clientToken: state.clientToken || '',
+    requestHeaders: state.requestHeaders || {},
   };
   if (!browserWindow || browserWindow.isDestroyed()) return fallback;
   const config = browserWindow.__ocRuntimeConfig;
   return {
     apiBaseUrl: typeof config?.apiBaseUrl === 'string' ? config.apiBaseUrl : fallback.apiBaseUrl,
     clientToken: typeof config?.clientToken === 'string' ? config.clientToken : fallback.clientToken,
+    requestHeaders: sanitizeRuntimeRequestHeaders(config?.requestHeaders || fallback.requestHeaders),
   };
 };
 
@@ -2085,6 +2338,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
   const effectiveRuntimeConfig = {
     apiBaseUrl: normalizeHostUrl(runtimeConfig.apiBaseUrl || state.apiBaseUrl || state.localOrigin || state.sidecarUrl || ''),
     clientToken: sanitizeClientTokenForStorage(runtimeConfig.clientToken || state.clientToken || ''),
+    requestHeaders: sanitizeRuntimeRequestHeaders(runtimeConfig.requestHeaders || state.requestHeaders || {}),
   };
   const sessionWindowKey = mode === 'session' && sessionId ? miniChatSessionWindowKey(effectiveRuntimeConfig, sessionId) : '';
   if (mode === 'session' && sessionId) {
@@ -2101,8 +2355,11 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
   const desktopLocalOrigin = state.localOrigin || '';
   const desktopApiBaseUrl = effectiveRuntimeConfig.apiBaseUrl || '';
   const desktopClientToken = effectiveRuntimeConfig.clientToken || '';
+  const desktopRequestHeaders = effectiveRuntimeConfig.requestHeaders || {};
   const desktopHome = os.homedir() || '';
   const desktopMacosMajor = String(macosMajorVersion());
+  // macOS vibrancy, on by default; users can disable it (Appearance settings).
+  const useVibrancy = process.platform === 'darwin' && readSettingsRoot().desktopVibrancy !== false;
   const browserWindow = new BrowserWindow({
     title: 'OpenChamber Mini Chat',
     width: MINI_CHAT_WINDOW_WIDTH,
@@ -2111,7 +2368,11 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
     minHeight: MINI_CHAT_MIN_WINDOW_HEIGHT,
     icon: getWindowIconPath(),
     show: false,
-    backgroundColor: '#151313',
+    backgroundColor: useVibrancy ? '#00000000' : '#151313',
+    // Vibrancy is applied after the window is shown (see applyMacVibrancy), not
+    // here: setting it in the constructor leaves the material uncomposited on a
+    // cold launch until a window event. No `transparent: true` either — vibrancy
+    // alone is enough and composites reliably once applied to a live window.
     frame: process.platform === 'win32' ? false : undefined,
     autoHideMenuBar: process.platform !== 'darwin',
     titleBarStyle: process.platform === 'darwin' || process.platform === 'win32' ? 'hidden' : 'default',
@@ -2121,6 +2382,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
         `--openchamber-local-origin=${desktopLocalOrigin}`,
         `--openchamber-api-base-url=${desktopApiBaseUrl}`,
         `--openchamber-client-token=${desktopClientToken}`,
+        `--openchamber-runtime-headers=${JSON.stringify(desktopRequestHeaders)}`,
         `--openchamber-home=${desktopHome}`,
         `--openchamber-macos-major=${desktopMacosMajor}`,
       ],
@@ -2135,7 +2397,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
   });
   browserWindow.__ocLabel = nextWindowLabel();
   browserWindow.__ocRuntimeConfig = effectiveRuntimeConfig;
-  browserWindow.__ocInitScript = buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken);
+  browserWindow.__ocInitScript = buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
   browserWindow.__ocMiniChat = true;
   browserWindow.__ocMiniChatSessionId = sessionWindowKey;
   browserWindow.__ocPinned = false;
@@ -2161,13 +2423,17 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
         browserWindow.setTrafficLightPosition({ x: 16, y: 17 });
       } catch {}
     };
+    // Suppress vibrancy only around minimize/restore, never on a plain show.
     browserWindow.on('show', refreshTrafficLights);
     browserWindow.on('focus', refreshTrafficLights);
+    browserWindow.on('minimize', () => setMacVibrancyReady(browserWindow, false));
+    browserWindow.on('restore', () => scheduleMacVibrancyReady(browserWindow, 180));
   }
 
   browserWindow.once('ready-to-show', () => {
     browserWindow.show();
     browserWindow.focus();
+    if (useVibrancy) applyMacVibrancy(browserWindow);
   });
 
   browserWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -2222,9 +2488,11 @@ const resolveMiniChatRuntimeConfig = (browserWindow, args = {}) => {
   const providedToken = sanitizeClientTokenForStorage(args.clientToken);
   const storedToken = targetUrl ? resolveStoredClientTokenForUrl(targetUrl) : '';
   const windowToken = targetUrl && sameOrigin(windowConfig.apiBaseUrl, targetUrl) ? windowConfig.clientToken : '';
+  const windowHeaders = targetUrl && sameOrigin(windowConfig.apiBaseUrl, targetUrl) ? windowConfig.requestHeaders : {};
   return {
     apiBaseUrl: targetUrl,
     clientToken: providedToken || windowToken || storedToken || '',
+    requestHeaders: sanitizeRuntimeRequestHeaders(args.requestHeaders || windowHeaders || {}),
   };
 };
 
@@ -2250,6 +2518,7 @@ const resolveInitialUrl = async () => {
   let initialUrl = localUiUrl;
   let apiBaseUrl = localUrl;
   let clientToken = readDesktopLocalClientToken();
+  let requestHeaders = {};
   let remoteProbe = null;
 
   const envTarget = normalizeHostUrl(process.env.OPENCHAMBER_SERVER_URL || '');
@@ -2257,25 +2526,28 @@ const resolveInitialUrl = async () => {
   if (envTarget) {
     apiBaseUrl = envTarget;
     clientToken = '';
+    requestHeaders = {};
     initialUrl = shouldUsePackagedUi() ? localUiUrl : envTarget;
   } else if (config.defaultHostId && config.defaultHostId !== LOCAL_HOST_ID) {
     const host = config.hosts.find((entry) => entry.id === config.defaultHostId);
     if (host?.url) {
       apiBaseUrl = host.apiUrl || host.url;
       clientToken = host.clientToken || '';
+      requestHeaders = sanitizeRuntimeRequestHeaders(host.requestHeaders || {});
       initialUrl = shouldUsePackagedUi() ? localUiUrl : host.url;
     }
   }
 
   if (apiBaseUrl && apiBaseUrl !== localUrl) {
-    remoteProbe = await probeHostWithTimeout(apiBaseUrl, 2_000);
+    remoteProbe = await probeHostWithTimeout(apiBaseUrl, 2_000, clientToken, requestHeaders);
     if (remoteProbe.status === 'unreachable') {
-      remoteProbe = await probeHostWithTimeout(apiBaseUrl, 10_000);
+      remoteProbe = await probeHostWithTimeout(apiBaseUrl, 10_000, clientToken, requestHeaders);
     }
     if (remoteProbe.status === 'unreachable') {
       state.unreachableHosts.add(apiBaseUrl);
       apiBaseUrl = localUrl;
       clientToken = readDesktopLocalClientToken();
+      requestHeaders = {};
       initialUrl = localUiUrl;
     }
   }
@@ -2287,7 +2559,7 @@ const resolveInitialUrl = async () => {
     localAvailable,
   });
 
-  return { initialUrl, localOrigin, localUiUrl, bootOutcome, apiBaseUrl, clientToken };
+  return { initialUrl, localOrigin, localUiUrl, bootOutcome, apiBaseUrl, clientToken, requestHeaders };
 };
 
 const compareSemver = (left, right) => {
@@ -2952,6 +3224,19 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return { supported: true, enabled: settings.openAtLogin === true };
     }
 
+    case 'desktop_get_keep_awake': {
+      return readDesktopKeepAwakeStatus();
+    }
+
+    case 'desktop_set_keep_awake': {
+      const enabled = args.enabled === true;
+      await mutateSettingsRoot((root) => {
+        root.desktopKeepAwakeEnabled = enabled;
+      });
+      const active = setDesktopKeepAwakeActive(enabled);
+      return { supported: true, enabled, active };
+    }
+
     case 'desktop_browser_capture_page': {
       const wcId = Number.isFinite(args.webContentsId) ? Math.trunc(args.webContentsId) : null;
       if (wcId === null || wcId < 0) throw new Error('webContentsId is required');
@@ -3075,6 +3360,27 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
 
     case 'desktop_notify':
       maybeShowNativeNotification(args);
+      return null;
+
+    case 'desktop_tray_update':
+      if (state.trayController) {
+        try {
+          state.trayController.update(args || {});
+        } catch (error) {
+          log.warn('[electron] tray update failed', error);
+        }
+      }
+      // Dock badge: count of chats with unseen activity (0 = cleared, also when
+      // the user disabled the badge). setBadgeCount drives the macOS dock badge.
+      try {
+        const rawCount = args && typeof args.dockBadgeCount === 'number' ? args.dockBadgeCount : 0;
+        const badgeCount = Number.isFinite(rawCount) ? Math.max(0, Math.floor(rawCount)) : 0;
+        if (typeof app.setBadgeCount === 'function') {
+          app.setBadgeCount(badgeCount);
+        }
+      } catch (error) {
+        log.warn('[electron] dock badge update failed', error);
+      }
       return null;
 
     case 'desktop_clear_cache':
@@ -3258,7 +3564,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         config: updatedConfig,
         localAvailable: Boolean(state.sidecarUrl || state.localOrigin),
       });
-      state.initScript = buildInitScript(state.localOrigin, state.bootOutcome, state.apiBaseUrl, state.clientToken);
+      state.initScript = buildInitScript(state.localOrigin, state.bootOutcome, state.apiBaseUrl, state.clientToken, state.requestHeaders || {});
       log.info('[electron] hosts config updated, recomputed bootOutcome', state.bootOutcome);
       return null;
     }
@@ -3267,13 +3573,14 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return readDesktopLocalClientToken();
 
     case 'desktop_host_probe':
-      return probeHostWithTimeout(String(args.url || ''), 2_000, String(args.clientToken || ''));
+      return probeHostWithTimeout(String(args.url || ''), 2_000, String(args.clientToken || ''), args.requestHeaders || {});
 
     case 'desktop_remote_password_login':
       return loginRemoteAndIssueClientToken({
         url: args.url,
         password: args.password,
         trustDevice: args.trustDevice === true,
+        requestHeaders: args.requestHeaders || {},
       });
 
     case 'desktop_set_window_theme': {
@@ -3309,13 +3616,23 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     }
 
     case 'desktop_set_vibrancy': {
-      // Vibrancy (macOS blur) is not supported in the Electron shell for our
-      // titleBarStyle:'hidden' setup. Persist the
-      // disabled state so settings UI reflects it; args.enabled is ignored.
+      // Vibrancy + transparent backing are window-creation options, so the
+      // change only takes effect on a fresh launch. Persist the preference,
+      // then relaunch the app.
+      const enabled = args.enabled === true;
       await mutateSettingsRoot((root) => {
-        root.desktopVibrancy = false;
+        root.desktopVibrancy = enabled;
       });
-      return { enabled: false, requiresRestart: false };
+      setImmediate(() => {
+        try {
+          prepareForQuit();
+          app.relaunch();
+          app.exit(0);
+        } catch (err) {
+          log.error('[electron] desktop_set_vibrancy relaunch failed', err);
+        }
+      });
+      return { enabled, requiresRestart: true };
     }
 
     case 'desktop_check_for_updates': {
@@ -3447,6 +3764,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       let runtimeConfig = {
         apiBaseUrl: state.sidecarUrl || state.localOrigin || '',
         clientToken: readDesktopLocalClientToken(),
+        requestHeaders: {},
       };
       if (config.defaultHostId && config.defaultHostId !== LOCAL_HOST_ID) {
         const host = config.hosts.find((entry) => entry.id === config.defaultHostId);
@@ -3456,6 +3774,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
           runtimeConfig = {
             apiBaseUrl: normalizeHostUrl(apiUrl),
             clientToken: sanitizeClientTokenForStorage(host.clientToken),
+            requestHeaders: sanitizeRuntimeRequestHeaders(host.requestHeaders),
           };
         }
       }
@@ -3471,8 +3790,9 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       const config = readDesktopHostsConfig();
       const providedToken = typeof args.clientToken === 'string' ? args.clientToken : '';
       const clientToken = sanitizeClientTokenForStorage(providedToken) || resolveStoredClientTokenForUrl(targetUrl, config);
+      const requestHeaders = sanitizeRuntimeRequestHeaders(args.requestHeaders || config.hosts.find((host) => normalizeHostUrl(host.apiUrl || host.url) === targetUrl)?.requestHeaders || {});
       let windowUrl = targetUrl;
-      const runtimeConfig = { apiBaseUrl: targetUrl, clientToken };
+      const runtimeConfig = { apiBaseUrl: targetUrl, clientToken, requestHeaders };
       if (shouldUsePackagedUi()) {
         windowUrl = buildPackagedUiUrl('/index.html');
       }
@@ -3501,23 +3821,33 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     case 'desktop_get_window_pinned':
       return { pinned: Boolean(browserWindow?.__ocPinned) };
 
-    case 'desktop_focus_main_window':
-      if (state.mainWindow && !state.mainWindow.isDestroyed()) {
-        if (state.mainWindow.isMinimized()) state.mainWindow.restore();
-        state.mainWindow.show();
-        state.mainWindow.focus();
-        const sessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : '';
-        const directory = typeof args.directory === 'string' ? args.directory.trim() : '';
-        const mode = typeof args.mode === 'string' ? args.mode.trim() : '';
-        if (sessionId) {
-          emitToWindow(state.mainWindow, 'openchamber:open-session', { sessionId, directory });
-        } else if (mode === 'draft') {
-          const projectId = typeof args.projectId === 'string' ? args.projectId.trim() : '';
-          emitToWindow(state.mainWindow, 'openchamber:open-draft-session', { directory, projectId });
-        }
+    case 'desktop_focus_main_window': {
+      const sessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : '';
+      const directory = typeof args.directory === 'string' ? args.directory.trim() : '';
+      const mode = typeof args.mode === 'string' ? args.mode.trim() : '';
+      const projectId = typeof args.projectId === 'string' ? args.projectId.trim() : '';
+      const hasMainWindow = state.mainWindow && !state.mainWindow.isDestroyed();
+
+      // No live main window (e.g. "Open in main window" from a mini-chat after
+      // the main window was closed): create one and open the session in it. A
+      // fresh window can't take an immediate emit, so queue the session as a
+      // pending deep-link and let did-finish-load flush it once ready.
+      if (!hasMainWindow) {
+        if (sessionId) pendingDeepLinks.push({ type: 'session', value: sessionId });
+        await openMainWindow();
         return { focused: true };
       }
-      return { focused: false };
+
+      if (state.mainWindow.isMinimized()) state.mainWindow.restore();
+      state.mainWindow.show();
+      state.mainWindow.focus();
+      if (sessionId) {
+        emitToWindow(state.mainWindow, 'openchamber:open-session', { sessionId, directory });
+      } else if (mode === 'draft') {
+        emitToWindow(state.mainWindow, 'openchamber:open-draft-session', { directory, projectId });
+      }
+      return { focused: true };
+    }
 
     case 'desktop_close_current_window':
       if (browserWindow && !browserWindow.isDestroyed()) {
@@ -3633,6 +3963,9 @@ const buildMacMenu = () => {
         { type: 'separator' },
         { label: 'New Session', accelerator: 'Cmd+N', click: () => dispatchAction('new-session') },
         { label: 'New Worktree', accelerator: 'Cmd+Shift+N', click: () => dispatchAction('new-worktree-session') },
+        // registerAccelerator:false → show the shortcut hint but let the
+        // renderer own the (customizable) key binding, avoiding a double open.
+        { label: 'New Mini Chat', accelerator: 'Cmd+Alt+N', registerAccelerator: false, click: () => dispatchOpenMiniChat() },
         { type: 'separator' },
         { label: 'Add Workspace', click: () => dispatchAction('change-workspace') },
         { type: 'separator' },
@@ -3685,6 +4018,7 @@ const buildMacMenu = () => {
       submenu: [
         { label: 'Keyboard Shortcuts', accelerator: 'Cmd+.', click: () => dispatchAction('help-dialog') },
         { label: 'Show Diagnostics', accelerator: 'Cmd+Shift+L', click: () => dispatchAction('download-logs') },
+        { label: 'Toggle Developer Tools', accelerator: 'Cmd+Alt+I', click: () => openDevToolsForMenuTarget() },
         { type: 'separator' },
         { label: 'Clear Cache', click: () => void handleInvoke(null, 'desktop_clear_cache') },
         { type: 'separator' },
@@ -3752,7 +4086,7 @@ const buildAutoHiddenMenu = () => {
       submenu: [
         { role: 'reload' },
         { role: 'forceReload' },
-        ...(isDev ? [{ role: 'toggleDevTools' }] : []),
+        { label: 'Toggle Developer Tools', accelerator: 'Ctrl+Alt+I', click: () => openDevToolsForMenuTarget() },
         { type: 'separator' },
         { label: 'Toggle Right Sidebar', accelerator: 'Ctrl+B', click: () => dispatchAction('toggle-right-sidebar') },
         { label: 'Open Git Sidebar', accelerator: 'Ctrl+Shift+G', click: () => dispatchAction('open-right-sidebar-git') },
@@ -3895,6 +4229,7 @@ const COMMANDS_SAFE_FOR_REMOTE = new Set([
   'desktop_get_app_version',
   'desktop_get_lan_address',
   'desktop_capture_page_rect',
+  'desktop_tray_update',
 ]);
 
 ipcMain.handle('openchamber:invoke', async (event, command, args) => {
@@ -3935,9 +4270,205 @@ ipcMain.handle('openchamber:dialog:open', async (event, options) => {
     ].filter(Boolean),
   });
   if (result.canceled) return null;
+  const grantFilePath = async (filePath) => {
+    if (options?.directory) return { path: filePath };
+    try {
+      const grant = await mintOutsideFileGrant(filePath, { scopes: ['stat', 'read', 'raw'], fsPromises: fsp, path });
+      return { path: grant.path, outsideFileGrant: grant.outsideFileGrant, expiresAt: grant.expiresAt };
+    } catch (error) {
+      log.warn(`[ipc] failed to mint outside file grant: ${error?.message || error}`);
+      return { path: filePath };
+    }
+  };
+  if (options?.returnGrant) {
+    if (options?.multiple) {
+      return Promise.all(result.filePaths.map((filePath) => grantFilePath(filePath)));
+    }
+    return result.filePaths[0] ? grantFilePath(result.filePaths[0]) : null;
+  }
   if (options?.multiple) return result.filePaths;
   return result.filePaths[0] || null;
 });
+
+ipcMain.handle('openchamber:file:grant-existing', async (event, filePath) => {
+  if (!isLocalSender(event.sender)) {
+    log.warn(`[ipc] rejected file:grant-existing from non-local origin: ${event.sender?.getURL?.() || '(unknown)'}`);
+    throw new Error('IPC not available for this origin');
+  }
+
+  const targetPath = typeof filePath === 'string' ? filePath.trim() : '';
+  if (!targetPath) {
+    throw new Error('Path is required');
+  }
+
+  const grant = await mintOutsideFileGrant(targetPath, { scopes: ['stat', 'read', 'raw'], fsPromises: fsp, path });
+  return {
+    path: grant.path,
+    outsideFileGrant: grant.outsideFileGrant,
+    expiresAt: grant.expiresAt,
+  };
+});
+
+// --- macOS menu bar (status bar) ---------------------------------------------
+// Tray lives only on macOS; the renderer streams a compact state snapshot via
+// the `desktop_tray_update` IPC command (see the command switch). Tray clicks
+// flow back through dispatchTrayAction → renderer (focus/respond) or native
+// handlers (show window / quit).
+
+// Icon assets: a calm outline (idle), a statically filled cube (a finished
+// session left unread), and an eased sequence the busy state breathes through.
+const TRAY_BREATH_FRAME_COUNT = 16;
+// Track the most recently focused window (main or mini-chat) so tray actions
+// can target the surface the user was last using, even when the tray menu is
+// open and nothing is focused right now.
+app.on('browser-window-focus', (_event, browserWindow) => {
+  if (browserWindow && !browserWindow.isDestroyed()) {
+    state.lastFocusedWindowId = browserWindow.id;
+  }
+});
+
+// The window the user is "on" for tray routing: the focused one, else the last
+// focused that is still alive.
+const resolveTraySurface = () => {
+  const focused = BrowserWindow.getFocusedWindow();
+  if (focused && !focused.isDestroyed()) return focused;
+  if (state.lastFocusedWindowId != null) {
+    const remembered = BrowserWindow.fromId(state.lastFocusedWindowId);
+    if (remembered && !remembered.isDestroyed()) return remembered;
+  }
+  return null;
+};
+
+const trayIconAssets = () => {
+  const dir = path.join(resourceRoot(), 'icons', 'tray');
+  const statusDir = path.join(dir, 'status');
+  return {
+    idleIconPath: path.join(dir, 'trayTemplate-idle.png'),
+    unseenIconPath: path.join(dir, 'trayTemplate-unseen.png'),
+    breathIconPaths: Array.from({ length: TRAY_BREATH_FRAME_COUNT }, (_, i) =>
+      path.join(dir, `trayTemplate-breath-${String(i).padStart(2, '0')}.png`)),
+    // Per-session status icons shown in the menu rows (left, vertically centred
+    // across the title + sublabel). 'blank' reserves the gutter for idle rows.
+    statusIconPaths: {
+      busy: path.join(statusDir, 'busy.png'),
+      retry: path.join(statusDir, 'retry.png'),
+      error: path.join(statusDir, 'error.png'),
+      unseen: path.join(statusDir, 'unseen.png'),
+      blank: path.join(statusDir, 'blank.png'),
+    },
+  };
+};
+
+const setupTray = () => {
+  if (process.platform !== 'darwin' || state.trayController) return;
+  const assets = trayIconAssets();
+  if (!fs.existsSync(assets.idleIconPath)) {
+    log.warn('[electron] tray icon missing, skipping tray setup', { iconPath: assets.idleIconPath });
+    return;
+  }
+  try {
+    state.trayController = createTrayController({
+      ...assets,
+      onAction: (action) => { void dispatchTrayAction(action); },
+    });
+    // Seed an empty snapshot so the icon appears immediately; the renderer
+    // pushes the real state once the sync stores are mounted.
+    state.trayController.update({ sessions: [], approvals: [] });
+  } catch (error) {
+    log.warn('[electron] failed to set up tray', error);
+    state.trayController = null;
+  }
+};
+
+// Bring the existing main window forward WITHOUT re-navigating it. Only when
+// no live window exists (truly closed) do we recreate one — recreation reloads,
+// but showing an existing window must not. This mirrors desktop_focus_main_window
+// and the notification "open session" path; calling openMainWindow on a live
+// window navigates it (full reload), which is the bug we're avoiding here.
+const revealMainWindow = async () => {
+  let target = state.mainWindow;
+  if (!target || target.isDestroyed()) {
+    target = await openMainWindow().catch(() => null) || state.mainWindow;
+  }
+  if (target && !target.isDestroyed()) {
+    if (target.isMinimized()) target.restore();
+    target.show();
+    target.focus();
+  }
+  return target;
+};
+
+// Open a session in the main window, creating one first if none is alive. A
+// freshly created window can't receive an immediate emit (its renderer hasn't
+// mounted its listeners yet), so we queue the session as a pending deep-link —
+// the did-finish-load handler flushes it once the window is ready.
+const focusMainWindowWithSession = async (sessionId, directory) => {
+  if (state.mainWindow && !state.mainWindow.isDestroyed()) {
+    if (state.mainWindow.isMinimized()) state.mainWindow.restore();
+    state.mainWindow.show();
+    state.mainWindow.focus();
+    if (sessionId) {
+      emitToWindow(state.mainWindow, 'openchamber:open-session', { sessionId, directory: directory || '' });
+    }
+    return;
+  }
+  if (sessionId) pendingDeepLinks.push({ type: 'session', value: sessionId });
+  await openMainWindow();
+};
+
+const dispatchTrayAction = async (action) => {
+  if (!action || typeof action !== 'object') return;
+
+  if (action.type === 'quit') {
+    app.quit();
+    return;
+  }
+
+  // Responding to a permission doesn't need to steal focus — just deliver it.
+  if (action.type === 'respond-permission') {
+    const target = (state.mainWindow && !state.mainWindow.isDestroyed())
+      ? state.mainWindow
+      : await revealMainWindow();
+    emitToWindow(target, 'openchamber:tray-action', action);
+    return;
+  }
+
+  // Mini chat opens its own small window; we only need a renderer with context,
+  // not to surface the main window.
+  if (action.type === 'new-mini-chat') {
+    let target = getMenuTargetWindow();
+    if (!target) target = await revealMainWindow();
+    dispatchOpenMiniChat(target);
+    return;
+  }
+
+  // Open a session on the surface the user was last on: if that's a mini-chat,
+  // switch THAT window to the session in place (no new window); otherwise use
+  // the main window.
+  if (action.type === 'focus-session') {
+    const surface = resolveTraySurface();
+    if (surface && surface.__ocMiniChat === true && action.sessionId) {
+      if (surface.isMinimized()) surface.restore();
+      surface.show();
+      surface.focus();
+      emitToWindow(surface, 'openchamber:open-session', {
+        sessionId: action.sessionId,
+        directory: action.directory || '',
+      });
+      return;
+    }
+    await focusMainWindowWithSession(action.sessionId, action.directory || '');
+    return;
+  }
+
+  const target = await revealMainWindow();
+  if (!target || target.isDestroyed()) return;
+
+  if (action.type === 'new-session') {
+    emitToWindow(target, 'openchamber:open-draft-session', { directory: '', projectId: '' });
+  }
+  // show-main-window: revealing the window above is the whole action.
+};
 
 app.on('window-all-closed', () => {
   if (process.platform === 'darwin' && !state.quitRequested) {
@@ -3994,16 +4525,23 @@ app.on('open-url', (event, url) => {
 
 app.on('activate', async () => {
   const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed());
-  if (windows.length > 0) {
-    const visibleWindow = windows.find((window) => window.isVisible());
-    const targetWindow = visibleWindow || state.mainWindow || windows[0];
-    if (targetWindow.isMinimized()) targetWindow.restore();
-    targetWindow.show();
-    targetWindow.focus();
+  // Only spawn a main window when there is genuinely nothing to come back to.
+  if (windows.length === 0) {
+    await openMainWindow();
     return;
   }
 
-  await openMainWindow();
+  // Otherwise bring back the surface the user was last on — restoring it if
+  // minimized — instead of surfacing a hidden window or creating a new one.
+  // This covers e.g. "only a minimized mini-chat remains": it should un-minimize
+  // rather than open the main window.
+  const remembered = resolveTraySurface();
+  const targetWindow = (remembered && !remembered.isDestroyed())
+    ? remembered
+    : (windows.find((window) => window.isVisible() && !window.isMinimized()) || windows[0]);
+  if (targetWindow.isMinimized()) targetWindow.restore();
+  targetWindow.show();
+  targetWindow.focus();
 });
 
 app.whenReady().then(async () => {
@@ -4024,6 +4562,7 @@ app.whenReady().then(async () => {
 
   if (process.platform === 'darwin') {
     Menu.setApplicationMenu(buildMacMenu());
+    setupTray();
   } else {
     Menu.setApplicationMenu(buildAutoHiddenMenu());
   }
@@ -4038,10 +4577,11 @@ app.whenReady().then(async () => {
   }
 
   if (isBackgroundStart) {
-    const { localOrigin, bootOutcome } = await resolveInitialUrl();
+    const { localOrigin, bootOutcome, requestHeaders } = await resolveInitialUrl();
     state.localOrigin = localOrigin;
     state.bootOutcome = bootOutcome ?? null;
-    state.initScript = buildInitScript(localOrigin, state.bootOutcome);
+    state.requestHeaders = sanitizeRuntimeRequestHeaders(requestHeaders || {});
+    state.initScript = buildInitScript(localOrigin, state.bootOutcome, '', '', state.requestHeaders);
     log.info('[electron] started in background without window');
     return;
   }
@@ -4055,8 +4595,8 @@ app.whenReady().then(async () => {
   const initial = extractInitialDeepLinks();
   if (initial.length > 0) handleDeepLinks(initial);
 
-  const { initialUrl, localOrigin, bootOutcome, apiBaseUrl, clientToken } = await resolveInitialUrl();
-  await activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken });
+  const { initialUrl, localOrigin, bootOutcome, apiBaseUrl, clientToken, requestHeaders } = await resolveInitialUrl();
+  await activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
 
   // Notify renderer on OS wake-from-sleep so the SSE event pipeline can
   // reconnect immediately instead of waiting for the heartbeat watchdog.

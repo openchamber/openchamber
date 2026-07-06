@@ -20,16 +20,17 @@ import { cn } from '@/lib/utils';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/url';
 import type { ModelMetadata } from '@/types';
-import { useI18n } from '@/lib/i18n';
+import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { opencodeClient } from '@/lib/opencode/client';
+import { shouldLoadAvailableProviders } from './providerAvailability';
 
-const COMPACT_NUMBER_FORMATTER = new Intl.NumberFormat('en-US', {
+const formatCompactNumber = (value: number) => new Intl.NumberFormat(getCurrentIntlLocale(), {
   notation: 'compact',
   compactDisplay: 'short',
   maximumFractionDigits: 1,
   minimumFractionDigits: 0,
-});
+}).format(value);
 
 const formatTokens = (value?: number | null) => {
   if (typeof value !== 'number' || Number.isNaN(value)) {
@@ -38,7 +39,7 @@ const formatTokens = (value?: number | null) => {
   if (value === 0) {
     return '0';
   }
-  const formatted = COMPACT_NUMBER_FORMATTER.format(value);
+  const formatted = formatCompactNumber(value);
   return formatted.endsWith('.0') ? formatted.slice(0, -2) : formatted;
 };
 
@@ -169,6 +170,7 @@ export const ProvidersPage: React.FC = () => {
   const [providerDropdownOpen, setProviderDropdownOpen] = React.useState(false);
   const [providerSources, setProviderSources] = React.useState<Record<string, ProviderSources>>({});
   const [showAuthPanel, setShowAuthPanel] = React.useState(false);
+  const isAddMode = selectedProviderId === ADD_PROVIDER_ID;
 
   React.useEffect(() => {
     if (!selectedProviderId && providers.length > 0) {
@@ -177,6 +179,10 @@ export const ProvidersPage: React.FC = () => {
   }, [providers, selectedProviderId, setSelectedProvider]);
 
   React.useEffect(() => {
+    if (!isAddMode) {
+      return;
+    }
+
     let isMounted = true;
 
     const loadAuthMethods = async () => {
@@ -204,9 +210,13 @@ export const ProvidersPage: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [t]);
+  }, [isAddMode, t]);
 
   React.useEffect(() => {
+    if (!shouldLoadAvailableProviders(isAddMode)) {
+      return;
+    }
+
     let isMounted = true;
 
     const loadAvailableProviders = async () => {
@@ -235,7 +245,7 @@ export const ProvidersPage: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [t]);
+  }, [isAddMode, t]);
 
   const connectedProviderIds = React.useMemo(
     () => new Set(providers.map((provider) => provider.id)),
@@ -467,9 +477,14 @@ export const ProvidersPage: React.FC = () => {
     setAuthBusyKey(busyKey);
 
     try {
-      const result = await opencodeClient.getSdkClient().auth.remove({ providerID: providerId });
-      if (result.error) {
-        throw new Error(t('settings.providers.page.toast.providerDisconnectFailed'));
+      const response = await runtimeFetch(`/api/provider/${encodeURIComponent(providerId)}/auth?scope=all`, {
+        method: 'DELETE',
+        headers: { Accept: 'application/json' },
+      });
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.error || t('settings.providers.page.toast.providerDisconnectFailed'));
       }
 
       toast.success(t('settings.providers.page.toast.providerDisconnected'));
@@ -481,8 +496,6 @@ export const ProvidersPage: React.FC = () => {
       setAuthBusyKey(null);
     }
   };
-
-  const isAddMode = selectedProviderId === ADD_PROVIDER_ID;
 
   if (!isAddMode && providers.length === 0) {
     return (
@@ -500,7 +513,7 @@ export const ProvidersPage: React.FC = () => {
     return (
       <ScrollableOverlay outerClassName="h-full" className="w-full">
         <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8">
-          <div className="mb-4">
+          <div data-settings-item="providers.connect" className="mb-4">
             <h1 className="typography-ui-header font-semibold text-foreground">{t('settings.providers.page.connect.title')}</h1>
           </div>
 
@@ -599,7 +612,7 @@ export const ProvidersPage: React.FC = () => {
           </div>
 
           {candidateProviderId && (
-            <div className="mb-8">
+            <div data-settings-item="providers.auth" className="mb-8">
               <div className="mb-1 px-1">
                 <h2 className="typography-ui-header font-medium text-foreground">{t('settings.providers.page.auth.title')}</h2>
               </div>
@@ -787,7 +800,7 @@ export const ProvidersPage: React.FC = () => {
         </div>
 
         {/* Authentication */}
-        <div className="mb-8">
+        <div data-settings-item="providers.auth" className="mb-8">
           <div className="mb-1 px-1 flex items-center justify-between gap-2">
             <h3 className="typography-ui-header font-medium text-foreground">{t('settings.providers.page.auth.title')}</h3>
             <Button
@@ -934,7 +947,7 @@ export const ProvidersPage: React.FC = () => {
         </div>
 
         {/* Connection Details */}
-        <div className="mb-8">
+        <div data-settings-item="providers.connection-details" className="mb-8">
           <div className="mb-1 px-1">
             <h3 className="typography-ui-header font-medium text-foreground">{t('settings.providers.page.connectionDetails.title')}</h3>
           </div>
@@ -971,7 +984,7 @@ export const ProvidersPage: React.FC = () => {
         </div>
 
         {/* Models */}
-        <div className="mb-8">
+        <div data-settings-item="providers.models" className="mb-8">
           <div className="mb-1 px-1 flex items-center justify-between gap-2">
             <h3 className="typography-ui-header font-medium text-foreground">
               {t('settings.providers.page.models.title')}

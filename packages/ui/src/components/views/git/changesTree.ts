@@ -25,7 +25,7 @@ export type FlattenedTreeRow =
       file: GitStatus['files'][number];
     };
 
-export const normalizePathForTree = (value: string): string =>
+const normalizePathForTree = (value: string): string =>
   value.replace(/\\/g, '/').replace(/^\/+/, '').trim();
 
 const createDirectoryNode = (path: string, name: string): ChangesTreeDirectoryNode => ({

@@ -1,0 +1,34 @@
+---
+title: Multi-run
+description: Lancez le même prompt sur plusieurs modèles ou sessions à la fois.
+---
+
+# Multi-run
+
+Multi-run lance plusieurs sessions depuis un seul formulaire — pratique pour essayer la même tâche avec différents modèles et comparer les résultats. Ouvrez-le depuis le bouton en haut de la barre latérale des sessions.
+
+## Démarrer un multi-run
+
+1. Ouvrez le lanceur multi-run.
+2. Choisissez le projet et nommez le groupe d’exécutions.
+3. Écrivez le prompt et choisissez les modèles qui doivent l’exécuter (jusqu’à cinq par groupe).
+4. Choisissez si vous voulez **isoler les exécutions**.
+5. Lancez.
+
+Chaque modèle reçoit sa propre session, et toutes commencent avec votre prompt.
+
+## Exécutions isolées
+
+Activez **isolate runs** pour donner à chaque exécution son propre [worktree](/worktrees/) et sa propre branche, afin qu’elles ne touchent jamais les mêmes fichiers. Cela nécessite un dépôt git — l’option est désactivée automatiquement pour les dossiers qui n’en sont pas un. Choisissez la branche de départ des exécutions.
+
+Sans isolation, chaque exécution est une session simple dans le dossier du projet.
+
+## Comparer les résultats
+
+Chaque exécution est une session normale que vous pouvez ouvrir, lire, conserver ou jeter. Si vous avez lancé des exécutions pour comparer des approches, relisez-les côte à côte et continuez avec la meilleure.
+
+Si une seule exécution ne démarre pas, les autres se lancent quand même — vous verrez simplement moins de sessions que demandé.
+
+## Pages liées
+
+- [Sessions worktree](/worktrees/) — comment l’isolation fonctionne sous le capot

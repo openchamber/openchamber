@@ -3,6 +3,7 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import type { SessionGroup, SessionNode } from '../types';
 import { normalizePath } from '../utils';
 import type { MainTab } from '@/stores/useUIStore';
+import { useUIStore } from '@/stores/useUIStore';
 
 type ProjectSection = {
   project: { id: string; normalizedPath: string };
@@ -15,17 +16,15 @@ type Args = {
   activeSessionByProject: Map<string, string>;
   setActiveSessionByProject: React.Dispatch<React.SetStateAction<Map<string, string>>>;
   currentSessionId: string | null;
-  handleSessionSelect: (sessionId: string, sessionDirectory: string | null, isMissingDirectory: boolean, projectId?: string | null) => void;
+  handleSessionSelect: (sessionId: string, sessionDirectory: string | null, projectId?: string | null) => void;
   newSessionDraftOpen: boolean;
   mobileVariant: boolean;
   openNewSessionDraft: (options?: { directoryOverride?: string | null }) => void;
   setActiveMainTab: (tab: MainTab) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
-  sessions: Session[];
-  worktreeMetadata: Map<string, { path?: string | null }>;
 };
 
-export const useProjectSessionSelection = (args: Args): { currentSessionDirectory: string | null } => {
+export const useProjectSessionSelection = (args: Args): void => {
   const {
     projectSections,
     activeProjectId,
@@ -38,8 +37,6 @@ export const useProjectSessionSelection = (args: Args): { currentSessionDirector
     openNewSessionDraft,
     setActiveMainTab,
     setSessionSwitcherOpen,
-    sessions,
-    worktreeMetadata,
   } = args;
 
   const projectSessionMeta = React.useMemo(() => {
@@ -93,9 +90,14 @@ export const useProjectSessionSelection = (args: Args): { currentSessionDirector
       return;
     }
 
+    if (useUIStore.getState().isNewWorktreeDialogOpen) {
+      return;
+    }
+
     if (previousActiveProjectRef.current === activeProjectId) {
       return;
     }
+
     const section = projectSections.find((item) => item.project.id === activeProjectId);
     if (!section) {
       return;
@@ -112,6 +114,15 @@ export const useProjectSessionSelection = (args: Args): { currentSessionDirector
         next.set(activeProjectId, currentSessionId);
         return next;
       });
+      return;
+    }
+
+    // Path A' — currentSessionId is set but not in stale projectMap.
+    // Preserve user's explicit selection when the projectMap exists but
+    // is missing the session (worktree data not yet loaded). For
+    // empty projects (projectMap is undefined), fall through to Path B
+    // so a new session draft is opened.
+    if (currentSessionId && projectMap) {
       return;
     }
 
@@ -134,7 +145,7 @@ export const useProjectSessionSelection = (args: Args): { currentSessionDirector
       return;
     }
     const targetDirectory = projectMap.get(targetSessionId)?.directory ?? null;
-    handleSessionSelect(targetSessionId, targetDirectory, false, activeProjectId);
+    handleSessionSelect(targetSessionId, targetDirectory, activeProjectId);
   }, [
     activeProjectId,
     activeSessionByProject,
@@ -168,20 +179,4 @@ export const useProjectSessionSelection = (args: Args): { currentSessionDirector
     });
   }, [activeProjectId, currentSessionId, projectSessionMeta, setActiveSessionByProject]);
 
-  const currentSessionDirectory = React.useMemo(() => {
-    if (!currentSessionId) {
-      return null;
-    }
-    const metadataPath = worktreeMetadata.get(currentSessionId)?.path;
-    if (metadataPath) {
-      return normalizePath(metadataPath) ?? metadataPath;
-    }
-    const activeSession = sessions.find((session) => session.id === currentSessionId);
-    if (!activeSession) {
-      return null;
-    }
-    return normalizePath((activeSession as Session & { directory?: string | null }).directory ?? null);
-  }, [currentSessionId, sessions, worktreeMetadata]);
-
-  return { currentSessionDirectory };
 };

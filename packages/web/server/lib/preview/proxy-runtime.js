@@ -194,7 +194,7 @@ export const classifyPreviewNavigation = ({ url, currentUrl, targetOrigin }) => 
   return { action: 'external', url: parsed.toString() };
 };
 
-  const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
+const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
   if (window.__openchamberPreviewBridgeInstalled) return;
   window.__openchamberPreviewBridgeInstalled = true;
 

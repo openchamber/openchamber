@@ -4,10 +4,202 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-07-05
+
+- Voice: voice input was rebuilt around live streaming transcription — the composer mic shows a live transcript with a volume meter and timer while you speak, and a recording can be cancelled, inserted, or inserted and sent; failed transcriptions keep their audio so you can retry or accept the partial text.
+- Voice: local speech-to-text works out of the box — models (Parakeet for English and 25 European languages, Whisper for a lighter multilingual option) download on demand from a new picker in Settings → Voice, or any OpenAI-compatible Whisper endpoint can be used instead; a configurable shortcut (mod+alt+v by default) toggles dictation.
+- Voice: read-aloud can now use a local Kokoro voice (11 English voices), and long replies start speaking after roughly a sentence instead of waiting for the whole message.
+- Voice: the Voice settings page was simplified — a single read-aloud toggle owns the playback options, and a new "Enable voice input" toggle hides the composer mic entirely.
+- Mobile: the composer collapses into a compact input bar while the keyboard is closed, with a round new-session button beside it (hidden on the new-session screen); tapping the bar expands it and opens the keyboard, and the mic starts voice input straight from the compact bar.
+- Mobile: the model and agent selectors moved into a row above the message text, the attachment menu and the new-session project/branch pickers open as bottom sheets with search, and a drag handle above the composer swipes it into a fullscreen editor — swiping down shrinks it back or dismisses the keyboard.
+- Mobile: long conversations now load older history with a button at the top of the chat, which disappears once everything is loaded; loading older messages keeps your scroll position steady on all platforms.
+- Mobile: the branch/worktree picker on the new-session screen lists all worktrees right after a cold start, and the GitHub connection status is recognized without re-running the connect flow.
+- Mobile: opening the web app in a phone browser against a password-protected instance shows the password unlock page again (regressed in 1.13.9).
+- Mobile: returning to the app no longer briefly flickers the session list.
+- Mobile: continued polish ahead of the native app release — the chat and composer ride the keyboard in one smooth motion (including in long conversations), bottom sheets enter cleanly while the keyboard dismisses, the text cursor stays in place when the keyboard opens, starter suggestions on the new-session screen step aside while the keyboard is up, and switching instances no longer leaves the previous instance's sessions in the sessions list.
+- UI: lists across the app were moved to one virtualization engine, so long lists scroll more consistently.
+- Mobile: the slash-command, file/agent, skill, and snippet autocompletes were tuned for touch — they can grow up to the top of the chat area, the keyboard-hint footer and description lines are gone, row icons line up, list scrolling no longer bounces the page behind, and picking a command keeps the keyboard open.
+- Mobile: in phone browsers the composer now keeps itself above the keyboard on the new-session screen and in the fullscreen editor, and opening the app shows the logo while it connects instead of flashing an unreachable-server error.
+- Chat: the stop button now aborts sessions running in a different project or worktree than the currently open one — previously those aborts silently did nothing.
+- Desktop: a local instance with a UI password and LAN access no longer gets stuck on "Auth required" and an unreachable-server screen (the app's client tokens are now reliably recognized as local, including for 0.0.0.0-bound servers).
+- Desktop: the app prefers your own OpenCode install again — the bundled CLI is used only when no OpenCode is installed anywhere on the machine.
+- Windows: OpenCode installed via npm now launches from paths with spaces (such as C:\Program Files\nodejs), binary paths pasted with surrounding quotes work, and discovery also checks the system-wide npm prefix and Scoop's shims — in the web/desktop app and the VS Code extension.
+
+## [1.13.9] - 2026-07-02
+
+- Mobile: added the native iOS and Android app projects ahead of the mobile app release, with continued polish for saved connections, password unlock, QR-code connection scanning, push notifications, iOS widgets, app resume, and native layout details.
+- Desktop: the app can now use a bundled OpenCode CLI, or you can choose your own CLI path in settings.
+- Desktop: added a Keep awake setting for the upcoming desktop app release to prevent the computer from sleeping while the app is running.
+- Desktop: you can now specify optional custom headers when adding a remote OpenChamber instance to the desktop app, including for Cloudflare Access-style setups; settings and environment variables can still override them, and the bundled CLI can be replaced by setting a direct OpenCode CLI path.
+- Desktop: SSH remote instances with a saved UI password now open directly after the tunnel connects instead of showing the unlock screen again.
+- Chat: fixed edge cases where late-loading tool content, subagent content, or streaming Thinking blocks could pull the conversation away from the latest message or fight manual scrolling.
+- Chat: embedded JSON examples in messages no longer render as generated-result cards.
+- Sync: chat state now recovers after idle reconnects instead of leaving sessions stuck in a stale busy state.
+- VSCode: clearing optional agent fields now removes them from agent config instead of saving `null` values.
+- VSCode: the extension no longer picks OpenCode desktop app installs when looking for the standalone OpenCode CLI.
+
+## [1.13.8] - 2026-06-29
+
+- Startup: launching the app no longer hangs for around 20 seconds before you can open a session, load a diff, or send a message — GitHub pull request status checks no longer tie up the connection to the server during startup.
+- OpenCode: when a separate OpenCode is already running (the TUI, `opencode serve`, or a daemon on the default port 4096), the app now starts its own server instead of attaching to it. This fixes the "OpenChamber could not finish initialization" error and stops the app from opening or closing your separate OpenCode when it starts and quits. Connecting to an external OpenCode now requires setting `OPENCODE_HOST`, `OPENCODE_PORT`, or `OPENCODE_SKIP_START`.
+- Chat: a new Follow-up behavior setting (Settings → Chat) controls what happens when you press Enter on a message while the agent is still responding — Steer inserts it into the agent's current turn, or Queue holds it until the turn finishes. Replaces the previous queue-mode toggle (thanks to @bashrusakh).
+- Sessions: deleting a worktree group from the sidebar, or permanently deleting an archived session that has subagent sessions, now removes those subagent sessions too instead of leaving them behind (thanks to @bashrusakh).
+- Sessions: clicking a session inside a worktree group no longer briefly jumps the selection to the project's first session while the sidebar data catches up (thanks to @bashrusakh).
+- Sync: a connected but quiet session (for example an agent running a long tool call) no longer triggers repeated background refreshes every ~15 seconds (thanks to @tomzx).
+
+## [1.13.7] - 2026-06-28
+
+- Chat: with tool calls (such as Bash and Edit) shown expanded by default, scrolling no longer twitches, and slow scrolling no longer jumps past several messages.
+- Mobile: in long conversations, older messages now load before you reach the very top, and fast scrolling no longer leaves blank gaps where messages briefly disappear until you scroll back.
+- Mobile: the model and agent buttons in the composer are now borderless and cleaner, show the provider logo next to the model name, and shorten long names with an ellipsis; in the model picker the thinking-variant control is plain text with a chevron and each row's controls line up.
+- Mobile: interface labels (the model and agent selectors and other small labels) are back to their previous size after 1.13.6 shrank them too much.
+- Providers: the Add provider form stays open while provider data refreshes or a model is picked in the background, instead of snapping back to an existing provider.
+- CLI: `openchamber update` works again after a missing helper broke the command.
+
+## [1.13.6] - 2026-06-28
+
+- Chat: scrolling in conversations now stays steady while sending, queueing, streaming, switching sessions, and loading older messages.
+- Chat: selecting a user-installed skill from the slash command menu now invokes the skill and injects its content, instead of inserting the skill name as plain text.
+- Context Panel: chat tabs now use the session title and mark the open chat as seen while you are viewing it.
+- Desktop/macOS: the Dock icon can now show a badge count for chats with unseen activity, with a new Appearance setting to turn it off.
+- Context Panel: Browser and Preview tabs no longer accumulate duplicate auth tokens in their URLs after reloads or navigation.
+
+## [1.13.5] - 2026-06-27
+
+- CLI: global web installs no longer crash on startup when tunnel commands load ngrok capabilities.
+- CLI: `openchamber update` works again, and tunnel start paths no longer fail when using managed-local config prompts, multi-instance port selection, or auto-started servers.
+- GitHub/Usage: fork upstream detection and Google quota checks no longer fail because of missing server helpers.
+
+## [1.13.4] - 2026-06-27
+
+- UI/Localization: added Japanese interface translations and Japanese documentation (thanks to @yuchi0531).
+- Chat: queued messages can now be reordered by dragging them in the queue (thanks to @makeittech).
+- Chat: sending a message now closes an open question prompt instead of leaving stale question UI in the composer (thanks to @tomzx).
+- Chat: conversations pinned to the bottom no longer jiggle or double-scroll after sending, and revisiting older sessions snaps to the latest message without a smooth-scroll delay.
+- Reviews: the Review changes dialog can now run an automatic review loop, with a chat banner for opening or stopping the linked review sessions.
+- Models: the model picker now remembers provider group expansion and custom ordering, and Shift+Delete removes a recent model from recents (thanks to @makeittech).
+- Shortcuts: the model-selector shortcut can now be customized (thanks to @makeittech).
+- Agents: agent edits against an external OpenCode server no longer show a saved-state update when the save did not succeed (thanks to @makeittech).
+- Providers: the add-provider form no longer loses the selected provider during background provider refreshes (thanks to @IbrahimKhan12).
+- Worktrees: messages sent to new worktree sessions now wait until the worktree session is ready instead of racing ahead (thanks to @bashrusakh).
+- Git: commit and pull-request generation from a draft session now starts from the created chat session instead of a temporary draft (thanks to @bashrusakh).
+- CLI: startup and status commands now check the live server port before treating an existing process as the active OpenChamber server.
+
+## [1.13.3] - 2026-06-24
+
+- Chat: selecting a user-installed skill from the slash command menu now invokes the skill instead of inserting the skill name as plain text (thanks to @IbrahimKhan12).
+- Chat: pasted text containing `@` no longer opens file mention autocomplete unexpectedly (thanks to @charpeni).
+- Chat: code blocks in user messages now preserve characters like `<` and `->` instead of escaping them inside the code block (thanks to @bashrusakh).
+- Chat: switching sessions and loading older messages no longer causes the conversation to jump backward or oscillate around the current scroll position (thanks to @herjarsa).
+- Chat: Arrow Up opens prompt history again when the cursor is at the start of the composer.
+- Sessions: new sessions now stay attached to the selected project or current workspace directory instead of sometimes appearing under a stale project (thanks to @bashrusakh).
+- Sessions: pinned sessions and folder rows no longer disappear from the sidebar after an empty session-list refresh (thanks to @bashrusakh).
+- Agents: agent settings now include thinking variant, temperature, and top-p controls, and clearing temperature or top-p now removes the override (thanks to @bashrusakh).
+- Settings/Models: per-model visibility and sibling model selections now stay saved after changes (thanks to @attilaszasz).
+- Settings/Skills: the skills catalog refreshes after catalog settings change (thanks to @gokulkgm).
+- Providers: disconnecting a provider from settings now works for the selected provider (thanks to @bashrusakh).
+- Git: Git identities can now enable SSH commit signing.
+- Git: pushing from the Git view now syncs first, reducing rejected pushes when the branch needs to update.
+- Usage: MiniMax M3 and Token Plan usage now handle the provider's latest API response format (thanks to @baruchvitorino).
+- VSCode: font size and padding preferences now apply inside the extension webview (thanks to @Sin991114).
+- Startup: managed OpenCode server processes left behind by a previous crash are cleaned up on the next start.
+- CLI: stale server PID files are checked more carefully so unrelated processes are not mistaken for an OpenChamber server.
+- Files: downloads and file names with non-Latin characters now handle those characters correctly in headers (thanks to @FanFan4204).
+- Mobile: subagent chevrons no longer overlap long session titles, and session grouping now matches the exact workspace directory (thanks to @weixiang1862, @lilyzhaun).
+
+## [1.13.2] - 2026-06-18
+
+- Chat/Performance: long conversations and large session lists now stay smooth and responsive while a response is streaming (thanks to @bashrusakh).
+- Chat: the end of a streamed response is no longer occasionally cut off — messages now always settle on their complete text (thanks to @IbrahimKhan12).
+- Chat: paragraphs in assistant messages now have proper spacing instead of collapsing into a single block (thanks to @foundryseven).
+- Files: HTML, image, and PDF previews no longer cycle to "authentication required" every ~50 seconds (thanks to @bashrusakh).
+- Startup: the app starts faster by no longer waiting on default OpenCode config, while your manual and per-directory model selections are preserved.
+
+## [1.13.1] - 2026-06-17
+
+- Chat: inline math delimiters no longer incorrectly treat currency amounts like `$50` as LaTeX math expressions — only `$$...$$` display math and `\(...\)` inline math are recognized.
+- Chat: pinned welcome starters now appear immediately when a new draft session opens, without needing to open the add dialog.
+- Chat: clicking a Mermaid diagram in a chat message now opens a fullscreen pan/zoom preview.
+- Chat: code-block highlighting now runs off the main thread, preventing UI freezes when rendering code-heavy responses.
+- Chat: the context usage indicator now shows as a circular progress ring with the same color thresholds, visible in all workspace headers.
+- Chat/UI: embedded chat views and context panel previews now consistently match the current theme.
+- Chat/Mobile: the session status button now responds more reliably to taps on Android.
+- Scheduled Tasks: the task editor dialog now supports Cron expressions with inline validation, quick-example chips, and a preview of the next four upcoming runs (thanks to @tomzx).
+- Files: syntax highlighting in the file editor, Plan View, and Skills page now uses Shiki for broader language support.
+- Agents: deleting a built-in agent no longer creates a disable override — the agent stays as-is and shows a clear explanation instead of silently disappearing.
+- Agents: deleting an agent now shows an error toast when the definition is missing, instead of failing silently.
+- Startup: providers and agents now load faster by avoiding the full provider catalog on initial load.
+- Right Sidebar: switching between sidebar tabs is less likely to re-render unrelated content (thanks to @bashrusakh).
+- Sessions: the app no longer crashes on startup when there are many sessions in folders.
+- Notifications: desktop notifications no longer show duplicate alerts, and reasoning text is excluded from notification bodies.
+- Security: self-hosted instances now include noindex headers and a robots.txt to block search engine crawlers.
+- CLI/Installer: the installer now requires Node.js 22 and handles version detection failures with clearer guidance.
+- Reliability: session list loading handles Windows paths and concurrent requests more steadily, and duplicate health-check URLs are removed from diagnostics.
+
+## [1.13.0] - 2026-06-15
+
+- Security: LAN and remote browser access now require a UI password before the server will start.
+- Desktop: if LAN access was enabled without a password, the app now starts locally and asks for a password before turning LAN access back on.
+- Chat: file paths inside fenced code blocks are now clickable, including line and column targets (thanks to @robertoberto).
+- Chat: context breakdowns now show message previews and cache hit rates (thanks to @robertoberto, @raz123).
+- Chat/Performance: long conversations now use virtualized rendering to keep large histories responsive.
+- Chat: custom-answer question textareas resize more steadily while typing (thanks to @bigcoder84).
+- Chat/Input: tab-completing a mention no longer changes the selected agent (thanks to @Quat3rnion).
+- Chat/Input: Arrow Up moves the cursor inside multi-line drafts again instead of always opening prompt history.
+- Chat/Mobile: collapsed tool cards now keep their tool icon visible, and reasoning/tool text no longer clips descenders.
+- Files: added dedicated PDF files previews mode.
+- Files: added an optional docked files editor toolbar (thanks to @robertoberto).
+- Files: file operations now use the active workspace directory more consistently (thanks to @tomzx).
+- Sessions: session menus now include a delete action (thanks to @ShogunPanda).
+- Sessions: deleting a parent session no longer brings deleted child sessions back into the sidebar (thanks to @panzeyu2013).
+- Sessions: switching sessions no longer leaves the chat area blank in some cases (thanks to @panzeyu2013).
+- Sessions: selected rows now highlight across the full sidebar gutter.
+- Comments: inline file/diff comment drafts now stay in place when focus changes.
+- Git/Diff: redesigned the Changes diff view with faster multi-file rendering, expandable hunk separators, a full-file loading toggle, compact responsive controls, and a unified changed/staged context panel workflow.
+- Git/Diff: individual diff hunks can now be staged, unstaged, or discarded directly from the Changes view via `git apply`.
+- Git/Diff: added a review flow for starting a review from current changes.
+- GitHub: GitHub settings can now use credentials from the `gh` CLI when available (thanks to @tomzx).
+- Settings/MCP: importing MCP snippets from OpenCode config works again (thanks to @youzini).
+- Notifications: notification streams now stay connected more reliably behind proxies (thanks to @kostazol).
+- Mobile: the empty Changes view keeps a close control visible (thanks to @lilyzhaun).
+- Security: file previews and downloads now reject paths outside the allowed workspace unless access has been granted.
+- Sessions: fixed a bug where a running session would briefly flicker as idle (in the sidebar, the send/stop button, and the status row) when the app is protected by a password.
+- Desktop: you can now open developer tools from the Help menu.
+- Sessions: new draft sessions now start from the default model and agent instead of inheriting the previous session's selection, and fall back to OpenCode's own `default_agent` (and its model) when no OpenChamber default is set.
+- Startup: cached settings and session state now appear earlier while the live API finishes connecting.
+- Startup: the model and agent now appear faster on the initial draft — config loads under the project key up front (no reload when the draft opens) and the agent list is fetched once instead of per consumer.
+- VSCode: the extension opens faster with cached sessions, models, providers, and projects, then refreshes in the background.
+- VSCode: sessions are now grouped under their workspace, with cleaner session rows and an archived-sessions toggle.
+
+## [1.12.4] - 2026-06-11
+
 - Chat: added `/handoff-review` to open a linked review session for the current workspace changes, with actions to send review feedback and implementation replies between the sessions.
+- Chat/UI: added a setting to collapse long user messages.
+- Chat: `@agent` mentions in rendered messages now use the primary accent color.
+- Chat: table copy actions now include a Markdown format option (thanks to @kjhq).
+- Chat: Mermaid diagrams can now be opened in a dedicated diagram editor (thanks to @nerdosaurus).
+- Models: hidden models now stay hidden in multi-model selection controls (thanks to @kjhq).
 - Worktrees: creating a single new worktree session now opens the session immediately while worktree setup continues in the background.
 - Multi-Run: creating isolated runs now opens sessions immediately while worktree setup continues in the background.
 - Sessions: chat folder assignments now stay in place after reloads.
+- Sessions: session, folder, project, and worktree rows now have right-click menus for their available actions.
+- Settings: added search across settings pages.
+- Settings/Agents: agent prompt and permission edits now stay saved after changes.
+- Files: added an editor Vim mode setting (thanks to @Champii).
+- Files: writes are now safer when saving through temporary files (thanks to @nerdosaurus).
+- Git: changed-file folders now have a revert action (thanks to @kostazol).
+- GitHub: issue and pull-request pickers now use server-side search for larger repositories (thanks to @tomzx).
+- Preview: inline module scripts are now rewritten in proxied HTML responses, fixing more Vite preview pages (thanks to @mdbetancourt).
+- Voice: Plan and file preview markdown now include text-to-speech buttons, with a setting for reading selected text or the full document (thanks to @yangyaofei).
+- Desktop/macOS: added a menu bar tray with live session status, Mini Chat access, and a provider usage submenu.
+- Desktop/macOS: added an optional vibrancy effect for the left sidebar.
+- Desktop/macOS: startup no longer opens unnecessary folder prompts.
+- Mobile: refreshed session controls, worktree deletion flow, MCP controls, update flow, and usage tracking for new layout.
+- Terminal/Mobile: touch scrolling in the terminal no longer conflicts with terminal input as often (thanks to @kostazol).
+- Usage: added Cursor quota tracking.
+- UI/Localization: added French interface translations and French documentation (thanks to @pascalandr).
+- VSCode: added an action to archive all sessions from the extension (thanks to @jjdubski).
+- VSCode: added multi-root workspace support, including workspace folder switching in the extension (thanks to @mmospanenko).
 
 ## [1.12.3] - 2026-06-05
 

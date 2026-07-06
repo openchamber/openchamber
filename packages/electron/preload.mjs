@@ -14,9 +14,14 @@ const readArgValue = (name) => {
 const localOrigin = readArgValue('--openchamber-local-origin');
 const apiBaseUrl = readArgValue('--openchamber-api-base-url');
 const clientToken = readArgValue('--openchamber-client-token');
+const runtimeHeadersRaw = readArgValue('--openchamber-runtime-headers');
 const homeDirectory = readArgValue('--openchamber-home');
 const macosMajorRaw = readArgValue('--openchamber-macos-major');
 const macosMajor = Number.parseInt(macosMajorRaw, 10);
+const macVibrancySupported = process.platform === 'darwin';
+// Effective state for this window (main process resolves the saved preference
+// and passes it in). Defaults on when supported unless explicitly '0'.
+const hasMacVibrancy = macVibrancySupported && readArgValue('--openchamber-mac-vibrancy') !== '0';
 
 // Preload re-executes on every cross-origin navigation (we run with
 // sandbox:false, per-document). Two separate concerns to balance:
@@ -57,6 +62,16 @@ if (clientToken && isLocalPage) {
   contextBridge.exposeInMainWorld('__OPENCHAMBER_CLIENT_TOKEN__', clientToken);
 }
 
+if (runtimeHeadersRaw && isLocalPage) {
+  try {
+    const runtimeHeaders = JSON.parse(runtimeHeadersRaw);
+    if (runtimeHeaders && typeof runtimeHeaders === 'object') {
+      contextBridge.exposeInMainWorld('__OPENCHAMBER_RUNTIME_HEADERS__', runtimeHeaders);
+    }
+  } catch {
+  }
+}
+
 // Home directory leaks the OS username — keep local-only. Remote pages
 // operate on the REMOTE server's filesystem, local home is irrelevant
 // (and would be misleading if consumed as a workspace hint).
@@ -72,6 +87,8 @@ if (Number.isFinite(macosMajor) && macosMajor > 0) {
 
 contextBridge.exposeInMainWorld('__OPENCHAMBER_ELECTRON__', {
   runtime: 'electron',
+  macVibrancy: hasMacVibrancy,
+  macVibrancySupported,
 });
 
 contextBridge.exposeInMainWorld('__OPENCHAMBER_PLATFORM__', process.platform);
@@ -120,6 +137,18 @@ const dispatchNativeEvent = (event, detail) => {
   }
 };
 
+// Toggles the frost on/off in response to the main process around the
+// minimize/restore cycle. The default ("ready") state is set reliably in the
+// renderer (cssGenerator) — not here — because this preload runs at
+// document-start when documentElement may not exist yet.
+const setVibrancyReady = (ready) => {
+  if (!hasMacVibrancy) return;
+  try {
+    document.documentElement.toggleAttribute('data-oc-vibrancy-ready', ready === true);
+  } catch {
+  }
+};
+
 // Main-process events are read-only notifications (update progress,
 // window focus, etc.) — safe to deliver to any page rendered in this
 // webContents. The events themselves don't grant capability.
@@ -133,6 +162,10 @@ ipcRenderer.on('openchamber:emit', (_evt, payload) => {
     return;
   }
 
+  if (event === 'openchamber:vibrancy-ready') {
+    setVibrancyReady(payload.detail?.ready === true);
+  }
+
   dispatchNativeEvent(event, payload.detail);
 });
 
@@ -143,6 +176,7 @@ ipcRenderer.on('openchamber:emit', (_evt, payload) => {
 contextBridge.exposeInMainWorld('__OPENCHAMBER_DESKTOP__', {
   invoke: (cmd, args) => ipcRenderer.invoke('openchamber:invoke', cmd, args || {}),
   openDialog: (options) => ipcRenderer.invoke('openchamber:dialog:open', options || {}),
+  grantFileAccess: (filePath) => ipcRenderer.invoke('openchamber:file:grant-existing', filePath),
   openExternal: (url) => ipcRenderer.invoke('openchamber:invoke', 'desktop_open_external_url', { url }),
   listen: async (event, handler) => addListener(event, handler),
 });

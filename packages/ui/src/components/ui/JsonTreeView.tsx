@@ -99,4 +99,3 @@ const JsonTreeView = React.memo(function JsonTreeView({
 });
 
 export { JsonTreeView };
-export type { JsonTreeViewProps };

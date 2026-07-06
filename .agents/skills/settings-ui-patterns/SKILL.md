@@ -226,6 +226,58 @@ For dense icon/color pickers in settings:
 - **Avoid show/hide button pairs** when a checkbox maps directly to the boolean.
 - **Do not couple unrelated toggles** under one synthetic section header; keep hierarchy clear.
 
+## Settings Search Integration
+
+Every Settings UI addition must preserve item search. The registry is explicit: search does not scrape JSX or infer fields automatically.
+
+### Required Files
+
+- Add or update search items in `packages/ui/src/lib/settings/search.ts`.
+- Add matching `data-settings-item="..."` anchors in the rendered Settings UI.
+- Reuse existing localized labels/descriptions where possible; otherwise add keys to all `packages/ui/src/lib/i18n/messages/*.settings.ts` files.
+- If adding a new top-level Settings page, add metadata in `packages/ui/src/lib/settings/metadata.ts` and at least one searchable item unless the page is purely navigational like `home`.
+
+### What To Index
+
+- Index stable user-facing controls, section headers, and static create/connect actions.
+- Use item IDs that match the page and target, for example `appearance.language`, `agents.mode`, `remote-instances.client-auth`.
+- Prefer the exact visible label key as `titleKey`; use a concise visible/help text key as `descriptionKey` only when it adds useful context.
+- Add `keywords` for common synonyms, acronyms, and words users may type that are not in the label.
+
+### What Not To Index
+
+- Do not generate search items from dynamic entities: individual agents, commands, MCP servers, snippets, plugins, skills, providers, projects, catalog rows, remote hosts, or SSH instances.
+- Do not index controls hidden behind selected-entity dialogs unless search selection prepares the required state before highlighting.
+- Do not add a registry entry for a conditional control unless its `isAvailable` guard matches actual render visibility.
+
+### Split Page Pattern
+
+For split pages, search should target predictable static surfaces only.
+
+- Index sidebar create/connect actions like `agents.create` or `providers.connect`.
+- Index editor fields/sections that exist after the existing search preparation opens a draft.
+- If a new create result needs draft setup, update `prepareSettingsSearchTarget` in `SettingsView.tsx` so the target is rendered before highlight runs.
+
+### Availability Guards
+
+- Match runtime/page availability exactly: VS Code, web, desktop, mobile, and local desktop origin when relevant.
+- Page-level guards belong in `metadata.ts`; item-specific guards belong in `search.ts`.
+- If a target renders only inside desktop shell UI, guard it with `ctx.isDesktop` or `ctx.isDesktopLocalOrigin` as appropriate.
+
+### Highlight Target Rules
+
+- Put `data-settings-item` on the smallest stable container that visually owns the setting.
+- Avoid adding layout-only wrappers just for search anchors.
+- Highlight styling is intentionally subtle and lives in `packages/ui/src/index.css` under `[data-settings-search-highlight="true"]`; keep it token-based and non-aggressive.
+
+### Audit Checklist
+
+- All registry IDs have matching anchors.
+- All `titleKey` and `descriptionKey` values exist in every settings locale file.
+- Every non-navigational `SettingsPageSlug` has item coverage.
+- Search results respect platform/runtime/mobile visibility.
+- Query-empty Settings navigation behavior is unchanged.
+
 ## Best Practices
 - **Density**: Keep options compact; avoid oversized rows/chips in dense settings pages.
 - **Consistency**: Reuse shared controls (`Checkbox`, `Radio`, `ButtonSmall size="xs"`) instead of inline icon logic.
@@ -236,3 +288,4 @@ For dense icon/color pickers in settings:
 - **Helper blocks**: For small notes/errors under a section, use `mt-1 px-2` with `typography-meta text-muted-foreground/70` (and status token for errors).
 - **Truncation**: Always consider long text. Use `min-w-0 flex-1 truncate` on text containers that sit next to buttons or icons to prevent layout breakage.
 - **Theme Variables**: *Always* use CSS variables for colors (e.g., `var(--status-success)`) rather than hardcoded hex values or generic Tailwind colors when indicating semantic states.
+- **Search compatibility**: When adding or moving a Settings control, update the search registry and anchor in the same change.

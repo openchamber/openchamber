@@ -106,6 +106,27 @@ describe('projectTurnRecords', () => {
         expect(next.turns[1]).not.toBe(initial.turns[1]);
     });
 
+    test('hydrates updated turns when a previous projection exists but no turn is reusable', () => {
+        const user = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
+        const assistant = createMessageEntry({ id: 'a1', role: 'assistant', parentID: 'u1', createdAt: 2 });
+        const initial = projectTurnRecords([user, assistant]);
+        const updatedAssistant = {
+            ...assistant,
+            parts: [{ id: 'tool_1', type: 'tool', tool: 'bash', state: { status: 'completed' } } as Part],
+        };
+
+        const next = projectTurnRecords([user, updatedAssistant], {
+            previousProjection: initial,
+        });
+
+        expect(next.turns).toHaveLength(1);
+        expect(next.turns[0]).not.toBe(initial.turns[0]);
+        expect(next.turns[0]?.hasTools).toBe(true);
+        expect(next.turns[0]?.activityParts).toHaveLength(1);
+        expect(next.turns[0]?.stream.isStreaming).toBe(true);
+        expect(next.turns[0]?.stream.isRetrying).toBe(false);
+    });
+
     test('reuses the whole turns array when every turn is unchanged', () => {
         const user = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
         const assistant = createMessageEntry({ id: 'a1', role: 'assistant', parentID: 'u1', createdAt: 2 });

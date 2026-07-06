@@ -43,10 +43,31 @@ const GIT_STATUS_CACHE_TTL_MS = 1200;
 const GIT_REPO_CHECK_CACHE_TTL_MS = 5000;
 const gitStatusCache = new Map<string, { value: GitStatus; expiresAt: number }>();
 const gitStatusInFlight = new Map<string, Promise<GitStatus>>();
+const gitStatusCacheVersions = new Map<string, number>();
 const gitRepoCache = new Map<string, { value: boolean; expiresAt: number }>();
 const gitRepoInFlight = new Map<string, Promise<boolean>>();
 
 const normalizeDirectoryKey = (directory: string): string => directory.trim();
+const getStatusCacheKey = (directory: string, mode?: 'light'): string =>
+  mode === 'light' ? `${normalizeDirectoryKey(directory)}::light` : normalizeDirectoryKey(directory);
+
+const getStatusCacheVersion = (directory: string): number =>
+  gitStatusCacheVersions.get(normalizeDirectoryKey(directory)) ?? 0;
+
+const invalidateGitStatusCache = (directory: string): void => {
+  const key = normalizeDirectoryKey(directory);
+  gitStatusCacheVersions.set(key, getStatusCacheVersion(directory) + 1);
+  for (const cacheKey of Array.from(gitStatusCache.keys())) {
+    if (cacheKey === key || cacheKey.startsWith(`${key}::`)) {
+      gitStatusCache.delete(cacheKey);
+    }
+  }
+  for (const cacheKey of Array.from(gitStatusInFlight.keys())) {
+    if (cacheKey === key || cacheKey.startsWith(`${key}::`)) {
+      gitStatusInFlight.delete(cacheKey);
+    }
+  }
+};
 
 function buildUrl(
   path: string,
@@ -98,7 +119,7 @@ export async function checkIsGitRepository(directory: string): Promise<boolean> 
 
 export async function getGitStatus(directory: string, options?: { mode?: 'light' }): Promise<GitStatus> {
   const mode = options?.mode;
-  const key = mode === 'light' ? `${normalizeDirectoryKey(directory)}::light` : normalizeDirectoryKey(directory);
+  const key = getStatusCacheKey(directory, mode);
   const now = Date.now();
   const cached = gitStatusCache.get(key);
   if (cached && cached.expiresAt > now) {
@@ -111,15 +132,18 @@ export async function getGitStatus(directory: string, options?: { mode?: 'light'
   }
 
   const task = (async () => {
+    const cacheVersion = getStatusCacheVersion(directory);
     const response = await runtimeFetch(buildUrl(`${API_BASE}/status`, directory, mode ? { mode } : undefined));
     if (!response.ok) {
       throw new Error(`Failed to get git status: ${response.statusText}`);
     }
     const payload = await response.json() as GitStatus;
-    gitStatusCache.set(key, {
-      value: payload,
-      expiresAt: Date.now() + GIT_STATUS_CACHE_TTL_MS,
-    });
+    if (getStatusCacheVersion(directory) === cacheVersion) {
+      gitStatusCache.set(key, {
+        value: payload,
+        expiresAt: Date.now() + GIT_STATUS_CACHE_TTL_MS,
+      });
+    }
     return payload;
   })();
 
@@ -131,6 +155,52 @@ export async function getGitStatus(directory: string, options?: { mode?: 'light'
       gitStatusInFlight.delete(key);
     }
   }
+}
+
+export async function resolveGitPrimaryRoot(directory: string): Promise<{ root: string }> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/primary-root`, directory));
+  if (!response.ok) {
+    throw new Error(`Failed to resolve git primary root: ${response.statusText}`);
+  }
+  const payload = await response.json().catch(() => ({})) as { root?: string };
+  return { root: typeof payload.root === 'string' && payload.root ? payload.root : directory };
+}
+
+export async function resolveGitTopLevel(directory: string): Promise<{ root: string }> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/toplevel`, directory));
+  if (!response.ok) {
+    throw new Error(`Failed to resolve git toplevel: ${response.statusText}`);
+  }
+  const payload = await response.json().catch(() => ({})) as { root?: string };
+  return { root: typeof payload.root === 'string' && payload.root ? payload.root : directory };
+}
+
+export async function getGitCommitSummaries(
+  directory: string,
+  shas: string[]
+): Promise<{ commits: Array<{ sha: string; short: string; subject: string }> }> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/commit-summaries`, directory), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ shas }),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to get git commit summaries: ${response.statusText}`);
+  }
+  const payload = await response.json().catch(() => ({})) as {
+    commits?: Array<{ sha?: string; short?: string; subject?: string }>;
+  };
+  return {
+    commits: Array.isArray(payload.commits)
+      ? payload.commits
+          .map((entry) => ({
+            sha: typeof entry.sha === 'string' ? entry.sha : '',
+            short: typeof entry.short === 'string' ? entry.short : '',
+            subject: typeof entry.subject === 'string' ? entry.subject : '',
+          }))
+          .filter((entry) => entry.sha && entry.short)
+      : [],
+  };
 }
 
 export async function getGitDiff(directory: string, options: GetGitDiffOptions): Promise<GitDiffResponse> {
@@ -195,6 +265,8 @@ export async function revertGitFile(
       .catch(() => ({ error: response.statusText }));
     throw new Error(message.error || 'Failed to revert git changes');
   }
+
+  invalidateGitStatusCache(directory);
 }
 
 export async function stageGitFile(directory: string, filePath: string): Promise<void> {
@@ -218,6 +290,8 @@ export async function stageGitFiles(directory: string, filePaths: string[]): Pro
     const message = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(message.error || 'Failed to stage git changes');
   }
+
+  invalidateGitStatusCache(directory);
 }
 
 export async function unstageGitFile(directory: string, filePath: string): Promise<void> {
@@ -241,6 +315,47 @@ export async function unstageGitFiles(directory: string, filePaths: string[]): P
     const message = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(message.error || 'Failed to unstage git changes');
   }
+
+  invalidateGitStatusCache(directory);
+}
+
+export async function stageGitHunk(directory: string, filePath: string, patch: string): Promise<void> {
+  await applyGitHunk(directory, filePath, patch, 'stage');
+}
+
+export async function unstageGitHunk(directory: string, filePath: string, patch: string): Promise<void> {
+  await applyGitHunk(directory, filePath, patch, 'unstage');
+}
+
+export async function revertGitHunk(directory: string, filePath: string, patch: string): Promise<void> {
+  await applyGitHunk(directory, filePath, patch, 'discard');
+}
+
+async function applyGitHunk(
+  directory: string,
+  filePath: string,
+  patch: string,
+  action: 'stage' | 'unstage' | 'discard',
+): Promise<void> {
+  if (!filePath) {
+    throw new Error('path is required to apply a git hunk');
+  }
+  if (typeof patch !== 'string' || !patch.trim()) {
+    throw new Error('patch is required to apply a git hunk');
+  }
+
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/apply-hunk`, directory), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: filePath, patch, action }),
+  });
+
+  if (!response.ok) {
+    const message = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(message.error || 'Failed to apply git hunk');
+  }
+
+  invalidateGitStatusCache(directory);
 }
 
 export async function isLinkedWorktree(directory: string): Promise<boolean> {
@@ -525,7 +640,9 @@ export async function createGitCommit(
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to create commit');
   }
-  return response.json();
+  const result = await response.json();
+  invalidateGitStatusCache(directory);
+  return result;
 }
 
 export async function gitPush(
@@ -541,7 +658,9 @@ export async function gitPush(
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to push');
   }
-  return response.json();
+  const result = await response.json();
+  invalidateGitStatusCache(directory);
+  return result;
 }
 
 export async function gitPull(
@@ -557,7 +676,9 @@ export async function gitPull(
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to pull');
   }
-  return response.json();
+  const result = await response.json();
+  invalidateGitStatusCache(directory);
+  return result;
 }
 
 export async function gitFetch(
@@ -573,7 +694,9 @@ export async function gitFetch(
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to fetch');
   }
-  return response.json();
+  const result = await response.json();
+  invalidateGitStatusCache(directory);
+  return result;
 }
 
 export async function listGitStashes(directory: string): Promise<{ stashes: GitStashEntry[] }> {

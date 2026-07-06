@@ -10,6 +10,7 @@ import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 // useEventStream removed — replaced by SyncProvider + SyncBridge
 import { useMenuActions } from '@/hooks/useMenuActions';
 import { useSessionStatusBootstrap } from '@/hooks/useSessionStatusBootstrap';
+import { useTraySync } from '@/hooks/useTraySync';
 import { useRouter } from '@/hooks/useRouter';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useWebNotificationStream } from '@/hooks/useWebNotificationStream';
@@ -17,7 +18,7 @@ import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { hasModifier } from '@/lib/utils';
-import { isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp, invokeDesktop } from '@/lib/desktop';
 import {
   getInjectedBootOutcome,
   getBootInjectionStatus,
@@ -29,19 +30,20 @@ import {
 } from '@/lib/desktopBoot';
 import type { RecoveryVariant } from '@/components/onboarding/DesktopConnectionRecovery';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { markSessionViewed } from '@/sync/notification-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { opencodeClient } from '@/lib/opencode/client';
-import { disposeTerminalInputTransport } from '@/lib/terminalApi';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
+import { resumeAutoReviewRun } from '@/lib/reviewFlow';
 import { SyncProvider } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { AboutDialog } from '@/components/ui/AboutDialog';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
-import { VoiceProvider } from '@/components/voice';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
@@ -53,8 +55,8 @@ import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { useI18n } from '@/lib/i18n';
 import { applyMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { SyncAppEffects } from '@/apps/AppEffects';
+import { resetAppForRuntimeEndpointChange } from '@/apps/runtimeEndpointReset';
 import { useAppFontEffects } from '@/apps/useAppFontEffects';
-import { resetStreamingState } from '@/sync/streaming';
 import { OpenCodeUpdateToast } from '@/components/update/OpenCodeUpdateToast';
 import { markStartupTrace, startupTraceEnabled } from '@/lib/startupTrace';
 
@@ -264,27 +266,34 @@ function App({ apis }: AppProps) {
 
   React.useEffect(() => {
     return subscribeRuntimeEndpointChanged((detail) => {
-      useSessionUIStore.getState().prepareForRuntimeSwitch(detail.previousRuntimeKey);
-      useUIStore.getState().prepareForRuntimeSwitch(detail.previousRuntimeKey);
-      disposeTerminalInputTransport();
-      opencodeClient.reconnectToRuntimeBaseUrl();
-      useConfigStore.setState({
-        providers: [],
-        agents: [],
-        isConnected: false,
-        isInitialized: false,
-        connectionPhase: 'connecting',
-        lastDisconnectReason: null,
-      });
-      useProjectsStore.getState().resetForRuntimeSwitch();
-      useSessionUIStore.getState().restoreForRuntimeSwitch(detail.runtimeKey);
-      useUIStore.getState().restoreForRuntimeSwitch(detail.runtimeKey);
-      resetStreamingState();
+      resetAppForRuntimeEndpointChange(detail);
       setRuntimeEndpointEpoch((epoch) => epoch + 1);
       setInitRetryExhausted(false);
       setInitRetryEpoch((epoch) => epoch + 1);
     });
   }, []);
+
+  const autoReviewResumeSignature = useAutoReviewStore((state) => {
+    const runtimeKey = getRuntimeKey();
+    return Object.values(state.runsByOriginalSessionID)
+      .filter((run) => run.status === 'running' && run.runtimeKey === runtimeKey)
+      .map((run) => `${run.originalSessionID}:${run.phase}:${run.lastForwardedMessageID ?? ''}:${run.expectedAssistantParentID ?? ''}`)
+      .sort()
+      .join('|');
+  });
+
+  React.useEffect(() => {
+    if (embeddedSessionChat) {
+      return;
+    }
+
+    const runtimeKey = getRuntimeKey();
+    const runs = Object.values(useAutoReviewStore.getState().runsByOriginalSessionID)
+      .filter((run) => run.status === 'running' && run.runtimeKey === runtimeKey);
+    for (const run of runs) {
+      resumeAutoReviewRun(run.originalSessionID);
+    }
+  }, [autoReviewResumeSignature, embeddedSessionChat, runtimeEndpointEpoch]);
 
   React.useEffect(() => {
     document.documentElement.classList.toggle('wide-chat-layout', wideChatLayoutEnabled);
@@ -601,6 +610,38 @@ function App({ apis }: AppProps) {
     return () => window.removeEventListener('openchamber:open-session', handler as EventListener);
   }, []);
 
+  // Open a draft Mini Chat window from the native File menu / tray. Uses a
+  // dedicated single-fire event (not the menu-action channel) because draft
+  // mini-chat windows are NOT deduplicated — a double dispatch would open two.
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onOpenMiniChat = () => {
+      const currentDir = useDirectoryStore.getState().currentDirectory;
+      const { activeProjectId, projects } = useProjectsStore.getState();
+      const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
+      void invokeDesktop('desktop_open_draft_mini_chat_window', {
+        directory: currentDir || activeProject?.path || '',
+        projectId: activeProject?.id ?? null,
+      });
+    };
+    window.addEventListener('openchamber:open-mini-chat', onOpenMiniChat);
+    return () => window.removeEventListener('openchamber:open-mini-chat', onOpenMiniChat);
+  }, []);
+
+  // When the window regains focus, mark the currently-selected session as seen.
+  // Turn-completes that arrive while the app is backgrounded are intentionally
+  // left unseen (see isViewedInCurrentSession); coming back to the window is the
+  // signal that the user has now looked at it, so the marker clears.
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onFocus = () => {
+      const sessionId = useSessionUIStore.getState().currentSessionId;
+      if (sessionId) markSessionViewed(sessionId);
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
+
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
 
@@ -671,6 +712,8 @@ function App({ apis }: AppProps) {
   }, []);
 
   useMenuActions(handleToggleMemoryDebug);
+
+  useTraySync();
 
   useSessionStatusBootstrap({ enabled: embeddedBackgroundWorkEnabled });
 
@@ -884,8 +927,8 @@ function App({ apis }: AppProps) {
   }
 
   // Always mount the full provider tree to avoid remounts when isInitialized
-  // flips from false → true. FireworksProvider and VoiceProvider are lightweight
-  // shells; their heavy children are only activated when actually needed.
+  // flips from false → true. FireworksProvider is a lightweight shell; its
+  // heavy children are only activated when actually needed.
   const isBootShell = !isInitialized && !isDesktopRuntime;
 
   return (
@@ -893,7 +936,6 @@ function App({ apis }: AppProps) {
       <SyncProvider key={runtimeEndpointEpoch} sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
         <RuntimeAPIProvider apis={apis}>
           <FireworksProvider>
-            <VoiceProvider>
               <TooltipProvider delayDuration={300} skipDelayDuration={150}>
                 <div className={isDesktopRuntime ? 'h-full text-foreground bg-transparent' : 'h-full text-foreground bg-background'}>
                   <SyncAppEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
@@ -911,7 +953,6 @@ function App({ apis }: AppProps) {
                   )}
                 </div>
               </TooltipProvider>
-            </VoiceProvider>
           </FireworksProvider>
         </RuntimeAPIProvider>
       </SyncProvider>

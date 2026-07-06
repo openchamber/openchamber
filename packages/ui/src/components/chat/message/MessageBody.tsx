@@ -337,7 +337,6 @@ interface MessageBodyProps {
     messageCompletedAt?: number;
     messageCreatedAt?: number;
 
-    syntaxTheme: { [key: string]: React.CSSProperties };
 
     isMobile: boolean;
     alwaysShowActions?: boolean;
@@ -950,7 +949,6 @@ const AssistantMessageBody = React.memo(({
     messageCompletedAt,
     messageCreatedAt,
 
-    syntaxTheme,
     isMobile,
     alwaysShowActions,
     hasTouchInput,
@@ -969,7 +967,7 @@ const AssistantMessageBody = React.memo(({
     errorVariant = 'error',
     reviewTransferDirection = null,
 }: Omit<MessageBodyProps, 'isUser'>) => {
-    const { t } = useI18n();
+    const { t, locale } = useI18n();
     const chatSurfaceMode = useChatSurfaceMode();
     const streamPhase = _streamPhase;
     void _allowAnimation;
@@ -1642,7 +1640,6 @@ const AssistantMessageBody = React.memo(({
                             isExpanded={turnGroupingContext.isGroupExpanded === true}
                             collapsedPreviewCount={collapsedPreviewCount}
                             onToggle={toggleActivityGroup}
-                            syntaxTheme={syntaxTheme}
                             isMobile={isMobile}
                             expandedTools={expandedTools}
                             onToggleTool={onToggleTool}
@@ -1696,6 +1693,7 @@ const AssistantMessageBody = React.memo(({
                             streamPhase={effectiveStreamPhase}
                             chatRenderMode={chatRenderMode}
                             onContentChange={onContentChange}
+                            onShowPopup={onShowPopup}
                         />
                     </div>
                 );
@@ -1730,6 +1728,7 @@ const AssistantMessageBody = React.memo(({
                                 streamPhase={effectiveStreamPhase}
                                 chatRenderMode={chatRenderMode}
                                 onContentChange={onContentChange}
+                                onShowPopup={onShowPopup}
                             />
                         );
                     } else if (groupReasoningBlocks) {
@@ -1792,7 +1791,6 @@ const AssistantMessageBody = React.memo(({
                                     part={toolPart}
                                     isExpanded={expandedTools.has(toolPart.id)}
                                     onToggle={onToggleTool}
-                                    syntaxTheme={syntaxTheme}
                                     isMobile={isMobile}
                                     alwaysShowActions={alwaysShowMessageActions}
                                     onContentChange={onContentChange}
@@ -1864,7 +1862,6 @@ const AssistantMessageBody = React.memo(({
         effectiveStreamPhase,
         showReasoningTraces,
         shouldDeferSortedInlineText,
-        syntaxTheme,
         toggleActivityGroup,
         turnGroupingContext,
         visibleParts,
@@ -1879,6 +1876,7 @@ const AssistantMessageBody = React.memo(({
     }, [isLastAssistantInTurn, hasStopFinish, turnGroupingContext?.userMessageCreatedAt, messageCompletedAt]);
 
     const footerTimestamp = React.useMemo(() => {
+        void locale;
         const timestamp = typeof messageCompletedAt === 'number' && messageCompletedAt > 0
             ? messageCompletedAt
             : (typeof messageCreatedAt === 'number' && messageCreatedAt > 0 ? messageCreatedAt : null);
@@ -1886,7 +1884,7 @@ const AssistantMessageBody = React.memo(({
 
         const formatted = formatTimestampForDisplay(timestamp, timeFormatPreference);
         return formatted.length > 0 ? formatted : null;
-    }, [messageCompletedAt, messageCreatedAt, timeFormatPreference]);
+    }, [messageCompletedAt, messageCreatedAt, timeFormatPreference, locale]);
 
     const footerTimestampClassName = 'text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1';
     const canOpenMessagePreview = !isMiniChatSurface && !isMobile && !isVSCode;
@@ -2027,6 +2025,7 @@ const AssistantMessageBody = React.memo(({
                                             content={errorMessage ?? ''}
                                             onShowPopup={onShowPopup}
                                             className="[&_.markdown-content>*:first-child]:mt-0 [&_.markdown-content>*:last-child]:mb-0"
+                                            enableFileReferences={false}
                                         />
                                     </div>
                                 </div>

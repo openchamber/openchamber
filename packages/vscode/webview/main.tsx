@@ -4,12 +4,14 @@ import { vscodeStreamPerfCount, vscodeStreamPerfMeasure, vscodeStreamPerfObserve
 import { extractBodyBase64, extractBodyText, extractJsonBody, hasInitBody } from './requestBodyTransport';
 import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
 import { opencodeClient } from '@openchamber/ui/lib/opencode/client';
+import { sanitizeHeadersForBrowser } from '@openchamber/ui/lib/runtime-fetch';
 import {
   buildVSCodeThemeFromPalette,
   readVSCodeThemePalette,
   type VSCodeThemeKind,
   type VSCodeThemePayload,
 } from '@openchamber/ui/lib/theme/vscode/adapter';
+import { getBootstrapMessages, readStoredLocaleForBootstrap } from '@openchamber/ui/lib/i18n';
 import type { VSCodeActiveEditorFile } from '@/sync/input-store';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'error' | 'disconnected';
@@ -23,6 +25,7 @@ declare global {
     __VSCODE_CONFIG__?: {
       apiUrl?: string;
       workspaceFolder: string;
+      workspaceFolders?: Array<{ name: string; path: string }>;
       theme: string;
       connectionStatus: string;
       cliAvailable?: boolean;
@@ -54,6 +57,9 @@ try {
 }
 
 window.__OPENCHAMBER_RUNTIME_APIS__ = createVSCodeAPIs();
+
+const bootstrapLocale = readStoredLocaleForBootstrap();
+const bootstrapMessages = getBootstrapMessages(bootstrapLocale);
 
 const bootstrapConnectionStatus = () => {
   const initialStatus = (window.__VSCODE_CONFIG__?.connectionStatus as ConnectionStatus | undefined) || 'connecting';
@@ -133,36 +139,6 @@ const waitForUiMount = (timeoutMs = 8000): Promise<boolean> => {
 };
 
 let uiMounted = false;
-let bootstrapProvidersReady = false;
-let bootstrapAgentsReady = false;
-let bootstrapFailed = false;
-
-const recordBootstrapFetch = (pathname: string, ok: boolean) => {
-  if (!pathname.startsWith('/api/')) return;
-
-  // Don't mark as failed while still connecting — early 503s are expected
-  const isConnected = window.__OPENCHAMBER_CONNECTION__?.status === 'connected';
-
-  if (pathname.startsWith('/api/config/providers')) {
-    if (ok) {
-      bootstrapProvidersReady = true;
-      // Reset failed flag — a successful retry supersedes earlier 503s
-      if (bootstrapAgentsReady || !isConnected) bootstrapFailed = false;
-    } else if (isConnected) {
-      bootstrapFailed = true;
-    }
-    return;
-  }
-
-  if (pathname === '/api/agent' || pathname.startsWith('/api/agent?')) {
-    if (ok) {
-      bootstrapAgentsReady = true;
-      if (bootstrapProvidersReady || !isConnected) bootstrapFailed = false;
-    } else if (isConnected) {
-      bootstrapFailed = true;
-    }
-  }
-};
 
 const maybeHideLoadingOverlay = () => {
   const connectionStatus = window.__OPENCHAMBER_CONNECTION__?.status ?? 'connecting';
@@ -172,31 +148,26 @@ const maybeHideLoadingOverlay = () => {
   }
 
   if (connectionStatus === 'connected') {
-    if (bootstrapFailed) {
-      setLoadingStatusText('OpenCode connected, but initial data load failed.', 'error');
-      fadeOutLoadingScreen();
-      return;
-    }
-
-    if (bootstrapProvidersReady && bootstrapAgentsReady) {
-      fadeOutLoadingScreen();
-      return;
-    }
-
-    // Still loading providers/agents — stay silent (the animated logo signals work).
-    setLoadingStatusText('');
+    // The UI hydrates pickers and the sidebar from cache and refreshes
+    // providers/agents in the background, so once it's mounted and OpenCode is
+    // connected there's real interactive content underneath the splash. Don't
+    // keep the overlay up waiting on the live provider/agent fetches — on a cold
+    // start those are the slowest tail, and gating on them makes the splash
+    // linger long after the app is usable. Per-widget loaders convey any
+    // remaining background work.
+    fadeOutLoadingScreen();
     return;
   }
 
   if (connectionStatus === 'error') {
     const error = window.__OPENCHAMBER_CONNECTION__?.error;
-    setLoadingStatusText(error || 'Connection error', 'error');
+    setLoadingStatusText(error || bootstrapMessages.connectionError, 'error');
     fadeOutLoadingScreen();
     return;
   }
 
   if (connectionStatus === 'disconnected') {
-    setLoadingStatusText('Disconnected', 'error');
+    setLoadingStatusText(bootstrapMessages.disconnected, 'error');
     fadeOutLoadingScreen();
     return;
   }
@@ -309,7 +280,7 @@ const normalizeUrl = (input: string | URL) => {
 
 const headersToRecord = (headers: HeadersInit | undefined): Record<string, string> => {
   if (!headers) return {};
-  const normalized = headers instanceof Headers ? headers : new Headers(headers);
+  const normalized = new Headers(sanitizeHeadersForBrowser(headers) ?? headers);
   const result: Record<string, string> = {};
   normalized.forEach((value, key) => {
     result[key] = value;
@@ -327,19 +298,26 @@ const getRequestDirectoryHint = (url: URL, input?: RequestInfo | URL, init?: Req
   const queryDirectory = url.searchParams.get('directory') || undefined;
   if (queryDirectory) return queryDirectory;
   const headers = getRequestHeaders(input, init);
+  const directoryEncoding = Object.entries(headers).find(([key]) => key.toLowerCase() === 'x-opencode-directory-encoding')?.[1];
   for (const [key, value] of Object.entries(headers)) {
-    if (key.toLowerCase() === 'x-opencode-directory') return value;
+    if (key.toLowerCase() === 'x-opencode-directory') {
+      // headersToRecord marks encoded directory hints so direct/raw percent
+      // sequences from other callers are not decoded accidentally.
+      if (directoryEncoding !== 'uri') return value;
+      try { return decodeURIComponent(value); } catch { return value; }
+    }
   }
   return undefined;
 };
 
-const decodeBase64 = (value: string): Uint8Array => {
+const decodeBase64 = (value: string): ArrayBuffer => {
   const binary = atob(value);
-  const bytes = new Uint8Array(binary.length);
+  const buffer = new ArrayBuffer(binary.length);
+  const bytes = new Uint8Array(buffer);
   for (let i = 0; i < binary.length; i += 1) {
     bytes[i] = binary.charCodeAt(i);
   }
-  return bytes;
+  return buffer;
 };
 
 const jsonResponse = (body: unknown, status = 200): Response => {
@@ -371,7 +349,7 @@ const buildProxiedResponse = (
     return new Response(proxied.bodyText, { status: proxied.status, headers: proxied.headers });
   }
 
-  const body = proxied.bodyBase64 ? decodeBase64(proxied.bodyBase64) : new Uint8Array();
+  const body = proxied.bodyBase64 ? decodeBase64(proxied.bodyBase64) : new ArrayBuffer(0);
   return new Response(body, { status: proxied.status, headers: proxied.headers });
 };
 
@@ -537,6 +515,23 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
 
   if ((pathname === '/api/tts/speak' || pathname === '/api/tts/say/speak') && method === 'POST') {
     return new Response(JSON.stringify({ error: 'TTS endpoints are not available in VS Code runtime' }), {
+      status: 501,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Dictation runs on the OpenChamber web server (WebSocket + worker); the VS
+  // Code bridge has no server process, so report it deterministically
+  // unavailable. The mic button hides itself when capture is unsupported.
+  if (normalizedPathname === '/api/dictation/status' && method === 'GET') {
+    return new Response(JSON.stringify({ provider: 'local', available: false, reasonCode: 'unsupported_runtime', models: [] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (normalizedPathname.startsWith('/api/dictation/') ) {
+    return new Response(JSON.stringify({ error: 'Dictation is not available in VS Code runtime' }), {
       status: 501,
       headers: { 'Content-Type': 'application/json' },
     });
@@ -1114,7 +1109,6 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   if (targetUrl && isLocalRuntimePath(normalizedPathname)) {
     const localResponse = await handleLocalApiRequest(input, targetUrl, init, method);
     if (localResponse) {
-      recordBootstrapFetch(targetUrl.pathname, localResponse.ok);
       maybeHideLoadingOverlay();
       return localResponse;
     }
@@ -1202,7 +1196,6 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const signal = (input instanceof Request ? input.signal : init?.signal) as AbortSignal | undefined;
       const proxied = await proxySessionMessageRequest({ path: suffixPath, headers, bodyText, signal });
       const response = buildProxiedResponse(proxied);
-      recordBootstrapFetch(targetUrl.pathname, response.ok);
       maybeHideLoadingOverlay();
       return response;
     }
@@ -1211,7 +1204,6 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const signal = (input instanceof Request ? input.signal : init?.signal) as AbortSignal | undefined;
     const proxied = await proxyApiRequest({ method, path: suffixPath, headers, bodyBase64, signal });
     const response = buildProxiedResponse(proxied);
-    recordBootstrapFetch(targetUrl.pathname, response.ok);
     maybeHideLoadingOverlay();
     return response;
   }
@@ -1333,12 +1325,55 @@ onCommand('createSessionWithPrompt', (payload) => {
   });
 });
 
+const normalizeWorkspaceFoldersPayload = (value: unknown): Array<{ name: string; path: string }> => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((entry) => {
+      const candidate = entry as { name?: unknown; path?: unknown };
+      const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
+      const path = typeof candidate.path === 'string' ? candidate.path.trim() : '';
+      return path ? { name, path } : null;
+    })
+    .filter((entry): entry is { name: string; path: string } => entry !== null);
+};
+
+const syncVSCodeWorkspaceProjects = async (
+  workspaceFolders: Array<{ name: string; path: string }>,
+  activePath?: string,
+) => {
+  if (window.__VSCODE_CONFIG__) {
+    window.__VSCODE_CONFIG__.workspaceFolders = workspaceFolders;
+  }
+  const { useProjectsStore } = await import('@/stores/useProjectsStore');
+  return useProjectsStore.getState().syncVSCodeWorkspaceFolders(workspaceFolders, activePath);
+};
+
+onCommand('workspaceFoldersChanged', (payload) => {
+  const record = payload as { workspaceFolders?: unknown } | undefined;
+  const workspaceFolders = normalizeWorkspaceFoldersPayload(record?.workspaceFolders);
+  void syncVSCodeWorkspaceProjects(workspaceFolders);
+});
+
 // Listen for newSession command from extension title bar button
-onCommand('newSession', () => {
-  import('@/sync/session-ui-store').then(({ useSessionUIStore }) => {
-    useSessionUIStore.getState().openNewSessionDraft();
+onCommand('newSession', (payload) => {
+  const record = payload as { directory?: unknown; workspaceFolders?: unknown } | undefined;
+  const directory = record?.directory;
+  const directoryOverride = typeof directory === 'string' && directory.trim().length > 0 ? directory.trim() : undefined;
+  const workspaceFolders = normalizeWorkspaceFoldersPayload(record?.workspaceFolders);
+
+  Promise.all([
+    import('@/sync/session-ui-store'),
+    syncVSCodeWorkspaceProjects(workspaceFolders, directoryOverride),
+  ]).then(([{ useSessionUIStore }, selectedProject]) => {
+    useSessionUIStore.getState().openNewSessionDraft(
+      directoryOverride
+        ? { directoryOverride, selectedProjectId: selectedProject?.id ?? undefined }
+        : undefined
+    );
   });
-  
+
   // Also dispatch event to navigate to chat view in VSCodeLayout
   window.dispatchEvent(new CustomEvent('openchamber:navigate', { detail: { view: 'chat' } }));
 });
@@ -1509,7 +1544,7 @@ const extractNotificationTextFromParts = (parts: unknown): string => {
     .map((part) => {
       if (!part || typeof part !== 'object') return '';
       const entry = part as { type?: unknown; text?: unknown; content?: unknown };
-      if (entry.type === 'text' || typeof entry.text === 'string' || typeof entry.content === 'string') {
+      if (entry.type === 'text') {
         return typeof entry.text === 'string' ? entry.text : typeof entry.content === 'string' ? entry.content : '';
       }
       return '';

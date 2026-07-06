@@ -18,8 +18,9 @@ import { buildCodeMirrorCommentWidgets, normalizeLineRange, useInlineCommentCont
 import { getLanguageFromExtension } from '@/lib/toolHelpers';
 import { useDeviceInfo } from '@/lib/device';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
-import { generateSyntaxTheme } from '@/lib/theme/syntaxThemeGenerator';
 import { createFlexokiCodeMirrorTheme } from '@/lib/codemirror/flexokiTheme';
+import { shikiHighlightExtension } from '@/lib/codemirror/shikiHighlight';
+import { getResolvedShikiTheme } from '@/lib/shiki/appThemeRegistry';
 import { languageByExtension } from '@/lib/codemirror/languageByExtension';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessions } from '@/sync/sync-context';
@@ -164,7 +165,6 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
   const runtimeApis = useRuntimeAPIs();
   const { isMobile } = useDeviceInfo();
   const { currentTheme } = useThemeSystem();
-  React.useMemo(() => generateSyntaxTheme(currentTheme), [currentTheme]);
 
   const session = React.useMemo(() => {
     if (!currentSessionId) return null;
@@ -277,6 +277,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
   const {
     drafts: planFileDrafts,
     commentText,
+    setCommentText,
     editingDraftId,
     setSelection: setCommentSelection,
     saveComment,
@@ -328,8 +329,10 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
       if (target.closest('.cm-gutterElement')) return;
       if (target.closest('[data-sonner-toast]') || target.closest('[data-sonner-toaster]')) return;
 
-      setLineSelection(null);
-      cancel();
+      if (!commentText.trim()) {
+        setLineSelection(null);
+        cancel();
+      }
     };
 
     const timeoutId = window.setTimeout(() => {
@@ -340,13 +343,24 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
       window.clearTimeout(timeoutId);
       document.removeEventListener('click', handleClickOutside);
     };
-  }, [cancel, editingDraftId, isMobile, lineSelection]);
+  }, [cancel, commentText, editingDraftId, isMobile, lineSelection]);
 
   const editorExtensions = React.useMemo(() => {
-    const extensions = [createFlexokiCodeMirrorTheme(currentTheme)];
+    // Shiki token colors only for code files; markdown keeps the lezer
+    // highlighter (markdown-aware bold headings etc., and no Shiki view to match).
+    const shikiLanguage = resolvedPath ? getLanguageFromExtension(resolvedPath) : null;
+    const useShiki = Boolean(shikiLanguage) && shikiLanguage !== 'markdown';
+    const extensions = [createFlexokiCodeMirrorTheme(currentTheme, useShiki ? { syntaxColors: false } : undefined)];
     const language = languageByExtension(resolvedPath || 'plan.md');
     if (language) {
       extensions.push(language);
+    }
+    if (useShiki && shikiLanguage) {
+      extensions.push(shikiHighlightExtension({
+        language: shikiLanguage,
+        themeName: currentTheme.metadata.id,
+        theme: getResolvedShikiTheme(currentTheme),
+      }));
     }
     extensions.push(EditorView.lineWrapping);
     return extensions;
@@ -602,6 +616,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
       drafts: planFileDrafts,
       editingDraftId,
       commentText,
+      onTextChange: setCommentText,
       selection: lineSelection,
       isDragging,
       fileLabel: planFileLabel,
@@ -615,7 +630,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
       },
       onDelete: deleteDraft,
     });
-  }, [commentText, deleteDraft, editingDraftId, handleCancelComment, handleSaveComment, isDragging, lineSelection, planFileDrafts, planFileLabel, startEdit]);
+  }, [commentText, deleteDraft, editingDraftId, handleCancelComment, handleSaveComment, isDragging, lineSelection, planFileDrafts, planFileLabel, setCommentText, startEdit]);
 
   return (
     <div className="relative flex h-full min-h-0 min-w-0 w-full flex-col overflow-hidden bg-background">
@@ -783,7 +798,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
                         </div>
                       }
                     >
-                      <SimpleMarkdownRenderer content={content} className="typography-markdown-body" />
+                      <SimpleMarkdownRenderer content={content} className="typography-markdown-body" enableFileReferences={false} />
                     </ErrorBoundary>
                   </div>
                 ) : (
@@ -810,6 +825,20 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
                             if (event.button !== 0) return false;
                             event.preventDefault();
                             const lineNumber = view.state.doc.lineAt(line.from).number;
+
+                            if (
+                              lineSelection &&
+                              !event.shiftKey &&
+                              Math.min(lineSelection.start, lineSelection.end) === lineNumber &&
+                              Math.max(lineSelection.start, lineSelection.end) === lineNumber
+                            ) {
+                              setLineSelection(null);
+                              cancel();
+                              isSelectingRef.current = false;
+                              selectionStartRef.current = null;
+                              setIsDragging(false);
+                              return true;
+                            }
 
                             if (isMobile && lineSelection && !event.shiftKey) {
                               const start = Math.min(lineSelection.start, lineSelection.end, lineNumber);

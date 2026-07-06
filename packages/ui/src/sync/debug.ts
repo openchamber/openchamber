@@ -14,7 +14,7 @@ const FLAG_KEY = "openchamber:sync:debug"
 
 let _enabled: boolean | undefined
 
-export function isSyncDebugEnabled(): boolean {
+function isSyncDebugEnabled(): boolean {
   if (_enabled !== undefined) return _enabled
   try {
     _enabled = typeof localStorage !== "undefined" && localStorage.getItem(FLAG_KEY) === "1"
@@ -23,13 +23,7 @@ export function isSyncDebugEnabled(): boolean {
   }
   return _enabled
 }
-
-/** Force-refresh the flag (call after user toggles localStorage). */
-export function refreshSyncDebugFlag(): void {
-  _enabled = undefined
-}
-
-type SyncDebugCategory = "pipeline" | "reducer" | "dispatch"
+type SyncDebugCategory = "pipeline" | "reducer" | "dispatch" | "recovery"
 
 function log(cat: SyncDebugCategory, ...args: unknown[]): void {
   if (!isSyncDebugEnabled()) return
@@ -79,5 +73,11 @@ export const syncDebug = {
     /** Event applied to store successfully. */
     eventApplied: (eventType: string, sessionID?: string, messageID?: string) =>
       log("dispatch", "event → applied", { eventType, sessionID, messageID }),
+  },
+
+  recovery: {
+    /** A scoped session snapshot fetch is starting because live state looked incomplete. */
+    materializing: (details: { reason: string; directory: string; sessionID: string; messageID?: string; partID?: string }) =>
+      log("recovery", "materializing session", details),
   },
 } as const

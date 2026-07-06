@@ -1,0 +1,20 @@
+{
+  "extension.description": "Assistant de codage IA propulsé par OpenCode",
+  "views.chat.name": "Chat",
+  "command.openSidebar.title": "Ouvrir la barre latérale",
+  "command.focusChat.title": "Mettre le chat au premier plan",
+  "command.restartApi.title": "Redémarrer la connexion API",
+  "command.showOpenCodeStatus.title": "Afficher l’état de OpenCode",
+  "command.openAgentManager.title": "Ouvrir le gestionnaire d’agents",
+  "command.openActiveSessionInEditor.title": "Ouvrir la session active dans l’éditeur",
+  "command.openNewSessionInEditor.title": "Ouvrir une nouvelle session dans l’éditeur",
+  "command.openCurrentOrNewSessionInEditor.title": "Ouvrir une session dans l’éditeur",
+  "command.addToContext.title": "Ajouter au contexte",
+  "command.explain.title": "Expliquer",
+  "command.improveCode.title": "Améliorer le code",
+  "command.newSession.title": "Nouvelle session",
+  "command.showSettings.title": "Paramètres",
+  "command.attachExplorerToChat.title": "Joindre au chat OpenChamber",
+  "configuration.apiUrl.description": "URL d’un serveur API OpenCode externe. Laissez vide pour démarrer automatiquement une instance locale.",
+  "configuration.opencodeBinary.description": "Chemin absolu facultatif vers le binaire CLI opencode. Utile si la recherche PATH échoue. Nécessite de recharger la fenêtre ou de redémarrer l’API pour être pris en compte."
+}

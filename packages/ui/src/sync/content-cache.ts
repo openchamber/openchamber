@@ -63,11 +63,6 @@ export function evictContentLru(keep: Set<string> | undefined, evict: (path: str
   }
 }
 
-export function resetContentLru() {
-  lru.clear()
-  total = 0
-}
-
 export function setContentBytes(path: string, bytes: number) {
   setBytes(path, bytes)
 }
@@ -78,16 +73,4 @@ export function removeContentBytes(path: string) {
 
 export function touchContent(path: string, bytes?: number) {
   touch(path, bytes)
-}
-
-export function getContentBytesTotal(): number {
-  return total
-}
-
-export function getContentEntryCount(): number {
-  return lru.size
-}
-
-export function hasContent(path: string): boolean {
-  return lru.has(path)
 }

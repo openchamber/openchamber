@@ -6,6 +6,11 @@ export {
   clearGitHubAuth,
   getGitHubClientId,
   getGitHubScopes,
+  GH_CLI_ACCOUNT_ID,
+  isGhCliDisabled,
+  isGhCliActive,
+  setGhCliActive,
+  setGhCliDisabled,
   GITHUB_AUTH_FILE,
 } from './auth.js';
 
@@ -16,6 +21,7 @@ export {
 
 export {
   getOctokitOrNull,
+  createOctokit,
 } from './octokit.js';
 
 export {

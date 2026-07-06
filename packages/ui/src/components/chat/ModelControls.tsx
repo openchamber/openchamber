@@ -35,8 +35,8 @@ import { getSessionMaterializationStatus } from '@/sync/materialization';
 import { useUIStore } from '@/stores/useUIStore';
 import { useModelLists } from '@/hooks/useModelLists';
 import { useIsTextTruncated } from '@/hooks/useIsTextTruncated';
-import { formatEffortLabel, getCycledPrimaryAgentName, type MobileControlsPanel } from './mobileControlsUtils';
-import { useI18n } from '@/lib/i18n';
+import { formatEffortLabel, getCycledPrimaryAgentName, isPrimaryMode, type MobileControlsPanel } from './mobileControlsUtils';
+import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
 import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
 import { markStartupTrace } from '@/lib/startupTrace';
@@ -164,27 +164,27 @@ const getModalityIcons = (metadata: ModelMetadata | undefined, direction: 'input
     return result;
 };
 
-const COMPACT_NUMBER_FORMATTER = new Intl.NumberFormat('en-US', {
+const formatCompactNumber = (value: number) => new Intl.NumberFormat(getCurrentIntlLocale(), {
     notation: 'compact',
     compactDisplay: 'short',
     maximumFractionDigits: 1,
     minimumFractionDigits: 0,
-});
+}).format(value);
 
-const CURRENCY_FORMATTER = new Intl.NumberFormat('en-US', {
+const formatUsdCurrency = (value: number) => new Intl.NumberFormat(getCurrentIntlLocale(), {
     style: 'currency',
     currency: 'USD',
     maximumFractionDigits: 4,
     minimumFractionDigits: 2,
-});
+}).format(value);
 
-const KNOWLEDGE_DATE_FORMATTER = new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric' });
+const formatKnowledgeDate = (value: Date) => new Intl.DateTimeFormat(getCurrentIntlLocale(), { month: 'short', year: 'numeric' }).format(value);
 
-const DATE_FORMATTER = new Intl.DateTimeFormat('en-US', {
+const formatReleaseDate = (value: Date) => new Intl.DateTimeFormat(getCurrentIntlLocale(), {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
-});
+}).format(value);
 
 const ADD_PROVIDER_ID = '__add_provider__';
 
@@ -226,7 +226,7 @@ const formatTokens = (value?: number | null) => {
         return '0';
     }
 
-    const formatted = COMPACT_NUMBER_FORMATTER.format(value);
+    const formatted = formatCompactNumber(value);
     return formatted.endsWith('.0') ? formatted.slice(0, -2) : formatted;
 };
 
@@ -235,7 +235,7 @@ const formatCost = (value?: number | null) => {
         return '—';
     }
 
-    return CURRENCY_FORMATTER.format(value);
+    return formatUsdCurrency(value);
 };
 
 const getCapabilityIcons = (metadata?: ModelMetadata) => {
@@ -259,7 +259,7 @@ const formatKnowledge = (knowledge?: string) => {
         const monthIndex = Number.parseInt(match[2], 10) - 1;
         const knowledgeDate = new Date(Date.UTC(year, monthIndex, 1));
         if (!Number.isNaN(knowledgeDate.getTime())) {
-            return KNOWLEDGE_DATE_FORMATTER.format(knowledgeDate);
+            return formatKnowledgeDate(knowledgeDate);
         }
     }
 
@@ -276,7 +276,7 @@ const formatDate = (value?: string) => {
         return value;
     }
 
-    return DATE_FORMATTER.format(parsedDate);
+    return formatReleaseDate(parsedDate);
 };
 
 interface ModelControlsProps {
@@ -366,6 +366,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
     const toggleFavoriteModel = useUIStore((state) => state.toggleFavoriteModel);
     const reorderFavoriteModel = useUIStore((state) => state.reorderFavoriteModel);
+    const providerOrder = useUIStore((state) => state.providerOrder);
+    const setProviderOrder = useUIStore((state) => state.setProviderOrder);
     const isFavoriteModel = useUIStore((state) => state.isFavoriteModel);
     const addRecentModel = useUIStore((state) => state.addRecentModel);
     const addRecentAgent = useUIStore((state) => state.addRecentAgent);
@@ -492,7 +494,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     }, [isAgentSelectorOpen, isCompact]);
 
     const selectableDesktopAgents = React.useMemo(() => {
-        return agents.filter((agent) => agent.mode !== 'subagent');
+        return agents.filter((agent) => isPrimaryMode(agent.mode));
     }, [agents]);
 
     const sortedAndFilteredAgents = React.useMemo(() => {
@@ -831,9 +833,14 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             setAgent(latestLoadedUserChoice.agent);
         }
 
-        const applyResult = tryApplyModelSelection(
+        const historicalVariant = latestLoadedUserChoice.variant
+            && getModelVariantOptions(latestLoadedUserChoice.providerID, latestLoadedUserChoice.modelID).includes(latestLoadedUserChoice.variant)
+            ? latestLoadedUserChoice.variant
+            : undefined;
+        const applyResult = applyModelSelectionWithVariant(
             latestLoadedUserChoice.providerID,
             latestLoadedUserChoice.modelID,
+            historicalVariant,
             latestLoadedUserChoice.agent || currentAgentName || undefined,
         );
         if (applyResult !== 'applied') {
@@ -847,7 +854,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 latestLoadedUserChoice.agent,
                 latestLoadedUserChoice.providerID,
                 latestLoadedUserChoice.modelID,
-                latestLoadedUserChoice.variant,
+                historicalVariant,
             );
         }
         saveSessionModelSelection(currentSessionId, latestLoadedUserChoice.providerID, latestLoadedUserChoice.modelID);
@@ -861,7 +868,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         hasRenderableCurrentSessionSnapshot,
         latestLoadedUserChoice,
         setAgent,
-        tryApplyModelSelection,
+        applyModelSelectionWithVariant,
+        getModelVariantOptions,
         saveSessionAgentSelection,
         saveAgentModelVariantForSession,
         saveSessionModelSelection,
@@ -1144,7 +1152,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
         const resolvedSaved = savedVariant && availableVariants.includes(savedVariant)
             ? savedVariant
-            : undefined;
+            : settingsDefaultVariant && availableVariants.includes(settingsDefaultVariant)
+                ? settingsDefaultVariant
+                : undefined;
 
         setCurrentVariant(resolvedSaved);
         manualVariantSelectionRef.current = false;
@@ -1661,7 +1671,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         isSelected && 'bg-interactive-selection/15 text-interactive-selection-foreground'
                     )}
                 >
-                    <div className="flex items-start gap-2 px-2 py-1.5">
+                    <div className="flex items-center gap-2 px-2 py-1.5">
                         <button
                             type="button"
                             onClick={() => handleMobileModelApply(providerId, modelId, resolvedVariant)}
@@ -1670,15 +1680,15 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 'focus:outline-none focus-visible:ring-1 focus-visible:ring-primary rounded-lg'
                             )}
                         >
-                            {showProviderLogo ? (
-                                <ProviderLogo providerId={providerId} className="mt-0.5 size-3.5 flex-shrink-0" />
-                            ) : null}
                             <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                                <div className="flex min-w-0 items-start gap-2">
+                                <div className="flex min-w-0 items-center gap-1.5">
+                                    {showProviderLogo ? (
+                                        <ProviderLogo providerId={providerId} className="size-3.5 flex-shrink-0" />
+                                    ) : null}
                                     <span className="typography-meta font-medium text-foreground truncate">
                                         {getModelDisplayName(model)}
                                     </span>
-                                    {isSelected ? <Icon name="check" className="mt-0.5 size-4 flex-shrink-0 text-primary" /> : null}
+                                    {isSelected ? <Icon name="check" className="size-4 flex-shrink-0 text-primary" /> : null}
                                 </div>
                                 {contextText || indicatorIcons.length > 0 ? (
                                     <div className="flex min-w-0 items-center gap-1.5 overflow-hidden typography-micro text-muted-foreground">
@@ -1712,7 +1722,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             <button
                                 type="button"
                                 onClick={() => setExpandedMobileModelKey((prev) => prev === rowKey ? null : rowKey)}
-                                className="flex items-center gap-1 rounded-lg border border-border/40 px-2 py-1 typography-micro font-medium text-muted-foreground hover:bg-interactive-hover/50 flex-shrink-0"
+                                className="flex items-center gap-0.5 typography-micro font-medium text-muted-foreground hover:text-foreground flex-shrink-0"
                                 aria-expanded={isExpanded}
                                 aria-label={isExpanded ? t('chat.modelControls.hideThinkingModes') : t('chat.modelControls.showThinkingModes')}
                             >
@@ -1720,7 +1730,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 {isExpanded ? <Icon name="arrow-down-s" className="size-3.5" /> : <Icon name="arrow-right-s" className="size-3.5" />}
                             </button>
                         ) : null}
-                        <div className="flex flex-shrink-0 items-start gap-1.5">
+                        <div className="flex flex-shrink-0 items-center gap-1.5">
                             <button
                                 type="button"
                                 onClick={(event) => {
@@ -2360,6 +2370,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 )}
                                 reorderFavoriteAriaLabel={t('chat.modelControls.reorderFavoriteAria')}
                                 reorderFavoriteTitle={t('chat.modelControls.reorderFavoriteTitle')}
+                                providerOrder={providerOrder}
+                                onReorderProvider={setProviderOrder}
+                                reorderProviderTitle={t('chat.modelControls.reorderProviderTitle')}
                                 footerContent={(activeEntry) => {
                                     const activeHasThinkingVariants = activeEntry
                                         ? getModelVariantOptions(activeEntry.providerID, activeEntry.modelID).length > 0

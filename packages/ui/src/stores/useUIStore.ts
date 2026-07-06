@@ -1,7 +1,7 @@
 import { create } from 'zustand';
-import { devtools, persist, createJSONStorage } from 'zustand/middleware';
+import { devtools, persist } from 'zustand/middleware';
 import type { SidebarSection } from '@/constants/sidebar';
-import { getSafeStorage } from './utils/safeStorage';
+import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import { SEMANTIC_TYPOGRAPHY, getTypographyVariable, type SemanticTypographyKey } from '@/lib/typography';
 import type { ShortcutCombo } from '@/lib/shortcuts';
 import type { DraftStarterRef } from '@/lib/draftStarters';
@@ -31,6 +31,7 @@ type ContextPanelTab = {
   targetPath: string | null;
   dedupeKey: string;
   label: string | null;
+  sessionTitleFallback: string | null;
   readOnly: boolean;
   stagedDiff: boolean;
   touchedAt: number;
@@ -41,6 +42,7 @@ type ContextPanelTabDescriptor = {
   targetPath?: string | null;
   dedupeKey?: string | null;
   label?: string | null;
+  sessionTitleFallback?: string | null;
   readOnly?: boolean;
   stagedDiff?: boolean;
 };
@@ -111,7 +113,8 @@ const CONTEXT_PANEL_MAX_WIDTH = 1400;
 const CONTEXT_PANEL_MAX_TABS = 12;
 const CONTEXT_PANEL_MAX_LABEL_LENGTH = 120;
 const LEFT_SIDEBAR_MIN_WIDTH = 280;
-const RIGHT_SIDEBAR_MIN_WIDTH = 360;
+export const RIGHT_SIDEBAR_MIN_WIDTH = 360;
+export const RIGHT_SIDEBAR_MAX_WIDTH = 860;
 const activeMainTabByRuntime = new Map<string, MainTab>();
 
 const runtimeMemoryKey = (value?: string | null): string => {
@@ -191,6 +194,10 @@ const normalizeContextPanelTabDedupeKey = (
   targetPath: string | null,
   dedupeKey: string | null | undefined,
 ): string => {
+  if (mode === 'diff') {
+    return mode;
+  }
+
   if (typeof dedupeKey === 'string') {
     const trimmed = dedupeKey.trim();
     if (trimmed) {
@@ -218,6 +225,7 @@ const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPa
     targetPath: normalizedTargetPath,
     dedupeKey,
     label: normalizeContextTabLabel(descriptor.label),
+    sessionTitleFallback: normalizeContextTabLabel(descriptor.sessionTitleFallback),
     readOnly: descriptor.readOnly === true,
     stagedDiff: descriptor.stagedDiff === true,
     touchedAt: Date.now(),
@@ -258,6 +266,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       targetPath?: unknown;
       dedupeKey?: unknown;
       label?: unknown;
+      sessionTitleFallback?: unknown;
       readOnly?: unknown;
       stagedDiff?: unknown;
       touchedAt?: unknown;
@@ -285,6 +294,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       targetPath,
       dedupeKey,
       label: normalizeContextTabLabel(typeof candidate.label === 'string' ? candidate.label : null),
+      sessionTitleFallback: normalizeContextTabLabel(typeof candidate.sessionTitleFallback === 'string' ? candidate.sessionTitleFallback : null),
       readOnly: candidate.readOnly === true,
       stagedDiff: candidate.stagedDiff === true,
       touchedAt: typeof candidate.touchedAt === 'number' && Number.isFinite(candidate.touchedAt)
@@ -345,7 +355,9 @@ const upsertContextPanelTab = (
           targetPath: nextTab.targetPath || tab.targetPath,
           dedupeKey: nextTab.dedupeKey,
           label: nextTab.label,
+          sessionTitleFallback: nextTab.sessionTitleFallback || tab.sessionTitleFallback,
           stagedDiff: nextTab.stagedDiff,
+          readOnly: nextTab.readOnly,
           touchedAt: Date.now(),
         }
       : tab));
@@ -536,6 +548,7 @@ interface UIStore {
   isSessionCreateDialogOpen: boolean;
   isScheduledTasksDialogOpen: boolean;
   isSettingsDialogOpen: boolean;
+  isNewWorktreeDialogOpen: boolean;
   isModelSelectorOpen: boolean;
   sidebarSection: SidebarSection;
 
@@ -547,6 +560,7 @@ interface UIStore {
   eventStreamStatus: EventStreamStatus;
   eventStreamHint: string | null;
   showReasoningTraces: boolean;
+  sessionAssistEnabled: boolean;
   collapsibleThinkingBlocks: boolean;
   groupReasoningBlocks: boolean;
   chatRenderMode: ChatRenderMode;
@@ -570,6 +584,7 @@ interface UIStore {
 
   favoriteModels: Array<{ providerID: string; modelID: string }>;
   hiddenModels: Array<{ providerID: string; modelID: string }>;
+  providerOrder: string[];
   collapsedModelProviders: string[];
   recentModels: Array<{ providerID: string; modelID: string }>;
   recentAgents: string[];
@@ -578,13 +593,14 @@ interface UIStore {
   diffLayoutPreference: 'dynamic' | 'inline' | 'side-by-side';
   diffFileLayout: Record<string, 'inline' | 'side-by-side'>;
   diffWrapLines: boolean;
-  diffViewMode: 'single' | 'stacked';
   gitChangesViewMode: 'flat' | 'tree';
   isTimelineDialogOpen: boolean;
   isImagePreviewOpen: boolean;
   nativeNotificationsEnabled: boolean;
   notificationMode: 'always' | 'hidden-only';
   notifyOnSubtasks: boolean;
+  // Desktop dock badge showing the count of sessions with unseen activity (macOS).
+  dockBadgeEnabled: boolean;
 
   // Event toggles (which events trigger notifications)
   notifyOnCompletion: boolean;
@@ -618,9 +634,10 @@ interface UIStore {
   weekStartPreference: WeekStartPreference;
   mermaidRenderingMode: MermaidRenderingMode;
   userMessageRenderingMode: UserMessageRenderingMode;
+  collapsibleUserMessages: boolean;
   stickyUserHeader: boolean;
+  expandedEditorToolbar: boolean;
   showSplitAssistantMessageActions: boolean;
-  showMobileSessionStatusBar: boolean;
   isMobileSessionStatusBarCollapsed: boolean;
   mobileSessionPanelOpen: boolean;
   mobileSessionFilterProjectId: string | null;
@@ -683,6 +700,7 @@ interface UIStore {
   setSessionCreateDialogOpen: (open: boolean) => void;
   setScheduledTasksDialogOpen: (open: boolean) => void;
   setSettingsDialogOpen: (open: boolean) => void;
+  setNewWorktreeDialogOpen: (open: boolean) => void;
   setModelSelectorOpen: (open: boolean) => void;
   applyTheme: () => void;
   setSidebarSection: (section: SidebarSection) => void;
@@ -691,6 +709,7 @@ interface UIStore {
   setSettingsRemoteInstancesSelectedId: (instanceId: string | null) => void;
   setEventStreamStatus: (status: EventStreamStatus, hint?: string | null) => void;
   setShowReasoningTraces: (value: boolean) => void;
+  setSessionAssistEnabled: (value: boolean) => void;
   setCollapsibleThinkingBlocks: (value: boolean) => void;
   setChatRenderMode: (value: ChatRenderMode) => void;
   setActivityRenderMode: (value: ActivityRenderMode) => void;
@@ -719,6 +738,7 @@ interface UIStore {
     overProviderID: string,
     overModelID: string,
   ) => void;
+  setProviderOrder: (orderedProviderIDs: string[]) => void;
   toggleHiddenModel: (providerID: string, modelID: string) => void;
   isHiddenModel: (providerID: string, modelID: string) => boolean;
   hideAllModels: (providerID: string, modelIDs: string[]) => void;
@@ -732,7 +752,6 @@ interface UIStore {
   setDiffLayoutPreference: (mode: 'dynamic' | 'inline' | 'side-by-side') => void;
   setDiffFileLayout: (filePath: string, mode: 'inline' | 'side-by-side') => void;
   setDiffWrapLines: (wrap: boolean) => void;
-  setDiffViewMode: (mode: 'single' | 'stacked') => void;
   setGitChangesViewMode: (mode: 'flat' | 'tree') => void;
   setMultiRunLauncherOpen: (open: boolean) => void;
   setTimelineDialogOpen: (open: boolean) => void;
@@ -741,6 +760,7 @@ interface UIStore {
   setNotificationMode: (mode: 'always' | 'hidden-only') => void;
   setShowTerminalQuickKeysOnDesktop: (value: boolean) => void;
   setNotifyOnSubtasks: (value: boolean) => void;
+  setDockBadgeEnabled: (value: boolean) => void;
   setNotifyOnCompletion: (value: boolean) => void;
   setNotifyOnError: (value: boolean) => void;
   setNotifyOnQuestion: (value: boolean) => void;
@@ -761,9 +781,10 @@ interface UIStore {
   setWeekStartPreference: (value: WeekStartPreference) => void;
   setMermaidRenderingMode: (value: MermaidRenderingMode) => void;
   setUserMessageRenderingMode: (value: UserMessageRenderingMode) => void;
+  setCollapsibleUserMessages: (value: boolean) => void;
   setStickyUserHeader: (value: boolean) => void;
+  setExpandedEditorToolbar: (value: boolean) => void;
   setShowSplitAssistantMessageActions: (value: boolean) => void;
-  setShowMobileSessionStatusBar: (value: boolean) => void;
   setIsMobileSessionStatusBarCollapsed: (value: boolean) => void;
   setMobileSessionPanelOpen: (value: boolean) => void;
   setMobileSessionFilterProjectId: (value: string | null) => void;
@@ -822,6 +843,7 @@ export const useUIStore = create<UIStore>()(
         isSessionCreateDialogOpen: false,
         isScheduledTasksDialogOpen: false,
         isSettingsDialogOpen: false,
+        isNewWorktreeDialogOpen: false,
         isModelSelectorOpen: false,
         sidebarSection: 'sessions',
         settingsPage: 'home',
@@ -831,6 +853,7 @@ export const useUIStore = create<UIStore>()(
         eventStreamStatus: 'idle',
         eventStreamHint: null,
         showReasoningTraces: true,
+        sessionAssistEnabled: true,
         collapsibleThinkingBlocks: true,
         groupReasoningBlocks: true,
         chatRenderMode: 'live',
@@ -852,6 +875,7 @@ export const useUIStore = create<UIStore>()(
         mobileKeyboardMode: getStoredMobileKeyboardMode(),
         favoriteModels: [],
         hiddenModels: [],
+        providerOrder: [],
         collapsedModelProviders: [],
         recentModels: [],
         recentAgents: [],
@@ -859,13 +883,13 @@ export const useUIStore = create<UIStore>()(
         diffLayoutPreference: 'inline',
         diffFileLayout: {},
         diffWrapLines: false,
-        diffViewMode: 'stacked',
         gitChangesViewMode: 'flat',
         isTimelineDialogOpen: false,
         isImagePreviewOpen: false,
         nativeNotificationsEnabled: false,
         notificationMode: 'hidden-only',
         notifyOnSubtasks: true,
+        dockBadgeEnabled: true,
 
         // Event toggles (which events trigger notifications)
         notifyOnCompletion: true,
@@ -897,9 +921,10 @@ export const useUIStore = create<UIStore>()(
         weekStartPreference: 'auto',
         mermaidRenderingMode: 'svg',
         userMessageRenderingMode: 'markdown',
+        collapsibleUserMessages: true,
         stickyUserHeader: false,
+        expandedEditorToolbar: false,
         showSplitAssistantMessageActions: false,
-        showMobileSessionStatusBar: false,
         isMobileSessionStatusBarCollapsed: false,
         mobileSessionPanelOpen: false,
         mobileSessionFilterProjectId: null,
@@ -972,29 +997,24 @@ export const useUIStore = create<UIStore>()(
         setRightSidebarOpen: (open) => {
           set((state) => {
             if (state.isRightSidebarOpen === open) {
-              if (!open) {
-                return state;
-              }
-              if (!state.hasManuallyResizedRightSidebar && state.rightSidebarWidth !== RIGHT_SIDEBAR_MIN_WIDTH) {
-                return {
-                  isRightSidebarOpen: open,
-                  rightSidebarWidth: RIGHT_SIDEBAR_MIN_WIDTH,
-                };
-              }
               return state;
             }
-            if (open && !state.hasManuallyResizedRightSidebar) {
-              return {
-                isRightSidebarOpen: open,
-                rightSidebarWidth: RIGHT_SIDEBAR_MIN_WIDTH,
-              };
-            }
-            return { isRightSidebarOpen: open };
+            const shouldResetWidth = open
+              && !state.hasManuallyResizedRightSidebar
+              && state.rightSidebarWidth !== RIGHT_SIDEBAR_MIN_WIDTH;
+            return {
+              isRightSidebarOpen: open,
+              rightSidebarWidth: shouldResetWidth ? RIGHT_SIDEBAR_MIN_WIDTH : state.rightSidebarWidth,
+            };
           });
         },
 
         setRightSidebarWidth: (width) => {
-          set({ rightSidebarWidth: width, hasManuallyResizedRightSidebar: true });
+          const clamped = Math.min(
+            RIGHT_SIDEBAR_MAX_WIDTH,
+            Math.max(RIGHT_SIDEBAR_MIN_WIDTH, width)
+          );
+          set({ rightSidebarWidth: clamped, hasManuallyResizedRightSidebar: true });
         },
 
         setRightSidebarTab: (tab) => {
@@ -1029,7 +1049,6 @@ export const useUIStore = create<UIStore>()(
           get().openContextPanelTab(normalizedDirectory, {
             mode: 'diff',
             targetPath: normalizedFilePath,
-            dedupeKey: staged ? 'staged' : null,
             stagedDiff: staged,
           });
         },
@@ -1492,6 +1511,10 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
+        setNewWorktreeDialogOpen: (open) => {
+          set({ isNewWorktreeDialogOpen: open });
+        },
+
         setModelSelectorOpen: (open) => {
           set({ isModelSelectorOpen: open });
         },
@@ -1521,6 +1544,10 @@ export const useUIStore = create<UIStore>()(
 
         setShowReasoningTraces: (value) => {
           set({ showReasoningTraces: value });
+        },
+
+        setSessionAssistEnabled: (value) => {
+          set({ sessionAssistEnabled: value });
         },
 
         setCollapsibleThinkingBlocks: (value) => {
@@ -1671,10 +1698,6 @@ export const useUIStore = create<UIStore>()(
           set({ diffWrapLines: wrap });
         },
 
-        setDiffViewMode: (mode) => {
-          set({ diffViewMode: mode });
-        },
-
         setGitChangesViewMode: (mode) => {
           set({ gitChangesViewMode: mode });
         },
@@ -1729,6 +1752,17 @@ export const useUIStore = create<UIStore>()(
             }
             nextFavorites.splice(newIndex, 0, moved);
             return { favoriteModels: nextFavorites };
+          });
+        },
+
+        setProviderOrder: (orderedProviderIDs) => {
+          set((state) => {
+            const next = orderedProviderIDs.filter((id) => typeof id === 'string' && id.length > 0);
+            const current = state.providerOrder;
+            if (current.length === next.length && current.every((id, index) => id === next[index])) {
+              return state;
+            }
+            return { providerOrder: next };
           });
         },
 
@@ -1958,6 +1992,10 @@ export const useUIStore = create<UIStore>()(
           set({ notifyOnSubtasks: value });
         },
 
+        setDockBadgeEnabled: (value) => {
+          set({ dockBadgeEnabled: value });
+        },
+
         setNotifyOnCompletion: (value) => { set({ notifyOnCompletion: value }); },
         setNotifyOnError: (value) => { set({ notifyOnError: value }); },
         setNotifyOnQuestion: (value) => { set({ notifyOnQuestion: value }); },
@@ -2004,14 +2042,17 @@ export const useUIStore = create<UIStore>()(
         setUserMessageRenderingMode: (value) => {
           set({ userMessageRenderingMode: value });
         },
+        setCollapsibleUserMessages: (value) => {
+          set({ collapsibleUserMessages: value });
+        },
         setStickyUserHeader: (value) => {
           set({ stickyUserHeader: value });
         },
+        setExpandedEditorToolbar: (value: boolean) => {
+          set({ expandedEditorToolbar: value });
+        },
         setShowSplitAssistantMessageActions: (value) => {
           set({ showSplitAssistantMessageActions: value });
-        },
-        setShowMobileSessionStatusBar: (value) => {
-          set({ showMobileSessionStatusBar: value });
         },
         setIsMobileSessionStatusBarCollapsed: (value) => {
           set({ isMobileSessionStatusBarCollapsed: value });
@@ -2072,13 +2113,18 @@ export const useUIStore = create<UIStore>()(
       }),
       {
         name: 'ui-store',
-        storage: createJSONStorage(() => getSafeStorage()),
-        version: 9,
+        storage: createDeferredSafeJSONStorage(),
+        version: 10,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
           }
           const state = persistedState as Record<string, unknown>;
+
+          // v9 -> v10: remove obsolete single-file diff view mode setting
+          if (version < 10) {
+            delete state.diffViewMode;
+          }
 
           // v8 -> v9: initialize notes/todo panel height fields
           if (version < 9) {
@@ -2188,6 +2234,7 @@ export const useUIStore = create<UIStore>()(
           isSessionCreateDialogOpen: state.isSessionCreateDialogOpen,
           // Note: isSettingsDialogOpen intentionally NOT persisted
           showReasoningTraces: state.showReasoningTraces,
+          sessionAssistEnabled: state.sessionAssistEnabled,
           collapsibleThinkingBlocks: state.collapsibleThinkingBlocks,
           chatRenderMode: state.chatRenderMode,
           activityRenderMode: state.activityRenderMode,
@@ -2206,18 +2253,19 @@ export const useUIStore = create<UIStore>()(
           cornerRadius: state.cornerRadius,
           favoriteModels: state.favoriteModels,
           hiddenModels: state.hiddenModels,
+          providerOrder: state.providerOrder,
           collapsedModelProviders: state.collapsedModelProviders,
           recentModels: state.recentModels,
           recentAgents: state.recentAgents,
           recentEfforts: state.recentEfforts,
           diffLayoutPreference: state.diffLayoutPreference,
           diffWrapLines: state.diffWrapLines,
-          diffViewMode: state.diffViewMode,
           gitChangesViewMode: state.gitChangesViewMode,
           nativeNotificationsEnabled: state.nativeNotificationsEnabled,
           notificationMode: state.notificationMode,
           showTerminalQuickKeysOnDesktop: state.showTerminalQuickKeysOnDesktop,
           notifyOnSubtasks: state.notifyOnSubtasks,
+          dockBadgeEnabled: state.dockBadgeEnabled,
           notifyOnCompletion: state.notifyOnCompletion,
           notifyOnError: state.notifyOnError,
           notifyOnQuestion: state.notifyOnQuestion,
@@ -2238,9 +2286,10 @@ export const useUIStore = create<UIStore>()(
           weekStartPreference: state.weekStartPreference,
           mermaidRenderingMode: state.mermaidRenderingMode,
           userMessageRenderingMode: state.userMessageRenderingMode,
+          collapsibleUserMessages: state.collapsibleUserMessages,
           stickyUserHeader: state.stickyUserHeader,
+          expandedEditorToolbar: state.expandedEditorToolbar,
           showSplitAssistantMessageActions: state.showSplitAssistantMessageActions,
-          showMobileSessionStatusBar: state.showMobileSessionStatusBar,
           isMobileSessionStatusBarCollapsed: state.isMobileSessionStatusBarCollapsed,
           mobileSessionFilterProjectId: state.mobileSessionFilterProjectId,
           shortcutOverrides: state.shortcutOverrides,

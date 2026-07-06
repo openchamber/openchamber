@@ -10,9 +10,83 @@ export const createNotificationTriggerRuntime = (deps) => {
     emitDesktopNotification,
     broadcastUiNotification,
     sendPushToAllUiSessions,
+    sendApnsToAllUiSessions,
+    isAnyInteractiveClientVisible,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
   } = deps;
+
+  // App-icon badge for native push: the set of DISTINCT collapse-ids (the push
+  // `tag`, e.g. `ready-<sessionId>` / `permission-<requestKey>`) we've sent since
+  // the app was last foregrounded. The badge is the absolute APNs `aps.badge`.
+  //
+  // We key by `tag`, not sessionId, because the tag IS the banner identity: iOS
+  // uses it as `apns-collapse-id`, so same-tag pushes REPLACE one banner while
+  // different tags are distinct banners. One session can raise several banners
+  // (ready + question + permission are different tags), so counting sessionIds
+  // both over- and under-counts the lock-screen stack; counting tags mirrors it.
+  //
+  // We deliberately do NOT derive this from the live attention snapshot
+  // (needsAttention/isViewed): that machinery is for in-app indicators on
+  // connected clients — a backgrounded client stays "viewing", and needsAttention
+  // is set by a separate session.status event that races the push trigger. The
+  // set is cleared when a UI client reports visible (`clearPendingPushBadge`),
+  // the same moment the device zeroes its icon badge on becomeActive.
+  const pendingPushTags = new Set();
+  const clearPendingPushBadge = () => {
+    pendingPushTags.clear();
+  };
+  const trackPushAndCountBadge = (tag) => {
+    if (typeof tag === 'string' && tag.length > 0) {
+      pendingPushTags.add(tag);
+    }
+    return pendingPushTags.size;
+  };
+
+  // Generic notification for native push (per the mobile design): a fixed, scenario-based
+  // title + the session name as the body. No model/project/message content crosses the relay.
+  const APNS_TITLE_BY_TYPE = {
+    ready: 'Agent response is ready',
+    error: 'Agent hit an error',
+    question: 'Agent needs your input',
+    permission: 'Agent needs permission',
+  };
+
+  const toApnsGenericPayload = (payload) => {
+    const data = payload?.data && typeof payload.data === 'object' ? payload.data : {};
+    const sessionName = typeof data.sessionName === 'string' && data.sessionName.trim().length > 0
+      ? data.sessionName.trim()
+      : 'Session';
+    return {
+      title: APNS_TITLE_BY_TYPE[data.type] || 'Agent update',
+      body: sessionName,
+      badge: trackPushAndCountBadge(typeof payload?.tag === 'string' ? payload.tag : undefined),
+      tag: payload?.tag,
+      // sessionId is forwarded so a tapped push can deep-link; it is an opaque id, not content.
+      data: typeof data.sessionId === 'string' ? { sessionId: data.sessionId } : undefined,
+    };
+  };
+
+  // Fan a notification out to every delivery channel: browser web-push (full templated
+  // payload) and native iOS APNs (generic model-based text). Both share the dedup tag and
+  // `requireNoSse` focus gate; a failure in one channel must not block the other.
+  const fanoutPush = (payload, options) => {
+    // Presence-aware routing: if any interactive (non-mobile) client — desktop/web/vscode — is
+    // currently visible, it already shows the in-app notification, so skip the native push to the
+    // phone. Gated on the desktop's visibility (reliable), never the phone's own. When we skip we
+    // also skip toApnsGenericPayload, so the badge isn't incremented for an undelivered push.
+    const interactiveVisible = isAnyInteractiveClientVisible?.() === true;
+    return Promise.all([
+      Promise.resolve(sendPushToAllUiSessions?.(payload, options)).catch((error) => {
+        console.warn('[Push] web-push fanout failed:', error?.message ?? error);
+      }),
+      interactiveVisible
+        ? Promise.resolve()
+        : Promise.resolve(sendApnsToAllUiSessions?.(toApnsGenericPayload(payload), options)).catch((error) => {
+            console.warn('[APNs] fanout failed:', error?.message ?? error);
+          }),
+    ]);
+  };
 
   let getIsWindowFocused = typeof deps.getIsWindowFocused === 'function'
     ? deps.getIsWindowFocused
@@ -240,6 +314,7 @@ export const createNotificationTriggerRuntime = (deps) => {
 
         let title = `${formatMode(info?.mode)} agent is ready`;
         let body = `${formatModelId(info?.modelID)} completed the task`;
+        let sessionName = '';
 
         try {
           const templates = settings.notificationTemplates || {};
@@ -249,6 +324,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             : (templates.completion || { title: '{agent_name} is ready', message: '{model_name} completed the task' });
 
           const variables = await buildTemplateVariables(payload, sessionId);
+          sessionName = typeof variables.session_name === 'string' ? variables.session_name : sessionName;
 
           const messageId = info?.id;
           let lastMessage = extractLastMessageText(payload);
@@ -279,11 +355,11 @@ export const createNotificationTriggerRuntime = (deps) => {
             directory: notificationDirectory,
             requireHidden: settings.notificationMode !== 'always',
           };
-          emitDesktopNotification(notificationPayload);
-          broadcastUiNotification(notificationPayload);
+          const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
+          broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
         }
 
-        await sendPushToAllUiSessions(
+        await fanoutPush(
           {
             title,
             body,
@@ -291,6 +367,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             data: {
               url: buildSessionDeepLinkUrl(sessionId),
               sessionId,
+              sessionName,
               type: 'ready',
             },
           },
@@ -308,9 +385,11 @@ export const createNotificationTriggerRuntime = (deps) => {
 
         let title = 'Tool error';
         let body = 'An error occurred';
+        let sessionName = '';
 
         try {
           const variables = await buildTemplateVariables(payload, sessionId);
+          sessionName = typeof variables.session_name === 'string' ? variables.session_name : sessionName;
           const errorMessageId = info?.id;
           let lastMessage = extractLastMessageText(payload);
           if (!lastMessage) {
@@ -341,11 +420,11 @@ export const createNotificationTriggerRuntime = (deps) => {
             directory: notificationDirectory,
             requireHidden: settings.notificationMode !== 'always',
           };
-          emitDesktopNotification(notificationPayload);
-          broadcastUiNotification(notificationPayload);
+          const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
+          broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
         }
 
-        await sendPushToAllUiSessions(
+        await fanoutPush(
           {
             title,
             body,
@@ -353,6 +432,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             data: {
               url: buildSessionDeepLinkUrl(sessionId),
               sessionId,
+              sessionName,
               type: 'error',
             },
           },
@@ -391,9 +471,11 @@ export const createNotificationTriggerRuntime = (deps) => {
             ? 'Switch to build mode'
             : header || 'Input needed';
         let body = questionText || 'Agent is waiting for your response';
+        let sessionName = '';
 
         try {
           const variables = await buildTemplateVariables(payload, sessionId);
+          sessionName = typeof variables.session_name === 'string' ? variables.session_name : sessionName;
           variables.last_message = questionText || header || '';
 
           const templates = settings.notificationTemplates || {};
@@ -408,7 +490,7 @@ export const createNotificationTriggerRuntime = (deps) => {
         }
 
         if (settings.nativeNotificationsEnabled) {
-          emitDesktopNotification({
+          const notificationPayload = {
             kind: 'question',
             title,
             body,
@@ -416,20 +498,12 @@ export const createNotificationTriggerRuntime = (deps) => {
             sessionId,
             directory: notificationDirectory,
             requireHidden: settings.notificationMode !== 'always',
-          });
-
-          broadcastUiNotification({
-            kind: 'question',
-            title,
-            body,
-            tag: `question-${sessionId}`,
-            sessionId,
-            directory: notificationDirectory,
-            requireHidden: settings.notificationMode !== 'always',
-          });
+          };
+          const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
+          broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
         }
 
-        void sendPushToAllUiSessions(
+        void fanoutPush(
           {
             title,
             body,
@@ -437,6 +511,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             data: {
               url: buildSessionDeepLinkUrl(sessionId),
               sessionId,
+              sessionName,
               type: 'question',
             },
           },
@@ -513,9 +588,11 @@ export const createNotificationTriggerRuntime = (deps) => {
 
         let title = 'Permission required';
         let body = fallbackMessage;
+        let sessionName = '';
 
         try {
           const variables = await buildTemplateVariables(payload, sessionId);
+          sessionName = typeof variables.session_name === 'string' ? variables.session_name : sessionName;
           variables.last_message = fallbackMessage;
 
           const templates = settings.notificationTemplates || {};
@@ -530,7 +607,7 @@ export const createNotificationTriggerRuntime = (deps) => {
         }
 
         if (settings.nativeNotificationsEnabled) {
-          emitDesktopNotification({
+          const notificationPayload = {
             kind: 'permission',
             title,
             body,
@@ -538,24 +615,16 @@ export const createNotificationTriggerRuntime = (deps) => {
             sessionId,
             directory: notificationDirectory,
             requireHidden: settings.notificationMode !== 'always',
-          });
-
-          broadcastUiNotification({
-            kind: 'permission',
-            title,
-            body,
-            tag: requestKey ? `permission-${requestKey}` : `permission-${sessionId}`,
-            sessionId,
-            directory: notificationDirectory,
-            requireHidden: settings.notificationMode !== 'always',
-          });
+          };
+          const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
+          broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
         }
 
         if (requestKey) {
           notifiedPermissionRequests.add(requestKey);
         }
 
-        void sendPushToAllUiSessions(
+        void fanoutPush(
           {
             title,
             body,
@@ -563,6 +632,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             data: {
               url: buildSessionDeepLinkUrl(sessionId),
               sessionId,
+              sessionName,
               type: 'permission',
             },
           },
@@ -578,5 +648,6 @@ export const createNotificationTriggerRuntime = (deps) => {
     maybeSendPushForTrigger,
     setAutoAcceptSession,
     setGetIsWindowFocused,
+    clearPendingPushBadge,
   };
 };

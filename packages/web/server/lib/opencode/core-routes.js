@@ -67,6 +67,8 @@ export const registerServerStatusRoutes = (app, dependencies) => {
     serverStartedAt,
     gracefulShutdown,
     getHealthSnapshot,
+    tunnelAuthController = null,
+    uiAuthController = null,
   } = dependencies;
 
   const allocateLoopbackPort = async () => {
@@ -232,11 +234,33 @@ export const registerServerStatusRoutes = (app, dependencies) => {
     });
   });
 
-  app.post('/api/system/shutdown', (_req, res) => {
-    res.json({ ok: true });
-    gracefulShutdown({ exitProcess: true }).catch((error) => {
-      console.error('Shutdown request failed:', error?.message || error);
-    });
+  const requireShutdownAuth = async (req, res, next) => {
+    if (!uiAuthController || typeof uiAuthController.requireAuth !== 'function') {
+      return next();
+    }
+    const requestScope = typeof tunnelAuthController?.classifyRequestScope === 'function'
+      ? tunnelAuthController.classifyRequestScope(req)
+      : 'local';
+    if (
+      (requestScope === 'tunnel' || requestScope === 'unknown-public')
+      && typeof tunnelAuthController?.requireTunnelSession === 'function'
+    ) {
+      return tunnelAuthController.requireTunnelSession(req, res, next);
+    }
+    return uiAuthController.requireAuth(req, res, next);
+  };
+
+  app.post('/api/system/shutdown', async (req, res, next) => {
+    try {
+      await requireShutdownAuth(req, res, () => {
+        res.json({ ok: true });
+        gracefulShutdown({ exitProcess: true }).catch((error) => {
+          console.error('Shutdown request failed:', error?.message || error);
+        });
+      });
+    } catch (error) {
+      next(error);
+    }
   });
 
   app.post('/api/system/dev-shutdown', express.json({ limit: '64kb' }), async (req, res) => {
@@ -361,6 +385,35 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
         if (context?.type === 'session' || context?.type === 'client') {
           await handler(context);
           return;
+        }
+      }
+
+      await runWithUiAuth(req, res, next, async () => {
+        await handler({ type: 'session' });
+      }, { sessionOnly: true });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  const runWithClientCreateAuth = async (req, res, next, handler) => {
+    try {
+      if (typeof uiAuthController.resolveAuthContext === 'function') {
+        const context = await uiAuthController.resolveAuthContext(req, res, {
+          allowClientAuth: true,
+          allowUrlToken: false,
+        });
+        if (context?.type === 'session') {
+          await handler(context);
+          return;
+        }
+        if (context?.type === 'client') {
+          const client = await clientRecordFromAuthContext(context);
+          if (client?.clientKind === 'desktop-local') {
+            await handler({ ...context, client });
+            return;
+          }
+          return res.status(403).json({ error: 'Client tokens cannot create remote clients' });
         }
       }
 
@@ -543,7 +596,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
   });
 
   app.post('/api/client-auth/clients', express.json({ limit: '64kb' }), async (req, res, next) => {
-    await runWithUiAuth(req, res, next, async () => {
+    await runWithClientCreateAuth(req, res, next, async () => {
       const result = await remoteClientAuthRuntime.createClient({
         label: req.body?.label,
         clientKind: req.body?.clientKind,
@@ -551,7 +604,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
       });
       res.setHeader('Cache-Control', 'no-store');
       res.status(201).json(result);
-    }, { sessionOnly: true });
+    });
   });
 
   app.delete('/api/client-auth/clients/:id', async (req, res, next) => {
@@ -620,7 +673,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
             redirect: 'manual',
             signal: AbortSignal.timeout(1500),
           });
-          return res.json({ ok: response.ok, status: response.status });
+          return res.json({ ok: response.status >= 200 && response.status < 600, status: response.status });
         } catch (error) {
           return res.json({ ok: false, error: error?.message || 'Probe failed' });
         }
@@ -706,6 +759,7 @@ export const registerCommonRequestMiddleware = (app, dependencies) => {
       req.path.startsWith('/api/push') ||
       req.path.startsWith('/api/notifications') ||
       req.path.startsWith('/api/session-folders') ||
+      req.path.startsWith('/api/small-model') ||
       req.path.startsWith('/api/text') ||
       req.path.startsWith('/api/voice') ||
       req.path.startsWith('/api/tts') ||

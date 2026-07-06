@@ -17,6 +17,8 @@ import { useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
+import { markSessionViewed } from '@/sync/notification-store';
+import { setExternallyViewedSession, useDirectoryStore } from '@/sync/sync-context';
 import { ContextPanelContent } from './ContextSidebarTab';
 import { toast } from '@/components/ui';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -26,6 +28,7 @@ import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { Icon } from "@/components/icon/Icon";
 import { OpenChamberLogo } from "@/components/ui/OpenChamberLogo";
 import { invokeDesktopCommand } from '@/lib/desktopNative';
+import { getOrCreateEmbeddedSessionChatURL, type EmbeddedSessionChatURLCacheEntry } from './contextPanelEmbeddedChat';
 import {
   type PreviewElementMetadata,
   isPreviewElementMetadata,
@@ -42,6 +45,7 @@ const CONTEXT_PANEL_MAX_WIDTH = 1400;
 const CONTEXT_PANEL_DEFAULT_WIDTH = 600;
 const CONTEXT_TAB_LABEL_MAX_CHARS = 24;
 type TranslateFn = ReturnType<typeof useI18n>['t'];
+const EMPTY_SESSION_TITLE_MAP = new Map<string, string>();
 
 type PreviewConsoleEvent = {
   id: number;
@@ -174,9 +178,27 @@ const getFileNameFromPath = (path: string | null): string | null => {
 };
 
 const getTabLabel = (
-  tab: { mode: ContextPanelMode; label: string | null; targetPath: string | null; stagedDiff?: boolean },
+  tab: { mode: ContextPanelMode; label: string | null; targetPath: string | null; dedupeKey?: string; sessionTitleFallback?: string | null; stagedDiff?: boolean },
+  sessionTitleById: ReadonlyMap<string, string>,
   t: TranslateFn
 ): string => {
+  if (tab.mode === 'chat') {
+    const sessionID = getSessionIDFromDedupeKey(tab.dedupeKey);
+    if (sessionID) {
+      const sessionTitle = sessionTitleById.get(sessionID)?.trim();
+      if (sessionTitle) {
+        return sessionTitle;
+      }
+    }
+
+    const sessionTitleFallback = tab.sessionTitleFallback?.trim();
+    if (sessionTitleFallback) {
+      return sessionTitleFallback;
+    }
+
+    return t('contextPanel.mode.chat');
+  }
+
   if (tab.label) {
     return tab.label;
   }
@@ -199,7 +221,7 @@ const getTabLabel = (
   }
 
   if (tab.mode === 'diff') {
-    return tab.stagedDiff ? t('contextPanel.mode.stagedDiff') : t('contextPanel.mode.workingDiff');
+    return t('contextPanel.mode.diff');
   }
 
   return getModeLabel(tab.mode, t);
@@ -246,6 +268,47 @@ const getSessionIDFromDedupeKey = (dedupeKey: string | undefined): string | null
 
   const sessionID = dedupeKey.slice('session:'.length).trim();
   return sessionID || null;
+};
+
+const areTitleMapsEqual = (a: ReadonlyMap<string, string>, b: ReadonlyMap<string, string>): boolean => {
+  if (a.size !== b.size) return false;
+  for (const [key, value] of a) {
+    if (b.get(key) !== value) return false;
+  }
+  return true;
+};
+
+const buildSessionTitleMap = (sessions: Array<{ id: string; title?: string | null }>, sessionIDs: readonly string[]): Map<string, string> => {
+  if (sessionIDs.length === 0) return EMPTY_SESSION_TITLE_MAP;
+  const wanted = new Set(sessionIDs);
+  const next = new Map<string, string>();
+  for (const session of sessions) {
+    if (!wanted.has(session.id)) continue;
+    const title = session.title?.trim();
+    if (title) next.set(session.id, title);
+  }
+  return next.size === 0 ? EMPTY_SESSION_TITLE_MAP : next;
+};
+
+const useSessionTitleMap = (directory: string | undefined, sessionIDs: readonly string[]): ReadonlyMap<string, string> => {
+  const store = useDirectoryStore(directory);
+  const snapshotRef = React.useRef<ReadonlyMap<string, string>>(EMPTY_SESSION_TITLE_MAP);
+  const sessionIDsRef = React.useRef<readonly string[]>(sessionIDs);
+
+  sessionIDsRef.current = sessionIDs;
+
+  return React.useSyncExternalStore(
+    store.subscribe,
+    React.useCallback(() => {
+      const next = buildSessionTitleMap(store.getState().session, sessionIDsRef.current);
+      if (areTitleMapsEqual(snapshotRef.current, next)) {
+        return snapshotRef.current;
+      }
+      snapshotRef.current = next;
+      return next;
+    }, [store]),
+    () => EMPTY_SESSION_TITLE_MAP,
+  );
 };
 
 const DESKTOP_BROWSER_INSPECT_SCRIPT = `new Promise((resolve) => {
@@ -401,29 +464,6 @@ const runIframeScript = async <T,>(iframe: HTMLIFrameElement, script: string): P
 };
 
 
-const buildEmbeddedSessionChatURL = (sessionID: string, directory: string | null, readOnly: boolean): string => {
-  if (typeof window === 'undefined') {
-    return '';
-  }
-
-  const url = new URL(window.location.pathname, window.location.origin);
-  url.searchParams.set('ocPanel', 'session-chat');
-  url.searchParams.set('sessionId', sessionID);
-  if (readOnly) {
-    url.searchParams.set('readOnly', '1');
-  } else {
-    url.searchParams.delete('readOnly');
-  }
-  if (directory && directory.trim().length > 0) {
-    url.searchParams.set('directory', directory);
-  } else {
-    url.searchParams.delete('directory');
-  }
-
-  url.hash = '';
-  return url.toString();
-};
-
 const truncateTabLabel = (value: string, maxChars: number): string => {
   if (value.length <= maxChars) {
     return value;
@@ -469,6 +509,21 @@ const stripPreviewTokenFromUrl = (value: string): string => {
     return value;
   }
 };
+
+const stripPreviewQueryParams = (value: string): string => {
+  if (!value) return value;
+  try {
+    const parsed = new URL(value);
+    parsed.searchParams.delete('ocPreview');
+    parsed.searchParams.delete('oc_preview_token');
+    parsed.searchParams.delete('oc_client_token');
+    parsed.searchParams.delete('oc_url_token');
+    return parsed.toString();
+  } catch {
+    return value;
+  }
+};
+
 const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
@@ -615,6 +670,8 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
     ? (() => {
       const path = normalizedUrl.pathname || '/';
       const searchParams = new URLSearchParams(normalizedUrl.search);
+      searchParams.delete('oc_url_token');
+      searchParams.delete('oc_client_token');
       searchParams.set('ocPreview', String(reloadNonce));
       searchParams.set('oc_preview_token', proxyState.previewToken || '');
       const search = searchParams.toString();
@@ -1416,6 +1473,8 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
       const parsed = new URL(currentUrl);
       const path = parsed.pathname || '/';
       const searchParams = new URLSearchParams(parsed.search);
+      searchParams.delete('oc_url_token');
+      searchParams.delete('oc_client_token');
       searchParams.set('ocPreview', String(reloadNonce));
       searchParams.set('oc_preview_token', proxyState.previewToken || '');
       const search = searchParams.toString();
@@ -1440,7 +1499,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
 
       const rest = parsedFrameUrl.pathname.slice(proxyBasePath.length) || '/';
       const upstreamOrigin = new URL(currentUrl).origin;
-      return new URL(`${rest}${parsedFrameUrl.search}${parsedFrameUrl.hash}`, upstreamOrigin).toString();
+      return stripPreviewQueryParams(new URL(`${rest}${parsedFrameUrl.search}${parsedFrameUrl.hash}`, upstreamOrigin).toString());
     } catch {
       return '';
     }
@@ -1462,7 +1521,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
         return '';
       }
 
-      return new URL(`${parsedFrameUrl.pathname}${parsedFrameUrl.search}${parsedFrameUrl.hash}`, upstreamOrigin).toString();
+      return stripPreviewQueryParams(new URL(`${parsedFrameUrl.pathname}${parsedFrameUrl.search}${parsedFrameUrl.hash}`, upstreamOrigin).toString());
     } catch {
       return '';
     }
@@ -1997,19 +2056,30 @@ export const ContextPanel: React.FC = () => {
   const panelState = useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined));
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
   const closeContextPanelTab = useUIStore((state) => state.closeContextPanelTab);
+  const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
   const toggleContextPanelExpanded = useUIStore((state) => state.toggleContextPanelExpanded);
   const setContextPanelWidth = useUIStore((state) => state.setContextPanelWidth);
   const setActiveContextPanelTab = useUIStore((state) => state.setActiveContextPanelTab);
   const reorderContextPanelTabs = useUIStore((state) => state.reorderContextPanelTabs);
   const setSelectedFilePath = useFilesViewTabsStore((state) => state.setSelectedPath);
   const openContextPreview = useUIStore((state) => state.openContextPreview);
-  const { themeMode, lightThemeId, darkThemeId, currentTheme } = useThemeSystem();
+  const { themeMode, setThemeMode, lightThemeId, darkThemeId, currentTheme } = useThemeSystem();
 
   const tabs = React.useMemo(() => panelState?.tabs ?? [], [panelState?.tabs]);
   const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? tabs[tabs.length - 1] ?? null;
   const isOpen = Boolean(panelState?.isOpen && activeTab);
   const isExpanded = Boolean(isOpen && panelState?.expanded);
   const width = clampWidth(panelState?.width ?? CONTEXT_PANEL_DEFAULT_WIDTH);
+  const chatSessionIDs = React.useMemo(() => {
+    const ids: string[] = [];
+    for (const tab of tabs) {
+      if (tab.mode !== 'chat') continue;
+      const sessionID = getSessionIDFromDedupeKey(tab.dedupeKey);
+      if (sessionID && !ids.includes(sessionID)) ids.push(sessionID);
+    }
+    return ids;
+  }, [tabs]);
+  const sessionTitleById = useSessionTitleMap(directoryKey || undefined, chatSessionIDs);
 
   const [isResizing, setIsResizing] = React.useState(false);
   const [suppressWidthTransition, setSuppressWidthTransition] = React.useState(false);
@@ -2019,6 +2089,7 @@ export const ContextPanel: React.FC = () => {
   const activeResizePointerIDRef = React.useRef<number | null>(null);
   const panelRef = React.useRef<HTMLElement | null>(null);
   const chatFrameRefs = React.useRef<Map<string, HTMLIFrameElement>>(new Map());
+  const chatFrameSrcByTabIDRef = React.useRef<Map<string, EmbeddedSessionChatURLCacheEntry>>(new Map());
   const wasOpenRef = React.useRef(false);
   const previousIsOpenRef = React.useRef(isOpen);
   const suppressWidthTransitionFrameRef = React.useRef<number | null>(null);
@@ -2170,13 +2241,74 @@ export const ContextPanel: React.FC = () => {
     }
 
     if (activeTab.mode === 'file' && activeTab.targetPath) {
-      setSelectedFilePath(directoryKey, activeTab.targetPath);
+      setSelectedFilePath(directoryKey, activeTab.targetPath, { allowOutsideRoot: true });
       return;
     }
 
   }, [activeTab, directoryKey, setSelectedFilePath]);
 
   const activeChatTabID = activeTab?.mode === 'chat' ? activeTab.id : null;
+  const activeChatSessionID = activeTab?.mode === 'chat' ? getSessionIDFromDedupeKey(activeTab.dedupeKey) : null;
+
+  React.useEffect(() => {
+    if (!isOpen || !directoryKey || !activeChatSessionID || typeof window === 'undefined') {
+      return;
+    }
+
+    const markActiveChatViewed = () => {
+      if (document.visibilityState === 'hidden' || !document.hasFocus()) {
+        setExternallyViewedSession(directoryKey, activeChatSessionID, false);
+        return;
+      }
+
+      markSessionViewed(activeChatSessionID);
+      setExternallyViewedSession(directoryKey, activeChatSessionID, true);
+    };
+
+    markActiveChatViewed();
+    const interval = window.setInterval(markActiveChatViewed, 10_000);
+    window.addEventListener('focus', markActiveChatViewed);
+    window.addEventListener('blur', markActiveChatViewed);
+    document.addEventListener('visibilitychange', markActiveChatViewed);
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', markActiveChatViewed);
+      window.removeEventListener('blur', markActiveChatViewed);
+      document.removeEventListener('visibilitychange', markActiveChatViewed);
+      setExternallyViewedSession(directoryKey, activeChatSessionID, false);
+    };
+  }, [activeChatSessionID, directoryKey, isOpen]);
+
+  const getEmbeddedChatSrc = React.useCallback((tabID: string, sessionID: string, readOnly: boolean): string => {
+    return getOrCreateEmbeddedSessionChatURL(chatFrameSrcByTabIDRef.current, tabID, sessionID, directoryKey || null, readOnly, {
+      mode: themeMode,
+      lightThemeId,
+      darkThemeId,
+      currentTheme,
+    });
+  }, [currentTheme, darkThemeId, directoryKey, lightThemeId, themeMode]);
+
+  React.useEffect(() => {
+    const liveTabIDs = new Set(tabs.map((tab) => tab.id));
+    for (const tabID of chatFrameSrcByTabIDRef.current.keys()) {
+      if (!liveTabIDs.has(tabID)) {
+        chatFrameSrcByTabIDRef.current.delete(tabID);
+      }
+    }
+  }, [tabs]);
+
+  const handleDiffScopeChange = React.useCallback((nextScope: 'working' | 'staged') => {
+    if (!directoryKey || activeTab?.mode !== 'diff') {
+      return;
+    }
+
+    openContextPanelTab(directoryKey, {
+      mode: 'diff',
+      targetPath: activeTab.targetPath,
+      stagedDiff: nextScope === 'staged',
+    });
+  }, [activeTab, directoryKey, openContextPanelTab]);
 
   const postThemeSyncToEmbeddedChat = React.useCallback(() => {
     if (typeof window === 'undefined') {
@@ -2254,6 +2386,37 @@ export const ContextPanel: React.FC = () => {
     }
   }, [activeChatTabID]);
 
+  React.useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) {
+        return;
+      }
+
+      const isKnownChatFrame = Array.from(chatFrameRefs.current.values())
+        .some((frame) => frame.contentWindow === event.source);
+      if (!isKnownChatFrame) {
+        return;
+      }
+
+      const data = event.data as { type?: unknown };
+      if (data?.type !== 'openchamber:cycle-theme-request') {
+        return;
+      }
+
+      const modes: Array<'light' | 'dark' | 'system'> = ['light', 'dark', 'system'];
+      const currentIndex = modes.indexOf(themeMode);
+      const nextIndex = (currentIndex + 1) % modes.length;
+      setThemeMode(modes[nextIndex]);
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [setThemeMode, themeMode]);
+
   React.useLayoutEffect(() => {
     const hasAnyChatTab = tabs.some((tab) => tab.mode === 'chat');
     if (!hasAnyChatTab) {
@@ -2265,7 +2428,7 @@ export const ContextPanel: React.FC = () => {
   }, [darkThemeId, lightThemeId, postEmbeddedVisibilityToChats, postThemeSyncToEmbeddedChat, tabs, themeMode]);
 
   const tabItems = React.useMemo(() => tabs.map((tab) => {
-    const rawLabel = getTabLabel(tab, t);
+    const rawLabel = getTabLabel(tab, sessionTitleById, t);
     const label = truncateTabLabel(rawLabel, CONTEXT_TAB_LABEL_MAX_CHARS);
     const tabPathLabel = getRelativePathLabel(tab.targetPath, effectiveDirectory);
     return {
@@ -2275,22 +2438,9 @@ export const ContextPanel: React.FC = () => {
       title: tabPathLabel ? `${rawLabel}: ${tabPathLabel}` : rawLabel,
       closeLabel: t('contextPanel.tab.closeTabAria', { label }),
     };
-  }), [effectiveDirectory, t, tabs]);
+  }), [effectiveDirectory, sessionTitleById, t, tabs]);
 
-  const activeNonChatContent = activeTab?.mode === 'diff'
-    ? (
-      <DiffView
-        key={activeTab.id}
-        hideStackedFileSidebar
-        stackedDefaultCollapsedAll
-        hideFileSelector
-        pinSelectedFileHeaderToTopOnNavigate
-        showOpenInEditorAction
-        diffScope={activeTab.stagedDiff ? 'staged' : 'working'}
-        targetFilePath={activeTab.targetPath}
-      />
-    )
-    : activeTab?.mode === 'context'
+  const activeNonChatContent = activeTab?.mode === 'context'
         ? <ContextPanelContent />
         : activeTab?.mode === 'plan'
             ? <PlanView targetPath={activeTab.targetPath} />
@@ -2310,6 +2460,10 @@ export const ContextPanel: React.FC = () => {
   );
   const browserTabs = React.useMemo(
     () => tabs.filter((tab) => tab.mode === 'browser'),
+    [tabs],
+  );
+  const diffTabs = React.useMemo(
+    () => tabs.filter((tab) => tab.mode === 'diff'),
     [tabs],
   );
   const BrowserPane = isElectronBrowserRuntime() ? DesktopBrowserPane : IframeBrowserPane;
@@ -2418,7 +2572,7 @@ export const ContextPanel: React.FC = () => {
       {!isExpanded && (
         <div
           className={cn(
-            'absolute left-0 top-0 z-20 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--interactive-border)]/80',
+            'absolute left-0 top-0 z-50 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--interactive-border)]/80',
             isResizing && 'bg-[var(--interactive-border)]'
           )}
           onPointerDown={handleResizeStart}
@@ -2443,7 +2597,7 @@ export const ContextPanel: React.FC = () => {
             return null;
           }
 
-          const src = buildEmbeddedSessionChatURL(sessionID, directoryKey || null, tab.readOnly);
+          const src = getEmbeddedChatSrc(tab.id, sessionID, tab.readOnly);
           if (!src) {
             return null;
           }
@@ -2482,7 +2636,27 @@ export const ContextPanel: React.FC = () => {
             <BrowserPane initialUrl={tab.targetPath ?? ''} directory={directoryKey} tabID={tab.id} />
           </div>
         ))}
-        {activeTab?.mode !== 'chat' && !isFileTabActive && activeTab?.mode !== 'browser' ? activeNonChatContent : null}
+        {diffTabs.map((tab) => (
+          <div
+            key={tab.id}
+            className={cn(
+              'absolute inset-0',
+              activeTab?.id !== tab.id && 'hidden'
+            )}
+          >
+            <DiffView
+              hideStackedFileSidebar
+              stackedDefaultCollapsedAll
+              pinSelectedFileHeaderToTopOnNavigate
+              showOpenInEditorAction
+              diffScope={tab.stagedDiff ? 'staged' : 'working'}
+              onDiffScopeChange={handleDiffScopeChange}
+              targetFilePath={tab.targetPath}
+              flushContent
+            />
+          </div>
+        ))}
+        {activeTab?.mode !== 'chat' && !isFileTabActive && activeTab?.mode !== 'browser' && activeTab?.mode !== 'diff' ? activeNonChatContent : null}
       </div>
     </aside>
   );

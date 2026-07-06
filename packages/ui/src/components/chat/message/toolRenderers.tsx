@@ -11,7 +11,7 @@ const cleanOutput = (output: string) => {
     return cleaned.trim();
 };
 
-export const hasLspDiagnostics = (output: string): boolean => {
+const hasLspDiagnostics = (output: string): boolean => {
     if (!output) return false;
     return output.includes('<diagnostics')
         || output.includes('<file_diagnostics>')
@@ -124,7 +124,7 @@ export const formatEditOutput = (output: string, toolName: string, metadata?: Re
     return cleaned;
 };
 
-export interface ParsedReadOutputLine {
+interface ParsedReadOutputLine {
     text: string;
     lineNumber: number | null;
     isInfo: boolean;
@@ -510,7 +510,7 @@ export const renderTodoOutput = (
     }
 };
 
-export const renderWebSearchOutput = (output: string, _syntaxTheme: { [key: string]: React.CSSProperties }, options?: { unstyled?: boolean }) => {
+export const renderWebSearchOutput = (output: string, options?: { unstyled?: boolean }) => {
     try {
         return (
             <div
@@ -528,9 +528,9 @@ export const renderWebSearchOutput = (output: string, _syntaxTheme: { [key: stri
     }
 };
 
-export type DiffLineType = 'context' | 'added' | 'removed';
+type DiffLineType = 'context' | 'added' | 'removed';
 
-export interface UnifiedDiffLine {
+interface UnifiedDiffLine {
     type: DiffLineType;
     lineNumber: number | null;
     content: string;
@@ -541,18 +541,6 @@ export interface UnifiedDiffHunk {
     oldStart: number;
     newStart: number;
     lines: UnifiedDiffLine[];
-}
-
-export interface SideBySideDiffLine {
-    leftLine: { type: 'context' | 'removed' | 'empty'; lineNumber: number | null; content: string };
-    rightLine: { type: 'context' | 'added' | 'empty'; lineNumber: number | null; content: string };
-}
-
-export interface SideBySideDiffHunk {
-    file: string;
-    oldStart: number;
-    newStart: number;
-    lines: SideBySideDiffLine[];
 }
 
 export const parseDiffToUnified = (diffText: string): UnifiedDiffHunk[] => {
@@ -603,199 +591,6 @@ export const parseDiffToUnified = (diffText: string): UnifiedDiffHunk[] => {
                 oldStart,
                 newStart,
                 lines: unifiedLines,
-            });
-
-            i = j;
-            continue;
-        }
-
-        i++;
-    }
-
-    return hunks;
-};
-
-export const parseDiffToLines = (diffText: string): SideBySideDiffHunk[] => {
-    const lines = diffText.split('\n');
-    let currentFile = '';
-    const hunks: SideBySideDiffHunk[] = [];
-
-    let i = 0;
-    while (i < lines.length) {
-        const line = lines[i];
-
-        if (line.startsWith('Index:') || line.startsWith('===') || line.startsWith('---') || line.startsWith('+++')) {
-            if (line.startsWith('Index:')) {
-                currentFile = line.split(' ')[1].split('/').pop() || 'file';
-            }
-            i++;
-            continue;
-        }
-
-        if (line.startsWith('@@')) {
-            const match = line.match(/@@ -(\d+),\d+ \+(\d+),\d+ @@/);
-            const oldStart = match ? parseInt(match[1]) : 0;
-            const newStart = match ? parseInt(match[2]) : 0;
-
-            const changes: Array<{
-                type: 'context' | 'added' | 'removed';
-                content: string;
-                oldLine?: number;
-                newLine?: number;
-            }> = [];
-
-            let oldLineNum = oldStart;
-            let newLineNum = newStart;
-            let j = i + 1;
-
-            while (j < lines.length && !lines[j].startsWith('@@') && !lines[j].startsWith('Index:')) {
-                const contentLine = lines[j];
-                if (contentLine.startsWith('+')) {
-                    changes.push({ type: 'added', content: contentLine.substring(1), newLine: newLineNum });
-                    newLineNum++;
-                } else if (contentLine.startsWith('-')) {
-                    changes.push({ type: 'removed', content: contentLine.substring(1), oldLine: oldLineNum });
-                    oldLineNum++;
-                } else if (contentLine.startsWith(' ')) {
-                    changes.push({
-                        type: 'context',
-                        content: contentLine.substring(1),
-                        oldLine: oldLineNum,
-                        newLine: newLineNum,
-                    });
-                    oldLineNum++;
-                    newLineNum++;
-                }
-                j++;
-            }
-
-            const alignedLines: Array<{
-                leftLine: { type: 'context' | 'removed' | 'empty'; lineNumber: number | null; content: string };
-                rightLine: { type: 'context' | 'added' | 'empty'; lineNumber: number | null; content: string };
-            }> = [];
-
-            const leftSide: Array<{ type: 'context' | 'removed'; lineNumber: number; content: string }> = [];
-            const rightSide: Array<{ type: 'context' | 'added'; lineNumber: number; content: string }> = [];
-
-            changes.forEach((change) => {
-                if (change.type === 'context') {
-                    leftSide.push({ type: 'context', lineNumber: change.oldLine!, content: change.content });
-                    rightSide.push({ type: 'context', lineNumber: change.newLine!, content: change.content });
-                } else if (change.type === 'removed') {
-                    leftSide.push({ type: 'removed', lineNumber: change.oldLine!, content: change.content });
-                } else if (change.type === 'added') {
-                    rightSide.push({ type: 'added', lineNumber: change.newLine!, content: change.content });
-                }
-            });
-
-            const alignmentPoints: Array<{ leftIdx: number; rightIdx: number }> = [];
-
-            leftSide.forEach((leftItem, leftIdx) => {
-                if (leftItem.type === 'context') {
-                    const rightIdx = rightSide.findIndex((rightItem, rIdx) =>
-                        rightItem.type === 'context' &&
-                        rightItem.content === leftItem.content &&
-                        !alignmentPoints.some((ap) => ap.rightIdx === rIdx)
-                    );
-                    if (rightIdx >= 0) {
-                        alignmentPoints.push({ leftIdx, rightIdx });
-                    }
-                }
-            });
-
-            alignmentPoints.sort((a, b) => a.leftIdx - b.leftIdx);
-
-            let leftIdx = 0;
-            let rightIdx = 0;
-            let alignIdx = 0;
-
-            while (leftIdx < leftSide.length || rightIdx < rightSide.length) {
-                const nextAlign = alignIdx < alignmentPoints.length ? alignmentPoints[alignIdx] : null;
-
-                if (nextAlign && leftIdx === nextAlign.leftIdx && rightIdx === nextAlign.rightIdx) {
-                    const leftItem = leftSide[leftIdx];
-                    const rightItem = rightSide[rightIdx];
-
-                    alignedLines.push({
-                        leftLine: {
-                            type: 'context',
-                            lineNumber: leftItem.lineNumber,
-                            content: leftItem.content,
-                        },
-                        rightLine: {
-                            type: 'context',
-                            lineNumber: rightItem.lineNumber,
-                            content: rightItem.content,
-                        },
-                    });
-
-                    leftIdx++;
-                    rightIdx++;
-                    alignIdx++;
-                } else {
-                    const needProcessLeft = leftIdx < leftSide.length && (!nextAlign || leftIdx < nextAlign.leftIdx);
-                    const needProcessRight = rightIdx < rightSide.length && (!nextAlign || rightIdx < nextAlign.rightIdx);
-
-                    if (needProcessLeft && needProcessRight) {
-                        const leftItem = leftSide[leftIdx];
-                        const rightItem = rightSide[rightIdx];
-
-                        alignedLines.push({
-                            leftLine: {
-                                type: leftItem.type,
-                                lineNumber: leftItem.lineNumber,
-                                content: leftItem.content,
-                            },
-                            rightLine: {
-                                type: rightItem.type,
-                                lineNumber: rightItem.lineNumber,
-                                content: rightItem.content,
-                            },
-                        });
-
-                        leftIdx++;
-                        rightIdx++;
-                    } else if (needProcessLeft) {
-                        const leftItem = leftSide[leftIdx];
-                        alignedLines.push({
-                            leftLine: {
-                                type: leftItem.type,
-                                lineNumber: leftItem.lineNumber,
-                                content: leftItem.content,
-                            },
-                            rightLine: {
-                                type: 'empty',
-                                lineNumber: null,
-                                content: '',
-                            },
-                        });
-                        leftIdx++;
-                    } else if (needProcessRight) {
-                        const rightItem = rightSide[rightIdx];
-                        alignedLines.push({
-                            leftLine: {
-                                type: 'empty',
-                                lineNumber: null,
-                                content: '',
-                            },
-                            rightLine: {
-                                type: rightItem.type,
-                                lineNumber: rightItem.lineNumber,
-                                content: rightItem.content,
-                            },
-                        });
-                        rightIdx++;
-                    } else {
-                        break;
-                    }
-                }
-            }
-
-            hunks.push({
-                file: currentFile,
-                oldStart,
-                newStart,
-                lines: alignedLines,
             });
 
             i = j;

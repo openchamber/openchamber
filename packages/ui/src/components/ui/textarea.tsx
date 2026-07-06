@@ -213,29 +213,4 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
 
 Textarea.displayName = "Textarea"
 
-function TextareaCharCounter({
-  current,
-  max,
-  className,
-}: {
-  current?: number;
-  max?: number;
-  className?: string;
-}) {
-  if (current === undefined || max === undefined) return null;
-  const isError = current > max;
-  return (
-    <span
-      className={cn(
-        "typography-meta text-muted-foreground",
-        "group-has-[[disabled]]/textarea:text-muted-foreground/60",
-        isError && "text-[var(--status-error)]",
-        className,
-      )}
-    >
-      {current}/{max}
-    </span>
-  );
-}
-
-export { Textarea, TextareaCharCounter }
+export { Textarea }

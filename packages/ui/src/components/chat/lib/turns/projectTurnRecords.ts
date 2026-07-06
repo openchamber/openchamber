@@ -115,12 +115,43 @@ const canReusePreviousTurn = (previous: TurnRecord, next: TurnRecord): boolean =
         && areSameMessageRefs(previous.assistantMessages, next.assistantMessages);
 };
 
-const stabilizeTurnRecords = (
+const hydrateTurnRecord = (
+    turn: TurnRecord,
+    effectiveOptions: ProjectTurnRecordsOptions,
+): TurnRecord => {
+    turn.summary = projectTurnSummary(turn.assistantMessages);
+    turn.summaryText = turn.summary.text ?? getUserSummaryBody(turn.userMessage);
+    turn.diffStats = projectTurnDiffStats(turn.userMessage);
+    turn.changedFiles = effectiveOptions.showTurnChangedFiles
+        ? projectTurnChangedFiles(turn.userMessage)
+        : undefined;
+
+    const activity = projectTurnActivity({
+        turnId: turn.turnId,
+        assistantMessages: turn.assistantMessages,
+        summarySourceMessageId: turn.summary.sourceMessageId,
+        summarySourcePartId: turn.summary.sourcePartId,
+        showTextJustificationActivity: effectiveOptions.showTextJustificationActivity,
+    });
+    turn.activityParts = activity.activityParts;
+    turn.activitySegments = activity.activitySegments;
+    turn.hasTools = activity.hasTools;
+    turn.hasReasoning = activity.hasReasoning;
+
+    turn.stream = buildTurnStreamState(turn.userMessage, turn.assistantMessages);
+    turn.startedAt = turn.stream.startedAt;
+    turn.completedAt = turn.stream.completedAt;
+    turn.durationMs = turn.stream.durationMs;
+    return turn;
+};
+
+const hydrateStableTurnRecords = (
     turns: TurnRecord[],
-    previousProjection?: TurnProjectionResult | null,
+    effectiveOptions: ProjectTurnRecordsOptions,
 ): TurnRecord[] => {
+    const previousProjection = effectiveOptions.previousProjection;
     if (!previousProjection || previousProjection.turns.length === 0 || turns.length === 0) {
-        return turns;
+        return turns.map((turn) => hydrateTurnRecord(turn, effectiveOptions));
     }
 
     let canReuseTurnArray = previousProjection.turns.length === turns.length;
@@ -137,14 +168,14 @@ const stabilizeTurnRecords = (
         }
 
         canReuseTurnArray = false;
-        return turn;
+        return hydrateTurnRecord(turn, effectiveOptions);
     });
 
     if (canReuseTurnArray && reusedAnyTurn) {
         return previousProjection.turns;
     }
 
-    return reusedAnyTurn ? nextTurns : turns;
+    return nextTurns;
 };
 
 export const projectTurnRecords = (
@@ -214,33 +245,7 @@ export const projectTurnRecords = (
         groupedMessageIds.add(message.info.id);
     });
 
-    turns.forEach((turn) => {
-        turn.summary = projectTurnSummary(turn.assistantMessages);
-        turn.summaryText = turn.summary.text ?? getUserSummaryBody(turn.userMessage);
-        turn.diffStats = projectTurnDiffStats(turn.userMessage);
-        turn.changedFiles = effectiveOptions.showTurnChangedFiles
-            ? projectTurnChangedFiles(turn.userMessage)
-            : undefined;
-
-        const activity = projectTurnActivity({
-            turnId: turn.turnId,
-            assistantMessages: turn.assistantMessages,
-            summarySourceMessageId: turn.summary.sourceMessageId,
-            summarySourcePartId: turn.summary.sourcePartId,
-            showTextJustificationActivity: effectiveOptions.showTextJustificationActivity,
-        });
-        turn.activityParts = activity.activityParts;
-        turn.activitySegments = activity.activitySegments;
-        turn.hasTools = activity.hasTools;
-        turn.hasReasoning = activity.hasReasoning;
-
-        turn.stream = buildTurnStreamState(turn.userMessage, turn.assistantMessages);
-        turn.startedAt = turn.stream.startedAt;
-        turn.completedAt = turn.stream.completedAt;
-        turn.durationMs = turn.stream.durationMs;
-    });
-
-    const stableTurns = stabilizeTurnRecords(turns, effectiveOptions.previousProjection);
+    const stableTurns = hydrateStableTurnRecords(turns, effectiveOptions);
     const projection = projectTurnIndexes(stableTurns);
     const ungroupedMessageIds = new Set<string>();
     messages.forEach((message) => {

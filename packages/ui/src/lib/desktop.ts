@@ -5,9 +5,10 @@ import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 
-export type AssistantNotificationPayload = {
-  title?: string;
-  body?: string;
+type ManagedRemoteTunnelPreset = {
+  id: string;
+  name: string;
+  hostname: string;
 };
 
 export type UpdateInfo = {
@@ -35,12 +36,6 @@ export type SkillCatalogConfig = {
   gitIdentityId?: string;
 };
 
-export type ManagedRemoteTunnelPreset = {
-  id: string;
-  name: string;
-  hostname: string;
-};
-
 export type DesktopSettings = {
   themeId?: string;
   useSystemTheme?: boolean;
@@ -56,10 +51,10 @@ export type DesktopSettings = {
   // Optional absolute path to `opencode` binary.
   opencodeBinary?: string;
   desktopLanAccessEnabled?: boolean;
+  desktopKeepAwakeEnabled?: boolean;
   desktopUiPassword?: string;
   projects?: ProjectEntry[];
   activeProjectId?: string;
-  approvedDirectories?: string[];
   securityScopedBookmarks?: string[];
   pinnedDirectories?: string[];
   showReasoningTraces?: boolean;
@@ -118,9 +113,13 @@ export type DesktopSettings = {
   defaultModel?: string; // format: "provider/model"
   defaultVariant?: string;
   defaultAgent?: string;
+  smallModelUseDefault?: boolean;
+  sessionAssistEnabled?: boolean;
+  smallModelOverride?: string; // format: "provider/model"
   defaultGitIdentityId?: string; // ''/undefined = unset, 'global' or profile id
   openInAppId?: string;
   autoCreateWorktree?: boolean;
+  followUpBehavior?: 'steer' | 'queue';
   queueModeEnabled?: boolean;
   gitmojiEnabled?: boolean;
   defaultFileViewerPreview?: boolean;
@@ -144,7 +143,9 @@ export type DesktopSettings = {
   activityRenderMode?: 'collapsed' | 'summary';
   mermaidRenderingMode?: 'svg' | 'ascii';
   userMessageRenderingMode?: 'markdown' | 'plain';
+  collapsibleUserMessages?: boolean;
   stickyUserHeader?: boolean;
+  expandedEditorToolbar?: boolean;
   wideChatLayoutEnabled?: boolean;
   showSplitAssistantMessageActions?: boolean;
   fontSize?: number;
@@ -157,9 +158,12 @@ export type DesktopSettings = {
   shortcutOverrides?: Record<string, string>;
 
   favoriteModels?: Array<{ providerID: string; modelID: string }>;
+  hiddenModels?: Array<{ providerID: string; modelID: string }>;
+  collapsedModelProviders?: string[];
   recentModels?: Array<{ providerID: string; modelID: string }>;
+  recentAgents?: string[];
+  recentEfforts?: Record<string, string[]>;
   diffLayoutPreference?: 'dynamic' | 'inline' | 'side-by-side';
-  diffViewMode?: 'single' | 'stacked';
   gitChangesViewMode?: 'flat' | 'tree';
   directoryShowHidden?: boolean;
   filesViewShowGitignored?: boolean;
@@ -177,14 +181,12 @@ export type DesktopSettings = {
   responseStyleEnabled?: boolean;
   responseStylePreset?: 'concise' | 'detailed' | 'mentor' | 'pushback' | 'noFiller' | 'matchEnergy' | 'warmPeer' | 'custom';
   responseStyleCustomInstructions?: string;
-  sttProvider?: 'browser' | 'server' | 'wasm';
+  dictationEnabled?: boolean;
+  sttProvider?: 'local' | 'openai-compatible';
   sttServerUrl?: string;
   sttModel?: string;
-  wasmSttModel?: string;
+  sttLocalModel?: string;
   sttLanguage?: string;
-  sttSilenceThresholdDb?: number;
-  sttSilenceHoldMs?: number;
-  sttTranscribeOnStop?: boolean;
   // Global draft welcome starters (pinned commands/skills), persisted to settings.json
   draftStarters?: DraftStarterRef[];
 };
@@ -192,6 +194,7 @@ export type DesktopSettings = {
 type DesktopBridgeGlobal = {
   invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
   openDialog?: (options: Record<string, unknown>) => Promise<unknown>;
+  grantFileAccess?: (path: string) => Promise<unknown>;
   openExternal?: (url: string) => Promise<unknown>;
   listen?: (
     event: string,
@@ -201,6 +204,8 @@ type DesktopBridgeGlobal = {
 
 type ElectronRuntimeGlobal = {
   runtime?: string;
+  macVibrancy?: boolean;
+  macVibrancySupported?: boolean;
 };
 
 const getElectronRuntime = (): ElectronRuntimeGlobal | null => {
@@ -230,6 +235,12 @@ export const invokeDesktop = async <T = unknown>(command: string, args?: Record<
 type LaunchAtLoginStatus = {
   supported: boolean;
   enabled: boolean;
+};
+
+type KeepAwakeStatus = {
+  supported: boolean;
+  enabled: boolean;
+  active: boolean;
 };
 
 export const getDesktopLaunchAtLogin = async (): Promise<LaunchAtLoginStatus | null> => {
@@ -262,6 +273,40 @@ export const setDesktopLaunchAtLogin = async (enabled: boolean): Promise<LaunchA
     return result;
   } catch (error) {
     console.warn('Failed to set launch at login status', error);
+    return null;
+  }
+};
+
+export const getDesktopKeepAwake = async (): Promise<KeepAwakeStatus | null> => {
+  if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
+    return null;
+  }
+
+  try {
+    const result = await invokeDesktop<KeepAwakeStatus>('desktop_get_keep_awake');
+    if (!result || typeof result.supported !== 'boolean' || typeof result.enabled !== 'boolean' || typeof result.active !== 'boolean') {
+      return null;
+    }
+    return result;
+  } catch (error) {
+    console.warn('Failed to get keep awake status', error);
+    return null;
+  }
+};
+
+export const setDesktopKeepAwake = async (enabled: boolean): Promise<KeepAwakeStatus | null> => {
+  if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
+    return null;
+  }
+
+  try {
+    const result = await invokeDesktop<KeepAwakeStatus>('desktop_set_keep_awake', { enabled });
+    if (!result || typeof result.supported !== 'boolean' || typeof result.enabled !== 'boolean' || typeof result.active !== 'boolean') {
+      return null;
+    }
+    return result;
+  } catch (error) {
+    console.warn('Failed to set keep awake status', error);
     return null;
   }
 };
@@ -431,22 +476,43 @@ export const requestDirectoryAccess = async (
   return { success: true, path: directoryPath };
 };
 
+const isDesktopFileGrantResult = (
+  value: unknown
+): value is { path?: unknown; outsideFileGrant?: unknown } => (
+  value !== null && typeof value === 'object' && !Array.isArray(value)
+);
+
 export const requestFileAccess = async (
   options?: { filters?: Array<{ name: string; extensions: string[] }>; defaultPath?: string }
-): Promise<{ success: boolean; path?: string; error?: string }> => {
+): Promise<{ success: boolean; path?: string; outsideFileGrant?: string; error?: string }> => {
   if (hasDesktopInvoke() && isDesktopLocalOriginActive()) {
     try {
       const selected = await getDesktopBridge()?.openDialog?.({
         directory: false,
         multiple: false,
         title: 'Select File',
+        returnGrant: true,
         ...(options?.filters ? { filters: options.filters } : {}),
         ...(options?.defaultPath ? { defaultPath: options.defaultPath } : {}),
       });
-      if (!selected || typeof selected !== 'string') {
+      if (!selected) {
         return { success: false, error: 'File selection cancelled' };
       }
-      return { success: true, path: selected };
+      if (typeof selected === 'string') {
+        return { success: true, path: selected };
+      }
+      if (!isDesktopFileGrantResult(selected)) {
+        return { success: false, error: 'File selection cancelled' };
+      }
+      const path = typeof selected.path === 'string' ? selected.path : '';
+      if (!path) {
+        return { success: false, error: 'File selection cancelled' };
+      }
+      return {
+        success: true,
+        path,
+        outsideFileGrant: typeof selected.outsideFileGrant === 'string' ? selected.outsideFileGrant : undefined,
+      };
     } catch (error) {
       console.warn('Failed to request file access', error);
       return { success: false, error: error instanceof Error ? error.message : String(error) };
@@ -454,6 +520,34 @@ export const requestFileAccess = async (
   }
 
   return { success: false, error: 'Native file picker not available' };
+};
+
+export const requestExistingFileAccess = async (
+  path: string
+): Promise<{ success: boolean; path?: string; outsideFileGrant?: string; error?: string }> => {
+  const targetPath = typeof path === 'string' ? path.trim() : '';
+  if (!targetPath) {
+    return { success: false, error: 'Path is required' };
+  }
+  if (!hasDesktopInvoke() || !isDesktopLocalOriginActive()) {
+    return { success: false, error: 'Native file access not available' };
+  }
+
+  try {
+    const selected = await getDesktopBridge()?.grantFileAccess?.(targetPath);
+    if (!isDesktopFileGrantResult(selected)) {
+      return { success: false, error: 'File access was not granted' };
+    }
+    const grantedPath = typeof selected.path === 'string' ? selected.path : '';
+    const outsideFileGrant = typeof selected.outsideFileGrant === 'string' ? selected.outsideFileGrant : '';
+    if (!grantedPath || !outsideFileGrant) {
+      return { success: false, error: 'File access was not granted' };
+    }
+    return { success: true, path: grantedPath, outsideFileGrant };
+  } catch (error) {
+    console.warn('Failed to request existing file access', error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
 };
 
 export const startAccessingDirectory = async (
@@ -468,28 +562,6 @@ export const stopAccessingDirectory = async (
 ): Promise<{ success: boolean; error?: string }> => {
   void directoryPath;
   return { success: true };
-};
-
-export const sendAssistantCompletionNotification = async (
-  payload?: AssistantNotificationPayload
-): Promise<boolean> => {
-  if (hasDesktopInvoke()) {
-    try {
-      await invokeDesktop('desktop_notify', {
-        payload: {
-          title: payload?.title,
-          body: payload?.body,
-          tag: 'openchamber-agent-complete',
-        },
-      });
-      return true;
-    } catch (error) {
-      console.warn('Failed to send assistant completion notification', error);
-      return false;
-    }
-  }
-
-  return false;
 };
 
 export const checkForDesktopUpdates = async (): Promise<UpdateInfo | null> => {
@@ -731,58 +803,6 @@ export const openDesktopFileInApp = async (
   }
 };
 
-export const filterInstalledDesktopApps = async (apps: string[]): Promise<string[]> => {
-  if (!hasDesktopInvoke() || !isDesktopLocalOriginActive()) {
-    return [];
-  }
-
-  const candidate = Array.isArray(apps) ? apps.filter((value) => typeof value === 'string') : [];
-  if (candidate.length === 0) {
-    return [];
-  }
-
-  try {
-    const result = await invokeDesktop<string[]>('desktop_filter_installed_apps', {
-      apps: candidate,
-    });
-    return Array.isArray(result) ? result.filter((value) => typeof value === 'string') : [];
-  } catch (error) {
-    console.warn('Failed to check installed apps', error);
-    return [];
-  }
-};
-
-export const fetchDesktopAppIcons = async (apps: string[]): Promise<Record<string, string>> => {
-  if (!hasDesktopInvoke() || !isDesktopLocalOriginActive()) {
-    return {};
-  }
-
-  const candidate = Array.isArray(apps) ? apps.filter((value) => typeof value === 'string') : [];
-  if (candidate.length === 0) {
-    return {};
-  }
-
-  try {
-    const result = await invokeDesktop<unknown[]>('desktop_fetch_app_icons', {
-      apps: candidate,
-    });
-    if (!Array.isArray(result)) {
-      return {};
-    }
-    const map: Record<string, string> = {};
-    for (const entry of result) {
-      if (!entry || typeof entry !== 'object') continue;
-      const candidateEntry = entry as { app?: unknown; data_url?: unknown };
-      if (typeof candidateEntry.app !== 'string' || typeof candidateEntry.data_url !== 'string') continue;
-      map[candidateEntry.app] = candidateEntry.data_url;
-    }
-    return map;
-  } catch (error) {
-    console.warn('Failed to fetch installed app icons', error);
-    return {};
-  }
-};
-
 export type InstalledDesktopAppInfo = {
   name: string;
   iconDataUrl?: string | null;
@@ -839,19 +859,5 @@ export const fetchDesktopInstalledApps = async (
   } catch (error) {
     console.warn('Failed to fetch installed apps', error);
     return { apps: [], success: false, hasCache: false, isCacheStale: false };
-  }
-};
-
-export const clearDesktopCache = async (): Promise<boolean> => {
-  if (!hasDesktopInvoke() || !isDesktopLocalOriginActive()) {
-    return false;
-  }
-
-  try {
-    await invokeDesktop('desktop_clear_cache');
-    return true;
-  } catch (error) {
-    console.warn('Failed to clear cache', error);
-    return false;
   }
 };

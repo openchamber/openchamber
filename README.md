@@ -6,7 +6,6 @@
 [![Discord](https://img.shields.io/badge/Discord-join.svg?style=flat&labelColor=100F0F&color=8B7EC8&logo=discord&logoColor=FFFCF0)](https://discord.gg/ZYRSdnwwKA)
 [![Support the project](https://img.shields.io/badge/Support-Project-black?style=flat&labelColor=100F0F&color=EC8B49&logo=ko-fi&logoColor=FFFCF0)](https://ko-fi.com/G2G41SAWNS)
 
-
 ## **OpenCode, everywhere.** Desktop. Browser. Phone.
 
 ### A rich interface for [OpenCode](https://opencode.ai). Review diffs, manage agents, run dev servers, and keep the big picture while your AI codes.
@@ -87,7 +86,7 @@
 
 ## Quick Start
 
-> **Prerequisite:** [OpenCode CLI](https://opencode.ai) installed.
+> **Prerequisite:** Desktop bundles the matching OpenCode CLI. CLI/Web and VS Code use your installed [OpenCode CLI](https://opencode.ai).
 
 ### **Desktop (macOS + Windows)**
 Download from [Releases](https://github.com/btriapitsyn/openchamber/releases).
@@ -96,7 +95,7 @@ Download from [Releases](https://github.com/btriapitsyn/openchamber/releases).
 Install from [Marketplace](https://marketplace.visualstudio.com/items?itemName=fedaykindev.openchamber) or search "OpenChamber" in Extensions.
 
 ### **CLI (Web + PWA)**
-_requires Node.js 20+_
+_requires Node.js 22+_
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/btriapitsyn/openchamber/main/scripts/install.sh | bash

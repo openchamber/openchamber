@@ -67,6 +67,15 @@ export const MobileSurfaceShell: React.FC<MobileSurfaceShellProps> = ({
   const isDraggingRef = React.useRef(false);
   const surfaceRef = React.useRef<HTMLElement | null>(null);
   const previousFocusRef = React.useRef<HTMLElement | null>(null);
+  // Keep onClose in a ref so the focus/keydown effect below depends only on `open`.
+  // The parent passes a fresh inline onClose on every render; if the effect depended
+  // on it, each parent re-render (e.g. an SSE store update) would re-run it and
+  // refocus the first element — stealing focus from whatever input the user is in
+  // and collapsing the keyboard mid-edit.
+  const onCloseRef = React.useRef(onClose);
+  React.useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   if (typeof document !== 'undefined' && !rootRef.current) {
     rootRef.current = ensureSurfaceRoot();
@@ -112,7 +121,7 @@ export const MobileSurfaceShell: React.FC<MobileSurfaceShellProps> = ({
     const focusTimer = window.setTimeout(focusFirstElement, ENTER_DELAY_MS);
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== 'Tab') return;
@@ -145,7 +154,7 @@ export const MobileSurfaceShell: React.FC<MobileSurfaceShellProps> = ({
       previousFocusRef.current?.focus?.({ preventScroll: true });
       previousFocusRef.current = null;
     };
-  }, [onClose, open]);
+  }, [open]);
 
   const handleDragStart = (event: React.TouchEvent<HTMLDivElement>) => {
     if (disableSwipeDismiss) return;
@@ -208,7 +217,7 @@ export const MobileSurfaceShell: React.FC<MobileSurfaceShellProps> = ({
   return createPortal(
     <div
       className={cn(
-        'fixed inset-0 z-50 flex flex-col bg-[rgb(0_0_0_/_0.45)]',
+        'oc-keyboard-inset-surface fixed inset-0 z-50 flex flex-col bg-[rgb(0_0_0_/_0.45)]',
         // The opacity transition keeps the scrim on its own compositing layer,
         // which iOS Safari clips to the viewport — without it, a static scrim
         // bleeds the dim into the bottom toolbar overscroll zone. Quick fade so

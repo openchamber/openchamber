@@ -11,7 +11,7 @@ export interface ToolMetadata {
   category: 'file' | 'search' | 'code' | 'system' | 'ai' | 'web';
 }
 
-export const TOOL_METADATA: Record<string, ToolMetadata> = {
+const TOOL_METADATA: Record<string, ToolMetadata> = {
 
   read: {
     displayName: 'Read File',
@@ -691,6 +691,11 @@ const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bm
 export function isImageFile(filePath: string): boolean {
   const ext = filePath.split('.').pop()?.toLowerCase();
   return IMAGE_EXTENSIONS.includes(ext || '');
+}
+
+export function isPdfFile(filePath: string): boolean {
+  const ext = filePath.split('.').pop()?.toLowerCase();
+  return ext === 'pdf';
 }
 
 export function getImageMimeType(filePath: string): string {

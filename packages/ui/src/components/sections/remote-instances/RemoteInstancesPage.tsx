@@ -46,7 +46,8 @@ import {
   resolveDesktopHostUrl,
   type DesktopHost,
 } from '@/lib/desktopHosts';
-import { isDesktopShell } from '@/lib/desktop';
+import { getDesktopLanAddress, isDesktopLocalOriginActive, isDesktopShell } from '@/lib/desktop';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeApiBaseUrl, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 
 const randomPort = (): number => {
@@ -199,6 +200,85 @@ const formatLogLine = (line: string): string => {
   return `[${iso}] [${level}] ${message}`;
 };
 
+type HeaderDraft = {
+  id: string;
+  name: string;
+  value: string;
+};
+
+const createHeaderDraft = (name = '', value = ''): HeaderDraft => ({
+  id: typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `header-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  name,
+  value,
+});
+
+const isReservedRequestHeaderName = (name: string): boolean => name.trim().toLowerCase() === 'authorization';
+
+const buildRequestHeaders = (headers: HeaderDraft[]): Record<string, string> | undefined => {
+  const next: Record<string, string> = {};
+  for (const header of headers) {
+    const name = header.name.trim();
+    const value = header.value.trim();
+    if (name && value && !isReservedRequestHeaderName(name)) next[name] = value;
+  }
+  return Object.keys(next).length > 0 ? next : undefined;
+};
+
+const readRequestHeaderDrafts = (headers: Record<string, string> | undefined): HeaderDraft[] => {
+  return Object.entries(headers || {}).map(([name, value]) => createHeaderDraft(name, value));
+};
+
+const getRuntimePort = (): number | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const runtimeApiBaseUrl = getRuntimeApiBaseUrl();
+  const portSource = runtimeApiBaseUrl || window.location.href;
+  try {
+    const port = Number(new URL(portSource).port || window.location.port);
+    return Number.isFinite(port) && port > 0 ? port : null;
+  } catch {
+    const port = Number(window.location.port);
+    return Number.isFinite(port) && port > 0 ? port : null;
+  }
+};
+
+const resolvePairingServerUrl = async (): Promise<string> => {
+  const fallback = normalizeHostUrl(getRuntimeApiBaseUrl()) || window.location.origin;
+  if (!isDesktopShell() || !isDesktopLocalOriginActive()) {
+    return fallback;
+  }
+
+  let response: Response;
+  try {
+    response = await runtimeFetch('/api/config/settings', {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+  } catch {
+    return fallback;
+  }
+  if (!response.ok) return fallback;
+
+  const settings = (await response.json().catch(() => null)) as null | {
+    desktopLanAccessActive?: unknown;
+  };
+  if (settings?.desktopLanAccessActive !== true) {
+    return fallback;
+  }
+
+  const address = await getDesktopLanAddress();
+  const port = getRuntimePort();
+  if (!address || !port) {
+    return fallback;
+  }
+
+  return `http://${address}:${port}`;
+};
+
 const navigateToUrl = (rawUrl: string): void => {
   const target = rawUrl.trim();
   if (!target) {
@@ -301,6 +381,7 @@ export const RemoteInstancesPage: React.FC = () => {
   const [directLabel, setDirectLabel] = React.useState('');
   const [directUrl, setDirectUrl] = React.useState('');
   const [directToken, setDirectToken] = React.useState('');
+  const [directHeaders, setDirectHeaders] = React.useState<HeaderDraft[]>([]);
   const [directConnectLink, setDirectConnectLink] = React.useState('');
   const [directError, setDirectError] = React.useState<string | null>(null);
   const [directAddDialogOpen, setDirectAddDialogOpen] = React.useState(false);
@@ -309,6 +390,7 @@ export const RemoteInstancesPage: React.FC = () => {
   const [directEditLabel, setDirectEditLabel] = React.useState('');
   const [directEditUrl, setDirectEditUrl] = React.useState('');
   const [directEditToken, setDirectEditToken] = React.useState('');
+  const [directEditHeaders, setDirectEditHeaders] = React.useState<HeaderDraft[]>([]);
   const [remoteClients, setRemoteClients] = React.useState<RemoteClientRecord[]>([]);
   const [remoteClientsLoading, setRemoteClientsLoading] = React.useState(false);
   const [remoteClientLabel, setRemoteClientLabel] = React.useState('');
@@ -374,16 +456,18 @@ export const RemoteInstancesPage: React.FC = () => {
       url,
       apiUrl: url,
       ...(directToken.trim() ? { clientToken: directToken.trim() } : {}),
+      ...(buildRequestHeaders(directHeaders) ? { requestHeaders: buildRequestHeaders(directHeaders) } : {}),
     };
     await persistDirectHosts([host, ...directHosts], directDefaultHostId);
     setDirectLabel('');
     setDirectUrl('');
     setDirectToken('');
+    setDirectHeaders([]);
     setDirectAddDialogOpen(false);
     if (resolved.redeemUrl) {
       navigateToUrl(resolved.redeemUrl);
     }
-  }, [directDefaultHostId, directHosts, directLabel, directToken, directUrl, persistDirectHosts, t]);
+  }, [directDefaultHostId, directHeaders, directHosts, directLabel, directToken, directUrl, persistDirectHosts, t]);
 
   const importDirectConnectLink = React.useCallback(async () => {
     const payload = parseClientConnectionPayload(directConnectLink);
@@ -427,6 +511,7 @@ export const RemoteInstancesPage: React.FC = () => {
     setDirectEditLabel(host.label);
     setDirectEditUrl(host.apiUrl || host.url);
     setDirectEditToken(host.clientToken || '');
+    setDirectEditHeaders(readRequestHeaderDrafts(host.requestHeaders));
     setDirectError(null);
   }, []);
 
@@ -445,6 +530,7 @@ export const RemoteInstancesPage: React.FC = () => {
         url,
         apiUrl: url,
         clientToken: directEditToken.trim() || undefined,
+        requestHeaders: buildRequestHeaders(directEditHeaders),
       }
       : host);
     await persistDirectHosts(nextHosts, directDefaultHostId);
@@ -452,7 +538,7 @@ export const RemoteInstancesPage: React.FC = () => {
     if (resolved.redeemUrl) {
       navigateToUrl(resolved.redeemUrl);
     }
-  }, [directDefaultHostId, directEditLabel, directEditToken, directEditUrl, directEditingId, directHosts, persistDirectHosts, t]);
+  }, [directDefaultHostId, directEditHeaders, directEditLabel, directEditToken, directEditUrl, directEditingId, directHosts, persistDirectHosts, t]);
 
   const createSshInstanceFromDialog = React.useCallback(async () => {
     const command = sshCommandDraft.trim();
@@ -513,7 +599,7 @@ export const RemoteInstancesPage: React.FC = () => {
     if (!clientAuth) return;
     setRemoteClientError(null);
     try {
-      const serverUrl = normalizeHostUrl(getRuntimeApiBaseUrl()) || window.location.origin;
+      const serverUrl = await resolvePairingServerUrl();
       const result = await clientAuth.createClient({ label: remoteClientLabel.trim() || 'Paired client' });
       const payload = buildClientConnectionPayload({ serverUrl, token: result.token, label: remoteClientLabel || 'OpenChamber' });
       const encoded = encodeClientConnectionPayload(payload);
@@ -956,7 +1042,7 @@ export const RemoteInstancesPage: React.FC = () => {
     return (
       <SettingsPageLayout>
         {clientAuth ? (
-          <div className="mb-8">
+          <div data-settings-item="remote-instances.client-auth" className="mb-8">
             <div className="mb-1 px-1 space-y-0.5">
               <h3 className="typography-ui-header font-medium text-foreground">{t('settings.remoteInstances.clientAuth.title')}</h3>
               <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.clientAuth.description')}</p>
@@ -1029,7 +1115,7 @@ export const RemoteInstancesPage: React.FC = () => {
           </div>
         ) : null}
 
-        {showInstanceManagement ? <div className="mb-8 border-t border-[var(--surface-subtle)] pt-8">
+        {showInstanceManagement ? <div data-settings-item="remote-instances.direct-hosts" className="mb-8 border-t border-[var(--surface-subtle)] pt-8">
           <div className="mb-1 px-1 space-y-0.5">
             <h3 className="typography-ui-header font-medium text-foreground">{t('settings.remoteInstances.direct.title')}</h3>
             <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.direct.description')}</p>
@@ -1095,6 +1181,25 @@ export const RemoteInstancesPage: React.FC = () => {
               <Input className="h-8" value={directLabel} onChange={(event) => setDirectLabel(event.target.value)} placeholder={t('settings.remoteInstances.direct.field.labelPlaceholder')} disabled={directSaving} />
               <Input className="h-8" value={directUrl} onChange={(event) => setDirectUrl(event.target.value)} placeholder={t('settings.remoteInstances.direct.field.urlPlaceholder')} disabled={directSaving} autoFocus />
               <Input className="h-8" value={directToken} onChange={(event) => setDirectToken(event.target.value)} placeholder={t('settings.remoteInstances.direct.field.tokenPlaceholder')} type="password" disabled={directSaving} />
+              <div className="space-y-2">
+                <div>
+                  <p className="typography-ui-label text-foreground">{t('settings.remoteInstances.direct.headers.title')}</p>
+                  <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.direct.headers.description')}</p>
+                </div>
+                {directHeaders.map((header) => (
+                  <div key={header.id} className="flex w-full gap-2">
+                    <Input className="h-8 font-mono text-xs" value={header.name} onChange={(event) => setDirectHeaders((headers) => headers.map((item) => item.id === header.id ? { ...item, name: event.target.value } : item))} placeholder={t('settings.remoteInstances.direct.headers.field.namePlaceholder')} disabled={directSaving} />
+                    <Input className="h-8 font-mono text-xs" value={header.value} onChange={(event) => setDirectHeaders((headers) => headers.map((item) => item.id === header.id ? { ...item, value: event.target.value } : item))} placeholder={t('settings.remoteInstances.direct.headers.field.valuePlaceholder')} type="password" disabled={directSaving} />
+                    <button type="button" onClick={() => setDirectHeaders((headers) => headers.filter((item) => item.id !== header.id))} className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-[var(--status-error-background)] hover:text-[var(--status-error)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]" aria-label={t('settings.remoteInstances.direct.headers.removeAria')} disabled={directSaving}>
+                      <Icon name="close" className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+                <Button type="button" variant="ghost" size="xs" className="!font-normal" onClick={() => setDirectHeaders((headers) => [...headers, createHeaderDraft()])} disabled={directSaving}>
+                  <Icon name="add" className="h-3.5 w-3.5" />
+                  {t('settings.remoteInstances.direct.headers.actions.add')}
+                </Button>
+              </div>
               <div className="flex justify-end gap-2">
                 <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={() => setDirectAddDialogOpen(false)} disabled={directSaving}>{t('settings.common.actions.cancel')}</Button>
                 <Button type="submit" size="xs" className="!font-normal" disabled={directSaving || !directUrl.trim()}>{t('settings.remoteInstances.direct.actions.add')}</Button>
@@ -1113,6 +1218,25 @@ export const RemoteInstancesPage: React.FC = () => {
               <Input className="h-8" value={directEditLabel} onChange={(event) => setDirectEditLabel(event.target.value)} placeholder={t('settings.remoteInstances.direct.field.labelPlaceholder')} disabled={directSaving} />
               <Input className="h-8" value={directEditUrl} onChange={(event) => setDirectEditUrl(event.target.value)} placeholder={t('settings.remoteInstances.direct.field.urlPlaceholder')} disabled={directSaving} autoFocus />
               <Input className="h-8" value={directEditToken} onChange={(event) => setDirectEditToken(event.target.value)} placeholder={t('settings.remoteInstances.direct.field.tokenPlaceholder')} type="password" disabled={directSaving} />
+              <div className="space-y-2">
+                <div>
+                  <p className="typography-ui-label text-foreground">{t('settings.remoteInstances.direct.headers.title')}</p>
+                  <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.direct.headers.description')}</p>
+                </div>
+                {directEditHeaders.map((header) => (
+                  <div key={header.id} className="flex w-full gap-2">
+                    <Input className="h-8 font-mono text-xs" value={header.name} onChange={(event) => setDirectEditHeaders((headers) => headers.map((item) => item.id === header.id ? { ...item, name: event.target.value } : item))} placeholder={t('settings.remoteInstances.direct.headers.field.namePlaceholder')} disabled={directSaving} />
+                    <Input className="h-8 font-mono text-xs" value={header.value} onChange={(event) => setDirectEditHeaders((headers) => headers.map((item) => item.id === header.id ? { ...item, value: event.target.value } : item))} placeholder={t('settings.remoteInstances.direct.headers.field.valuePlaceholder')} type="password" disabled={directSaving} />
+                    <button type="button" onClick={() => setDirectEditHeaders((headers) => headers.filter((item) => item.id !== header.id))} className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-[var(--status-error-background)] hover:text-[var(--status-error)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]" aria-label={t('settings.remoteInstances.direct.headers.removeAria')} disabled={directSaving}>
+                      <Icon name="close" className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+                <Button type="button" variant="ghost" size="xs" className="!font-normal" onClick={() => setDirectEditHeaders((headers) => [...headers, createHeaderDraft()])} disabled={directSaving}>
+                  <Icon name="add" className="h-3.5 w-3.5" />
+                  {t('settings.remoteInstances.direct.headers.actions.add')}
+                </Button>
+              </div>
               <div className="flex justify-end gap-2">
                 <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={() => setDirectEditingId(null)} disabled={directSaving}>{t('settings.common.actions.cancel')}</Button>
                 <Button type="submit" size="xs" className="!font-normal" disabled={directSaving}>{t('settings.common.actions.saveChanges')}</Button>

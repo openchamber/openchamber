@@ -45,7 +45,7 @@ export type Snippet = {
 };
 
 export type PluginScope = 'user' | 'project';
-export type PluginParsedKind = 'npm' | 'path';
+type PluginParsedKind = 'npm' | 'path';
 
 export type PluginEntry = {
   id: string;
@@ -200,7 +200,7 @@ const getUserAgentPath = (agentName: string, lookupCache: AgentLookupCache = glo
   return pluralPath;
 };
 
-export const getAgentScope = (
+const getAgentScope = (
   agentName: string,
   workingDirectory?: string,
   lookupCache: AgentLookupCache = globalAgentLookupCache
@@ -273,7 +273,7 @@ const getUserCommandPath = (commandName: string): string => {
   return pluralPath;
 };
 
-export const getCommandScope = (commandName: string, workingDirectory?: string): { scope: CommandScope | null; path: string | null } => {
+const getCommandScope = (commandName: string, workingDirectory?: string): { scope: CommandScope | null; path: string | null } => {
   if (workingDirectory) {
     const projectPath = getProjectCommandPath(workingDirectory, commandName);
     if (fs.existsSync(projectPath)) {
@@ -1194,23 +1194,6 @@ export const queryPluginRegistry = async (
   return { results };
 };
 
-export type McpLocalConfig = {
-  type: 'local';
-  command?: string[];
-  environment?: Record<string, string>;
-  enabled?: boolean;
-};
-
-export type McpRemoteConfig = {
-  type: 'remote';
-  url?: string;
-  environment?: Record<string, string>;
-  headers?: Record<string, string>;
-  enabled?: boolean;
-};
-
-export type McpConfigPayload = McpLocalConfig | McpRemoteConfig;
-
 export type McpConfigEntry = {
   name: string;
   scope?: AgentScope | null;
@@ -1622,10 +1605,28 @@ export const createAgent = (agentName: string, config: Record<string, unknown>, 
   }
 
   // Extract scope and prompt from config - scope is only used for path determination, not written to file
-  const { prompt, scope: _ignored, ...frontmatter } = config as Record<string, unknown> & { prompt?: unknown; scope?: unknown };
+  const { prompt, scope: _ignored, ...rawFrontmatter } = config as Record<string, unknown> & { prompt?: unknown; scope?: unknown };
   void _ignored; // Scope is only used for path determination
+  const frontmatter = Object.fromEntries(
+    Object.entries(rawFrontmatter).filter(([, value]) => value !== null && value !== undefined)
+  );
   writeMdFile(targetPath, frontmatter, typeof prompt === 'string' ? prompt : '');
   resetAgentLookupCache(globalAgentLookupCache);
+};
+
+const deleteAgentJsonField = (config: Record<string, unknown>, agentName: string, field: string): boolean => {
+  const agentMap = config.agent as Record<string, unknown> | undefined;
+  const current = agentMap?.[agentName] as Record<string, unknown> | undefined;
+  if (!agentMap || !current || !(field in current)) return false;
+
+  delete current[field];
+  if (Object.keys(current).length === 0) {
+    delete agentMap[agentName];
+  }
+  if (Object.keys(agentMap).length === 0) {
+    delete config.agent;
+  }
+  return true;
 };
 
 export const updateAgent = (agentName: string, updates: Record<string, unknown>, workingDirectory?: string) => {
@@ -1774,6 +1775,19 @@ export const updateAgent = (agentName: string, updates: Record<string, unknown>,
     const hasMdField = Boolean(mdData?.frontmatter?.[field] !== undefined);
     const hasJsonField = Boolean(jsonSection?.[field] !== undefined);
 
+    if (value === null) {
+      if (hasMdField && mdData) {
+        delete mdData.frontmatter[field];
+        mdModified = true;
+      }
+
+      if (hasJsonField && deleteAgentJsonField(config, agentName, field)) {
+        jsonModified = true;
+      }
+
+      continue;
+    }
+
     // JSON takes precedence over md, so update JSON first if field exists there
     if (hasJsonField) {
       if (!config.agent) config.agent = {};
@@ -1816,48 +1830,72 @@ export const updateAgent = (agentName: string, updates: Record<string, unknown>,
   }
 };
 
-export const deleteAgent = (agentName: string, workingDirectory?: string) => {
-  let deleted = false;
+const deleteJsonAgentEntry = (config: Record<string, unknown>, agentName: string): boolean => {
+  const agentMap = config.agent as Record<string, unknown> | undefined;
+  if (!agentMap?.[agentName]) return false;
+  delete agentMap[agentName];
+  if (Object.keys(agentMap).length > 0) {
+    config.agent = agentMap;
+  } else {
+    delete config.agent;
+  }
+  return true;
+};
+
+export const deleteAgent = (agentName: string, workingDirectory?: string, scope?: AgentScope) => {
+  const requestedScope = scope === AGENT_SCOPE.PROJECT || scope === AGENT_SCOPE.USER ? scope : null;
 
   // Check project level first (takes precedence)
-  if (workingDirectory) {
+  if ((!requestedScope || requestedScope === AGENT_SCOPE.PROJECT) && workingDirectory) {
     const projectPath = getProjectAgentPath(workingDirectory, agentName);
     if (fs.existsSync(projectPath)) {
       fs.unlinkSync(projectPath);
-      deleted = true;
+      resetAgentLookupCache(globalAgentLookupCache);
+      return;
     }
   }
 
   // Then check user level
-  const userPath = getUserAgentPath(agentName);
-  if (fs.existsSync(userPath)) {
-    fs.unlinkSync(userPath);
-    deleted = true;
+  if (!requestedScope || requestedScope === AGENT_SCOPE.USER) {
+    const userPath = getUserAgentPath(agentName);
+    if (fs.existsSync(userPath)) {
+      fs.unlinkSync(userPath);
+      resetAgentLookupCache(globalAgentLookupCache);
+      return;
+    }
+  }
+
+  const layers = readConfigLayers(workingDirectory);
+
+  if (requestedScope === AGENT_SCOPE.PROJECT) {
+    if (layers.paths.projectPath && deleteJsonAgentEntry(layers.projectConfig, agentName)) {
+      writeConfig(layers.projectConfig, layers.paths.projectPath);
+      resetAgentLookupCache(globalAgentLookupCache);
+      return;
+    }
+    throw new Error(`Project agent ${agentName} not found`);
+  }
+
+  if (requestedScope === AGENT_SCOPE.USER) {
+    const userJsonPath = layers.paths.customPath || layers.paths.userPath;
+    const userJsonConfig = layers.paths.customPath ? layers.customConfig : layers.userConfig;
+    if (userJsonPath && deleteJsonAgentEntry(userJsonConfig, agentName)) {
+      writeConfig(userJsonConfig, userJsonPath);
+      resetAgentLookupCache(globalAgentLookupCache);
+      return;
+    }
+    throw new Error(`User agent ${agentName} not found`);
   }
 
   // Also check json config (highest precedence entry only)
-  const layers = readConfigLayers(workingDirectory);
   const jsonSource = getJsonEntrySource(layers, 'agent', agentName);
-  if (jsonSource.exists && jsonSource.config && jsonSource.path) {
-    const targetConfig = jsonSource.config as Record<string, unknown>;
-    const agentMap = (targetConfig.agent as Record<string, unknown> | undefined) ?? {};
-    delete agentMap[agentName];
-    targetConfig.agent = agentMap;
-    writeConfig(targetConfig, jsonSource.path);
-    deleted = true;
+  if (jsonSource.exists && jsonSource.config && jsonSource.path && deleteJsonAgentEntry(jsonSource.config, agentName)) {
+    writeConfig(jsonSource.config, jsonSource.path);
+    resetAgentLookupCache(globalAgentLookupCache);
+    return;
   }
 
-  // If nothing was deleted (built-in agent), disable it in highest-precedence config
-  if (!deleted) {
-    const jsonTarget = getJsonWriteTarget(layers, workingDirectory ? AGENT_SCOPE.PROJECT : AGENT_SCOPE.USER);
-    const targetConfig = (jsonTarget.config || {}) as Record<string, unknown>;
-    const agentMap = (targetConfig.agent as Record<string, unknown> | undefined) ?? {};
-    agentMap[agentName] = { disable: true };
-    targetConfig.agent = agentMap;
-    writeConfig(targetConfig, jsonTarget.path || CONFIG_FILE);
-  }
-
-  resetAgentLookupCache(globalAgentLookupCache);
+  throw new Error(`Agent ${agentName} is built-in or not deletable`);
 };
 
 export const getCommandSources = (commandName: string, workingDirectory?: string): ConfigSources => {
@@ -2217,7 +2255,7 @@ export const SKILL_SCOPE = {
 export type SkillScope = typeof SKILL_SCOPE[keyof typeof SKILL_SCOPE];
 export type SkillSource = 'opencode' | 'claude' | 'agents';
 
-export type SupportingFile = {
+type SupportingFile = {
   name: string;
   path: string;
   fullPath: string;
@@ -2358,9 +2396,9 @@ const getProjectAgentsSkillDir = (workingDirectory: string, skillName: string): 
   return path.join(workingDirectory, '.agents', 'skills', skillName);
 };
 
-export const getSkillScope = (skillName: string, workingDirectory?: string): { 
-  scope: SkillScope | null; 
-  path: string | null; 
+const getSkillScope = (skillName: string, workingDirectory?: string): {
+  scope: SkillScope | null;
+  path: string | null;
   source: SkillSource | null;
 } => {
   const discovered = discoverSkills(workingDirectory).find((skill) => skill.name === skillName);

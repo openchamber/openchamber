@@ -14,6 +14,7 @@ const localLogoModules = import.meta.glob<string>('../assets/provider-logos/*.sv
 });
 
 const LOCAL_PROVIDER_LOGO_MAP = new Map<string, string>();
+const PRELOADED_LOGO_SRCS = new Set<string>();
 
 const LOGO_ALIAS = new Map<string, string>([
     ['codex', 'openai'],
@@ -48,6 +49,39 @@ const buildLogoCandidates = (providerId: string | null | undefined) => {
         .filter((value): value is string => Boolean(value && value.length > 0));
 
     return [...new Set(candidates)];
+};
+
+const resolveProviderLogoSrc = (providerId: string | null | undefined): string | null => {
+    const candidates = buildLogoCandidates(providerId);
+    const localResolvedId = candidates.find((candidate) => LOCAL_PROVIDER_LOGO_MAP.has(candidate)) ?? null;
+    const localLogoSrc = localResolvedId ? LOCAL_PROVIDER_LOGO_MAP.get(localResolvedId) ?? null : null;
+    if (localLogoSrc) {
+        return localLogoSrc;
+    }
+
+    const remoteResolvedId = candidates[0] ?? null;
+    return remoteResolvedId ? `https://models.dev/logos/${remoteResolvedId}.svg` : null;
+};
+
+const preloadProviderLogo = (providerId: string | null | undefined): void => {
+    if (typeof Image === 'undefined') return;
+    const src = resolveProviderLogoSrc(providerId);
+    if (!src || PRELOADED_LOGO_SRCS.has(src)) return;
+
+    PRELOADED_LOGO_SRCS.add(src);
+    const image = new Image();
+    image.decoding = 'async';
+    image.onerror = () => {
+        PRELOADED_LOGO_SRCS.delete(src);
+    };
+    image.src = src;
+    void image.decode?.().catch(() => undefined);
+};
+
+export const preloadProviderLogos = (providerIds: readonly (string | null | undefined)[]): void => {
+    for (const providerId of providerIds) {
+        preloadProviderLogo(providerId);
+    }
 };
 
 for (const [path, url] of Object.entries(localLogoModules)) {

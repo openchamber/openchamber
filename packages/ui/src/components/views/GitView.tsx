@@ -6,6 +6,7 @@ import type { GitIdentityProfile, CommitFileEntry, GitStatus } from '@/lib/api/t
 import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useGitmojiList } from '@/hooks/useGitmojiList';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import {
   useGitStore,
@@ -93,19 +94,8 @@ type GitmojiEntry = {
   description: string;
 };
 
-type GitmojiCachePayload = {
-  gitmojis: GitmojiEntry[];
-  fetchedAt: number;
-  version: string;
-};
-
-const GITMOJI_CACHE_KEY = 'gitmojiCache';
-const GITMOJI_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
-const GITMOJI_CACHE_VERSION = '1';
 const GIT_DIFF_PRIORITY_PREFETCH_LIMIT = 40;
 const GIT_DIFF_PRIORITY_BASELINE_LIMIT = 20;
-const GITMOJI_SOURCE_URL =
-  'https://raw.githubusercontent.com/carloscuesta/gitmoji/master/packages/gitmojis/src/gitmojis.json';
 
 const KEYWORD_MAP: Record<string, string> = {
   'feat': ':sparkles:',
@@ -147,50 +137,6 @@ const KEYWORD_MAP: Record<string, string> = {
   'initial': ':tada:',
 };
 
-const isGitmojiEntry = (value: unknown): value is GitmojiEntry => {
-  if (!value || typeof value !== 'object') return false;
-  const candidate = value as Record<string, unknown>;
-  return (
-    typeof candidate.emoji === 'string' &&
-    typeof candidate.code === 'string' &&
-    typeof candidate.description === 'string'
-  );
-};
-
-const readGitmojiCache = (): GitmojiCachePayload | null => {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = localStorage.getItem(GITMOJI_CACHE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<GitmojiCachePayload>;
-    if (!parsed || parsed.version !== GITMOJI_CACHE_VERSION || typeof parsed.fetchedAt !== 'number') {
-      return null;
-    }
-    if (!Array.isArray(parsed.gitmojis)) return null;
-    const gitmojis = parsed.gitmojis.filter(isGitmojiEntry);
-    return { gitmojis, fetchedAt: parsed.fetchedAt, version: parsed.version };
-  } catch {
-    return null;
-  }
-};
-
-const writeGitmojiCache = (gitmojis: GitmojiEntry[]) => {
-  if (typeof window === 'undefined') return;
-  try {
-    const payload: GitmojiCachePayload = {
-      gitmojis,
-      fetchedAt: Date.now(),
-      version: GITMOJI_CACHE_VERSION,
-    };
-    localStorage.setItem(GITMOJI_CACHE_KEY, JSON.stringify(payload));
-  } catch {
-    return;
-  }
-};
-
-const isGitmojiCacheFresh = (payload: GitmojiCachePayload) =>
-  Date.now() - payload.fetchedAt < GITMOJI_CACHE_TTL_MS;
-
 const matchGitmojiFromSubject = (subject: string, gitmojis: GitmojiEntry[]): GitmojiEntry | null => {
   const lowerSubject = subject.toLowerCase();
 
@@ -217,7 +163,22 @@ const matchGitmojiFromSubject = (subject: string, gitmojis: GitmojiEntry[]): Git
   return null;
 };
 
+const GIT_VIEW_SNAPSHOTS_CAP = 20;
+
 const gitViewSnapshots = new Map<string, GitViewSnapshot>();
+
+const rememberSnapshot = (key: string, snapshot: GitViewSnapshot) => {
+  // Touch-on-write LRU: deleting before re-inserting promotes the key to
+  // the Map's insertion order, so the oldest key falls off the end.
+  gitViewSnapshots.delete(key);
+  gitViewSnapshots.set(key, snapshot);
+  if (gitViewSnapshots.size > GIT_VIEW_SNAPSHOTS_CAP) {
+    const oldest = gitViewSnapshots.keys().next().value;
+    if (oldest !== undefined) {
+      gitViewSnapshots.delete(oldest);
+    }
+  }
+};
 
 const normalizePath = (value?: string | null): string =>
   (value || '').replace(/\\/g, '/').replace(/\/+$/, '');
@@ -233,7 +194,11 @@ const isUnstagedStatusFile = (file: GitStatus['files'][number]): boolean => {
   return Boolean(workingStatus || indexStatus === '?');
 };
 
-export const GitView: React.FC = () => {
+type GitViewProps = {
+  isActive: boolean;
+};
+
+export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   const { t } = useI18n();
   const { git } = useRuntimeAPIs();
   const currentDirectory = useEffectiveDirectory();
@@ -308,26 +273,44 @@ export const GitView: React.FC = () => {
   const currentIdentity = useGitIdentity(currentDirectory ?? null);
   const isLoading = useGitLoadingStatus(currentDirectory ?? null);
   const isLogLoading = useGitLoadingLog(currentDirectory ?? null);
-  const setActiveDirectory = useGitStore((state) => state.setActiveDirectory);
-  const fetchAll = useGitStore((state) => state.fetchAll);
-  const ensureAll = useGitStore((state) => state.ensureAll);
-  const fetchStatus = useGitStore((state) => state.fetchStatus);
-  const fetchBranches = useGitStore((state) => state.fetchBranches);
-  const fetchLog = useGitStore((state) => state.fetchLog);
-  const setLogMaxCount = useGitStore((state) => state.setLogMaxCount);
-  const fetchIdentity = useGitStore((state) => state.fetchIdentity);
-  const prefetchDiffs = useGitStore((state) => state.prefetchDiffs);
-  const moveStatusPathsOptimistically = useGitStore((state) => state.moveStatusPathsOptimistically);
-  const restoreStatus = useGitStore((state) => state.restoreStatus);
-  const bumpIndexRevision = useGitStore((state) => state.bumpIndexRevision);
+  const {
+    setActiveDirectory,
+    fetchAll,
+    ensureAll,
+    fetchStatus,
+    fetchBranches,
+    fetchLog,
+    setLogMaxCount,
+    fetchIdentity,
+    prefetchDiffs,
+    moveStatusPathsOptimistically,
+    restoreStatus,
+    bumpIndexRevision,
+  } = useGitStore(useShallow((state) => ({
+    setActiveDirectory: state.setActiveDirectory,
+    fetchAll: state.fetchAll,
+    ensureAll: state.ensureAll,
+    fetchStatus: state.fetchStatus,
+    fetchBranches: state.fetchBranches,
+    fetchLog: state.fetchLog,
+    setLogMaxCount: state.setLogMaxCount,
+    fetchIdentity: state.fetchIdentity,
+    prefetchDiffs: state.prefetchDiffs,
+    moveStatusPathsOptimistically: state.moveStatusPathsOptimistically,
+    restoreStatus: state.restoreStatus,
+    bumpIndexRevision: state.bumpIndexRevision,
+  })));
   const isMobile = useUIStore((state) => state.isMobile);
   const openContextDiff = useUIStore((state) => state.openContextDiff);
   const navigateToDiff = useUIStore((state) => state.navigateToDiff);
   const setRightSidebarOpen = useUIStore((state) => state.setRightSidebarOpen);
+
   const previousBootstrapStatusRef = React.useRef<'pending' | 'ready' | 'failed' | null>(null);
   const gitReconcileTimeoutRef = React.useRef<number | null>(null);
   const gitMutationFlushTimeoutRef = React.useRef<number | null>(null);
   const flushQueuedGitMutationsRef = React.useRef<(() => void) | null>(null);
+  const mountedRef = React.useRef(true);
+  React.useEffect(() => () => { mountedRef.current = false; }, []);
 
   const clearScheduledGitReconcile = React.useCallback(() => {
     if (gitReconcileTimeoutRef.current === null) {
@@ -429,6 +412,7 @@ export const GitView: React.FC = () => {
   React.useEffect(() => clearScheduledGitMutationFlush, [clearScheduledGitMutationFlush]);
 
   React.useEffect(() => {
+    if (!isActive) return;
     if (!currentDirectory) {
       setWorktreeBootstrapStatus(null);
       setIsWaitingForGitRefreshAfterBootstrap(false);
@@ -465,7 +449,7 @@ export const GitView: React.FC = () => {
         window.clearTimeout(timeoutId);
       }
     };
-  }, [currentDirectory]);
+  }, [isActive, currentDirectory]);
 
   React.useEffect(() => {
     const previous = previousBootstrapStatusRef.current;
@@ -506,6 +490,7 @@ export const GitView: React.FC = () => {
 
   const settingsGitmojiEnabled = useConfigStore((state) => state.settingsGitmojiEnabled);
   const [rootBranchHint, setRootBranchHint] = React.useState<string | null>(null);
+  const { gitmojis: gitmojiEmojis } = useGitmojiList(settingsGitmojiEnabled);
 
   React.useEffect(() => {
     const projectRoot = authoritativeProjectRoot || worktreeMetadata?.projectDirectory;
@@ -550,12 +535,14 @@ export const GitView: React.FC = () => {
 
   const beginIdentityApply = React.useCallback(() => {
     identityApplyCountRef.current += 1;
-    setIsSettingIdentity(true);
+    if (mountedRef.current) {
+      setIsSettingIdentity(true);
+    }
   }, []);
 
   const endIdentityApply = React.useCallback(() => {
     identityApplyCountRef.current = Math.max(0, identityApplyCountRef.current - 1);
-    if (identityApplyCountRef.current === 0) {
+    if (mountedRef.current && identityApplyCountRef.current === 0) {
       setIsSettingIdentity(false);
     }
   }, []);
@@ -623,9 +610,10 @@ export const GitView: React.FC = () => {
   const [expandedCommitHashes, setExpandedCommitHashes] = React.useState<Set<string>>(new Set());
   const [commitFilesMap, setCommitFilesMap] = React.useState<Map<string, CommitFileEntry[]>>(new Map());
   const [loadingCommitHashes, setLoadingCommitHashes] = React.useState<Set<string>>(new Set());
+  const commitFilesMapRef = React.useRef(commitFilesMap);
+  const loadingCommitHashesRef = React.useRef(loadingCommitHashes);
   const [historyBranchDivider, setHistoryBranchDivider] = React.useState<HistoryBranchDivider>(null);
   const [remoteUrl, setRemoteUrl] = React.useState<string | null>(null);
-  const [gitmojiEmojis, setGitmojiEmojis] = React.useState<GitmojiEntry[]>([]);
   const [gitmojiSearch, setGitmojiSearch] = React.useState('');
   const [gitLogDialogMode, setGitLogDialogMode] = React.useState<GitLogDialogMode | null>(null);
 
@@ -740,46 +728,86 @@ export const GitView: React.FC = () => {
   }, []);
 
   React.useEffect(() => {
+    commitFilesMapRef.current = commitFilesMap;
+  }, [commitFilesMap]);
+
+  React.useEffect(() => {
+    loadingCommitHashesRef.current = loadingCommitHashes;
+  }, [loadingCommitHashes]);
+
+  React.useEffect(() => {
     if (!currentDirectory || !git) return;
 
     // Find hashes that are expanded but not yet loaded or loading
     const hashesToLoad = Array.from(expandedCommitHashes).filter(
-      (hash) => !commitFilesMap.has(hash) && !loadingCommitHashes.has(hash)
+      (hash) => !commitFilesMapRef.current.has(hash) && !loadingCommitHashesRef.current.has(hash)
     );
 
     if (hashesToLoad.length === 0) return;
+
+    let cancelled = false;
 
     setLoadingCommitHashes((prev) => {
       const next = new Set(prev);
       for (const hash of hashesToLoad) {
         next.add(hash);
       }
+      loadingCommitHashesRef.current = next;
       return next;
     });
 
-    for (const hash of hashesToLoad) {
-      git
-        .getCommitFiles(currentDirectory, hash)
-        .then((response) => {
-          setCommitFilesMap((prev) => new Map(prev).set(hash, response.files));
-        })
-        .catch((error) => {
-          console.error('Failed to fetch commit files:', error);
-          setCommitFilesMap((prev) => new Map(prev).set(hash, []));
-        })
-        .finally(() => {
-          setLoadingCommitHashes((prev) => {
-            const next = new Set(prev);
-            next.delete(hash);
-            return next;
-          });
-        });
-    }
-  }, [expandedCommitHashes, currentDirectory, git, commitFilesMap, loadingCommitHashes]);
+    void Promise.all(
+      hashesToLoad.map((hash) =>
+        git
+          .getCommitFiles(currentDirectory, hash)
+          .then((response) => ({ hash, files: response.files }))
+          .catch((error) => {
+            console.error('Failed to fetch commit files:', error);
+            return { hash, files: [] as CommitFileEntry[] };
+          })
+      )
+    ).then((results) => {
+      if (cancelled) return;
+      setCommitFilesMap((prev) => {
+        const next = new Map(prev);
+        for (const { hash, files } of results) {
+          next.set(hash, files);
+        }
+        commitFilesMapRef.current = next;
+        return next;
+      });
+      setLoadingCommitHashes((prev) => {
+        const next = new Set(prev);
+        for (const { hash } of results) {
+          next.delete(hash);
+        }
+        loadingCommitHashesRef.current = next;
+        return next;
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      setLoadingCommitHashes((prev) => {
+        let changed = false;
+        const next = new Set(prev);
+        for (const hash of hashesToLoad) {
+          if (next.delete(hash)) {
+            changed = true;
+          }
+        }
+        if (!changed) {
+          return prev;
+        }
+        loadingCommitHashesRef.current = next;
+        return next;
+      });
+    };
+  }, [expandedCommitHashes, currentDirectory, git]);
 
   React.useEffect(() => {
     if (!currentDirectory) return;
-    gitViewSnapshots.set(currentDirectory, {
+    rememberSnapshot(currentDirectory, {
       directory: currentDirectory,
       commitMessage,
       generatedHighlights,
@@ -787,18 +815,25 @@ export const GitView: React.FC = () => {
   }, [commitMessage, currentDirectory, generatedHighlights]);
 
   React.useEffect(() => {
+    if (!isActive) return;
     loadProfiles();
     loadGlobalIdentity();
     loadDefaultGitIdentityId();
-  }, [loadProfiles, loadGlobalIdentity, loadDefaultGitIdentityId]);
+  }, [isActive, loadProfiles, loadGlobalIdentity, loadDefaultGitIdentityId]);
 
   React.useEffect(() => {
+    if (!isActive) return;
     if (!currentDirectory || !git?.getRemoteUrl) {
       setRemoteUrl(null);
       return;
     }
-    git.getRemoteUrl(currentDirectory).then(setRemoteUrl).catch(() => setRemoteUrl(null));
-  }, [currentDirectory, git]);
+    let cancelled = false;
+    git
+      .getRemoteUrl(currentDirectory)
+      .then((url) => { if (!cancelled) setRemoteUrl(url); })
+      .catch(() => { if (!cancelled) setRemoteUrl(null); });
+    return () => { cancelled = true; };
+  }, [isActive, currentDirectory, git]);
 
   const refreshRemotes = React.useCallback(async () => {
     if (!currentDirectory || !git?.getRemotes) {
@@ -807,68 +842,31 @@ export const GitView: React.FC = () => {
     }
     try {
       const remoteList = await git.getRemotes(currentDirectory);
-      setRemotes(remoteList);
+      if (mountedRef.current) {
+        setRemotes(remoteList);
+      }
     } catch {
-      setRemotes([]);
+      if (mountedRef.current) {
+        setRemotes([]);
+      }
     }
   }, [currentDirectory, git]);
 
   React.useEffect(() => {
+    if (!isActive) return;
     void refreshRemotes();
-  }, [refreshRemotes]);
+  }, [isActive, refreshRemotes]);
 
   React.useEffect(() => {
-    if (!settingsGitmojiEnabled) {
-      setGitmojiEmojis([]);
-      return;
-    }
-
-    let cancelled = false;
-
-    const cached = readGitmojiCache();
-    if (cached) {
-      setGitmojiEmojis(cached.gitmojis);
-      if (isGitmojiCacheFresh(cached)) {
-        return () => {
-          cancelled = true;
-        };
-      }
-    }
-
-    const loadGitmojis = async () => {
-      try {
-        const response = await fetch(GITMOJI_SOURCE_URL);
-        if (!response.ok) {
-          throw new Error(`Failed to load gitmojis: ${response.statusText}`);
-        }
-        const payload = (await response.json()) as { gitmojis?: GitmojiEntry[] };
-        const gitmojis = Array.isArray(payload.gitmojis) ? payload.gitmojis.filter(isGitmojiEntry) : [];
-        if (!cancelled) {
-          setGitmojiEmojis(gitmojis);
-          writeGitmojiCache(gitmojis);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          console.warn('Failed to load gitmoji list:', error);
-        }
-      }
-    };
-
-    void loadGitmojis();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [settingsGitmojiEnabled]);
-
-  React.useEffect(() => {
+    if (!isActive) return;
     if (currentDirectory) {
       setActiveDirectory(currentDirectory);
       void ensureAll(currentDirectory, git);
     }
-  }, [currentDirectory, setActiveDirectory, ensureAll, git]);
+  }, [isActive, currentDirectory, setActiveDirectory, ensureAll, git]);
 
   React.useEffect(() => {
+    if (!isActive) return;
     if (!currentDirectory) {
       return;
     }
@@ -879,7 +877,7 @@ export const GitView: React.FC = () => {
       }
       void fetchStatus(currentDirectory, git);
     });
-  }, [currentDirectory, fetchStatus, git]);
+  }, [isActive, currentDirectory, fetchStatus, git]);
 
   const refreshStatusAndBranches = React.useCallback(
     async (showErrors = true) => {
@@ -912,6 +910,7 @@ export const GitView: React.FC = () => {
   }, [currentDirectory, git, fetchIdentity]);
 
   React.useEffect(() => {
+    if (!isActive) return;
     if (!currentDirectory) return;
     if (!git?.hasLocalIdentity) return;
     if (isGitRepo !== true) return;
@@ -948,18 +947,14 @@ export const GitView: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [beginIdentityApply, currentDirectory, defaultGitIdentityId, endIdentityApply, git, isGitRepo, refreshIdentity]);
+  }, [isActive, beginIdentityApply, currentDirectory, defaultGitIdentityId, endIdentityApply, git, isGitRepo, refreshIdentity]);
 
   const changeEntries = React.useMemo(() => {
     if (!status) return [];
     const files = status.files ?? [];
-    const unique = new Map<string, (typeof files)[number]>();
-
-    for (const file of files) {
-      unique.set(file.path, file);
-    }
-
-    return Array.from(unique.values()).sort((a, b) => a.path.localeCompare(b.path));
+    // GitStatus.files is already unique by `path` per the server contract;
+    // a defensive dedup pass would only mask real upstream bugs.
+    return [...files].sort((a, b) => a.path.localeCompare(b.path));
   }, [status]);
 
   const stagedChangeEntries = React.useMemo(
@@ -1162,7 +1157,34 @@ export const GitView: React.FC = () => {
       await refreshStatusAndBranches();
 
       if (options.pushAfter) {
-        const result = await git.gitPush(currentDirectory);
+        const trackingRemoteName = status?.tracking?.split('/')[0];
+        const remote = effectiveRemotes.find((entry) => entry.name === trackingRemoteName) ?? effectiveRemotes[0];
+        if (!remote) {
+          throw new Error(t('mobile.changes.noRemote'));
+        }
+
+        setSyncAction('sync');
+        const trackingPrefix = `${remote.name}/`;
+        const trackedBranch = status?.tracking?.startsWith(trackingPrefix)
+          ? status.tracking.slice(trackingPrefix.length)
+          : undefined;
+
+        await git.gitFetch(currentDirectory, { remote: remote.name });
+        const afterFetch = await git.getGitStatus(currentDirectory);
+        if ((afterFetch.behind ?? 0) > 0) {
+          if ((afterFetch.files?.length ?? 0) > 0) {
+            toast.error(t('gitView.toast.commitOrStashBeforeSync'));
+            await refreshStatusAndBranches(false);
+            return;
+          }
+          await git.gitPull(currentDirectory, { remote: remote.name, branch: trackedBranch, rebase: true });
+        }
+
+        const afterPull = await git.getGitStatus(currentDirectory);
+        let result: Awaited<ReturnType<typeof git.gitPush>> | undefined;
+        if ((afterPull.ahead ?? 0) > 0) {
+          result = await git.gitPush(currentDirectory);
+        }
         toast.success(t('gitView.toast.pushedToUpstream', { name: getPushedRemoteName(result) }));
         triggerFireworks();
         await refreshStatusAndBranches(false);
@@ -2361,7 +2383,7 @@ export const GitView: React.FC = () => {
   }
 
   return (
-    <div className={cn('flex h-full flex-col overflow-hidden', 'bg-sidebar')}>
+    <div className={cn('flex h-full flex-col overflow-hidden')}>
           <GitHeader
         status={status}
         localBranches={localBranches}
@@ -2407,7 +2429,7 @@ export const GitView: React.FC = () => {
 
       <div className="flex-1 min-h-0 overflow-hidden">
         <div className="h-full min-h-0 flex flex-col">
-          <div className={cn('min-w-0 min-h-0 h-full flex flex-col', 'bg-sidebar')}>
+          <div className={cn('min-w-0 min-h-0 h-full flex flex-col')}>
             <ScrollableOverlay
               as={ScrollShadow}
               ref={actionPanelScrollRef}
@@ -2429,6 +2451,7 @@ export const GitView: React.FC = () => {
                           onVisiblePathsChange={setVisibleChangePaths}
                           onRevertAll={handleRevertAll}
                           onRevertDirectory={handleRevertDirectory}
+                          headerBackgroundClassName="bg-background"
                         />
                       </div>
 

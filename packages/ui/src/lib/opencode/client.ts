@@ -7,7 +7,6 @@ import type {
   Part,
   Provider,
   Config,
-  Model,
   Agent,
   TextPartInput,
   FilePartInput,
@@ -16,6 +15,7 @@ import type { PermissionRequest } from "@/types/permission";
 import type { QuestionRequest } from "@/types/question";
 import { getRuntimeUrlResolver } from "@/lib/runtime-url";
 import { runtimeFetch } from "@/lib/runtime-fetch";
+import { getRuntimeKey } from "@/lib/runtime-switch";
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry";
 import { markStartupTrace } from "@/lib/startupTrace";
 import {
@@ -29,6 +29,8 @@ import {
 // Use relative path by default (works with both dev and nginx proxy server)
 // Can be overridden with VITE_OPENCODE_URL for absolute URLs in special deployments
 const DEFAULT_BASE_URL = import.meta.env.VITE_OPENCODE_URL || "/api";
+const CONFIG_CACHE_TTL_MS = 10_000;
+const OPENCODE_HEALTH_TIMEOUT_MS = 4_000;
 
 /**
  * Render an SDK error payload into a short string for Error messages.
@@ -156,6 +158,26 @@ const resolveRuntimeBaseUrl = (): string | null => {
   }
 };
 
+type AbortSignalConstructorWithTimeout = typeof AbortSignal & {
+  timeout?: (milliseconds: number) => AbortSignal;
+};
+
+const createTimeoutSignal = (timeoutMs: number): { signal: AbortSignal; cleanup: () => void } => {
+  const abortSignal = typeof AbortSignal !== 'undefined'
+    ? AbortSignal as AbortSignalConstructorWithTimeout
+    : undefined;
+  if (typeof abortSignal?.timeout === 'function') {
+    return { signal: abortSignal.timeout(timeoutMs), cleanup: () => undefined };
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  return {
+    signal: controller.signal,
+    cleanup: () => clearTimeout(timeoutId),
+  };
+};
+
 const createRuntimeOpencodeClient = (config: { baseUrl: string; directory?: string }): OpencodeClient => {
   return createOpencodeClient({
     ...config,
@@ -168,7 +190,7 @@ interface App {
   [key: string]: unknown;
 }
 
-export type FilesystemEntry = {
+type FilesystemEntry = {
   name: string;
   path: string;
   isDirectory: boolean;
@@ -201,7 +223,7 @@ type FileInputLite = {
   url: string;
 };
 
-export type DirectorySwitchResult = {
+type DirectorySwitchResult = {
   success: boolean;
   restarted: boolean;
   path: string;
@@ -228,6 +250,11 @@ class OpencodeService {
   private currentDirectory: string | undefined = undefined;
   private directoryContextQueue: Promise<void> = Promise.resolve();
   private listDirectoryInFlight: Map<string, Promise<FilesystemEntry[]>> = new Map();
+  private configProvidersInFlight: Map<string, Promise<{ providers: Provider[]; default: { [key: string]: string } }>> = new Map();
+  private listAgentsInFlight: Map<string, Promise<Agent[]>> = new Map();
+  private configInFlight: Map<string, Promise<Config>> = new Map();
+  private configCache: Map<string, { config: Config; expiresAt: number }> = new Map();
+  private configCacheGeneration = 0;
   private listDirectoryCache: Map<string, { entries: FilesystemEntry[]; expiresAt: number }> = new Map();
 
   constructor(baseUrl: string = DEFAULT_BASE_URL) {
@@ -251,6 +278,9 @@ class OpencodeService {
     this.client = createRuntimeOpencodeClient({ baseUrl: this.baseUrl });
     this.scopedClients.clear();
     this.listDirectoryInFlight.clear();
+    this.configProvidersInFlight.clear();
+    this.listAgentsInFlight.clear();
+    this.clearConfigCache();
     this.listDirectoryCache.clear();
   }
 
@@ -726,6 +756,7 @@ class OpencodeService {
     }>;
     messageId?: string;
     agentMentions?: Array<{ name: string; source?: { value: string; start: number; end: number } }>;
+    delivery?: 'steer';
     format?: {
       type: 'json_schema';
       schema: Record<string, unknown>;
@@ -831,6 +862,7 @@ class OpencodeService {
           agent: params.agent,
           variant: params.variant,
           messageID: messageId,
+          ...(params.delivery ? { delivery: params.delivery } : {}),
           ...(params.format ? { format: params.format } : {}),
           parts,
         });
@@ -1227,17 +1259,62 @@ class OpencodeService {
   }
 
   // Configuration
-  async getConfig(): Promise<Config> {
-    const response = await this.client.config.get();
-    if (!response.data) throw new Error('Failed to get config');
-    return response.data;
+  clearConfigCache(): void {
+    this.configCacheGeneration += 1;
+    this.configInFlight.clear();
+    this.configCache.clear();
+  }
+
+  async getConfig(directory?: string | null): Promise<Config> {
+    const effectiveDirectory = this.normalizeCandidatePath(directory) ?? directory ?? this.currentDirectory ?? undefined;
+    const key = effectiveDirectory ?? '';
+    const cached = this.configCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) {
+      markStartupTrace('opencodeClient.getConfig:cacheHit', { directory: effectiveDirectory ?? null });
+      return cached.config;
+    }
+
+    const existing = this.configInFlight.get(key);
+    if (existing) {
+      markStartupTrace('opencodeClient.getConfig:deduped', { directory: effectiveDirectory ?? null });
+      return existing;
+    }
+
+    const generation = this.configCacheGeneration;
+    const request = (async () => {
+      markStartupTrace('opencodeClient.getConfig:start', { directory: effectiveDirectory ?? null });
+      const started = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      const scopedClient = effectiveDirectory ? this.getScopedApiClient(effectiveDirectory) : this.client;
+      const response = await scopedClient.config.get();
+      if (!response.data) throw new Error('Failed to get config');
+      const ended = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      markStartupTrace('opencodeClient.getConfig:end', {
+        directory: effectiveDirectory ?? null,
+        durationMs: Math.round(ended - started),
+      });
+      if (generation === this.configCacheGeneration) {
+        this.configCache.set(key, { config: response.data, expiresAt: Date.now() + CONFIG_CACHE_TTL_MS });
+      }
+      return response.data;
+    })();
+
+    this.configInFlight.set(key, request);
+    try {
+      return await request;
+    } finally {
+      if (this.configInFlight.get(key) === request) {
+        this.configInFlight.delete(key);
+      }
+    }
   }
 
   async updateConfig(config: Record<string, unknown>): Promise<Config> {
     // IMPORTANT: Do NOT pass directory parameter for config updates
     // The config should be global, not directory-specific
     const response = await this.client.config.update({ config: config as Config });
-    return unwrapSdkData(response, 'global.config.update');
+    const data = unwrapSdkData(response, 'global.config.update');
+    this.clearConfigCache();
+    return data;
   }
 
   /**
@@ -1261,11 +1338,34 @@ class OpencodeService {
     providers: Provider[];
     default: { [key: string]: string };
   }> {
-    const response = await this.client.config.providers(
-      this.currentDirectory ? { directory: this.currentDirectory } : undefined
-    );
-    if (!response.data) throw new Error('Failed to get providers');
-    return response.data;
+    return this.getProvidersForConfig(this.currentDirectory);
+  }
+
+  async getProvidersForConfig(directory?: string | null): Promise<{
+    providers: Provider[];
+    default: { [key: string]: string };
+  }> {
+    const effectiveDirectory = this.normalizeCandidatePath(directory) ?? directory ?? this.currentDirectory ?? undefined;
+    const key = effectiveDirectory ?? '';
+
+    const existing = this.configProvidersInFlight.get(key);
+    if (existing) {
+      return existing;
+    }
+
+    const request = (async () => {
+      const response = await this.client.config.providers(
+        effectiveDirectory ? { directory: effectiveDirectory } : undefined,
+      );
+      return unwrapSdkData(response, 'config.providers');
+    })();
+
+    this.configProvidersInFlight.set(key, request);
+    try {
+      return await request;
+    } finally {
+      this.configProvidersInFlight.delete(key);
+    }
   }
 
   // App Management - using config endpoint since /app doesn't exist in this version
@@ -1293,14 +1393,50 @@ class OpencodeService {
    * useAgentsStore) can observe failure and retry; silently returning an
    * empty list would defeat retries and clear the cached agent list.
    */
-  async listAgents(): Promise<Agent[]> {
-    const response = await this.client.app.agents(
-      this.currentDirectory ? { directory: this.currentDirectory } : undefined
-    );
-    if (response.error) {
-      throw new Error(`app.agents failed: ${formatSdkError(response.error)}`);
+  async listAgents(directory?: string | null): Promise<Agent[]> {
+    // Pass the directory explicitly so we don't depend on (and serialize behind)
+    // withDirectory's shared context queue. Concurrent callers for the same
+    // directory (e.g. config store + agents store at startup) share one request.
+    const effectiveDirectory = this.normalizeCandidatePath(directory) ?? directory ?? this.currentDirectory ?? undefined;
+    const key = effectiveDirectory ?? '';
+
+    const existing = this.listAgentsInFlight.get(key);
+    if (existing) {
+      return existing;
     }
-    return response.data || [];
+
+    const request = (async () => {
+      const params = effectiveDirectory ? { directory: effectiveDirectory } : undefined;
+      const response = await this.client.app.agents(params);
+      if (!response.error && Array.isArray(response.data) && response.data.length > 0) {
+        return response.data;
+      }
+
+      // SDK gap / endpoint drift: current OpenCode exposes the authoritative
+      // agent list at /agent, while app.agents can be empty on some runtimes.
+      const fallbackResponse = await runtimeFetch('/api/agent', {
+        ...(effectiveDirectory ? { query: { directory: effectiveDirectory } } : {}),
+      });
+      if (!fallbackResponse.ok) {
+        if (response.error) {
+          throw new Error(`app.agents failed${response.response?.status ? ` (${response.response.status})` : ''}: ${formatSdkError(response.error)}`);
+        }
+        throw new Error(`agent.list failed (${fallbackResponse.status})`);
+      }
+
+      const fallbackData = await fallbackResponse.json().catch(() => null) as unknown;
+      if (!Array.isArray(fallbackData)) {
+        throw new Error('agent.list failed: invalid response');
+      }
+      return fallbackData as Agent[];
+    })();
+
+    this.listAgentsInFlight.set(key, request);
+    try {
+      return await request;
+    } finally {
+      this.listAgentsInFlight.delete(key);
+    }
   }
 
   // SSE infrastructure removed — EventPipeline in sync/event-pipeline.ts handles
@@ -1428,7 +1564,8 @@ class OpencodeService {
         ? '/api/opencode/health'
         : `${normalizedBase}/opencode/health`;
       markStartupTrace('opencodeClient.checkHealth:url', { baseUrl: this.baseUrl, healthUrl });
-      const response = await runtimeFetch(healthUrl);
+      const timeout = createTimeoutSignal(OPENCODE_HEALTH_TIMEOUT_MS);
+      const response = await runtimeFetch(healthUrl, { signal: timeout.signal }).finally(timeout.cleanup);
       markStartupTrace('opencodeClient.checkHealth:response', { status: response.status });
       if (!response.ok) {
         return false;
@@ -1627,11 +1764,16 @@ class OpencodeService {
   }
 
   async getFilesystemHome(): Promise<string | null> {
-    // Optimization: Check for desktop runtime first to avoid unnecessary network calls
-    // and fix the "SyntaxError" warning when the endpoint is missing
-    const desktopHome = await getDesktopHomeDirectory();
-    if (desktopHome) {
-      return desktopHome;
+    // The injected desktop home describes the LOCAL machine. It is only a
+    // valid answer while the active runtime is the local one — after an
+    // in-place switch to a remote host the home must come from that host's
+    // /api/fs/home, not from the local Electron global.
+    const runtimeKey = getRuntimeKey();
+    if (!runtimeKey || runtimeKey === 'local') {
+      const desktopHome = await getDesktopHomeDirectory();
+      if (desktopHome) {
+        return desktopHome;
+      }
     }
 
     try {
@@ -1711,5 +1853,3 @@ class OpencodeService {
 export const opencodeClient = new OpencodeService();
 
 // Exported types
-export type { Session, Message, Part, Provider, Config, Model };
-export type { App };

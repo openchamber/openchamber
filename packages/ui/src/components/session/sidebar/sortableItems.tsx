@@ -7,6 +7,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
@@ -89,13 +90,34 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   const suppressNextToggleRef = React.useRef(false);
   const menuInstanceKey = `project:${id}`;
   const isMenuOpen = openSidebarMenuKey === menuInstanceKey;
+  const [isContextMenuOpen, setIsContextMenuOpen] = React.useState(false);
 
   const projectIconName = projectIcon ? PROJECT_ICON_MAP[projectIcon] : null;
   const iconColor = projectColor ? (PROJECT_COLOR_MAP[projectColor] ?? null) : null;
 
   const handleMenuOpenChange = React.useCallback((open: boolean) => {
+    if (open) setIsContextMenuOpen(false);
     setOpenSidebarMenuKey(open ? menuInstanceKey : null);
   }, [menuInstanceKey, setOpenSidebarMenuKey]);
+
+  const renderProjectMenuItems = (Item: React.ElementType) => (
+    <>
+      {showCreateButtons && !isRepo && !hideDirectoryControls && onNewSession && (
+        <Item onClick={onNewSession}>
+          <Icon name="add" className="mr-1.5 h-4 w-4" />
+          {t('sessions.sidebar.project.actions.newSession')}
+        </Item>
+      )}
+      <Item onClick={onRenameStart}>
+        <Icon name="pencil-ai" className="mr-1.5 h-4 w-4" />
+        {t('sessions.sidebar.session.menu.rename')}
+      </Item>
+      <Item onClick={onClose} className="text-destructive focus:text-destructive">
+        <Icon name="close" className="mr-1.5 h-4 w-4" />
+        {t('sessions.sidebar.project.actions.closeProject')}
+      </Item>
+    </>
+  );
 
   const handleMenuTriggerClick = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
@@ -140,12 +162,21 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
             />
           )}
 
-          <div
-            className={cn(
-              'w-full text-left group/project select-none',
-            )}
-            style={{ backgroundColor: isDesktopShell && isStuck ? 'transparent' : undefined }}
-          >
+          <ContextMenu open={isContextMenuOpen} onOpenChange={setIsContextMenuOpen}>
+            <ContextMenuTrigger
+              render={
+                <div
+                  className={cn('w-full text-left group/project select-none')}
+                  style={{ backgroundColor: isDesktopShell && isStuck ? 'transparent' : undefined }}
+                  onContextMenu={(event) => {
+                    // VS Code hides project actions entirely (hideDirectoryControls).
+                    if (hideDirectoryControls) return;
+                    event.preventDefault();
+                    setIsContextMenuOpen(true);
+                  }}
+                />
+              }
+            >
             <div className="relative flex items-center gap-1 px-0.5 py-0.5" {...attributes}>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -237,6 +268,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                   </Tooltip>
                 ) : null}
 
+                {!hideDirectoryControls ? (
                 <DropdownMenu
                   open={isMenuOpen}
                   onOpenChange={handleMenuOpenChange}
@@ -261,25 +293,10 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                       </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="min-w-[180px]">
-                      {showCreateButtons && !isRepo && !hideDirectoryControls && onNewSession && (
-                      <DropdownMenuItem onClick={onNewSession}>
-                        <Icon name="add" className="mr-1.5 h-4 w-4" />
-                        {t('sessions.sidebar.project.actions.newSession')}
-                      </DropdownMenuItem>
-                    )}
-                    <DropdownMenuItem onClick={onRenameStart}>
-                      <Icon name="pencil-ai" className="mr-1.5 h-4 w-4" />
-                      {t('sessions.sidebar.session.menu.rename')}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={onClose}
-                      className="text-destructive focus:text-destructive"
-                    >
-                      <Icon name="close" className="mr-1.5 h-4 w-4" />
-                      {t('sessions.sidebar.project.actions.closeProject')}
-                    </DropdownMenuItem>
+                      {renderProjectMenuItems(DropdownMenuItem)}
                     </DropdownMenuContent>
                   </DropdownMenu>
+                ) : null}
               </div>
 
               {showCreateButtons && onNewSession ? (
@@ -312,7 +329,11 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                 </div>
               ) : null}
             </div>
-          </div>
+            </ContextMenuTrigger>
+            <ContextMenuContent className="min-w-[180px]">
+              {renderProjectMenuItems(ContextMenuItem)}
+            </ContextMenuContent>
+          </ContextMenu>
         </>
       ) : null}
 

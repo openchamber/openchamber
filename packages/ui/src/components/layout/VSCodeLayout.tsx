@@ -10,9 +10,11 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { McpDropdown } from '@/components/mcp/McpDropdown';
+import { ArchiveAllDropdown } from '@/components/session/ArchiveAllDropdown';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
 import { SessionsTabTitle } from '@/components/session/SessionsTabTitle';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { cn } from '@/lib/utils';
 import {
   DropdownMenu,
@@ -23,6 +25,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useUpdatePolling } from '@/hooks/useUpdatePolling';
 import { useI18n } from '@/lib/i18n';
 import { toast } from '@/components/ui';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
@@ -31,11 +34,11 @@ import { PaceIndicator } from '@/components/sections/usage/PaceIndicator';
 import { Icon } from "@/components/icon/Icon";
 import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
-import { useUpdateStore } from '@/stores/useUpdateStore';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { formatTimeForPreference } from '@/lib/timeFormat';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
-import type { Session, UsageWindow } from '@/types';
+import type { Session } from '@opencode-ai/sdk/v2';
+import type { UsageWindow } from '@/types';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 
@@ -73,41 +76,7 @@ type VSCodeView = 'sessions' | 'chat' | 'settings';
 export const VSCodeLayout: React.FC = () => {
   const { t } = useI18n();
   const runtimeApis = useRuntimeAPIs();
-  const checkForUpdates = useUpdateStore((state) => state.checkForUpdates);
-
-  React.useEffect(() => {
-    const initialDelayMs = 3000;
-    const defaultIntervalMs = 60 * 60 * 1000;
-    const minIntervalMs = 5 * 60 * 1000;
-    const maxIntervalMs = 24 * 60 * 60 * 1000;
-    let disposed = false;
-    let timer: number | null = null;
-
-    const clampIntervalMs = (seconds: number): number => {
-      const ms = Math.round(seconds * 1000);
-      return Math.max(minIntervalMs, Math.min(maxIntervalMs, ms));
-    };
-
-    const scheduleNext = (delayMs: number) => {
-      if (disposed) return;
-      timer = window.setTimeout(async () => {
-        const suggestedSec = await checkForUpdates();
-        const nextDelay = typeof suggestedSec === 'number' && Number.isFinite(suggestedSec)
-          ? clampIntervalMs(suggestedSec)
-          : defaultIntervalMs;
-        scheduleNext(nextDelay);
-      }, delayMs);
-    };
-
-    scheduleNext(initialDelayMs);
-
-    return () => {
-      disposed = true;
-      if (timer !== null) {
-        window.clearTimeout(timer);
-      }
-    };
-  }, [checkForUpdates]);
+  useUpdatePolling();
 
   const viewMode = React.useMemo<'sidebar' | 'editor'>(() => {
     const configured =
@@ -579,7 +548,6 @@ export const VSCodeLayout: React.FC = () => {
               mobileVariant
               allowReselect
               hideDirectoryControls
-              showOnlyMainWorkspace
             />
             <div
               className={cn(
@@ -627,7 +595,6 @@ export const VSCodeLayout: React.FC = () => {
                   allowReselect
                   onSessionSelected={() => setCurrentView('chat')}
                   hideDirectoryControls
-                  showOnlyMainWorkspace
                 />
               </div>
             </div>
@@ -673,6 +640,8 @@ interface VSCodeHeaderProps {
 
 const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, onArchiveAll, onNewSession, onSettings, onAgentManager, showMcp, showContextUsage, showRateLimits, enableSessionSwitcher }) => {
   const { t } = useI18n();
+  const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
+  const toggleArchivedSessions = useSessionDisplayStore((state) => state.toggleArchivedSessions);
   const getCurrentModel = useConfigStore((state) => state.getCurrentModel);
   const providers = useConfigStore((state) => state.providers);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
@@ -847,9 +816,25 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
           </button>
         </SessionSwitcherDropdown>
       ) : (
-        <SessionsTabTitle title={title} onArchiveAll={onArchiveAll} />
+        <SessionsTabTitle title={title} />
       )}
       <div className="min-w-0 flex-1" />
+      {onArchiveAll && (
+        <button
+          type="button"
+          onClick={toggleArchivedSessions}
+          className={cn(
+            'inline-flex h-8 w-8 items-center justify-center p-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+            showArchivedSessions ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
+          )}
+          aria-label={t('sessions.sidebar.header.displayMode.showArchived')}
+          aria-pressed={showArchivedSessions}
+          title={t('sessions.sidebar.header.displayMode.showArchived')}
+        >
+          <Icon name="archive-stack" className="h-5 w-5" />
+        </button>
+      )}
+      {onArchiveAll && <ArchiveAllDropdown onArchiveAll={onArchiveAll} />}
       {onNewSession && (
         <button
           onClick={onNewSession}
@@ -1034,7 +1019,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
           valueClassName="font-semibold leading-none"
           hideIcon
           showPercentIcon
-          percentIconClassName="h-5 w-5"
+          percentIconClassName="h-4.5 w-4.5"
         />
       )}
     </div>

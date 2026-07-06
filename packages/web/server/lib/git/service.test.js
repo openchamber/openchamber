@@ -8,12 +8,18 @@ import simpleGit from 'simple-git';
 import {
   checkoutCommit,
   cherryPick,
+  createWorktree,
   getStatus,
+  removeWorktree,
+  resolvePrimaryWorktreeRoot,
+  resolveWorktreeTopLevel,
   resetToCommit,
   resolveBaseRefForLog,
   revertCommit,
   stageFiles,
   unstageFiles,
+  applyHunk,
+  getDiff,
 } from './service.js';
 
 // ---------------------------------------------------------------------------
@@ -120,6 +126,143 @@ describe('git index path validation', () => {
 });
 
 // ---------------------------------------------------------------------------
+// applyHunk (per-hunk stage / unstage / discard)
+// ---------------------------------------------------------------------------
+
+/** Minimal unified-diff splitter: returns standalone per-hunk patches. */
+const splitHunks = (patch) => {
+  const lines = patch.split(/\r?\n/);
+  const headerEnd = lines.findIndex((line) => /^@@\s/.test(line));
+  if (headerEnd === -1) return [];
+  const header = lines.slice(0, headerEnd);
+  const hunks = [];
+  for (let i = headerEnd; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (/^@@\s/.test(line)) hunks.push([...header, line]);
+    else if (hunks.length > 0) hunks[hunks.length - 1].push(line);
+  }
+  return hunks.map((hunk) => hunk.join('\n'))
+    .filter((hunk) => hunk.trim().length > 0)
+    .map((hunk) => (hunk.endsWith('\n') ? hunk : `${hunk}\n`));
+};
+
+const writeFile = (repo, name, contents) =>
+  fs.promises.writeFile(path.join(repo, name), contents, 'utf8');
+
+// Build a 20-line file so changes on line 1 and line 20 stay in separate hunks
+// (default 3-line diff context would merge closer edits into one hunk).
+const makeFile = (first, last) =>
+  [first, ...Array.from({ length: 18 }, (_, i) => `line${i + 2}`), last].join('\n') + '\n';
+const ORIGINAL_FILE = makeFile('line1', 'line20');
+const EDITED_FILE = makeFile('TOP', 'BOTTOM');
+
+const readWorking = (repo) => fs.promises.readFile(path.join(repo, 'file.txt'), 'utf8').then((c) => c.replace(/\r\n/g, '\n'));
+const readStaged = async (git) => (await git.raw(['show', ':file.txt'])).replace(/\r\n/g, '\n');
+
+describe('applyHunk', () => {
+  it('rejects an invalid action or a patch without a hunk header', async () => {
+    const { tmpDir } = await createTempRepo();
+    await expect(applyHunk(tmpDir, 'file.txt', { patch: '@@ -1 +1 @@\n a\n', action: 'bogus' })).rejects.toThrow(
+      'Invalid hunk action'
+    );
+    await expect(applyHunk(tmpDir, 'file.txt', { patch: 'no hunk here', action: 'stage' })).rejects.toThrow(
+      'hunk header'
+    );
+  });
+
+  it('stages a single hunk while leaving the rest unstaged', async () => {
+    if (!canRunGit()) return;
+    const { tmpDir, git } = await createTempRepo();
+    await writeFile(tmpDir, 'file.txt', ORIGINAL_FILE);
+    await git.add('file.txt');
+    await git.commit('Initial');
+
+    await writeFile(tmpDir, 'file.txt', EDITED_FILE);
+    const diff = await getDiff(tmpDir, { path: 'file.txt' });
+    const hunks = splitHunks(diff);
+    expect(hunks.length).toBe(2);
+
+    await applyHunk(tmpDir, 'file.txt', { patch: hunks[0], action: 'stage' });
+
+    expect(await readStaged(git)).toBe(makeFile('TOP', 'line20'));
+    expect(await readWorking(tmpDir)).toBe(EDITED_FILE);
+  });
+
+  it('discards a single hunk from the working tree', async () => {
+    if (!canRunGit()) return;
+    const { tmpDir, git } = await createTempRepo();
+    await writeFile(tmpDir, 'file.txt', ORIGINAL_FILE);
+    await git.add('file.txt');
+    await git.commit('Initial');
+
+    await writeFile(tmpDir, 'file.txt', EDITED_FILE);
+    const diff = await getDiff(tmpDir, { path: 'file.txt' });
+    const hunks = splitHunks(diff);
+    expect(hunks.length).toBe(2);
+
+    await applyHunk(tmpDir, 'file.txt', { patch: hunks[1], action: 'discard' });
+
+    expect(await readWorking(tmpDir)).toBe(makeFile('TOP', 'line20'));
+  });
+
+  it('unstages a single hunk from the index', async () => {
+    if (!canRunGit()) return;
+    const { tmpDir, git } = await createTempRepo();
+    await writeFile(tmpDir, 'file.txt', ORIGINAL_FILE);
+    await git.add('file.txt');
+    await git.commit('Initial');
+
+    await writeFile(tmpDir, 'file.txt', EDITED_FILE);
+    await git.add('file.txt');
+
+    const stagedDiff = await getDiff(tmpDir, { path: 'file.txt', staged: true });
+    const hunks = splitHunks(stagedDiff);
+    expect(hunks.length).toBe(2);
+
+    await applyHunk(tmpDir, 'file.txt', { patch: hunks[0], action: 'unstage' });
+
+    // Only the first hunk (line1 -> TOP) was reverted in the index;
+    // the second hunk (BOTTOM) stays staged.
+    expect(await readStaged(git)).toBe(makeFile('line1', 'BOTTOM'));
+  });
+
+  it('rejects a patch whose target path does not match the requested file', async () => {
+    if (!canRunGit()) return;
+    const { tmpDir, git } = await createTempRepo();
+    await writeFile(tmpDir, 'file.txt', ORIGINAL_FILE);
+    await git.add('file.txt');
+    await git.commit('Initial');
+    await writeFile(tmpDir, 'file.txt', makeFile('CHANGED', 'line20'));
+
+    const diff = await getDiff(tmpDir, { path: 'file.txt' });
+    const [hunk] = splitHunks(diff);
+    const retargeted = hunk.replace(/file\.txt/g, 'other.txt');
+    await expect(applyHunk(tmpDir, 'file.txt', { patch: retargeted, action: 'stage' })).rejects.toThrow(
+      'patch target path does not match'
+    );
+  });
+
+  it('accepts hunk patches for files with spaces in their path', async () => {
+    if (!canRunGit()) return;
+    const { tmpDir, git } = await createTempRepo();
+    const filePath = 'file name.txt';
+    await writeFile(tmpDir, filePath, ORIGINAL_FILE);
+    await git.add(filePath);
+    await git.commit('Initial');
+
+    await writeFile(tmpDir, filePath, EDITED_FILE);
+    const diff = await getDiff(tmpDir, { path: filePath });
+    const hunks = splitHunks(diff);
+    expect(hunks.length).toBe(2);
+
+    await applyHunk(tmpDir, filePath, { patch: hunks[0], action: 'stage' });
+
+    const staged = (await git.raw(['show', `:${filePath}`])).replace(/\r\n/g, '\n');
+    expect(staged).toBe(makeFile('TOP', 'line20'));
+  });
+});
+
+// ---------------------------------------------------------------------------
 // getStatus
 // ---------------------------------------------------------------------------
 
@@ -136,6 +279,127 @@ describe('getStatus', () => {
     runGit(repo, ['commit', '-m', 'Initial commit']);
 
     await expect(getStatus(repo)).resolves.toMatchObject({ current: 'main' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// worktree root resolution
+// ---------------------------------------------------------------------------
+
+describe('worktree root resolution', () => {
+  it('resolves the git toplevel for a repository subdirectory', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    const subdirectory = path.join(repo, 'packages', 'app');
+    runGit(repo, ['init', '-b', 'main']);
+    fs.mkdirSync(subdirectory, { recursive: true });
+
+    await expect(resolveWorktreeTopLevel(subdirectory)).resolves.toEqual({ root: fs.realpathSync(repo) });
+  });
+
+  it('resolves the primary worktree root from a linked worktree', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    const worktree = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+    runGit(repo, ['add', 'README.md']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+    fs.rmSync(worktree, { recursive: true, force: true });
+    runGit(repo, ['worktree', 'add', '-b', 'feature/test', worktree, 'HEAD']);
+
+    await expect(resolvePrimaryWorktreeRoot(worktree)).resolves.toEqual({ root: fs.realpathSync(repo) });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createWorktree
+// ---------------------------------------------------------------------------
+
+describe('createWorktree', () => {
+  it('preflights fast create branch-in-use failures before creating the candidate directory', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+
+    try {
+      const repo = createTempDir();
+      const worktree = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+      const projectID = runGit(repo, ['rev-list', '--max-parents=0', '--all']).trim();
+
+      fs.rmSync(worktree, { recursive: true, force: true });
+      runGit(repo, ['worktree', 'add', '-b', 'feature/in-use', worktree, 'HEAD']);
+      const canonicalWorktree = fs.realpathSync(worktree);
+
+      await expect(createWorktree(repo, {
+        mode: 'existing',
+        existingBranch: 'feature/in-use',
+        branchName: 'feature/in-use',
+        worktreeName: 'feature-in-use',
+        returnAfterDirectoryCreated: true,
+      })).rejects.toThrow(`Branch is already checked out in ${canonicalWorktree}`);
+
+      const candidateDirectory = path.join(dataHome, 'opencode', 'worktree', projectID, 'feature-in-use');
+      expect(fs.existsSync(candidateDirectory)).toBe(false);
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// removeWorktree
+// ---------------------------------------------------------------------------
+
+describe('removeWorktree', () => {
+  it('forgets unmanaged orphan worktree entries without deleting files', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+
+    try {
+      const repo = createTempDir();
+      const sentinel = createTempDir();
+      const canary = path.join(sentinel, 'canary.txt');
+
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+      fs.writeFileSync(canary, 'sentinel');
+
+      await expect(removeWorktree(repo, {
+        directory: sentinel,
+        deleteLocalBranch: false,
+      })).resolves.toBe(true);
+      expect(fs.existsSync(canary)).toBe(true);
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
   });
 });
 

@@ -7,6 +7,7 @@ import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { getClientPlatform } from '@/lib/platform';
 import { useI18n } from '@/lib/i18n';
 
 const DEFAULT_NOTIFICATION_TEMPLATES = {
@@ -39,7 +40,15 @@ export const NotificationSettings: React.FC = () => {
   const { t } = useI18n();
   const isDesktop = React.useMemo(() => isDesktopShell(), []);
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
-  const isBrowser = !isDesktop && !isVSCode;
+  // The native Capacitor app runs in a WKWebView with no Web Notification API; it has its
+  // own native (Local Notifications) permission. Treat it as a native runtime, not a
+  // browser, so the toggle isn't gated on Notification.permission (which is stuck there).
+  const isNativeApp = React.useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    const capacitor = (window as typeof window & { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
+    return capacitor?.isNativePlatform?.() === true || window.location.protocol === 'capacitor:';
+  }, []);
+  const isBrowser = !isDesktop && !isVSCode && !isNativeApp;
   const nativeNotificationsEnabled = useUIStore(state => state.nativeNotificationsEnabled);
   const setNativeNotificationsEnabled = useUIStore(state => state.setNativeNotificationsEnabled);
   const notificationMode = useUIStore(state => state.notificationMode);
@@ -131,7 +140,7 @@ export const NotificationSettings: React.FC = () => {
     }
   };
 
-  const canShowNotifications = isDesktop || isVSCode || (isBrowser && typeof Notification !== 'undefined' && Notification.permission === 'granted');
+  const canShowNotifications = isDesktop || isVSCode || isNativeApp || (isBrowser && typeof Notification !== 'undefined' && Notification.permission === 'granted');
 
   const updateTemplate = (
     event: 'completion' | 'error' | 'question' | 'subtask',
@@ -383,6 +392,7 @@ export const NotificationSettings: React.FC = () => {
             auth: keys.auth,
           },
           origin: typeof window !== 'undefined' ? window.location.origin : undefined,
+          platform: getClientPlatform(),
         }),
         15000,
         'Push subscribe request timed out'
@@ -441,7 +451,7 @@ export const NotificationSettings: React.FC = () => {
     <div className="space-y-8">
 
         {/* --- Global Delivery Settings --- */}
-        <div className="mb-8">
+        <div data-settings-item="notifications.delivery" className="mb-8">
           <div className="mb-1 px-1">
               <h3 className="typography-ui-header font-medium text-foreground">
                 {t('settings.notifications.page.delivery.title')}
@@ -474,7 +484,10 @@ export const NotificationSettings: React.FC = () => {
               <span className="typography-ui-label text-foreground">{t('settings.notifications.page.delivery.enableLabel')}</span>
             </div>
 
-            {nativeNotificationsEnabled && canShowNotifications && (
+            {/* The native Capacitor app never notifies while focused (hard rule) and uses
+                generic, non-customizable text, so the "notify while focused" toggle and the
+                test button are hidden there. */}
+            {nativeNotificationsEnabled && canShowNotifications && !isNativeApp && (
               <>
                 <div
                   className="group flex cursor-pointer items-center gap-2 py-1.5"
@@ -540,7 +553,7 @@ export const NotificationSettings: React.FC = () => {
         {nativeNotificationsEnabled && canShowNotifications && (
           <>
             {/* --- Events --- */}
-            <div className="mb-8">
+            <div data-settings-item="notifications.events" className="mb-8">
               <div className="mb-1 px-1">
                 <h3 className="typography-ui-header font-medium text-foreground">
                   {t('settings.notifications.page.events.title')}
@@ -618,7 +631,8 @@ export const NotificationSettings: React.FC = () => {
               </section>
             </div>
 
-            {/* --- Template Customization --- */}
+            {/* --- Template Customization (not on the native app — it uses generic text) --- */}
+            {!isNativeApp && (
             <div className="mb-8">
               <div className="mb-1 px-1">
                 <h3 className="typography-ui-header font-medium text-foreground">
@@ -666,13 +680,14 @@ export const NotificationSettings: React.FC = () => {
                 ))}
               </div>
             </div>
+            )}
 
           </>
         )}
 
         {/* --- Background Push Notifications --- */}
         {isBrowser && (
-          <div className="mb-8">
+          <div data-settings-item="notifications.push" className="mb-8">
             <div className="mb-1 px-1">
               <h3 className="typography-ui-header font-medium text-foreground">
                 {t('settings.notifications.page.push.title')}

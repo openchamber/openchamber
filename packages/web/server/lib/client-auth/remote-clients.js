@@ -135,6 +135,14 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
       };
       if (normalizedDedupeKey) {
         store.clients = store.clients.filter((entry) => entry.dedupeKey !== normalizedDedupeKey);
+        // Migrate pre-clientKind desktop tokens: a deduped, kind-tagged mint
+        // supersedes legacy records with the same label that carry neither a
+        // kind nor a dedupe key — those tokens can no longer pass the
+        // desktop-local client-create gate and would otherwise linger forever.
+        if (client.clientKind) {
+          store.clients = store.clients.filter((entry) =>
+            !(entry.label === client.label && !entry.clientKind && !entry.dedupeKey));
+        }
       }
       store.clients.push(client);
       await writeStore(store);

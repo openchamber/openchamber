@@ -105,3 +105,4 @@ For each issue:
 - Add a small set of accurate existing labels following the steps above.
 - In a single comment summarize the issue and ask the reporter for any additional information needed to complete the request.
 - Keep the comment friendly and concise.
+- Never post test, probe, placeholder, or debugging comments.

@@ -6,6 +6,7 @@ import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 
 type AppearanceSlice = {
   showReasoningTraces: boolean;
+  sessionAssistEnabled: boolean;
   collapsibleThinkingBlocks: boolean;
   showDeletionDialog: boolean;
   nativeNotificationsEnabled: boolean;
@@ -36,7 +37,6 @@ type AppearanceSlice = {
   inputBarOffset: number;
   mobileKeyboardMode: MobileKeyboardMode;
   diffLayoutPreference: 'dynamic' | 'inline' | 'side-by-side';
-  diffViewMode: 'single' | 'stacked';
   gitChangesViewMode: 'flat' | 'tree';
 };
 
@@ -51,6 +51,7 @@ export const startAppearanceAutoSave = (): void => {
 
   let previous: AppearanceSlice = {
     showReasoningTraces: useUIStore.getState().showReasoningTraces,
+    sessionAssistEnabled: useUIStore.getState().sessionAssistEnabled,
     collapsibleThinkingBlocks: useUIStore.getState().collapsibleThinkingBlocks,
     showDeletionDialog: useUIStore.getState().showDeletionDialog,
     nativeNotificationsEnabled: useUIStore.getState().nativeNotificationsEnabled,
@@ -76,7 +77,6 @@ export const startAppearanceAutoSave = (): void => {
     inputBarOffset: useUIStore.getState().inputBarOffset,
     mobileKeyboardMode: useUIStore.getState().mobileKeyboardMode,
     diffLayoutPreference: useUIStore.getState().diffLayoutPreference,
-    diffViewMode: useUIStore.getState().diffViewMode,
     gitChangesViewMode: useUIStore.getState().gitChangesViewMode,
   };
 
@@ -103,6 +103,7 @@ export const startAppearanceAutoSave = (): void => {
   useUIStore.subscribe((state) => {
     const current: AppearanceSlice = {
       showReasoningTraces: state.showReasoningTraces,
+      sessionAssistEnabled: state.sessionAssistEnabled,
       collapsibleThinkingBlocks: state.collapsibleThinkingBlocks,
       showDeletionDialog: state.showDeletionDialog,
       nativeNotificationsEnabled: state.nativeNotificationsEnabled,
@@ -128,7 +129,6 @@ export const startAppearanceAutoSave = (): void => {
       inputBarOffset: state.inputBarOffset,
       mobileKeyboardMode: state.mobileKeyboardMode,
       diffLayoutPreference: state.diffLayoutPreference,
-      diffViewMode: state.diffViewMode,
       gitChangesViewMode: state.gitChangesViewMode,
     };
 
@@ -136,6 +136,9 @@ export const startAppearanceAutoSave = (): void => {
 
     if (current.showReasoningTraces !== previous.showReasoningTraces) {
       diff.showReasoningTraces = current.showReasoningTraces;
+    }
+    if (current.sessionAssistEnabled !== previous.sessionAssistEnabled) {
+      diff.sessionAssistEnabled = current.sessionAssistEnabled;
     }
     if (current.collapsibleThinkingBlocks !== previous.collapsibleThinkingBlocks) {
       diff.collapsibleThinkingBlocks = current.collapsibleThinkingBlocks;
@@ -211,9 +214,6 @@ export const startAppearanceAutoSave = (): void => {
     }
     if (current.diffLayoutPreference !== previous.diffLayoutPreference) {
       diff.diffLayoutPreference = current.diffLayoutPreference;
-    }
-    if (current.diffViewMode !== previous.diffViewMode) {
-      diff.diffViewMode = current.diffViewMode;
     }
     if (current.gitChangesViewMode !== previous.gitChangesViewMode) {
       diff.gitChangesViewMode = current.gitChangesViewMode;

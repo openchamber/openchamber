@@ -18,6 +18,27 @@ describe('OpenCode proxy header handling', () => {
     expect(headers['accept-encoding']).toBeUndefined();
   });
 
+  it('replaces client authorization with managed OpenCode auth', () => {
+    const headers = collectForwardProxyHeaders(
+      { authorization: 'Bearer oc_client_stale-ui-token' },
+      { Authorization: 'Bearer managed-opencode-token' },
+    );
+
+    expect(headers.Authorization).toBe('Bearer managed-opencode-token');
+    expect(headers['authorization']).toBeUndefined();
+  });
+
+  it('drops client authorization when upstream has no managed auth', () => {
+    const headers = collectForwardProxyHeaders({
+      accept: 'application/json',
+      authorization: 'Bearer oc_client_stale-ui-token',
+    });
+
+    expect(headers['authorization']).toBeUndefined();
+    expect(headers.Authorization).toBeUndefined();
+    expect(headers.accept).toBe('application/json');
+  });
+
   it('drops content-encoding from forwarded response headers', () => {
     expect(shouldForwardProxyResponseHeader('content-encoding')).toBe(false);
     expect(shouldForwardProxyResponseHeader('Content-Encoding')).toBe(false);

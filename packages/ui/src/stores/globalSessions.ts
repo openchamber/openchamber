@@ -1,5 +1,6 @@
 import type { OpencodeClient, Session } from "@opencode-ai/sdk/v2";
 import { retry } from "@/sync/retry";
+import { stripSessionListDetails } from "@/sync/sanitize";
 
 export type GlobalSessionRecord = Session & {
     project?: {
@@ -72,29 +73,6 @@ const unwrapSessionList = (
     return result.data as GlobalSessionRecord[];
 };
 
-export const readNextCursor = (response: unknown): number | null => {
-    return toNumber(readResponseHeader(response, "x-next-cursor"));
-};
-
-export const isMissingGlobalSessionsEndpointError = (error: unknown): boolean => {
-    if (!error || typeof error !== "object") {
-        return false;
-    }
-
-    const value = error as {
-        status?: number;
-        response?: { status?: number };
-        cause?: { status?: number; response?: { status?: number } };
-    };
-
-    const status = value.status
-        ?? value.response?.status
-        ?? value.cause?.status
-        ?? value.cause?.response?.status;
-
-    return status === 404;
-};
-
 export async function listGlobalSessionPages(
     apiClient: OpencodeClient,
     options: {
@@ -121,7 +99,8 @@ export async function listGlobalSessionPages(
             { attempts: 3, delay: 500, retryIf: () => true },
         );
 
-        const payload = unwrapSessionList(response, "experimental.session.list");
+        const payload = unwrapSessionList(response, "experimental.session.list")
+            .map((session) => stripSessionListDetails(session) as GlobalSessionRecord);
         if (payload.length === 0) break;
 
         let appended = 0;

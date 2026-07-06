@@ -1,12 +1,12 @@
 import type { Agent } from "@opencode-ai/sdk/v2";
 
-export interface AgentMentionSource {
+interface AgentMentionSource {
   value: string;
   start: number;
   end: number;
 }
 
-export interface ParsedAgentMention {
+interface ParsedAgentMention {
   name: string;
   source?: AgentMentionSource;
 }

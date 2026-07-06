@@ -10,6 +10,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { canUseElectronDesktopIPC, invokeDesktop, isVSCodeRuntime } from '@/lib/desktop';
 import { showOpenCodeStatus } from '@/lib/openCodeStatus';
 import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
+import { readEmbeddedThemeSearchParams } from '@/contexts/theme-embedded-bootstrap';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { getCycledPrimaryAgentName } from '@/components/chat/mobileControlsUtils';
@@ -184,6 +185,10 @@ export const useKeyboardShortcuts = () => {
 
       if (eventMatchesShortcut(e, combo('cycle_theme'))) {
         e.preventDefault();
+        if (readEmbeddedThemeSearchParams() !== null && window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'openchamber:cycle-theme-request' }, window.location.origin);
+          return;
+        }
         const modes: Array<'light' | 'dark' | 'system'> = ['light', 'dark', 'system'];
         const activeElement = document.activeElement as HTMLElement | null;
         const currentIndex = modes.indexOf(themeModeRef.current);
@@ -466,6 +471,18 @@ export const useKeyboardShortcuts = () => {
         }
         e.preventDefault();
         toggleExpandedInput();
+        return;
+      }
+
+      if (eventMatchesShortcut(e, combo('toggle_dictation'))) {
+        const { activeMainTab, isCommandPaletteOpen, isHelpDialogOpen, isSessionSwitcherOpen, isSettingsDialogOpen } = useUIStore.getState();
+        if (activeMainTab !== 'chat' || isCommandPaletteOpen || isHelpDialogOpen || isSessionSwitcherOpen || isSettingsDialogOpen) {
+          return;
+        }
+        e.preventDefault();
+        // Dictation state lives inside the composer's isolated component;
+        // toggle it via an event instead of subscribing this hot hook to it.
+        window.dispatchEvent(new CustomEvent('openchamber:dictation-toggle'));
         return;
       }
 

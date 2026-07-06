@@ -11,10 +11,19 @@ permissions:
 
 jobs:
   stale:
+    if: ${{ github.repository == 'openchamber/openchamber' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/stale@v10
+      - name: Generate bot app token
+        id: app-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
         with:
+          app-id: ${{ secrets.OC_REVIEW_APP_ID }}
+          private-key: ${{ secrets.OC_REVIEW_APP_PRIVATE_KEY }}
+
+      - uses: actions/stale@eb5cf3af3ac0a1aa4c9c45633dd1ae542a27a899 # v10.3.0
+        with:
+          repo-token: ${{ steps.app-token.outputs.token }}
           days-before-stale: 60
           days-before-close: 7
           stale-issue-label: stale

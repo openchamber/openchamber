@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import type { OpencodeClient, Session } from '@opencode-ai/sdk/v2';
 import { opencodeClient } from '@/lib/opencode/client';
 import { listGlobalSessionPages } from '@/stores/globalSessions';
+import { getReviewTransferDirection, type ReviewTransferDirection } from '@/lib/reviewFlow';
+import { getOriginalSessionID, getReviewSessionID } from '@/lib/sessionReviewMetadata';
 
 type GlobalSessionsStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -14,6 +16,7 @@ type GlobalSessionsState = {
   activeSessions: Session[];
   archivedSessions: Session[];
   sessionsByDirectory: Map<string, Session[]>;
+  reviewTransferBySessionId: Map<string, ReviewTransferDirection>;
   hasLoaded: boolean;
   status: GlobalSessionsStatus;
   loadSessions: (fallbackActive?: Session[]) => Promise<LoadResult>;
@@ -22,11 +25,17 @@ type GlobalSessionsState = {
   upsertSession: (session: Session) => void;
   removeSessions: (ids: Iterable<string>) => void;
   archiveSessions: (ids: Iterable<string>, archivedAt?: number) => void;
+  /** Drop every session from the previous runtime instance and go back to the
+      unloaded state, so a fresh load runs against the new endpoint. */
+  resetForRuntimeSwitch: () => void;
 };
 
 const PAGE_SIZE = 500;
 
 let inflightLoad: Promise<LoadResult> | null = null;
+// Bumped on runtime switch: an in-flight load from the previous instance must
+// not apply its (stale) snapshot after the reset.
+let loadGeneration = 0;
 
 const normalizePath = (value?: string | null): string | null => {
   if (typeof value !== 'string') {
@@ -95,6 +104,17 @@ export const mergeSessionDirectoryMetadata = (incoming: Session, existing?: Sess
   }
 
   return changed ? next : incoming;
+};
+
+export const mergeLiveSessionWithGlobalSession = (
+  liveSession: Session,
+  globalSession: Session,
+): Session => {
+  const merged = mergeSessionDirectoryMetadata(liveSession, globalSession);
+  if (merged.share !== globalSession.share) {
+    return { ...merged, share: globalSession.share };
+  }
+  return merged;
 };
 
 const buildSessionsByDirectory = (sessions: Session[]): Map<string, Session[]> => {
@@ -297,11 +317,15 @@ const applySnapshot = (
   const nextSessionsByDirectory = nextActiveSessions === state.activeSessions
     ? state.sessionsByDirectory
     : buildSessionsByDirectory(nextActiveSessions);
+  const nextReviewTransferMap = nextActiveSessions === state.activeSessions
+    ? state.reviewTransferBySessionId
+    : buildReviewTransferMap(nextActiveSessions);
 
   if (
     nextActiveSessions === state.activeSessions
     && nextArchivedSessions === state.archivedSessions
     && nextSessionsByDirectory === state.sessionsByDirectory
+    && nextReviewTransferMap === state.reviewTransferBySessionId
     && state.hasLoaded
     && state.status === status
   ) {
@@ -312,20 +336,50 @@ const applySnapshot = (
     activeSessions: nextActiveSessions,
     archivedSessions: nextArchivedSessions,
     sessionsByDirectory: nextSessionsByDirectory,
+    reviewTransferBySessionId: nextReviewTransferMap,
     hasLoaded: true,
     status,
   };
 };
 
+const buildReviewTransferMap = (sessions: Session[]): Map<string, ReviewTransferDirection> => {
+  const next = new Map<string, ReviewTransferDirection>()
+  const activeIds = new Set(sessions.map((s) => s.id))
+  for (const session of sessions) {
+    const direction = getReviewTransferDirection(session)
+    if (!direction) continue
+    const targetSessionId = direction === 'review-to-original'
+      ? getOriginalSessionID(session)
+      : getReviewSessionID(session)
+    if (!targetSessionId || !activeIds.has(targetSessionId)) continue
+    next.set(session.id, direction)
+  }
+  return next
+}
+
 export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => ({
   activeSessions: [],
   archivedSessions: [],
   sessionsByDirectory: new Map(),
+  reviewTransferBySessionId: new Map(),
   hasLoaded: false,
   status: 'idle',
 
   applySnapshot: (activeSessions, archivedSessions, status = 'ready') => {
     set((state) => applySnapshot(state, activeSessions, archivedSessions, status));
+  },
+
+  resetForRuntimeSwitch: () => {
+    loadGeneration += 1;
+    inflightLoad = null;
+    set({
+      activeSessions: [],
+      archivedSessions: [],
+      sessionsByDirectory: new Map(),
+      reviewTransferBySessionId: new Map(),
+      hasLoaded: false,
+      status: 'idle',
+    });
   },
 
   loadSessions: async (fallbackActive) => {
@@ -335,6 +389,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
 
     set((state) => (state.status === 'loading' ? state : { status: 'loading' }));
 
+    const generation = loadGeneration;
     inflightLoad = (async () => {
       const current = get();
 
@@ -360,9 +415,17 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
           console.warn('[GlobalSessions] Failed to load archived sessions, preserving current snapshot:', archivedResult.reason);
         }
 
+        if (generation !== loadGeneration) {
+          // Runtime switched mid-load: this snapshot belongs to the previous
+          // instance — drop it.
+          return { activeSessions: [], archivedSessions: [] };
+        }
         set((state) => applySnapshot(state, nextActiveSessions, nextArchivedSessions, 'ready'));
         return { activeSessions: nextActiveSessions, archivedSessions: nextArchivedSessions };
       } catch (error) {
+        if (generation !== loadGeneration) {
+          return { activeSessions: [], archivedSessions: [] };
+        }
         const nextActiveSessions = mergeSessionLists(current.activeSessions, fallbackActive);
         const nextArchivedSessions = current.archivedSessions;
         console.warn('[GlobalSessions] Failed to load sessions, using fallback snapshot:', error);
@@ -424,6 +487,9 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         activeSessions: nextActiveSessions,
         archivedSessions: nextArchivedSessions,
         sessionsByDirectory: nextSessionsByDirectory,
+        reviewTransferBySessionId: nextActiveSessions === state.activeSessions
+          ? state.reviewTransferBySessionId
+          : buildReviewTransferMap(nextActiveSessions),
       };
     });
 
@@ -458,6 +524,9 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         sessionsByDirectory: nextActiveSessions === state.activeSessions
           ? state.sessionsByDirectory
           : buildSessionsByDirectory(nextActiveSessions),
+        reviewTransferBySessionId: nextActiveSessions === state.activeSessions
+          ? state.reviewTransferBySessionId
+          : buildReviewTransferMap(nextActiveSessions),
       };
     });
   },
@@ -483,6 +552,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         activeSessions: nextActiveSessions,
         archivedSessions: nextArchivedSessions,
         sessionsByDirectory: buildSessionsByDirectory(nextActiveSessions),
+        reviewTransferBySessionId: buildReviewTransferMap(nextActiveSessions),
       };
     });
   },
@@ -520,6 +590,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         activeSessions: nextActiveSessions,
         archivedSessions: [...movedSessions, ...remainingArchivedSessions],
         sessionsByDirectory: buildSessionsByDirectory(nextActiveSessions),
+        reviewTransferBySessionId: buildReviewTransferMap(nextActiveSessions),
       };
     });
   },

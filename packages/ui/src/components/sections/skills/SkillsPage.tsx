@@ -35,6 +35,9 @@ import {
 import { useI18n } from '@/lib/i18n';
 import { languageByExtension } from '@/lib/codemirror/languageByExtension';
 import { createFlexokiCodeMirrorTheme } from '@/lib/codemirror/flexokiTheme';
+import { shikiHighlightExtension } from '@/lib/codemirror/shikiHighlight';
+import { getResolvedShikiTheme } from '@/lib/shiki/appThemeRegistry';
+import { getLanguageFromExtension } from '@/lib/toolHelpers';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { cn } from '@/lib/utils';
 import { EditorView } from '@codemirror/view';
@@ -253,10 +256,20 @@ const SkillsInstalledPage: React.FC = () => {
 
   const supportingFileEditorExtensions = React.useMemo<Extension[]>(() => {
     const filePath = newFileName.trim() || 'supporting-file.md';
-    const extensions: Extension[] = [createFlexokiCodeMirrorTheme(currentTheme)];
+    // Shiki token colors for code supporting files; markdown stays on lezer.
+    const shikiLanguage = getLanguageFromExtension(filePath);
+    const useShiki = Boolean(shikiLanguage) && shikiLanguage !== 'markdown';
+    const extensions: Extension[] = [createFlexokiCodeMirrorTheme(currentTheme, useShiki ? { syntaxColors: false } : undefined)];
     const languageExtension = languageByExtension(filePath);
     if (languageExtension) {
       extensions.push(languageExtension);
+    }
+    if (useShiki && shikiLanguage) {
+      extensions.push(shikiHighlightExtension({
+        language: shikiLanguage,
+        themeName: currentTheme.metadata.id,
+        theme: getResolvedShikiTheme(currentTheme),
+      }));
     }
     extensions.push(EditorView.lineWrapping);
     return extensions;
@@ -508,7 +521,7 @@ const SkillsInstalledPage: React.FC = () => {
         </div>
 
         {/* Basic Information */}
-        <div className="mb-8">
+        <div data-settings-item="skills.basic-information" className="mb-8">
           <div className="mb-1 px-1">
             <h3 className="typography-ui-header font-medium text-foreground">
               {t('settings.skills.page.section.basicInformation')}
@@ -583,7 +596,7 @@ const SkillsInstalledPage: React.FC = () => {
         </div>
 
         {/* Instructions */}
-        <div className="mb-8">
+        <div data-settings-item="skills.instructions" className="mb-8">
           <div className="mb-1 px-1 flex items-center justify-between gap-2">
             <h3 className="typography-ui-header font-medium text-foreground">
               {t('settings.skills.page.section.instructions')}
@@ -608,6 +621,7 @@ const SkillsInstalledPage: React.FC = () => {
                       content={skillMarkdown}
                       className="typography-markdown-body"
                       stripFrontmatter
+                      enableFileReferences={false}
                     />
                   </div>
                 </ScrollableOverlay>
@@ -626,7 +640,7 @@ const SkillsInstalledPage: React.FC = () => {
         </div>
 
         {/* Supporting Files */}
-        <div className="mb-2">
+        <div data-settings-item="skills.supporting-files" className="mb-2">
           <div className="mb-1 px-1 flex items-center gap-2">
             <h3 className="typography-ui-header font-medium text-foreground">
               {t('settings.skills.page.section.supportingFiles')}

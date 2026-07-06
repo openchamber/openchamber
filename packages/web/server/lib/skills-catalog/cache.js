@@ -23,7 +23,3 @@ export function setCachedScan(key, value, ttlMs = DEFAULT_TTL_MS) {
   const ttl = Number.isFinite(ttlMs) ? ttlMs : DEFAULT_TTL_MS;
   cache.set(key, { expiresAt: Date.now() + ttl, value });
 }
-
-export function clearCache() {
-  cache.clear();
-}

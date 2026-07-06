@@ -1,8 +1,42 @@
 import { create } from 'zustand';
-import { devtools, persist, createJSONStorage } from 'zustand/middleware';
-import { getSafeStorage } from './utils/safeStorage';
+import { devtools, persist } from 'zustand/middleware';
+import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import type { AttachedFile } from './types/sessionTypes';
 import { updateDesktopSettings } from '@/lib/persistence';
+
+export type FollowUpBehavior = 'steer' | 'queue';
+
+export const DEFAULT_FOLLOW_UP_BEHAVIOR: FollowUpBehavior = 'queue';
+
+export const isFollowUpBehavior = (value: unknown): value is FollowUpBehavior => (
+    value === 'steer' || value === 'queue'
+);
+
+export const normalizeFollowUpBehavior = (
+    value: unknown,
+    legacyQueueModeEnabled?: boolean | null,
+): FollowUpBehavior => {
+    // "immediate" was removed: on a busy session it was wire-identical to
+    // "steer" (OpenCode only supports delivery "steer" | "queue", defaulting
+    // to "steer"), so collapse any persisted/legacy "immediate" onto "steer".
+    if (value === 'immediate') {
+        return 'steer';
+    }
+
+    if (isFollowUpBehavior(value)) {
+        return value;
+    }
+
+    if (legacyQueueModeEnabled === false) {
+        return 'steer';
+    }
+
+    if (legacyQueueModeEnabled === true) {
+        return 'queue';
+    }
+
+    return DEFAULT_FOLLOW_UP_BEHAVIOR;
+};
 
 export interface QueuedMessage {
     id: string;
@@ -20,27 +54,34 @@ export interface QueuedMessage {
 
 interface MessageQueueState {
     queuedMessages: Record<string, QueuedMessage[]>; // sessionId → queue
-    queueModeEnabled: boolean; // global toggle
+    followUpBehavior: FollowUpBehavior;
 }
 
 interface MessageQueueActions {
     addToQueue: (sessionId: string, message: Omit<QueuedMessage, 'id' | 'createdAt'>) => void;
     removeFromQueue: (sessionId: string, messageId: string) => void;
+    reorderQueue: (sessionId: string, fromId: string, toId: string) => void;
     popToInput: (sessionId: string, messageId: string) => QueuedMessage | null;
     clearQueue: (sessionId: string) => void;
     clearAllQueues: () => void;
-    setQueueMode: (enabled: boolean) => void;
+    setFollowUpBehavior: (behavior: FollowUpBehavior) => void;
     getQueueForSession: (sessionId: string) => QueuedMessage[];
 }
 
 type MessageQueueStore = MessageQueueState & MessageQueueActions;
+
+type PersistedMessageQueueState = {
+    queuedMessages?: Record<string, QueuedMessage[]>;
+    followUpBehavior?: FollowUpBehavior;
+    queueModeEnabled?: boolean;
+};
 
 export const useMessageQueueStore = create<MessageQueueStore>()(
     devtools(
         persist(
             (set, get) => ({
                 queuedMessages: {},
-                queueModeEnabled: true,
+                followUpBehavior: DEFAULT_FOLLOW_UP_BEHAVIOR,
 
                 addToQueue: (sessionId, message) => {
                     const id = `queued-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
@@ -74,6 +115,28 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                             return { queuedMessages: rest };
                         }
                         
+                        return {
+                            queuedMessages: {
+                                ...state.queuedMessages,
+                                [sessionId]: newQueue,
+                            },
+                        };
+                    });
+                },
+
+                reorderQueue: (sessionId, fromId, toId) => {
+                    if (fromId === toId) return;
+                    set((state) => {
+                        const currentQueue = state.queuedMessages[sessionId];
+                        if (!currentQueue) return state;
+                        const fromIndex = currentQueue.findIndex((m) => m.id === fromId);
+                        const toIndex = currentQueue.findIndex((m) => m.id === toId);
+                        if (fromIndex === -1 || toIndex === -1) return state;
+
+                        const newQueue = currentQueue.slice();
+                        const [moved] = newQueue.splice(fromIndex, 1);
+                        newQueue.splice(toIndex, 0, moved);
+
                         return {
                             queuedMessages: {
                                 ...state.queuedMessages,
@@ -126,10 +189,9 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                     set({ queuedMessages: {} });
                 },
 
-                setQueueMode: (enabled) => {
-                    set({ queueModeEnabled: enabled });
-                    // Persist to settings.json (async, fire-and-forget)
-                    void updateDesktopSettings({ queueModeEnabled: enabled });
+                setFollowUpBehavior: (behavior) => {
+                    set({ followUpBehavior: behavior });
+                    void updateDesktopSettings({ followUpBehavior: behavior });
                 },
 
                 getQueueForSession: (sessionId) => {
@@ -138,11 +200,19 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
             }),
             {
                 name: 'message-queue-store',
-                storage: createJSONStorage(() => getSafeStorage()),
+                version: 1,
+                storage: createDeferredSafeJSONStorage(),
                 partialize: (state) => ({
                     queuedMessages: state.queuedMessages,
-                    queueModeEnabled: state.queueModeEnabled,
+                    followUpBehavior: state.followUpBehavior,
                 }),
+                migrate: (persistedState) => {
+                    const state = (persistedState ?? {}) as PersistedMessageQueueState;
+                    return {
+                        queuedMessages: state.queuedMessages ?? {},
+                        followUpBehavior: normalizeFollowUpBehavior(state.followUpBehavior, state.queueModeEnabled ?? null),
+                    };
+                },
             }
         ),
         {

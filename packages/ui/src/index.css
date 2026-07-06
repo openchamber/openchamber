@@ -3,6 +3,12 @@
 @import "./styles/design-system.css";
 @import "./styles/typography.css";
 @import "./styles/mobile.css";
+/* Load KaTeX styles eagerly with the main bundle. Importing them inside the
+   lazy MarkdownRendererImpl chunk meant a stylesheet was injected late on the
+   first markdown render of a session; that late injection triggered a style
+   recalc during which the layered `.chat-message-column` width clamp briefly
+   lost, flashing message text to full width before it snapped back. */
+@import "katex/dist/katex.min.css";
 @source "./**/*.{ts,tsx,css}";
 
 /* KaTeX theme overrides for light/dark mode */
@@ -38,6 +44,69 @@ button,
 :root.oc-theme-switching *::after {
   transition: none !important;
   animation: none !important;
+}
+
+[data-settings-search-highlight="true"] {
+  border-radius: 0.25rem;
+  background: color-mix(in srgb, var(--primary-base) 7%, transparent);
+  transition: background-color 180ms ease;
+}
+
+/* ── macOS vibrancy ───────────────────────────────────────────────────────
+   The window is created transparent with a native 'sidebar' NSVisualEffectView
+   behind it. We keep the whole app opaque (bg-background covers the window)
+   EXCEPT the left sidebar, which is the only translucent surface that lets the
+   native vibrancy show through. `data-oc-vibrancy` = vibrancy active;
+   `data-oc-vibrancy-ready` = native layer has settled (set from the main
+   process after show/restore) — until then the sidebar stays solid to avoid a
+   flash of raw transparency. */
+html[data-oc-vibrancy] body,
+html[data-oc-vibrancy] #root {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+html[data-oc-vibrancy] .main-content-safe-area {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* Left sidebar: solid until the native layer is ready, then a translucent
+   overlay so the vibrancy frosts through. */
+html[data-oc-vibrancy] .oc-vibrancy-surface {
+  background: var(--sidebar) !important;
+}
+
+html[data-oc-vibrancy][data-oc-vibrancy-ready] .oc-vibrancy-surface {
+  background: var(--sidebar-vibrancy-overlay) !important;
+}
+
+/* Inner bg-sidebar elements inside the vibrant surface must not re-paint an
+   opaque fill, or they'd cover the frosted effect. */
+html[data-oc-vibrancy] .oc-vibrancy-surface .bg-sidebar {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* Project-actions pill over the open sidebar: drop its opaque surface so it
+   frosts to the exact same level as the sidebar (border keeps its outline). */
+html[data-oc-vibrancy] .oc-vibrancy-pill {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* Accessibility: drop translucency when the OS asks for reduced transparency. */
+@media (prefers-reduced-transparency: reduce) {
+  html[data-oc-vibrancy] body,
+  html[data-oc-vibrancy] #root,
+  html[data-oc-vibrancy] .main-content-safe-area {
+    background: var(--surface-background) !important;
+  }
+
+  html[data-oc-vibrancy] .oc-vibrancy-surface,
+  html[data-oc-vibrancy][data-oc-vibrancy-ready] .oc-vibrancy-surface {
+    background: var(--sidebar) !important;
+  }
 }
 
 /* Suppress WebKit-specific hover/focus adornments on the chat textarea */
@@ -639,11 +708,11 @@ html:not(.dark) .chat-scroll {
 
 /* Pierre diff viewer styling */
 .pierre-diff-wrapper {
-  --diffs-font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  --diffs-font-family: var(--font-mono, ui-monospace, monospace);
   --diffs-font-size: var(--text-code);
   --diffs-line-height: 24px;
   --diffs-tab-size: 2;
-  --diffs-header-font-family: var(--font-sans, 'IBM Plex Sans', sans-serif);
+  --diffs-header-font-family: var(--font-sans, system-ui, sans-serif);
   --diffs-min-number-column-width: 4ch;
   --diffs-gap-inline: 0;
   --diffs-gap-block: 0;
@@ -794,6 +863,20 @@ html:not(.dark) .chat-scroll {
   }
 }
 
+/* Diff toolbar: drop low-priority labels only when the context panel is genuinely tight. */
+@container diff-toolbar (max-width: 28rem) {
+  .diff-toolbar__scope-count,
+  .diff-toolbar__review-label,
+  .diff-toolbar__expand-label {
+    display: none;
+  }
+
+  .diff-toolbar__review-button,
+  .diff-toolbar__expand-button {
+    padding-inline: 0.5rem;
+  }
+}
+
 /* Status row: collapse optional text when narrow to keep both sides in one line. */
 @container status-row (max-width: 30rem) {
   .status-row__active-todo {
@@ -840,7 +923,7 @@ html:not(.dark) .chat-scroll {
   }
 }
 
-/* Text font: IBM Plex Sans */
+/* Text font */
 .markdown-content {
   font-family: var(--font-sans);
   font-size: var(--text-markdown);
@@ -853,6 +936,30 @@ html:not(.dark) .chat-scroll {
 .markdown-content td,
 .markdown-content th {
   line-height: inherit;
+}
+
+/* Restore paragraph block spacing inside markdown content. The
+   --markdown-paragraph-spacing token existed but was never wired, so Tailwind
+   preflight's zeroed <p> margins left adjacent paragraphs collapsed into one
+   visual line. */
+.markdown-content p {
+  margin: 0 0 var(--markdown-paragraph-spacing) 0;
+}
+
+/* The markdown renderer wraps each block in a display:contents [data-md-block]
+   element, so the message-level [&_.markdown-content>*:last-child]:mb-0
+   nullifiers target the wrapper (where margin is ignored), not the paragraph.
+   Drop the trailing margin on the last paragraph of the last block directly so
+   messages don't gain extra space at the bottom. */
+.markdown-content > [data-md-block]:last-child p:last-child {
+  margin-bottom: 0;
+}
+
+/* Tool cards (code size) and reasoning (meta size, dimmed) are intentionally
+   compact — keep their paragraphs tight, matching prior behavior. */
+.markdown-content.markdown-tool p,
+.markdown-content.markdown-reasoning p {
+  margin-bottom: 0;
 }
 
 /* Tool markdown should render at code size to match tool card typography. */
@@ -950,7 +1057,7 @@ html:not(.dark) .chat-scroll {
   margin-bottom: 0.25em;
 }
 
-/* Code font: IBM Plex Mono */
+/* Code font */
 .markdown-content code,
 .markdown-content pre {
   font-family: var(--font-mono);
@@ -1004,6 +1111,17 @@ html:not(.dark) .chat-scroll {
 
 .markdown-content [data-openchamber-file-link="true"]:hover {
   color: var(--markdown-link-hover, var(--primary));
+}
+
+/* Agent/skill mentions use the primary accent, not the markdown link color */
+.markdown-content a[data-openchamber-agent-mention="true"],
+.markdown-content a[data-skill-name] {
+  color: var(--primary);
+}
+
+.markdown-content a[data-openchamber-agent-mention="true"]:hover,
+.markdown-content a[data-skill-name]:hover {
+  color: var(--primary);
 }
 
 /* Markdown blockquote - use theme colors */
@@ -1213,7 +1331,7 @@ html:not(.dark) .chat-scroll {
   white-space: pre;
   width: max-content;
   min-width: 100%;
-  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   color: var(--surface-foreground);
   background: transparent;
 }
@@ -1270,7 +1388,7 @@ html:not(.dark) .chat-scroll {
   width: max-content;
   min-width: 100%;
   min-height: 100%;
-  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   color: var(--surface-foreground);
   background: transparent;
 }
@@ -1504,10 +1622,24 @@ input[aria-label="Terminal input"] {
     animation: none;
   }
 
-
 }
 
 /* Settings dialog: hide the overlay scrollbar; wheel/keyboard scroll still works. */
 [data-settings-view="true"] .overlay-scrollbar {
   display: none;
+}
+
+/* Desktop app shell (Electron/native window): native apps use the arrow cursor
+   for clickable controls, not the web's hand/pointer. Neutralize pointer
+   cursors under the desktop runtime only — web in a browser keeps them.
+   Resize/grab/text cursors are untouched. */
+html.desktop-runtime
+  :where(button, [role="button"], a[href], summary, label[for]):not(:disabled):not([aria-disabled="true"]) {
+  cursor: default;
+}
+html.desktop-runtime [class*="cursor-pointer"] {
+  cursor: default !important;
+}
+html.desktop-runtime .markdown-content [data-openchamber-file-link="true"] {
+  cursor: default;
 }

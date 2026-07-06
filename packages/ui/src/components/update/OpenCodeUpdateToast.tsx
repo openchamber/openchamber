@@ -6,7 +6,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { updateDesktopSettings } from '@/lib/persistence';
-import { getSafeStorage } from '@/stores/utils/safeStorage';
+import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import {
   resolveOpenCodeUpdateVersion,
   resolveOpenCodeUpgradeStatusVersion,
@@ -100,7 +100,7 @@ export const OpenCodeUpdateToast: React.FC = () => {
       }
       const decision = shouldShowOpenCodeUpdateToast({
         version,
-        dismissedVersion: getSafeStorage().getItem(UPDATE_TOAST_DISMISSED_VERSION_KEY),
+        dismissedVersion: getDeferredSafeStorage().getItem(UPDATE_TOAST_DISMISSED_VERSION_KEY),
         seenVersions: seenVersionsRef.current,
       });
       if (!decision) {
@@ -119,7 +119,7 @@ export const OpenCodeUpdateToast: React.FC = () => {
         cancel: {
           label: t('opencodeUpdate.toast.actions.dismiss'),
           onClick: () => {
-            getSafeStorage().setItem(UPDATE_TOAST_DISMISSED_VERSION_KEY, version);
+            getDeferredSafeStorage().setItem(UPDATE_TOAST_DISMISSED_VERSION_KEY, version);
             void updateDesktopSettings({ openCodeUpdateToastDismissedVersion: version });
             toast.dismiss(UPDATE_TOAST_ID);
           },

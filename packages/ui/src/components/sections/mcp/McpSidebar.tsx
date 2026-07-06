@@ -23,6 +23,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { useI18n } from '@/lib/i18n';
 
 interface McpSidebarProps {
@@ -81,6 +82,7 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
   const [deleteTarget, setDeleteTarget] = React.useState<McpServerConfig | null>(null);
   const [isDeleting, setIsDeleting] = React.useState(false);
   const [openMenuMcp, setOpenMenuMcp] = React.useState<string | null>(null);
+  const [rightClickMenuMcp, setRightClickMenuMcp] = React.useState<string | null>(null);
   const [isRefreshingStatus, setIsRefreshingStatus] = React.useState(false);
 
   const projectServers = React.useMemo(
@@ -164,6 +166,19 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
     setIsDeleting(false);
   };
 
+  const renderMcpMenuItems = (server: McpServerConfig, Item: React.ElementType) => (
+    <Item
+      onClick={(e: React.MouseEvent) => {
+        e.stopPropagation();
+        setDeleteTarget(server);
+      }}
+      className="text-destructive focus:text-destructive"
+    >
+      <Icon name="delete-bin" className="h-4 w-4 mr-px" />
+      {t('settings.common.actions.delete')}
+    </Item>
+  );
+
   return (
     <div className={cn('flex h-full flex-col', bgClass)}>
       <div className="border-b px-3 pt-4 pb-3">
@@ -186,6 +201,7 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
             {t('settings.mcp.sidebar.total', { count: mcpServers.length })}
           </span>
           <Button size="sm"
+            data-settings-item="mcp.create"
             variant="ghost"
             className="h-7 w-7 px-0 -my-1 text-muted-foreground"
             onClick={handleCreateNew}
@@ -218,17 +234,8 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
                   const isMobile = isMobileDeviceViaCSS();
 
                   return (
-                    <div
-                      key={server.name}
-                      className={cn(
-                        'group relative flex items-center rounded-md px-1.5 py-1 transition-all duration-200 select-none',
-                        isSelected ? 'bg-interactive-selection' : 'hover:bg-interactive-hover',
-                      )}
-                      onContextMenu={!isMobile ? (e) => {
-                        e.preventDefault();
-                        setOpenMenuMcp(server.name);
-                      } : undefined}
-                    >
+                    <ContextMenu key={server.name} open={rightClickMenuMcp === server.name} onOpenChange={(open) => setRightClickMenuMcp(open ? server.name : null)}>
+                      <ContextMenuTrigger render={<div className={cn('group relative flex items-center rounded-md px-1.5 py-1 transition-all duration-200 select-none', isSelected ? 'bg-interactive-selection' : 'hover:bg-interactive-hover')} onContextMenu={!isMobile ? (e) => { e.preventDefault(); setRightClickMenuMcp(server.name); } : undefined} />}>
                       <button
                         onClick={() => {
                           setSelectedMcp(server.name);
@@ -258,26 +265,21 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
                         </div>
                       </button>
 
-                      <DropdownMenu open={openMenuMcp === server.name} onOpenChange={(open) => setOpenMenuMcp(open ? server.name : null)}>
+                      <DropdownMenu open={openMenuMcp === server.name} onOpenChange={(open) => { if (open) setRightClickMenuMcp(null); setOpenMenuMcp(open ? server.name : null); }}>
                         <DropdownMenuTrigger asChild>
                           <Button size="xs" variant="ghost" className="flex-shrink-0 -mr-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
                             <Icon name="more-2" className="h-3.5 w-3.5" />
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-fit min-w-20">
-                          <DropdownMenuItem
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDeleteTarget(server);
-                            }}
-                            className="text-destructive focus:text-destructive"
-                          >
-                            <Icon name="delete-bin" className="h-4 w-4 mr-px" />
-                            {t('settings.common.actions.delete')}
-                          </DropdownMenuItem>
+                          {renderMcpMenuItems(server, DropdownMenuItem)}
                         </DropdownMenuContent>
                       </DropdownMenu>
-                    </div>
+                      </ContextMenuTrigger>
+                      <ContextMenuContent className="w-fit min-w-20">
+                        {renderMcpMenuItems(server, ContextMenuItem)}
+                      </ContextMenuContent>
+                    </ContextMenu>
                   );
                 })}
               </>
@@ -295,17 +297,8 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
                   const isMobile = isMobileDeviceViaCSS();
 
                   return (
-                    <div
-                      key={server.name}
-                      className={cn(
-                        'group relative flex items-center rounded-md px-1.5 py-1 transition-all duration-200 select-none',
-                        isSelected ? 'bg-interactive-selection' : 'hover:bg-interactive-hover',
-                      )}
-                      onContextMenu={!isMobile ? (e) => {
-                        e.preventDefault();
-                        setOpenMenuMcp(server.name);
-                      } : undefined}
-                    >
+                    <ContextMenu key={server.name} open={rightClickMenuMcp === server.name} onOpenChange={(open) => setRightClickMenuMcp(open ? server.name : null)}>
+                      <ContextMenuTrigger render={<div className={cn('group relative flex items-center rounded-md px-1.5 py-1 transition-all duration-200 select-none', isSelected ? 'bg-interactive-selection' : 'hover:bg-interactive-hover')} onContextMenu={!isMobile ? (e) => { e.preventDefault(); setRightClickMenuMcp(server.name); } : undefined} />}>
                       <button
                         onClick={() => {
                           setSelectedMcp(server.name);
@@ -335,26 +328,21 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
                         </div>
                       </button>
 
-                      <DropdownMenu open={openMenuMcp === server.name} onOpenChange={(open) => setOpenMenuMcp(open ? server.name : null)}>
+                      <DropdownMenu open={openMenuMcp === server.name} onOpenChange={(open) => { if (open) setRightClickMenuMcp(null); setOpenMenuMcp(open ? server.name : null); }}>
                         <DropdownMenuTrigger asChild>
                           <Button size="xs" variant="ghost" className="flex-shrink-0 -mr-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
                             <Icon name="more-2" className="h-3.5 w-3.5" />
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-fit min-w-20">
-                          <DropdownMenuItem
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDeleteTarget(server);
-                            }}
-                            className="text-destructive focus:text-destructive"
-                          >
-                            <Icon name="delete-bin" className="h-4 w-4 mr-px" />
-                            {t('settings.common.actions.delete')}
-                          </DropdownMenuItem>
+                          {renderMcpMenuItems(server, DropdownMenuItem)}
                         </DropdownMenuContent>
                       </DropdownMenu>
-                    </div>
+                      </ContextMenuTrigger>
+                      <ContextMenuContent className="w-fit min-w-20">
+                        {renderMcpMenuItems(server, ContextMenuItem)}
+                      </ContextMenuContent>
+                    </ContextMenu>
                   );
                 })}
               </>
@@ -396,5 +384,5 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
 };
 
 // Re-export for easy sidebar icon usage
-export { McpIcon } from '@/components/icons/McpIcon';
+
 import { Icon } from "@/components/icon/Icon";

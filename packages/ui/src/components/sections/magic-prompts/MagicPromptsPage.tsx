@@ -326,6 +326,7 @@ export const MagicPromptsPage: React.FC = () => {
             </div>
           </div>
           <Button
+            data-settings-item="magic-prompts.reset-overrides"
             variant="outline"
             size="sm"
             onClick={() => {
@@ -348,7 +349,11 @@ export const MagicPromptsPage: React.FC = () => {
           const resetting = resettingIds[block.id] === true;
 
           return (
-            <section key={block.id} className={index > 0 ? 'space-y-3 pt-5 border-t border-border' : 'space-y-3'}>
+            <section
+              key={block.id}
+              data-settings-item={isVisiblePromptId(block.id) ? 'magic-prompts.visible-prompt' : 'magic-prompts.instructions'}
+              className={index > 0 ? 'space-y-3 pt-5 border-t border-border' : 'space-y-3'}
+            >
               <div className="space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <h3 className="typography-ui-label text-foreground">{tUnsafe(block.titleKey)}</h3>

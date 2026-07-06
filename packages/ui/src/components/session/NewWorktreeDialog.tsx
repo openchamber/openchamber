@@ -33,7 +33,8 @@ import * as sessionActions from '@/sync/session-actions';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { validateWorktreeCreate, createWorktree } from '@/lib/worktrees/worktreeManager';
 import { withWorktreeUpstreamDefaults } from '@/lib/worktrees/worktreeCreate';
-import { getWorktreeSetupCommands } from '@/lib/openchamberConfig';
+import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
+import { getWorktreeSetupCommands, getWorktreeSetupWaitEnabled } from '@/lib/openchamberConfig';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
@@ -358,6 +359,12 @@ export function NewWorktreeDialog({
     }
     void fetchBranches(projectDirectory, git);
   }, [projectDirectory, git, fetchBranches]);
+
+  React.useEffect(() => {
+    if (!open || !projectDirectory || !git) return;
+    if (branches?.all) return;
+    void fetchBranches(projectDirectory, git);
+  }, [open, projectDirectory, git, branches?.all, fetchBranches]);
 
   React.useEffect(() => {
     if (!existingBranchDropdownOpen && !existingBranchPickerOpen) {
@@ -850,6 +857,10 @@ export function NewWorktreeDialog({
       let createdSessionId: string | null = null;
 
       if (shouldCreateSession) {
+        if (await getWorktreeSetupWaitEnabled(projectRef)) {
+          await waitForWorktreeBootstrap(metadata.path);
+        }
+
         const sessionTitle = linkedIssue
           ? `#${linkedIssue.number} ${linkedIssue.title}`.trim()
           : linkedPrState

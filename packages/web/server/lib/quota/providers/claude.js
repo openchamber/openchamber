@@ -10,7 +10,7 @@ import {
 
 export const providerId = 'claude';
 export const providerName = 'Claude';
-export const aliases = ['anthropic', 'claude'];
+const aliases = ['anthropic', 'claude'];
 
 export const isConfigured = () => {
   const auth = readAuthFile();

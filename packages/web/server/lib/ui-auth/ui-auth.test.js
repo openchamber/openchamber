@@ -182,6 +182,59 @@ describe('ui auth client credential seam', () => {
     expect(await auth.ensureSessionToken(urlReq, urlRes)).toBe('client:device-1');
     expect(await auth.resolveAuthContext(urlReq, urlRes, { allowUrlToken: false })).toBe(null);
 
+    const serveReq = { method: 'GET', path: '/api/fs/serve/tmp/index.html', url: `/api/fs/serve/tmp/index.html?oc_url_token=${encodeURIComponent(urlToken)}`, headers: {} };
+    const serveRes = createResponse();
+    let serveCalled = false;
+    await auth.requireAuth(serveReq, serveRes, () => {
+      serveCalled = true;
+    });
+    expect(serveCalled).toBe(true);
+
+    const absoluteServeReq = { method: 'GET', path: '/api/fs/serve/Users/test/project/preview-test.html', url: `/api/fs/serve/Users/test/project/preview-test.html?oc_url_token=${encodeURIComponent(urlToken)}`, headers: {} };
+    const absoluteServeRes = createResponse();
+    let absoluteServeCalled = false;
+    await auth.requireAuth(absoluteServeReq, absoluteServeRes, () => {
+      absoluteServeCalled = true;
+    });
+    expect(absoluteServeCalled).toBe(true);
+
+    const mountedServeReq = {
+      method: 'GET',
+      baseUrl: '/api',
+      path: '/fs/serve/Users/test/project/preview-test.html',
+      originalUrl: `/api/fs/serve/Users/test/project/preview-test.html?oc_url_token=${encodeURIComponent(urlToken)}`,
+      url: `/fs/serve/Users/test/project/preview-test.html?oc_url_token=${encodeURIComponent(urlToken)}`,
+      headers: {},
+    };
+    const mountedServeRes = createResponse();
+    let mountedServeCalled = false;
+    await auth.requireAuth(mountedServeReq, mountedServeRes, () => {
+      mountedServeCalled = true;
+    });
+    expect(mountedServeCalled).toBe(true);
+
+    const dictationWsReq = {
+      method: 'GET',
+      path: '/api/dictation/ws',
+      url: `/api/dictation/ws?oc_url_token=${encodeURIComponent(urlToken)}`,
+      headers: { upgrade: 'websocket' },
+    };
+    expect(await auth.ensureSessionToken(dictationWsReq, null)).toBe('client:device-1');
+
+    const dictationHttpReq = {
+      method: 'GET',
+      path: '/api/dictation/ws',
+      url: `/api/dictation/ws?oc_url_token=${encodeURIComponent(urlToken)}`,
+      headers: { accept: 'application/json' },
+    };
+    const dictationHttpRes = createResponse();
+    let dictationHttpCalled = false;
+    await auth.requireAuth(dictationHttpReq, dictationHttpRes, () => {
+      dictationHttpCalled = true;
+    });
+    expect(dictationHttpCalled).toBe(false);
+    expect(dictationHttpRes.statusCode).toBe(401);
+
     const arbitraryGetReq = { method: 'GET', path: '/api/config/settings', url: `/api/config/settings?oc_url_token=${encodeURIComponent(urlToken)}`, headers: { accept: 'application/json' } };
     const arbitraryGetRes = createResponse();
     let arbitraryGetCalled = false;
@@ -191,14 +244,16 @@ describe('ui auth client credential seam', () => {
     expect(arbitraryGetCalled).toBe(false);
     expect(arbitraryGetRes.statusCode).toBe(401);
 
-    const postReq = { method: 'POST', path: '/api/config/settings', url: `/api/config/settings?oc_url_token=${encodeURIComponent(urlToken)}`, headers: { accept: 'application/json' } };
-    const postRes = createResponse();
-    let postCalled = false;
-    await auth.requireAuth(postReq, postRes, () => {
-      postCalled = true;
-    });
-    expect(postCalled).toBe(false);
-    expect(postRes.statusCode).toBe(401);
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+      const writeReq = { method, path: '/api/fs/raw', url: `/api/fs/raw?path=%2Ftmp%2Fimage.png&oc_url_token=${encodeURIComponent(urlToken)}`, headers: { accept: 'application/json' } };
+      const writeRes = createResponse();
+      let writeCalled = false;
+      await auth.requireAuth(writeReq, writeRes, () => {
+        writeCalled = true;
+      });
+      expect(writeCalled).toBe(false);
+      expect(writeRes.statusCode).toBe(401);
+    }
   });
 
   it('issues desktop client tokens with the UI session expiry', async () => {

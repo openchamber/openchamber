@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils';
 import type { UpdateInfo, UpdateProgress } from '@/lib/desktop';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/url';
-import { useI18n } from '@/lib/i18n';
+import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
 type WebUpdateState = 'idle' | 'updating' | 'restarting' | 'reconnecting' | 'error';
@@ -57,7 +57,7 @@ function formatIsoDateForUI(isoDate: string): string {
   if (Number.isNaN(d.getTime())) {
     return isoDate;
   }
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(getCurrentIntlLocale(), {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
@@ -369,7 +369,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                       }
                     }}
                   >
-                    <SimpleMarkdownRenderer content={changelog.content} disableLinkSafety={true} />
+                    <SimpleMarkdownRenderer content={changelog.content} disableLinkSafety={true} enableFileReferences={false} />
                   </div>
                 ) : (
                   <div className="divide-y divide-[var(--surface-subtle)]">
@@ -395,7 +395,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                             }
                           }}
                         >
-                          <SimpleMarkdownRenderer content={section.content} disableLinkSafety={true} />
+                          <SimpleMarkdownRenderer content={section.content} disableLinkSafety={true} enableFileReferences={false} />
                         </div>
                       </div>
                     ))}

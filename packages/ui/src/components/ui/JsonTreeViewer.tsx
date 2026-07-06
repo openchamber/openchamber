@@ -203,13 +203,13 @@ const JsonTreeViewer = React.forwardRef<{ expandAll: () => void; collapseAll: ()
 
     const shouldVirtualize = flatNodes.length > VIRTUALIZE_THRESHOLD;
     const parentRef = React.useRef<HTMLDivElement>(null);
-
-    const virtualizer = useVirtualizer({
+    const virtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
       count: flatNodes.length,
+      enabled: shouldVirtualize,
       getScrollElement: () => parentRef.current,
       estimateSize: () => ROW_HEIGHT,
       overscan: 20,
-      enabled: shouldVirtualize,
+      getItemKey: (index) => flatNodes[index]?.node.id ?? index,
     });
 
     const handleToggle = React.useCallback((id: string) => {
@@ -246,27 +246,16 @@ const JsonTreeViewer = React.forwardRef<{ expandAll: () => void; collapseAll: ()
           className={className}
           style={{ maxHeight, overflow: 'auto' }}
         >
-          <div
-            style={{
-              height: `${virtualizer.getTotalSize()}px`,
-              width: '100%',
-              position: 'relative',
-            }}
-          >
-            {virtualizer.getVirtualItems().map((virtualRow) => {
-              const flatNode = flatNodes[virtualRow.index];
+          <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+            {virtualizer.getVirtualItems().map((item) => {
+              const flatNode = flatNodes[item.index];
               if (!flatNode) return null;
               return (
                 <div
                   key={flatNode.node.id}
-                  style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    height: `${virtualRow.size}px`,
-                    transform: `translateY(${virtualRow.start}px)`,
-                  }}
+                  data-index={item.index}
+                  ref={virtualizer.measureElement}
+                  style={{ position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${item.start}px)` }}
                 >
                   <JsonRow
                     flatNode={flatNode}
@@ -301,4 +290,3 @@ const JsonTreeViewer = React.forwardRef<{ expandAll: () => void; collapseAll: ()
 );
 
 export { JsonTreeViewer };
-export type { JsonTreeViewerProps };

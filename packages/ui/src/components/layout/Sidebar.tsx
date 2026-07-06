@@ -4,7 +4,7 @@ import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 
-export const SIDEBAR_CONTENT_WIDTH = 280;
+const SIDEBAR_CONTENT_WIDTH = 280;
 const SIDEBAR_MIN_WIDTH = 280;
 const SIDEBAR_MAX_WIDTH = 500;
 
@@ -13,9 +13,11 @@ interface SidebarProps {
     isMobile: boolean;
     children: React.ReactNode;
     className?: string;
+    /** Fixed strip rendered above the scrollable content (e.g. toggle + project actions). */
+    topBar?: React.ReactNode;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, className }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, className, topBar }) => {
     const { t } = useI18n();
     const sidebarWidth = useUIStore((state) => state.sidebarWidth);
     const setSidebarWidth = useUIStore((state) => state.setSidebarWidth);
@@ -125,7 +127,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
             ref={sidebarRef}
             className={cn(
                 'relative flex h-full overflow-hidden border-r border-border/40 will-change-[width] motion-reduce:transition-none',
-                'bg-sidebar',
+                'bg-sidebar oc-vibrancy-surface',
                 !isOpen && 'border-r-0',
                 className,
             )}
@@ -165,7 +167,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
                 style={{ width: 'var(--oc-left-sidebar-width)', overflowX: 'hidden' }}
                 aria-hidden={!isOpen}
             >
-                <div className="flex-1 overflow-y-auto">
+                {topBar}
+                <div className="min-h-0 flex-1 overflow-y-auto">
                     <ErrorBoundary>{children}</ErrorBoundary>
                 </div>
             </div>

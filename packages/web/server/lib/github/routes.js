@@ -1,6 +1,25 @@
 const PR_STATUS_CACHE_TTL_MS = 90_000;
 const PR_STATUS_CACHE_MAX_ENTRIES = 200;
+// Upper bound for resolving a single PR status. resolveGitHubPrStatus makes many
+// serial GitHub API calls; under GitHub secondary-rate-limiting a single request
+// can otherwise hang 20s+. We bound it so the route fails fast instead of holding
+// the response (and a client socket) open — the client keeps its last-known
+// status on error, and a later poll fills it in.
+const PR_STATUS_RESOLVE_TIMEOUT_MS = 12_000;
 const prStatusCache = new Map();
+
+function withTimeout(promise, timeoutMs, label) {
+  let timer;
+  const timeout = new Promise((_resolve, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error(`${label} timed out after ${timeoutMs}ms`);
+      error.code = 'ETIMEDOUT';
+      reject(error);
+    }, timeoutMs);
+    if (typeof timer.unref === 'function') timer.unref();
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 function getRequestedRepo(req) {
   const owner = typeof req.query?.owner === 'string' ? req.query.owner.trim() : '';
@@ -76,16 +95,51 @@ export function registerGitHubRoutes(app) {
 
   app.get('/api/github/auth/status', async (_req, res) => {
     try {
-      const { getGitHubAuth, getOctokitOrNull, clearGitHubAuth, getGitHubAuthAccounts } = await getGitHubLibraries();
+      const { getGitHubAuth, getOctokitOrNull, clearGitHubAuth, getGitHubAuthAccounts, GH_CLI_ACCOUNT_ID, isGhCliActive, isGhCliDisabled, setGhCliActive } = await getGitHubLibraries();
+      const { getGhCliToken } = await import('./gh-cli-credential.js');
+
       const auth = getGitHubAuth();
-      const accounts = getGitHubAuthAccounts();
-      if (!auth?.accessToken) {
-        return res.json({ connected: false, accounts });
+      let accounts = getGitHubAuthAccounts();
+      const ghCliDisabled = isGhCliDisabled();
+      const ghCliActive = isGhCliActive();
+      const ghToken = getGhCliToken();
+      const usingOwnToken = Boolean(auth?.accessToken);
+      let ghCliUser = null;
+
+      if (ghToken !== null && !ghCliDisabled) {
+        try {
+          const { createOctokit } = await import('./octokit.js');
+          ghCliUser = await getGitHubUserSummary(createOctokit(ghToken));
+        } catch {
+          ghCliUser = null;
+        }
       }
+      if (ghCliActive && !ghCliUser) {
+        setGhCliActive(false);
+      }
+
+      const ghCliCurrent = ghToken !== null && !ghCliDisabled && Boolean(ghCliUser) && (ghCliActive || !usingOwnToken);
+      if (ghCliUser) {
+        accounts = accounts
+          .map((account) => ({ ...account, current: ghCliCurrent ? false : Boolean(account.current) }))
+          .concat({
+            id: GH_CLI_ACCOUNT_ID,
+            user: ghCliUser,
+            current: ghCliCurrent,
+            source: 'gh-cli',
+          });
+      }
+
+      const buildGhCli = (activeUser = null) => ({
+        available: ghToken !== null,
+        disabled: ghCliDisabled,
+        active: ghCliCurrent,
+        ...(!ghCliDisabled && (activeUser || ghCliUser) ? { user: activeUser || ghCliUser } : {}),
+      });
 
       const octokit = getOctokitOrNull();
       if (!octokit) {
-        return res.json({ connected: false, accounts });
+        return res.json({ connected: false, accounts, ghCli: buildGhCli() });
       }
 
       let user = null;
@@ -93,23 +147,37 @@ export function registerGitHubRoutes(app) {
         user = await getGitHubUserSummary(octokit);
       } catch (error) {
         if (isGitHubAuthInvalid(error)) {
-          clearGitHubAuth();
-          return res.json({ connected: false, accounts: getGitHubAuthAccounts() });
+          if (usingOwnToken) clearGitHubAuth();
+          return res.json({ connected: false, accounts: getGitHubAuthAccounts(), ghCli: buildGhCli() });
         }
       }
 
-      const fallback = auth.user;
+      const fallback = usingOwnToken ? auth.user : null;
       const mergedUser = user || fallback;
-
       return res.json({
         connected: true,
         user: mergedUser,
-        scope: auth.scope,
+        scope: ghCliCurrent ? undefined : auth?.scope,
         accounts,
+        ghCli: buildGhCli(ghCliCurrent ? mergedUser : null),
       });
     } catch (error) {
       console.error('Failed to get GitHub auth status:', error);
       return res.status(500).json({ error: error.message || 'Failed to get GitHub auth status' });
+    }
+  });
+
+  app.post('/api/github/auth/gh-cli', async (req, res) => {
+    try {
+      const { setGhCliDisabled, isGhCliDisabled } = await getGitHubLibraries();
+      const { clearGhCliTokenCache } = await import('./gh-cli-credential.js');
+      const disabled = Boolean(req.body?.disabled);
+      setGhCliDisabled(disabled);
+      clearGhCliTokenCache();
+      return res.json({ disabled: isGhCliDisabled() });
+    } catch (error) {
+      console.error('Failed to update gh CLI setting:', error);
+      return res.status(500).json({ error: error.message || 'Failed to update gh CLI setting' });
     }
   });
 
@@ -178,8 +246,8 @@ export function registerGitHubRoutes(app) {
         return res.status(500).json({ error: 'Missing access_token from GitHub' });
       }
 
-      const { Octokit } = await import('@octokit/rest');
-      const octokit = new Octokit({ auth: accessToken });
+      const { createOctokit } = await import('./octokit.js');
+      const octokit = createOctokit(accessToken);
       const user = await getGitHubUserSummary(octokit);
 
       setGitHubAuth({
@@ -203,25 +271,70 @@ export function registerGitHubRoutes(app) {
 
   app.post('/api/github/auth/activate', async (req, res) => {
     try {
-      const { activateGitHubAuth, getGitHubAuth, getOctokitOrNull, clearGitHubAuth, getGitHubAuthAccounts } = await getGitHubLibraries();
+      const { activateGitHubAuth, getGitHubAuth, getOctokitOrNull, clearGitHubAuth, getGitHubAuthAccounts, GH_CLI_ACCOUNT_ID, isGhCliDisabled, setGhCliActive } = await getGitHubLibraries();
       const accountId = typeof req.body?.accountId === 'string' ? req.body.accountId : '';
       if (!accountId) {
         return res.status(400).json({ error: 'accountId is required' });
       }
+      if (accountId === GH_CLI_ACCOUNT_ID) {
+        const { getGhCliToken } = await import('./gh-cli-credential.js');
+        const ghToken = !isGhCliDisabled() ? getGhCliToken() : null;
+        if (!ghToken) {
+          return res.status(404).json({ error: 'GitHub CLI account not found' });
+        }
+
+        const { createOctokit } = await import('./octokit.js');
+        const user = await getGitHubUserSummary(createOctokit(ghToken));
+        setGhCliActive(true);
+        const accounts = getGitHubAuthAccounts()
+          .map((account) => ({ ...account, current: false }))
+          .concat({ id: GH_CLI_ACCOUNT_ID, user, current: true, source: 'gh-cli' });
+        return res.json({
+          connected: true,
+          user,
+          accounts,
+          ghCli: {
+            available: true,
+            disabled: false,
+            active: true,
+            user,
+          },
+        });
+      }
+
       const activated = activateGitHubAuth(accountId);
       if (!activated) {
         return res.status(404).json({ error: 'GitHub account not found' });
       }
 
       const auth = getGitHubAuth();
-      const accounts = getGitHubAuthAccounts();
+      let accounts = getGitHubAuthAccounts();
       if (!auth?.accessToken) {
         return res.json({ connected: false, accounts });
       }
 
+      const { getGhCliToken } = await import('./gh-cli-credential.js');
+      const ghCliDisabled = isGhCliDisabled();
+      const ghToken = !ghCliDisabled ? getGhCliToken() : null;
+      let ghCliUser = null;
+      if (ghToken) {
+        try {
+          const { createOctokit } = await import('./octokit.js');
+          ghCliUser = await getGitHubUserSummary(createOctokit(ghToken));
+          accounts = accounts.concat({
+            id: GH_CLI_ACCOUNT_ID,
+            user: ghCliUser,
+            current: false,
+            source: 'gh-cli',
+          });
+        } catch {
+          ghCliUser = null;
+        }
+      }
+
       const octokit = getOctokitOrNull();
       if (!octokit) {
-        return res.json({ connected: false, accounts });
+        return res.json({ connected: false, accounts, ghCli: { available: ghToken !== null, disabled: ghCliDisabled, active: false, ...(ghCliUser ? { user: ghCliUser } : {}) } });
       }
 
       let user = auth.user || null;
@@ -239,6 +352,12 @@ export function registerGitHubRoutes(app) {
         user,
         scope: auth.scope,
         accounts,
+        ghCli: {
+          available: ghToken !== null,
+          disabled: ghCliDisabled,
+          active: false,
+          ...(ghCliUser ? { user: ghCliUser } : {}),
+        },
       });
     } catch (error) {
       console.error('Failed to activate GitHub account:', error);
@@ -300,6 +419,17 @@ export function registerGitHubRoutes(app) {
         return res.json(cached.data);
       }
 
+      // If GitHub recently rate-limited us, don't pile on more calls that will
+      // also fail. Serve whatever we last cached (even if stale); otherwise
+      // report a transient failure so the client keeps its last-known status.
+      const { isGitHubRateLimited } = await import('./rate-limit.js');
+      if (isGitHubRateLimited()) {
+        if (cached) {
+          return res.json(cached.data);
+        }
+        return res.status(503).json({ error: 'GitHub rate limited' });
+      }
+
       // Intercept res.json to cache successful responses before sending
       // Only caches responses with connected:true — error/edge-case responses are not cached
       const originalJson = res.json.bind(res);
@@ -317,12 +447,16 @@ export function registerGitHubRoutes(app) {
       }
 
       const { resolveGitHubPrStatus } = await import('./pr-status.js');
-      const resolvedStatus = await resolveGitHubPrStatus({
-        octokit,
-        directory,
-        branch,
-        remoteName: remote,
-      });
+      const resolvedStatus = await withTimeout(
+        resolveGitHubPrStatus({
+          octokit,
+          directory,
+          branch,
+          remoteName: remote,
+        }),
+        PR_STATUS_RESOLVE_TIMEOUT_MS,
+        'resolveGitHubPrStatus',
+      );
       const searchRepo = resolvedStatus.repo;
       const first = resolvedStatus.pr;
       if (!searchRepo) {
@@ -453,6 +587,24 @@ export function registerGitHubRoutes(app) {
         const { clearGitHubAuth } = await getGitHubLibraries();
         clearGitHubAuth();
         return res.json({ connected: false });
+      }
+      // Transient failures — a rate limit, or the overall resolve timeout
+      // firing — are expected under heavy load and should not be logged as hard
+      // errors. Record a rate-limit cooldown when applicable, then serve the
+      // last cached status (even if stale) or a 503 so the client keeps its
+      // last-known value instead of clearing the badge.
+      const { noteIfGitHubRateLimit } = await import('./rate-limit.js');
+      const wasRateLimited = noteIfGitHubRateLimit(error);
+      const wasTimeout = error?.code === 'ETIMEDOUT';
+      if (wasRateLimited || wasTimeout) {
+        const dir = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
+        const br = typeof req.query?.branch === 'string' ? req.query.branch.trim() : '';
+        const rem = typeof req.query?.remote === 'string' ? req.query.remote.trim() : 'origin';
+        const cached = prStatusCache.get(`${dir}::${br}::${rem}`);
+        if (cached) {
+          return res.json(cached.data);
+        }
+        return res.status(503).json({ error: wasRateLimited ? 'GitHub rate limited' : 'GitHub request timed out' });
       }
       if (isGitHubResourceUnavailable(error)) {
         return res.json({
@@ -882,6 +1034,7 @@ export function registerGitHubRoutes(app) {
       if (upstream) {
         try {
           const { getRemotes } = await import('../git/index.js');
+          const { resolveGitHubRepoFromDirectory } = await import('./index.js');
           const remotes = await getRemotes(directory);
           for (const r of remotes) {
             if (r?.name) {

@@ -27,6 +27,7 @@ Your job is to review third-party contributions the way a careful maintainer wou
 - Use `gh` to inspect PR metadata, commits, changed files, checks, reviews, bot comments, issue comments, and inline review comments.
 - Read the diff and the relevant surrounding source code. Do not review only the changed hunks.
 - Check whether previous bot/review comments appear to be addressed by the current diff and latest comments.
+- Treat PR review as a timeline, not a snapshot. Before repeating a prior finding, compare the previous review comment timestamp with later commits and comments, then inspect the current diff/current file state to confirm the issue still exists.
 - Look for concrete failure modes, not vague suspicions.
 - Do not nitpick style, formatting, or naming unless it creates a real bug, user-visible regression, security issue, or maintenance trap.
 - Prefer the smallest correct fix when suggesting changes.
@@ -42,6 +43,17 @@ Start with these commands or equivalent `gh api` calls:
 
 Then inspect the relevant base-branch files around the changed code using `rg`, `git`, and file reads. Use `gh pr diff` and `gh api` for the PR contents. If the PR touches a documented module, read that module's `DOCUMENTATION.md` from the base checkout before judging the change.
 
+## Timeline and repeat-review handling
+
+For every review, build a short chronological picture before writing findings:
+
+- Identify prior bot/review comments and inline comments, including when they were posted and which findings they raised.
+- Identify commits pushed after those comments. Commit order matters: a later commit may exist specifically to address an earlier review.
+- For each prior finding, inspect the current diff/current files and classify it as addressed, still present, superseded, or no longer applicable.
+- Do not carry forward a previous finding just because it appeared in an earlier review. Only repeat it if you verified the current code still has the concrete failure mode.
+- In the final comment, briefly state which meaningful prior findings were addressed and which remain. If all prior blockers are fixed, say that explicitly.
+- If a repeated review request happens after a new push, prioritize the delta since the prior review before scanning the whole PR again.
+
 ## Correctness focus
 
 Prioritize these risks:
@@ -54,6 +66,18 @@ Prioritize these risks:
 - Scroll, focus, keyboard, and accessibility semantics that affect real use.
 - Missing targeted tests for risky logic.
 - Claims in the PR description that are not actually true in the implementation.
+
+## User-facing behavior contract
+
+For every user-facing change, first infer the behavioral contract before judging the implementation:
+
+- What is the user trying to accomplish, and what are the natural inputs, choices, and recovery paths for that task?
+- What existing product patterns should this reuse, and what state must be preserved if the user edits an unrelated field?
+- Does the UI expose a guided interaction when the value has known choices, rather than exposing raw internal/schema values by default?
+- Is any raw/manual input intentionally requested, or should it be an advanced/fallback path only?
+- Does the implementation preserve persisted/custom/unknown values instead of normalizing them away or clearing them silently?
+
+Do not map schema/API types directly to UI/API behavior. A config field typed as `string` does not automatically justify a plain text input, and a backend nullable field does not automatically define the user interaction. Review for mismatches between the requested behavior and the implemented UX, not just type correctness, null handling, and i18n coverage.
 
 ## Security and supply-chain focus
 
@@ -92,7 +116,7 @@ Pay extra attention to:
 
 Match the repository's existing PR-review style: concise summary first, then a confidence/merge signal, then concrete findings. Do not use a header like `## OpenCode PR review`.
 
-Leave exactly one top-level PR comment with `gh pr comment "$PR_NUMBER" --body "..."` or an equivalent `gh api` call. Do not create separate inline review comments unless the workflow explicitly asks for inline comments later.
+Leave exactly one top-level PR comment with `gh pr comment "$PR_NUMBER" --body "..."` or an equivalent `gh api` call. Do not create separate inline review comments unless the workflow explicitly asks for inline comments later. Never post test, probe, placeholder, or debugging comments. Printing the review to stdout is not enough: after posting, verify that the new comment exists on the PR by reading comments only (for example with `gh pr view "$PR_NUMBER" --json comments`); do not verify by posting any additional comment.
 
 Use this structure:
 
@@ -110,6 +134,13 @@ Briefly explain what this PR changes and what problem it is trying to solve.
 Merge signal in plain English: safe to merge, safe after a small fix, or not safe to merge yet.
 
 Explain the reason in a short paragraph. If there are findings, name the files that need attention.
+</details>
+
+<details open><summary><h3>Risk Score: X/5</h3></summary>
+
+1 is low risk (isolated, reversible, well-contained change), 5 is high risk (touches security, data persistence, shared state, build/release, or broad cross-runtime contracts).
+
+Explain the score in a short paragraph: which risk dimensions apply (correctness, data loss, security/supply-chain, performance, cross-runtime parity) and what makes the change more or less risky.
 </details>
 
 <details><summary><h3>Findings</h3></summary>

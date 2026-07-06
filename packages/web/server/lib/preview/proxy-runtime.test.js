@@ -146,11 +146,27 @@ describe('preview body URL rewriting', () => {
       'import RefreshRuntime from "/@react-refresh";',
       'window.__vite_plugin_react_preamble_installed__ = true;',
       '</script>',
+      '<script type=module>',
+      'import { injectIntoGlobalHook } from "/@react-refresh";',
+      'import value from "/module.js";',
+      'const url = "/api/data";',
+      '</script>',
+      '<script type=\'module\'>',
+      'import "/entry.js";',
+      '</script>',
+      '<script type="text/javascript">',
+      'import "/not-rewritten.js";',
+      '</script>',
       '<script>const refreshUrl = "/@react-refresh";</script>',
     ].join('');
     const output = rewrite(input, 'html');
 
     expect(output).toContain('from "/api/preview/proxy/abc123/@react-refresh"');
+    expect(output).toContain('import { injectIntoGlobalHook } from "/api/preview/proxy/abc123/@react-refresh";');
+    expect(output).toContain('import value from "/api/preview/proxy/abc123/module.js";');
+    expect(output).toContain('const url = "/api/data";');
+    expect(output).toContain('import "/api/preview/proxy/abc123/entry.js";');
+    expect(output).toContain('import "/not-rewritten.js";');
     expect(output).toContain('window.__vite_plugin_react_preamble_installed__ = true;');
     expect(output).toContain('const refreshUrl = "/@react-refresh";');
   });
