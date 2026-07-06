@@ -1179,27 +1179,41 @@ export async function resyncBlockingRequestsForDirectory(
 
     if (autoAcceptingSessionIds.length > 0) {
       const acceptedIdsBySession = new Map<string, Set<string>>()
+      // Track server-confirmed resolved permissions separately so we can
+      // remove them from `grouped` below — the V1 listPendingPermissions
+      // snapshot can still contain entries the server has already answered,
+      // and leaving them in place produces a spurious "Permission needed"
+      // toast for a permission the user has already resolved.
+      const resolvedIdsBySession = new Map<string, Set<string>>()
       await Promise.all(autoAcceptingSessionIds.flatMap((sessionId) =>
         (grouped[sessionId] ?? []).map(async (permission) => {
           try {
             // Verify the permission is still pending before auto-accepting.
-            // The V2 endpoint (OpenCode SDK v1.17.12+) returns null when the
-            // request is already resolved or when the server is unreachable.
-            // On a pre-v1.17.12 server without the V2 endpoint, this
-            // permanently disables auto-accept — the call always returns
-            // null. This is an acknowledged scope tradeoff: the project
-            // requires SDK v1.17.12, so pre-1.17.12 servers are unsupported.
-            // The user can still answer manually; failed auto-accept
-            // permissions remain in UI state.
-            const fresh = await opencodeClient.fetchPermission(
+            // - state: "ok"        → still pending, safe to auto-accept
+            // - state: "resolved"  → server returned 404, drop from grouped
+            // - state: "unknown"   → network error / pre-1.17.12 server,
+            //                        keep in grouped for the user to act on
+            //
+            // On a pre-v1.17.12 server without the V2 endpoint, every call
+            // returns "unknown". This permanently disables auto-accept
+            // (acknowledged scope tradeoff — project requires SDK 1.17.12)
+            // but does not falsely report permissions as resolved.
+            const outcome = await opencodeClient.fetchPermission(
               permission.sessionID,
               permission.id,
             )
-            if (!fresh) return
-            await sessionActions.respondToPermission(permission.sessionID, permission.id, "once")
-            const accepted = acceptedIdsBySession.get(sessionId) ?? new Set<string>()
-            accepted.add(permission.id)
-            acceptedIdsBySession.set(sessionId, accepted)
+            if (outcome.state === "ok") {
+              await sessionActions.respondToPermission(permission.sessionID, permission.id, "once")
+              const accepted = acceptedIdsBySession.get(sessionId) ?? new Set<string>()
+              accepted.add(permission.id)
+              acceptedIdsBySession.set(sessionId, accepted)
+            } else if (outcome.state === "resolved") {
+              const resolved = resolvedIdsBySession.get(sessionId) ?? new Set<string>()
+              resolved.add(permission.id)
+              resolvedIdsBySession.set(sessionId, resolved)
+            }
+            // state: "unknown" → keep the permission in grouped; user can
+            // answer manually.
           } catch {
             // Keep failed auto-accept permissions in UI state so the user can act.
           }
@@ -1208,8 +1222,11 @@ export async function resyncBlockingRequestsForDirectory(
 
       for (const sessionId of autoAcceptingSessionIds) {
         const acceptedIds = acceptedIdsBySession.get(sessionId)
-        if (!acceptedIds) continue
-        const remaining = (grouped[sessionId] ?? []).filter((permission) => !acceptedIds.has(permission.id))
+        const resolvedIds = resolvedIdsBySession.get(sessionId)
+        if (!acceptedIds && !resolvedIds) continue
+        const drop = (id: string) =>
+          acceptedIds?.has(id) || resolvedIds?.has(id) || false
+        const remaining = (grouped[sessionId] ?? []).filter((permission) => !drop(permission.id))
         if (remaining.length > 0) grouped[sessionId] = remaining
         else delete grouped[sessionId]
       }
