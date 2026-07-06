@@ -1098,6 +1098,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 onScrollToMessage={timelineController.scrollToMessage}
                 onScrollByTurnOffset={navigation.scrollByTurnOffset}
                 onResumeToLatest={resumeToLatestInstant}
+                canLoadEarlier={timelineController.historySignals.canLoadEarlier}
+                isLoadingEarlier={timelineController.isLoadingOlder}
+                onLoadEarlier={handleLoadOlderClick}
             />
         </div>
     );
