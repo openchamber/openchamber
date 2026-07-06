@@ -128,7 +128,7 @@ function makeNode(tag: string, owner: FakeDocument): FakeNode {
   return node;
 }
 
-function installDomStub(): FakeDocument {
+function installDomStub(): { document: FakeDocument; restore: () => void } {
   const document = {
     nodeType: 9,
     nodeName: "#document",
@@ -179,12 +179,37 @@ function installDomStub(): FakeDocument {
   document.body = makeNode("body", document as unknown as FakeDocument);
   document.documentElement = makeNode("html", document as unknown as FakeDocument);
 
-  (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  (globalThis as unknown as { document: FakeDocument }).document = document;
-  (globalThis as unknown as { window: FakeWindow }).window = document.defaultView;
-  (globalThis as unknown as { navigator: FakeWindow["navigator"] }).navigator = document.defaultView.navigator;
+  // Capture previous globals so the test process is left untouched after
+  // each test runs. Bun's test runner shares globalThis across all tests in
+  // a file, so a leaked DOM stub (or a sticky IS_REACT_ACT_ENVIRONMENT) would
+  // bleed into unrelated tests.
+  const g = globalThis as unknown as {
+    document?: FakeDocument;
+    window?: FakeWindow;
+    navigator?: FakeWindow["navigator"];
+    IS_REACT_ACT_ENVIRONMENT?: boolean;
+  };
+  const previous = {
+    document: g.document,
+    window: g.window,
+    navigator: g.navigator,
+    IS_REACT_ACT_ENVIRONMENT: g.IS_REACT_ACT_ENVIRONMENT,
+  };
 
-  return document;
+  g.IS_REACT_ACT_ENVIRONMENT = true;
+  g.document = document;
+  g.window = document.defaultView;
+  g.navigator = document.defaultView.navigator;
+
+  return {
+    document,
+    restore() {
+      g.document = previous.document;
+      g.window = previous.window;
+      g.navigator = previous.navigator;
+      g.IS_REACT_ACT_ENVIRONMENT = previous.IS_REACT_ACT_ENVIRONMENT;
+    },
+  };
 }
 
 // --- Module mocks --------------------------------------------------------
@@ -371,14 +396,29 @@ function mountControlled(props: ControlledProps): ControlledHandle {
   };
 }
 
+// Helper: returns the most recent recorded value, or throws if the parent
+// never produced a commit. Replaces the old `recorded[len-1]!` non-null
+// assertions so a regression that drops the first commit fails loudly
+// instead of being silently coerced to `undefined`.
+function lastCommit(handle: ControlledHandle): number {
+  const value = handle.recorded[handle.recorded.length - 1];
+  if (value === undefined) {
+    throw new Error("expected a recorded commit before the next step");
+  }
+  return value;
+}
+
 // Helper: mount, run body, unmount — avoids leaking roots between tests.
+// Also restores the global DOM/window/navigator/IS_REACT_ACT_ENVIRONMENT
+// globals to their pre-test values so the test process stays clean.
 function withHandle<T>(props: ControlledProps, body: (h: ControlledHandle) => T): T {
-  installDomStub();
+  const stub = installDomStub();
   const handle = mountControlled(props);
   try {
     return body(handle);
   } finally {
     try { handle.unmount(); } catch { /* ignore */ }
+    stub.restore();
   }
 }
 
@@ -445,9 +485,9 @@ describe("NumberInput rapid-click stepper", () => {
       handle.clickDecrease();
       // Simulate the real-world prop round-trip: parent re-renders with the
       // latest committed value.
-      handle.rerenderWith(handle.recorded[handle.recorded.length - 1]!);
+      handle.rerenderWith(lastCommit(handle));
       handle.clickIncrease();
-      handle.rerenderWith(handle.recorded[handle.recorded.length - 1]!);
+      handle.rerenderWith(lastCommit(handle));
       handle.clickIncrease();
 
       expect(handle.recorded).toEqual([95, 100, 105]);
@@ -479,7 +519,7 @@ describe("NumberInput rapid-click stepper", () => {
       // 2) The parent re-renders with the latest committed value, mirroring
       //    a real React parent's setState round-trip. This is what makes
       //    `value` and `ref` agree before blur runs.
-      handle.rerenderWith(handle.recorded[handle.recorded.length - 1]!);
+      handle.rerenderWith(lastCommit(handle));
       // 3) User blurs. handleBlur sees the typed draft, the ref is already
       //    at 110, and `normalized !== value` is false — no duplicate commit.
       handle.blurInput();
@@ -501,7 +541,7 @@ describe("NumberInput rapid-click stepper", () => {
       //    commitValue clamps to 50 before emitting onValueChange.
       handle.typeInput("20");
       // 2) Parent re-renders with the clamped value 50.
-      handle.rerenderWith(handle.recorded[handle.recorded.length - 1]!);
+      handle.rerenderWith(lastCommit(handle));
       // 3) Blur: the draft "20" parses to 20, clamps to 50, normalizes to 50.
       //    `50 !== value(50)` is false — no duplicate commit.
       handle.blurInput();

@@ -116,6 +116,10 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
     // to onValueChange). See packages/ui/src/components/ui/number-input.test.tsx.
     const committedValueRef = React.useRef<number>(baseValue)
 
+    // Assumes a well-behaved controlled parent: when the parent updates the
+    // `value` prop, the effect syncs the ref. If a parent ever rejects or
+    // debounces `onValueChange`, the ref can briefly lead the prop. Today no
+    // production caller rejects; revisit if a debounced caller is added.
     React.useEffect(() => {
       committedValueRef.current = baseValue
     }, [baseValue])
