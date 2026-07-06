@@ -24,7 +24,8 @@ import { useDeviceInfo } from '@/lib/device';
 import { mergeModelMetadataWithLiveModel } from '@/lib/modelMetadata';
 import { getModelDisplayName as getSharedModelDisplayName } from '@/lib/modelDisplay';
 import { getEditModeColors } from '@/lib/permissions/editModeColors';
-import { cn, fuzzyMatch } from '@/lib/utils';
+import { cn } from '@/lib/utils';
+import { rankAutocompleteItems } from '@/lib/search/autocompleteRanking';
 import { useContextStore } from '@/stores/contextStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -498,13 +499,13 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     }, [agents]);
 
     const sortedAndFilteredAgents = React.useMemo(() => {
-        const sorted = [...selectableDesktopAgents].sort((a, b) => a.name.localeCompare(b.name));
-        if (!agentSearchQuery.trim()) {
-            return sorted;
-        }
-        return sorted.filter((agent) =>
-            fuzzyMatch(agent.name, agentSearchQuery) ||
-            (agent.description && fuzzyMatch(agent.description, agentSearchQuery))
+        return rankAutocompleteItems(
+            selectableDesktopAgents,
+            agentSearchQuery,
+            (agent) => `${agent.name} ${agent.description ?? ''}`,
+            {
+                compare: (a, b) => a.name.localeCompare(b.name),
+            },
         );
     }, [selectableDesktopAgents, agentSearchQuery]);
 
