@@ -1070,6 +1070,7 @@ export const settingsDict = {
   'settings.openchamber.visual.section.userMessageRendering': 'Renderowanie wiadomości użytkownika',
   'settings.openchamber.visual.section.userMessageRenderingAria': 'Tryb renderowania wiadomości użytkownika',
   'settings.openchamber.worktrees.list.deleteWorktreeAria': 'Usuń worktree {name}',
+  'settings.openchamber.worktrees.list.openInDiscord': 'Otwórz w Discordzie',
   'settings.openchamber.worktrees.list.detachedHead': 'Odłączony HEAD',
   'settings.openchamber.worktrees.list.empty': 'Nie znaleziono worktree dla tego projektu',
   'settings.openchamber.worktrees.list.loading': 'Ładowanie worktree...',

@@ -385,6 +385,24 @@ export async function createWorktree(project: ProjectRef, args: CreateWorktreeAr
     availableWorktrees: [...useSessionUIStore.getState().availableWorktrees, metadata],
   });
 
+  void import('@/stores/useMessengerStore')
+    .then(({ useMessengerStore }) => {
+      const notify = useMessengerStore.getState().notifyWorktreeAdded;
+      void notify(
+        {
+          id: project.id,
+          path: metadataProjectDirectory,
+          label: metadataProjectDirectory.split('/').pop() ?? metadataProjectDirectory,
+        },
+        {
+          path: metadata.path,
+          branch: metadata.branch,
+          label: metadata.label,
+        },
+      );
+    })
+    .catch(() => undefined);
+
   return metadata;
 }
 
@@ -451,4 +469,18 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
   if (deleteRemote && branchName) {
     await deleteRemoteBranch(projectDirectory, { branch: branchName, remote: remoteName }).catch(() => undefined);
   }
+
+  void import('@/stores/useMessengerStore')
+    .then(({ useMessengerStore }) => {
+      const notify = useMessengerStore.getState().notifyWorktreeRemoved;
+      void notify(
+        { id: project.id, path: project.path, label: project.path.split('/').pop() ?? project.path },
+        {
+          path: worktree.path,
+          branch: worktree.branch,
+          label: worktree.label,
+        },
+      );
+    })
+    .catch(() => undefined);
 }

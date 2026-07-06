@@ -89,6 +89,9 @@ export class MessengerBridgeStore {
       'verbosity_override TEXT',
       'variant_override TEXT',
       'permission_mode TEXT',
+      'project_root TEXT',
+      'worktree_path TEXT',
+      'branch TEXT',
     ]) {
       try {
         this.db.exec(`ALTER TABLE messenger_session_bindings ADD COLUMN ${col}`);
@@ -96,6 +99,22 @@ export class MessengerBridgeStore {
         // ignore — column already exists
       }
     }
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS messenger_worktree_bindings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bot_token_hash TEXT NOT NULL,
+        project_root TEXT NOT NULL,
+        worktree_path TEXT NOT NULL,
+        branch TEXT,
+        channel_id TEXT NOT NULL,
+        thread_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (bot_token_hash, worktree_path)
+      );
+      CREATE INDEX IF NOT EXISTS idx_messenger_worktree_project
+        ON messenger_worktree_bindings (bot_token_hash, project_root);
+    `);
     // Global bridge settings (key/value). Holds the per-messenger verbosity
     // default (key `verbosity:discord` / `verbosity:telegram`) that the
     // OpenChamber UI writes and the `/verbosity` chat command can override
@@ -263,8 +282,9 @@ export class MessengerBridgeStore {
     const row = this.db
       .prepare(
         `SELECT session_id AS sessionId, project_path AS projectPath,
-                project_label AS projectLabel, created_at AS createdAt,
-                last_used_at AS lastUsedAt,
+                project_label AS projectLabel, project_root AS projectRoot,
+                worktree_path AS worktreePath, branch,
+                created_at AS createdAt, last_used_at AS lastUsedAt,
                 model_override AS modelOverride,
                 agent_override AS agentOverride,
                 verbosity_override AS verbosityOverride,
@@ -339,17 +359,35 @@ export class MessengerBridgeStore {
       .run(type, botTokenHash, targetKey);
   }
 
-  bind({ type, botTokenHash, targetKey, sessionId, projectPath, projectLabel }) {
+  bind({
+    type,
+    botTokenHash,
+    targetKey,
+    sessionId,
+    projectPath,
+    projectLabel,
+    projectRoot = undefined,
+    worktreePath = undefined,
+    branch = undefined,
+  }) {
     const now = new Date().toISOString();
+    const existing = this.lookup({ type, botTokenHash, targetKey });
+    const nextProjectRoot = projectRoot === undefined ? existing?.projectRoot ?? null : projectRoot;
+    const nextWorktreePath = worktreePath === undefined ? existing?.worktreePath ?? null : worktreePath;
+    const nextBranch = branch === undefined ? existing?.branch ?? null : branch;
     this.db
       .prepare(
         `INSERT INTO messenger_session_bindings
-           (type, target_key, session_id, project_path, project_label, bot_token_hash, created_at, last_used_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           (type, target_key, session_id, project_path, project_label, project_root,
+            worktree_path, branch, bot_token_hash, created_at, last_used_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(type, bot_token_hash, target_key)
          DO UPDATE SET session_id = excluded.session_id,
                        project_path = excluded.project_path,
                        project_label = excluded.project_label,
+                       project_root = excluded.project_root,
+                       worktree_path = excluded.worktree_path,
+                       branch = excluded.branch,
                        last_used_at = excluded.last_used_at`,
       )
       .run(
@@ -358,10 +396,97 @@ export class MessengerBridgeStore {
         sessionId,
         projectPath ?? null,
         projectLabel ?? null,
+        nextProjectRoot,
+        nextWorktreePath,
+        nextBranch,
         botTokenHash,
         now,
         now,
       );
+  }
+
+  bindWorktree({ botTokenHash, projectRoot, worktreePath, branch, channelId, threadId }) {
+    if (!botTokenHash || !projectRoot || !worktreePath || !channelId || !threadId) return;
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO messenger_worktree_bindings
+           (bot_token_hash, project_root, worktree_path, branch, channel_id, thread_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(bot_token_hash, worktree_path)
+         DO UPDATE SET project_root = excluded.project_root,
+                       branch = excluded.branch,
+                       channel_id = excluded.channel_id,
+                       thread_id = excluded.thread_id,
+                       updated_at = excluded.updated_at`,
+      )
+      .run(
+        botTokenHash,
+        projectRoot,
+        worktreePath,
+        branch ?? null,
+        String(channelId),
+        String(threadId),
+        now,
+        now,
+      );
+  }
+
+  lookupWorktreeByPath({ botTokenHash, worktreePath }) {
+    if (!worktreePath) return null;
+    const params = [worktreePath];
+    let sql = `SELECT project_root AS projectRoot, worktree_path AS worktreePath, branch,
+                      channel_id AS channelId, thread_id AS threadId,
+                      created_at AS createdAt, updated_at AS updatedAt
+                 FROM messenger_worktree_bindings
+                WHERE worktree_path = ?`;
+    if (botTokenHash) {
+      sql += ' AND bot_token_hash = ?';
+      params.push(botTokenHash);
+    }
+    const row = this.db.prepare(sql).get(...params);
+    return row ?? null;
+  }
+
+  lookupWorktreeByThread({ botTokenHash, threadId }) {
+    if (!threadId) return null;
+    const params = [String(threadId)];
+    let sql = `SELECT project_root AS projectRoot, worktree_path AS worktreePath, branch,
+                      channel_id AS channelId, thread_id AS threadId
+                 FROM messenger_worktree_bindings
+                WHERE thread_id = ?`;
+    if (botTokenHash) {
+      sql += ' AND bot_token_hash = ?';
+      params.push(botTokenHash);
+    }
+    const row = this.db.prepare(sql).get(...params);
+    return row ?? null;
+  }
+
+  listWorktreesForProject({ botTokenHash, projectRoot }) {
+    if (!projectRoot) return [];
+    const params = [projectRoot];
+    let sql = `SELECT project_root AS projectRoot, worktree_path AS worktreePath, branch,
+                      channel_id AS channelId, thread_id AS threadId
+                 FROM messenger_worktree_bindings
+                WHERE project_root = ?`;
+    if (botTokenHash) {
+      sql += ' AND bot_token_hash = ?';
+      params.push(botTokenHash);
+    }
+    sql += ' ORDER BY branch ASC';
+    return this.db.prepare(sql).all(...params);
+  }
+
+  unbindWorktree({ botTokenHash, worktreePath }) {
+    if (!worktreePath) return;
+    const params = [worktreePath];
+    let sql = 'DELETE FROM messenger_worktree_bindings WHERE worktree_path = ?';
+    if (botTokenHash) {
+      sql += ' AND bot_token_hash = ?';
+      params.push(botTokenHash);
+    }
+    this.db.prepare(sql).run(...params);
   }
 
   touch({ type, botTokenHash, targetKey }) {

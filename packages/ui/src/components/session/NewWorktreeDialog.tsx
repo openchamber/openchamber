@@ -877,6 +877,25 @@ export function NewWorktreeDialog({
         onOpenChange(false);
         setIsCreating(false);
 
+        void import('@/stores/useMessengerStore')
+          .then(({ useMessengerStore }) => {
+            const notify = useMessengerStore.getState().notifyWorktreeAdded;
+            void notify(
+              {
+                id: projectRef.id,
+                path: projectRef.path,
+                label: projectRef.path.split('/').pop() ?? projectRef.path,
+              },
+              {
+                path: metadata.path,
+                branch: metadata.branch,
+                label: metadata.label,
+              },
+              createdSessionId,
+            );
+          })
+          .catch(() => undefined);
+
         void sessionActions.updateSessionTitle(session.id, sessionTitle).catch(() => undefined);
 
         try {
