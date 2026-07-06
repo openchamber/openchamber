@@ -1182,6 +1182,20 @@ export async function resyncBlockingRequestsForDirectory(
       await Promise.all(autoAcceptingSessionIds.flatMap((sessionId) =>
         (grouped[sessionId] ?? []).map(async (permission) => {
           try {
+            // Verify the permission is still pending before auto-accepting.
+            // The V2 endpoint (OpenCode SDK v1.17.12+) returns null when the
+            // request is already resolved or when the server is unreachable.
+            // On a pre-v1.17.12 server without the V2 endpoint, this
+            // permanently disables auto-accept — the call always returns
+            // null. This is an acknowledged scope tradeoff: the project
+            // requires SDK v1.17.12, so pre-1.17.12 servers are unsupported.
+            // The user can still answer manually; failed auto-accept
+            // permissions remain in UI state.
+            const fresh = await opencodeClient.fetchPermission(
+              permission.sessionID,
+              permission.id,
+            )
+            if (!fresh) return
             await sessionActions.respondToPermission(permission.sessionID, permission.id, "once")
             const accepted = acceptedIdsBySession.get(sessionId) ?? new Set<string>()
             accepted.add(permission.id)

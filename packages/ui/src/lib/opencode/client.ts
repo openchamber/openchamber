@@ -1,4 +1,5 @@
 import { createOpencodeClient, OpencodeClient } from "@opencode-ai/sdk/v2";
+import type { PermissionV2Request, PermissionV2Effect, PermissionV2Source } from "@opencode-ai/sdk/v2/client";
 import type { FilesAPI } from "../api/types";
 import { getDesktopHomeDirectory } from "../desktop";
 import type {
@@ -1126,6 +1127,91 @@ class OpencodeService {
       ...(options?.message ? { message: options.message } : {}),
     });
     return unwrapSdkOptional(response, 'permission.reply') === true;
+  }
+
+  /**
+   * Programmatically evaluate and (when approval is required) create a
+   * permission request for a session via the V2 endpoint introduced in
+   * OpenCode SDK v1.17.12. Wraps `session.permission.create`.
+   *
+   * Returns `{ id, effect }` on success, or `null` on any failure
+   * (network error, 4xx/5xx response, malformed payload, or pre-v1.17.12
+   * server without the V2 endpoint). Callers driving authoritative state
+   * must treat `null` as "unknown — do not act" rather than "permission
+   * allowed."
+   *
+   * Thin wrapper for future programmatic permission creation. The V1
+   * `permission.list` / `permission.reply` flow used by the auto-accept
+   * path is unchanged.
+   */
+  async createPermission(
+    sessionID: string,
+    action: string,
+    resources: string[],
+    options?: {
+      id?: string;
+      save?: string[];
+      metadata?: Record<string, unknown>;
+      source?: PermissionV2Source;
+      agent?: string;
+    }
+  ): Promise<{ id: string; effect: PermissionV2Effect } | null> {
+    try {
+      const response = await this.client.v2.session.permission.create({
+        sessionID,
+        action,
+        resources,
+        ...(options?.id ? { id: options.id } : {}),
+        ...(options?.save ? { save: options.save } : {}),
+        ...(options?.metadata ? { metadata: options.metadata } : {}),
+        ...(options?.source ? { source: options.source } : {}),
+        ...(options?.agent ? { agent: options.agent } : {}),
+      });
+      // Discriminated union narrowing on `error` (see fetchPermission).
+      if (response.error !== undefined) return null;
+      const payload = response.data?.data;
+      if (payload === undefined) return null;
+      return { id: payload.id, effect: payload.effect };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Fetch a pending permission request owned by a session via the V2
+   * endpoint introduced in OpenCode SDK v1.17.12. Wraps
+   * `session.permission.get`.
+   *
+   * Returns the permission request on success, or `null` when the request
+   * is no longer pending (404), the server is unreachable, or the endpoint
+   * is unavailable (older server). The `null` result is the explicit
+   * "permission already resolved" signal that the auto-accept flow uses
+   * to skip already-answered permissions before replying.
+   */
+  async fetchPermission(
+    sessionID: string,
+    requestID: string,
+  ): Promise<PermissionV2Request | null> {
+    try {
+      // The V2 path is session-scoped and does not require a `directory`
+      // parameter. The client-scoped directory (set via setDirectory) is
+      // honored by the underlying SDK client when the call is routed.
+      const response = await this.client.v2.session.permission.get({
+        sessionID,
+        requestID,
+      });
+      // The SDK returns a discriminated union on `error`/`data` (HeyApi
+      // `RequestResult` with `ThrowOnError = false`). The error branch
+      // collapses `data` to `undefined`; the data branch returns the
+      // 200-response payload as `{ data: PermissionV2Request }`. Narrow
+      // via `error` first, then unwrap the inner `data` field.
+      if (response.error !== undefined) return null;
+      const payload = response.data?.data;
+      if (payload === undefined) return null;
+      return payload;
+    } catch {
+      return null;
+    }
   }
 
   /**
