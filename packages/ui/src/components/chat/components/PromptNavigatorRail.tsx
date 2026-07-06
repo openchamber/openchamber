@@ -101,7 +101,7 @@ export const PromptNavigatorRail: React.FC<PromptNavigatorRailProps> = ({
     return (
         <nav
             aria-label={t('chat.promptNavigator.aria')}
-            className="pointer-events-none absolute right-2 top-1/2 z-20 -translate-y-1/2"
+            className="pointer-events-none absolute right-3 top-1/2 z-20 -translate-y-1/2"
         >
             <div
                 className="pointer-events-auto relative"
@@ -116,8 +116,6 @@ export const PromptNavigatorRail: React.FC<PromptNavigatorRailProps> = ({
                             ? 'border border-[var(--interactive-border)]/40 bg-[var(--surface-background)]/90 shadow-sm backdrop-blur-sm'
                             : 'bg-transparent',
                     )}
-                    role="group"
-                    aria-label={t('chat.promptNavigator.aria')}
                 >
                     {prompts.map((prompt) => {
                         const isActive = prompt.turnId === activeTurnId;
