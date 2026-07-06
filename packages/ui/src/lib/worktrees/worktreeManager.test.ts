@@ -65,7 +65,7 @@ mock.module('@/lib/gitApi', () => ({
   },
 }));
 
-const { createWorktree, listProjectWorktrees } = await import('./worktreeManager');
+const { createWorktree, listProjectWorktrees, worktreeMapsEqual } = await import('./worktreeManager');
 
 const waitForListCallCount = async (count: number): Promise<void> => {
   for (let attempt = 0; attempt < 10; attempt += 1) {
@@ -119,5 +119,74 @@ describe('worktreeManager list invalidation', () => {
 
     expect(metadata.worktreeStatus).toBe('pending');
     expect(sessionState.availableWorktrees[0]?.worktreeStatus).toBe('pending');
+  });
+});
+
+describe('worktreeMapsEqual', () => {
+  const wt = (
+    path: string,
+    branch: string,
+    overrides: Partial<WorktreeMetadata> = {},
+  ): WorktreeMetadata => ({
+    path,
+    branch,
+    projectDirectory: '/repo',
+    label: branch,
+    ...overrides,
+  });
+
+  test('returns true for two empty maps', () => {
+    const a = new Map<string, WorktreeMetadata[]>();
+    const b = new Map<string, WorktreeMetadata[]>();
+    expect(worktreeMapsEqual(a, b)).toBe(true);
+  });
+
+  test('returns true when paths and branches match in order', () => {
+    const a = new Map([['/repo', [wt('/r/main', 'main'), wt('/r/feat', 'feat')]]]);
+    const b = new Map([['/repo', [wt('/r/main', 'main'), wt('/r/feat', 'feat')]]]);
+    expect(worktreeMapsEqual(a, b)).toBe(true);
+  });
+
+  test('returns false when same path has a different branch (external git checkout)', () => {
+    const a = new Map([['/repo', [wt('/r/main', 'main')]]]);
+    const b = new Map([['/repo', [wt('/r/main', 'develop')]]]);
+    expect(worktreeMapsEqual(a, b)).toBe(false);
+  });
+
+  test('returns false when paths differ', () => {
+    const a = new Map([['/repo', [wt('/r/main', 'main')]]]);
+    const b = new Map([['/repo', [wt('/r/other', 'main')]]]);
+    expect(worktreeMapsEqual(a, b)).toBe(false);
+  });
+
+  test('returns false when per-project array lengths differ', () => {
+    const a = new Map([['/repo', [wt('/r/main', 'main')]]]);
+    const b = new Map([['/repo', [wt('/r/main', 'main'), wt('/r/feat', 'feat')]]]);
+    expect(worktreeMapsEqual(a, b)).toBe(false);
+  });
+
+  test('returns false when number of project keys differ', () => {
+    const a = new Map<string, WorktreeMetadata[]>([['/repo', [wt('/r/main', 'main')]]]);
+    const b = new Map<string, WorktreeMetadata[]>([
+      ['/repo', [wt('/r/main', 'main')]],
+      ['/repo-2', [wt('/r2/main', 'main')]],
+    ]);
+    expect(worktreeMapsEqual(a, b)).toBe(false);
+  });
+
+  test('returns false when worktrees are reordered (positional compare)', () => {
+    const a = new Map([['/repo', [wt('/r/main', 'main'), wt('/r/feat', 'feat')]]]);
+    const b = new Map([['/repo', [wt('/r/feat', 'feat'), wt('/r/main', 'main')]]]);
+    expect(worktreeMapsEqual(a, b)).toBe(false);
+  });
+
+  test('returns false when a non-first worktree differs (subset of entries)', () => {
+    const a = new Map([
+      ['/repo', [wt('/r/main', 'main'), wt('/r/feat', 'feat'), wt('/r/old', 'old')]],
+    ]);
+    const b = new Map([
+      ['/repo', [wt('/r/main', 'main'), wt('/r/feat', 'feat'), wt('/r/old', 'new-branch')]],
+    ]);
+    expect(worktreeMapsEqual(a, b)).toBe(false);
   });
 });
