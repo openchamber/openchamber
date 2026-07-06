@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/electron",
-  "version": "1.14.0",
+  "version": "1.14.0-r0.1",
   "private": true,
   "description": "Electron desktop runtime for OpenChamber",
   "author": "OpenChamber",

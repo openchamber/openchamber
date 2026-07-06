@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.14.0-r0.1] - 2026-07-06
+
+- Russian (ru) locale: full UI i18n translation (4523 keys) and 40 docs MDX pages.
+- Mobile: fix Windows EPERM build error — skip redundant web rebuild when web/dist already exists.
+
 ## [1.14.0] - 2026-07-05
 
 - Voice: voice input was rebuilt around live streaming transcription — the composer mic shows a live transcript with a volume meter and timer while you speak, and a recording can be cancelled, inserted, or inserted and sent; failed transcriptions keep their audio so you can retry or accept the partial text.
