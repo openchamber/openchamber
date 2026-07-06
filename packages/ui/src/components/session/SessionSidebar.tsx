@@ -381,6 +381,11 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     }));
   }, [globalActiveSessions, isVSCode, knownSessionDirectories, liveSessions]);
 
+  const persistenceSessions = React.useMemo(
+    () => [...globalActiveSessions, ...archivedSessions],
+    [archivedSessions, globalActiveSessions],
+  );
+
   const syncSessionStructureSignature = React.useMemo(
     () => liveSessions
       .map((session) => {
@@ -541,7 +546,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       projectActiveSession: PROJECT_ACTIVE_SESSION_STORAGE_KEY,
       groupCollapse: GROUP_COLLAPSE_STORAGE_KEY,
     },
-    sessions,
+    sessions: persistenceSessions,
     pinnedSessionIds,
     setPinnedSessionIds,
     groupOrderByProject,
