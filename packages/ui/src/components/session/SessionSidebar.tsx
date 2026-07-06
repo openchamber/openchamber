@@ -1011,6 +1011,77 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     lastRepoStatusRef.current = Boolean(projectRepoStatus.get(activeProjectId));
   }
 
+  const showRecentSection = useSessionDisplayStore((state) => state.showRecentSection);
+  const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
+  const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
+  const manualProjectOrder = useProjectsStore((state) => state.manualProjectOrder);
+
+  const recentProjectIds = React.useMemo(() => {
+    const recentSessions = deriveRecentSessions(sessions);
+    if (recentSessions.length === 0) return new Set<string>();
+
+    const pathToId = new Map<string, string>();
+    for (const project of normalizedProjects) {
+      if (project.normalizedPath) {
+        pathToId.set(project.normalizedPath, project.id);
+      }
+    }
+
+    const ids = new Set<string>();
+    for (const session of recentSessions) {
+      const directory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
+      if (directory) {
+        const projectId = pathToId.get(directory);
+        if (projectId) ids.add(projectId);
+      }
+    }
+    return ids;
+  }, [sessions, normalizedProjects]);
+
+  const sortedProjects = React.useMemo(() => {
+    const list = [...normalizedProjects];
+
+    switch (projectSortOrder) {
+      case 'a-z':
+        list.sort((a, b) => {
+          const aLabel = (a.label || a.path).toLowerCase();
+          const bLabel = (b.label || b.path).toLowerCase();
+          return aLabel.localeCompare(bLabel);
+        });
+        break;
+      case 'z-a':
+        list.sort((a, b) => {
+          const aLabel = (a.label || a.path).toLowerCase();
+          const bLabel = (b.label || b.path).toLowerCase();
+          return bLabel.localeCompare(aLabel);
+        });
+        break;
+      case 'date-added':
+        list.sort((a, b) => (b.addedAt ?? 0) - (a.addedAt ?? 0));
+        break;
+      case 'recent':
+        list.sort((a, b) => (b.lastOpenedAt ?? 0) - (a.lastOpenedAt ?? 0));
+        break;
+      case 'manual': {
+        const orderMap = new Map(manualProjectOrder.map((id, i) => [id, i]));
+        list.sort((a, b) => {
+          const ai = orderMap.get(a.id) ?? Infinity;
+          const bi = orderMap.get(b.id) ?? Infinity;
+          return ai - bi;
+        });
+        break;
+      }
+    }
+
+    if (projectSortOrder === 'manual') {
+      return list;
+    }
+
+    const recent = list.filter((p) => recentProjectIds.has(p.id));
+    const rest = list.filter((p) => !recentProjectIds.has(p.id));
+    return [...recent, ...rest];
+  }, [normalizedProjects, projectSortOrder, manualProjectOrder, recentProjectIds]);
+
   const {
     projectSections,
     groupSearchDataByGroup,
@@ -1122,82 +1193,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
     return meta;
   }, [projectSections, homeDirectory]);
-
-  const showRecentSection = useSessionDisplayStore((state) => state.showRecentSection);
-  const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
-  const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
-  const manualProjectOrder = useProjectsStore((state) => state.manualProjectOrder);
-
-  const recentProjectIds = React.useMemo(() => {
-    const recentSessions = deriveRecentSessions(sessions);
-    if (recentSessions.length === 0) return new Set<string>();
-
-    // Build path→id map once for O(1) lookups
-    const pathToId = new Map<string, string>();
-    for (const project of normalizedProjects) {
-      if (project.normalizedPath) {
-        pathToId.set(project.normalizedPath, project.id);
-      }
-    }
-
-    const ids = new Set<string>();
-    for (const session of recentSessions) {
-      const directory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
-      if (directory) {
-        const projectId = pathToId.get(directory);
-        if (projectId) ids.add(projectId);
-      }
-    }
-    return ids;
-  }, [sessions, normalizedProjects]);
-
-  const sortedProjects = React.useMemo(() => {
-    const list = [...normalizedProjects];
-
-    // 1. Sort by the selected order
-    switch (projectSortOrder) {
-      case 'a-z':
-        list.sort((a, b) => {
-          const aLabel = (a.label || a.path).toLowerCase();
-          const bLabel = (b.label || b.path).toLowerCase();
-          return aLabel.localeCompare(bLabel);
-        });
-        break;
-      case 'z-a':
-        list.sort((a, b) => {
-          const aLabel = (a.label || a.path).toLowerCase();
-          const bLabel = (b.label || b.path).toLowerCase();
-          return bLabel.localeCompare(aLabel);
-        });
-        break;
-      case 'date-added':
-        list.sort((a, b) => (b.addedAt ?? 0) - (a.addedAt ?? 0));
-        break;
-      case 'recent':
-        list.sort((a, b) => (b.lastOpenedAt ?? 0) - (a.lastOpenedAt ?? 0));
-        break;
-      case 'manual': {
-        // Restore from snapshot, keep unknown projects at the end
-        const orderMap = new Map(manualProjectOrder.map((id, i) => [id, i]));
-        list.sort((a, b) => {
-          const ai = orderMap.get(a.id) ?? Infinity;
-          const bi = orderMap.get(b.id) ?? Infinity;
-          return ai - bi;
-        });
-        break;
-      }
-    }
-
-    // 2. Pin projects with recent sessions to the top in non-manual modes.
-    // Manual mode must preserve the user's explicit order snapshot exactly.
-    if (projectSortOrder === 'manual') {
-      return list;
-    }
-
-    const recent = list.filter((p) => recentProjectIds.has(p.id));
-    const rest = list.filter((p) => !recentProjectIds.has(p.id));
-    return [...recent, ...rest];
-  }, [normalizedProjects, projectSortOrder, manualProjectOrder, recentProjectIds]);
 
   const activeNowSessions = React.useMemo(() => {
     if (!showRecentSection || isVSCode) {
