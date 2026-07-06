@@ -526,9 +526,8 @@ const loadPersistedWorktreeMap = (): Map<string, WorktreeMetadata[]> => {
   }
 }
 
-const persistWorktreeMap = (map: Map<string, WorktreeMetadata[]>, preSerialized?: string): void => {
+const persistWorktreeMap = (serialized: string): void => {
   try {
-    const serialized = preSerialized ?? JSON.stringify([...map.entries()])
     getDeferredSafeStorage().setItem(WORKTREE_MAP_STORAGE_KEY, serialized)
   } catch {
     // quota / serialization error — ignore; discovery still refreshes at runtime
@@ -1547,20 +1546,17 @@ setSessionOpener((sessionID, directory) => {
 })
 
 // Write-through persist of the worktree map whenever discovery refreshes it.
-// Reference-equality guard filters hot session updates; content-hash guard
-// avoids redundant localStorage writes when the Map reference changed but
-// the content is identical (e.g., re-discovery that found the same worktrees).
-let lastPersistedWorktreeHash = ''
+// Reference-equality guard filters hot session updates; the serialized
+// comparison avoids redundant localStorage writes when the Map reference
+// changed but the content is identical (e.g., re-discovery that found the
+// same worktrees).
+let lastPersistedWorktreeSerialized = ''
 useSessionUIStore.subscribe((state, prev) => {
   if (state.availableWorktreesByProject !== prev.availableWorktreesByProject) {
-    try {
-      const serialized = JSON.stringify([...state.availableWorktreesByProject.entries()])
-      if (serialized !== lastPersistedWorktreeHash) {
-        lastPersistedWorktreeHash = serialized
-        persistWorktreeMap(state.availableWorktreesByProject, serialized)
-      }
-    } catch {
-      // serialization error — skip persist; discovery still refreshes at runtime
+    const serialized = JSON.stringify([...state.availableWorktreesByProject.entries()])
+    if (serialized !== lastPersistedWorktreeSerialized) {
+      lastPersistedWorktreeSerialized = serialized
+      persistWorktreeMap(serialized)
     }
   }
 })
