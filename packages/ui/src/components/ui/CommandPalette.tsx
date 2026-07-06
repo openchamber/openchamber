@@ -41,6 +41,7 @@ import { truncatePathMiddle } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { buildCommandPaletteFileSearchKey, scoreCommandPaletteFiles } from './commandPaletteFilesState';
 
 type CommandEntry = {
   id: string;
@@ -318,21 +319,27 @@ export const CommandPalette: React.FC = () => {
   // File search
   // ---------------------------------------------------------------------------
   const [fileResults, setFileResults] = React.useState<FileHit[]>([]);
-  const [isSearchingFiles, setIsSearchingFiles] = React.useState(false);
+  const [fileResultsKey, setFileResultsKey] = React.useState('');
+
+  const fileSearchKey = buildCommandPaletteFileSearchKey(currentRoot, trimmedQuery);
 
   React.useEffect(() => {
     if (!isCommandPaletteOpen) {
       setFileResults([]);
-      setIsSearchingFiles(false);
+      setFileResultsKey('');
       return;
     }
-    if (!currentRoot || trimmedQuery.length === 0) {
+    if (!fileSearchKey) {
       setFileResults([]);
-      setIsSearchingFiles(false);
+      setFileResultsKey('');
+      return;
+    }
+    if (!currentRoot) {
+      setFileResults([]);
+      setFileResultsKey('');
       return;
     }
     let cancelled = false;
-    setIsSearchingFiles(true);
     void searchFiles(currentRoot, trimmedQuery, 10, { type: 'file' })
       .then((results) => {
         if (cancelled) return;
@@ -343,17 +350,18 @@ export const CommandPalette: React.FC = () => {
             relativePath: file.relativePath,
           })),
         );
+        setFileResultsKey(fileSearchKey);
       })
       .catch(() => {
-        if (!cancelled) setFileResults([]);
-      })
-      .finally(() => {
-        if (!cancelled) setIsSearchingFiles(false);
+        if (!cancelled) {
+          setFileResults([]);
+          setFileResultsKey(fileSearchKey);
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [isCommandPaletteOpen, currentRoot, trimmedQuery, searchFiles]);
+  }, [isCommandPaletteOpen, currentRoot, trimmedQuery, fileSearchKey, searchFiles]);
 
   // ---------------------------------------------------------------------------
   // Filter visible items
@@ -385,14 +393,11 @@ export const CommandPalette: React.FC = () => {
   }, [sortedActiveSessions, liveTrimmed, hasQuery]);
 
   const scoredFiles = React.useMemo(() => {
-    if (!hasQuery || fileResults.length === 0) return [];
-    // Server already ranked by relevance; compute a comparable client score on
-    // basename so we can decide file group placement vs sessions/commands.
-    return scoreByFuzzyQuery(fileResults, liveTrimmed, (f) => f.name, {
-      limit: 10,
-      threshold: 0.4,
-    });
-  }, [fileResults, liveTrimmed, hasQuery]);
+    if (!isCommandPaletteOpen) return [];
+    return scoreCommandPaletteFiles(fileResults, trimmedQuery, fileSearchKey, fileResultsKey);
+  }, [isCommandPaletteOpen, fileResults, fileResultsKey, fileSearchKey, trimmedQuery]);
+
+  const isFileSearchStale = isCommandPaletteOpen && fileSearchKey.length > 0 && fileResultsKey !== fileSearchKey;
 
   // ---------------------------------------------------------------------------
   // Projects
@@ -590,7 +595,7 @@ export const CommandPalette: React.FC = () => {
               return null;
             })}
 
-            {hasQuery && isSearchingFiles && visibleFiles.length === 0 ? (
+            {isFileSearchStale ? (
               <div className="px-3 py-2 typography-meta text-muted-foreground">
                 {t('commandPalette.empty.searchingFiles')}
               </div>
