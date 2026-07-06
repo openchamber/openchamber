@@ -15,6 +15,7 @@ export const dict: Record<I18nKey, string> = {
   'common.language.korean': '한국어',
   'common.language.polish': '폴란드어',
   'common.language.japanese': '일본어',
+  'common.language.russian': '러시아어',
   'common.revealPath.finder': 'Finder에서 보기',
   'common.revealPath.fileExplorer': 'File Explorer에서 열기',
   'common.revealPath.fileManager': '파일 관리자에서 열기',

@@ -1,0 +1,117 @@
+---
+title: Туннели
+description: Безопасно открывайте OpenChamber для удалённого и мобильного доступа.
+---
+
+# Туннели
+
+Туннель — это публичная ссылка на ваш OpenChamber, чтобы вы могли получить к нему с телефона или из другой сети. Используйте `openchamber tunnel`, чтобы создать туннель для запущенного инстанса.
+
+## Предварительные требования
+
+OpenChamber запускает CLI провайдера туннелей на вашей машине. Сначала установите нужного провайдера:
+
+```bash
+brew install cloudflared
+brew install ngrok
+```
+
+Быстрые туннели Cloudflare запускаются через `cloudflared`. Ngrok требует аккаунт ngrok и authtoken из дашборда ngrok:
+
+```bash
+ngrok config add-authtoken <your-ngrok-token>
+```
+
+## Быстрый старт
+
+1. Запустите OpenChamber:
+
+```bash
+openchamber
+```
+
+Если пропустить этот шаг, `openchamber tunnel start` может автоматически запустить CLI-сервер. При автозапуске можно передать параметры сервера, такие как `--port`, `--host`, `--lan`, `--ui-password` и `--api-only`.
+
+2. Запустите туннель Cloudflare:
+
+```bash
+openchamber tunnel start --provider cloudflare --mode quick
+```
+
+Или запустите туннель Ngrok:
+
+```bash
+openchamber tunnel start --provider ngrok --mode quick
+```
+
+3. Проверьте статус:
+
+```bash
+openchamber tunnel status
+```
+
+Когда туннель поднят, `status` показывает публичный URL. Откройте его или отсканируйте QR-код, чтобы попасть в OpenChamber из любой точки.
+
+По умолчанию OpenChamber выводит QR-код в интерактивных TTY-сессиях. Используйте `--qr`, чтобы принудительно вывести QR, или `--no-qr`, чтобы отключить.
+
+## Провайдеры
+
+- `cloudflare`: режимы quick, managed remote и managed local
+- `ngrok`: режим quick
+
+## Управляемые режимы
+
+### Managed remote
+
+Используйте токен + hostname под управлением Cloudflare:
+
+```bash
+openchamber tunnel start --provider cloudflare --mode managed-remote --token-file ~/.secrets/cf-token --hostname app.example.com
+```
+
+### Managed local
+
+Используйте локальный конфиг `cloudflared`:
+
+```bash
+openchamber tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
+```
+
+## Профили (managed-remote)
+
+Сохраните переиспользуемый профиль:
+
+```bash
+openchamber tunnel profile add --provider cloudflare --mode managed-remote --name prod-main --hostname app.example.com --token-file ~/.secrets/cf-token
+```
+
+Запустите с сохранённым профилем:
+
+```bash
+openchamber tunnel start --profile prod-main
+```
+
+## Полезные команды
+
+```bash
+openchamber tunnel providers
+openchamber tunnel ready --provider cloudflare
+openchamber tunnel ready --provider ngrok
+openchamber tunnel doctor --provider cloudflare
+openchamber tunnel doctor --provider ngrok
+openchamber tunnel stop --port 3000
+```
+
+## Замечания по поведению
+
+- один активный туннель на инстанс OpenChamber (порт)
+- запуск нового режима/провайдера на том же инстансе заменяет предыдущий туннель
+- генерация новой ссылки подключения отзывает предыдущую неиспользованную
+- автозапуск туннеля сохраняет флаги сервера, такие как `--ui-password` и `--api-only`, в настройках инстанса, используемых потоками restart/update
+
+## См. также
+
+- [Безопасность](/security/) — защитите UI перед тем, как открывать доступ
+- [Туннели в desktop](/desktop-tunnels/) — настройка туннеля в desktop-приложении без запуска CLI
+- [PWA и мобильные](/mobile/) — доступ к OpenChamber с телефона
+- [Устранение неполадок](/troubleshooting/) — если туннельная ссылка не работает

@@ -204,12 +204,13 @@ other language mirrors the English files under a locale folder.
 | Polish | `pl/` | `pl` |
 | French | `fr/` | `fr` |
 | Japanese | `ja/` | `ja` |
+| Russian | `ru/` | `ru` |
 
 > [!IMPORTANT]
 > The **content folder** uses the lowercase locale key (`zh-cn`, `pt-br`); the
 > **sidebar `translations`** key uses the BCP-47 language tag (`zh-CN`, `pt-BR`).
 > They look similar but are not interchangeable — Starlight resolves them with
-> different rules. Everything else (`uk`, `es`, `ko`, `pl`, `fr`, `ja`, `en`) is identical
+> different rules. Everything else (`uk`, `es`, `ko`, `pl`, `fr`, `ja`, `ru`, `en`) is identical
 > in both columns.
 
 This locale set is mirrored in the website at
@@ -232,6 +233,7 @@ content/docs/
   pl/install.mdx           # Polish
   fr/install.mdx           # French
   ja/install.mdx           # Japanese
+  ru/install.mdx           # Russian
 
   guides/tunnels.mdx       # nested English page
   uk/guides/tunnels.mdx    # its Ukrainian translation

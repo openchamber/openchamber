@@ -15,6 +15,7 @@ export const dict: Record<I18nKey, string> = {
   'common.language.korean': '韓語',
   'common.language.polish': '波蘭語',
   'common.language.japanese': '日語',
+  'common.language.russian': '俄語',
   'common.revealPath.finder': '在 Finder 中顯示',
   'common.revealPath.fileExplorer': '在檔案總管中開啟',
   'common.revealPath.fileManager': '在檔案管理員中開啟',

@@ -7,6 +7,7 @@ import { dict as jaDict } from './messages/ja';
 import { dict as koDict } from './messages/ko';
 import { dict as plDict } from './messages/pl';
 import { dict as ptBrDict } from './messages/pt-BR';
+import { dict as ruDict } from './messages/ru';
 import { dict as ukDict } from './messages/uk';
 import { dict as zhCnDict } from './messages/zh-CN';
 import { dict as zhTwDict } from './messages/zh-TW';
@@ -22,6 +23,7 @@ const localeDictionaries = {
   pl: plDict,
   'zh-CN': zhCnDict,
   'zh-TW': zhTwDict,
+  ru: ruDict,
 } as const;
 
 describe('i18n dictionaries', () => {
