@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { getSafeStorage } from './utils/safeStorage';
 import { useProjectsStore } from './useProjectsStore';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import type { ProjectEntry } from '@/lib/api/types';
 
 export type MessengerType = 'discord';
@@ -108,6 +109,8 @@ export interface MessengerConnection {
   // Sync config
   syncMode: SyncMode;
   syncProjects: boolean;
+  /** Mirror git worktrees to Discord threads under each project channel. */
+  syncWorktrees: boolean;
   syncTasks: boolean;
   syncSchedule: boolean;
   autoCreateThreads: boolean;
@@ -323,6 +326,21 @@ interface MessengerState {
   ensureProjectChannel: (project: ProjectEntry) => Promise<void>;
   renameProjectChannel: (project: ProjectEntry) => Promise<void>;
   removeProjectChannel: (projectId: string, projectPath: string) => Promise<void>;
+  notifyWorktreeAdded: (
+    project: ProjectEntry,
+    worktree: { path: string; branch?: string; label?: string },
+    sessionId?: string | null,
+  ) => Promise<void>;
+  notifyWorktreeRemoved: (
+    project: ProjectEntry,
+    worktree: { path: string; branch?: string; label?: string },
+  ) => Promise<void>;
+  notifyWorktreeMerged: (
+    project: ProjectEntry,
+    worktree: { path: string; branch?: string; label?: string },
+    summary?: string | null,
+  ) => Promise<void>;
+  fetchWorktreeDiscordUrl: (worktreePath: string) => Promise<string | null>;
   startOnboarding: (type: MessengerType) => void;
   nextOnboardingStep: () => void;
   prevOnboardingStep: () => void;
@@ -339,6 +357,7 @@ const DEFAULT_CONNECTION: Omit<MessengerConnection, 'type'> = {
   lastSyncMessage: null,
   syncMode: 'full',
   syncProjects: true,
+  syncWorktrees: true,
   syncTasks: true,
   syncSchedule: true,
   autoCreateThreads: true,
@@ -891,6 +910,7 @@ export const useMessengerStore = create<MessengerState>()(
             defaultChannelId: conn.defaultChannelId,
             defaultUserId: conn.defaultUserId,
             projectBindings,
+            syncWorktrees: conn.syncWorktrees !== false,
           });
         } catch {
           // silent — config save is best-effort
@@ -1321,6 +1341,69 @@ export const useMessengerStore = create<MessengerState>()(
         }
         get().removeProjectMapping(projectId);
         get().saveDiscordConfig();
+      },
+
+      notifyWorktreeAdded: async (project, worktree, sessionId = null) => {
+        const conn = get().connections.find((c) => c.type === 'discord');
+        if (!conn?.botToken || !conn.discordGuildId || conn.syncProjects === false || conn.syncWorktrees === false) {
+          return;
+        }
+        try {
+          await postJson('/api/otto/messenger/bridge/worktree-added', {
+            project: { id: project.id, path: project.path, label: project.label ?? project.path },
+            worktree,
+            sessionId,
+            discord: {
+              token: conn.botToken,
+              guildId: conn.discordGuildId,
+              parentCategoryId: conn.discordParentCategoryId,
+            },
+          });
+        } catch {
+          // best-effort
+        }
+      },
+
+      notifyWorktreeRemoved: async (project, worktree) => {
+        const conn = get().connections.find((c) => c.type === 'discord');
+        if (!conn?.botToken || conn.syncWorktrees === false) return;
+        try {
+          await postJson('/api/otto/messenger/bridge/worktree-removed', {
+            project: { id: project.id, path: project.path, label: project.label ?? project.path },
+            worktree,
+          });
+        } catch {
+          // best-effort
+        }
+      },
+
+      notifyWorktreeMerged: async (project, worktree, summary = null) => {
+        const conn = get().connections.find((c) => c.type === 'discord');
+        if (!conn?.botToken || conn.syncWorktrees === false) return;
+        try {
+          await postJson('/api/otto/messenger/bridge/worktree-merged', {
+            project: { id: project.id, path: project.path, label: project.label ?? project.path },
+            worktree,
+            summary,
+          });
+        } catch {
+          // best-effort
+        }
+      },
+
+      fetchWorktreeDiscordUrl: async (worktreePath) => {
+        const conn = get().connections.find((c) => c.type === 'discord');
+        if (!conn?.botToken || !conn.discordGuildId || conn.syncWorktrees === false) return null;
+        try {
+          const response = await runtimeFetch(
+            `/api/otto/messenger/bridge/worktree-discord-url?path=${encodeURIComponent(worktreePath)}`,
+          );
+          if (!response.ok) return null;
+          const data = (await response.json()) as { ok?: boolean; discordUrl?: string };
+          return data.ok && data.discordUrl ? data.discordUrl : null;
+        } catch {
+          return null;
+        }
       },
 
       startOnboarding: (type) => {

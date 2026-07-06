@@ -1151,6 +1151,7 @@ export const settingsDict = {
   'settings.openchamber.worktrees.list.empty': 'No worktrees found for this project',
   'settings.openchamber.worktrees.list.detachedHead': 'Detached HEAD',
   'settings.openchamber.worktrees.list.deleteWorktreeAria': 'Delete worktree {name}',
+  'settings.openchamber.worktrees.list.openInDiscord': 'Open in Discord',
   'settings.agents.modelSelector.title': 'Select model',
   'settings.agents.modelSelector.searchPlaceholder': 'Search models',
   'settings.agents.modelSelector.selectPlaceholder': 'Select model...',

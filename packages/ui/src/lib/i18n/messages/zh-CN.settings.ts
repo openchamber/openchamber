@@ -1118,6 +1118,7 @@ export const settingsDict = {
   'settings.openchamber.worktrees.list.empty': '该项目未找到工作树',
   'settings.openchamber.worktrees.list.detachedHead': '分离 HEAD',
   'settings.openchamber.worktrees.list.deleteWorktreeAria': '删除工作树 {name}',
+  'settings.openchamber.worktrees.list.openInDiscord': '在 Discord 中打开',
   'settings.agents.modelSelector.title': '选择模型',
   'settings.agents.modelSelector.searchPlaceholder': '搜索模型',
   'settings.agents.modelSelector.selectPlaceholder': '选择模型...',

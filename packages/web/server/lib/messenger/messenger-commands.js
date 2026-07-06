@@ -151,6 +151,21 @@ const COMMAND_HELP = [
     summary: 'Squash-merge this worktree\'s commits into the default branch',
   },
   {
+    name: 'list-worktrees',
+    usage: '/list-worktrees',
+    summary: 'List git worktrees for this project with Discord thread links',
+  },
+  {
+    name: 'open-worktree',
+    usage: '/open-worktree <branch-or-name>',
+    summary: 'Open an existing worktree in its Discord thread (UI-created worktrees included)',
+  },
+  {
+    name: 'worktree-status',
+    usage: '/worktree-status',
+    summary: 'Show git status for the worktree bound to this conversation',
+  },
+  {
     name: 'schedule',
     usage: '/schedule <when> [model=p/m] [agent=name] <prompt> | list | delete <id>',
     summary:
@@ -1039,6 +1054,72 @@ export async function executeMessengerCommand({
         };
       }
       return { reply: `✗ Merge failed: ${r.error ?? 'unknown error'}` };
+    }
+
+    case 'list-worktrees': {
+      if (!bridgeOps?.listWorktrees) {
+        return { reply: '✗ `/list-worktrees` is not available on this surface.' };
+      }
+      const r = await bridgeOps.listWorktrees();
+      if (!r.ok) return { reply: `✗ ${r.error ?? 'could not list worktrees.'}` };
+      if (!r.worktrees || r.worktrees.length === 0) {
+        return { reply: '_(no worktrees found for this project — create one in the UI or with `/new-worktree`)_' };
+      }
+      const lines = ['**Worktrees**', ''];
+      for (const [index, wt] of r.worktrees.entries()) {
+        const statusParts = [];
+        if (wt.status?.ahead) statusParts.push(`+${wt.status.ahead}`);
+        if (wt.status?.behind) statusParts.push(`-${wt.status.behind}`);
+        if (wt.status?.isDirty) statusParts.push('dirty');
+        const statusText = statusParts.length > 0 ? statusParts.join('·') : 'clean';
+        const link = wt.threadId ? `<#${wt.threadId}>` : '_no thread_';
+        lines.push(`${index + 1}. \`${wt.branch}\` — ${statusText} → ${link}`);
+      }
+      lines.push('', 'Open one with `/open-worktree <branch>`.');
+      return { reply: lines.join('\n') };
+    }
+
+    case 'open-worktree': {
+      if (!bridgeOps?.openWorktree) {
+        return { reply: '✗ `/open-worktree` is not available on this surface.' };
+      }
+      const query = command.args.trim();
+      if (!query) {
+        return { reply: '✗ Usage: `/open-worktree <branch-or-name>` — run `/list-worktrees` to see options.' };
+      }
+      const r = await bridgeOps.openWorktree({ query });
+      if (!r.ok) return { reply: `✗ ${r.error ?? 'could not open worktree.'}` };
+      return {
+        reply: [
+          `🌿 Opened worktree \`${r.branch}\``,
+          `📁 \`${r.path}\``,
+          r.threadId ? `Continue in <#${r.threadId}>.` : '',
+        ].filter(Boolean).join('\n'),
+      };
+    }
+
+    case 'worktree-status': {
+      if (!bridgeOps?.worktreeStatus) {
+        return { reply: '✗ `/worktree-status` is not available on this surface.' };
+      }
+      const r = await bridgeOps.worktreeStatus();
+      if (!r.ok) return { reply: `✗ ${r.error ?? 'could not read worktree status.'}` };
+      const statusParts = [];
+      if (r.status?.ahead) statusParts.push(`+${r.status.ahead} ahead`);
+      if (r.status?.behind) statusParts.push(`${r.status.behind} behind`);
+      if (r.status?.isDirty) statusParts.push('dirty');
+      const statusText = statusParts.length > 0 ? statusParts.join(', ') : 'clean';
+      return {
+        reply: [
+          `**Worktree status**`,
+          `Path: \`${r.path}\``,
+          `Project root: \`${r.projectRoot}\``,
+          `Branch: \`${r.branch ?? 'unknown'}\``,
+          `Git: ${statusText}`,
+          r.isWorktree ? '' : '_This conversation is not inside a secondary worktree._',
+          r.threadId ? `Thread: <#${r.threadId}>` : '',
+        ].filter(Boolean).join('\n'),
+      };
     }
 
     default:

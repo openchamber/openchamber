@@ -67,3 +67,48 @@ describe('MessengerBridgeStore — permission mode persistence', () => {
     expect(store.getPermissionModeDefault('discord')).toBeNull();
   });
 });
+
+describe('MessengerBridgeStore — worktree bindings', () => {
+  let dbPath;
+  let store;
+
+  beforeEach(() => {
+    dbPath = path.join(os.tmpdir(), `otto-store-${crypto.randomBytes(6).toString('hex')}.sqlite`);
+    store = new MessengerBridgeStore({ dbPath });
+  });
+
+  afterEach(() => {
+    try {
+      store.db.close();
+    } catch {
+      // ignore
+    }
+    for (const suffix of ['', '-wal', '-shm']) {
+      try {
+        fs.unlinkSync(dbPath + suffix);
+      } catch {
+        // ignore
+      }
+    }
+  });
+
+  it('binds and looks up worktrees by path', () => {
+    store.bindWorktree({
+      botTokenHash: 'hash',
+      projectRoot: '/repo',
+      worktreePath: '/repo/.worktrees/feature',
+      branch: 'feature',
+      channelId: 'chan-1',
+      threadId: 'thread-1',
+    });
+    const row = store.lookupWorktreeByPath({
+      botTokenHash: 'hash',
+      worktreePath: '/repo/.worktrees/feature',
+    });
+    expect(row?.threadId).toBe('thread-1');
+    expect(row?.branch).toBe('feature');
+    expect(store.listWorktreesForProject({ botTokenHash: 'hash', projectRoot: '/repo' })).toHaveLength(1);
+    store.unbindWorktree({ botTokenHash: 'hash', worktreePath: '/repo/.worktrees/feature' });
+    expect(store.lookupWorktreeByPath({ botTokenHash: 'hash', worktreePath: '/repo/.worktrees/feature' })).toBeNull();
+  });
+});

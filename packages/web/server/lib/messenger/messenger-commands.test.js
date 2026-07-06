@@ -465,6 +465,44 @@ describe('worktree commands', () => {
     expect(result.reply).toContain('Merge conflict detected');
     expect(result.reply).toContain('asked the model');
   });
+  it('list-worktrees renders project worktrees', async () => {
+    const { result } = await run('/list-worktrees', {
+      binding: { projectPath: '/repo' },
+      bridgeOps: {
+        listWorktrees: async () => ({
+          ok: true,
+          worktrees: [{ branch: 'feature', path: '/repo/wt/feature', status: { ahead: 1, isDirty: true }, threadId: 'th-1' }],
+        }),
+      },
+    });
+    expect(result.reply).toContain('feature');
+    expect(result.reply).toContain('<#th-1>');
+  });
+  it('open-worktree requires a query', async () => {
+    const { result } = await run('/open-worktree', {
+      binding: { projectPath: '/repo' },
+      bridgeOps: { openWorktree: vi.fn() },
+    });
+    expect(result.reply).toMatch(/Usage/);
+  });
+  it('worktree-status reports git state', async () => {
+    const { result } = await run('/worktree-status', {
+      binding: { projectPath: '/repo/wt/feature', branch: 'feature' },
+      bridgeOps: {
+        worktreeStatus: async () => ({
+          ok: true,
+          path: '/repo/wt/feature',
+          projectRoot: '/repo',
+          isWorktree: true,
+          branch: 'feature',
+          status: { ahead: 2, behind: 0, isDirty: false },
+          threadId: 'th-9',
+        }),
+      },
+    });
+    expect(result.reply).toContain('feature');
+    expect(result.reply).toContain('<#th-9>');
+  });
 });
 
 describe('/shell command', () => {
@@ -524,7 +562,21 @@ describe('/shell command', () => {
 describe('/help lists the extended command set', () => {
   it('mentions queue, fork, share, resume, worktrees and mention-mode', async () => {
     const { result } = await run('/help');
-    for (const cmd of ['/queue', '/fork', '/share', '/resume', '/new-worktree', '/merge-worktree', '/mention-mode', '/clear-queue', '/session', '/shell']) {
+    for (const cmd of [
+      '/queue',
+      '/fork',
+      '/share',
+      '/resume',
+      '/new-worktree',
+      '/merge-worktree',
+      '/list-worktrees',
+      '/open-worktree',
+      '/worktree-status',
+      '/mention-mode',
+      '/clear-queue',
+      '/session',
+      '/shell',
+    ]) {
       expect(result.reply).toContain(cmd);
     }
   });

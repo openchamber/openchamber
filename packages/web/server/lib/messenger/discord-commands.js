@@ -92,6 +92,15 @@ export function buildSlashCommandDefinitions() {
       ],
     },
     { name: 'merge-worktree', description: 'Squash-merge this worktree into the default branch' },
+    { name: 'list-worktrees', description: 'List git worktrees for this project with Discord thread links' },
+    {
+      name: 'open-worktree',
+      description: 'Open an existing worktree in its Discord thread',
+      options: [
+        { type: STRING_OPTION, name: 'branch', description: 'Branch or worktree name', required: true },
+      ],
+    },
+    { name: 'worktree-status', description: 'Show git status for the worktree in this conversation' },
     {
       name: 'schedule',
       description: 'Schedule a prompt: UTC ISO date or cron — list / delete <id> to manage',
