@@ -2819,6 +2819,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
     }, [agents, currentAgentName, currentSessionId, setAgent, saveSessionAgentSelection]);
 
+    // Height the dictation transcript needs (null when idle): the overlay sits
+    // absolutely over the composer, so the underlying textarea must grow for
+    // the composer to grow — feed this into the autosize below.
+    const dictationContentHeightRef = React.useRef<number | null>(null);
+    const [dictationContentHeight, setDictationContentHeight] = React.useState<number | null>(null);
+    const handleDictationContentHeightChange = React.useCallback((height: number | null) => {
+        setDictationContentHeight((prev) => (prev === height ? prev : height));
+    }, []);
+
     const adjustTextareaHeight = React.useCallback((options?: { allowShrink?: boolean }) => {
         const textarea = textareaRef.current;
         if (!textarea) {
@@ -2854,7 +2863,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         const targetLineHeight = Number.isNaN(lineHeight) ? fallbackLineHeight : lineHeight;
         const maxHeight = targetLineHeight * MAX_VISIBLE_TEXTAREA_LINES + paddingTotal;
         const scrollHeight = textarea.scrollHeight || textarea.offsetHeight;
-        const nextHeight = Math.min(scrollHeight, maxHeight);
+        const dictationHeight = dictationContentHeightRef.current ?? 0;
+        const nextHeight = Math.min(Math.max(scrollHeight, dictationHeight), maxHeight);
 
         textarea.style.height = `${nextHeight}px`;
         textarea.style.maxHeight = `${maxHeight}px`;
@@ -2875,6 +2885,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         previousMessageLengthRef.current = message.length;
         adjustTextareaHeight({ allowShrink });
     }, [adjustTextareaHeight, message, isMobile]);
+
+    React.useLayoutEffect(() => {
+        dictationContentHeightRef.current = dictationContentHeight;
+        // Growing transcript never shrinks mid-recording (matches typing);
+        // dictation ending (null) releases the height back to the message.
+        adjustTextareaHeight({ allowShrink: dictationContentHeight === null });
+    }, [adjustTextareaHeight, dictationContentHeight]);
 
     const updateAutocompleteState = React.useCallback((
         value: string,
@@ -5363,6 +5380,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         sendIconSizeClass={sendIconSizeClass}
                                         onInsert={handleDictationInsert}
                                         onInsertAndSend={handleDictationInsertAndSend}
+                                        onContentHeightChange={handleDictationContentHeightChange}
                                     />
                                     <ComposerActionButtons
                                         isMobile={isMobile}
@@ -5402,6 +5420,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         onInsert={handleDictationInsert}
                         onInsertAndSend={handleDictationInsertAndSend}
                         onActiveChange={handleMobileDictationActiveChange}
+                        onContentHeightChange={handleDictationContentHeightChange}
                         renderTrigger={false}
                         topAccessory={mobileComposerHandle}
                     />

@@ -33,6 +33,9 @@ interface ComposerDictationProps {
     onInsertAndSend: (text: string) => void;
     /** Reports whether dictation is active (recording/transcribing/failed overlay shown). */
     onActiveChange?: (active: boolean) => void;
+    /** Reports the height (px) the transcript needs, so the host can grow the
+        composer like typed text would; null when dictation is idle. */
+    onContentHeightChange?: (height: number | null) => void;
     /** Render the mic trigger button (default). Pass false when the host renders
         its own trigger and only needs the overlay + recording engine. */
     renderTrigger?: boolean;
@@ -123,6 +126,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
     onInsert,
     onInsertAndSend,
     onActiveChange,
+    onContentHeightChange,
     renderTrigger = true,
     topAccessory,
 }) => {
@@ -233,8 +237,54 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
     // picker), so measure it — it stays mounted underneath the overlay — and
     // give our action row the same height so the icons line up exactly.
     const overlayRef = React.useRef<HTMLDivElement | null>(null);
+    const transcriptAreaRef = React.useRef<HTMLDivElement | null>(null);
+    const transcriptContentRef = React.useRef<HTMLDivElement | null>(null);
     const [footerHeight, setFooterHeight] = React.useState<number | null>(null);
     const isActiveStatus = status !== 'idle';
+
+    // Grow the composer with the transcript, the way typing grows the
+    // textarea. The overlay is absolutely positioned over the composer, so it
+    // can't push the composer's height itself — measure how much room the
+    // transcript wants (scrollHeight ignores the clamped box) and report it to
+    // the host, which feeds it into the textarea autosize (same line cap, then
+    // the transcript area scrolls).
+    const onContentHeightChangeRef = React.useRef(onContentHeightChange);
+    React.useEffect(() => {
+        onContentHeightChangeRef.current = onContentHeightChange;
+    }, [onContentHeightChange]);
+    // Two instances can coexist (mobile footer + wrapper engine); only the one
+    // that actually reported a height may clear it, or an idle sibling
+    // mounting mid-recording would zero the active transcript's height.
+    const hasReportedHeightRef = React.useRef(false);
+    React.useLayoutEffect(() => {
+        if (!isActiveStatus) {
+            if (hasReportedHeightRef.current) {
+                hasReportedHeightRef.current = false;
+                onContentHeightChangeRef.current?.(null);
+            }
+            return;
+        }
+        const area = transcriptAreaRef.current;
+        const content = transcriptContentRef.current;
+        if (!area || !content) return;
+        // Measure the text block, not the container: the container is flex-1
+        // inside the overlay, so its scrollHeight tracks the composer's own
+        // height — feeding that back would creep a few px on every transcript
+        // update instead of stepping per wrapped line.
+        const style = window.getComputedStyle(area);
+        const padding = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+        hasReportedHeightRef.current = true;
+        onContentHeightChangeRef.current?.(content.offsetHeight + padding);
+        // Once the composer hits its line cap the transcript area starts
+        // scrolling — follow the newest words like a textarea caret would.
+        area.scrollTop = area.scrollHeight;
+    }, [isActiveStatus, partialTranscript, status, error]);
+    React.useEffect(() => () => {
+        if (hasReportedHeightRef.current) {
+            hasReportedHeightRef.current = false;
+            onContentHeightChangeRef.current?.(null);
+        }
+    }, []);
     React.useLayoutEffect(() => {
         if (!isActiveStatus) {
             return;
@@ -332,6 +382,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
                 >
                     {topAccessory}
                     <div
+                        ref={transcriptAreaRef}
                         className={cn(
                             // Text paddings match the composer textarea, plus the
                             // 4px (pt-1) attachment-chips row that always renders
@@ -345,25 +396,29 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
                             isMobile ? 'pt-3.5 pb-2.5' : 'pt-5 pb-2',
                         )}
                     >
-                        {partialTranscript ? (
-                            <p className="typography-markdown md:typography-ui-label whitespace-pre-wrap" style={{ color: currentTheme.colors.surface.foreground }}>
-                                {partialTranscript}
-                            </p>
-                        ) : (
-                            <p className="typography-markdown md:typography-ui-label" style={{ color: currentTheme.colors.surface.mutedForeground }}>
-                                {placeholderText}
-                            </p>
-                        )}
-                        {status === 'failed' ? (
-                            <p className="typography-meta mt-1" style={{ color: currentTheme.colors.status.error }}>
-                                {error || t('chat.dictation.failed')}
-                            </p>
-                        ) : null}
-                        {status === 'recording' && error && !isModelDownloading ? (
-                            <p className="typography-meta mt-1" style={{ color: currentTheme.colors.status.warning }}>
-                                {error}
-                            </p>
-                        ) : null}
+                        {/* Measured for the composer-growth report — keep all
+                            transcript/placeholder/error content inside. */}
+                        <div ref={transcriptContentRef}>
+                            {partialTranscript ? (
+                                <p className="typography-markdown md:typography-ui-label whitespace-pre-wrap" style={{ color: currentTheme.colors.surface.foreground }}>
+                                    {partialTranscript}
+                                </p>
+                            ) : (
+                                <p className="typography-markdown md:typography-ui-label" style={{ color: currentTheme.colors.surface.mutedForeground }}>
+                                    {placeholderText}
+                                </p>
+                            )}
+                            {status === 'failed' ? (
+                                <p className="typography-meta mt-1" style={{ color: currentTheme.colors.status.error }}>
+                                    {error || t('chat.dictation.failed')}
+                                </p>
+                            ) : null}
+                            {status === 'recording' && error && !isModelDownloading ? (
+                                <p className="typography-meta mt-1" style={{ color: currentTheme.colors.status.warning }}>
+                                    {error}
+                                </p>
+                            ) : null}
+                        </div>
                     </div>
                     <div
                         className={cn('flex flex-shrink-0 items-center gap-x-3', footerPaddingClass)}
