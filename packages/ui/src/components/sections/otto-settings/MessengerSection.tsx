@@ -1455,6 +1455,21 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
               <label className="flex items-center gap-1.5 text-[11px] cursor-pointer">
                 <input
                   type="checkbox"
+                  checked={conn.syncWorktrees !== false}
+                  onChange={(e) => {
+                    updateConnection('discord', { syncWorktrees: e.target.checked });
+                    setTimeout(() => saveDiscordConfig(), 0);
+                  }}
+                  className="rounded border-border accent-primary"
+                />
+                <span className="text-muted-foreground">
+                  Sync worktrees to Discord threads
+                </span>
+              </label>
+
+              <label className="flex items-center gap-1.5 text-[11px] cursor-pointer">
+                <input
+                  type="checkbox"
                   checked={conn.discordCreateThreads !== false}
                   onChange={(e) =>
                     updateConnection('discord', { discordCreateThreads: e.target.checked })

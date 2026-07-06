@@ -1030,6 +1030,7 @@
   'settings.openchamber.worktrees.list.empty': '該專案找不到 worktree',
   'settings.openchamber.worktrees.list.detachedHead': '分離 HEAD',
   'settings.openchamber.worktrees.list.deleteWorktreeAria': '刪除 worktree {name}',
+  'settings.openchamber.worktrees.list.openInDiscord': '在 Discord 中開啟',
   'settings.agents.modelSelector.title': '選擇模型',
   'settings.agents.modelSelector.searchPlaceholder': '搜尋模型',
   'settings.agents.modelSelector.selectPlaceholder': '選擇模型...',
