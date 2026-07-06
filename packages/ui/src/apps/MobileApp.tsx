@@ -2329,11 +2329,7 @@ export function MobileApp({ apis }: MobileAppProps) {
 
       const allWorktrees = Array.from(worktreesByProject.values()).flat();
 
-      // Skip the store update if nothing actually changed. Each reference
-      // change to availableWorktreesByProject triggers re-renders in 16+
-      // subscribers, so avoiding unnecessary updates is worth the comparison.
-      // Uses path-based comparison (not reference equality) because
-      // readStableProjectWorktrees creates new object instances on each call.
+      // Skip update if nothing changed — see worktreeMapsEqual JSDoc.
       const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
       if (!worktreeMapsEqual(worktreesByProject, currentByProject)) {
         useSessionUIStore.setState({
