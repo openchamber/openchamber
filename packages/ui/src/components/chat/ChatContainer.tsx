@@ -164,7 +164,6 @@ type ChatViewportProps = {
     showLoadOlderButton: boolean;
     onLoadOlder: () => void;
     turnIds: string[];
-    turnMessageStartIndexes: number[];
     activeTurnId: string | null;
     onSelectTurn: (turnId: string) => void;
     showPromptNavigator: boolean;
@@ -195,7 +194,6 @@ const ChatViewport = React.memo(({
     showLoadOlderButton,
     onLoadOlder,
     turnIds,
-    turnMessageStartIndexes,
     activeTurnId,
     onSelectTurn,
     showPromptNavigator,
@@ -302,11 +300,8 @@ const ChatViewport = React.memo(({
                 {showPromptNavigator ? (
                     <PromptNavigatorRail
                         turnIds={turnIds}
-                        turnMessageStartIndexes={turnMessageStartIndexes}
-                        messageCount={renderedMessages.length}
                         previewsByTurnId={promptPreviewsByTurnId}
                         activeTurnId={activeTurnId}
-                        scrollRef={scrollRef}
                         onSelectTurn={onSelectTurn}
                     />
                 ) : null}
@@ -338,7 +333,6 @@ const ChatViewport = React.memo(({
         && prev.showLoadOlderButton === next.showLoadOlderButton
         && prev.onLoadOlder === next.onLoadOlder
         && prev.turnIds === next.turnIds
-        && prev.turnMessageStartIndexes === next.turnMessageStartIndexes
         && prev.activeTurnId === next.activeTurnId
         && prev.onSelectTurn === next.onSelectTurn
         && prev.showPromptNavigator === next.showPromptNavigator;
@@ -758,7 +752,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     const handlePromptNavigatorSelect = React.useCallback((turnId: string) => {
         void navigation.scrollToTurnId(turnId, { behavior: 'smooth' });
     }, [navigation]);
-    const showPromptNavigator = !isMobile && !isDesktopExpandedInput && timelineController.turnIds.length >= 2;
+    const showPromptNavigator = !isMobile && !isDesktopExpandedInput && timelineController.turnIds.length >= 1;
 
     React.useEffect(() => {
         if (typeof window === 'undefined' || !currentSessionId) return;
@@ -1066,7 +1060,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 showLoadOlderButton={showLoadOlderButton}
                 onLoadOlder={handleLoadOlderClick}
                 turnIds={timelineController.turnIds}
-                turnMessageStartIndexes={timelineController.turnWindowModel.turnMessageStartIndexes}
                 activeTurnId={timelineController.activeTurnId}
                 onSelectTurn={handlePromptNavigatorSelect}
                 showPromptNavigator={showPromptNavigator}
