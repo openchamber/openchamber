@@ -231,16 +231,27 @@ const toCreatePayload = (args: {
 
 /**
  * Compare two worktree-by-project maps for equality.
- * Uses path-based comparison for entries (not reference equality)
- * because readStableProjectWorktrees creates new object instances
- * on each call, making reference checks always report changed.
+ * Compares per-element `path` and `branch` (not reference equality)
+ * because readStableProjectWorktrees creates new object instances on
+ * each call, making reference checks always report changed.
  *
- * Generic over `T extends { path: string }` so the helper documents
- * its equality contract at the type level (it compares arrays element
- * by element on the `path` field) and stays reusable for any future
- * map-of-arrays shape that has a `path` field.
+ * `branch` is included so an external `git checkout` between
+ * discoveries — which changes `branch` (and the derived `label`
+ * and `headState`) while leaving `path` unchanged — still triggers
+ * a store update. Without this, the branch label in the sidebar
+ * could go stale until the next worktree create/remove or project
+ * switch, since there is no periodic worktree-list refresh.
+ *
+ * Status changes (`worktreeStatus`) are not compared here: those
+ * flow through `setStoredWorktreeStatus`, which writes a new Map
+ * reference that the persist subscriber picks up directly.
+ *
+ * Generic over `T extends { path: string; branch: string }` so the
+ * helper documents its equality contract at the type level and
+ * stays reusable for any future map-of-arrays shape that has both
+ * fields.
  */
-export const worktreeMapsEqual = <T extends { path: string }>(
+export const worktreeMapsEqual = <T extends { path: string; branch: string }>(
   a: Map<string, T[]>,
   b: Map<string, T[]>,
 ): boolean => {
@@ -250,6 +261,7 @@ export const worktreeMapsEqual = <T extends { path: string }>(
     if (!existing || existing.length !== value.length) return false;
     for (let i = 0; i < value.length; i++) {
       if (value[i].path !== existing[i].path) return false;
+      if (value[i].branch !== existing[i].branch) return false;
     }
   }
   return true;
