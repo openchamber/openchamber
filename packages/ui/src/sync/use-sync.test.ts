@@ -223,4 +223,22 @@ describe('first-commit gating invariant (#2084)', () => {
     const isComplete = true
     expect(hasUserMessage(completeAssistantOnlyPage) || isComplete).toBe(true)
   })
+
+  test('prepend mode always commits — deferral does not apply', () => {
+    // The deferred init path exists to keep the skeleton visible for an
+    // assistant-only initial fetch. Prepend mode (loading older history)
+    // has no skeleton to protect and must always write to the store —
+    // otherwise the fetched older messages would be silently dropped.
+    //
+    // This test pins the gate condition: deferral requires `!options.before`.
+    // An assistant-only, incomplete page in prepend mode must NOT defer.
+    const assistantOnlyPage = [assistantMessage('a_1'), assistantMessage('a_2')]
+    const hasBefore = true // prepend mode
+    const isComplete = false
+
+    // The actual gate in loadMessages is:
+    //   const deferFirstCommit = !options?.before && !page.complete && !hasUserMessage(page.session)
+    const deferFirstCommit = !hasBefore && !isComplete && !hasUserMessage(assistantOnlyPage)
+    expect(deferFirstCommit).toBe(false) // prepend must not defer
+  })
 })

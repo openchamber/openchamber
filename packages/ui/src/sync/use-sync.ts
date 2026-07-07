@@ -410,14 +410,20 @@ export function useSync() {
         // commit to the expansion loop below, which fetches older records
         // until a user boundary appears and commits that page instead.
         //
+        // The deferral only applies to the initial fetch (no `before`).
+        // Prepend mode (loading older history) always commits — messages are
+        // already rendered, so there is no skeleton to protect, and skipping
+        // the store write would drop the fetched older messages entirely.
+        //
         // The deferred fallback carries page.session (not []) so that if the
         // expansion loop is ever a no-op (e.g. all nextLimit <= limit after a
         // constant change), the final setMetaFor reflects the real fetched
         // count instead of overwriting it with 0.
-        let committed =
-          hasUserMessage(page.session) || page.complete
-            ? commitMessagesToStore(page, options?.mode, options?.isStale)
-            : { messages: page.session, cursor: page.cursor, complete: page.complete }
+        const deferFirstCommit =
+          !options?.before && !page.complete && !hasUserMessage(page.session)
+        let committed = deferFirstCommit
+          ? { messages: page.session, cursor: page.cursor, complete: page.complete }
+          : commitMessagesToStore(page, options?.mode, options?.isStale)
 
         // If the first commit detected a stale session, bail out immediately
         // instead of relying on downstream guards to skip the final setMetaFor.
