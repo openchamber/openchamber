@@ -218,27 +218,12 @@ jobs:
           for (const { bundle, profile } of replacements) {
             if (!profile) throw new Error(`Missing provisioning profile name for ${bundle}`);
             const marker = `PRODUCT_BUNDLE_IDENTIFIER = ${bundle};`;
-            let blockStart = -1;
-            let blockEnd = -1;
-            let searchFrom = 0;
-            while (true) {
-              const candidate = project.indexOf(marker, searchFrom);
-              if (candidate === -1) break;
-              const candidateStart = project.lastIndexOf('\n\t\t', candidate);
-              const candidateEnd = project.indexOf('\n\t\t};', candidate);
-              const config = project.slice(candidateStart, candidateEnd);
-              if (config.includes('name = Release;')) {
-                blockStart = project.indexOf('buildSettings = {', candidateStart);
-                blockEnd = project.indexOf('\n\t\t\t\t};', candidate);
-                break;
-              }
-              searchFrom = candidate + marker.length;
-            }
-            if (blockStart === -1 || blockEnd === -1) throw new Error(`Could not find ${bundle} build settings block`);
+            const escapedMarker = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const releaseBlockPattern = new RegExp(`\\n\\t\\t[^\\n]+/\\* Release \\*/ = \\{[\\s\\S]*?${escapedMarker}[\\s\\S]*?\\n\\t\\t\\};`);
+            const match = project.match(releaseBlockPattern);
+            if (!match) throw new Error(`Could not find ${bundle} Release build settings block`);
 
-            const before = project.slice(0, blockStart);
-            let block = project.slice(blockStart, blockEnd);
-            const after = project.slice(blockEnd);
+            let block = match[0];
 
             block = block.replace(/CODE_SIGN_STYLE = Automatic;/, 'CODE_SIGN_STYLE = Manual;');
             if (!block.includes('DEVELOPMENT_TEAM = ')) {
@@ -251,7 +236,7 @@ jobs:
               block = block.replace(`${marker}\n`, `${marker}\n\t\t\t\tPROVISIONING_PROFILE_SPECIFIER = "${profile}";\n`);
             }
 
-            project = `${before}${block}${after}`;
+            project = project.replace(match[0], block);
           }
 
           writeFileSync(projectPath, project);
