@@ -18,7 +18,7 @@ import type { EditorAPI } from '@/lib/api/types';
 import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { ensureOutsideFileGrantForDesktop } from '@/lib/outsideFileGrants';
-import { getDirectoryForFilePath, isAbsoluteFilePath, isFilePathWithinDirectory, normalizeFilePath, toAbsoluteFilePath } from '@/lib/path-utils';
+import { getDirectoryForFilePath, isFilePathWithinDirectory, toAbsoluteFilePath } from '@/lib/path-utils';
 import { renderMarkdownBlocks, renderMarkdownSync } from './markdown/markdownCore';
 import { ensureMarkdownShikiTheme, getMarkdownSyntaxVars } from './markdown/markdownTheme';
 import {
@@ -28,6 +28,13 @@ import {
   type DecorateLabels,
   type MermaidRender,
 } from './markdown/decorate';
+import {
+  BLOCK_PATH_TOKEN_RE,
+  isAbsoluteReferencePath,
+  normalizeReferencePath,
+  parseFileReference,
+  type ParsedFileReference,
+} from './fileReferenceParser';
 
 const useCurrentMermaidTheme = () => {
   const themeSystem = useOptionalThemeSystem();
@@ -148,16 +155,9 @@ const FILE_LINK_SELECTOR = '[data-openchamber-file-link="true"]';
 const BLOCK_PATH_TOKEN_ATTR = 'data-openchamber-block-path-token';
 const BLOCK_PATH_TOKEN_SELECTOR = `[${BLOCK_PATH_TOKEN_ATTR}]`;
 const CODE_BLOCK_PATH_SCANNED_ATTR = 'data-openchamber-block-paths-scanned';
-// Matches `path[:line[:col]]` inside shell/grep-style output. Requires a file
-// extension (1-8 alphanumerics) so plain words don't qualify; the path itself
-// must contain at least one extension-bearing segment.
-//
-// Known limitation: backslash-separated Windows paths (e.g.
-// `C:\Users\test\file.ts:12`) are not matched because the path character class
-// does not include `\`. Compiler output inside fenced code blocks predominantly
-// uses forward slashes, so this is a niche gap. The inline-code pipeline is not
-// affected — it reads full text content rather than matching with a regex.
-const BLOCK_PATH_TOKEN_RE = /(?:[A-Za-z]:[\\/])?[\w.\-/@+]*[\w\-/@+]\.[A-Za-z0-9]{1,8}(?::\d+){0,2}/g;
+// Matches `path[:line[:col]]` or `path:start-end` inside shell/grep-style
+// output. The regex is defined in `./fileReferenceParser`; the inline-code
+// pipeline reads full text content rather than using this regex.
 const MAX_BLOCK_CODE_SCAN_LENGTH = 200_000;
 const FILE_REFERENCE_STAT_CONCURRENCY = 4;
 const FILE_REFERENCE_STAT_CACHE_MAX = 1000;
@@ -177,12 +177,6 @@ const getFileReferenceLinkLimit = (): number => (
   isVSCodeRuntime() ? VSCODE_FILE_REFERENCE_LINK_LIMIT : FILE_REFERENCE_LINK_LIMIT
 );
 
-type ParsedFileReference = {
-  path: string;
-  line?: number;
-  column?: number;
-};
-
 const KNOWN_FILE_BASENAMES = new Set([
   'dockerfile',
   'makefile',
@@ -192,124 +186,17 @@ const KNOWN_FILE_BASENAMES = new Set([
   '.gitignore',
   '.npmrc',
 ]);
-const KNOWN_BASENAME_PATTERN = Array.from(KNOWN_FILE_BASENAMES)
-  .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-  .join('|');
 
 const normalizePath = (value: string): string => {
-  return normalizeFilePath(value);
+  return normalizeReferencePath(value);
 };
 
 const isAbsolutePath = (value: string): boolean => {
-  return isAbsoluteFilePath(value);
+  return isAbsoluteReferencePath(value);
 };
 
 const toAbsolutePath = (basePath: string, targetPath: string): string => {
   return toAbsoluteFilePath(basePath, targetPath);
-};
-
-const trimPathCandidate = (value: string): string => {
-  let next = (value || '').trim();
-  if (!next) {
-    return '';
-  }
-
-  if ((next.startsWith('`') && next.endsWith('`')) || (next.startsWith('"') && next.endsWith('"')) || (next.startsWith("'") && next.endsWith("'"))) {
-    next = next.slice(1, -1).trim();
-  }
-
-  next = next.replace(/[.,;!?]+$/g, '');
-
-  if (next.endsWith(')') && !next.includes('(')) {
-    next = next.slice(0, -1);
-  }
-  if (next.endsWith(']') && !next.includes('[')) {
-    next = next.slice(0, -1);
-  }
-
-  return next;
-};
-
-const stripTrailingReference = (value: string): string => {
-  let next = trimPathCandidate(value);
-  if (!next) {
-    return '';
-  }
-
-  const semicolonIndex = next.indexOf(';');
-  if (semicolonIndex >= 0) {
-    next = next.slice(0, semicolonIndex);
-  }
-
-  next = next.replace(/#.*$/, '');
-
-  const extensionSuffixMatch = next.match(/^(.*\.[A-Za-z0-9_-]{1,16}):.*$/);
-  if (extensionSuffixMatch) {
-    next = extensionSuffixMatch[1] ?? next;
-  }
-
-  const basenameSuffixMatch = KNOWN_BASENAME_PATTERN.length > 0
-    ? next.match(new RegExp(`^(.*(?:/|^)(${KNOWN_BASENAME_PATTERN})):.*$`, 'i'))
-    : null;
-  if (basenameSuffixMatch) {
-    next = basenameSuffixMatch[1] ?? next;
-  }
-
-  return trimPathCandidate(next);
-};
-
-const parseFileReference = (value: string): ParsedFileReference | null => {
-  const trimmed = trimPathCandidate(value);
-  if (!trimmed) {
-    return null;
-  }
-
-  const semicolonIndex = trimmed.indexOf(';');
-  const withoutSemicolonSuffix = semicolonIndex >= 0
-    ? trimPathCandidate(trimmed.slice(0, semicolonIndex))
-    : trimmed;
-  if (!withoutSemicolonSuffix) {
-    return null;
-  }
-
-  const hashMatch = withoutSemicolonSuffix.match(/^(.*)#L(\d+)(?:C(\d+))?$/i);
-  if (hashMatch) {
-    const path = stripTrailingReference(hashMatch[1] ?? '');
-    const line = Number.parseInt(hashMatch[2] ?? '', 10);
-    const column = hashMatch[3] ? Number.parseInt(hashMatch[3], 10) : undefined;
-    if (!path || !Number.isFinite(line)) {
-      return null;
-    }
-
-    return {
-      path,
-      line,
-      column: Number.isFinite(column ?? Number.NaN) ? column : undefined,
-    };
-  }
-
-  const colonMatch = withoutSemicolonSuffix.match(/^(.*):(\d+)(?::(\d+))?$/);
-  if (colonMatch) {
-    const path = stripTrailingReference(colonMatch[1] ?? '');
-    const line = Number.parseInt(colonMatch[2] ?? '', 10);
-    const column = colonMatch[3] ? Number.parseInt(colonMatch[3], 10) : undefined;
-    if (!path || !Number.isFinite(line)) {
-      return null;
-    }
-
-    return {
-      path,
-      line,
-      column: Number.isFinite(column ?? Number.NaN) ? column : undefined,
-    };
-  }
-
-  const pathOnly = stripTrailingReference(withoutSemicolonSuffix);
-  if (!pathOnly) {
-    return null;
-  }
-
-  return { path: pathOnly };
 };
 
 const hasFileExtension = (path: string): boolean => {

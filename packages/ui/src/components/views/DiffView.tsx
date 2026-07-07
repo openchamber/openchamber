@@ -39,6 +39,7 @@ import { fileDiffFromPatch } from '@/lib/diff/patchFileDiff';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { startReviewFlow } from '@/lib/reviewFlow';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { getFirstChangedModifiedLineFromPatch } from './diffPatchUtils';
 import type { FileDiffMetadata } from '@pierre/diffs';
 
 // Minimum width for side-by-side diff view (px)
@@ -158,24 +159,6 @@ const getFirstChangedModifiedLine = (original: string, modified: string): number
     }
 
     return 1;
-};
-
-const getFirstVisibleModifiedLineFromPatch = (patch: string): number | null => {
-    if (!patch) {
-        return null;
-    }
-
-    const match = patch.match(/@@\s*-\d+(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s*@@/m);
-    if (!match) {
-        return null;
-    }
-
-    const parsed = Number.parseInt(match[1], 10);
-    if (!Number.isFinite(parsed) || parsed < 1) {
-        return null;
-    }
-
-    return parsed;
 };
 
 const isBinaryPatch = (patch: string): boolean =>
@@ -1422,7 +1405,9 @@ export const DiffView: React.FC<DiffViewProps> = ({
         try {
             let targetLine: number | null = null;
 
-            if (cachedDiffData && !cachedDiffData.isBinary && !isImageFile(filePath)) {
+            if (cachedDiffData?.patch && !cachedDiffData.isBinary && !isImageFile(filePath)) {
+                targetLine = getFirstChangedModifiedLineFromPatch(cachedDiffData.patch);
+            } else if (cachedDiffData && cachedDiffData.contextMode === 'full' && !cachedDiffData.isBinary && !isImageFile(filePath)) {
                 targetLine = getFirstChangedModifiedLine(cachedDiffData.original, cachedDiffData.modified);
             }
 
@@ -1433,7 +1418,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                         staged: activeDiffStaged,
                         contextLines: 3,
                     });
-                    targetLine = getFirstVisibleModifiedLineFromPatch(patchResponse.diff);
+                    targetLine = getFirstChangedModifiedLineFromPatch(patchResponse.diff);
                 } catch {
                     targetLine = null;
                 }
