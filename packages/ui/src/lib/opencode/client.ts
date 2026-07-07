@@ -517,14 +517,23 @@ class OpencodeService {
   }
 
   async createSession(params?: { parentID?: string; title?: string; metadata?: Record<string, unknown> }, directory?: string | null): Promise<Session> {
+    // Direct fetch - bypasses SDK v2 bug where session.create omits the body.
+    // The OpenCode server rejects requests with parentID: null in the body.
     const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
-    const response = await this.client.session.create({
-      ...(requestDirectory ? { directory: requestDirectory } : {}),
-      parentID: params?.parentID,
-      title: params?.title,
-      metadata: params?.metadata,
+    const baseUrl = (this.baseUrl || '/api').replace(/\/$/, '');
+    const dirPath = encodeURIComponent(requestDirectory ?? '');
+    const fallbackUrl = `${baseUrl}/session?directory=${dirPath}`;
+    const body: Record<string, unknown> = { directory: requestDirectory };
+    if (params?.title !== undefined) body.title = params.title;
+    if (params?.parentID) body.parentID = params.parentID;
+    if (params?.metadata) body.metadata = params.metadata;
+    const fallbackResponse = await fetch(fallbackUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
     });
-    return unwrapSdkData(response, 'session.create');
+    const sessionData: Session = await fallbackResponse.json();
+    return sessionData;
   }
 
   async getSession(id: string, directory?: string | null): Promise<Session> {
