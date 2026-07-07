@@ -452,6 +452,31 @@ export const autoConnectLastInstance = async (): Promise<boolean> => {
   return true;
 };
 
+export const validateMobileConnectionSession = async (input: {
+  url: string;
+  clientToken?: string | null;
+}): Promise<boolean> => {
+  let url = '';
+  try {
+    url = normalizeConnectionUrl(input.url);
+  } catch {
+    return false;
+  }
+  if (!url) return false;
+
+  const token = input.clientToken?.trim() || undefined;
+  const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+
+  const health = await requestWithTimeout(`${url}/health`, { method: 'GET', headers });
+  if (!health?.ok) return false;
+
+  const session = await requestWithTimeout(`${url}/auth/session`, { method: 'GET', credentials: 'include', headers });
+  if (!session || (!session.ok && session.status !== 404)) return false;
+
+  const status = await readSessionStatus(session);
+  return !(status && status.disabled !== true && status.authenticated === false);
+};
+
 // ---------------------------------------------------------------------------
 // Shared connection controller
 // ---------------------------------------------------------------------------

@@ -113,6 +113,10 @@ export type DesktopSettings = {
   defaultModel?: string; // format: "provider/model"
   defaultVariant?: string;
   defaultAgent?: string;
+  smallModelUseDefault?: boolean;
+  sessionRecapEnabled?: boolean;
+  sessionSuggestionEnabled?: boolean;
+  smallModelOverride?: string; // format: "provider/model"
   defaultGitIdentityId?: string; // ''/undefined = unset, 'global' or profile id
   openInAppId?: string;
   autoCreateWorktree?: boolean;

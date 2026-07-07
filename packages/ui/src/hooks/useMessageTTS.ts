@@ -12,6 +12,36 @@ import { useSayTTS } from './useSayTTS';
 import { useLocalTTS } from './useLocalTTS';
 import { browserVoiceService } from '@/lib/voice/browserVoiceService';
 import { sanitizeForTTS } from '@/lib/voice/summarize';
+import { runtimeFetch } from '@/lib/runtime-fetch';
+
+// Below this length the reply is comfortable to listen to as-is; summarizing
+// would only add latency.
+const TTS_SUMMARIZE_MIN_CHARS = 600;
+
+const SUMMARIZE_SYSTEM_PROMPT = 'Summarize the assistant reply for text-to-speech listening. Reply with 2-4 sentences of plain spoken prose in the same language as the reply. No markdown, no lists, no code — mention code changes briefly in words instead.';
+
+async function summarizeForSpeech(
+    text: string,
+    preferred: { providerID?: string; modelID?: string },
+): Promise<string | null> {
+    try {
+        const response = await runtimeFetch('/api/small-model/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                prompt: text,
+                system: SUMMARIZE_SYSTEM_PROMPT,
+                ...(preferred.providerID ? { preferredProviderID: preferred.providerID } : {}),
+                ...(preferred.modelID ? { preferredModelID: preferred.modelID } : {}),
+            }),
+        });
+        if (!response.ok) return null;
+        const payload = await response.json().catch(() => null) as { text?: unknown } | null;
+        return typeof payload?.text === 'string' && payload.text.trim() ? payload.text.trim() : null;
+    } catch {
+        return null;
+    }
+}
 
 export interface UseMessageTTSReturn {
     /** Whether TTS is currently playing for this message */
@@ -69,9 +99,24 @@ export function useMessageTTS(): UseMessageTTSReturn {
         setIsPlaying(true);
         
         try {
+            // Summarized mode: replace long replies with a short spoken-prose
+            // summary from the small model; fall back to the sanitized
+            // original when summarization is unavailable.
+            let sourceText = text;
+            if (ttsInputMode === 'summarized' && text.length >= TTS_SUMMARIZE_MIN_CHARS) {
+                const { currentProviderId, currentModelId } = useConfigStore.getState();
+                const summary = await summarizeForSpeech(text, {
+                    providerID: currentProviderId || undefined,
+                    modelID: currentModelId || undefined,
+                });
+                if (summary) {
+                    sourceText = summary;
+                }
+            }
+
             const shouldUseRaw = ttsInputMode === 'raw' && isServerProvider;
-            const sanitizedText = sanitizeForTTS(text);
-            const textToSpeak = shouldUseRaw ? text : sanitizedText;
+            const sanitizedText = sanitizeForTTS(sourceText);
+            const textToSpeak = shouldUseRaw ? sourceText : sanitizedText;
             
             if (isServerProvider && isServerTTSAvailable) {
                 const voice = voiceProvider === 'openai-compatible' ? openaiCompatibleVoice : openaiVoice;

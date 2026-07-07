@@ -57,7 +57,7 @@ import { MobileFilesSurface } from './MobileFilesSurface';
 import { MobileSessionsSheet } from './MobileSessionsSheet';
 import { MobileSurfaceShell } from './MobileSurfaceShell';
 import { DedicatedMobileAppProvider, type MobileAppActions } from './mobileAppContext';
-import { autoConnectLastInstance, isSameConnectionUrl, useMobileConnection } from './mobileConnections';
+import { autoConnectLastInstance, isSameConnectionUrl, useMobileConnection, validateMobileConnectionSession } from './mobileConnections';
 import { isQrScanSupported, parseConnectionPayload, scanConnectionQr } from './mobileQrScan';
 import { resetAppForRuntimeEndpointChange } from './runtimeEndpointReset';
 import { useAppFontEffects } from './useAppFontEffects';
@@ -515,6 +515,12 @@ const mobileInputKeyboardProps = {
 } as const;
 
 const NATIVE_RESUME_SYNC_EVENT_THROTTLE_MS = 1_000;
+
+const getRuntimeClientToken = (): string => {
+  if (typeof window === 'undefined') return '';
+  const token = (window as typeof window & { __OPENCHAMBER_CLIENT_TOKEN__?: string }).__OPENCHAMBER_CLIENT_TOKEN__;
+  return typeof token === 'string' ? token.trim() : '';
+};
 
 const getProjectLabel = (path: string): string => {
   const normalized = normalizePath(path);
@@ -2184,18 +2190,33 @@ export function MobileApp({ apis }: MobileAppProps) {
   const [autoConnectPhase, setAutoConnectPhase] = React.useState<'pending' | 'attempting' | 'done'>('pending');
   const isNativeMobileApp = React.useMemo(() => isCapacitorMobileApp(), []);
   const lastNativeResumeSyncEventAtRef = React.useRef(0);
+  const nativeResumeValidationSeqRef = React.useRef(0);
 
   const handleNativeResume = React.useCallback(() => {
-    if (!getRuntimeApiBaseUrl()) return;
+    const apiBaseUrl = getRuntimeApiBaseUrl();
+    if (!apiBaseUrl) return;
+    const validationSeq = nativeResumeValidationSeqRef.current + 1;
+    nativeResumeValidationSeqRef.current = validationSeq;
+
+    void validateMobileConnectionSession({ url: apiBaseUrl, clientToken: getRuntimeClientToken() }).then((isValid) => {
+      if (nativeResumeValidationSeqRef.current !== validationSeq) return;
+      if (!isValid) {
+        switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: 'mobile-disconnected' });
+        setConnectionEpoch((value) => value + 1);
+        return;
+      }
+
+      void initializeApp();
+      void refreshGitHubAuthStatus(apis.github, { force: true });
+      if (providersCount === 0) void loadProviders({ source: 'mobileApp:nativeResume' });
+      if (agentsCount === 0) void loadAgents({ source: 'mobileApp:nativeResume' });
+    });
+
     const now = Date.now();
     if (now - lastNativeResumeSyncEventAtRef.current >= NATIVE_RESUME_SYNC_EVENT_THROTTLE_MS) {
       lastNativeResumeSyncEventAtRef.current = now;
       window.dispatchEvent(new Event('openchamber:system-resume'));
     }
-    void initializeApp();
-    void refreshGitHubAuthStatus(apis.github, { force: true });
-    if (providersCount === 0) void loadProviders({ source: 'mobileApp:nativeResume' });
-    if (agentsCount === 0) void loadAgents({ source: 'mobileApp:nativeResume' });
   }, [agentsCount, apis.github, initializeApp, loadAgents, loadProviders, providersCount, refreshGitHubAuthStatus]);
 
   useNativeMobileChrome();
