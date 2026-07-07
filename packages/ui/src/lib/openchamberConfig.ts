@@ -173,7 +173,7 @@ const readTextFile = async (path: string): Promise<string | null> => {
   }
 
   try {
-    const response = await runtimeFetch(`${getBaseUrl()}/fs/read?path=${encodeURIComponent(path)}`,
+    const response = await runtimeFetch(`${getBaseUrl()}/fs/read?path=${encodeURIComponent(path)}&optional=true`,
       {
         // Avoid conditional requests (304 + empty body).
         cache: 'no-store',
