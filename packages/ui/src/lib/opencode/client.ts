@@ -859,61 +859,37 @@ class OpencodeService {
 
     let response!: Response;
 
+    // FIX: SDK v2 omits the body for session.promptAsync (same bug as
+    // session.create). The server returns 400 BadRequest for an empty
+    // body. Skip the SDK entirely and POST directly.
+    const buildFallbackBody = (): Record<string, unknown> => {
+      const fallbackBody: Record<string, unknown> = {
+        sessionID: params.id,
+        model: { providerID: params.providerID, modelID: params.modelID },
+        messageID: messageId,
+        parts,
+      };
+      if (params.agent) fallbackBody.agent = params.agent;
+      if (params.variant) fallbackBody.variant = params.variant;
+      if (requestDirectory) fallbackBody.directory = requestDirectory;
+      if (params.delivery) fallbackBody.delivery = params.delivery;
+      if (params.format) fallbackBody.format = params.format;
+      return fallbackBody;
+    };
+
+    const baseUrl = (this.baseUrl || '/api').replace(/\/$/, '');
+    const dirPath = encodeURIComponent(requestDirectory ?? '');
+    const fallbackUrl = `${baseUrl}/session/${encodeURIComponent(params.id)}/prompt_async?directory=${dirPath}`;
+
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const result = await this.client.session.promptAsync({
-          sessionID: params.id,
-          ...(requestDirectory ? { directory: requestDirectory } : {}),
-          model: {
-            providerID: params.providerID,
-            modelID: params.modelID,
-          },
-          agent: params.agent,
-          variant: params.variant,
-          messageID: messageId,
-          ...(params.delivery ? { delivery: params.delivery } : {}),
-          ...(params.format ? { format: params.format } : {}),
-          parts,
+        response = await fetch(fallbackUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(buildFallbackBody()),
         });
-        if (result.response instanceof Response) {
-          response = result.response;
-        } else if (result.error) {
-          const status = (result as SdkResult<unknown>).response?.status || 500;
-          response = new Response(JSON.stringify(result.error), { status });
-        } else {
-          response = new Response(JSON.stringify(result.data ?? true), { status: 200 });
-        }
-      } catch (sdkError) {
-        // FIX: SDK v2 omits the body for session.promptAsync (same bug as
-        // session.create). The server returns 400 BadRequest for an empty
-        // body. Fall back to a direct fetch with the proper body.
-        if (attempt === 0) {
-          const baseUrl = (this.baseUrl || '/api').replace(/\/$/, '');
-          const dirPath = encodeURIComponent(requestDirectory ?? '');
-          const fallbackUrl = `${baseUrl}/session/${encodeURIComponent(params.id)}/prompt_async?directory=${dirPath}`;
-          const fallbackBody: Record<string, unknown> = {
-            sessionID: params.id,
-            model: {
-              providerID: params.providerID,
-              modelID: params.modelID,
-            },
-            messageID: messageId,
-            parts,
-          };
-          if (params.agent) fallbackBody.agent = params.agent;
-          if (params.variant) fallbackBody.variant = params.variant;
-          if (requestDirectory) fallbackBody.directory = requestDirectory;
-          if (params.delivery) fallbackBody.delivery = params.delivery;
-          if (params.format) fallbackBody.format = params.format;
-          response = await fetch(fallbackUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(fallbackBody),
-            signal: controller.signal,
-          });
-          continue;
-        }
-        if (attempt < 2 && isRetryableFetchError(error)) {
+      } catch (error) {
+        if (attempt < 2 && isRetryableFetchError(error as Error)) {
           const delay = getRetryDelayMs(attempt);
           console.warn(
             `[prompt] fetch failed for ${params.providerID}/${params.modelID} (attempt ${attempt + 1}/3), retrying in ${delay}ms`,
