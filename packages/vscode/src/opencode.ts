@@ -280,14 +280,26 @@ function validateConfiguredOpencodeBinaryForManagedStart(): string | null {
     // ignore
   }
 
-  try {
-    const settings = readOpenChamberSettings();
-    const raw = typeof settings.opencodeBinary === 'string' ? settings.opencodeBinary.trim() : '';
-    if (raw) {
-      candidates.push(raw);
+  // support ssh remote
+  if (vscode.env.remoteName) {
+    const result = spawnSync('which', ['opencode'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    if (result.status === 0) {
+      candidates.push(result.stdout.trim());
     }
-  } catch {
-    // ignore
+  } else {
+    try {
+      const settings = readOpenChamberSettings();
+      const raw = typeof settings.opencodeBinary === 'string' ? settings.opencodeBinary.trim() : '';
+      if (raw) {
+        candidates.push(raw);
+      }
+    } catch {
+      // ignore
+    }
   }
 
   const raw = candidates[0];
