@@ -7,9 +7,19 @@
 
 import { MAX_PLAINTEXT_FRAME_BYTES } from './e2ee.js';
 
+
 export const TUNNEL_FRAME_HEADER_BYTES = 5;
 export const TUNNEL_FRAGMENT_FLAG = 0x80;
-export const MAX_TUNNEL_PAYLOAD_BYTES = MAX_PLAINTEXT_FRAME_BYTES - TUNNEL_FRAME_HEADER_BYTES;
+
+// Batch envelope container (mirror of protocol.ts). Only used when both peers
+// negotiated `batch`. Reserve the per-frame envelope overhead from the payload
+// budget so any single frame still fits one 64 KiB encrypted plaintext.
+export const BATCH_CONTAINER_TAG_SINGLE = 0x00;
+export const BATCH_CONTAINER_TAG_BATCH = 0x01;
+export const BATCH_FRAME_LENGTH_BYTES = 4;
+export const BATCH_ENVELOPE_RESERVED_BYTES = 1 + BATCH_FRAME_LENGTH_BYTES;
+export const MAX_TUNNEL_PAYLOAD_BYTES =
+  MAX_PLAINTEXT_FRAME_BYTES - TUNNEL_FRAME_HEADER_BYTES - BATCH_ENVELOPE_RESERVED_BYTES;
 
 export const TunnelFrameType = {
   HttpRequest: 1,
@@ -181,6 +191,183 @@ export const createFragmentAssembler = (maxMessageBytes = 16 * 1024 * 1024) => {
       for (const key of pending.keys()) {
         if (key.startsWith(`${streamId}:`)) pending.delete(key);
       }
+    },
+  };
+};
+
+/**
+ * Batch envelope encoder (mirror of tunnel-codec.ts encodeFrameBatch). Only used
+ * when both peers negotiated `batch`. One encrypted WS message still equals one
+ * encrypt() call — this only changes how many tunnel frames it carries.
+ * @param {Uint8Array[]} frames
+ * @returns {Uint8Array}
+ */
+export const encodeFrameBatch = (frames) => {
+  if (frames.length === 0) {
+    throw new TunnelCodecError('cannot encode an empty frame batch');
+  }
+  if (frames.length === 1) {
+    const frame = frames[0];
+    const out = new Uint8Array(1 + frame.length);
+    out[0] = BATCH_CONTAINER_TAG_SINGLE;
+    out.set(frame, 1);
+    if (out.length > MAX_PLAINTEXT_FRAME_BYTES) {
+      throw new TunnelCodecError('frame batch exceeds maximum plaintext size');
+    }
+    return out;
+  }
+  let total = 1;
+  for (const frame of frames) total += BATCH_FRAME_LENGTH_BYTES + frame.length;
+  if (total > MAX_PLAINTEXT_FRAME_BYTES) {
+    throw new TunnelCodecError('frame batch exceeds maximum plaintext size');
+  }
+  const out = new Uint8Array(total);
+  out[0] = BATCH_CONTAINER_TAG_BATCH;
+  let offset = 1;
+  for (const frame of frames) {
+    out[offset] = (frame.length >>> 24) & 0xff;
+    out[offset + 1] = (frame.length >>> 16) & 0xff;
+    out[offset + 2] = (frame.length >>> 8) & 0xff;
+    out[offset + 3] = frame.length & 0xff;
+    offset += BATCH_FRAME_LENGTH_BYTES;
+    out.set(frame, offset);
+    offset += frame.length;
+  }
+  return out;
+};
+
+/**
+ * Decodes a batch-envelope plaintext into its ordered tunnel frames.
+ * @param {Uint8Array} plaintext
+ * @returns {Uint8Array[]}
+ */
+export const decodeFrameBatch = (plaintext) => {
+  if (plaintext.length < 1) {
+    throw new TunnelCodecError('empty batch plaintext');
+  }
+  const tag = plaintext[0];
+  if (tag === BATCH_CONTAINER_TAG_SINGLE) {
+    return [plaintext.slice(1)];
+  }
+  if (tag !== BATCH_CONTAINER_TAG_BATCH) {
+    throw new TunnelCodecError(`unknown batch container tag ${tag}`);
+  }
+  const frames = [];
+  let offset = 1;
+  while (offset < plaintext.length) {
+    if (offset + BATCH_FRAME_LENGTH_BYTES > plaintext.length) {
+      throw new TunnelCodecError('truncated batch frame length');
+    }
+    const length =
+      ((plaintext[offset] << 24)
+        | (plaintext[offset + 1] << 16)
+        | (plaintext[offset + 2] << 8)
+        | plaintext[offset + 3]) >>> 0;
+    offset += BATCH_FRAME_LENGTH_BYTES;
+    if (offset + length > plaintext.length) {
+      throw new TunnelCodecError('truncated batch frame body');
+    }
+    frames.push(plaintext.slice(offset, offset + length));
+    offset += length;
+  }
+  if (frames.length === 0) {
+    throw new TunnelCodecError('empty frame batch');
+  }
+  return frames;
+};
+
+// Only high-volume body/stream data is buffered; setup/teardown/keepalive frames
+// flush immediately so TTFT, terminal echo, and liveness stay snappy.
+const BUFFERED_FRAME_TYPES = new Set([
+  TunnelFrameType.HttpBody,
+  TunnelFrameType.WsText,
+  TunnelFrameType.WsBinary,
+]);
+
+// See the TS mirror (tunnel-codec.ts) for the 150ms rationale: the chat render pipeline's
+// 100ms input throttle + ~64ms paced-reveal smoothing make a 150ms batch window invisible.
+export const DEFAULT_BATCH_WINDOW_MS = 150;
+export const DEFAULT_BATCH_MAX_BYTES = 24 * 1024;
+export const DEFAULT_BATCH_MAX_FRAMES = 32;
+
+/**
+ * Outbound batching buffer (mirror of tunnel-codec.ts createOutboundFrameBatcher).
+ * @param {{
+ *   windowMs?: number,
+ *   maxBatchBytes?: number,
+ *   maxBatchFrames?: number,
+ *   sendBatch: (plaintext: Uint8Array) => void,
+ *   now?: () => number,
+ *   setTimer?: (fn: () => void, ms: number) => any,
+ *   clearTimer?: (handle: any) => void,
+ * }} options
+ */
+export const createOutboundFrameBatcher = (options) => {
+  const windowMs = options.windowMs ?? DEFAULT_BATCH_WINDOW_MS;
+  const maxBatchBytes = options.maxBatchBytes ?? DEFAULT_BATCH_MAX_BYTES;
+  const maxBatchFrames = options.maxBatchFrames ?? DEFAULT_BATCH_MAX_FRAMES;
+  const now = options.now ?? (() => Date.now());
+  const setTimer = options.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
+  const clearTimer = options.clearTimer ?? ((handle) => clearTimeout(handle));
+
+  let buffer = [];
+  let bufferedBytes = 0;
+  let timer = null;
+  let lastFlushAt = 0;
+  let disposed = false;
+
+  const clearPendingTimer = () => {
+    if (timer !== null) {
+      clearTimer(timer);
+      timer = null;
+    }
+  };
+
+  const flush = () => {
+    clearPendingTimer();
+    if (buffer.length === 0) return;
+    const frames = buffer;
+    buffer = [];
+    bufferedBytes = 0;
+    lastFlushAt = now();
+    options.sendBatch(encodeFrameBatch(frames));
+  };
+
+  const enqueue = (frame) => {
+    if (disposed) return;
+    const frameType = frame[0] & ~TUNNEL_FRAGMENT_FLAG;
+    if (!BUFFERED_FRAME_TYPES.has(frameType)) {
+      buffer.push(frame);
+      flush();
+      return;
+    }
+    const at = now();
+    if (buffer.length === 0 && at - lastFlushAt >= windowMs) {
+      buffer.push(frame);
+      flush();
+      return;
+    }
+    const frameCost = BATCH_FRAME_LENGTH_BYTES + frame.length;
+    if (buffer.length > 0 && 1 + bufferedBytes + frameCost > MAX_PLAINTEXT_FRAME_BYTES) {
+      flush();
+    }
+    buffer.push(frame);
+    bufferedBytes += frameCost;
+    if (bufferedBytes >= maxBatchBytes || buffer.length >= maxBatchFrames) {
+      flush();
+      return;
+    }
+    if (timer === null) timer = setTimer(flush, windowMs);
+  };
+
+  return {
+    enqueue,
+    flush,
+    dispose() {
+      disposed = true;
+      clearPendingTimer();
+      buffer = [];
+      bufferedBytes = 0;
     },
   };
 };

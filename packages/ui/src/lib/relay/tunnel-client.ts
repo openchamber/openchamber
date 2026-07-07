@@ -15,14 +15,19 @@ import {
 import {
   chunkPayload,
   createFragmentAssembler,
+  createOutboundFrameBatcher,
   createStreamIdAllocator,
+  DEFAULT_BATCH_WINDOW_MS,
+  decodeFrameBatch,
   decodeJsonPayload,
   decodeTunnelFrame,
   encodeFragmentedMessage,
   encodeJsonPayload,
   encodeTunnelFrame,
+  type OutboundFrameBatcher,
   type TunnelFrame,
 } from './tunnel-codec';
+import { TUNNEL_FRAGMENT_FLAG } from './protocol';
 import {
   isHttpResponsePayload,
   isStreamAbortPayload,
@@ -151,6 +156,10 @@ export interface RelayTunnelClientOptions {
   helloTimeoutMs?: number;
   pingIntervalMs?: number;
   pingTimeoutMs?: number;
+  /** Frame-batching flush window in ms (default 150). Only applies once negotiated. */
+  batchWindowMs?: number;
+  /** Advertise frame batching in the handshake. Default true. */
+  batch?: boolean;
   reconnectBaseDelayMs?: number;
   reconnectMaxDelayMs?: number;
   hiddenOrOfflineMaxDelayMs?: number;
@@ -196,8 +205,10 @@ const isOfflineOrHidden = (): boolean => {
 export const createRelayTunnelClient = (options: RelayTunnelClientOptions): RelayTunnelClient => {
   const helloRetryMs = options.helloRetryMs ?? 1_000;
   const helloTimeoutMs = options.helloTimeoutMs ?? 30_000;
-  const pingIntervalMs = options.pingIntervalMs ?? 10_000;
+  const pingIntervalMs = options.pingIntervalMs ?? 30_000;
   const pingTimeoutMs = options.pingTimeoutMs ?? 30_000;
+  const batchWindowMs = options.batchWindowMs ?? DEFAULT_BATCH_WINDOW_MS;
+  const advertiseBatch = options.batch !== false;
   const reconnectBaseDelayMs = options.reconnectBaseDelayMs ?? 1_000;
   const reconnectMaxDelayMs = options.reconnectMaxDelayMs ?? 30_000;
   const hiddenOrOfflineMaxDelayMs = options.hiddenOrOfflineMaxDelayMs ?? 60_000;
@@ -321,7 +332,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
 
     let handshake;
     try {
-      handshake = await createClientHandshake(options.hostEncPubJwk);
+      handshake = await createClientHandshake(options.hostEncPubJwk, { batch: advertiseBatch });
     } catch (error) {
       if (generation !== attemptGeneration || closed) return;
       failAttempt(generation, toError(error), true);
@@ -345,7 +356,13 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
     let recvChain: Promise<void> = Promise.resolve();
     let channel: ActiveChannel | null = null;
     let cryptoChannel: EstablishedChannelCrypto | null = null;
+    let batchNegotiated = false;
+    let batcher: OutboundFrameBatcher | null = null;
+    // Liveness: updated on ANY received frame (incl. Pong) — dead-tunnel probe.
     let lastAliveAt = Date.now();
+    // Idle tracking: updated on any non-Ping/Pong frame in EITHER direction.
+    // Ping/Pong are excluded so the keepalive can't sustain itself.
+    let lastActivityAt = Date.now();
 
     const cleanupTimers = (): void => {
       if (helloInterval !== null) {
@@ -359,6 +376,10 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
       if (pingTimer !== null) {
         clearInterval(pingTimer);
         pingTimer = null;
+      }
+      if (batcher !== null) {
+        batcher.dispose();
+        batcher = null;
       }
     };
     currentAttemptCleanup = cleanupTimers;
@@ -392,8 +413,9 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
       }
     };
 
-    const establish = (crypto: EstablishedChannelCrypto): void => {
+    const establish = (crypto: EstablishedChannelCrypto, batch: boolean): void => {
       cryptoChannel = crypto;
+      batchNegotiated = batch;
       if (helloInterval !== null) {
         clearInterval(helloInterval);
         helloInterval = null;
@@ -406,37 +428,58 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
       const allocator = createStreamIdAllocator();
       const assembler = createFragmentAssembler();
       let sendChain: Promise<void> = Promise.resolve();
+      // Serialize encrypt+send: the per-direction IV counter must hit the wire in
+      // encryption order or the receiver fails closed. One call == one encrypted
+      // WS message == one counter tick, whether it carries a batch or a lone frame.
+      const sendEncryptedPlaintext = (plaintext: Uint8Array): void => {
+        sendChain = sendChain
+          .then(async () => {
+            if (channelObj.dead) return;
+            const encrypted = await crypto.encryptor.encrypt(plaintext);
+            wire.send(encrypted);
+          })
+          .catch(() => {
+            // Send failures surface via wire close; do not break the chain.
+          });
+      };
+      const localBatcher = batch
+        ? createOutboundFrameBatcher({ windowMs: batchWindowMs, sendBatch: sendEncryptedPlaintext })
+        : null;
+      batcher = localBatcher;
       const channelObj: ActiveChannel = {
         streams,
         assembler,
         nextStreamId: () => allocator.next(),
         dead: false,
         send(frame: Uint8Array): void {
-          // Serialize encrypt+send: the per-direction IV counter must hit the
-          // wire in encryption order or the receiver fails closed.
-          sendChain = sendChain
-            .then(async () => {
-              if (channelObj.dead) return;
-              const encrypted = await crypto.encryptor.encrypt(frame);
-              wire.send(encrypted);
-            })
-            .catch(() => {
-              // Send failures surface via wire close; do not break the chain.
-            });
+          if (channelObj.dead) return;
+          const frameType = frame[0] & ~TUNNEL_FRAGMENT_FLAG;
+          if (frameType !== TunnelFrameType.Ping && frameType !== TunnelFrameType.Pong) {
+            lastActivityAt = Date.now();
+          }
+          if (localBatcher) localBatcher.enqueue(frame);
+          else sendEncryptedPlaintext(frame);
         },
       };
       channel = channelObj;
       activeChannel = channelObj;
       consecutiveFailures = 0;
       lastAliveAt = Date.now();
+      lastActivityAt = Date.now();
       setStatus({ state: 'connected' });
       resolveWaiters(channelObj);
       pingTimer = setInterval(() => {
-        if (Date.now() - lastAliveAt > pingTimeoutMs) {
+        const now = Date.now();
+        // Dead-tunnel probe: no traffic AND no pong within the timeout.
+        if (now - lastAliveAt > pingTimeoutMs) {
           failAttemptLocal(new Error('relay keepalive timeout'));
           return;
         }
-        channelObj.send(encodeTunnelFrame(TunnelFrameType.Ping, 0, EMPTY_PAYLOAD));
+        // Only ping when the tunnel has actually been idle; streaming traffic
+        // keeps lastActivityAt fresh, so sustained bursts send zero pings.
+        if (now - lastActivityAt >= pingIntervalMs) {
+          channelObj.send(encodeTunnelFrame(TunnelFrameType.Ping, 0, EMPTY_PAYLOAD));
+        }
       }, pingIntervalMs);
     };
 
@@ -454,6 +497,8 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         return;
       }
       if (frame.frameType === TunnelFrameType.Pong) return;
+      // Non-keepalive inbound traffic counts as activity (suppresses our ping).
+      lastActivityAt = Date.now();
 
       let payload = frame.payload;
       if (frame.frameType === TunnelFrameType.WsText || frame.frameType === TunnelFrameType.WsBinary) {
@@ -496,7 +541,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
             const action = await handshake.handleText(data);
             if (action.type === 'established') {
               if (cryptoChannel) return;
-              establish(action.channel);
+              establish(action.channel, action.batch);
             } else if (action.type === 'fail') {
               failAttemptLocal(new Error(`relay handshake failed: ${action.reason}`));
             }
@@ -523,6 +568,22 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
             plaintext = await currentCrypto.decryptor.decrypt(bytes);
           } catch (error) {
             failAttemptLocal(toError(error));
+            return;
+          }
+          if (batchNegotiated) {
+            // One encrypted message may carry several tunnel frames; dispatch
+            // each in order through the same per-frame handling as legacy.
+            let frames: Uint8Array[];
+            try {
+              frames = decodeFrameBatch(plaintext);
+            } catch (error) {
+              failAttemptLocal(toError(error));
+              return;
+            }
+            for (const frame of frames) {
+              if (settled || generation !== attemptGeneration || currentChannel.dead) return;
+              handleTunnelFrame(currentChannel, frame);
+            }
             return;
           }
           handleTunnelFrame(currentChannel, plaintext);

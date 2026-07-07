@@ -19,7 +19,20 @@ export const MAX_PLAINTEXT_FRAME_BYTES = 64 * 1024;
 // Tunnel frame layout: [1 byte frameType(+fragment flag)][4 byte BE streamId][payload].
 export const TUNNEL_FRAME_HEADER_BYTES = 5;
 export const TUNNEL_FRAGMENT_FLAG = 0x80;
-export const MAX_TUNNEL_PAYLOAD_BYTES = MAX_PLAINTEXT_FRAME_BYTES - TUNNEL_FRAME_HEADER_BYTES;
+
+// Batch envelope (Layer 2 plaintext container, used only when both peers
+// negotiated `batch`). Plaintext = [1 byte container tag] then either the raw
+// tunnel frame (tag 0x00) or repeated [4 byte BE length][frame] (tag 0x01).
+// See tunnel-codec encodeFrameBatch/decodeFrameBatch.
+export const BATCH_CONTAINER_TAG_SINGLE = 0x00;
+export const BATCH_CONTAINER_TAG_BATCH = 0x01;
+export const BATCH_FRAME_LENGTH_BYTES = 4;
+// Worst-case per-frame envelope overhead inside a batch (tag + length prefix).
+// Reserved from the tunnel payload budget so any single frame — even at the
+// maximum size — still fits inside one 64 KiB encrypted plaintext once wrapped.
+export const BATCH_ENVELOPE_RESERVED_BYTES = 1 + BATCH_FRAME_LENGTH_BYTES;
+export const MAX_TUNNEL_PAYLOAD_BYTES =
+  MAX_PLAINTEXT_FRAME_BYTES - TUNNEL_FRAME_HEADER_BYTES - BATCH_ENVELOPE_RESERVED_BYTES;
 
 export const TunnelFrameType = {
   HttpRequest: 1,
@@ -80,11 +93,17 @@ export interface E2eeHelloMessage {
   v: typeof RELAY_PROTOCOL_VERSION;
   clientPubJwk: JsonWebKey;
   nonce: string; // base64url, 16 bytes
+  // Capability advertisement: the client can pack multiple tunnel frames into
+  // one encrypted WS message. Missing/false = legacy (one frame per message).
+  batch?: boolean;
 }
 
 export interface E2eeReadyMessage {
   t: 'ready';
   v: typeof RELAY_PROTOCOL_VERSION;
+  // Host echoes `batch: true` only when it also supports batching AND the client
+  // advertised it. Batching is enabled for the session only if both agree.
+  batch?: boolean;
 }
 
 // Layer 1 control messages (relay <-> host control socket).

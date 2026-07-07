@@ -9,13 +9,16 @@ import {
   chunkPayload,
   createFragmentAssembler,
   createStreamIdAllocator,
+  decodeFrameBatch,
   decodeJsonPayload,
   decodeTunnelFrame,
   encodeFragmentedMessage,
+  encodeFrameBatch,
   encodeJsonPayload,
   encodeTunnelFrame,
   TunnelCodecError,
 } from './tunnel-codec';
+import { MAX_PLAINTEXT_FRAME_BYTES } from './protocol';
 
 const randomBytes = (length: number): Uint8Array => {
   const bytes = new Uint8Array(length);
@@ -130,5 +133,46 @@ describe('tunnel codec', () => {
   test('stream id allocator yields odd ascending ids', () => {
     const allocator = createStreamIdAllocator();
     expect([allocator.next(), allocator.next(), allocator.next()]).toEqual([1, 3, 5]);
+  });
+
+  test('frame batch round-trips N frames byte-identically, in order', () => {
+    const frames = [
+      encodeTunnelFrame(TunnelFrameType.HttpBody, 1, randomBytes(10)),
+      encodeTunnelFrame(TunnelFrameType.WsText, 3, randomBytes(64)),
+      encodeTunnelFrame(TunnelFrameType.WsBinary, 5, randomBytes(500)),
+    ];
+    const decoded = decodeFrameBatch(encodeFrameBatch(frames));
+    expect(decoded.length).toBe(frames.length);
+    decoded.forEach((frame, index) => expect(frame).toEqual(frames[index]));
+  });
+
+  test('single-frame batch uses the compact tag with 1 byte of overhead', () => {
+    const frame = encodeTunnelFrame(TunnelFrameType.HttpBody, 7, randomBytes(128));
+    const encoded = encodeFrameBatch([frame]);
+    expect(encoded[0]).toBe(0x00); // BATCH_CONTAINER_TAG_SINGLE
+    expect(encoded.length).toBe(frame.length + 1);
+    const decoded = decodeFrameBatch(encoded);
+    expect(decoded.length).toBe(1);
+    expect(decoded[0]).toEqual(frame);
+  });
+
+  test('multi-frame batch uses the length-prefixed tag', () => {
+    const encoded = encodeFrameBatch([
+      encodeTunnelFrame(TunnelFrameType.HttpBody, 1, new Uint8Array([1])),
+      encodeTunnelFrame(TunnelFrameType.HttpBody, 1, new Uint8Array([2])),
+    ]);
+    expect(encoded[0]).toBe(0x01); // BATCH_CONTAINER_TAG_BATCH
+  });
+
+  test('rejects empty input and oversized batches, and truncated/unknown containers', () => {
+    expect(() => encodeFrameBatch([])).toThrow(TunnelCodecError);
+    const huge = new Uint8Array(MAX_PLAINTEXT_FRAME_BYTES); // no room for the tag
+    expect(() => encodeFrameBatch([huge])).toThrow('frame batch exceeds maximum plaintext size');
+    expect(() => decodeFrameBatch(new Uint8Array(0))).toThrow('empty batch plaintext');
+    expect(() => decodeFrameBatch(new Uint8Array([0x09]))).toThrow('unknown batch container tag 9');
+    // tag 0x01 then a length claiming more bytes than present.
+    expect(() => decodeFrameBatch(new Uint8Array([0x01, 0, 0, 0, 8, 1, 2]))).toThrow(
+      'truncated batch frame body',
+    );
   });
 });

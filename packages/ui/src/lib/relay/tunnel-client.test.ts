@@ -13,8 +13,10 @@ import { createHostHandshake } from './handshake';
 import { TunnelFrameType } from './protocol';
 import {
   createFragmentAssembler,
+  decodeFrameBatch,
   decodeJsonPayload,
   decodeTunnelFrame,
+  encodeFrameBatch,
   encodeJsonPayload,
   encodeTunnelFrame,
   type TunnelFrame,
@@ -48,9 +50,13 @@ class FakeEndpoint implements TunnelWireSocket {
   onerror: (() => void) | null = null;
   peer: FakeEndpoint | null = null;
   closed = false;
+  // Count binary (encrypted) WS messages that cross this endpoint's send path —
+  // the billable unit the batching optimization is designed to reduce.
+  binarySent = 0;
 
   send(data: string | ArrayBuffer | Uint8Array): void {
     if (this.closed) return;
+    if (typeof data !== 'string') this.binarySent += 1;
     const peer = this.peer;
     if (!peer) return;
     // Copy bytes so the receiver can't observe later mutation.
@@ -82,14 +88,19 @@ type MiniHostOptions = {
   // the client's helloRetryMs this reproduces the first-connect race where the
   // client retries `hello` and the host answers every retry with `ready`.
   firstHelloDelayMs?: number;
+  // Advertise batching from the host (default true = matches production).
+  batch?: boolean;
+  // Records every tunnel frame the host received, in arrival order.
+  recordFrame?: (frame: TunnelFrame) => void;
 };
 
 // A minimal host responder wired to one endpoint. Answers a few routes so the
 // client's HTTP/WS/abort paths can be exercised end to end.
 const attachMiniHost = (endpoint: FakeEndpoint, hostPrivateKey: CryptoKey, options: MiniHostOptions = {}): void => {
-  const handshake = createHostHandshake(hostPrivateKey);
+  const handshake = createHostHandshake(hostPrivateKey, { batch: options.batch });
   let encryptor: FrameEncryptor | null = null;
   let decryptor: FrameDecryptor | null = null;
+  let batchNegotiated = false;
   const assembler = createFragmentAssembler();
   const httpBodies = new Map<number, Uint8Array[]>();
   const aborted = new Set<number>();
@@ -99,7 +110,10 @@ const attachMiniHost = (endpoint: FakeEndpoint, hostPrivateKey: CryptoKey, optio
   const sendFrame = (frame: Uint8Array): void => {
     sendChain = sendChain.then(async () => {
       if (!encryptor || endpoint.closed) return;
-      endpoint.send(await encryptor.encrypt(frame));
+      // When batching is negotiated the client always expects a container tag,
+      // so wrap even single frames (tag 0x00). The host here does not coalesce.
+      const plaintext = batchNegotiated ? encodeFrameBatch([frame]) : frame;
+      endpoint.send(await encryptor.encrypt(plaintext));
     });
   };
 
@@ -110,6 +124,7 @@ const attachMiniHost = (endpoint: FakeEndpoint, hostPrivateKey: CryptoKey, optio
   };
 
   const handleTunnelFrame = (frame: TunnelFrame): void => {
+    options.recordFrame?.(frame);
     if (options.silent) return;
     if (frame.frameType === TunnelFrameType.Ping) {
       sendFrame(encodeTunnelFrame(TunnelFrameType.Pong, frame.streamId, new Uint8Array(0)));
@@ -203,6 +218,7 @@ const attachMiniHost = (endpoint: FakeEndpoint, hostPrivateKey: CryptoKey, optio
         if (action.type === 'established') {
           encryptor = action.channel.encryptor;
           decryptor = action.channel.decryptor;
+          batchNegotiated = action.batch;
           if (action.replyText) endpoint.send(action.replyText);
           options.onConnect?.();
         } else if (action.type === 'send-text' && action.text) {
@@ -213,7 +229,8 @@ const attachMiniHost = (endpoint: FakeEndpoint, hostPrivateKey: CryptoKey, optio
       if (!decryptor) return;
       const bytes = data instanceof Uint8Array ? data : new Uint8Array(data as ArrayBuffer);
       const plaintext = await decryptor.decrypt(bytes);
-      handleTunnelFrame(decodeTunnelFrame(plaintext));
+      const frames = batchNegotiated ? decodeFrameBatch(plaintext) : [plaintext];
+      for (const frame of frames) handleTunnelFrame(decodeTunnelFrame(frame));
     });
   };
 };
@@ -222,11 +239,13 @@ const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(
 
 const setupClient = async (
   hostOptions: MiniHostOptions = {},
+  clientOverrides: Partial<Parameters<typeof createRelayTunnelClient>[0]> = {},
 ): Promise<{
   client: RelayTunnelClient;
   connectionCount: () => number;
   killWire: () => void;
   sendTextToClient: (text: string) => void;
+  clientBinaryCount: () => number;
 }> => {
   const hostKeyPair = await generateEcdhKeyPair();
   const hostPubJwk = await exportPublicKeyJwk(hostKeyPair.publicKey);
@@ -242,6 +261,7 @@ const setupClient = async (
     pingTimeoutMs: 120,
     reconnectBaseDelayMs: 20,
     reconnectMaxDelayMs: 80,
+    ...clientOverrides,
     createWireSocket: () => {
       count += 1;
       const clientEndpoint = new FakeEndpoint();
@@ -260,6 +280,7 @@ const setupClient = async (
     connectionCount: () => count,
     killWire: () => lastClientEndpoint?.close(1006, 'killed'),
     sendTextToClient: (text: string) => lastHostEndpoint?.send(text),
+    clientBinaryCount: () => lastClientEndpoint?.binarySent ?? 0,
   };
 };
 
@@ -424,5 +445,132 @@ describe('createRelayTunnelClient', () => {
     client.subscribeStatus((status) => seen.push(status.state));
     await client.fetch('/health');
     expect(seen).toContain('connected');
+  });
+
+  test('packs a burst of WS messages into far fewer wire messages, preserving order', async () => {
+    const received: TunnelFrame[] = [];
+    const { client, clientBinaryCount } = await setupClient(
+      { recordFrame: (frame) => received.push(frame) },
+      { batchWindowMs: 100 },
+    );
+    track(client);
+    const socket = client.openWebSocket('/api/event/ws');
+    await new Promise<void>((resolve) => {
+      socket.onopen = () => resolve();
+    });
+
+    const echoes: string[] = [];
+    socket.onmessage = (event) => {
+      if (typeof event.data === 'string') echoes.push(event.data);
+    };
+
+    const BURST = 50;
+    const baseline = clientBinaryCount(); // WsOpen etc. before the burst
+    for (let i = 0; i < BURST; i += 1) socket.send(`m${i}`);
+
+    // Wait for the trailing window to flush and echoes to round-trip.
+    await wait(250);
+
+    const bodyFrames = received.filter((f) => f.frameType === TunnelFrameType.WsText);
+    expect(bodyFrames.length).toBe(BURST);
+    // Order preserved: the host saw m0..m49 in sequence.
+    expect(bodyFrames.map((f) => textDecoder.decode(f.payload))).toEqual(
+      Array.from({ length: BURST }, (_, i) => `m${i}`),
+    );
+    // Echoes arrived in order too.
+    expect(echoes).toEqual(Array.from({ length: BURST }, (_, i) => `echo:m${i}`));
+
+    // The 50 frames crossed the wire as a handful of encrypted messages, not 50.
+    const burstWireMessages = clientBinaryCount() - baseline;
+    expect(burstWireMessages).toBeLessThan(BURST / 3);
+    expect(burstWireMessages).toBeGreaterThan(0);
+  });
+
+  test('leading edge: a single frame after idle is delivered immediately, not a window later', async () => {
+    const WINDOW = 300;
+    let firstWsTextAt = 0;
+    const { client } = await setupClient(
+      {
+        recordFrame: (frame) => {
+          if (frame.frameType === TunnelFrameType.WsText && firstWsTextAt === 0) {
+            firstWsTextAt = Date.now();
+          }
+        },
+      },
+      { batchWindowMs: WINDOW },
+    );
+    track(client);
+    const socket = client.openWebSocket('/api/event/ws');
+    await new Promise<void>((resolve) => {
+      socket.onopen = () => resolve();
+    });
+    // Stay idle beyond the window so the next frame takes the leading edge.
+    await wait(WINDOW + 50);
+    const sentAt = Date.now();
+    socket.send('solo');
+    await wait(WINDOW / 2);
+    expect(firstWsTextAt).toBeGreaterThan(0);
+    // Delivered well within a full window (leading-edge flush), not delayed.
+    expect(firstWsTextAt - sentAt).toBeLessThan(WINDOW / 2);
+  });
+
+  test('boundary frame (StreamEnd) flushes buffered body immediately', async () => {
+    // A large batch window would stall a POST body if StreamEnd did not force a
+    // flush; the request completing quickly proves the boundary flush.
+    const { client } = await setupClient({}, { batchWindowMs: 1_000 });
+    track(client);
+    const start = Date.now();
+    const response = await client.fetch('/echo-body', { method: 'POST', body: 'boundary-body' });
+    expect(await response.text()).toBe('boundary-body');
+    expect(Date.now() - start).toBeLessThan(500);
+  });
+
+  test('keepalive: no ping while frames flow, ping fires after idle', async () => {
+    const pings: number[] = [];
+    const { client } = await setupClient(
+      {
+        recordFrame: (frame) => {
+          if (frame.frameType === TunnelFrameType.Ping) pings.push(Date.now());
+        },
+      },
+      { pingIntervalMs: 40, pingTimeoutMs: 5_000, batchWindowMs: 20 },
+    );
+    track(client);
+    const socket = client.openWebSocket('/api/event/ws');
+    await new Promise<void>((resolve) => {
+      socket.onopen = () => resolve();
+    });
+
+    // Keep traffic flowing faster than the ping interval for a few intervals.
+    const busyUntil = Date.now() + 200;
+    while (Date.now() < busyUntil) {
+      socket.send('keepbusy');
+      await wait(10);
+    }
+    expect(pings.length).toBe(0);
+
+    // Now go idle: a ping must appear once we exceed the interval.
+    await wait(150);
+    expect(pings.length).toBeGreaterThan(0);
+  });
+
+  test('negotiates legacy (no batch) when the host does not advertise batching', async () => {
+    // Host advertises batch:false -> both directions fall back to one frame per
+    // encrypted message. Everything still works end to end.
+    const { client } = await setupClient({ batch: false });
+    track(client);
+    const socket = client.openWebSocket('/api/event/ws');
+    await new Promise<void>((resolve) => {
+      socket.onopen = () => resolve();
+    });
+    const message = new Promise<string>((resolve) => {
+      socket.onmessage = (event) => {
+        if (typeof event.data === 'string') resolve(event.data);
+      };
+    });
+    socket.send('legacy');
+    expect(await message).toBe('echo:legacy');
+    const health = await client.fetch('/health');
+    expect(health.status).toBe(200);
   });
 });

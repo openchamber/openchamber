@@ -48,6 +48,31 @@ describe('relay E2EE handshake', () => {
     expect(new TextDecoder().decode(await clientChannel.decryptor.decrypt(toClient))).toBe('pong');
   });
 
+  test('negotiates batching only when both peers advertise it', async () => {
+    const assertNegotiated = async (
+      clientBatch: boolean | undefined,
+      hostBatch: boolean | undefined,
+      expected: boolean,
+    ) => {
+      const host = await createHostIdentity();
+      const client = await createClientHandshake(host.publicJwk, { batch: clientBatch });
+      const hostMachine = createHostHandshake(host.privateKey, { batch: hostBatch });
+      const hostResult = await hostMachine.handleText(client.helloText);
+      if (hostResult.type !== 'established') throw new Error('host did not establish');
+      const clientResult = await client.handleText(hostResult.replyText as string);
+      if (clientResult.type !== 'established') throw new Error('client did not establish');
+      // Symmetric: both sides agree on the same negotiated value.
+      expect(hostResult.batch).toBe(expected);
+      expect(clientResult.batch).toBe(expected);
+    };
+
+    await assertNegotiated(true, true, true);
+    await assertNegotiated(undefined, undefined, true); // default is batch-on
+    await assertNegotiated(false, true, false); // legacy client
+    await assertNegotiated(true, false, false); // legacy host
+    await assertNegotiated(false, false, false); // both legacy
+  });
+
   test('host re-sends ready for an identical retried hello', async () => {
     const host = await createHostIdentity();
     const client = await createClientHandshake(host.publicJwk);

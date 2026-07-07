@@ -6,11 +6,22 @@
 import { WebSocket } from 'ws';
 
 import { RELAY_PROTOCOL_VERSION, RelayCloseCode, createHostHandshake } from './e2ee.js';
+import { createOutboundFrameBatcher, decodeFrameBatch } from './tunnel-codec.js';
 import { createTunnelHost } from './tunnel-host.js';
 
 const BACKOFF_BASE_MS = 1000;
 const BACKOFF_CAP_MS = 30000;
 const DATA_SOCKET_OPEN_TIMEOUT_MS = 15000;
+const DEFAULT_BATCH_WINDOW_MS = 150;
+
+// Resolve the frame-batching flush window: explicit option wins, then env, then
+// the 150 ms default. Only applies on directions where batching was negotiated.
+const resolveBatchWindowMs = (option) => {
+  if (Number.isFinite(option) && option >= 0) return option;
+  const envValue = Number.parseInt(process.env.OPENCHAMBER_RELAY_BATCH_WINDOW_MS ?? '', 10);
+  if (Number.isFinite(envValue) && envValue >= 0) return envValue;
+  return DEFAULT_BATCH_WINDOW_MS;
+};
 
 /**
  * @param {{
@@ -22,8 +33,10 @@ const DATA_SOCKET_OPEN_TIMEOUT_MS = 15000;
  *   logger?: Pick<Console, 'warn'>,
  * }} options
  */
-export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, onStatus, logger = console }) => {
+export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, onStatus, logger = console, batchWindowMs, batch }) => {
   const resolveLocalPort = typeof getLocalPort === 'function' ? getLocalPort : () => localPort;
+  const localBatch = batch !== false;
+  const resolvedBatchWindowMs = resolveBatchWindowMs(batchWindowMs);
 
   let stopped = false;
   let state = 'connecting';
@@ -66,6 +79,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     if (!entry) return;
     dataSockets.delete(connectionId);
     if (entry.openTimer) clearTimeout(entry.openTimer);
+    entry.batcher?.dispose();
     entry.tunnel?.close();
     try {
       if (entry.socket.readyState === WebSocket.OPEN || entry.socket.readyState === WebSocket.CONNECTING) {
@@ -89,18 +103,34 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
       return;
     }
 
-    const entry = { socket, tunnel: null, openTimer: null };
+    const entry = { socket, tunnel: null, openTimer: null, batcher: null };
     dataSockets.set(connectionId, entry);
     entry.openTimer = setTimeout(() => {
       logger.warn('[Relay] host-data socket open timeout');
       teardownDataSocket(connectionId);
     }, DATA_SOCKET_OPEN_TIMEOUT_MS);
 
-    const handshake = createHostHandshake(identity.hostEncPrivateKey);
+    const handshake = createHostHandshake(identity.hostEncPrivateKey, { batch: localBatch });
     let channel = null;
+    let batchNegotiated = false;
     // Serialize async message handling so encrypted frame order (and the
     // strictly-increasing decrypt counter) is preserved.
     let processing = Promise.resolve();
+    // Serialize encrypt+send so the per-direction IV counter reaches the wire in
+    // encryption order. One encrypt() == one WS message == one counter tick,
+    // whether it carries a batch or a lone frame.
+    let sendChain = Promise.resolve();
+    const sendEncryptedPlaintext = (plaintext) => {
+      sendChain = sendChain
+        .then(async () => {
+          if (dataSockets.get(connectionId) !== entry || socket.readyState !== WebSocket.OPEN || !channel) return;
+          const encrypted = await channel.encryptor.encrypt(plaintext);
+          socket.send(encrypted, { binary: true });
+        })
+        .catch((error) => {
+          logger.warn(`[Relay] host-data send failed: ${error?.message ?? error}`);
+        });
+    };
 
     const failChannel = (closeCode, reason) => {
       // connectionId + reason only — never payload contents.
@@ -118,14 +148,18 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
           socket.send(action.text);
         } else if (action.type === 'established') {
           channel = action.channel;
+          batchNegotiated = action.batch === true;
+          entry.batcher = batchNegotiated
+            ? createOutboundFrameBatcher({ windowMs: resolvedBatchWindowMs, sendBatch: sendEncryptedPlaintext })
+            : null;
           entry.tunnel = createTunnelHost({
             connectionId,
             getLocalPort: resolveLocalPort,
             getBufferedAmount: () => socket.bufferedAmount,
-            sendFrame: async (plaintextFrame) => {
+            sendFrame: (plaintextFrame) => {
               if (dataSockets.get(connectionId) !== entry || socket.readyState !== WebSocket.OPEN) return;
-              const encrypted = await channel.encryptor.encrypt(plaintextFrame);
-              socket.send(encrypted, { binary: true });
+              if (entry.batcher) entry.batcher.enqueue(plaintextFrame);
+              else sendEncryptedPlaintext(plaintextFrame);
             },
           });
           if (action.replyText) socket.send(action.replyText);
@@ -148,7 +182,16 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
         return;
       }
       try {
-        await entry.tunnel.handleFrame(plaintext);
+        if (batchNegotiated) {
+          // One encrypted message may carry several tunnel frames; dispatch each
+          // in order through the same per-frame handling as legacy.
+          for (const frame of decodeFrameBatch(plaintext)) {
+            if (dataSockets.get(connectionId) !== entry) return;
+            await entry.tunnel.handleFrame(frame);
+          }
+        } else {
+          await entry.tunnel.handleFrame(plaintext);
+        }
       } catch (error) {
         logger.warn(`[Relay] tunnel frame handling failed: ${error?.message ?? error}`);
       }
