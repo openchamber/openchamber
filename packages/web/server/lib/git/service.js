@@ -824,6 +824,19 @@ const isNotGitRepositoryError = (error) => {
   return /not a git repository/i.test(text);
 };
 
+// A directory that no longer exists (e.g. a worktree deleted while something
+// was still polling its status) is an expected, benign condition — not a fault
+// to scream about. simple-git throws "Cannot use simple-git on a directory that
+// does not exist"; the underlying fs errors are ENOENT/ENOTDIR.
+const isMissingDirectoryError = (error) => {
+  const code = error?.code;
+  if (code === 'ENOENT' || code === 'ENOTDIR') {
+    return true;
+  }
+  const text = parseGitErrorText(error);
+  return /directory that does not exist|does not exist|no such file or directory/i.test(text);
+};
+
 const runGitCommand = async (cwd, args) => {
   try {
     const { stdout, stderr } = await execFileAsync(getGitBinary(), args, {
@@ -2184,7 +2197,7 @@ export async function getStatus(directory, options = {}) {
       rebaseInProgress,
     };
   } catch (error) {
-    if (!isNotGitRepositoryError(error)) {
+    if (!isNotGitRepositoryError(error) && !isMissingDirectoryError(error)) {
       console.error('Failed to get Git status:', error);
     }
     throw error;

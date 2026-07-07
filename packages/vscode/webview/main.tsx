@@ -520,6 +520,23 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     });
   }
 
+  // Dictation runs on the OpenChamber web server (WebSocket + worker); the VS
+  // Code bridge has no server process, so report it deterministically
+  // unavailable. The mic button hides itself when capture is unsupported.
+  if (normalizedPathname === '/api/dictation/status' && method === 'GET') {
+    return new Response(JSON.stringify({ provider: 'local', available: false, reasonCode: 'unsupported_runtime', models: [] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (normalizedPathname.startsWith('/api/dictation/') ) {
+    return new Response(JSON.stringify({ error: 'Dictation is not available in VS Code runtime' }), {
+      status: 501,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
   // Health endpoints: reflect actual connection status
   if (pathname === '/health' || pathname === '/api/health') {
     const connectionStatus = window.__OPENCHAMBER_CONNECTION__?.status;

@@ -340,6 +340,7 @@ Project skills live under `.agents/skills/*/SKILL.md`. Before editing, agents **
 | User-facing UI text: labels, buttons, placeholders, aria labels, empty/error/loading states, toasts, dialogs, settings copy, or navigation labels | `skill({ name: "locale-ui-patterns" })` |
 | Settings pages, settings dialogs, configuration UI, or visual/layout changes inside Settings | `skill({ name: "settings-ui-patterns" })` |
 | Drag-to-reorder, sortable lists/chips/grids, or `@dnd-kit` behavior including touch/mobile and wrapping variable-width items | `skill({ name: "drag-to-reorder" })` |
+| iOS Simulator preview/control for the mobile app, `serve-sim`, simulator taps/typing/gestures/rotation, or headless install/launch workflows outside Xcode | `skill({ name: "serve-sim" })` |
 
 Skill docs are the source of truth for detailed patterns. Do not duplicate their full guidance here; load the skill and follow it before making matching changes.
 

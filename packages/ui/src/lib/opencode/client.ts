@@ -30,6 +30,7 @@ import {
 // Can be overridden with VITE_OPENCODE_URL for absolute URLs in special deployments
 const DEFAULT_BASE_URL = import.meta.env.VITE_OPENCODE_URL || "/api";
 const CONFIG_CACHE_TTL_MS = 10_000;
+const OPENCODE_HEALTH_TIMEOUT_MS = 4_000;
 
 /**
  * Render an SDK error payload into a short string for Error messages.
@@ -155,6 +156,26 @@ const resolveRuntimeBaseUrl = (): string | null => {
   } catch {
     return null;
   }
+};
+
+type AbortSignalConstructorWithTimeout = typeof AbortSignal & {
+  timeout?: (milliseconds: number) => AbortSignal;
+};
+
+const createTimeoutSignal = (timeoutMs: number): { signal: AbortSignal; cleanup: () => void } => {
+  const abortSignal = typeof AbortSignal !== 'undefined'
+    ? AbortSignal as AbortSignalConstructorWithTimeout
+    : undefined;
+  if (typeof abortSignal?.timeout === 'function') {
+    return { signal: abortSignal.timeout(timeoutMs), cleanup: () => undefined };
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  return {
+    signal: controller.signal,
+    cleanup: () => clearTimeout(timeoutId),
+  };
 };
 
 const createRuntimeOpencodeClient = (config: { baseUrl: string; directory?: string }): OpencodeClient => {
@@ -735,6 +756,7 @@ class OpencodeService {
     }>;
     messageId?: string;
     agentMentions?: Array<{ name: string; source?: { value: string; start: number; end: number } }>;
+    delivery?: 'steer';
     format?: {
       type: 'json_schema';
       schema: Record<string, unknown>;
@@ -840,6 +862,7 @@ class OpencodeService {
           agent: params.agent,
           variant: params.variant,
           messageID: messageId,
+          ...(params.delivery ? { delivery: params.delivery } : {}),
           ...(params.format ? { format: params.format } : {}),
           parts,
         });
@@ -1541,7 +1564,8 @@ class OpencodeService {
         ? '/api/opencode/health'
         : `${normalizedBase}/opencode/health`;
       markStartupTrace('opencodeClient.checkHealth:url', { baseUrl: this.baseUrl, healthUrl });
-      const response = await runtimeFetch(healthUrl);
+      const timeout = createTimeoutSignal(OPENCODE_HEALTH_TIMEOUT_MS);
+      const response = await runtimeFetch(healthUrl, { signal: timeout.signal }).finally(timeout.cleanup);
       markStartupTrace('opencodeClient.checkHealth:response', { status: response.status });
       if (!response.ok) {
         return false;

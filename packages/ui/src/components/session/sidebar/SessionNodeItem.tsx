@@ -82,7 +82,7 @@ type Props = {
   removeSessionFromFolder: (scopeKey: string, sessionId: string) => void;
   addSessionToFolder: (scopeKey: string, folderId: string, sessionId: string) => void;
   createFolderAndStartRename: (scopeKey: string, parentId?: string | null) => { id: string } | null;
-  openContextPanelTab: (directory: string, options: { mode: 'chat'; dedupeKey: string; label: string; readOnly?: boolean }) => void;
+  openContextPanelTab: (directory: string, options: { mode: 'chat'; dedupeKey: string; label: string; sessionTitleFallback?: string; readOnly?: boolean }) => void;
   handleDeleteSession: (session: Session, source?: { archivedBucket?: boolean; hardDelete?: boolean; skipConfirm?: boolean }) => void;
   mobileVariant: boolean;
   alwaysShowActions: boolean;
@@ -747,6 +747,18 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     handleSessionSelect(session.id, sessionDirectory, projectId);
   };
 
+  // The selection/active highlight covers the WHOLE row box (gutter, edge
+  // paddings), while the primary click target is the inner title button.
+  // Make the rest of the highlighted box clickable too — but only for clicks
+  // that did not originate from an interactive child (title button, chevron,
+  // action menu), so nothing double-fires.
+  const handleRowBackgroundClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (event.defaultPrevented) return;
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('button, a, input, [role="menuitem"], [role="menu"]')) return;
+    handleRowSelect(event as unknown as React.MouseEvent<HTMLButtonElement>);
+  };
+
   const handleRowMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
     if (event.button === 2 || (event.button === 0 && event.ctrlKey && !selectionModeEnabled)) {
       suppressNextSelectRef.current = true;
@@ -867,6 +879,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
               mode: 'chat',
               dedupeKey: `session:${session.id}`,
               label: sessionTitle,
+              sessionTitleFallback: sessionTitle,
             });
           }}
           className="[&>svg]:mr-1"
@@ -973,8 +986,9 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                 data-session-row={session.id}
                 data-session-scope={sessionDirectory ?? ''}
                 data-session-archived={archivedBucket ? '1' : '0'}
+                onClick={handleRowBackgroundClick}
                 className={cn(
-                  'group relative my-0.5 flex items-center rounded-md py-1 pr-1.5',
+                  'group relative my-0.5 flex cursor-pointer items-center rounded-md py-1 pr-1.5',
                   // Pull the row box left into the container gutter so the
                   // selection highlight covers the chevron/status markers
                   // (which sit in that gutter), then re-pad so the title text

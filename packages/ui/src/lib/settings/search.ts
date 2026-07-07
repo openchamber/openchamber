@@ -20,6 +20,8 @@ export interface SettingsSearchResult extends SettingsSearchItem {
 interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
   isMobile: boolean;
   isDesktopLocalOrigin: boolean;
+  // macOS desktop shell — for controls that only render on darwin (e.g. dock badge).
+  isMac: boolean;
 }
 
 const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
@@ -64,6 +66,16 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     descriptionKey: 'settings.openchamber.visual.field.macVibrancyHint',
     keywords: ['transparent', 'transparency', 'vibrancy', 'blur', 'macos', 'opaque'],
     isAvailable: (ctx) => ctx.isDesktopLocalOrigin,
+  },
+  {
+    id: 'appearance.dock-badge',
+    page: 'appearance',
+    titleKey: 'settings.openchamber.visual.field.dockBadge',
+    descriptionKey: 'settings.openchamber.visual.field.dockBadgeHint',
+    keywords: ['dock', 'badge', 'unread', 'unseen', 'counter', 'count', 'notification', 'macos'],
+    // Exactly matches the render guard in OpenChamberVisualSettings: any darwin
+    // Electron shell (isMac already implies isDesktopShell), local or remote host.
+    isAvailable: (ctx) => ctx.isMac,
   },
   {
     id: 'appearance.pwa-install-name',
@@ -155,6 +167,18 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['streaming', 'sse', 'websocket'],
   },
   {
+    id: 'chat.session-recap',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.sessionRecap',
+    keywords: ['recap', 'assist', 'small model', 'summary'],
+  },
+  {
+    id: 'chat.session-suggestion',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.sessionSuggestion',
+    keywords: ['suggestion', 'assist', 'small model', 'follow up'],
+  },
+  {
     id: 'chat.reasoning-traces',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.showReasoningTraces',
@@ -205,11 +229,11 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
-    id: 'chat.queue-mode',
+    id: 'chat.follow-up-behavior',
     page: 'chat',
-    titleKey: 'settings.openchamber.visual.field.queueMessagesByDefault',
-    descriptionKey: 'settings.openchamber.visual.field.queueMessagesByDefaultTooltip',
-    keywords: ['queue', 'enter', 'send'],
+    titleKey: 'settings.openchamber.visual.section.followUpBehavior',
+    descriptionKey: 'settings.openchamber.visual.field.followUpBehaviorDescription',
+    keywords: ['follow up', 'queue', 'steer', 'send immediately'],
   },
   {
     id: 'chat.persist-drafts',
@@ -249,6 +273,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['delete', 'confirmation'],
   },
   {
+    id: 'sessions.small-model',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.defaults.smallModel.title',
+    descriptionKey: 'settings.openchamber.defaults.smallModel.description',
+    keywords: ['small model', 'utility', 'summary', 'recap', 'cheap', 'override'],
+  },
+  {
     id: 'sessions.auto-cleanup',
     page: 'sessions',
     titleKey: 'settings.openchamber.sessionRetention.field.enableAutoCleanup',
@@ -273,6 +304,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.desktopNetwork.field.launchAtLogin',
     descriptionKey: 'settings.openchamber.desktopNetwork.field.launchAtLoginDescription',
     keywords: ['desktop', 'startup', 'login'],
+    isAvailable: (ctx) => ctx.isDesktopLocalOrigin,
+  },
+  {
+    id: 'sessions.desktop-keep-awake',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.desktopNetwork.field.keepAwake',
+    descriptionKey: 'settings.openchamber.desktopNetwork.field.keepAwakeDescription',
+    keywords: ['desktop', 'sleep', 'awake', 'server', 'mobile', 'phone'],
     isAvailable: (ctx) => ctx.isDesktopLocalOrigin,
   },
   {
@@ -392,7 +431,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'remote-instances',
     titleKey: 'settings.remoteInstances.direct.title',
     descriptionKey: 'settings.remoteInstances.direct.description',
-    keywords: ['server url', 'connection token', 'import link', 'host switcher'],
+    keywords: ['server url', 'connection token', 'import link', 'host switcher', 'additional headers', 'request headers', 'cloudflare access', 'service token'],
     isAvailable: (ctx) => ctx.isDesktop,
   },
   {
@@ -658,22 +697,16 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['keyboard', 'hotkeys', 'bindings'],
   },
   {
-    id: 'voice.voice-setup',
+    id: 'voice.playback',
     page: 'voice',
-    titleKey: 'settings.voice.page.section.voiceSetup',
-    keywords: ['tts', 'voice mode', 'provider', 'speech rate', 'speech pitch', 'speech volume', 'language'],
+    titleKey: 'settings.voice.page.section.playbackAndSummary',
+    keywords: ['tts', 'read aloud', 'voice', 'provider', 'speech rate', 'speech pitch', 'speech volume', 'tts input mode', 'markdown'],
   },
   {
     id: 'voice.speech-recognition',
     page: 'voice',
     titleKey: 'settings.voice.page.section.speechRecognition',
-    keywords: ['stt', 'transcribe', 'whisper', 'microphone', 'silence threshold'],
-  },
-  {
-    id: 'voice.playback',
-    page: 'voice',
-    titleKey: 'settings.voice.page.section.playbackAndSummary',
-    keywords: ['read aloud', 'tts input mode', 'summary', 'markdown'],
+    keywords: ['stt', 'dictation', 'voice input', 'transcribe', 'whisper', 'parakeet', 'microphone'],
   },
   {
     id: 'tunnel.provider',

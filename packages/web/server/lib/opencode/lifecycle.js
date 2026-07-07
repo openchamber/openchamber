@@ -819,15 +819,15 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         state.lastOpenCodeError = null;
         state.openCodeNotReadySince = 0;
         syncToHmrState();
-      } else if (!env.ENV_EFFECTIVE_PORT && await probeExternalOpenCode(4096)) {
-        console.log('Auto-detected existing OpenCode server on default port 4096');
-        setOpenCodePort(4096);
-        state.isOpenCodeReady = true;
-        state.isExternalOpenCode = true;
-        state.lastOpenCodeError = null;
-        state.openCodeNotReadySince = 0;
-        syncToHmrState();
       } else {
+        // We never auto-attach to an arbitrary pre-existing OpenCode instance.
+        // Attaching to an external server requires explicit opt-in via env
+        // (OPENCODE_HOST / OPENCODE_PORT / OPENCODE_SKIP_START), handled by the
+        // branches above. Without that opt-in we always start our OWN managed
+        // instance on a freshly-allocated port. A blind probe of the default
+        // port 4096 used to hijack a user's separately-running OpenCode (e.g.
+        // the OpenCode desktop app), coupling our lifecycle to theirs and
+        // breaking init against an unexpected server version/config.
         if (env.ENV_EFFECTIVE_PORT) {
           console.log(`Using OpenCode port from environment: ${env.ENV_EFFECTIVE_PORT}`);
           setOpenCodePort(env.ENV_EFFECTIVE_PORT);

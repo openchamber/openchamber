@@ -89,6 +89,17 @@ describe('settings helpers', () => {
     });
   });
 
+  it('accepts desktopKeepAwakeEnabled as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ desktopKeepAwakeEnabled: true })).toEqual({
+      desktopKeepAwakeEnabled: true,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ desktopKeepAwakeEnabled: false })).toEqual({
+      desktopKeepAwakeEnabled: false,
+    });
+  });
+
   it('accepts desktopUiPassword as a persisted shared setting', () => {
     const helpers = createTestHelpers();
 

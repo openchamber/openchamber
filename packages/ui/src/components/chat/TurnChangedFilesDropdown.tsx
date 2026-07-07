@@ -4,13 +4,11 @@ import { Popover } from '@base-ui/react/popover';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useIsGitRepo } from '@/stores/useGitStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import {
     type ChangedFile,
     type ChangedFileEntry,
     FILE_EDIT_TOOLS,
     extractChangedFiles,
-    isGitFile,
     toRelativePath,
 } from './changedFiles';
 import { ChangedFilesList } from './ChangedFilesList';
@@ -18,7 +16,6 @@ import { changedFilesPopoverClassName, changedFilesPopoverStyle } from './change
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import type { TurnActivityRecord } from './lib/turns/types';
-import { toAbsoluteFilePath } from '@/lib/path-utils';
 
 interface TurnChangedFilesDropdownProps {
     activityParts: TurnActivityRecord[] | undefined;
@@ -29,7 +26,6 @@ export const TurnChangedFilesDropdown: React.FC<TurnChangedFilesDropdownProps> =
     const [portalContainer, setPortalContainer] = React.useState<HTMLElement | null>(null);
     const triggerButtonRef = React.useRef<HTMLButtonElement | null>(null);
     const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
-    const runtime = React.useContext(RuntimeAPIContext);
     const isGitRepo = useIsGitRepo(currentDirectory);
 
     const changedFiles = React.useMemo<ChangedFile[]>(() => {
@@ -56,24 +52,16 @@ export const TurnChangedFilesDropdown: React.FC<TurnChangedFilesDropdownProps> =
 
     const handleOpenFile = (file: ChangedFileEntry) => {
         if (!currentDirectory) return;
-        if (isGitFile(file)) return;
-
-        const absolutePath = toAbsoluteFilePath(currentDirectory, file.path);
-
-        const editor = runtime?.editor;
-        if (editor) {
-            void editor.openFile(absolutePath);
-            setIsExpanded(false);
-            return;
-        }
 
         const store = useUIStore.getState();
+        const relativePath = toRelativePath(file.path, currentDirectory);
         if (!store.isMobile) {
-            store.openContextFile(currentDirectory, absolutePath);
+            store.openContextDiff(currentDirectory, relativePath, false, 'turn');
             setIsExpanded(false);
             return;
         }
-        store.navigateToDiff(toRelativePath(file.path, currentDirectory));
+
+        store.navigateToDiff(relativePath, false, 'turn');
         store.setRightSidebarOpen(false);
         setIsExpanded(false);
     };

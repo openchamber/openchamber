@@ -1,9 +1,1 @@
-
-
-import '@fontsource/ibm-plex-sans/latin-400.css';
-import '@fontsource/ibm-plex-sans/latin-500.css';
-import '@fontsource/ibm-plex-sans/latin-600.css';
-
-import '@fontsource/ibm-plex-mono/latin-400.css';
-import '@fontsource/ibm-plex-mono/latin-500.css';
-import '@fontsource/ibm-plex-mono/latin-600.css';
+// Default fonts use system stacks. Optional user-selected fonts are loaded on demand.

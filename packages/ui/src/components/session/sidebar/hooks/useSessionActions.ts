@@ -217,13 +217,12 @@ export const useSessionActions = (args: Args) => {
 
       const ids = [session.id, ...descendantIds];
       if (shouldHardDelete) {
-        // The server cascade-deletes all descendant sessions when the parent
-        // is removed. Only send the root session delete request; sending
-        // individual requests for each descendant would hit 404 (already
-        // deleted by cascade) and trigger rollback that restores them.
-        const success = await args.deleteSession(session.id);
-        if (success) {
-          const totalDeleted = descendantIds.length + 1;
+        // Delete root + all descendants individually. If the server
+        // cascade-deletes some children before we get to them, 404 is
+        // treated as success by deleteSession and no rollback occurs.
+        const { deletedIds, failedIds } = await args.deleteSessions(ids);
+        if (failedIds.length === 0) {
+          const totalDeleted = deletedIds.length;
           toast.success(totalDeleted === 1
             ? t('sessions.sidebar.bulkActions.deletedSingle', { count: totalDeleted })
             : t('sessions.sidebar.bulkActions.deletedPlural', { count: totalDeleted }));

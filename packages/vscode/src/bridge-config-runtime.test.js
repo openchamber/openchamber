@@ -52,6 +52,39 @@ afterEach(() => {
 const readJson = (filePath) => JSON.parse(fs.readFileSync(filePath, 'utf8'));
 
 describe('VS Code config bridge plugin parity', () => {
+  test('removes agent fields when update payload sends null', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-agent-null-'));
+    tempRoots.push(root);
+    const ctx = createCtx(root);
+    const configDir = path.join(root, '.opencode');
+    const configPath = path.join(configDir, 'opencode.json');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(configPath, JSON.stringify({
+      agent: {
+        build: {
+          variant: 'fast',
+          temperature: 0.3,
+          top_p: 0.8,
+          mode: 'subagent',
+        },
+      },
+    }, null, 2), 'utf8');
+
+    const updated = await handleConfigBridgeMessage({
+      id: 'update-agent-null-fields',
+      type: 'api:config/agents',
+      payload: {
+        method: 'PATCH',
+        name: 'build',
+        directory: root,
+        body: { variant: null, temperature: null, top_p: null },
+      },
+    }, ctx, deps);
+
+    expect(updated?.success).toBe(true);
+    expect(readJson(configPath).agent.build).toEqual({ mode: 'subagent' });
+  });
+
   test('creates, lists, updates, and deletes project plugin entries', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-plugins-'));
     tempRoots.push(root);

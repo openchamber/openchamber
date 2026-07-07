@@ -131,6 +131,29 @@ function dirStoreForSession(sessionId: string): { store: DirectoryStoreApi; dire
   return { store: dirStore(), directory: dir() }
 }
 
+/**
+ * Provider/model of the session's last assistant message — the authoritative
+ * "session provider" for utility calls (notes distillation etc.), independent
+ * of what the composer picker currently points at.
+ */
+export function getSessionLastAssistantModel(sessionId: string): { providerID: string; modelID: string } | null {
+  try {
+    const { store } = dirStoreForSession(sessionId)
+    const messages = store.getState().message[sessionId]
+    if (!messages) return null
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const info = messages[i] as { role?: string; providerID?: string; modelID?: string }
+      if (info?.role === "assistant" && typeof info.providerID === "string" && info.providerID
+        && typeof info.modelID === "string" && info.modelID) {
+        return { providerID: info.providerID, modelID: info.modelID }
+      }
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
 function updateLiveSession(session: Session, directory?: string): void {
   const stores = _childStores
   if (!stores) return
@@ -466,6 +489,10 @@ function restoreSessionListSnapshots(snapshots: SessionListSnapshot[]): void {
   }
 }
 
+function cleanupSessionWorktreeMetadata(sessionId: string): void {
+  useSessionUIStore.getState().setWorktreeMetadata(sessionId, null)
+}
+
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function deleteSession(sessionId: string, _options?: Record<string, unknown>): Promise<boolean> {
   const sessionDirectory = getSessionDirectory(sessionId)
@@ -484,6 +511,7 @@ export async function deleteSession(sessionId: string, _options?: Record<string,
       throw new Error("session.delete failed: server did not confirm deletion")
     }
     useGlobalSessionsStore.getState().removeSessions([sessionId])
+    cleanupSessionWorktreeMetadata(sessionId)
     return true
   } catch (error) {
     console.error("[session-actions] deleteSession failed", error)
@@ -491,6 +519,7 @@ export async function deleteSession(sessionId: string, _options?: Record<string,
     // Subsequent delete attempts for those children return 404; treat as
     // success since the session was already deleted by the cascade.
     if ((error as { status?: number })?.status === 404) {
+      cleanupSessionWorktreeMetadata(sessionId)
       return true
     }
     restoreSessionListSnapshots(snapshots)
@@ -514,10 +543,12 @@ export async function deleteSessionInDirectory(sessionId: string, directory: str
       throw new Error("session.delete failed: server did not confirm deletion")
     }
     useGlobalSessionsStore.getState().removeSessions([sessionId])
+    cleanupSessionWorktreeMetadata(sessionId)
     return true
   } catch (error) {
     console.error("[session-actions] deleteSessionInDirectory failed", error)
     if ((error as { status?: number })?.status === 404) {
+      cleanupSessionWorktreeMetadata(sessionId)
       return true
     }
     restoreSessionListSnapshots(snapshots)
@@ -713,8 +744,14 @@ export async function optimisticSend(input: {
 // ---------------------------------------------------------------------------
 
 export async function abortCurrentOperation(sessionId: string): Promise<void> {
+  // The abort must carry the SESSION'S directory, not the active UI directory:
+  // OpenCode routes the request to the per-directory instance, and an abort
+  // sent to the wrong instance cancels nothing while still returning 200 true
+  // (the "stop button does nothing" report — sessions in another project/
+  // worktree than the UI's current directory could never be aborted).
+  const { directory } = dirStoreForSession(sessionId)
   try {
-    await sdk().session.abort({ sessionID: sessionId, directory: dir() })
+    await sdk().session.abort({ sessionID: sessionId, directory })
   } catch (error) {
     console.error("[session-actions] abort failed", error)
   }
@@ -1161,6 +1198,10 @@ export async function fetchMessagesForSession(sessionID: string, directory?: str
     // can't repopulate (and un-evict) a session already navigated away from.
     if (useSessionUIStore.getState().currentSessionId !== sessionID) return
 
+    const latestState = store.getState()
+    const latestStatus = getSessionMaterializationStatus(latestState, sessionID)
+    if (latestStatus.renderable && (latestState.message[sessionID]?.length ?? 0) >= records.length) return
+
     store.setState((state) => {
       const materialized = materializeSessionSnapshots(
         state,
@@ -1171,6 +1212,7 @@ export async function fetchMessagesForSession(sessionID: string, directory?: str
         })),
         { skipPartTypes: MESSAGE_REFETCH_SKIP_PARTS },
       )
+      if (!materialized.messagesChanged && !materialized.partsChanged) return state
       return { message: materialized.message, part: materialized.part }
     })
   } catch {

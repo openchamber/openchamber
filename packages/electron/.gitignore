@@ -8,6 +8,9 @@ dist-bundle/
 # Generated packaging resources
 resources/web-dist/
 resources/sidecar/
+resources/opencode-cli/*
+!resources/opencode-cli/.gitkeep
+.cache/
 
 # OS-specific
 .DS_Store
