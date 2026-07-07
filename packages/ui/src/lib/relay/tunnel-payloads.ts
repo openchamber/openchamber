@@ -25,7 +25,9 @@ export const isWsClosePayload = (value: unknown): value is TunnelWsClosePayload 
 const ABSOLUTE_URL_PATTERN = /^[a-z][a-z\d+.-]*:\/\//i;
 
 // Placeholder base for parsing origin-relative request paths; never fetched.
-const TUNNEL_PARSE_BASE = 'http://tunnel.invalid';
+// Throwaway base for parsing relative runtime paths — only pathname+search are
+// ever read, the host is discarded. Shared so relay modules don't diverge on it.
+export const TUNNEL_PARSE_BASE = 'http://tunnel.invalid';
 
 /** Extracts `pathname?search` from an absolute or relative WS/HTTP URL. */
 export const wsUrlToTunnelPath = (url: string): string => {

@@ -8,6 +8,7 @@
 import { createClientHandshake, type EstablishedChannelCrypto } from './handshake';
 import {
   RELAY_PROTOCOL_VERSION,
+  RelayCloseCode,
   TunnelFrameType,
   type TunnelHttpRequestPayload,
   type TunnelWsOpenPayload,
@@ -178,6 +179,20 @@ const WS_OPEN = 1;
 const WS_CLOSING = 2;
 const WS_CLOSED = 3;
 
+// Relay close codes that a reconnect can never resolve — surface a terminal error
+// instead of looping forever (auth failed, duplicate client, limit exceeded).
+const TERMINAL_RELAY_CLOSE_CODES = new Set<number>([
+  RelayCloseCode.AuthFailed,
+  RelayCloseCode.DuplicateClient,
+  RelayCloseCode.LimitExceeded,
+]);
+
+const RELAY_CLOSE_MESSAGES: Record<number, string> = {
+  [RelayCloseCode.AuthFailed]: 'relay authentication failed',
+  [RelayCloseCode.DuplicateClient]: 'relay connection replaced by another client',
+  [RelayCloseCode.LimitExceeded]: 'relay connection limit reached',
+};
+
 type StreamHandler = {
   handleFrame(frameType: number, payload: Uint8Array): void;
   fail(error: Error): void;
@@ -206,7 +221,9 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
   const helloRetryMs = options.helloRetryMs ?? 1_000;
   const helloTimeoutMs = options.helloTimeoutMs ?? 30_000;
   const pingIntervalMs = options.pingIntervalMs ?? 30_000;
-  const pingTimeoutMs = options.pingTimeoutMs ?? 30_000;
+  // Pong wait after an idle keepalive ping — must be well under the interval so a
+  // dead socket is caught within one cycle rather than after two.
+  const pingTimeoutMs = options.pingTimeoutMs ?? 15_000;
   const batchWindowMs = options.batchWindowMs ?? DEFAULT_BATCH_WINDOW_MS;
   const advertiseBatch = options.batch !== false;
   const reconnectBaseDelayMs = options.reconnectBaseDelayMs ?? 1_000;
@@ -353,13 +370,16 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
     let helloInterval: ReturnType<typeof setInterval> | null = null;
     let helloDeadline: ReturnType<typeof setTimeout> | null = null;
     let pingTimer: ReturnType<typeof setInterval> | null = null;
+    // One-shot: armed when an idle-keepalive ping is sent, cleared by any received
+    // frame (incl. Pong). If it fires, the tunnel is dead. Independent of the ping
+    // cadence so a dead socket is detected ~pingTimeoutMs after an unanswered ping,
+    // not on the next full interval.
+    let pongDeadline: ReturnType<typeof setTimeout> | null = null;
     let recvChain: Promise<void> = Promise.resolve();
     let channel: ActiveChannel | null = null;
     let cryptoChannel: EstablishedChannelCrypto | null = null;
     let batchNegotiated = false;
     let batcher: OutboundFrameBatcher | null = null;
-    // Liveness: updated on ANY received frame (incl. Pong) — dead-tunnel probe.
-    let lastAliveAt = Date.now();
     // Idle tracking: updated on any non-Ping/Pong frame in EITHER direction.
     // Ping/Pong are excluded so the keepalive can't sustain itself.
     let lastActivityAt = Date.now();
@@ -377,6 +397,10 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         clearInterval(pingTimer);
         pingTimer = null;
       }
+      if (pongDeadline !== null) {
+        clearTimeout(pongDeadline);
+        pongDeadline = null;
+      }
       if (batcher !== null) {
         batcher.dispose();
         batcher = null;
@@ -384,7 +408,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
     };
     currentAttemptCleanup = cleanupTimers;
 
-    function failAttemptLocal(error: Error, asErrorState = false): void {
+    function failAttemptLocal(error: Error, asErrorState = false, terminal = false): void {
       if (settled || generation !== attemptGeneration) return;
       settled = true;
       cleanupTimers();
@@ -401,6 +425,12 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
       if (currentWire === wire) currentWire = null;
       if (closed) return;
       consecutiveFailures += 1;
+      // A permanent rejection (auth failed, duplicate, limit) won't resolve by
+      // retrying — surface a terminal error instead of reconnecting forever.
+      if (terminal) {
+        setStatus({ state: 'error', lastError: error.message });
+        return;
+      }
       setStatus({ state: asErrorState ? 'error' : 'reconnecting', lastError: error.message });
       scheduleReconnect();
     }
@@ -464,21 +494,21 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
       channel = channelObj;
       activeChannel = channelObj;
       consecutiveFailures = 0;
-      lastAliveAt = Date.now();
       lastActivityAt = Date.now();
       setStatus({ state: 'connected' });
       resolveWaiters(channelObj);
       pingTimer = setInterval(() => {
         const now = Date.now();
-        // Dead-tunnel probe: no traffic AND no pong within the timeout.
-        if (now - lastAliveAt > pingTimeoutMs) {
-          failAttemptLocal(new Error('relay keepalive timeout'));
-          return;
-        }
         // Only ping when the tunnel has actually been idle; streaming traffic
         // keeps lastActivityAt fresh, so sustained bursts send zero pings.
-        if (now - lastActivityAt >= pingIntervalMs) {
-          channelObj.send(encodeTunnelFrame(TunnelFrameType.Ping, 0, EMPTY_PAYLOAD));
+        if (now - lastActivityAt < pingIntervalMs) return;
+        channelObj.send(encodeTunnelFrame(TunnelFrameType.Ping, 0, EMPTY_PAYLOAD));
+        // Expect a Pong (or any frame) before the deadline; otherwise it's dead.
+        if (pongDeadline === null) {
+          pongDeadline = setTimeout(() => {
+            pongDeadline = null;
+            failAttemptLocal(new Error('relay keepalive timeout'));
+          }, pingTimeoutMs);
         }
       }, pingIntervalMs);
     };
@@ -491,7 +521,11 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         failAttemptLocal(toError(error));
         return;
       }
-      lastAliveAt = Date.now();
+      // Any received frame proves the tunnel is alive — clear the pong deadline.
+      if (pongDeadline !== null) {
+        clearTimeout(pongDeadline);
+        pongDeadline = null;
+      }
       if (frame.frameType === TunnelFrameType.Ping) {
         channelObj.send(encodeTunnelFrame(TunnelFrameType.Pong, frame.streamId, EMPTY_PAYLOAD));
         return;
@@ -594,7 +628,12 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
     };
 
     wire.onclose = (event) => {
-      failAttemptLocal(new Error(`relay socket closed (code ${event.code})`));
+      const terminal = TERMINAL_RELAY_CLOSE_CODES.has(event.code);
+      failAttemptLocal(
+        new Error(RELAY_CLOSE_MESSAGES[event.code] ?? `relay socket closed (code ${event.code})`),
+        terminal,
+        terminal,
+      );
     };
 
     wire.onerror = () => {

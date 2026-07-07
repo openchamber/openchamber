@@ -165,10 +165,17 @@ export class DictationClient {
             };
 
             socket.onerror = () => {
-                // The socket always fires onclose right after onerror carrying the
-                // real reason (e.g. "Unexpected server response: 403"); let onclose
-                // settle so that reason is surfaced instead of a generic "failed".
-                // The connect timeout is the fallback if no onclose arrives.
+                // Prefer onclose, which follows with the real reason (e.g.
+                // "Unexpected server response: 403"). But if a socket ever errors
+                // without a prompt onclose, fail fast here rather than hanging for
+                // the full connect timeout. onclose still wins if it arrives first.
+                window.setTimeout(() => {
+                    if (settled) return;
+                    settled = true;
+                    clearTimeout(timeout);
+                    this.connectPromise = null;
+                    reject(new Error('Dictation connection failed'));
+                }, 250);
             };
 
             socket.onclose = (event) => {
