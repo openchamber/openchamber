@@ -560,7 +560,8 @@ interface UIStore {
   eventStreamStatus: EventStreamStatus;
   eventStreamHint: string | null;
   showReasoningTraces: boolean;
-  sessionAssistEnabled: boolean;
+  sessionRecapEnabled: boolean;
+  sessionSuggestionEnabled: boolean;
   collapsibleThinkingBlocks: boolean;
   groupReasoningBlocks: boolean;
   chatRenderMode: ChatRenderMode;
@@ -709,7 +710,8 @@ interface UIStore {
   setSettingsRemoteInstancesSelectedId: (instanceId: string | null) => void;
   setEventStreamStatus: (status: EventStreamStatus, hint?: string | null) => void;
   setShowReasoningTraces: (value: boolean) => void;
-  setSessionAssistEnabled: (value: boolean) => void;
+  setSessionRecapEnabled: (value: boolean) => void;
+  setSessionSuggestionEnabled: (value: boolean) => void;
   setCollapsibleThinkingBlocks: (value: boolean) => void;
   setChatRenderMode: (value: ChatRenderMode) => void;
   setActivityRenderMode: (value: ActivityRenderMode) => void;
@@ -853,7 +855,8 @@ export const useUIStore = create<UIStore>()(
         eventStreamStatus: 'idle',
         eventStreamHint: null,
         showReasoningTraces: true,
-        sessionAssistEnabled: true,
+        sessionRecapEnabled: true,
+        sessionSuggestionEnabled: true,
         collapsibleThinkingBlocks: true,
         groupReasoningBlocks: true,
         chatRenderMode: 'live',
@@ -1546,8 +1549,12 @@ export const useUIStore = create<UIStore>()(
           set({ showReasoningTraces: value });
         },
 
-        setSessionAssistEnabled: (value) => {
-          set({ sessionAssistEnabled: value });
+        setSessionRecapEnabled: (value) => {
+          set({ sessionRecapEnabled: value });
+        },
+
+        setSessionSuggestionEnabled: (value) => {
+          set({ sessionSuggestionEnabled: value });
         },
 
         setCollapsibleThinkingBlocks: (value) => {
@@ -2234,7 +2241,8 @@ export const useUIStore = create<UIStore>()(
           isSessionCreateDialogOpen: state.isSessionCreateDialogOpen,
           // Note: isSettingsDialogOpen intentionally NOT persisted
           showReasoningTraces: state.showReasoningTraces,
-          sessionAssistEnabled: state.sessionAssistEnabled,
+          sessionRecapEnabled: state.sessionRecapEnabled,
+          sessionSuggestionEnabled: state.sessionSuggestionEnabled,
           collapsibleThinkingBlocks: state.collapsibleThinkingBlocks,
           chatRenderMode: state.chatRenderMode,
           activityRenderMode: state.activityRenderMode,

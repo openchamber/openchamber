@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.14.1] - 2026-07-07
+
+- Chat: finished agent replies can now show a short recap and a suggested next message, with separate settings for each and a Small Model setting for choosing the utility model used for those helpers.
+- Notes/Todos: adding selected chat text to notes now uses the Small Model to summarize it automatically.
+- Voice: read-aloud can now use the Small Model to summarize long text before speaking it.
+- Git/GitHub: commit message and pull-request generation now use the Small Model from setting instead of sending message to chat.
+- Chat: the timeline dialog can now load older messages when the current session history has not all been fetched yet.
+- Chat: file references with line ranges like `src/file.ts:10-20` are now clickable in messages (thanks to @Catan).
+- Git/Diff: opening a changed file now jumps to the first changed line instead of the start of the diff hunk.
+- Mobile: the composer stays focused more reliably when the keyboard opens, and the dictation transcript grows the composer like typed text.
+- Mobile: iOS PWA safe areas, keyboard overlays, and app-resume connection checks were tightened up.
+- Desktop: password-protected instances opened from desktop or a browser no longer take the mobile-only unlock path.
+- VSCode: favorite models now stay saved after restarting the extension (thanks to @Catan).
+- VSCode: closing Settings returns to the previous extension view instead of always showing the sessions list (thanks to @Catan).
+
 ## [1.14.0] - 2026-07-05
 
 - Voice: voice input was rebuilt around live streaming transcription — the composer mic shows a live transcript with a volume meter and timer while you speak, and a recording can be cancelled, inserted, or inserted and sent; failed transcriptions keep their audio so you can retry or accept the partial text.

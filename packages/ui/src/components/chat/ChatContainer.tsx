@@ -267,7 +267,7 @@ const ChatViewport = React.memo(({
                             </div>
                         )}
 
-                        <SessionRecapNote sessionId={currentSessionId} isMobile={isMobile} />
+                        <SessionRecapNote sessionId={currentSessionId} directory={directory} isMobile={isMobile} />
 
                         <div className="mb-3">
                             <StatusRowContainer />
@@ -993,6 +993,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 onScrollToMessage={timelineController.scrollToMessage}
                 onScrollByTurnOffset={navigation.scrollByTurnOffset}
                 onResumeToLatest={resumeToLatestInstant}
+                canLoadEarlier={timelineController.historySignals.canLoadEarlier}
+                isLoadingEarlier={timelineController.isLoadingOlder}
+                onLoadEarlier={handleLoadOlderClick}
             />
         </div>
     );
