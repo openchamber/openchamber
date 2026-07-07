@@ -527,8 +527,6 @@ type ComposerAttachmentControlsProps = {
     isVSCode: boolean;
     footerIconButtonClass: string;
     iconSizeClass: string;
-    fileInputRef: React.RefObject<HTMLInputElement | null>;
-    handleLocalFileSelect: (event: React.ChangeEvent<HTMLInputElement>) => void | Promise<void>;
     handlePickLocalFiles: () => void;
     openIssuePicker: () => void;
     openPrPicker: () => void;
@@ -544,8 +542,6 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
         isVSCode,
         footerIconButtonClass,
         iconSizeClass,
-        fileInputRef,
-        handleLocalFileSelect,
         handlePickLocalFiles,
         openIssuePicker,
         openPrPicker,
@@ -554,15 +550,6 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
 
     return (
         <div className="flex items-center gap-x-1.5">
-            <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                className="hidden"
-                onChange={handleLocalFileSelect}
-                accept="*/*"
-            />
-
             <div className="relative inline-flex">
                 {props.onOpenMobileSheet ? (
                     <button
@@ -4907,8 +4894,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                 isVSCode={isVSCode}
                                 footerIconButtonClass={footerIconButtonClass}
                                 iconSizeClass={iconSizeClass}
-                                fileInputRef={fileInputRef}
-                                handleLocalFileSelect={handleLocalFileSelect}
                                 handlePickLocalFiles={handlePickLocalFiles}
                                 openIssuePicker={openIssuePicker}
                                 openPrPicker={openPrPicker}
@@ -5285,8 +5270,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                             isVSCode={isVSCode}
                                             footerIconButtonClass={footerIconButtonClass}
                                             iconSizeClass={iconSizeClass}
-                                            fileInputRef={fileInputRef}
-                                            handleLocalFileSelect={handleLocalFileSelect}
                                             handlePickLocalFiles={handlePickLocalFiles}
                                             openIssuePicker={openIssuePicker}
                                             openPrPicker={openPrPicker}
@@ -5350,8 +5333,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         isVSCode={isVSCode}
                                         footerIconButtonClass={footerIconButtonClass}
                                         iconSizeClass={iconSizeClass}
-                                        fileInputRef={fileInputRef}
-                                        handleLocalFileSelect={handleLocalFileSelect}
                                         handlePickLocalFiles={handlePickLocalFiles}
                                         openIssuePicker={openIssuePicker}
                                         openPrPicker={openPrPicker}
@@ -5478,6 +5459,21 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             popup={attachmentPreview}
             onOpenChange={handleAttachmentPreviewOpenChange}
             isMobile={isMobile}
+        />
+
+        {/* Single always-mounted picker input. It must NOT live inside
+            ComposerAttachmentControls: that component mounts once per composer
+            variant (pill / expanded footer), so a shared ref got nulled when a
+            variant unmounted, and a variant swap while the OS file picker was
+            open detached the clicked input — its change event was silently
+            lost and the picked files never attached. */}
+        <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={handleLocalFileSelect}
+            accept="*/*"
         />
 
         {/* Mobile attachment sheet: replaces the dropdown (which stole focus and
