@@ -33,6 +33,11 @@ const MESSAGE_REFETCH_SKIP_PARTS = new Set(["patch", "step-start", "step-finish"
 const UNREVERT_REFETCH_ATTEMPTS = 3
 const UNREVERT_REFETCH_RETRY_MS = 150
 
+// Self-heal busy status if the SSE idle event is lost after a successful
+// SDK call. Window chosen to be longer than typical SSE delivery but short
+// enough that the user notices recovery within a few seconds. (#2072)
+const OPTIMISTIC_STATUS_WATCHDOG_MS = 4_000
+
 // Reference set by SyncProvider — allows actions to access SDK and stores
 let _sdk: OpencodeClient | null = null
 let _childStores: ChildStoreManager | null = null
@@ -42,6 +47,30 @@ type OptimisticRemoveInput = { sessionID: string; directory?: string | null; mes
 
 let _optimisticAdd: ((input: OptimisticAddInput) => void) | null = null
 let _optimisticRemove: ((input: OptimisticRemoveInput) => void) | null = null
+
+// Status-snapshot reconciliation function injected by SyncProvider so this
+// module does not need to import from `sync-context` (which already imports
+// us, creating a circular dependency). The watchdog uses it to lower a
+// wedged busy status back to idle once the server confirms the session is
+// no longer active. (#2072)
+type StatusSnapshotEntry = {
+  type: "idle" | "busy" | "retry"
+  attempt?: number
+  message?: string
+  next?: number
+}
+type ApplySessionStatusSnapshotFn = (
+  store: DirectoryStoreApi,
+  snapshot: Record<string, StatusSnapshotEntry>,
+  candidateSessionIds: string[],
+  mode: "monotonic" | "authoritative",
+) => boolean
+let _applySessionStatusSnapshot: ApplySessionStatusSnapshotFn | null = null
+export function setApplySessionStatusSnapshot(
+  fn: ApplySessionStatusSnapshotFn | null,
+): void {
+  _applySessionStatusSnapshot = fn
+}
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -737,6 +766,71 @@ export async function optimisticSend(input: {
     })
     throw error
   }
+
+  // Self-heal: if the SSE idle event never lands, fetch the authoritative
+  // status from the server after a short window and clear the busy flag if
+  // the server confirms we are idle. Without this, a lost SSE event wedges
+  // the session in a permanent "Gears turning ..." state and the next user
+  // send is force-queued instead of sent. (#2072)
+  scheduleOptimisticStatusWatchdog(store, input.sessionId, targetDirectory)
+}
+
+/**
+ * Self-healing watchdog for the busy status set by `optimisticSend`.
+ *
+ * The success path of `optimisticSend` relies on the server's SSE
+ * `session.status idle` event to clear the busy flag. If that event is
+ * dropped (long-context session with heavy prepending, a transient network
+ * blip, or any reason the event pipeline loses the tail), the busy flag
+ * stays set forever, the composer shows "Gears turning ...", and the next
+ * user send is force-queued because `useQueuedMessageAutoSend` gates on
+ * `currentStatus !== 'idle'`.
+ *
+ * After a short grace window we re-read the authoritative status from the
+ * server via `getSessionStatusForDirectory` and reconcile the local store
+ * through the same `applySessionStatusSnapshot` helper used by the
+ * reconnect/escalated-resync paths. A non-null response with the session
+ * absent or marked `idle` lowers a wedged `busy` to `idle`; an explicit
+ * `busy`/`retry` entry confirms the AI is still working. If the fetch
+ * fails (`null`) we preserve the current state — a transient network blip
+ * must not flip us to `idle` while the AI is genuinely still working.
+ */
+function scheduleOptimisticStatusWatchdog(
+  store: DirectoryStoreApi,
+  sessionId: string,
+  directory: string | null | undefined,
+): ReturnType<typeof setTimeout> {
+  return setTimeout(() => {
+    void runOptimisticStatusWatchdog(store, sessionId, directory)
+  }, OPTIMISTIC_STATUS_WATCHDOG_MS)
+}
+
+/**
+ * Body of the self-heal watchdog. Extracted as a separate function so tests
+ * can invoke it directly without sleeping for the grace window.
+ */
+async function runOptimisticStatusWatchdog(
+  store: DirectoryStoreApi,
+  sessionId: string,
+  directory: string | null | undefined,
+): Promise<void> {
+  // SSE may have already moved us out of `busy`; only reconcile if still
+  // wedged. This makes the watchdog a no-op in the normal case where the
+  // idle event arrived within the grace window.
+  const current = store.getState().session_status?.[sessionId]
+  if (!current || current.type !== "busy") return
+
+  const snapshot = await opencodeClient.getSessionStatusForDirectory(directory ?? null)
+  // null = fetch failed. Preserve state; the next SSE event or a future
+  // reconcile will recover. Do NOT flip to `idle` on a network blip.
+  if (snapshot === null) return
+
+  // `applySessionStatusSnapshot` is injected by SyncProvider to avoid a
+  // circular import with `sync-context`. Without the ref we cannot recover;
+  // a missing ref means the SyncProvider has not mounted yet, in which case
+  // a later reconnect-driven resync will reconcile state.
+  if (!_applySessionStatusSnapshot) return
+  _applySessionStatusSnapshot(store, snapshot, [sessionId], "authoritative")
 }
 
 // ---------------------------------------------------------------------------

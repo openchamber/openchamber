@@ -22,7 +22,7 @@ import {
 import { bootstrapGlobal, bootstrapDirectory } from "./bootstrap"
 import { retry } from "./retry"
 import { updateStreamingState } from "./streaming"
-import { setActionRefs } from "./session-actions"
+import { setActionRefs, setApplySessionStatusSnapshot } from "./session-actions"
 import { setSyncRefs, getAllSyncSessions } from "./sync-refs"
 import { stripMessageDiffSnapshots, stripSessionDiffSnapshots } from "./sanitize"
 import { syncDebug } from "./debug"
@@ -2131,6 +2131,13 @@ export function SyncProvider(props: {
       childStores,
       () => opencodeClient.getDirectory() || props.directory,
     )
+    // Inject the status-snapshot reconciler so `runOptimisticStatusWatchdog`
+    // (defined in `session-actions`) can lower a wedged busy status to idle
+    // without `session-actions` needing to import from this module. (#2072)
+    setApplySessionStatusSnapshot(applySessionStatusSnapshot)
+    return () => {
+      setApplySessionStatusSnapshot(null)
+    }
   }, [props.sdk, props.directory, childStores, routingIndex])
 
   // Subscribe to child store for streaming state derivation

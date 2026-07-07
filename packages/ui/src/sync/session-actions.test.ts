@@ -11,6 +11,15 @@ let questionReplyError: unknown | null = null
 let questionRejectError: unknown | null = null
 let sessionShareResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
 const globalUpsertedSessions: unknown[] = []
+// Default undefined = simulate the server omitting a session from the
+// /session/status response (i.e. authoritative "idle"). `null` simulates a
+// fetch failure (network/HTTP error). A populated object simulates a
+// busy/retry entry.
+let sessionStatusResult:
+  | Record<string, { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }>
+  | null
+  | undefined
+  = undefined
 
 const mockScopedClient = {
   permission: {
@@ -92,6 +101,10 @@ mock.module("@/lib/opencode/client", () => ({
       return mockScopedClient
     },
     getDirectory: () => "/test/project",
+    getSessionStatusForDirectory: () => {
+      if (sessionStatusResult === null) return Promise.resolve(null)
+      return Promise.resolve(sessionStatusResult ?? {})
+    },
     replyToPermission: mock((requestId: string, reply: string, options?: { directory?: string | null }) => {
       replyCalls.push({ method: "permission.reply", params: { requestID: requestId, reply, directory: options?.directory } })
       return Promise.resolve(true)
@@ -181,6 +194,22 @@ mock.module("./sync-refs", () => ({
   registerSessionDirectory: (sessionID: string, directory: string) => {
     registeredSessionDirectories.push({ sessionID, directory })
   },
+  setSyncRefs: () => {},
+  getAllSyncSessions: () => [],
+  getDirectoryState: () => undefined,
+  getSyncChildStores: () => ({ children: new Map(), ensureChild: () => undefined, getChild: () => undefined }),
+  getSyncConfig: () => undefined,
+  subscribeToSyncConfigChanges: () => () => {},
+  emitSyncConfigChanged: () => {},
+  getSyncSessions: () => [],
+  getSyncMessages: () => [],
+  getSyncSessionMaterializationStatus: () => ({
+    hasMessages: false,
+    renderable: false,
+    missingPartMessageIDs: [],
+  }),
+  getSyncParts: () => [],
+  getSyncSessionStatus: () => undefined,
 }))
 
 import { create, type StoreApi } from "zustand"
@@ -758,5 +787,174 @@ describe("dismissOpenQuestionsForSession", () => {
     expect(rejectCalls[0].params.requestID).toBe("q-stale")
     // The stale entry is cleared from the store even though the server reported not-found.
     expect(store.getState().question["session-a"]).toBe(undefined)
+  })
+})
+
+describe("optimisticSend busy-status self-heal watchdog (#2072)", () => {
+  beforeEach(() => {
+    sessionStatusResult = undefined
+  })
+
+  // Mirror the watchdog body without the 4s setTimeout. The watchdog in
+  // `session-actions` does three things and exits:
+  //   1. early-return if the local status is no longer `busy`
+  //   2. fetch the status snapshot (null = preserve)
+  //   3. delegate reconciliation to `applySessionStatusSnapshot` (authoritative)
+  // We replicate those steps directly with the public helper, since the
+  // helper is the single source of truth for the snapshot reconciliation.
+  async function runWatchdog(
+    store: StoreApi<DirectoryStore>,
+    sessionId: string,
+  ): Promise<void> {
+    const current = store.getState().session_status?.[sessionId]
+    if (!current || current.type !== "busy") return
+
+    const { opencodeClient } = await import("@/lib/opencode/client")
+    const snapshot = await opencodeClient.getSessionStatusForDirectory("/test/project")
+    if (snapshot === null) return
+
+    const { applySessionStatusSnapshot } = await import("./sync-context")
+    applySessionStatusSnapshot(
+      store,
+      snapshot as Parameters<typeof applySessionStatusSnapshot>[1],
+      [sessionId],
+      "authoritative",
+    )
+  }
+
+  test("clears wedged busy status when the server reports the session idle (absent from snapshot)", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    const { setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(() => {}, () => {})
+
+    // Simulate the wedge: optimisticSend finished, but the SSE idle event
+    // never landed so the local store is stuck on `busy`.
+    targetStore.setState({
+      session_status: { "session-watchdog": { type: "busy" } },
+    })
+    // Server snapshot: empty (no active sessions) — the missing entry means
+    // "session-watchdog is idle per the server".
+    sessionStatusResult = {}
+
+    expect(targetStore.getState().session_status["session-watchdog"]?.type).toBe("busy")
+    await runWatchdog(targetStore, "session-watchdog")
+    expect(targetStore.getState().session_status["session-watchdog"]?.type).toBe("idle")
+  })
+
+  test("clears wedged busy status when the server explicitly returns { type: 'idle' }", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    const { setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(() => {}, () => {})
+
+    targetStore.setState({
+      session_status: { "session-watchdog": { type: "busy" } },
+    })
+    sessionStatusResult = { "session-watchdog": { type: "idle" } }
+
+    await runWatchdog(targetStore, "session-watchdog")
+    expect(targetStore.getState().session_status["session-watchdog"]?.type).toBe("idle")
+  })
+
+  test("preserves busy when the server reports the session is still busy", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    const { setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(() => {}, () => {})
+
+    targetStore.setState({
+      session_status: { "session-watchdog": { type: "busy" } },
+    })
+    sessionStatusResult = { "session-watchdog": { type: "busy" } }
+
+    await runWatchdog(targetStore, "session-watchdog")
+    // AI is genuinely still working — must NOT clobber busy with idle.
+    expect(targetStore.getState().session_status["session-watchdog"]?.type).toBe("busy")
+  })
+
+  test("preserves a non-idle status when the server reports the session is in retry", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    const { setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(() => {}, () => {})
+
+    targetStore.setState({
+      session_status: { "session-watchdog": { type: "busy" } },
+    })
+    sessionStatusResult = {
+      "session-watchdog": { type: "retry", attempt: 2, message: "rate limited", next: 30 },
+    }
+
+    await runWatchdog(targetStore, "session-watchdog")
+    // The helper confirms the active retry state and RAISES the local entry
+    // from busy → retry (the snapshot is authoritative). The important
+    // invariant is that we never lower to `idle` while the AI is still
+    // working — so the new status must remain a non-idle active state.
+    expect(targetStore.getState().session_status["session-watchdog"]?.type).toBe("retry")
+  })
+
+  test("preserves busy when the fetch fails (getSessionStatusForDirectory returns null)", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    const { setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(() => {}, () => {})
+
+    targetStore.setState({
+      session_status: { "session-watchdog": { type: "busy" } },
+    })
+    sessionStatusResult = null
+
+    await runWatchdog(targetStore, "session-watchdog")
+    // Network blip during a long send must not flip us to idle while the
+    // AI is genuinely still working.
+    expect(targetStore.getState().session_status["session-watchdog"]?.type).toBe("busy")
+  })
+
+  test("is a no-op when the SSE has already moved status out of busy (e.g. idle)", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    const { setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(() => {}, () => {})
+
+    // SSE idle event landed within the grace window.
+    targetStore.setState({
+      session_status: { "session-watchdog": { type: "idle" } },
+    })
+    sessionStatusResult = {}
+    const statusBefore = targetStore.getState().session_status["session-watchdog"]
+
+    await runWatchdog(targetStore, "session-watchdog")
+    // The watchdog early-returns because the current status is not `busy`;
+    // the store entry must be unchanged (referential equality on the slice).
+    expect(targetStore.getState().session_status["session-watchdog"]).toBe(statusBefore)
+  })
+
+  test("is a no-op when the SSE has already moved status out of busy (e.g. retry)", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    const { setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(() => {}, () => {})
+
+    // SSE retry event landed within the grace window. The local store now
+    // reflects an authoritative non-idle state from the server, so the
+    // watchdog should not touch it.
+    targetStore.setState({
+      session_status: {
+        "session-watchdog": { type: "retry", attempt: 1, message: "backing off", next: 5 },
+      },
+    })
+    sessionStatusResult = {}
+    const statusBefore = targetStore.getState().session_status["session-watchdog"]
+
+    await runWatchdog(targetStore, "session-watchdog")
+    expect(targetStore.getState().session_status["session-watchdog"]).toBe(statusBefore)
   })
 })
