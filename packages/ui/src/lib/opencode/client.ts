@@ -883,7 +883,36 @@ class OpencodeService {
         } else {
           response = new Response(JSON.stringify(result.data ?? true), { status: 200 });
         }
-      } catch (error) {
+      } catch (sdkError) {
+        // FIX: SDK v2 omits the body for session.promptAsync (same bug as
+        // session.create). The server returns 400 BadRequest for an empty
+        // body. Fall back to a direct fetch with the proper body.
+        if (attempt === 0) {
+          const baseUrl = (this.baseUrl || '/api').replace(/\/$/, '');
+          const dirPath = encodeURIComponent(requestDirectory ?? '');
+          const fallbackUrl = `${baseUrl}/session/${encodeURIComponent(params.id)}/prompt_async?directory=${dirPath}`;
+          const fallbackBody: Record<string, unknown> = {
+            sessionID: params.id,
+            model: {
+              providerID: params.providerID,
+              modelID: params.modelID,
+            },
+            messageID: messageId,
+            parts,
+          };
+          if (params.agent) fallbackBody.agent = params.agent;
+          if (params.variant) fallbackBody.variant = params.variant;
+          if (requestDirectory) fallbackBody.directory = requestDirectory;
+          if (params.delivery) fallbackBody.delivery = params.delivery;
+          if (params.format) fallbackBody.format = params.format;
+          response = await fetch(fallbackUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(fallbackBody),
+            signal: controller.signal,
+          });
+          continue;
+        }
         if (attempt < 2 && isRetryableFetchError(error)) {
           const delay = getRetryDelayMs(attempt);
           console.warn(
