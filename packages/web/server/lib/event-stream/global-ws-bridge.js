@@ -194,9 +194,18 @@ export function createGlobalMessageStreamWsBridge({
     clients.add(socket);
     clientLastEventIds.set(socket, requestedLastEventId);
     globalHub.start();
-    if (globalHub.isConnected()) {
-      markReady(socket, requestedLastEventId);
-    }
+    // FIX: Always mark the socket as ready immediately, regardless of whether
+    // the upstream hub has finished connecting. Previously we gated this on
+    // `globalHub.isConnected()`, which races the upstream SSE handshake:
+    // the client's 2s WS-ready timeout fired before the server could send the
+    // `ready` frame, triggering WS_FALLBACK and locking the client into
+    // SSE-only mode for 60s on every page load. Events that arrive before the
+    // upstream connects are buffered in the hub; new sockets that connect
+    // after the hub is ready are still handled by the `status.type === 'connect'`
+    // branch above. If the hub fails to connect at all, `unsubscribeStatus`
+    // fires `closeClientsWithInitialError` which sends an `error` frame and
+    // closes this socket with code 1011.
+    markReady(socket, requestedLastEventId);
   };
 
   const close = () => {
