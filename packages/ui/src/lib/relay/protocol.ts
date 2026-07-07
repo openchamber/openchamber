@@ -76,6 +76,11 @@ export interface TunnelWsOpenPayload {
   path: string;
   query: string;
   protocols?: string[];
+  // The client's real page origin (e.g. capacitor://localhost, openchamber-ui://app).
+  // The host sets it as the Origin header on the loopback dial so the server's WS
+  // origin check accepts it — the tunnel drops browser-set headers otherwise, and
+  // a WS upgrade with no Origin is rejected.
+  origin?: string;
 }
 
 export interface TunnelWsOpenedPayload {

@@ -75,7 +75,8 @@ const isWsOpenPayload = (parsed) =>
   Boolean(parsed && typeof parsed === 'object'
     && typeof parsed.path === 'string'
     && typeof parsed.query === 'string'
-    && (parsed.protocols === undefined || Array.isArray(parsed.protocols)));
+    && (parsed.protocols === undefined || Array.isArray(parsed.protocols))
+    && (parsed.origin === undefined || typeof parsed.origin === 'string'));
 
 const isWsClosePayload = (parsed) => Boolean(parsed && typeof parsed === 'object');
 
@@ -303,10 +304,15 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     }
 
     const url = `ws://127.0.0.1:${getLocalPort()}${open.path}${open.query ? `?${open.query}` : ''}`;
+    // The `ws` client sends no Origin; forward the client's real origin so the
+    // server's WS origin check accepts this loopback dial (it rejects no-origin
+    // upgrades). The request is already authenticated by the tunneled oc_url_token.
+    const dialHeaders = { 'x-openchamber-relay-connection': connectionId };
+    if (open.origin) dialHeaders.origin = open.origin;
     let socket;
     try {
       socket = new WebSocket(url, open.protocols, {
-        headers: { 'x-openchamber-relay-connection': connectionId },
+        headers: dialHeaders,
       });
     } catch (error) {
       void sendAbort(streamId, error?.message ?? 'ws dial failed');

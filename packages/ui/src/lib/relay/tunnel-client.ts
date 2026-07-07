@@ -160,6 +160,8 @@ export interface RelayTunnelClientOptions {
   batchWindowMs?: number;
   /** Advertise frame batching in the handshake. Default true. */
   batch?: boolean;
+  /** Origin sent on tunneled WS opens; defaults to window.location.origin. */
+  origin?: string;
   reconnectBaseDelayMs?: number;
   reconnectMaxDelayMs?: number;
   hiddenOrOfflineMaxDelayMs?: number;
@@ -937,7 +939,15 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         },
       });
       const { path, query } = splitPathQuery(pathWithQuery);
-      const openPayload: TunnelWsOpenPayload = protocols && protocols.length > 0 ? { path, query, protocols } : { path, query };
+      // Forward the app's real origin so the host can satisfy the server's WS
+      // origin check on the loopback dial (a WS upgrade with no Origin is rejected).
+      const origin = options.origin ?? (typeof window !== 'undefined' ? window.location.origin : undefined);
+      const openPayload: TunnelWsOpenPayload = {
+        path,
+        query,
+        ...(protocols && protocols.length > 0 ? { protocols } : {}),
+        ...(origin ? { origin } : {}),
+      };
       channel.send(encodeTunnelFrame(TunnelFrameType.WsOpen, streamId, encodeJsonPayload(openPayload)));
     })();
 
