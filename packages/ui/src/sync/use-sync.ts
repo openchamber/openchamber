@@ -127,7 +127,7 @@ function isUserMessage(message: Message): boolean {
   return role === "user"
 }
 
-function hasUserMessage(messages: Message[] | undefined): boolean {
+export function hasUserMessage(messages: Message[] | undefined): boolean {
   return Boolean(messages?.some(isUserMessage))
 }
 
@@ -349,44 +349,102 @@ export function useSync() {
       setMetaFor(sessionID, { loading: true })
 
       try {
+        // Commit a fetched page to the store: merge optimistic items, run
+        // materialization, and write the result so the UI can render it.
+        // Returns the committed meta so the caller can update pagination
+        // state once at the end. The store write happens here (per page) so
+        // the hydrating skeleton disappears after the first fetch instead of
+        // waiting for the full expansion sequence.
+        const commitMessagesToStore = (
+          page: Awaited<ReturnType<typeof fetchMessages>>,
+          mode: "replace" | "prepend" | undefined,
+          isStale?: () => boolean,
+        ) => {
+          const items = getOptimistic(sessionID)
+          const merged = mergeOptimisticPage(page, items)
+          for (const messageID of merged.confirmed) {
+            clearOptimistic(sessionID, messageID)
+          }
+
+          if (isStale?.()) {
+            return { messages: [], cursor: merged.cursor, complete: merged.complete }
+          }
+
+          const current = store.getState()
+          const materialized = materializeSessionSnapshots(
+            current,
+            sessionID,
+            merged.session.map((info) => ({
+              info,
+              parts: merged.part.find((item) => item.id === info.id)?.part ?? [],
+            })),
+            { skipPartTypes: SKIP_PARTS, mode: mode === "prepend" ? "prepend" : "merge" },
+          )
+
+          // materializeSessionSnapshots is synchronous today, so this check
+          // is defense-in-depth: it guards the store write if materialization
+          // ever becomes async or yields between the check above and setState.
+          if (isStale?.()) {
+            return { messages: materialized.messages, cursor: merged.cursor, complete: merged.complete }
+          }
+
+          if (materialized.messagesChanged || materialized.partsChanged) {
+            store.setState({
+              ...(materialized.messagesChanged ? { message: materialized.message } : {}),
+              ...(materialized.partsChanged ? { part: materialized.part } : {}),
+            })
+          }
+          return { messages: materialized.messages, cursor: merged.cursor, complete: merged.complete }
+        }
+
         const limit = options?.before ? HISTORY_MESSAGE_PAGE_SIZE : m.limit
-        let page = await fetchMessages(sessionID, limit, options?.before)
+        const page = await fetchMessages(sessionID, limit, options?.before)
+
+        // Commit the first page to the store immediately so the hydrating
+        // skeleton disappears after a single round-trip — but only when the
+        // page already contains a user message boundary. If the tail is
+        // assistant/tool-only (a very large final turn), committing now would
+        // drop the skeleton and render an empty chat (turn projection skips
+        // assistant messages without a user parent), which looks like a fresh
+        // session instead of a loading state. In that case defer the first
+        // commit to the expansion loop below, which fetches older records
+        // until a user boundary appears and commits that page instead.
+        let committed =
+          hasUserMessage(page.session) || page.complete
+            ? commitMessagesToStore(page, options?.mode, options?.isStale)
+            : { messages: [] as Message[], cursor: page.cursor, complete: page.complete }
+
+        // If the first commit detected a stale session, bail out immediately
+        // instead of relying on downstream guards to skip the final setMetaFor.
+        if (options?.isStale?.()) {
+          setMetaFor(sessionID, { loading: false })
+          return
+        }
 
         // Keep the initial page small for switch performance. Some sessions
         // have a very large final turn, so the latest records can
         // contain only assistant/tool records and no user boundary. That makes
         // turn projection render an empty chat until the user manually loads
         // older messages. Expand only this initial tail fetch, with a hard cap.
+        // Each expanded page is committed to the store incrementally so the
+        // user sees content as soon as a user boundary appears, instead of
+        // waiting for the full expansion sequence before the first paint.
         if (!options?.before && !page.complete && !hasUserMessage(page.session)) {
           for (const nextLimit of getInitialPageExpansionLimits()) {
             if (nextLimit <= limit) continue
-            page = await fetchMessages(sessionID, nextLimit)
-            if (page.complete || hasUserMessage(page.session)) break
+            if (options?.isStale?.()) {
+              setMetaFor(sessionID, { loading: false })
+              return
+            }
+            const expandedPage = await fetchMessages(sessionID, nextLimit)
+            committed = commitMessagesToStore(expandedPage, options?.mode, options?.isStale)
+            if (options?.isStale?.()) {
+              setMetaFor(sessionID, { loading: false })
+              return
+            }
+            if (expandedPage.complete || hasUserMessage(expandedPage.session)) break
           }
         }
-
-        // Merge optimistic items
-        const items = getOptimistic(sessionID)
-        const merged = mergeOptimisticPage(page, items)
-        for (const messageID of merged.confirmed) {
-          clearOptimistic(sessionID, messageID)
-        }
-
-        if (options?.isStale?.()) {
-          setMetaFor(sessionID, { loading: false })
-          return
-        }
-
-        const current = store.getState()
-        const materialized = materializeSessionSnapshots(
-          current,
-          sessionID,
-          merged.session.map((info) => ({
-            info,
-            parts: merged.part.find((item) => item.id === info.id)?.part ?? [],
-          })),
-          { skipPartTypes: SKIP_PARTS, mode: options?.mode === "prepend" ? "prepend" : "merge" },
-        )
 
         if (options?.isStale?.()) {
           setMetaFor(sessionID, { loading: false })
@@ -394,23 +452,17 @@ export function useSync() {
         }
 
         setMetaFor(sessionID, {
-          limit: materialized.messages.length,
-          cursor: merged.cursor,
-          complete: merged.complete,
+          limit: committed.messages.length,
+          cursor: committed.cursor,
+          complete: committed.complete,
           loading: false,
         })
-        if (materialized.messagesChanged || materialized.partsChanged) {
-          store.setState({
-            ...(materialized.messagesChanged ? { message: materialized.message } : {}),
-            ...(materialized.partsChanged ? { part: materialized.part } : {}),
-          })
-        }
         setSessionPrefetch({
           directory,
           sessionID,
-          limit: materialized.messages.length,
-          cursor: merged.cursor,
-          complete: merged.complete,
+          limit: committed.messages.length,
+          cursor: committed.cursor,
+          complete: committed.complete,
         })
       } catch {
         setMetaFor(sessionID, { loading: false })
