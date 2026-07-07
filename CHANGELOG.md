@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.14.1-r0.1] - 2026-07-07
+
+- Russian (ru) locale: full UI i18n translation (~4535 keys) and 40 docs MDX pages.
+- Mobile: fix Windows EPERM build error on `bun run build` — skip redundant web rebuild when web/dist already exists.
+
 ## [1.14.1] - 2026-07-07
 
 - Chat: finished agent replies can now show a short recap and a suggested next message, with separate settings for each and a Small Model setting for choosing the utility model used for those helpers.

@@ -1,0 +1,97 @@
+---
+title: Сервер OpenCode
+description: Подключите OpenChamber к локальному или удалённому серверу OpenCode.
+---
+
+# Сервер OpenCode
+
+OpenChamber работает поверх сервера OpenCode. По умолчанию он запускает его для вас, так что вам ничего не нужно делать. Эта страница нужна, только если вы хотите указать OpenChamber на сервер, который уже запускаете, или управлять тем, который он запускает.
+
+## Как OpenChamber находит сервер
+
+При запуске OpenChamber ищет сервер в таком порядке:
+
+1. переиспользовать сервер, который он уже запустил
+2. подключиться к внешнему, если вы указали его (см. ниже)
+3. автоопределить сервер на порту по умолчанию (`4096`)
+4. иначе — запустить и управлять своим собственным
+
+Если ничего не настроено, шаг 4 выполняется автоматически, и вы готовы к работе.
+
+## Подключение к серверу, который вы уже запускаете
+
+Задайте это перед запуском OpenChamber:
+
+```bash
+OPENCODE_HOST=http://localhost:4096 OPENCODE_SKIP_START=true openchamber
+```
+
+- `OPENCODE_HOST` — полный адрес вашего сервера OpenCode, включая порт (значение вроде `http://localhost:4096`). В конце не должно быть пути.
+- `OPENCODE_SKIP_START=true` — указывает OpenChamber не запускать собственный сервер.
+
+Если нужно только сменить порт, задайте `OPENCODE_PORT` вместо `OPENCODE_HOST`.
+
+Если в `OPENCODE_HOST` нет порта или есть путь, OpenChamber игнорирует его и возвращается к запуску собственного сервера. Следите за предупреждением `[config]` в логах запуска, если ожидаемого подключения не произошло.
+
+## Управление сервером из CLI
+
+```bash
+openchamber status
+openchamber logs
+openchamber restart
+openchamber stop
+```
+
+`openchamber` без аргументов запускает сервер в фоне. Добавьте `--foreground`, чтобы держать его привязанным к терминалу.
+
+## Запуск OpenChamber при входе в систему
+
+Используйте `startup enable`, чтобы установить нативную пользовательскую службу. OpenChamber использует `launchd` на macOS, `systemd --user` на Linux и Task Scheduler на Windows.
+
+```bash
+openchamber startup enable
+openchamber startup status
+openchamber startup disable
+```
+
+Чтобы защитить UI, задайте пароль при включении службы:
+
+```bash
+OPENCHAMBER_UI_PASSWORD='secret' openchamber startup enable
+```
+
+Для headless-сервера, который стартует при входе и предназначен для десктопных или мобильных клиентов, добавьте `--api-only` и достижимый хост:
+
+```bash
+openchamber startup enable --port 3000 --api-only --host 0.0.0.0 --ui-password secret
+```
+
+`startup enable` делает снимок вашего текущего окружения в службу, чтобы она вела себя ближе к запуску `openchamber` из той же оболочки. Это сохраняет доступность токенов провайдеров, `PATH`, настроек SSH-агента и других CLI auth/config-переменных. Используйте `--no-env-snapshot`, чтобы получить минимальное окружение службы.
+
+Стартовая служба запоминает `--port`, `--host`, `--ui-password` и `--api-only`. CLI restart и update restart переиспользуют эти сохранённые настройки.
+
+Чтобы создать ссылку подключения для другого приложения OpenChamber, используйте:
+
+```bash
+openchamber connect-url --port 3000 --server http://your-host:3000 --qr
+```
+
+Запустите `openchamber connect-url --help`, чтобы увидеть все опции ссылки, включая `--name`, `--lan`, `--server`, `--api-only`, `--ui-password` и `--qr`.
+
+Туннелями для этой запущенной службы можно управлять независимо:
+
+```bash
+openchamber tunnel start --port 3000
+openchamber tunnel stop --port 3000
+```
+
+Остановка туннеля не перезапускает службу или приложение.
+
+## «OpenCode перезапускается»
+
+Пока сервер запускается или перезапускается, OpenChamber показывает состояние «OpenCode is restarting» и ставит запросы на паузу, пока он не будет готов. Это нормально сразу после запуска или перезапуска. Если оно не проходит, см. [Подключение OpenCode](/troubleshooting/opencode-connection/).
+
+## Похожие темы
+
+- [Провайдеры, модели и агенты](/providers/) — настройте, с чем говорит сервер
+- [Подключение OpenCode](/troubleshooting/opencode-connection/) — если не подключается
