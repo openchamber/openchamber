@@ -173,9 +173,20 @@ jobs:
           security import "$cert_path" -P "$IOS_DISTRIBUTION_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain_path"
           security list-keychain -d user -s "$keychain_path"
 
-          printf '%s' "$IOS_APP_PROFILE_BASE64" | base64 -D > "$profiles_dir/openchamber-app.mobileprovision"
-          printf '%s' "$IOS_WIDGET_PROFILE_BASE64" | base64 -D > "$profiles_dir/openchamber-widget.mobileprovision"
-          printf '%s' "$IOS_NSE_PROFILE_BASE64" | base64 -D > "$profiles_dir/openchamber-notification-service.mobileprovision"
+          app_profile="$profiles_dir/openchamber-app.mobileprovision"
+          widget_profile="$profiles_dir/openchamber-widget.mobileprovision"
+          nse_profile="$profiles_dir/openchamber-notification-service.mobileprovision"
+          printf '%s' "$IOS_APP_PROFILE_BASE64" | base64 -D > "$app_profile"
+          printf '%s' "$IOS_WIDGET_PROFILE_BASE64" | base64 -D > "$widget_profile"
+          printf '%s' "$IOS_NSE_PROFILE_BASE64" | base64 -D > "$nse_profile"
+
+          profile_uuid() {
+            security cms -D -i "$1" > "$RUNNER_TEMP/profile.plist"
+            /usr/libexec/PlistBuddy -c 'Print :UUID' "$RUNNER_TEMP/profile.plist"
+          }
+          echo "IOS_APP_PROFILE_UUID=$(profile_uuid "$app_profile")" >> "$GITHUB_ENV"
+          echo "IOS_WIDGET_PROFILE_UUID=$(profile_uuid "$widget_profile")" >> "$GITHUB_ENV"
+          echo "IOS_NSE_PROFILE_UUID=$(profile_uuid "$nse_profile")" >> "$GITHUB_ENV"
 
       - name: Prepare mobile assets
         run: bun run mobile:sync
@@ -204,19 +215,23 @@ jobs:
             {
               bundle: 'com.openchamber.app',
               profile: process.env.IOS_APP_PROFILE_NAME,
+              uuid: process.env.IOS_APP_PROFILE_UUID,
             },
             {
               bundle: 'com.openchamber.app.OpenChamberWidget',
               profile: process.env.IOS_WIDGET_PROFILE_NAME,
+              uuid: process.env.IOS_WIDGET_PROFILE_UUID,
             },
             {
               bundle: 'com.openchamber.app.OpenChamberNotificationService',
               profile: process.env.IOS_NSE_PROFILE_NAME,
+              uuid: process.env.IOS_NSE_PROFILE_UUID,
             },
           ];
 
-          for (const { bundle, profile } of replacements) {
+          for (const { bundle, profile, uuid } of replacements) {
             if (!profile) throw new Error(`Missing provisioning profile name for ${bundle}`);
+            if (!uuid) throw new Error(`Missing provisioning profile UUID for ${bundle}`);
             const marker = `PRODUCT_BUNDLE_IDENTIFIER = ${bundle};`;
             const escapedMarker = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             const releaseBlockPattern = new RegExp(`\\n\\t\\t[^\\n]+/\\* Release \\*/ = \\{[\\s\\S]*?${escapedMarker}[\\s\\S]*?\\n\\t\\t\\};`);
@@ -234,6 +249,9 @@ jobs:
             }
             if (!block.includes('PROVISIONING_PROFILE_SPECIFIER = ')) {
               block = block.replace(`${marker}\n`, `${marker}\n\t\t\t\tPROVISIONING_PROFILE_SPECIFIER = "${profile}";\n`);
+            }
+            if (!block.includes('PROVISIONING_PROFILE = ')) {
+              block = block.replace(`${marker}\n`, `${marker}\n\t\t\t\tPROVISIONING_PROFILE = "${uuid}";\n`);
             }
 
             project = project.replace(match[0], block);
