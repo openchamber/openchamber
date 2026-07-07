@@ -34,9 +34,18 @@ const UNREVERT_REFETCH_ATTEMPTS = 3
 const UNREVERT_REFETCH_RETRY_MS = 150
 
 // Self-heal busy status if the SSE idle event is lost after a successful
-// SDK call. Window chosen to be longer than typical SSE delivery but short
-// enough that the user notices recovery within a few seconds. (#2072)
+// SDK call. Window chosen to be longer than typical SSE delivery (ms-scale)
+// but shorter than the 5s periodic status poll (`ACTIVE_SESSION_STATUS_POLL_INTERVAL_MS`),
+// so the per-send watchdog recovers a wedged session a second or so before
+// the next poll. (#2072)
 const OPTIMISTIC_STATUS_WATCHDOG_MS = 4_000
+
+// Per-session watchdog timers. A burst of `optimisticSend` calls on the same
+// session would otherwise queue an arbitrary number of pending callbacks;
+// the snapshot reconciliation is idempotent so the result is still correct,
+// but the unbounded timer growth is wasteful. We replace the previous
+// pending timer (if any) when a new one is scheduled for the same session.
+const _optimisticStatusWatchdogTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 // Reference set by SyncProvider — allows actions to access SDK and stores
 let _sdk: OpencodeClient | null = null
@@ -800,9 +809,17 @@ function scheduleOptimisticStatusWatchdog(
   sessionId: string,
   directory: string | null | undefined,
 ): ReturnType<typeof setTimeout> {
-  return setTimeout(() => {
+  // Replace any pending watchdog for the same session — a burst of
+  // `optimisticSend` calls must not pile up callbacks that fire long after
+  // the latest send.
+  const existing = _optimisticStatusWatchdogTimers.get(sessionId)
+  if (existing !== undefined) clearTimeout(existing)
+
+  const timer = setTimeout(() => {
     void runOptimisticStatusWatchdog(store, sessionId, directory)
   }, OPTIMISTIC_STATUS_WATCHDOG_MS)
+  _optimisticStatusWatchdogTimers.set(sessionId, timer)
+  return timer
 }
 
 /**
@@ -814,24 +831,39 @@ async function runOptimisticStatusWatchdog(
   sessionId: string,
   directory: string | null | undefined,
 ): Promise<void> {
-  // SSE may have already moved us out of `busy`; only reconcile if still
-  // wedged. This makes the watchdog a no-op in the normal case where the
-  // idle event arrived within the grace window.
-  const current = store.getState().session_status?.[sessionId]
-  if (!current || current.type !== "busy") return
+  // Always clear our timer registration, regardless of which branch we take.
+  // The next scheduling pass (or a new send) owns the Map from this point on.
+  _optimisticStatusWatchdogTimers.delete(sessionId)
+  try {
+    // SSE may have already moved us out of `busy`; only reconcile if still
+    // wedged. This makes the watchdog a no-op in the normal case where the
+    // idle event arrived within the grace window.
+    const current = store.getState().session_status?.[sessionId]
+    if (!current || current.type !== "busy") return
 
-  const snapshot = await opencodeClient.getSessionStatusForDirectory(directory ?? null)
-  // null = fetch failed. Preserve state; the next SSE event or a future
-  // reconcile will recover. Do NOT flip to `idle` on a network blip.
-  if (snapshot === null) return
+    const snapshot = await opencodeClient.getSessionStatusForDirectory(directory ?? null)
+    // null = fetch failed. Preserve state; the next SSE event or a future
+    // reconcile will recover. Do NOT flip to `idle` on a network blip.
+    if (snapshot === null) return
 
-  // `applySessionStatusSnapshot` is injected by SyncProvider to avoid a
-  // circular import with `sync-context`. Without the ref we cannot recover;
-  // a missing ref means the SyncProvider has not mounted yet, in which case
-  // a later reconnect-driven resync will reconcile state.
-  if (!_applySessionStatusSnapshot) return
-  _applySessionStatusSnapshot(store, snapshot, [sessionId], "authoritative")
+    // `applySessionStatusSnapshot` is injected by SyncProvider to avoid a
+    // circular import with `sync-context`. Without the ref we cannot recover;
+    // a missing ref means the SyncProvider has not mounted yet, in which case
+    // a later reconnect-driven resync will reconcile state.
+    if (!_applySessionStatusSnapshot) return
+    _applySessionStatusSnapshot(store, snapshot, [sessionId], "authoritative")
+  } catch (error) {
+    // The watchdog must never throw into the timer callback. Preserve the
+    // local state and let the next SSE event / poll recover.
+    console.error("[session-actions] optimistic status watchdog failed", error)
+  }
 }
+
+// Exported under a `__test` prefix so production code paths are the only
+// callers — the body is not part of the public API. The codebase has no
+// other `__test*` exports today; the prefix is a hard "do not import from
+// feature code" signal. (#2072)
+export const __testRunOptimisticStatusWatchdog = runOptimisticStatusWatchdog
 
 // ---------------------------------------------------------------------------
 // Abort

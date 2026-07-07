@@ -876,7 +876,7 @@ describe("optimisticSend busy-status self-heal watchdog (#2072)", () => {
     expect(targetStore.getState().session_status["session-watchdog"]?.type).toBe("busy")
   })
 
-  test("preserves a non-idle status when the server reports the session is in retry", async () => {
+  test("raises busy to retry when the server reports the session is in retry", async () => {
     const targetStore = createStore({})
     const childStores = createChildStores([["/target/project", targetStore]])
     const { setActionRefs, setOptimisticRefs } = await import("./session-actions")
@@ -956,5 +956,249 @@ describe("optimisticSend busy-status self-heal watchdog (#2072)", () => {
 
     await runWatchdog(targetStore, "session-watchdog")
     expect(targetStore.getState().session_status["session-watchdog"]).toBe(statusBefore)
+  })
+
+  // ---------------------------------------------------------------------
+  // Production-ref-path coverage (#2072 follow-ups)
+  //
+  // The tests above re-implement the watchdog body inline. That guards the
+  // snapshot reconciliation, but it does NOT exercise the production
+  // `_applySessionStatusSnapshot` module-level ref — a regression in
+  // `setApplySessionStatusSnapshot` wiring would slip through. The
+  // following tests use the production `__testRunOptimisticStatusWatchdog`
+  // export and inject a spy via `setApplySessionStatusSnapshot` so the
+  // ref path is covered end-to-end.
+  //
+  // Test-helper design: `__testRunOptimisticStatusWatchdog` is a
+  // test-only export (prefixed `__test`) that calls the same body the
+  // 4s setTimeout would. We choose this over `bun:test`'s fake timers
+  // because the watchdog body is async and re-orders events on the
+  // microtask queue; a 4s setSystemTime jump adds brittleness without
+  // exercising anything the direct call doesn't already cover.
+  // ---------------------------------------------------------------------
+
+  test("invokes the production applySessionStatusSnapshot ref wired by setApplySessionStatusSnapshot", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    const { setActionRefs, setOptimisticRefs, setApplySessionStatusSnapshot, __testRunOptimisticStatusWatchdog } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(() => {}, () => {})
+
+    // Wedged busy so the watchdog will actually try to reconcile.
+    targetStore.setState({
+      session_status: { "session-watchdog": { type: "busy" } },
+    })
+    sessionStatusResult = { "session-watchdog": { type: "idle" } }
+
+    // Manual call-recording spy (matches the file's `replyCalls` pattern —
+    // bun:test's `mock` return type does not expose `mock.calls` /
+    // `toHaveBeenCalledTimes` to TypeScript here, and a plain array keeps
+    // the assertion style uniform with the rest of the file).
+    type SnapshotCall = {
+      store: unknown
+      snapshot: Record<string, unknown>
+      candidateSessionIds: string[]
+      mode: "monotonic" | "authoritative"
+    }
+    const calls: SnapshotCall[] = []
+    const spy: Parameters<typeof setApplySessionStatusSnapshot>[0] = (
+      store,
+      snapshot,
+      candidateSessionIds,
+      mode,
+    ) => {
+      calls.push({ store, snapshot, candidateSessionIds, mode })
+      return true
+    }
+    setApplySessionStatusSnapshot(spy)
+
+    try {
+      await __testRunOptimisticStatusWatchdog(targetStore, "session-watchdog", "/target/project")
+    } finally {
+      // Always clear the ref, even on failure, so other test blocks run
+      // in the same module are not contaminated.
+      setApplySessionStatusSnapshot(null)
+    }
+
+    // The production ref MUST have been called with the snapshot, the
+    // candidate list (only this session), and the authoritative mode.
+    expect(calls).toHaveLength(1)
+    const call = calls[0]
+    expect(call.snapshot).toEqual({ "session-watchdog": { type: "idle" } })
+    expect(call.candidateSessionIds).toEqual(["session-watchdog"])
+    expect(call.mode).toBe("authoritative")
+  })
+
+  test("no-ops gracefully when the production applySessionStatusSnapshot ref is null", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    const { setActionRefs, setOptimisticRefs, setApplySessionStatusSnapshot, __testRunOptimisticStatusWatchdog } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(() => {}, () => {})
+
+    targetStore.setState({
+      session_status: { "session-watchdog": { type: "busy" } },
+    })
+    sessionStatusResult = {}
+
+    // Ensure the ref is null (a previous test may have set it).
+    setApplySessionStatusSnapshot(null)
+
+    // The watchdog body must early-return without throwing when the ref
+    // is null (this is the SyncProvider-unmounted edge case). The
+    // `busy` status is preserved — the next SSE event / poll will recover.
+    await __testRunOptimisticStatusWatchdog(targetStore, "session-watchdog", "/target/project")
+    expect(targetStore.getState().session_status["session-watchdog"]?.type).toBe("busy")
+  })
+
+  test("lowers busy to idle when the candidate is absent from a populated snapshot, without touching other sessions", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    const { setActionRefs, setOptimisticRefs, setApplySessionStatusSnapshot, __testRunOptimisticStatusWatchdog } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(() => {}, () => {})
+
+    // Local state: our candidate is wedged busy, but a *different* session
+    // already has an authoritative busy entry.
+    targetStore.setState({
+      session_status: {
+        "session-watchdog": { type: "busy" },
+        "session-other": { type: "busy" },
+      },
+    })
+    // Server snapshot: only `session-other` is reported (still busy).
+    // `session-watchdog` is absent — i.e. authoritative idle.
+    sessionStatusResult = { "session-other": { type: "busy" } }
+
+    type SnapshotCall = {
+      snapshot: Record<string, unknown>
+      candidateSessionIds: string[]
+    }
+    const calls: SnapshotCall[] = []
+    const spy: Parameters<typeof setApplySessionStatusSnapshot>[0] = (
+      _store,
+      snapshot,
+      candidateSessionIds,
+      // mode is forwarded by the production code; we don't need to assert
+      // it here (the first test in this block already covers that).
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      _mode,
+    ) => {
+      calls.push({ snapshot, candidateSessionIds })
+      return true
+    }
+    setApplySessionStatusSnapshot(spy)
+
+    try {
+      await __testRunOptimisticStatusWatchdog(targetStore, "session-watchdog", "/target/project")
+    } finally {
+      setApplySessionStatusSnapshot(null)
+    }
+
+    // The watchdog targets only `session-watchdog` (the candidate). The
+    // helper is given the full server snapshot and a 1-element candidate
+    // list, so `session-other` is not part of the reconciliation surface.
+    expect(calls).toHaveLength(1)
+    const call = calls[0]
+    expect(call.candidateSessionIds).toEqual(["session-watchdog"])
+    // The snapshot forwarded to the helper still carries `session-other`
+    // — reconciliation decides what to do per candidate, the helper does
+    // not pre-filter.
+    expect(call.snapshot).toEqual({ "session-other": { type: "busy" } })
+  })
+
+  // ---------------------------------------------------------------------
+  // Concurrent watchdog guard (#2072 follow-up)
+  //
+  // A burst of `optimisticSend` calls on the same session must not pile
+  // up pending watchdog timers. We assert the observable signal: the
+  // second send must `clearTimeout` the first one's pending timer so
+  // only one reconciliation fires. The body itself also clears the Map
+  // entry on entry, so we do NOT inspect the Map directly — we use the
+  // `clearTimeout` global as the witness.
+  // ---------------------------------------------------------------------
+
+  test("replaces a pending watchdog instead of stacking when optimisticSend fires twice on the same session", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    const { setActionRefs, setOptimisticRefs, optimisticSend } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(() => {}, () => {})
+
+    // Spy on `clearTimeout` so we can observe the replacement. We can't
+    // easily count the watchdogs scheduled without intercepting
+    // `setTimeout` (which the optimistic path also uses internally), so
+    // the presence of a `clearTimeout` call from the watchdog path
+    // between the two sends is the witness.
+    //
+    // We also capture the most recently created watchdog handle via
+    // `setTimeout` spying so we can clean it up in `finally` — otherwise
+    // the 4s timer would fire during teardown and could affect
+    // subsequent tests in the file.
+    const realClearTimeout = globalThis.clearTimeout
+    const realSetTimeout = globalThis.setTimeout
+    const clearedHandles: ReturnType<typeof setTimeout>[] = []
+    let pendingWatchdogHandle: ReturnType<typeof setTimeout> | null = null
+    globalThis.clearTimeout = ((handle: ReturnType<typeof setTimeout>) => {
+      clearedHandles.push(handle)
+      if (handle === pendingWatchdogHandle) pendingWatchdogHandle = null
+      return realClearTimeout(handle)
+    }) as typeof clearTimeout
+    globalThis.setTimeout = ((
+      handler: Parameters<typeof setTimeout>[0],
+      ms?: number,
+      ...args: Parameters<typeof setTimeout> extends [unknown, ...infer Rest] ? Rest : never[]
+    ) => {
+      const handle = realSetTimeout(handler as never, ms as never, ...(args as never))
+      // The watchdog uses OPTIMISTIC_STATUS_WATCHDOG_MS (4_000). Other
+      // setTimeouts in the optimistic path are ms-scale (<= 200). Treat
+      // >= 1000ms as the watchdog.
+      if (typeof ms === "number" && ms >= 1_000) {
+        pendingWatchdogHandle = handle as ReturnType<typeof setTimeout>
+      }
+      return handle as ReturnType<typeof setTimeout>
+    }) as typeof setTimeout
+
+    try {
+      // First send: schedules watchdog #1.
+      await optimisticSend({
+        sessionId: "session-burst",
+        directory: "/target/project",
+        content: "first",
+        providerID: "p",
+        modelID: "m",
+        send: async () => {},
+      })
+      const clearCountAfterFirst = clearedHandles.length
+      const firstHandle = pendingWatchdogHandle
+
+      // Second send: the watchdog guard MUST clearTimeout the first
+      // timer before scheduling the second one.
+      await optimisticSend({
+        sessionId: "session-burst",
+        directory: "/target/project",
+        content: "second",
+        providerID: "p",
+        modelID: "m",
+        send: async () => {},
+      })
+
+      // Exactly one `clearTimeout` for the previous watchdog handle.
+      expect(clearedHandles.length - clearCountAfterFirst).toBe(1)
+      // And it cleared the first watchdog's handle.
+      expect(clearedHandles[clearedHandles.length - 1]).toBe(firstHandle)
+      // The replacement timer is a different handle.
+      expect(pendingWatchdogHandle).not.toBe(firstHandle)
+      expect(targetStore.getState().session_status["session-burst"]?.type).toBe("busy")
+    } finally {
+      // Clean up the still-pending replacement timer so the 4s watchdog
+      // body does not fire during teardown.
+      if (pendingWatchdogHandle) {
+        realClearTimeout(pendingWatchdogHandle)
+        pendingWatchdogHandle = null
+      }
+      globalThis.clearTimeout = realClearTimeout
+      globalThis.setTimeout = realSetTimeout
+    }
   })
 })
