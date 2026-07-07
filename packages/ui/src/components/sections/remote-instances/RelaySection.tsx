@@ -3,6 +3,7 @@ import QRCode from 'qrcode';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -90,6 +91,7 @@ export const RelaySection: React.FC = () => {
   const [isPairing, setIsPairing] = React.useState(false);
   const [offerUrl, setOfferUrl] = React.useState<string | null>(null);
   const [offerQrDataUrl, setOfferQrDataUrl] = React.useState<string | null>(null);
+  const [qrDialogOpen, setQrDialogOpen] = React.useState(false);
 
   const refreshStatus = React.useCallback(async (signal?: AbortSignal) => {
     const next = await fetchRelayStatus(signal);
@@ -175,10 +177,11 @@ export const RelaySection: React.FC = () => {
       }
       setOfferUrl(result.url);
       // Relay offers are ~500 chars (encryption key JWK + token) — far denser than
-      // direct-pairing QRs. Low ECC + a large render keep the modules big enough for
-      // a phone camera to lock onto from a desktop screen.
+      // direct-pairing QRs. Render at high resolution with low ECC; the fullscreen
+      // dialog then displays it large enough for a phone camera to lock on. A small
+      // inline QR of this density is unscannable (learned the hard way).
       setOfferQrDataUrl(
-        await QRCode.toDataURL(result.url, { width: 384, margin: 2, errorCorrectionLevel: 'L' }),
+        await QRCode.toDataURL(result.url, { width: 1024, margin: 2, errorCorrectionLevel: 'L' }),
       );
       setPairLabel('');
     } catch (err) {
@@ -266,17 +269,22 @@ export const RelaySection: React.FC = () => {
                 <p className="typography-meta text-muted-foreground/70">{t('settings.remoteInstances.relay.pair.requiresConnected')}</p>
               ) : null}
               {offerUrl ? (
-                <div className="flex flex-col gap-3 rounded-md border border-[var(--interactive-border)] p-2 sm:flex-row">
-                  {offerQrDataUrl ? <img src={offerQrDataUrl} alt={t('settings.remoteInstances.relay.pair.qrAlt')} className="size-72 self-start" /> : null}
-                  <div className="min-w-0 flex-1 space-y-2">
-                    <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.relay.pair.linkLabel')}</p>
-                    <code className="block select-all break-all typography-code text-foreground">{offerUrl}</code>
+                <div className="min-w-0 space-y-2 rounded-md border border-[var(--interactive-border)] p-2">
+                  <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.relay.pair.linkLabel')}</p>
+                  <code className="block select-all break-all typography-code text-foreground">{offerUrl}</code>
+                  <div className="flex flex-wrap gap-1">
                     <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={handleCopyOffer}>
                       <Icon name="file-copy" className="h-3.5 w-3.5" />
                       {t('settings.common.actions.copyAll')}
                     </Button>
-                    <p className="typography-meta text-[var(--status-warning)]">{t('settings.remoteInstances.relay.pair.warning')}</p>
+                    {offerQrDataUrl ? (
+                      <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={() => setQrDialogOpen(true)}>
+                        <Icon name="scan-2" className="h-3.5 w-3.5" />
+                        {t('settings.remoteInstances.relay.pair.showQr')}
+                      </Button>
+                    ) : null}
                   </div>
+                  <p className="typography-meta text-[var(--status-warning)]">{t('settings.remoteInstances.relay.pair.warning')}</p>
                 </div>
               ) : null}
               <p className="typography-meta text-muted-foreground/70">{t('settings.remoteInstances.relay.pair.manageHint')}</p>
@@ -284,6 +292,23 @@ export const RelaySection: React.FC = () => {
           </>
         )}
       </section>
+      <Dialog open={qrDialogOpen} onOpenChange={setQrDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t('settings.remoteInstances.relay.pair.qrDialogTitle')}</DialogTitle>
+            <DialogDescription>{t('settings.remoteInstances.relay.pair.qrDialogDescription')}</DialogDescription>
+          </DialogHeader>
+          {offerQrDataUrl ? (
+            <div className="flex justify-center py-2">
+              <img
+                src={offerQrDataUrl}
+                alt={t('settings.remoteInstances.relay.pair.qrAlt')}
+                className="w-full max-w-xs rounded-md bg-white p-3"
+              />
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

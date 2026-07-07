@@ -88,6 +88,9 @@ export interface RelayTunnelSocketCloseEvent {
 
 export interface RelayTunnelWebSocket {
   readonly readyState: number;
+  // Native-only hint; the tunnel always delivers binary as ArrayBuffer, so it
+  // accepts the setter as a no-op to keep the two socket shapes interchangeable.
+  binaryType?: 'blob' | 'arraybuffer';
   onopen: (() => void) | null;
   onmessage: ((event: RelayTunnelSocketMessageEvent) => void) | null;
   onerror: (() => void) | null;
@@ -100,6 +103,12 @@ export const wrapBrowserWebSocket = (ws: WebSocket): RelayTunnelWebSocket => {
   const socket: RelayTunnelWebSocket = {
     get readyState() {
       return ws.readyState;
+    },
+    get binaryType() {
+      return ws.binaryType;
+    },
+    set binaryType(value) {
+      if (value) ws.binaryType = value;
     },
     onopen: null,
     onmessage: null,

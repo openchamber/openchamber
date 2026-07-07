@@ -16,9 +16,8 @@ import type { Event, OpencodeClient, SessionStatus } from "@opencode-ai/sdk/v2/c
 import { opencodeClient } from "@/lib/opencode/client"
 import { getRuntimeUrlResolver } from "@/lib/runtime-url"
 import { clearRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from "@/lib/runtime-auth"
-import { getActiveRelayTunnel } from "@/lib/relay/runtime-tunnel"
-import { wrapBrowserWebSocket, type RelayTunnelWebSocket } from "@/lib/relay/tunnel-client"
-import { wsUrlToTunnelPath } from "@/lib/relay/tunnel-payloads"
+import { type RelayTunnelWebSocket } from "@/lib/relay/tunnel-client"
+import { openRuntimeWebSocket } from "@/lib/relay/runtime-socket"
 import { syncDebug } from "./debug"
 
 const FLUSH_FRAME_MS = 33
@@ -223,11 +222,7 @@ function buildGlobalEventWsUrl(lastEventId?: string): string {
 // WebSocket path, wrapped to the same shape so the caller holds one type.
 function openGlobalEventSocket(lastEventId?: string): RelayTunnelWebSocket {
   const url = buildGlobalEventWsUrl(lastEventId)
-  const relay = getActiveRelayTunnel()
-  if (relay) {
-    return relay.openWebSocket(wsUrlToTunnelPath(url))
-  }
-  return wrapBrowserWebSocket(new WebSocket(url))
+  return openRuntimeWebSocket(url)
 }
 
 type DirectoryQueue = {

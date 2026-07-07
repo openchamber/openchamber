@@ -28,7 +28,12 @@ const isAllowedHttpPath = (pathname) =>
   || pathname === '/auth'
   || pathname.startsWith('/auth/');
 
-const ALLOWED_WS_PATHS = new Set(['/api/global/event/ws', '/api/event/ws', '/api/terminal/ws']);
+const ALLOWED_WS_PATHS = new Set([
+  '/api/global/event/ws',
+  '/api/event/ws',
+  '/api/terminal/ws',
+  '/api/dictation/ws',
+]);
 
 // Hop-by-hop headers stripped from tunneled requests; `host` is set by fetch
 // to the loopback origin. content-length is dropped too because the body is
