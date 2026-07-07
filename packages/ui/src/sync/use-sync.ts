@@ -385,7 +385,7 @@ export function useSync() {
           // is defense-in-depth: it guards the store write if materialization
           // ever becomes async or yields between the check above and setState.
           if (isStale?.()) {
-            return { messages: materialized.messages, cursor: merged.cursor, complete: merged.complete }
+            return { messages: [], cursor: merged.cursor, complete: merged.complete }
           }
 
           if (materialized.messagesChanged || materialized.partsChanged) {
@@ -409,10 +409,15 @@ export function useSync() {
         // session instead of a loading state. In that case defer the first
         // commit to the expansion loop below, which fetches older records
         // until a user boundary appears and commits that page instead.
+        //
+        // The deferred fallback carries page.session (not []) so that if the
+        // expansion loop is ever a no-op (e.g. all nextLimit <= limit after a
+        // constant change), the final setMetaFor reflects the real fetched
+        // count instead of overwriting it with 0.
         let committed =
           hasUserMessage(page.session) || page.complete
             ? commitMessagesToStore(page, options?.mode, options?.isStale)
-            : { messages: [] as Message[], cursor: page.cursor, complete: page.complete }
+            : { messages: page.session, cursor: page.cursor, complete: page.complete }
 
         // If the first commit detected a stale session, bail out immediately
         // instead of relying on downstream guards to skip the final setMetaFor.
@@ -437,6 +442,10 @@ export function useSync() {
               return
             }
             const expandedPage = await fetchMessages(sessionID, nextLimit)
+            if (options?.isStale?.()) {
+              setMetaFor(sessionID, { loading: false })
+              return
+            }
             committed = commitMessagesToStore(expandedPage, options?.mode, options?.isStale)
             if (options?.isStale?.()) {
               setMetaFor(sessionID, { loading: false })
