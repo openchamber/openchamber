@@ -25,7 +25,14 @@ const STREAM_YIELD_MS = 8
 const DEFAULT_RECONNECT_DELAY_MS = 250
 const DEFAULT_HEARTBEAT_TIMEOUT_MS = 30_000
 const WS_FALLBACK_WINDOW_MS = 60_000
-const DEFAULT_WS_READY_TIMEOUT_MS = 2_000
+// FIX: Increased from 2_000 → 10_000. The server-side global hub's upstream
+// SSE connection takes longer than 2s to establish on cold start, causing
+// the WS ready timeout to fire before the server sends the `ready` frame.
+// This in turn triggers WS_FALLBACK and locks the pipeline into SSE mode
+// for 60s on every page load. 10s gives the hub time to connect without
+// degrading user experience.
+const DEFAULT_WS_READY_TIMEOUT_MS = 10_000
+
 // Retry pacing. Visible+online tabs probe quickly so the user sees connection
 // recovery in under a second of real outage; hidden/offline tabs back off
 // further so a backgrounded PWA on a flaky link doesn't burn battery probing
