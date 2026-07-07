@@ -219,6 +219,7 @@ jobs:
 
           const projectPath = 'App.xcodeproj/project.pbxproj';
           let project = readFileSync(projectPath, 'utf8');
+          const releaseBlockPattern = /\n\t\t[^\n]+ \/\* Release \*\/ = \{\n\t\t\tisa = XCBuildConfiguration;\n\t\t\t(?:baseConfigurationReference = [^\n]+\n)?\t\t\tbuildSettings = \{[\s\S]*?\n\t\t\t\};\n\t\t\tname = Release;\n\t\t\};/g;
           const replacements = [
             {
               bundle: 'com.openchamber.app',
@@ -237,30 +238,26 @@ jobs:
             },
           ];
 
+          function setBuildSetting(block, key, value) {
+            const settingPattern = new RegExp(`\\n\\t\\t\\t\\t${key} = [^;]+;`);
+            const line = `\n\t\t\t\t${key} = ${value};`;
+            if (settingPattern.test(block)) return block.replace(settingPattern, line);
+            return block.replace('\n\t\t\t};', `${line}\n\t\t\t};`);
+          }
+
           for (const { bundle, profile, uuid } of replacements) {
             if (!profile) throw new Error(`Missing provisioning profile name for ${bundle}`);
             if (!uuid) throw new Error(`Missing provisioning profile UUID for ${bundle}`);
             const marker = `PRODUCT_BUNDLE_IDENTIFIER = ${bundle};`;
-            const escapedMarker = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const releaseBlockPattern = new RegExp(`\\n\\t\\t[^\\n]+/\\* Release \\*/ = \\{[\\s\\S]*?${escapedMarker}[\\s\\S]*?\\n\\t\\t\\};`);
-            const match = project.match(releaseBlockPattern);
+            const match = [...project.matchAll(releaseBlockPattern)].find(([block]) => block.includes(marker));
             if (!match) throw new Error(`Could not find ${bundle} Release build settings block`);
 
             let block = match[0];
-
-            block = block.replace(/CODE_SIGN_STYLE = Automatic;/, 'CODE_SIGN_STYLE = Manual;');
-            if (!block.includes('DEVELOPMENT_TEAM = ')) {
-              block = block.replace(/CODE_SIGN_STYLE = Manual;\n/, `CODE_SIGN_STYLE = Manual;\n\t\t\t\tDEVELOPMENT_TEAM = ${process.env.APPLE_TEAM_ID};\n`);
-            }
-            if (!block.includes('CODE_SIGN_IDENTITY = ')) {
-              block = block.replace(/CODE_SIGN_STYLE = Manual;\n/, 'CODE_SIGN_STYLE = Manual;\n\t\t\t\tCODE_SIGN_IDENTITY = "Apple Distribution";\n');
-            }
-            if (!block.includes('PROVISIONING_PROFILE_SPECIFIER = ')) {
-              block = block.replace(`${marker}\n`, `${marker}\n\t\t\t\tPROVISIONING_PROFILE_SPECIFIER = "${profile}";\n`);
-            }
-            if (!block.includes('PROVISIONING_PROFILE = ')) {
-              block = block.replace(`${marker}\n`, `${marker}\n\t\t\t\tPROVISIONING_PROFILE = "${uuid}";\n`);
-            }
+            block = setBuildSetting(block, 'CODE_SIGN_IDENTITY', '"Apple Distribution"');
+            block = setBuildSetting(block, 'CODE_SIGN_STYLE', 'Manual');
+            block = setBuildSetting(block, 'DEVELOPMENT_TEAM', process.env.APPLE_TEAM_ID);
+            block = setBuildSetting(block, 'PROVISIONING_PROFILE', `"${uuid}"`);
+            block = setBuildSetting(block, 'PROVISIONING_PROFILE_SPECIFIER', `"${profile}"`);
 
             project = project.replace(match[0], block);
           }
