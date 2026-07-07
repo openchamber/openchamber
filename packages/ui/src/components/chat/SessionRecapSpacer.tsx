@@ -4,14 +4,15 @@ import { useI18n } from '@/lib/i18n';
 
 interface SessionRecapNoteProps {
   sessionId: string;
+  directory?: string;
   isMobile: boolean;
 }
 
 // Quiet one-paragraph recap of the agent's last reply, rendered right under
 // the last message (above the reserved bottom gap). Appears only after the
-// 5-minute quiet window, so the layout shift happens off-screen in practice.
-export const SessionRecapNote: React.FC<SessionRecapNoteProps> = React.memo(({ sessionId, isMobile }) => {
-  const { visibleRecap } = useSessionAssistState(sessionId);
+// 1-minute quiet window, so the layout shift happens off-screen in practice.
+export const SessionRecapNote: React.FC<SessionRecapNoteProps> = React.memo(({ sessionId, directory, isMobile }) => {
+  const { visibleRecap } = useSessionAssistState(sessionId, directory);
   const { t } = useI18n();
 
   if (!visibleRecap) {

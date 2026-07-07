@@ -1,10 +1,11 @@
 import React from 'react';
 import { useDirectoryStore, useSession, useSessionStatus } from '@/sync/sync-context';
 import { getSessionAssist, type SessionAssistPayload } from '@/lib/sessionAssistMetadata';
+import { useUIStore } from '@/stores/useUIStore';
 
 // How long the chat must sit untouched before the recap becomes visible.
 // The suggestion has no such delay — it shows as soon as it arrives.
-export const RECAP_VISIBILITY_DELAY_MS = 5 * 60 * 1000;
+export const RECAP_VISIBILITY_DELAY_MS = 60 * 1000;
 
 interface LastMessageSnapshot {
   id: string;
@@ -13,8 +14,8 @@ interface LastMessageSnapshot {
 }
 
 /** Narrow subscription to the last message of a session (id/role/time only). */
-function useLastMessageSnapshot(sessionId: string): LastMessageSnapshot | null {
-  const store = useDirectoryStore();
+function useLastMessageSnapshot(sessionId: string, directory?: string): LastMessageSnapshot | null {
+  const store = useDirectoryStore(directory);
   const cacheRef = React.useRef<LastMessageSnapshot | null>(null);
 
   const getSnapshot = React.useCallback((): LastMessageSnapshot | null => {
@@ -50,16 +51,18 @@ function useLastMessageSnapshot(sessionId: string): LastMessageSnapshot | null {
 export interface SessionAssistState {
   /** Valid (fresh) assist payload, or null. */
   assist: SessionAssistPayload | null;
-  /** Recap text, only when the 5-minute quiet window has elapsed. */
+  /** Recap text, only when the 1-minute quiet window has elapsed. */
   visibleRecap: string | null;
   /** Suggestion text — fresh payload, session idle; caller still gates on input emptiness. */
   suggestion: string | null;
 }
 
-export function useSessionAssistState(sessionId: string): SessionAssistState {
-  const session = useSession(sessionId);
-  const status = useSessionStatus(sessionId);
-  const lastMessage = useLastMessageSnapshot(sessionId);
+export function useSessionAssistState(sessionId: string, directory?: string): SessionAssistState {
+  const session = useSession(sessionId, directory);
+  const status = useSessionStatus(sessionId, directory);
+  const lastMessage = useLastMessageSnapshot(sessionId, directory);
+  const sessionRecapEnabled = useUIStore((state) => state.sessionRecapEnabled);
+  const sessionSuggestionEnabled = useUIStore((state) => state.sessionSuggestionEnabled);
 
   const isIdle = !status || status.type === 'idle';
   const payload = getSessionAssist(session);
@@ -88,7 +91,7 @@ export function useSessionAssistState(sessionId: string): SessionAssistState {
 
   return {
     assist,
-    visibleRecap: assist && assist.recap && quietElapsed ? assist.recap : null,
-    suggestion: assist && assist.suggestion ? assist.suggestion : null,
+    visibleRecap: sessionRecapEnabled && assist && assist.recap && quietElapsed ? assist.recap : null,
+    suggestion: sessionSuggestionEnabled && assist && assist.suggestion ? assist.suggestion : null,
   };
 }

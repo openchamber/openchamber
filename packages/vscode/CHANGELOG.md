@@ -1,3 +1,10 @@
+## [1.14.1] - 2026-07-07
+
+- Chat: the timeline dialog can now load older messages when the current session history has not all been fetched yet.
+- Chat: file references with line ranges like `src/file.ts:10-20` are now clickable in messages (thanks to @Catan).
+- Chat: favorite models now stay saved after restarting the extension (thanks to @Catan).
+- Settings: closing Settings returns to the previous extension view instead of always showing the sessions list (thanks to @Catan).
+
 ## [1.14.0] - 2026-07-05
 
 - Chat: loading older messages keeps your scroll position steady.

@@ -680,6 +680,55 @@
   visibility: hidden;
 }
 
+/* Installed PWA (standalone) safe areas. In the in-browser page Safari's own
+   chrome covers the home indicator and status bar, and the Capacitor shell has
+   its own choreography (--oc-app-bottom-safe + keyboard FLIP) — neither matches
+   display-mode: standalone, so this block is PWA-only and cannot regress them.
+   Standalone runs the page edge-to-edge (viewport-fit=cover), so the composer
+   needs real top/bottom safe-area room of its own. */
+@media (display-mode: standalone) {
+  /* Bottom: reserve home-indicator room under the composer while the keyboard
+     is down. The generic .bottom-safe-area token is intentionally capped at
+     4px (visual tuck under the gradient overlay), which is not enough to keep
+     controls clear of the indicator / rounded corners. A fixed floor is
+     required: iOS 26 standalone reports env(safe-area-inset-bottom) as 0.
+     Cancel the room while the keyboard is up (the indicator area is behind the
+     keyboard, and the pinned form anchors by its offsetHeight). The class flip
+     is deliberately delayed (tap race, see ChatInput onBlur) — the transition
+     turns that late flip into a slide instead of a dip-then-pop. */
+  :root:not(.oc-capacitor-app) .oc-mobile-composer {
+    transition: padding-bottom 220ms cubic-bezier(0.33, 1, 0.68, 1);
+  }
+
+  :root:not(.oc-capacitor-app):not(.oc-browser-keyboard-open) .oc-mobile-composer {
+    padding-bottom: calc(0.75rem + max(16px, var(--oc-safe-area-bottom, env(safe-area-inset-bottom, 0px)))) !important;
+  }
+
+  /* Fullscreen composer: ChatInput pins the form to the visual viewport from
+     y = visualViewport.offsetTop, which is 0 in standalone (no URL bar), so the
+     form's first row lands under the status bar / Dynamic Island. Pad the
+     content down into the safe region instead. */
+  :root.oc-browser-kb-fullscreen:not(.oc-capacitor-app) .oc-mobile-composer {
+    padding-top: calc(var(--oc-safe-area-top, env(safe-area-inset-top, 0px)) + 0.5rem) !important;
+  }
+
+  /* iOS standalone can leave 100dvh stuck at the keyboard-shrunk value after
+     the keyboard hides (WebKit doesn't reliably restore the dynamic viewport),
+     which shifted the whole shell up by that leftover. Standalone has no
+     collapsing browser chrome, so the dynamic and large viewports are the same
+     thing — pin the shell to 100lvh, which always reports full screen height.
+     Initial geometry is identical (lvh == dvh on load). */
+  :root:not(.oc-capacitor-app) .h-\[100dvh\] {
+    height: 100lvh;
+  }
+
+  /* Top toasts: same offset the Capacitor shell already applies — without it
+     they render under the clock / Dynamic Island. */
+  :root:not(.oc-capacitor-app) [data-sonner-toaster][data-y-position='top'] {
+    top: calc(var(--oc-safe-area-top, env(safe-area-inset-top, 0px)) + 16px) !important;
+  }
+}
+
 @keyframes oc-composer-morph-fade {
   from { opacity: 0; }
   to { opacity: 1; }

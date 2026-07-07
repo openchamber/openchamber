@@ -24,18 +24,20 @@ and one suggested user follow-up with the small model
    conversation content never goes to a provider the user didn't pick for
    the session, unless the small model was chosen explicitly (settings
    override or opencode config). A resolver 404 is silently skipped.
-4. The `{recap, suggestion}` JSON is clamped and PATCHed onto the session
-   metadata together with `forMessageID` (the last assistant message id) and
-   `generatedAt`. Before writing, the session tail is re-checked (a stale
-   result is dropped) and the metadata is merged from a fresh session read so
-   concurrent metadata writes made during generation are preserved.
+4. The requested JSON fields (`recap`, `suggestion`, or both) are clamped and
+   PATCHed onto the session metadata together with `forMessageID` (the last
+   assistant message id) and `generatedAt`. Before writing, the session tail is
+   re-checked (a stale result is dropped) and the metadata is merged from a
+   fresh session read so concurrent metadata writes made during generation are
+   preserved.
 
 ## Settings gate
 
-`sessionAssistEnabled` in OpenChamber settings (Settings → Chat, default on)
-is a hard generation switch checked at fire time: when off, no small-model
-calls run and nothing is written. Existing payloads keep rendering and can
-still be dismissed — the switch is about generation, not visibility.
+`sessionRecapEnabled` and `sessionSuggestionEnabled` in OpenChamber settings
+(Settings → Chat, default on) are hard generation switches checked at fire
+time. When both are off, no small-model calls run and nothing is written. When
+one is on, the runtime still makes at most one small-model call and asks only
+for that field. The UI also hides disabled payload types immediately.
 
 ## Freshness contract (no clearing writes)
 
@@ -47,7 +49,7 @@ everywhere instantly and offline; the next idle cycle overwrites it.
 ## UI consumers (packages/ui)
 
 - `lib/sessionAssistMetadata.ts` — payload parsing.
-- `hooks/useSessionAssist.ts` — freshness gating + the 5-minute quiet window
+- `hooks/useSessionAssist.ts` — freshness gating + the 1-minute quiet window
   for the recap (single timeout to the boundary, no polling).
 - `components/chat/SessionRecapSpacer.tsx` — renders the recap inside the
   fixed-height reserved gap under the last message (height never changes).

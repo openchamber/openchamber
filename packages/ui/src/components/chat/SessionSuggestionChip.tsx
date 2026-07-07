@@ -8,6 +8,7 @@ import { useI18n } from '@/lib/i18n';
 
 interface SessionSuggestionChipProps {
   sessionId: string | null;
+  directory?: string;
   /** The composer already has content — the suggestion must stay out of the way. */
   hidden: boolean;
   onApply: (text: string) => void;
@@ -20,8 +21,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 // One small-model-suggested follow-up message, styled like the draft starter
 // chips. Tapping it fills the composer (no auto-send); the X patches the
 // suggestion out of the session metadata so it stays dismissed everywhere.
-export const SessionSuggestionChip: React.FC<SessionSuggestionChipProps> = React.memo(({ sessionId, hidden, onApply, className }) => {
-  const { suggestion } = useSessionAssistState(sessionId ?? '');
+export const SessionSuggestionChip: React.FC<SessionSuggestionChipProps> = React.memo(({ sessionId, directory, hidden, onApply, className }) => {
+  const { suggestion } = useSessionAssistState(sessionId ?? '', directory);
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
   const [dismissing, setDismissing] = React.useState(false);

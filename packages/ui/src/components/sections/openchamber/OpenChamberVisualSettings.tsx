@@ -343,8 +343,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const { browserTab } = usePwaDetection();
     const directoryShowHidden = useDirectoryShowHidden();
     const showReasoningTraces = useUIStore(state => state.showReasoningTraces);
-    const sessionAssistEnabled = useUIStore(state => state.sessionAssistEnabled);
-    const setSessionAssistEnabled = useUIStore(state => state.setSessionAssistEnabled);
+    const sessionRecapEnabled = useUIStore(state => state.sessionRecapEnabled);
+    const sessionSuggestionEnabled = useUIStore(state => state.sessionSuggestionEnabled);
+    const setSessionRecapEnabled = useUIStore(state => state.setSessionRecapEnabled);
+    const setSessionSuggestionEnabled = useUIStore(state => state.setSessionSuggestionEnabled);
     const setShowReasoningTraces = useUIStore(state => state.setShowReasoningTraces);
     const collapsibleThinkingBlocks = useUIStore(state => state.collapsibleThinkingBlocks);
     const setCollapsibleThinkingBlocks = useUIStore(state => state.setCollapsibleThinkingBlocks);
@@ -1911,27 +1913,50 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                             {(shouldShow('sessionAssist') || shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || shouldShow('dotfiles') || shouldShow('fileViewerPreview') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || shouldShow('showTurnChangedFiles') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning')) && (
                                 <section className="p-2 space-y-0.5">
                                     {shouldShow('sessionAssist') && (
+                                        <>
                                         <div
-                                            data-settings-item="chat.session-assist"
+                                            data-settings-item="chat.session-recap"
                                             className="group flex cursor-pointer items-center gap-2 py-0.5"
                                             role="button"
                                             tabIndex={0}
-                                            aria-pressed={sessionAssistEnabled}
-                                            onClick={() => setSessionAssistEnabled(!sessionAssistEnabled)}
+                                            aria-pressed={sessionRecapEnabled}
+                                            onClick={() => setSessionRecapEnabled(!sessionRecapEnabled)}
                                             onKeyDown={(event) => {
                                                 if (event.key === ' ' || event.key === 'Enter') {
                                                     event.preventDefault();
-                                                    setSessionAssistEnabled(!sessionAssistEnabled);
+                                                    setSessionRecapEnabled(!sessionRecapEnabled);
                                                 }
                                             }}
                                         >
                                             <Checkbox
-                                                checked={sessionAssistEnabled}
-                                                onChange={setSessionAssistEnabled}
-                                                ariaLabel={t('settings.openchamber.visual.field.sessionAssistAria')}
+                                                checked={sessionRecapEnabled}
+                                                onChange={setSessionRecapEnabled}
+                                                ariaLabel={t('settings.openchamber.visual.field.sessionRecapAria')}
                                             />
-                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.sessionAssist')}</span>
+                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.sessionRecap')}</span>
                                         </div>
+                                        <div
+                                            data-settings-item="chat.session-suggestion"
+                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={sessionSuggestionEnabled}
+                                            onClick={() => setSessionSuggestionEnabled(!sessionSuggestionEnabled)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    setSessionSuggestionEnabled(!sessionSuggestionEnabled);
+                                                }
+                                            }}
+                                        >
+                                            <Checkbox
+                                                checked={sessionSuggestionEnabled}
+                                                onChange={setSessionSuggestionEnabled}
+                                                ariaLabel={t('settings.openchamber.visual.field.sessionSuggestionAria')}
+                                            />
+                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.sessionSuggestion')}</span>
+                                        </div>
+                                        </>
                                     )}
                                     {shouldShow('reasoning') && (
                                         <div
