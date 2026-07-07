@@ -19,6 +19,8 @@ RUN bun run build:web
 FROM oven/bun:1.3.14 AS runtime
 WORKDIR /home/openchamber
 
+ARG DEBIAN_FRONTEND=noninteractive
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
   bash \
   ca-certificates \

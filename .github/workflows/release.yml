@@ -22,6 +22,7 @@ env:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   create-release:
@@ -118,6 +119,133 @@ jobs:
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-docker:
+    needs: create-release
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - arch: amd64
+            runs-on: ubuntu-latest
+            platform: linux/amd64
+          - arch: arm64
+            runs-on: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.config.runs-on }}
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Normalize image name
+        id: image
+        shell: bash
+        run: echo "name=${IMAGE_NAME,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Login to GHCR
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Docker Metadata action
+        id: meta
+        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6.1.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: ${{ matrix.config.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ steps.image.outputs.name }},push-by-digest=true,name-canonical=true,push=${{ github.event.inputs.dry_run != 'true' }}
+          cache-from: type=gha,scope=${{ matrix.config.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.config.arch }}
+
+      - name: Export digest
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        shell: bash
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: digests-${{ matrix.config.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-docker-manifest:
+    needs:
+      - create-release
+      - publish-docker
+    if: ${{ github.event.inputs.dry_run != 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository }}
+    steps:
+      - name: Normalize image name
+        id: image
+        shell: bash
+        run: echo "name=${IMAGE_NAME,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Login to GHCR
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Download digests
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Docker Metadata action
+        id: meta
+        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6.1.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}
+          tags: |
+            type=semver,pattern={{version}},value=v${{ needs.create-release.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=v${{ needs.create-release.outputs.version }}
+            type=raw,value=latest
+            type=sha,prefix=sha-
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        shell: bash
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY }}/${{ steps.image.outputs.name }}@sha256:%s ' *)
 
   build-desktop-electron-macos:
     needs: create-release
@@ -390,7 +518,15 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   finalize-release:
-    needs: [create-release, build-desktop-electron-macos, build-desktop-electron-windows, publish-npm, combine-electron-manifests]
+    needs:
+      [
+        create-release,
+        build-desktop-electron-macos,
+        build-desktop-electron-windows,
+        publish-npm,
+        combine-electron-manifests,
+        publish-docker-manifest,
+      ]
     runs-on: ubuntu-latest
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
