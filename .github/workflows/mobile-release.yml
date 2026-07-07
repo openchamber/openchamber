@@ -185,11 +185,79 @@ jobs:
         env:
           VERSION_NAME: ${{ needs.resolve-version.outputs.version_name }}
           BUILD_NUMBER: ${{ needs.resolve-version.outputs.build_number }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          IOS_APP_PROFILE_NAME: ${{ secrets.IOS_APP_PROFILE_NAME }}
+          IOS_WIDGET_PROFILE_NAME: ${{ secrets.IOS_WIDGET_PROFILE_NAME }}
+          IOS_NSE_PROFILE_NAME: ${{ secrets.IOS_NSE_PROFILE_NAME }}
         run: |
           set -euo pipefail
           /usr/libexec/PlistBuddy -c "Set :aps-environment production" App/App.entitlements
           xcrun agvtool new-marketing-version "$VERSION_NAME"
           xcrun agvtool new-version -all "$BUILD_NUMBER"
+
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+
+          const projectPath = 'App.xcodeproj/project.pbxproj';
+          let project = readFileSync(projectPath, 'utf8');
+          const replacements = [
+            {
+              bundle: 'com.openchamber.app',
+              profile: process.env.IOS_APP_PROFILE_NAME,
+            },
+            {
+              bundle: 'com.openchamber.app.OpenChamberWidget',
+              profile: process.env.IOS_WIDGET_PROFILE_NAME,
+            },
+            {
+              bundle: 'com.openchamber.app.OpenChamberNotificationService',
+              profile: process.env.IOS_NSE_PROFILE_NAME,
+            },
+          ];
+
+          for (const { bundle, profile } of replacements) {
+            if (!profile) throw new Error(`Missing provisioning profile name for ${bundle}`);
+            const marker = `PRODUCT_BUNDLE_IDENTIFIER = ${bundle};`;
+            let markerIndex = -1;
+            let searchFrom = 0;
+            while (true) {
+              const candidate = project.indexOf(marker, searchFrom);
+              if (candidate === -1) break;
+              const candidateEnd = project.indexOf('\n\t\t\t\t};', candidate);
+              const configEnd = project.indexOf('\n\t\t};', candidateEnd);
+              const config = project.slice(candidateEnd, configEnd);
+              if (config.includes('name = Release;')) {
+                markerIndex = candidate;
+                break;
+              }
+              searchFrom = candidate + marker.length;
+            }
+            if (markerIndex === -1) throw new Error(`Could not find ${bundle} Release build settings`);
+
+            const blockStart = project.lastIndexOf('buildSettings = {', markerIndex);
+            const blockEnd = project.indexOf('\n\t\t\t\t};', markerIndex);
+            if (blockStart === -1 || blockEnd === -1) throw new Error(`Could not find ${bundle} build settings block`);
+
+            const before = project.slice(0, blockStart);
+            let block = project.slice(blockStart, blockEnd);
+            const after = project.slice(blockEnd);
+
+            block = block.replace(/CODE_SIGN_STYLE = Automatic;/, 'CODE_SIGN_STYLE = Manual;');
+            if (!block.includes('DEVELOPMENT_TEAM = ')) {
+              block = block.replace(/CODE_SIGN_STYLE = Manual;\n/, `CODE_SIGN_STYLE = Manual;\n\t\t\t\tDEVELOPMENT_TEAM = ${process.env.APPLE_TEAM_ID};\n`);
+            }
+            if (!block.includes('CODE_SIGN_IDENTITY = ')) {
+              block = block.replace(/CODE_SIGN_STYLE = Manual;\n/, 'CODE_SIGN_STYLE = Manual;\n\t\t\t\tCODE_SIGN_IDENTITY = "Apple Distribution";\n');
+            }
+            if (!block.includes('PROVISIONING_PROFILE_SPECIFIER = ')) {
+              block = block.replace(`${marker}\n`, `${marker}\n\t\t\t\tPROVISIONING_PROFILE_SPECIFIER = "${profile}";\n`);
+            }
+
+            project = `${before}${block}${after}`;
+          }
+
+          writeFileSync(projectPath, project);
+          NODE
         working-directory: ${{ env.IOS_PROJECT_DIR }}
 
       - name: Archive iOS app
