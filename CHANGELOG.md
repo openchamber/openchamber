@@ -4,9 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-## [Unreleased]
+## [1.14.1-r0.1] - 2026-07-07
 
-- Russian (ru) locale: full UI i18n translation (4523 keys) and 40 docs MDX pages.
+- Russian (ru) locale: full UI i18n translation (~4535 keys) and 40 docs MDX pages.
 - Mobile: fix Windows EPERM build error on `bun run build` — skip redundant web rebuild when web/dist already exists.
 
 ## [1.14.1] - 2026-07-07
