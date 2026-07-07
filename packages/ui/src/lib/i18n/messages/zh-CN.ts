@@ -1880,6 +1880,11 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.toast.attachmentsTooLarge': '附件过大，无法发送。请减少图片数量或大小。',
   'chat.chatInput.toast.sendAttachmentsFailed': '发送附件失败。请尝试更少文件或更小图片。',
   'chat.chatInput.toast.messageSendFailed': '消息发送失败，附件已恢复。',
+  'chat.sendError.mayStillProcessing': 'Message may still be processing on the server.',
+  'chat.sendError.mayStillProcessingDescription': 'If new responses appear, the message went through. Use STOP to cancel; do not resend yet.',
+  'chat.sendError.queuedFailed': 'Queued message failed to send.',
+  'chat.sendError.queuedFailedDescription': 'The message was removed from the queue. Try resending it directly.',
+
   'chat.chatInput.toast.clipboardAttachFailed': '从剪贴板附加图片失败',
   'chat.chatInput.toast.addedFileMentions': '已添加 {count} 个文件提及',
   'chat.chatInput.toast.attachFileFailed': '附加文件失败',

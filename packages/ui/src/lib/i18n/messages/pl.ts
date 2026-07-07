@@ -1131,6 +1131,11 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.toast.clipboardAttachFailed': 'Nie udało się dołączyć obrazu ze schowka',
   'chat.chatInput.toast.compactFailed': 'Nie udało się skompaktować sesji',
   'chat.chatInput.toast.messageSendFailed': 'Nie udało się wysłać wiadomości. Załączniki zostały przywrócone.',
+  'chat.sendError.mayStillProcessing': 'Message may still be processing on the server.',
+  'chat.sendError.mayStillProcessingDescription': 'If new responses appear, the message went through. Use STOP to cancel; do not resend yet.',
+  'chat.sendError.queuedFailed': 'Queued message failed to send.',
+  'chat.sendError.queuedFailedDescription': 'The message was removed from the queue. Try resending it directly.',
+
   'chat.chatInput.toast.openSessionFirst': 'Najpierw otwórz sesję',
   'chat.chatInput.toast.reviewFailed': 'Nie udało się przejrzeć zmian',
   'chat.chatInput.toast.planFeatureFailed': 'Nie udało się rozpocząć planowania funkcji',

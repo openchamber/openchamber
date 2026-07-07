@@ -1703,6 +1703,11 @@ export const dict = {
   'chat.chatInput.toast.attachmentsTooLarge': 'Les pièces jointes sont trop volumineuses pour être envoyées. Veuillez essayer de réduire le nombre ou la taille des images.',
   'chat.chatInput.toast.sendAttachmentsFailed': 'Échec de l\'envoi des pièces jointes. Essayez moins de fichiers ou des images plus petites.',
   'chat.chatInput.toast.messageSendFailed': 'Le message n\'a pas pu être envoyé. Pièces jointes restaurées.',
+  'chat.sendError.mayStillProcessing': 'Message may still be processing on the server.',
+  'chat.sendError.mayStillProcessingDescription': 'If new responses appear, the message went through. Use STOP to cancel; do not resend yet.',
+  'chat.sendError.queuedFailed': 'Queued message failed to send.',
+  'chat.sendError.queuedFailedDescription': 'The message was removed from the queue. Try resending it directly.',
+
   'chat.chatInput.toast.clipboardAttachFailed': 'Échec de la pièce jointe de l\'image du presse-papiers',
   'chat.chatInput.toast.addedFileMentions': 'Ajout des mentions du fichier {count}',
   'chat.chatInput.toast.attachFileFailed': 'Impossible de joindre le fichier',
