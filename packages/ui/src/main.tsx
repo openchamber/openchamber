@@ -1,5 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { opencodeClient } from './lib/opencode/client'
+import { SyncProvider } from './sync/sync-context'
 import './styles/fonts'
 import './index.css'
 import App from './App.tsx'
@@ -55,14 +57,16 @@ if (!rootElement) {
 
 createRoot(rootElement).render(
   <StrictMode>
-    <I18nProvider>
-      <ThemeSystemProvider>
-        <ThemeProvider>
-          <SessionAuthGate>
-            <App apis={runtimeAPIs} />
-          </SessionAuthGate>
-        </ThemeProvider>
-      </ThemeSystemProvider>
-    </I18nProvider>
+    <SyncProvider sdk={opencodeClient.getSdkClient()} directory="">
+      <I18nProvider>
+        <ThemeSystemProvider>
+          <ThemeProvider>
+            <SessionAuthGate>
+              <App apis={runtimeAPIs} />
+            </SessionAuthGate>
+          </ThemeProvider>
+        </ThemeSystemProvider>
+      </I18nProvider>
+    </SyncProvider>
   </StrictMode>,
 );

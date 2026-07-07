@@ -444,8 +444,13 @@ export async function materializeOpenDraftSession(selection: {
   variant?: string
 }): Promise<MaterializedDraftSession | null> {
   const store = useSessionUIStore.getState()
+  // FIX: Open the draft if it's not already open. This allows the
+  // sendMessage flow to create sessions even when the draft was
+  // closed (e.g., by selecting an existing session earlier).
+  if (!store.newSessionDraft?.open) {
+    store.openNewSessionDraft({});
+  }
   const draft = store.newSessionDraft
-  if (!draft?.open) return null
 
   const trimmedAgent = typeof selection.agent === "string" && selection.agent.trim().length > 0
     ? selection.agent.trim()
@@ -1007,7 +1012,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const trimmedAgent = typeof agent === "string" && agent.trim().length > 0 ? agent.trim() : undefined
 
     // ---- New session from draft ----
-    if (!options?.sessionId && draft?.open) {
+    if (!options?.sessionId && (draft?.open || !draft)) {
       const createdDraftSession = await materializeOpenDraftSession({
         providerID,
         modelID,

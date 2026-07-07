@@ -517,14 +517,23 @@ class OpencodeService {
   }
 
   async createSession(params?: { parentID?: string; title?: string; metadata?: Record<string, unknown> }, directory?: string | null): Promise<Session> {
+    // Direct fetch - bypasses SDK v2 bug where session.create omits the body.
+    // The OpenCode server rejects requests with parentID: null in the body.
     const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
-    const response = await this.client.session.create({
-      ...(requestDirectory ? { directory: requestDirectory } : {}),
-      parentID: params?.parentID,
-      title: params?.title,
-      metadata: params?.metadata,
+    const baseUrl = (this.baseUrl || '/api').replace(/\/$/, '');
+    const dirPath = encodeURIComponent(requestDirectory ?? '');
+    const fallbackUrl = `${baseUrl}/session?directory=${dirPath}`;
+    const body: Record<string, unknown> = { directory: requestDirectory };
+    if (params?.title !== undefined) body.title = params.title;
+    if (params?.parentID) body.parentID = params.parentID;
+    if (params?.metadata) body.metadata = params.metadata;
+    const fallbackResponse = await fetch(fallbackUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
     });
-    return unwrapSdkData(response, 'session.create');
+    const sessionData: Session = await fallbackResponse.json();
+    return sessionData;
   }
 
   async getSession(id: string, directory?: string | null): Promise<Session> {
@@ -850,32 +859,37 @@ class OpencodeService {
 
     let response!: Response;
 
+    // FIX: SDK v2 omits the body for session.promptAsync (same bug as
+    // session.create). The server returns 400 BadRequest for an empty
+    // body. Skip the SDK entirely and POST directly.
+    const buildFallbackBody = (): Record<string, unknown> => {
+      const fallbackBody: Record<string, unknown> = {
+        sessionID: params.id,
+        model: { providerID: params.providerID, modelID: params.modelID },
+        messageID: messageId,
+        parts,
+      };
+      if (params.agent) fallbackBody.agent = params.agent;
+      if (params.variant) fallbackBody.variant = params.variant;
+      if (requestDirectory) fallbackBody.directory = requestDirectory;
+      if (params.delivery) fallbackBody.delivery = params.delivery;
+      if (params.format) fallbackBody.format = params.format;
+      return fallbackBody;
+    };
+
+    const baseUrl = (this.baseUrl || '/api').replace(/\/$/, '');
+    const dirPath = encodeURIComponent(requestDirectory ?? '');
+    const fallbackUrl = `${baseUrl}/session/${encodeURIComponent(params.id)}/prompt_async?directory=${dirPath}`;
+
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const result = await this.client.session.promptAsync({
-          sessionID: params.id,
-          ...(requestDirectory ? { directory: requestDirectory } : {}),
-          model: {
-            providerID: params.providerID,
-            modelID: params.modelID,
-          },
-          agent: params.agent,
-          variant: params.variant,
-          messageID: messageId,
-          ...(params.delivery ? { delivery: params.delivery } : {}),
-          ...(params.format ? { format: params.format } : {}),
-          parts,
+        response = await fetch(fallbackUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(buildFallbackBody()),
         });
-        if (result.response instanceof Response) {
-          response = result.response;
-        } else if (result.error) {
-          const status = (result as SdkResult<unknown>).response?.status || 500;
-          response = new Response(JSON.stringify(result.error), { status });
-        } else {
-          response = new Response(JSON.stringify(result.data ?? true), { status: 200 });
-        }
       } catch (error) {
-        if (attempt < 2 && isRetryableFetchError(error)) {
+        if (attempt < 2 && isRetryableFetchError(error as Error)) {
           const delay = getRetryDelayMs(attempt);
           console.warn(
             `[prompt] fetch failed for ${params.providerID}/${params.modelID} (attempt ${attempt + 1}/3), retrying in ${delay}ms`,
