@@ -798,10 +798,24 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
     } = props;
     const { t } = useI18n();
 
+    const guardMobileTouchAction = React.useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+        if (!isMobile || event.pointerType !== 'touch') {
+            return;
+        }
+
+        // In installed PWAs, tapping Send while the software keyboard is open
+        // blurs the textarea before the synthesized click arrives. The keyboard
+        // resize can then collapse the full composer into the compact pill and
+        // move the button out from under the finger, losing the send. Preserve
+        // focus through the touch sequence so the normal click handler fires.
+        event.preventDefault();
+    }, [isMobile]);
+
     const sendButton = (
         <button
             type={isMobile ? 'button' : 'submit'}
             disabled={!canSend || (!currentSessionId && !newSessionDraftOpen)}
+            onPointerDownCapture={guardMobileTouchAction}
             onClick={(event) => {
                 if (!isMobile) {
                     return;
@@ -2637,8 +2651,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             return;
         }
 
-        // Handle Enter/Ctrl+Enter based on selected follow-up behavior.
-        if (e.key === 'Enter' && !e.shiftKey && (!isMobile || e.ctrlKey || e.metaKey)) {
+        // Handle Enter/Ctrl+Enter based on selected follow-up behavior. Mobile
+        // virtual keyboards expose their Send action as an unmodified Enter;
+        // Shift+Enter remains the explicit newline path for hardware keyboards.
+        if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
 
             const isCtrlEnter = e.ctrlKey || e.metaKey;
@@ -5235,6 +5251,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                 autoCorrect={isMobile ? "on" : "off"}
                                 autoCapitalize={isMobile ? "sentences" : "off"}
                                 spellCheck={isMobile || inputSpellcheckEnabled}
+                                enterKeyHint={isMobile ? "send" : undefined}
                                 fillContainer={isComposerExpanded}
                                 outerClassName={cn('ring-0 bg-transparent shadow-none hover:bg-transparent focus-within:ring-0', isComposerExpanded && 'flex-1 min-h-0')}
                                 className={cn(
