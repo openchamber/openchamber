@@ -12,16 +12,32 @@ on:
         required: false
         type: string
       upload_github_release:
-        description: Upload Android artifacts to the matching GitHub Release when running on a tag.
+        description: Upload Android artifacts to GitHub Release. Requires release_tag when called by the release workflow.
         required: false
-        default: true
+        default: false
         type: boolean
-  push:
-    tags:
-      - "v*"
+  workflow_call:
+    inputs:
+      version_name:
+        description: Version name / marketing version. Leave empty to use package.json version.
+        required: false
+        type: string
+      build_number:
+        description: Build number. Leave empty to use GitHub run number.
+        required: false
+        type: string
+      release_tag:
+        description: Existing GitHub Release tag to attach Android artifacts to.
+        required: false
+        type: string
+      upload_github_release:
+        description: Upload Android artifacts to the matching GitHub Release.
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
-  group: mobile-release-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
+  group: mobile-release-${{ inputs.release_tag != '' && inputs.release_tag || github.run_id }}
   cancel-in-progress: false
 
 env:
@@ -46,20 +62,20 @@ jobs:
         run: |
           set -euo pipefail
 
-          input_version='${{ github.event.inputs.version_name }}'
-          input_build='${{ github.event.inputs.build_number }}'
+          input_version='${{ inputs.version_name }}'
+          input_build='${{ inputs.build_number }}'
+          input_release_tag='${{ inputs.release_tag }}'
           package_version="$(node -p "require('./package.json').version")"
 
           version_name="${input_version:-$package_version}"
           build_number="${input_build:-${{ github.run_number }}}"
-          release_tag=""
-          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
-            release_tag="$GITHUB_REF_NAME"
-          fi
+          release_tag="$input_release_tag"
 
-          echo "version_name=$version_name" >> "$GITHUB_OUTPUT"
-          echo "build_number=$build_number" >> "$GITHUB_OUTPUT"
-          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+          {
+            echo "version_name=$version_name"
+            echo "build_number=$build_number"
+            echo "release_tag=$release_tag"
+          } >> "$GITHUB_OUTPUT"
 
   android-release:
     name: Android signed release
@@ -116,7 +132,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload Android artifacts to GitHub Release
-        if: needs.resolve-version.outputs.release_tag != '' && (github.event_name != 'workflow_dispatch' || github.event.inputs.upload_github_release == 'true')
+        if: inputs.upload_github_release && needs.resolve-version.outputs.release_tag != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ needs.resolve-version.outputs.release_tag }}
