@@ -1016,13 +1016,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     // so the chat compensates keyboard + composer height in a single motion.
     const [mobileComposerExpanded, setMobileComposerExpanded] = React.useState(false);
     const [mobileTextareaFocused, setMobileTextareaFocused] = React.useState(false);
-    // Installed PWA (standalone): tapping a composer control while the keyboard
-    // is up blurs the textarea first, and the keyboard-resize reflow moves the
-    // control out from under the finger BEFORE iOS synthesizes the click — the
-    // tap dismisses the keyboard but the control's onClick never fires. Defer
-    // the blur-driven state flip so the pinned composer holds still through the
-    // tap; a refocus cancels it. Browser (pan mode) and Capacitor keep the
-    // immediate flip.
+    // Mobile browser / installed PWA: tapping a composer control while the
+    // keyboard is up blurs the textarea first, and the keyboard-resize reflow
+    // moves the control out from under the finger BEFORE the browser
+    // synthesizes the click — the tap dismisses the keyboard but the control's
+    // onClick never fires. Defer the blur-driven state flip so the pinned
+    // composer holds still through the tap; a refocus cancels it. Capacitor
+    // keeps the immediate flip.
     const mobileBlurTimerRef = React.useRef<number | null>(null);
     React.useEffect(() => () => {
         if (mobileBlurTimerRef.current !== null) {
@@ -5204,9 +5204,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         }
                                     }
                                     lastMobileBlurAtRef.current = Date.now();
-                                    const standalone = !isCapacitorApp()
-                                        && window.matchMedia?.('(display-mode: standalone)')?.matches;
-                                    if (!standalone) {
+                                    // Mobile browsers and installed PWAs share the
+                                    // blur race: the keyboard-dismiss reflow moves
+                                    // composer buttons before the tap's synthesized
+                                    // click lands, so the click misses its target.
+                                    // Capacitor's WebView does not need the hold.
+                                    if (isCapacitorApp()) {
                                         setMobileTextareaFocused(false);
                                         return;
                                     }
