@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { getMermaidDataUrlSourcePromise } from './toolOutputDialogMermaid';
+import { MermaidLoadFailure, getMermaidDataUrlSourcePromise } from './toolOutputDialogMermaid';
 
 describe('getMermaidDataUrlSourcePromise', () => {
     test('turns malformed data URLs into rejected promises', async () => {
@@ -10,7 +10,12 @@ describe('getMermaidDataUrlSourcePromise', () => {
             () => {
                 throw new Error('expected malformed data URL to reject');
             },
-            (error) => expect(error).toEqual({ key: 'chat.toolOutputDialog.mermaid.dataUrlMalformed', params: undefined }),
+            (error) => {
+                expect(error).toBeInstanceOf(Error);
+                expect(error).toBeInstanceOf(MermaidLoadFailure);
+                expect(error.key).toBe('chat.toolOutputDialog.mermaid.dataUrlMalformed');
+                expect(error.params).toBe(undefined);
+            },
         );
     });
 });

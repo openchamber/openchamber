@@ -1,18 +1,20 @@
 import type { I18nKey, I18nParams } from '@/lib/i18n';
 
-export type MermaidLoadFailure = {
+export class MermaidLoadFailure extends Error {
     key: I18nKey;
     params?: I18nParams;
-};
 
-const mermaidLoadFailure = (key: I18nKey, params?: I18nParams): MermaidLoadFailure => ({ key, params });
+    constructor(key: I18nKey, params?: I18nParams) {
+        super(key);
+        this.name = 'MermaidLoadFailure';
+        this.key = key;
+        this.params = params;
+    }
+}
 
-export const isMermaidLoadFailure = (value: unknown): value is MermaidLoadFailure => (
-    typeof value === 'object'
-    && value !== null
-    && 'key' in value
-    && typeof (value as MermaidLoadFailure).key === 'string'
-);
+const mermaidLoadFailure = (key: I18nKey, params?: I18nParams): MermaidLoadFailure => new MermaidLoadFailure(key, params);
+
+export const isMermaidLoadFailure = (value: unknown): value is MermaidLoadFailure => value instanceof MermaidLoadFailure;
 
 const decodeMermaidDataUrl = (value: string): string => {
     const commaIndex = value.indexOf(',');

@@ -28,7 +28,7 @@ import { JsonTreeView } from '@/components/ui/JsonTreeView';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n, type I18nKey, type I18nParams } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getMermaidDataUrlSourcePromise, isMermaidLoadFailure, type MermaidLoadFailure } from './toolOutputDialogMermaid';
+import { MermaidLoadFailure, getMermaidDataUrlSourcePromise, isMermaidLoadFailure } from './toolOutputDialogMermaid';
 
 interface ToolOutputDialogProps {
     popup: ToolPopupContent;
@@ -36,7 +36,7 @@ interface ToolOutputDialogProps {
     isMobile: boolean;
 }
 
-const mermaidLoadFailure = (key: I18nKey, params?: I18nParams): MermaidLoadFailure => ({ key, params });
+const mermaidLoadFailure = (key: I18nKey, params?: I18nParams): MermaidLoadFailure => new MermaidLoadFailure(key, params);
 
 const getToolIcon = (toolName: string) => {
     const iconClass = 'h-3.5 w-3.5 flex-shrink-0';
