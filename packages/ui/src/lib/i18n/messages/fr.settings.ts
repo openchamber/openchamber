@@ -1701,7 +1701,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.messageTransport.ws.description': 'Utilisez WebSocket pour la diffusion de messages.',
   'settings.openchamber.visual.option.messageTransport.sse.label': 'SSE',
   'settings.openchamber.visual.option.messageTransport.sse.description': 'Utilisez les événements envoyés par le serveur pour la diffusion de messages.',
-  'settings.openchamber.visual.option.activityRenderMode.collapsed.label': 'Effondré',
+  'settings.openchamber.visual.option.activityRenderMode.collapsed.label': 'Réduite',
   'settings.openchamber.visual.option.activityRenderMode.collapsed.description': 'Gardez l\'activité réduite par défaut.',
   'settings.openchamber.visual.option.activityRenderMode.summary.label': 'Étendu',
   'settings.openchamber.visual.option.activityRenderMode.summary.description': 'Développez Activité par défaut.',
