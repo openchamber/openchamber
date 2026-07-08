@@ -478,10 +478,16 @@ export function useSync() {
           complete: committed.complete,
           loading: false,
         })
+        // Perf cap (#2096): bound persisted prefetch limit so the next
+        // cold open of this session does not initial-fetch the full
+        // materialized page (HAR showed 7-8 MB single responses at
+        // limit=611). Older history remains reachable via load-older
+        // (cursor). In-memory messages are untouched.
+        const SESSION_PREFETCH_LIMIT_CAP = 150
         setSessionPrefetch({
           directory,
           sessionID,
-          limit: committed.messages.length,
+          limit: Math.min(committed.messages.length, SESSION_PREFETCH_LIMIT_CAP),
           cursor: committed.cursor,
           complete: committed.complete,
         })
