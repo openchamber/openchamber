@@ -25,6 +25,8 @@ import {
   attachMarkdownInteractions,
   applyMarkdownCodeBlockWrapState,
   decorateMarkdown,
+  scheduleMarkdownCodeLineNumberSync,
+  syncMarkdownCodeLineNumbers,
   type DecorateContext,
   type DecorateLabels,
   type MermaidRender,
@@ -981,6 +983,8 @@ const useMorphdomMarkdown = ({
       for (let i = existing.length - 1; i >= blocks.length; i -= 1) {
         existing[i]?.remove();
       }
+
+      scheduleMarkdownCodeLineNumberSync(target);
     });
 
     return () => {
@@ -1010,6 +1014,25 @@ const useMorphdomMarkdown = ({
     if (!target) return;
     applyMarkdownCodeBlockWrapState(target, ctx.codeBlockLineWrap, ctx.labels);
   }, [containerRef, ctx.codeBlockLineWrap, ctx.labels]);
+
+  React.useEffect(() => {
+    const container = containerRef.current;
+    const target = container?.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
+    if (!target || typeof ResizeObserver === 'undefined') return;
+    let frame: number | null = null;
+    const observer = new ResizeObserver(() => {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        syncMarkdownCodeLineNumbers(target);
+      });
+    });
+    observer.observe(target);
+    return () => {
+      observer.disconnect();
+      if (frame !== null) window.cancelAnimationFrame(frame);
+    };
+  }, [containerRef]);
 };
 
 const markdownContentClassName = (variant: MarkdownVariant): string =>

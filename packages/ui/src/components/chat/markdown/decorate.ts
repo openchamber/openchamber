@@ -73,6 +73,14 @@ const applyCodeBlockWrapState = (wrapper: HTMLElement, enabled: boolean, labels:
   pre?.classList.toggle('break-words', enabled);
   code?.classList.toggle('whitespace-pre-wrap', enabled);
   code?.classList.toggle('break-words', enabled);
+  if (pre) {
+    pre.style.whiteSpace = enabled ? 'pre-wrap' : 'pre';
+    pre.style.overflowWrap = enabled ? 'anywhere' : 'normal';
+  }
+  if (code) {
+    code.style.whiteSpace = enabled ? 'pre-wrap' : 'pre';
+    code.style.overflowWrap = enabled ? 'anywhere' : 'normal';
+  }
   if (wrapButton) {
     const title = enabled ? labels.disableCodeWrap : labels.enableCodeWrap;
     wrapButton.setAttribute('title', title);
@@ -85,11 +93,110 @@ const applyCodeBlockWrapState = (wrapper: HTMLElement, enabled: boolean, labels:
   }
 };
 
+const createCodeLineNumbers = (pre: HTMLPreElement): HTMLDivElement => {
+  const gutter = document.createElement('div');
+  gutter.setAttribute('data-md-code-line-numbers', '');
+  gutter.setAttribute('aria-hidden', 'true');
+  gutter.className = 'select-none border-r border-border/50 pr-3 text-right text-muted-foreground/45';
+
+  const text = pre.textContent ?? '';
+  const lineCount = Math.max(1, text.endsWith('\n') ? text.split('\n').length - 1 : text.split('\n').length);
+  for (let index = 1; index <= lineCount; index += 1) {
+    const line = document.createElement('div');
+    line.className = 'tabular-nums';
+    line.textContent = String(index);
+    gutter.appendChild(line);
+  }
+
+  return gutter;
+};
+
+const collectTextNodes = (root: HTMLElement): Text[] => {
+  const nodes: Text[] = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  while (node) {
+    nodes.push(node as Text);
+    node = walker.nextNode();
+  }
+  return nodes;
+};
+
+const findTextPosition = (nodes: Text[], targetOffset: number): { node: Text; offset: number } | null => {
+  let offset = 0;
+  for (const node of nodes) {
+    const nextOffset = offset + node.data.length;
+    if (targetOffset <= nextOffset) {
+      return { node, offset: Math.max(0, targetOffset - offset) };
+    }
+    offset = nextOffset;
+  }
+  const last = nodes.at(-1);
+  return last ? { node: last, offset: last.data.length } : null;
+};
+
+export const syncMarkdownCodeLineNumbers = (root: HTMLElement): void => {
+  const wrappers = root.querySelectorAll<HTMLElement>('[data-component="markdown-code"]');
+  for (const wrapper of Array.from(wrappers)) {
+    const code = wrapper.querySelector<HTMLElement>('pre code');
+    const gutter = wrapper.querySelector<HTMLElement>('[data-md-code-line-numbers]');
+    if (!code || !gutter) continue;
+
+    const numbers = Array.from(gutter.children) as HTMLElement[];
+    const text = code.textContent ?? '';
+    const textNodes = collectTextNodes(code);
+    const codeStyle = window.getComputedStyle(code);
+    const lineHeight = Number.parseFloat(codeStyle.lineHeight) || 20;
+    gutter.style.fontFamily = codeStyle.fontFamily;
+    gutter.style.fontSize = codeStyle.fontSize;
+    gutter.style.lineHeight = `${lineHeight}px`;
+    let lineStart = 0;
+
+    for (let index = 0; index < numbers.length; index += 1) {
+      const nextBreak = text.indexOf('\n', lineStart);
+      const lineEnd = nextBreak === -1 ? text.length : nextBreak;
+      const lineEl = numbers[index];
+      if (!lineEl) continue;
+
+      const start = findTextPosition(textNodes, lineStart);
+      const end = findTextPosition(textNodes, lineEnd);
+      if (!start || !end || lineStart === lineEnd) {
+        lineEl.style.height = `${lineHeight}px`;
+        lineEl.style.lineHeight = `${lineHeight}px`;
+      } else {
+        const range = document.createRange();
+        range.setStart(start.node, start.offset);
+        range.setEnd(end.node, end.offset);
+        const rowTops: number[] = [];
+        for (const rect of Array.from(range.getClientRects())) {
+          if (rect.width === 0 && rect.height === 0) continue;
+          if (!rowTops.some((top) => Math.abs(top - rect.top) < 2)) {
+            rowTops.push(rect.top);
+          }
+        }
+        const height = Math.max(lineHeight, Math.max(1, rowTops.length) * lineHeight);
+        range.detach();
+        lineEl.style.height = `${height}px`;
+        lineEl.style.lineHeight = `${lineHeight}px`;
+      }
+
+      lineStart = lineEnd + 1;
+    }
+  }
+};
+
+export const scheduleMarkdownCodeLineNumberSync = (root: HTMLElement): void => {
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => syncMarkdownCodeLineNumbers(root));
+  });
+};
+
 export const applyMarkdownCodeBlockWrapState = (root: HTMLElement, enabled: boolean, labels: DecorateLabels): void => {
   const wrappers = root.querySelectorAll<HTMLElement>('[data-component="markdown-code"]');
   for (const wrapper of Array.from(wrappers)) {
     applyCodeBlockWrapState(wrapper, enabled, labels);
   }
+  scheduleMarkdownCodeLineNumberSync(root);
 };
 
 const flashCopied = (button: HTMLButtonElement, copiedTitle: string, restore: keyof typeof ICONS, restoreTitle: string): void => {
@@ -151,15 +258,18 @@ const decorateCodeBlocks = (root: HTMLElement, ctx: DecorateContext): void => {
 
     const body = document.createElement('div');
     body.setAttribute('data-md-code-body', '');
-    body.className = 'px-3 py-2.5 overflow-x-auto';
+    body.className = 'flex gap-3 px-3 py-2.5 overflow-x-auto';
 
     parent.replaceChild(wrapper, pre);
     pre.style.margin = '0';
     pre.style.background = 'transparent';
+    pre.classList.add('min-w-0', 'w-full', 'flex-1');
+    body.appendChild(createCodeLineNumbers(pre));
     body.appendChild(pre);
     wrapper.appendChild(header);
     wrapper.appendChild(body);
     applyCodeBlockWrapState(wrapper, ctx.codeBlockLineWrap, ctx.labels);
+    scheduleMarkdownCodeLineNumberSync(wrapper);
   }
 };
 
