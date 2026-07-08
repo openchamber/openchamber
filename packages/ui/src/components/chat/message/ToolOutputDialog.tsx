@@ -28,7 +28,7 @@ import { JsonTreeView } from '@/components/ui/JsonTreeView';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n, type I18nKey, type I18nParams } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { MermaidLoadFailure, getMermaidDataUrlSourcePromise, isMermaidLoadFailure } from './toolOutputDialogMermaid';
+import { MermaidLoadFailure, getMermaidDataUrlSourcePromise, isCurrentMermaidLoadRequest, isMermaidLoadFailure, nextMermaidLoadRequestId } from './toolOutputDialogMermaid';
 
 interface ToolOutputDialogProps {
     popup: ToolPopupContent;
@@ -699,6 +699,9 @@ const MermaidPreviewDialog: React.FC<{
 
     const loadMermaidSource = React.useCallback(async () => {
         const target = popup.mermaid;
+        const requestId = nextMermaidLoadRequestId(requestIdRef.current);
+        requestIdRef.current = requestId;
+
         if (!target?.url) {
             setStatus('error');
             setErrorMessage(t('chat.toolOutputDialog.mermaid.missingSource'));
@@ -711,9 +714,6 @@ const MermaidPreviewDialog: React.FC<{
             setErrorMessage('');
             return;
         }
-
-        const requestId = requestIdRef.current + 1;
-        requestIdRef.current = requestId;
 
         setStatus('loading');
         setErrorMessage('');
@@ -755,7 +755,7 @@ const MermaidPreviewDialog: React.FC<{
 
         await sourcePromise
             .then((resolvedSource) => {
-                if (requestIdRef.current !== requestId) {
+                if (!isCurrentMermaidLoadRequest(requestIdRef.current, requestId)) {
                     return;
                 }
 
@@ -763,7 +763,7 @@ const MermaidPreviewDialog: React.FC<{
                 setStatus('ready');
             })
             .catch((error) => {
-                if (requestIdRef.current !== requestId) {
+                if (!isCurrentMermaidLoadRequest(requestIdRef.current, requestId)) {
                     return;
                 }
                 setStatus('error');

@@ -16,6 +16,10 @@ const mermaidLoadFailure = (key: I18nKey, params?: I18nParams): MermaidLoadFailu
 
 export const isMermaidLoadFailure = (value: unknown): value is MermaidLoadFailure => value instanceof MermaidLoadFailure;
 
+export const nextMermaidLoadRequestId = (current: number): number => current + 1;
+
+export const isCurrentMermaidLoadRequest = (current: number, requestId: number): boolean => current === requestId;
+
 const decodeMermaidDataUrl = (value: string): string => {
     const commaIndex = value.indexOf(',');
     if (commaIndex < 0) {

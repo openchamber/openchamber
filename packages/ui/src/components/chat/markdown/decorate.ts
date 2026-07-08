@@ -36,6 +36,7 @@ export type DecorateContext = {
   labels: DecorateLabels;
   mermaidControls: MermaidControlOptions;
   codeBlockLineWrap: boolean;
+  deferCodeLineNumberSync?: boolean;
   onToggleCodeBlockLineWrap?: () => void;
   // Renders a mermaid block source to svg/ascii using current theme colors.
   renderMermaid: (source: string) => MermaidRender;
@@ -112,7 +113,7 @@ const createCodeLineNumbers = (pre: HTMLPreElement): HTMLDivElement => {
   const gutter = document.createElement('div');
   gutter.setAttribute('data-md-code-line-numbers', '');
   gutter.setAttribute('aria-hidden', 'true');
-  gutter.className = 'select-none border-r border-border/50 pr-3 text-right text-muted-foreground/45';
+  gutter.className = 'min-w-8 shrink-0 select-none border-r border-border/50 pr-3 text-right font-mono text-[13px] text-muted-foreground/45';
 
   const text = pre.textContent ?? '';
   const lineCount = Math.max(1, text.endsWith('\n') ? text.split('\n').length - 1 : text.split('\n').length);
@@ -209,6 +210,12 @@ export const scheduleMarkdownCodeLineNumberSync = (root: HTMLElement): void => {
 export const applyMarkdownCodeBlockWrapState = (root: HTMLElement, enabled: boolean, labels: DecorateLabels): void => {
   const wrappers = root.querySelectorAll<HTMLElement>('[data-component="markdown-code"]');
   for (const wrapper of Array.from(wrappers)) {
+    const body = wrapper.querySelector<HTMLElement>('[data-md-code-body]');
+    const pre = wrapper.querySelector<HTMLPreElement>('pre');
+    if (body && pre && !body.querySelector('[data-md-code-line-numbers]')) {
+      body.classList.add('flex', 'gap-3');
+      body.insertBefore(createCodeLineNumbers(pre), pre);
+    }
     applyCodeBlockWrapState(wrapper, enabled, labels);
   }
   scheduleMarkdownCodeLineNumberSync(root);
@@ -275,18 +282,22 @@ const decorateCodeBlocks = (root: HTMLElement, ctx: DecorateContext): void => {
 
     const body = document.createElement('div');
     body.setAttribute('data-md-code-body', '');
-    body.className = 'flex gap-3 px-3 py-2.5 overflow-x-auto';
+    body.className = ctx.deferCodeLineNumberSync ? 'px-3 py-2.5 overflow-x-auto' : 'flex gap-3 px-3 py-2.5 overflow-x-auto';
 
     parent.replaceChild(wrapper, pre);
     pre.style.margin = '0';
     pre.style.background = 'transparent';
     pre.classList.add('min-w-0', 'w-full', 'flex-1');
-    body.appendChild(createCodeLineNumbers(pre));
+    if (!ctx.deferCodeLineNumberSync) {
+      body.appendChild(createCodeLineNumbers(pre));
+    }
     body.appendChild(pre);
     wrapper.appendChild(header);
     wrapper.appendChild(body);
     applyCodeBlockWrapState(wrapper, ctx.codeBlockLineWrap, ctx.labels);
-    scheduleMarkdownCodeLineNumberSync(wrapper);
+    if (!ctx.deferCodeLineNumberSync) {
+      scheduleMarkdownCodeLineNumberSync(wrapper);
+    }
   }
 };
 

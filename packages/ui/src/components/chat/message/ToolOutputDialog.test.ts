@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { MermaidLoadFailure, getMermaidDataUrlSourcePromise } from './toolOutputDialogMermaid';
+import { MermaidLoadFailure, getMermaidDataUrlSourcePromise, isCurrentMermaidLoadRequest, nextMermaidLoadRequestId } from './toolOutputDialogMermaid';
 
 describe('getMermaidDataUrlSourcePromise', () => {
     test('turns malformed data URLs into rejected promises', async () => {
@@ -17,5 +17,15 @@ describe('getMermaidDataUrlSourcePromise', () => {
                 expect(error.params).toBe(undefined);
             },
         );
+    });
+});
+
+describe('Mermaid load request ids', () => {
+    test('invalidates stale async loads when a newer load starts', () => {
+        const firstRequest = nextMermaidLoadRequestId(0);
+        const secondRequest = nextMermaidLoadRequestId(firstRequest);
+
+        expect(isCurrentMermaidLoadRequest(secondRequest, firstRequest)).toBe(false);
+        expect(isCurrentMermaidLoadRequest(secondRequest, secondRequest)).toBe(true);
     });
 });
