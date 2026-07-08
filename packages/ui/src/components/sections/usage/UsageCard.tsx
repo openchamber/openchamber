@@ -6,6 +6,7 @@ import { PaceIndicator } from './PaceIndicator';
 import { useQuotaStore } from '@/stores/useQuotaStore';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useUIStore } from '@/stores/useUIStore';
+import { useI18n } from '@/lib/i18n';
 
 interface UsageCardProps {
   title: string;
@@ -24,11 +25,14 @@ export const UsageCard: React.FC<UsageCardProps> = ({
   toggleEnabled = false,
   onToggle,
 }) => {
+  const { t } = useI18n();
   const displayMode = useQuotaStore((state) => state.displayMode);
   const showPredValues = useQuotaStore((state) => state.showPredValues);
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const displayPercent = displayMode === 'remaining' ? window.remainingPercent : window.usedPercent;
-  const barLabel = displayMode === 'remaining' ? 'remaining' : 'used';
+  const barLabel = displayMode === 'remaining'
+    ? t('settings.usage.card.bar.remaining')
+    : t('settings.usage.card.bar.used');
   const percentLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
   const resetLabel = formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted, timeFormatPreference);
   const windowLabel = formatWindowLabel(title);
@@ -53,7 +57,7 @@ export const UsageCard: React.FC<UsageCardProps> = ({
             <Checkbox
               checked={toggleEnabled}
               onChange={(checked) => onToggle?.(checked)}
-              ariaLabel="Show in dropdown"
+              ariaLabel={t('settings.usage.card.showInHeaderAria')}
             />
           )}
           <div className="min-w-0 flex flex-col">
@@ -77,7 +81,7 @@ export const UsageCard: React.FC<UsageCardProps> = ({
         />
         <div className="mt-1 flex items-center justify-between">
           <span className="typography-micro text-muted-foreground">
-            {resetLabel ? `Resets ${resetLabel}` : ''}
+            {resetLabel ? t('settings.usage.card.resetsAt', { time: resetLabel }) : ''}
           </span>
           <span className="typography-micro text-muted-foreground">
             {barLabel}
