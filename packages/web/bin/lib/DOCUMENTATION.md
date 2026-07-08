@@ -36,6 +36,7 @@ Command modules implement user-facing commands and preserve output contracts acr
 - `commands-connect-url.js`
   - Implements `openchamber connect-url`.
   - Finds or starts a local instance and prints the browser/connect URL according to the selected output mode.
+  - `--relay` builds an end-to-end-encrypted relay pairing link instead: it mints a client token and an offer from the instance's local relay identity (no server URL, no auto-start). The relay endpoint follows `OPENCHAMBER_RELAY_URL` / the stored setting / the default, matching the running host; clients read it from the offer.
 
 - `commands-update.js`
   - Implements `openchamber update`.

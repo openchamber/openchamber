@@ -35,13 +35,16 @@ jobs:
 
       - name: Get version
         id: get_version
+        env:
+          RELEASE_INPUT_VERSION: ${{ github.event.inputs.version }}
+          RELEASE_REF: ${{ github.ref }}
         run: |
-          if [[ -n "${{ github.event.inputs.version }}" ]]; then
-            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          if [[ -n "$RELEASE_INPUT_VERSION" ]]; then
+            echo "version=$RELEASE_INPUT_VERSION" >> "$GITHUB_OUTPUT"
+          elif [[ "$RELEASE_REF" == refs/tags/* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
           else
-            echo "version=0.0.0-dev" >> $GITHUB_OUTPUT
+            echo "version=0.0.0-dev" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Extract changelog for release
@@ -173,8 +176,8 @@ jobs:
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
-          echo "$APPLE_CERTIFICATE" | base64 --decode > $RUNNER_TEMP/certificate.p12
-          security import $RUNNER_TEMP/certificate.p12 \
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" \
             -P "$APPLE_CERTIFICATE_PASSWORD" \
             -A -t cert -f pkcs12 \
             -k "$KEYCHAIN_PATH"
@@ -389,8 +392,19 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  mobile-release:
+    needs: create-release
+    if: ${{ github.event.inputs.dry_run != 'true' }}
+    uses: ./.github/workflows/mobile-release.yml
+    with:
+      version_name: ${{ needs.create-release.outputs.version }}
+      build_number: ${{ github.run_number }}
+      release_tag: v${{ needs.create-release.outputs.version }}
+      upload_github_release: true
+    secrets: inherit
+
   finalize-release:
-    needs: [create-release, build-desktop-electron-macos, build-desktop-electron-windows, publish-npm, combine-electron-manifests]
+    needs: [create-release, build-desktop-electron-macos, build-desktop-electron-windows, publish-npm, combine-electron-manifests, mobile-release]
     runs-on: ubuntu-latest
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
@@ -486,7 +500,7 @@ jobs:
           curl --fail-with-body -sS -X POST \
             -H "Authorization: Bearer $WEBSITE_TOKEN" \
             -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/$WEBSITE_REPO/dispatches \
+            "https://api.github.com/repos/$WEBSITE_REPO/dispatches" \
             -d @- <<JSON
           {
             "event_type": "site_refresh_requested",

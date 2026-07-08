@@ -537,9 +537,37 @@ const readDesktopLocalClientToken = () => {
   return sanitizeClientTokenForStorage(readSettingsRoot().desktopLocalClientToken) || '';
 };
 
+const isMachineLocalHostname = (hostname) => {
+  const clean = String(hostname || '').replace(/^\[|\]$/g, '');
+  if (!clean) return false;
+  if (clean === 'localhost' || clean === '127.0.0.1' || clean === '::1' || clean === '0.0.0.0' || clean === '::') {
+    return true;
+  }
+  try {
+    return Object.values(os.networkInterfaces()).some((entries) =>
+      (entries || []).some((entry) => entry?.address === clean));
+  } catch {
+    return false;
+  }
+};
+
 const isLocalRuntimeUrl = (targetUrl) => {
   const localUrl = state.sidecarUrl || state.localOrigin || '';
-  return Boolean(localUrl && sameOrigin(targetUrl, localUrl));
+  if (!localUrl) return false;
+  if (sameOrigin(targetUrl, localUrl)) return true;
+  // The embedded server bound to 0.0.0.0 for LAN access is still THIS
+  // machine's server when addressed via any of its own interfaces on the same
+  // port — the minted client token must carry the desktop-local kind, or the
+  // server's client-create gate rejects it (the "Local — Auth required" +
+  // unreachable-screen regression).
+  try {
+    const target = new URL(targetUrl);
+    const local = new URL(localUrl);
+    const portOf = (url) => url.port || (url.protocol === 'https:' ? '443' : '80');
+    return portOf(target) === portOf(local) && isMachineLocalHostname(target.hostname);
+  } catch {
+    return false;
+  }
 };
 
 const readDesktopHostsConfig = () => {

@@ -19,6 +19,10 @@ import React from 'react';
 
 import { useI18n } from '@/lib/i18n';
 import { isCapacitorApp } from '@/lib/platform';
+import { buildRelayOfferUrl, parseRelayOfferUrl } from '@/lib/relay/offer';
+import { isRelayModeActive } from '@/lib/relay/runtime-tunnel';
+import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
 
 const MOBILE_CONNECTIONS_STORAGE_KEY = 'openchamber.mobile.connections.v1';
@@ -28,11 +32,28 @@ const MOBILE_CONNECT_TIMEOUT_MS = 8000;
 const MOBILE_NATIVE_HTTP_TIMEOUT_MS = 2500;
 const MOBILE_SECURE_TIMEOUT_MS = 3000;
 
+export type MobileConnectionMode = 'direct' | 'relay';
+
+// Persisted relay transport config. This is connection metadata, not a secret
+// (the host public key is public by construction) — but never log it raw; use
+// redactOffer-style masking for any debug output.
+export type MobileRelayConfig = {
+  relayUrl: string;
+  serverId: string;
+  hostEncPubJwk: JsonWebKey;
+};
+
 export type MobileSavedConnection = {
   id: string;
   label: string;
   url: string;
   lastUsedAt: number;
+  // 'direct' talks HTTP to `url`; 'relay' rides the E2EE tunnel described by `relay`.
+  // Entries persisted before relay support existed normalize to 'direct' on read.
+  mode: MobileConnectionMode;
+  // Present iff mode === 'relay'. For relay entries `url` holds the canonical
+  // token-free offer link (display/dedupe only — never fetched).
+  relay?: MobileRelayConfig;
   // Native: indicates a token exists in the secure store. Web: unused.
   hasToken?: boolean;
   // Web only: the token stored inline. On native this stays undefined in the list.
@@ -42,12 +63,17 @@ export type MobileSavedConnection = {
 export type MobilePendingConnection = {
   label: string;
   url: string;
+  // Present when the password unlock must ride the relay tunnel.
+  relay?: MobileRelayConfig;
+  relayGrant?: string;
 };
 
 export type MobileConnectInput = {
   url: string;
   clientToken?: string;
   label?: string;
+  relay?: MobileRelayConfig;
+  relayGrant?: string;
 };
 
 type MobileFetchResponse = {
@@ -96,6 +122,79 @@ const getConnectionStorageKey = (url: string): string => {
 
 export const isSameConnectionUrl = (left: string, right: string): boolean =>
   getConnectionStorageKey(left) === getConnectionStorageKey(right);
+
+// ---------------------------------------------------------------------------
+// Relay helpers
+// ---------------------------------------------------------------------------
+
+// Stable identity for a relay connection. Also used as the runtime key passed
+// to switchRuntimeEndpoint so "is this saved entry the active runtime?" checks
+// can compare against getRuntimeKey().
+export const relayConnectionRuntimeKey = (relay: MobileRelayConfig): string =>
+  `relay:${relay.serverId}@${relay.relayUrl.trim()}`;
+
+// Dedupe/secure-store key for a connection of either mode. Direct connections
+// keep the historical normalized-URL key so existing saved tokens stay valid.
+const connectionKeyOf = (connection: { url: string; relay?: MobileRelayConfig }): string =>
+  connection.relay ? relayConnectionRuntimeKey(connection.relay) : getConnectionStorageKey(connection.url);
+
+// Canonical token-free offer link stored as the relay entry's `url`. Secret-free
+// by construction (no token/grant), safe for localStorage and display.
+const canonicalRelayUrl = (relay: MobileRelayConfig): string =>
+  buildRelayOfferUrl({
+    v: 1,
+    mode: 'relay',
+    relayUrl: relay.relayUrl,
+    serverId: relay.serverId,
+    hostEncPubJwk: relay.hostEncPubJwk,
+  });
+
+const parseRelayConfig = (value: unknown): MobileRelayConfig | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.relayUrl !== 'string' || !record.relayUrl.trim()) return null;
+  if (typeof record.serverId !== 'string' || !record.serverId.trim()) return null;
+  const jwk = record.hostEncPubJwk;
+  if (!jwk || typeof jwk !== 'object' || Array.isArray(jwk)) return null;
+  const key = jwk as Record<string, unknown>;
+  if (key.kty !== 'EC' || key.crv !== 'P-256') return null;
+  if (typeof key.x !== 'string' || !key.x || typeof key.y !== 'string' || !key.y) return null;
+  return {
+    relayUrl: record.relayUrl,
+    serverId: record.serverId,
+    hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: key.x, y: key.y },
+  };
+};
+
+type ResolvedRelayInput = {
+  relay: MobileRelayConfig;
+  token?: string;
+  label?: string;
+  grant?: string;
+};
+
+// Accepts relay input either as an explicit descriptor (saved connections) or as
+// a raw pairing link typed/pasted/scanned into the URL field.
+const resolveRelayInput = (input: MobileConnectInput): ResolvedRelayInput | null => {
+  if (input.relay) {
+    return {
+      relay: input.relay,
+      token: input.clientToken?.trim() || undefined,
+      label: input.label?.trim() || undefined,
+      grant: input.relayGrant,
+    };
+  }
+  const trimmed = input.url.trim();
+  if (!/^openchamber:\/\//i.test(trimmed)) return null;
+  const offer = parseRelayOfferUrl(trimmed);
+  if (!offer) return null;
+  return {
+    relay: { relayUrl: offer.relayUrl, serverId: offer.serverId, hostEncPubJwk: offer.hostEncPubJwk },
+    token: input.clientToken?.trim() || offer.token,
+    label: input.label?.trim() || offer.label,
+    grant: offer.grant,
+  };
+};
 
 // ---------------------------------------------------------------------------
 // Request helpers (native CapacitorHttp first — needed to reach plain-http LAN
@@ -194,7 +293,7 @@ const requestWithTimeout = async (url: string, init?: RequestInit): Promise<Mobi
   );
 };
 
-const readSessionStatus = async (response: MobileFetchResponse | null): Promise<MobileSessionStatus | null> => {
+const readSessionStatus = async (response: { json: () => Promise<unknown> } | null): Promise<MobileSessionStatus | null> => {
   if (!response) return null;
   const payload = await response.json().catch(() => null);
   if (!payload || typeof payload !== 'object') return null;
@@ -204,6 +303,68 @@ const readSessionStatus = async (response: MobileFetchResponse | null): Promise<
     disabled: typeof record.disabled === 'boolean' ? record.disabled : undefined,
     scope: typeof record.scope === 'string' ? record.scope : undefined,
   };
+};
+
+// ---------------------------------------------------------------------------
+// Relay connect helpers
+// ---------------------------------------------------------------------------
+
+const RELAY_CONNECT_TIMEOUT_MS = 15_000;
+
+type RelayProbeOutcome = 'ok' | 'needs-login' | 'auth-failed' | 'unreachable';
+
+// Probe /health + /auth/session through a short-lived tunnel — the relay
+// counterpart of the direct flow's pre-switch reachability/auth probe. The
+// throwaway client is always closed; the long-lived runtime tunnel is created
+// by switchRuntimeEndpoint afterwards. Cookies never ride the tunnel, so the
+// cookie-only-session special case from the direct flow does not apply here.
+const probeRelaySession = async (
+  relay: MobileRelayConfig,
+  token?: string,
+  grant?: string,
+): Promise<RelayProbeOutcome> => {
+  const tunnel = createRelayTunnelClient({
+    relayUrl: relay.relayUrl,
+    serverId: relay.serverId,
+    hostEncPubJwk: relay.hostEncPubJwk,
+    ...(grant ? { grant } : {}),
+  });
+  try {
+    const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+    const health = await raceWithTimeout(RELAY_CONNECT_TIMEOUT_MS, tunnel.fetch('/health', { headers }).catch(() => null));
+    logConnect('relay:health', { ok: health?.ok === true, status: health?.status ?? null });
+    if (!health?.ok) return 'unreachable';
+    const session = await raceWithTimeout(RELAY_CONNECT_TIMEOUT_MS, tunnel.fetch('/auth/session', { headers }).catch(() => null));
+    logConnect('relay:session', { ok: session?.ok === true, status: session?.status ?? null, hasToken: Boolean(token) });
+    if (!session) return 'unreachable';
+    if (session.status === 401) return token ? 'auth-failed' : 'needs-login';
+    if (!session.ok && session.status !== 404) return 'auth-failed';
+    const status = await readSessionStatus(session);
+    if (status && status.disabled !== true && status.authenticated === false) {
+      return token ? 'auth-failed' : 'needs-login';
+    }
+    return 'ok';
+  } finally {
+    tunnel.close();
+  }
+};
+
+const switchToRelayRuntime = (relay: MobileRelayConfig, clientToken: string | null, grant?: string): void => {
+  // Relay mode has no network base URL: runtimeFetch intercepts runtime paths on
+  // the current window origin and rides the E2EE tunnel, so the window origin is
+  // the correct virtual API base. The runtime key carries the real identity.
+  const apiBaseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+  switchRuntimeEndpoint({
+    apiBaseUrl,
+    clientToken,
+    runtimeKey: relayConnectionRuntimeKey(relay),
+    relay: {
+      relayUrl: relay.relayUrl,
+      serverId: relay.serverId,
+      hostEncPubJwk: relay.hostEncPubJwk,
+      ...(grant ? { grant } : {}),
+    },
+  });
 };
 
 // ---------------------------------------------------------------------------
@@ -225,12 +386,19 @@ const readConnections = (): MobileSavedConnection[] => {
       if (!item || typeof item !== 'object') return [];
       const c = item as Partial<MobileSavedConnection>;
       if (typeof c.id !== 'string' || typeof c.url !== 'string') return [];
+      // Explicit normalization: entries persisted before relay support carry no
+      // `mode` and default to 'direct'. A relay entry with malformed transport
+      // config is unusable — drop it rather than misrepresent it as direct.
+      const relay = c.mode === 'relay' ? parseRelayConfig(c.relay) : null;
+      if (c.mode === 'relay' && !relay) return [];
       const inlineToken = typeof c.clientToken === 'string' && c.clientToken.trim() ? c.clientToken : undefined;
       const base: MobileSavedConnection = {
         id: c.id,
         label: typeof c.label === 'string' && c.label.trim() ? c.label : getConnectionLabel(c.url),
         url: c.url,
         lastUsedAt: typeof c.lastUsedAt === 'number' ? c.lastUsedAt : 0,
+        mode: relay ? 'relay' : 'direct',
+        ...(relay ? { relay } : {}),
       };
       if (native) return [{ ...base, hasToken: Boolean(c.hasToken) || Boolean(inlineToken) }];
       return [{ ...base, clientToken: inlineToken, hasToken: Boolean(inlineToken) }];
@@ -241,11 +409,20 @@ const readConnections = (): MobileSavedConnection[] => {
 const writeConnections = (connections: MobileSavedConnection[]): void => {
   if (typeof window === 'undefined') return;
   const native = isCapacitorApp();
-  const serialized = connections.slice(0, MOBILE_CONNECTIONS_LIMIT).map((c) => (
-    native
-      ? { id: c.id, label: c.label, url: c.url, lastUsedAt: c.lastUsedAt, hasToken: Boolean(c.hasToken || c.clientToken) }
-      : { id: c.id, label: c.label, url: c.url, lastUsedAt: c.lastUsedAt, clientToken: c.clientToken }
-  ));
+  const serialized = connections.slice(0, MOBILE_CONNECTIONS_LIMIT).map((c) => {
+    // Persist only the three relay transport fields — grant/token never land here.
+    const shared = {
+      id: c.id,
+      label: c.label,
+      url: c.url,
+      lastUsedAt: c.lastUsedAt,
+      mode: c.mode,
+      ...(c.relay ? { relay: { relayUrl: c.relay.relayUrl, serverId: c.relay.serverId, hostEncPubJwk: c.relay.hostEncPubJwk } } : {}),
+    };
+    return native
+      ? { ...shared, hasToken: Boolean(c.hasToken || c.clientToken) }
+      : { ...shared, clientToken: c.clientToken };
+  });
   try {
     window.localStorage.setItem(MOBILE_CONNECTIONS_STORAGE_KEY, JSON.stringify(serialized));
   } catch (error) {
@@ -255,23 +432,25 @@ const writeConnections = (connections: MobileSavedConnection[]): void => {
 
 const upsertConnectionInList = (
   connections: MobileSavedConnection[],
-  draft: { label: string; url: string; clientToken?: string; hasToken?: boolean },
+  draft: { label: string; url: string; clientToken?: string; hasToken?: boolean; relay?: MobileRelayConfig },
 ): MobileSavedConnection[] => {
-  const key = getConnectionStorageKey(draft.url);
-  const existing = connections.find((item) => getConnectionStorageKey(item.url) === key);
+  const key = connectionKeyOf(draft);
+  const existing = connections.find((item) => connectionKeyOf(item) === key);
   const native = isCapacitorApp();
   const next: MobileSavedConnection = {
     id: existing?.id || crypto.randomUUID(),
     label: draft.label,
     url: draft.url,
     lastUsedAt: Date.now(),
+    mode: draft.relay ? 'relay' : 'direct',
+    ...(draft.relay ? { relay: draft.relay } : {}),
     ...(native
       ? { hasToken: draft.hasToken ?? (Boolean(draft.clientToken) || existing?.hasToken || false) }
       : { clientToken: draft.clientToken ?? existing?.clientToken, hasToken: Boolean(draft.clientToken ?? existing?.clientToken) }),
   };
   return [
     next,
-    ...connections.filter((item) => item.id !== next.id && getConnectionStorageKey(item.url) !== key),
+    ...connections.filter((item) => item.id !== next.id && connectionKeyOf(item) !== key),
   ].slice(0, MOBILE_CONNECTIONS_LIMIT);
 };
 
@@ -295,8 +474,11 @@ type NativeSecureStorage = {
 const nativeSecure = SecureStorage as unknown as NativeSecureStorage;
 const KEYCHAIN_ACCESS_WHEN_UNLOCKED = 0; // KeychainAccess.whenUnlocked
 
-const prefixedTokenKey = (url: string): string =>
-  `${MOBILE_SECURE_STORAGE_PREFIX}token.${encodeURIComponent(getConnectionStorageKey(url))}`;
+// `key` is a connection storage key (connectionKeyOf): the normalized URL for
+// direct connections (unchanged historical format, existing tokens stay valid)
+// or the relay identity key for relay connections.
+const prefixedTokenKey = (key: string): string =>
+  `${MOBILE_SECURE_STORAGE_PREFIX}token.${encodeURIComponent(key)}`;
 
 const withTimeout = async <T,>(operation: Promise<T>, fallback: T): Promise<T> => {
   let timeoutId: number | undefined;
@@ -322,36 +504,36 @@ const boundedSecure = async <T,>(label: string, run: () => Promise<T>, fallback:
   );
 };
 
-const readSecureToken = async (url: string): Promise<string | undefined> => {
-  logStorage('secure:read-start', { url });
+const readSecureToken = async (key: string): Promise<string | undefined> => {
+  logStorage('secure:read-start', { key });
   const value = await boundedSecure(
     'secure:read',
-    async () => (await nativeSecure.internalGetItem({ prefixedKey: prefixedTokenKey(url), sync: false })).data,
+    async () => (await nativeSecure.internalGetItem({ prefixedKey: prefixedTokenKey(key), sync: false })).data,
     null,
   );
   const token = typeof value === 'string' && value.trim() ? value : undefined;
-  logStorage('secure:read', { url, hasToken: Boolean(token) });
+  logStorage('secure:read', { key, hasToken: Boolean(token) });
   return token;
 };
 
-const writeSecureToken = async (url: string, token: string): Promise<boolean> => {
-  logStorage('secure:write-start', { url });
+const writeSecureToken = async (key: string, token: string): Promise<boolean> => {
+  logStorage('secure:write-start', { key });
   const ok = await boundedSecure('secure:write', async () => {
     await nativeSecure.internalSetItem({
-      prefixedKey: prefixedTokenKey(url),
+      prefixedKey: prefixedTokenKey(key),
       data: token,
       sync: false,
       access: KEYCHAIN_ACCESS_WHEN_UNLOCKED,
     });
     return true;
   }, false);
-  logStorage('secure:write', { url, ok });
+  logStorage('secure:write', { key, ok });
   return ok;
 };
 
-const deleteSecureToken = async (url: string): Promise<void> => {
+const deleteSecureToken = async (key: string): Promise<void> => {
   await boundedSecure('secure:delete', async () => {
-    await nativeSecure.internalRemoveItem({ prefixedKey: prefixedTokenKey(url), sync: false });
+    await nativeSecure.internalRemoveItem({ prefixedKey: prefixedTokenKey(key), sync: false });
     return true;
   }, false);
 };
@@ -379,7 +561,7 @@ const migrateLegacyInlineTokens = async (): Promise<void> => {
   if (legacy.length === 0) return;
   logStorage('secure:migrate-start', { count: legacy.length });
   for (const { url, clientToken } of legacy) {
-    await writeSecureToken(url, clientToken);
+    await writeSecureToken(getConnectionStorageKey(url), clientToken);
   }
   writeConnections(readConnections());
   logStorage('secure:migrate-done', { count: legacy.length });
@@ -391,12 +573,12 @@ export const loadMobileConnections = async (): Promise<MobileSavedConnection[]> 
 };
 
 export const upsertMobileConnection = async (
-  connection: { label: string; url: string; clientToken?: string },
+  connection: { label: string; url: string; clientToken?: string; relay?: MobileRelayConfig },
 ): Promise<MobileSavedConnection[]> => {
   const next = upsertConnectionInList(readConnections(), connection);
   writeConnections(next);
   if (isCapacitorApp() && connection.clientToken) {
-    await writeSecureToken(connection.url, connection.clientToken);
+    await writeSecureToken(connectionKeyOf(connection), connection.clientToken);
   }
   return next;
 };
@@ -406,7 +588,7 @@ export const deleteMobileConnection = async (id: string): Promise<MobileSavedCon
   const removed = connections.find((connection) => connection.id === id) ?? null;
   const next = connections.filter((connection) => connection.id !== id);
   writeConnections(next);
-  if (removed && isCapacitorApp()) await deleteSecureToken(removed.url);
+  if (removed && isCapacitorApp()) await deleteSecureToken(connectionKeyOf(removed));
   return next;
 };
 
@@ -422,6 +604,25 @@ export const autoConnectLastInstance = async (): Promise<boolean> => {
   const candidate = readConnections()[0]; // sorted most-recent-first
   if (!candidate) return false;
 
+  // Relay connections auto-connect through the tunnel: no URL to probe, the
+  // health/session check rides a throwaway tunnel client instead.
+  if (candidate.mode === 'relay' && candidate.relay) {
+    let relayToken: string | undefined;
+    if (isCapacitorApp()) {
+      if (!candidate.hasToken) return false;
+      relayToken = await readSecureToken(connectionKeyOf(candidate));
+      if (!relayToken) return false;
+    } else {
+      relayToken = candidate.clientToken;
+      if (!relayToken) return false;
+    }
+    const outcome = await probeRelaySession(candidate.relay, relayToken);
+    if (outcome !== 'ok') return false;
+    await upsertMobileConnection({ label: candidate.label, url: candidate.url, relay: candidate.relay }); // bump lastUsedAt
+    switchToRelayRuntime(candidate.relay, relayToken);
+    return true;
+  }
+
   const url = normalizeConnectionUrl(candidate.url);
   if (!url) return false;
 
@@ -430,7 +631,7 @@ export const autoConnectLastInstance = async (): Promise<boolean> => {
   let token: string | undefined;
   if (isCapacitorApp()) {
     if (!candidate.hasToken) return false;
-    token = await readSecureToken(url);
+    token = await readSecureToken(getConnectionStorageKey(url));
     if (!token) return false;
   } else {
     token = candidate.clientToken;
@@ -450,6 +651,52 @@ export const autoConnectLastInstance = async (): Promise<boolean> => {
   await upsertMobileConnection({ label: candidate.label, url }); // bump lastUsedAt (keeps hasToken)
   switchRuntimeEndpoint({ apiBaseUrl: url, clientToken: token ?? null });
   return true;
+};
+
+export const validateMobileConnectionSession = async (input: {
+  url: string;
+  clientToken?: string | null;
+}): Promise<boolean> => {
+  let url = '';
+  try {
+    url = normalizeConnectionUrl(input.url);
+  } catch {
+    return false;
+  }
+  if (!url) return false;
+
+  const token = input.clientToken?.trim() || undefined;
+  const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+
+  const health = await requestWithTimeout(`${url}/health`, { method: 'GET', headers });
+  if (!health?.ok) return false;
+
+  const session = await requestWithTimeout(`${url}/auth/session`, { method: 'GET', credentials: 'include', headers });
+  if (!session || (!session.ok && session.status !== 404)) return false;
+
+  const status = await readSessionStatus(session);
+  return !(status && status.disabled !== true && status.authenticated === false);
+};
+
+// Relay-aware session validation for the ACTIVE runtime (native resume path).
+// In relay mode there is no reachable URL to probe — validate through the live
+// tunnel via runtimeFetch. A transport failure/timeout is transient (the tunnel
+// reconnects on its own) and must not masquerade as a revoked session, so only
+// an explicit auth rejection reports invalid.
+export const validateActiveRuntimeSession = async (input: {
+  url: string;
+  clientToken?: string | null;
+}): Promise<boolean> => {
+  if (!isRelayModeActive()) return validateMobileConnectionSession(input);
+  const session = await raceWithTimeout(
+    RELAY_CONNECT_TIMEOUT_MS,
+    runtimeFetch('/auth/session').then((response): Response | null => response).catch(() => null),
+  );
+  if (!session) return true;
+  if (session.status === 401) return false;
+  if (!session.ok && session.status !== 404) return true;
+  const status = await readSessionStatus(session);
+  return !(status && status.disabled !== true && status.authenticated === false);
 };
 
 // ---------------------------------------------------------------------------
@@ -507,7 +754,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
   }, [applyConnections]);
 
   // Persist metadata for a connection and reflect it in state immediately.
-  const persistMetadata = React.useCallback((draft: { label: string; url: string; clientToken?: string }) => {
+  const persistMetadata = React.useCallback((draft: { label: string; url: string; clientToken?: string; relay?: MobileRelayConfig }) => {
     const next = upsertConnectionInList(connectionsRef.current, draft);
     applyConnections(next);
     writeConnections(next);
@@ -518,6 +765,49 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
     setError(null);
     beginBusy('connect');
     try {
+      // Relay connections (saved entries or pasted/scanned pairing offers) ride
+      // the E2EE tunnel; there is no URL to reach, so the probe + login flow
+      // runs through a throwaway tunnel client instead of network requests.
+      const relayInput = resolveRelayInput(input);
+      if (relayInput) {
+        const { relay, grant } = relayInput;
+        const key = relayConnectionRuntimeKey(relay);
+        const saved = connectionsRef.current.find((c) => c.relay && relayConnectionRuntimeKey(c.relay) === key);
+        const label = relayInput.label || saved?.label || getConnectionLabel(relay.relayUrl);
+        let token = relayInput.token;
+        const tokenIsNew = Boolean(token);
+        if (!token) {
+          if (isCapacitorApp()) {
+            if (saved?.hasToken) token = await readSecureToken(key);
+          } else {
+            token = saved?.clientToken;
+          }
+        }
+        logConnect('relay:connect:start', { serverId: relay.serverId, hasToken: Boolean(token) });
+        const outcome = await probeRelaySession(relay, token, grant);
+        const url = canonicalRelayUrl(relay);
+        if (outcome === 'unreachable') {
+          setError(t('mobile.connect.error.unreachable'));
+          return;
+        }
+        if (outcome === 'needs-login') {
+          persistMetadata({ label, url, relay });
+          setPendingConnection({ label, url, relay, relayGrant: grant });
+          return;
+        }
+        if (outcome === 'auth-failed') {
+          setError(t('mobile.connect.error.authRequired'));
+          return;
+        }
+        if (token && tokenIsNew && isCapacitorApp()) {
+          await writeSecureToken(key, token);
+        }
+        persistMetadata({ label, url, relay, clientToken: token });
+        switchToRelayRuntime(relay, token ?? null, grant);
+        onConnected();
+        return;
+      }
+
       const url = normalizeConnectionUrl(input.url);
       if (!url) {
         setError(t('mobile.connect.error.urlRequired'));
@@ -533,8 +823,8 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       let token = input.clientToken?.trim() || undefined;
       const tokenIsNew = Boolean(token);
       if (!token && isCapacitorApp()) {
-        const saved = connectionsRef.current.find((c) => isSameConnectionUrl(c.url, url));
-        if (saved?.hasToken) token = await readSecureToken(url);
+        const saved = connectionsRef.current.find((c) => c.mode !== 'relay' && isSameConnectionUrl(c.url, url));
+        if (saved?.hasToken) token = await readSecureToken(getConnectionStorageKey(url));
       }
 
       const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
@@ -576,7 +866,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       // Connected. If the token came from the user (not the secure store), persist
       // it first so a cold restart won't re-prompt.
       if (token && tokenIsNew && isCapacitorApp()) {
-        await writeSecureToken(url, token);
+        await writeSecureToken(getConnectionStorageKey(url), token);
       }
       persistMetadata({ label, url, clientToken: token });
       switchRuntimeEndpoint({ apiBaseUrl: url, clientToken: token ?? null });
@@ -595,6 +885,50 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
     beginBusy('password');
     const { url, label } = pendingConnection;
     try {
+      // Relay login rides the tunnel: POST /auth/session through a throwaway
+      // tunnel client. Cookies never cross the tunnel, so an issued bearer
+      // token is mandatory on every platform (not just native).
+      if (pendingConnection.relay) {
+        const relay = pendingConnection.relay;
+        const grant = pendingConnection.relayGrant;
+        const tunnel = createRelayTunnelClient({
+          relayUrl: relay.relayUrl,
+          serverId: relay.serverId,
+          hostEncPubJwk: relay.hostEncPubJwk,
+          ...(grant ? { grant } : {}),
+        });
+        try {
+          logConnect('relay:password:start', { serverId: relay.serverId });
+          const response = await raceWithTimeout(RELAY_CONNECT_TIMEOUT_MS, tunnel.fetch('/auth/session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ password, trustDevice: true, issueClientToken: true, clientLabel: 'OpenChamber Mobile' }),
+          }).catch(() => null));
+          logConnect('relay:password:done', { ok: response?.ok === true, status: response?.status ?? null });
+          if (!response?.ok) {
+            setError(t('mobile.connect.error.passwordFailed'));
+            return;
+          }
+          const payload = await response.json().catch(() => null) as { clientToken?: unknown } | null;
+          const issuedToken = typeof payload?.clientToken === 'string' ? payload.clientToken.trim() : '';
+          logConnect('relay:password:token', { issued: Boolean(issuedToken) });
+          if (!issuedToken) {
+            setError(t('mobile.connect.error.authRequired'));
+            return;
+          }
+          if (isCapacitorApp()) {
+            await writeSecureToken(relayConnectionRuntimeKey(relay), issuedToken);
+          }
+          persistMetadata({ label, url: canonicalRelayUrl(relay), relay, clientToken: issuedToken });
+          setPendingConnection(null);
+          switchToRelayRuntime(relay, issuedToken, grant);
+          onConnected();
+        } finally {
+          tunnel.close();
+        }
+        return;
+      }
+
       logConnect('password:start', { url });
       const response = await requestWithTimeout(`${url}/auth/session`, {
         method: 'POST',
@@ -621,7 +955,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
 
       // Guarantee the token is persisted BEFORE switching (no fire-and-forget).
       if (isCapacitorApp() && issuedToken) {
-        await writeSecureToken(url, issuedToken);
+        await writeSecureToken(getConnectionStorageKey(url), issuedToken);
       }
       persistMetadata({ label, url, clientToken: issuedToken || undefined });
       setPendingConnection(null);
@@ -642,6 +976,21 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
 
   const saveConnection = React.useCallback(async (input: MobileConnectInput): Promise<MobileSavedConnection | null> => {
     setError(null);
+    // Relay pairing links save as relay-mode entries (token → secure storage,
+    // metadata holds only the transport descriptor).
+    const relayInput = resolveRelayInput(input);
+    if (relayInput) {
+      const { relay } = relayInput;
+      const key = relayConnectionRuntimeKey(relay);
+      const label = relayInput.label || getConnectionLabel(relay.relayUrl);
+      // Awaited token write so "Save" truly persisted the secret before returning.
+      if (isCapacitorApp() && relayInput.token) {
+        await writeSecureToken(key, relayInput.token);
+      }
+      const next = persistMetadata({ label, url: canonicalRelayUrl(relay), relay, clientToken: relayInput.token });
+      return next.find((connection) => connection.relay && relayConnectionRuntimeKey(connection.relay) === key) ?? null;
+    }
+
     const url = normalizeConnectionUrl(input.url);
     if (!url) {
       setError(t('mobile.connect.error.urlRequired'));
@@ -651,10 +1000,10 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
     const label = input.label?.trim() || getConnectionLabel(url);
     // Awaited token write so "Save" truly persisted the secret before returning.
     if (isCapacitorApp() && clientToken) {
-      await writeSecureToken(url, clientToken);
+      await writeSecureToken(getConnectionStorageKey(url), clientToken);
     }
     const next = persistMetadata({ label, url, clientToken });
-    return next.find((connection) => isSameConnectionUrl(connection.url, url)) ?? null;
+    return next.find((connection) => connection.mode !== 'relay' && isSameConnectionUrl(connection.url, url)) ?? null;
   }, [persistMetadata, t]);
 
   const removeConnection = React.useCallback(async (id: string): Promise<MobileSavedConnection | null> => {

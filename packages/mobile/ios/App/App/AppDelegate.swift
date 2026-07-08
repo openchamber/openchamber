@@ -146,8 +146,9 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         webView.backgroundColor = .clear
         webView.scrollView.backgroundColor = .clear
         if #available(iOS 26.0, *) {
-            webView.scrollView.topEdgeEffect.isHidden = true
-            webView.scrollView.bottomEdgeEffect.isHidden = true
+            for key in ["topEdgeEffect", "bottomEdgeEffect"] {
+                (webView.scrollView.value(forKey: key) as? UIView)?.isHidden = true
+            }
         }
     }
 

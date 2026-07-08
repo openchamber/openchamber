@@ -1,6 +1,5 @@
 import { useUIStore } from '@/stores/useUIStore';
 import { updateDesktopSettings } from '@/lib/persistence';
-import { isVSCodeRuntime } from '@/lib/desktop';
 
 type ModelRef = { providerID: string; modelID: string };
 type ModelPrefsPayload = {
@@ -70,9 +69,6 @@ const cloneModelPrefs = (prefs: ModelPrefsPayload): ModelPrefsPayload => ({
 
 export const startModelPrefsAutoSave = () => {
   if (typeof window === 'undefined') {
-    return () => {};
-  }
-  if (isVSCodeRuntime()) {
     return () => {};
   }
 

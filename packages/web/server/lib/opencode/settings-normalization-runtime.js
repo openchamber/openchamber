@@ -17,7 +17,15 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
       return value;
     }
 
-    const trimmed = value.trim();
+    let trimmed = value.trim();
+    // Paths pasted from Windows "Copy as path" (or quoted shell snippets)
+    // arrive wrapped in quotes — a literal quote character can never be part
+    // of a real path, and it breaks every fs.stat/executable check.
+    if (trimmed.length >= 2
+      && ((trimmed.startsWith('"') && trimmed.endsWith('"'))
+        || (trimmed.startsWith("'") && trimmed.endsWith("'")))) {
+      trimmed = trimmed.slice(1, -1).trim();
+    }
     if (!trimmed) {
       return trimmed;
     }

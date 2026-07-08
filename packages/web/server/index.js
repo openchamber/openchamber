@@ -72,6 +72,7 @@ import { createOpenCodeResolutionRuntime } from './lib/opencode/opencode-resolut
 import { createBootstrapRuntime } from './lib/opencode/bootstrap-runtime.js';
 import { createSessionRuntime } from './lib/opencode/session-runtime.js';
 import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
+import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
 import { createTunnelWiringRuntime } from './lib/opencode/tunnel-wiring-runtime.js';
@@ -88,6 +89,7 @@ import { createProjectConfigRuntime } from './lib/projects/project-config.js';
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
 import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
 import { attachRealtimeProxy } from './lib/realtime-proxy.js';
+import { createRelayService } from './lib/relay/service.js';
 import { createProxyMiddleware, responseInterceptor } from 'http-proxy-middleware';
 import webPush from 'web-push';
 
@@ -601,6 +603,7 @@ Object.defineProperties(openCodeNetworkState, {
 const openCodeNetworkRuntime = createOpenCodeNetworkRuntime({
   state: openCodeNetworkState,
   getOpenCodeAuthHeaders,
+  configuredOpenCodeHostname: ENV_CONFIGURED_OPENCODE_HOSTNAME,
 });
 
 const waitForReady = (...args) => openCodeNetworkRuntime.waitForReady(...args);
@@ -713,6 +716,12 @@ const maybeSendPushForTrigger = (...args) => notificationTriggerRuntime.maybeSen
 const setAutoAcceptSession = (...args) => notificationTriggerRuntime.setAutoAcceptSession(...args);
 clearPendingPushBadge = () => notificationTriggerRuntime.clearPendingPushBadge();
 
+const sessionAssistRuntime = createSessionAssistRuntime({
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  getSmallModelService: async () => import('./lib/small-model/index.js'),
+});
+
 const globalMessageStreamHub = createGlobalMessageStreamHub({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
@@ -730,6 +739,19 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
     void maybeSendPushForTrigger(payload);
     sessionRuntime.processOpenCodeSsePayload(payload);
   },
+});
+
+// Session-assist subscribes to the hub directly: it needs the envelope's
+// directory to route its own OpenCode calls to the right instance.
+console.log('[session-assist] listening for session events');
+globalMessageStreamHub.subscribeEvent((event) => {
+  const raw = event?.payload;
+  const payload = raw?.payload && typeof raw.payload === 'object' ? raw.payload : raw;
+  if (!payload || typeof payload !== 'object') return;
+  const directory = typeof event?.directory === 'string' && event.directory && event.directory !== 'global'
+    ? event.directory
+    : '';
+  sessionAssistRuntime.processPayload(payload, directory);
 });
 
 const processForwardedEventPayload = (payload, emitSyntheticEvent) => {
@@ -1014,11 +1036,12 @@ const bootstrapOpenCodeAtStartup = async (...args) => {
   if (openCodeLifecycleState.openCodeProcess && !openCodeLifecycleState.isExternalOpenCode) {
     startHealthMonitoring();
   }
-  if (ENV_DESKTOP_NOTIFY) {
-    void ensureGlobalWatcherStarted().catch((error) => {
-      console.warn(`Global event watcher startup failed: ${error?.message || error}`);
-    });
-  }
+  // The global watcher used to start only for desktop notifications; the
+  // session-assist runtime also rides its event hub, so it now starts
+  // unconditionally once OpenCode is up.
+  void ensureGlobalWatcherStarted().catch((error) => {
+    console.warn(`Global event watcher startup failed: ${error?.message || error}`);
+  });
 };
 const killProcessOnPort = (...args) => openCodeLifecycleRuntime.killProcessOnPort(...args);
 const waitForPortRelease = (...args) => openCodeLifecycleRuntime.waitForPortRelease(...args);
@@ -1037,6 +1060,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   },
   syncToHmrState,
   openCodeWatcherRuntime,
+  sessionAssistRuntime,
   sessionRuntime,
   getHealthCheckInterval: () => healthCheckInterval,
   clearHealthCheckInterval: (value) => clearInterval(value),
@@ -1263,6 +1287,19 @@ async function main(options = {}) {
   const tunnelRuntimeContext = tunnelWiringRuntime.initialize(app, port);
   const { tunnelService, startTunnelWithNormalizedRequest } = tunnelRuntimeContext;
 
+  // Private relay host service: config + management routes + host client
+  // lifecycle. Loopback port comes from the same source the tunnel uses so
+  // relay-tunneled requests hit the local Express app on 127.0.0.1.
+  const relayService = createRelayService({
+    crypto,
+    os,
+    readSettingsFromDiskMigrated,
+    writeSettingsToDisk,
+    remoteClientAuthRuntime,
+    getLocalPort: () => tunnelRuntimeContext.getActivePort(),
+  });
+  relayService.registerRoutes(app);
+
   await featureRoutesRuntime.registerRoutes(app, {
     crypto,
     fs,
@@ -1372,6 +1409,9 @@ async function main(options = {}) {
     console.warn('[ScheduledTasks] Failed to start runtime:', error?.message || error);
   }
 
+  // Only opens a relay control socket when the user opted in (config enabled).
+  void relayService.startIfEnabled();
+
   return {
     expressApp: app,
     httpServer: server,
@@ -1402,6 +1442,11 @@ async function main(options = {}) {
     },
     stop: (shutdownOptions = {}) => {
       realtimeProxyRuntime.stop();
+      try {
+        relayService.stop();
+      } catch {
+        // best-effort teardown of the relay host client
+      }
       try {
         dictationRuntime?.stop?.();
       } catch {

@@ -13,6 +13,9 @@ import {
 import { discoverRunningInstances } from './cli-lifecycle.js';
 import { getInstanceFilePath, readInstanceOptions } from './cli-process.js';
 import { createRemoteClientAuthRuntime } from '../../server/lib/client-auth/remote-clients.js';
+import { createRelayIdentityRuntime } from '../../server/lib/relay/identity.js';
+import { DEFAULT_RELAY_URL } from '../../server/lib/relay/service.js';
+import { bytesToBase64Url } from '../../server/lib/relay/e2ee.js';
 import {
   intro as clackIntro,
   outro as clackOutro,
@@ -24,6 +27,102 @@ import {
 } from '../cli-output.js';
 
 const REMOTE_CLIENTS_FILE_NAME = 'remote-clients.json';
+const SETTINGS_FILE_NAME = 'settings.json';
+
+function isValidRelayUrl(value) {
+  if (typeof value !== 'string') return false;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === 'ws:' || url.protocol === 'wss:';
+  } catch {
+    return false;
+  }
+}
+
+// Resolve the relay endpoint the same way the running host does (service.js):
+// OPENCHAMBER_RELAY_URL env override, then the stored setting, then the default —
+// so the pairing link points at the same relay the host connects out to.
+function resolveRelayUrl(settings) {
+  const envUrl = process.env.OPENCHAMBER_RELAY_URL;
+  if (isValidRelayUrl(envUrl)) return envUrl.trim();
+  const stored = settings?.privateRelay?.relayUrl;
+  if (isValidRelayUrl(stored)) return stored.trim();
+  return DEFAULT_RELAY_URL;
+}
+
+// Minimal settings.json read/write for the relay identity runtime. It reads the
+// whole object and writes it back with the relay keys added, so other settings
+// are preserved. Enough for the CLI without wiring the full settings runtime.
+function createSettingsAccessors() {
+  const settingsPath = path.join(getOpenChamberDataDir(), SETTINGS_FILE_NAME);
+  const readSettingsFromDiskMigrated = async () => {
+    try {
+      return JSON.parse(await fs.promises.readFile(settingsPath, 'utf8'));
+    } catch {
+      return {};
+    }
+  };
+  const writeSettingsToDisk = async (settings) => {
+    await fs.promises.mkdir(path.dirname(settingsPath), { recursive: true });
+    await fs.promises.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
+  };
+  return { readSettingsFromDiskMigrated, writeSettingsToDisk };
+}
+
+// Builds an end-to-end-encrypted relay pairing link. Reuses the instance's relay
+// identity (serverId + encryption public key), generating it if the relay was
+// never enabled. The client reads the relay URL from the offer, so no client-side
+// configuration is needed.
+async function buildRelayConnectionPayload({ token, label }) {
+  const accessors = createSettingsAccessors();
+  const settings = await accessors.readSettingsFromDiskMigrated();
+  const relayUrl = resolveRelayUrl(settings);
+  const identityRuntime = createRelayIdentityRuntime({ crypto, ...accessors });
+  const identity = await identityRuntime.getRelayIdentity();
+  const offer = {
+    v: 1,
+    mode: 'relay',
+    relayUrl,
+    serverId: identity.serverId,
+    hostEncPubJwk: identity.hostEncPubJwk,
+    label,
+    token,
+  };
+  const encoded = bytesToBase64Url(new TextEncoder().encode(JSON.stringify(offer)));
+  return { connectUrl: `openchamber://connect?v=1&mode=relay#offer=${encoded}`, relayUrl, serverId: identity.serverId };
+}
+
+async function generateRelayConnectUrl(options) {
+  const label = options.name || os.hostname();
+  const runtime = createRemoteClientAuthRuntime({
+    fsPromises: fs.promises,
+    path,
+    crypto,
+    storePath: path.join(getOpenChamberDataDir(), REMOTE_CLIENTS_FILE_NAME),
+  });
+  const result = await runtime.createClient({ label, clientKind: 'relay' });
+  const { connectUrl, relayUrl, serverId } = await buildRelayConnectionPayload({ token: result.token, label });
+
+  if (isJsonMode(options)) {
+    printJson({ mode: 'relay', relayUrl, serverId, connectUrl, token: result.token, client: result.client });
+    return;
+  }
+
+  if (isQuietMode(options)) {
+    process.stdout.write(`${connectUrl}\n`);
+    return;
+  }
+
+  clackIntro('OpenChamber relay connect URL');
+  logStatus('success', connectUrl);
+  clackLog.info(`Relay: ${relayUrl}`);
+  logStatus('info', '[RELAY_ENABLE]', 'Enable the relay on this instance so this link can connect (Settings -> Remote Instances).');
+  clackLog.info('Copy this link into another OpenChamber client. The token is shown only once.');
+  if (options.qr === true) {
+    await displayTunnelQrCode(connectUrl);
+  }
+  clackOutro('relay connect URL generated');
+}
 
 async function resolveConnectUrlServerUrl(options) {
   let hostOverride = options.host;
@@ -117,6 +216,13 @@ function createConnectUrlCommand({ serveCommand }) {
     const explicitServerUrl = options.server ? normalizeServerUrlForConnection(options.server) : null;
     if (options.server && !explicitServerUrl) {
       throw new TunnelCliError('Invalid --server URL. Use an http:// or https:// URL.', EXIT_CODE.USAGE_ERROR);
+    }
+
+    // Relay pairing needs neither a reachable server URL nor a running server:
+    // the link is built from the instance's local relay identity + a fresh client
+    // token. The client reads the relay endpoint from the offer.
+    if (options.relay) {
+      return await generateRelayConnectUrl(options);
     }
 
     const running = await discoverRunningInstances();

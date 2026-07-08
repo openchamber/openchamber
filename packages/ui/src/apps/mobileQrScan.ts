@@ -9,10 +9,19 @@
 // at runtime instead of importing the package so the web build stays dependency-free
 // and the browser-hosted mobile UI degrades to `unsupported` cleanly.
 
+import { parseRelayOfferUrl } from '@/lib/relay/offer';
+
+import type { MobileRelayConfig } from './mobileConnections';
+
 export type MobileConnectionPayload = {
   url: string;
   clientToken?: string;
   label?: string;
+  // Present when the payload is a relay pairing offer (openchamber://connect?v=1&mode=relay#offer=...).
+  // `url` then holds the raw offer link so form fields and connect() can round-trip it.
+  relay?: MobileRelayConfig;
+  // One-time relay authorization grant from the offer. Never persisted.
+  relayGrant?: string;
 };
 
 export type QrScanResult =
@@ -108,6 +117,23 @@ export const parseConnectionPayload = (raw: string): MobileConnectionPayload | n
   if (!trimmed) return null;
 
   if (/^openchamber:\/\//i.test(trimmed)) {
+    // Relay pairing offers are a strict superset format (mode=relay + fragment
+    // payload); try them first. Direct pairing links (?server=...) never match
+    // the relay parser, so existing payloads are untouched.
+    const offer = parseRelayOfferUrl(trimmed);
+    if (offer) {
+      return {
+        url: trimmed,
+        clientToken: offer.token,
+        label: offer.label,
+        relay: {
+          relayUrl: offer.relayUrl,
+          serverId: offer.serverId,
+          hostEncPubJwk: offer.hostEncPubJwk,
+        },
+        relayGrant: offer.grant,
+      };
+    }
     try {
       const parsed = new URL(trimmed);
       const server = parsed.searchParams.get('server')?.trim();
