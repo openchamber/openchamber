@@ -516,26 +516,35 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
   // desktop UI reaches its own server over loopback, so the request origin is not
   // scannable — it passes the LAN URL instead). Falls back to the request origin
   // for remote callers where the Host header IS the reachable address.
-  const pairingServerCandidates = async (req, preferredServerUrl) => {
+  //
+  // `includeRelay` is the per-link transport choice from the create-link dialog:
+  //   true  → add the relay candidate, enabling the relay host on demand;
+  //   false → direct only, never relay;
+  //   undefined → legacy: advertise relay only if it is already enabled.
+  // `includeDirect === false` produces a relay-only link (no direct candidate).
+  const pairingServerCandidates = async (req, { preferredServerUrl, includeRelay, includeDirect = true } = {}) => {
     const candidates = [];
-    const direct = normalizeCandidateUrl(preferredServerUrl) || requestOrigin(req);
-    if (direct) {
-      let type = 'lan';
-      try {
-        const parsed = new URL(direct);
-        type = parsed.protocol === 'https:' ? 'tunnel' : 'lan';
-      } catch {
+    if (includeDirect) {
+      const direct = normalizeCandidateUrl(preferredServerUrl) || requestOrigin(req);
+      if (direct) {
+        let type = 'lan';
+        try {
+          const parsed = new URL(direct);
+          type = parsed.protocol === 'https:' ? 'tunnel' : 'lan';
+        } catch {
+        }
+        candidates.push({ type, url: direct, priority: 10 });
       }
-      candidates.push({ type, url: direct, priority: 10 });
     }
-    // Advertise the relay transport as an additional candidate when the host
-    // relay is on. The client races candidates and falls back to relay only if
-    // the direct URL is unreachable (relay carries a higher priority number).
-    try {
-      const relayCandidate = await getRelayPairingCandidate();
-      if (relayCandidate) candidates.push(relayCandidate);
-    } catch {
-      // A relay-status read failure must not break direct pairing.
+    // The client races candidates and falls back to relay only if the direct URL
+    // is unreachable (relay carries a higher priority number).
+    if (includeRelay !== false) {
+      try {
+        const relayCandidate = await getRelayPairingCandidate({ ensureEnabled: includeRelay === true });
+        if (relayCandidate) candidates.push(relayCandidate);
+      } catch {
+        // A relay enable/status failure must not break direct pairing.
+      }
     }
     return candidates;
   };
@@ -747,7 +756,11 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
         ...result,
         server: {
           label: 'OpenChamber',
-          candidates: await pairingServerCandidates(req, req.body?.serverUrl),
+          candidates: await pairingServerCandidates(req, {
+            preferredServerUrl: req.body?.serverUrl,
+            includeRelay: typeof req.body?.includeRelay === 'boolean' ? req.body.includeRelay : undefined,
+            includeDirect: req.body?.includeDirect !== false,
+          }),
         },
       });
     });

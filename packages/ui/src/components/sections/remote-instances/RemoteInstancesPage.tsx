@@ -399,6 +399,7 @@ export const RemoteInstancesPage: React.FC = () => {
   const [remoteClientError, setRemoteClientError] = React.useState<string | null>(null);
   const [pairingUrl, setPairingUrl] = React.useState<string | null>(null);
   const [pairingQrDataUrl, setPairingQrDataUrl] = React.useState<string | null>(null);
+  const [pairingQrDialogOpen, setPairingQrDialogOpen] = React.useState(false);
   const revokedClientCount = React.useMemo(() => remoteClients.filter((client) => Boolean(client.revokedAt)).length, [remoteClients]);
   const [sshAddDialogOpen, setSshAddDialogOpen] = React.useState(false);
   const [sshCommandDraft, setSshCommandDraft] = React.useState('ssh user@example.com');
@@ -605,22 +606,31 @@ export const RemoteInstancesPage: React.FC = () => {
     await persistDirectHosts(directHosts, id);
   }, [directHosts, persistDirectHosts]);
 
-  const loadRemoteClients = React.useCallback(async () => {
+  const loadRemoteClients = React.useCallback(async (options?: { silent?: boolean }) => {
     if (!clientAuth) return;
-    setRemoteClientsLoading(true);
-    setRemoteClientError(null);
+    if (!options?.silent) setRemoteClientsLoading(true);
+    if (!options?.silent) setRemoteClientError(null);
     try {
       setRemoteClients(await clientAuth.listClients());
     } catch (err) {
-      setRemoteClientError(err instanceof Error ? err.message : String(err));
+      // A silent poll must not surface a transient error over the live list.
+      if (!options?.silent) setRemoteClientError(err instanceof Error ? err.message : String(err));
     } finally {
-      setRemoteClientsLoading(false);
+      if (!options?.silent) setRemoteClientsLoading(false);
     }
   }, [clientAuth]);
 
+  // Load on mount, then poll while the page is visible so a device that redeems
+  // a pairing link shows up in the list without reopening settings.
   React.useEffect(() => {
+    if (!clientAuth) return;
     void loadRemoteClients();
-  }, [loadRemoteClients]);
+    const interval = window.setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      void loadRemoteClients({ silent: true });
+    }, 5_000);
+    return () => window.clearInterval(interval);
+  }, [clientAuth, loadRemoteClients]);
 
   const createRemoteClient = React.useCallback(async () => {
     if (!clientAuth) return;
@@ -658,7 +668,10 @@ export const RemoteInstancesPage: React.FC = () => {
       });
       const encoded = encodePairingConnectionPayload(payload);
       setPairingUrl(encoded);
-      setPairingQrDataUrl(await QRCode.toDataURL(encoded, { width: 192, margin: 1 }));
+      // Pairing payloads are dense (multiple transport candidates + the relay
+      // E2EE key), so render at high resolution with low error-correction — a
+      // small/default QR of this density is unscannable by a phone camera.
+      setPairingQrDataUrl(await QRCode.toDataURL(encoded, { width: 1024, margin: 2, errorCorrectionLevel: 'L' }));
       setRemoteClientLabel('');
       await loadRemoteClients();
     } catch (err) {
@@ -1111,10 +1124,19 @@ export const RemoteInstancesPage: React.FC = () => {
                 </Button>
               </div>
               {pairingUrl ? (
-                <div className="flex flex-col gap-3 rounded-md border border-[var(--interactive-border)] p-2 sm:flex-row">
-                  {pairingQrDataUrl ? <img src={pairingQrDataUrl} alt={t('settings.remoteInstances.clientAuth.qrAlt')} className="size-48 self-start" /> : null}
-                  <div className="min-w-0 flex-1 space-y-2">
-                    <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.clientAuth.pairingUrl')}</p>
+                <div className="flex flex-col items-center gap-3 rounded-md border border-[var(--interactive-border)] p-3">
+                  {pairingQrDataUrl ? (
+                    <button
+                      type="button"
+                      onClick={() => setPairingQrDialogOpen(true)}
+                      className="rounded-md bg-white p-3 transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-base)]"
+                      aria-label={t('settings.remoteInstances.clientAuth.qrEnlarge')}
+                    >
+                      <img src={pairingQrDataUrl} alt={t('settings.remoteInstances.clientAuth.qrAlt')} className="h-auto w-full max-w-[260px]" />
+                    </button>
+                  ) : null}
+                  <div className="w-full min-w-0 space-y-2">
+                    <p className="typography-meta text-center text-muted-foreground">{t('settings.remoteInstances.clientAuth.qrScanHint')}</p>
                     <code className="block select-all break-all typography-code text-foreground">{pairingUrl}</code>
                     <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={() => void copyTextToClipboard(pairingUrl)}>
                       <Icon name="file-copy" className="h-3.5 w-3.5" />
@@ -1315,6 +1337,24 @@ export const RemoteInstancesPage: React.FC = () => {
             </form>
           </DialogContent>
         </Dialog> : null}
+
+        <Dialog open={pairingQrDialogOpen} onOpenChange={setPairingQrDialogOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>{t('settings.remoteInstances.clientAuth.qrDialogTitle')}</DialogTitle>
+              <DialogDescription>{t('settings.remoteInstances.clientAuth.qrScanHint')}</DialogDescription>
+            </DialogHeader>
+            {pairingQrDataUrl ? (
+              <div className="flex justify-center py-2">
+                <img
+                  src={pairingQrDataUrl}
+                  alt={t('settings.remoteInstances.clientAuth.qrAlt')}
+                  className="w-full max-w-sm rounded-md bg-white p-4"
+                />
+              </div>
+            ) : null}
+          </DialogContent>
+        </Dialog>
 
         {showInstanceManagement ? <div className="mb-8 border-t border-[var(--surface-subtle)] pt-8">
           <div className="mb-1 px-1 space-y-0.5">

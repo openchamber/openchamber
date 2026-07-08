@@ -141,9 +141,8 @@ export const createRelayService = ({
   // tunnel like any other candidate. Returns null when the host relay is off, so
   // callers only advertise relay when it is actually reachable. Priority is high
   // (tried after LAN/tunnel) since the relay path is the last-resort transport.
-  const getPairingCandidate = async () => {
+  const buildPairingCandidate = async () => {
     const config = await readConfig();
-    if (!config.enabled) return null;
     const identity = await identityRuntime.getRelayIdentity();
     return {
       type: 'relay',
@@ -152,6 +151,28 @@ export const createRelayService = ({
       hostEncPubJwk: identity.hostEncPubJwk,
       priority: 30,
     };
+  };
+
+  const getPairingCandidate = async () => {
+    const config = await readConfig();
+    if (!config.enabled) return null;
+    return buildPairingCandidate();
+  };
+
+  // Enable the relay host on demand and return its pairing candidate. Creating a
+  // relay pairing link IS the demand signal, so the relay turns itself on here
+  // rather than requiring a separate manual toggle. Idempotent: a no-op when the
+  // relay is already enabled and running.
+  const ensureEnabledForPairing = async () => {
+    const config = await readConfig();
+    if (!config.enabled) {
+      await writeConfig({ enabled: true, relayUrl: config.relayUrl });
+    }
+    if (!hostClient) {
+      const next = await readConfig();
+      await start(next.relayUrl);
+    }
+    return buildPairingCandidate();
   };
 
   const registerRoutes = (app) => {
@@ -195,5 +216,6 @@ export const createRelayService = ({
     stop,
     getStatus,
     getPairingCandidate,
+    ensureEnabledForPairing,
   };
 };

@@ -1259,7 +1259,14 @@ async function main(options = {}) {
     tunnelAuthController,
     remoteClientAuthRuntime,
     clientPairingRuntime,
-    getRelayPairingCandidate: () => (relayServiceInstance ? relayServiceInstance.getPairingCandidate() : null),
+    getRelayPairingCandidate: (options) => {
+      if (!relayServiceInstance) return null;
+      // A relay pairing link enables the relay on demand; a plain link only
+      // advertises relay when it is already on.
+      return options?.ensureEnabled
+        ? relayServiceInstance.ensureEnabledForPairing()
+        : relayServiceInstance.getPairingCandidate();
+    },
     readSettingsFromDiskMigrated,
     normalizeTunnelSessionTtlMs,
     sayTTSCapability,
