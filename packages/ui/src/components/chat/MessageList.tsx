@@ -1339,20 +1339,24 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 
 
     const baseDisplayMessages = React.useMemo(() => streamPerfMeasure('ui.message_list.base_display_ms', () => {
-        const seenIdsFromTail = new Set<string>();
+        const seenIds = new Set<string>();
         const dedupedMessages: ChatMessageEntry[] = [];
-        for (let index = messages.length - 1; index >= 0; index -= 1) {
+        // Deduplicate from head to tail (oldest to newest) to preserve chronological
+        // order during history pagination (prepend). Older messages have smaller
+        // time-sortable IDs and appear first in the array. Keeping the first
+        // occurrence ensures prepended history isn't incorrectly discarded in favor
+        // of newer duplicates from the existing view.
+        for (let index = 0; index < messages.length; index += 1) {
             const message = messages[index];
             const messageId = message.info?.id;
             if (typeof messageId === 'string') {
-                if (seenIdsFromTail.has(messageId)) {
+                if (seenIds.has(messageId)) {
                     continue;
                 }
-                seenIdsFromTail.add(messageId);
+                seenIds.add(messageId);
             }
             dedupedMessages.push(getNormalizedMessageForDisplay(message));
         }
-        dedupedMessages.reverse();
 
         const output: ChatMessageEntry[] = [];
         const compactionCommandIds = new Set<string>();
