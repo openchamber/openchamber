@@ -1,6 +1,8 @@
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { getExternalFaviconUrl, isExternalHttpUrl, isLoopbackHttpUrl } from '@/lib/url';
 import { dropdownMenuItemClass, dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
+import type { IconName } from '@/components/icon/icons';
+import { getMermaidViewerController } from './mermaidViewer';
 
 // ---------------------------------------------------------------------------
 // Shared decoration context
@@ -15,12 +17,22 @@ export type DecorateLabels = {
   downloadTable: string;
   copyDiagram: string;
   downloadDiagram: string;
+  zoomInDiagram: string;
+  zoomOutDiagram: string;
+  resetDiagramView: string;
   previewLabel: string;
   previewTitle: string;
 };
 
+export type MermaidControlOptions = {
+  download: boolean;
+  copy: boolean;
+  showPanZoomControls: boolean;
+};
+
 export type DecorateContext = {
   labels: DecorateLabels;
+  mermaidControls: MermaidControlOptions;
   // Renders a mermaid block source to svg/ascii using current theme colors.
   renderMermaid: (source: string) => MermaidRender;
   onPreviewLoopback?: (url: string) => void;
@@ -29,19 +41,22 @@ export type DecorateContext = {
 // Reference the app's icon sprite (injected into <body> by the shared Icon
 // component) so DOM-built controls use the same themed icons as the rest of
 // the app. Sprite symbols are registered under `#oc-<name>`.
-const spriteIcon = (name: string): string =>
+const spriteIcon = (name: IconName): string =>
   `<svg class="remixicon size-3.5" viewBox="0 0 24 24" aria-hidden="true"><use href="#oc-${name}"></use></svg>`;
 
 const ICONS = {
   copy: spriteIcon('file-copy'),
   check: spriteIcon('check'),
   download: spriteIcon('download'),
+  zoomIn: spriteIcon('add'),
+  zoomOut: spriteIcon('subtract'),
+  fit: spriteIcon('refresh'),
 } as const;
 
 const ICON_BTN_CLASS =
-  'p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors';
+  'p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--interactive-focus-ring)]';
 
-const setHtml = (el: Element, html: string): void => {
+const setIconHtml = (el: Element, html: string): void => {
   el.innerHTML = html;
 };
 
@@ -52,16 +67,18 @@ const makeIconButton = (icon: keyof typeof ICONS, title: string, slot: string): 
   button.setAttribute('data-md-action', slot);
   button.setAttribute('title', title);
   button.setAttribute('aria-label', title);
-  setHtml(button, ICONS[icon]);
+  setIconHtml(button, ICONS[icon]);
   return button;
 };
 
 const flashCopied = (button: HTMLButtonElement, copiedTitle: string, restore: keyof typeof ICONS, restoreTitle: string): void => {
-  setHtml(button, ICONS.check);
+  setIconHtml(button, ICONS.check);
   button.setAttribute('title', copiedTitle);
+  button.setAttribute('aria-label', copiedTitle);
   window.setTimeout(() => {
-    setHtml(button, ICONS[restore]);
+    setIconHtml(button, ICONS[restore]);
     button.setAttribute('title', restoreTitle);
+    button.setAttribute('aria-label', restoreTitle);
   }, 2000);
 };
 
@@ -246,33 +263,52 @@ const decorateMermaid = (root: HTMLElement, ctx: DecorateContext): void => {
 
     const block = document.createElement('div');
     block.setAttribute('data-markdown', 'mermaid-block');
+    block.setAttribute('data-md-source', source);
     block.className = 'group relative';
 
     const scroll = document.createElement('div');
     scroll.setAttribute('data-markdown', 'mermaid-scroll');
 
     const toolbar = document.createElement('div');
-    toolbar.className = 'absolute top-1 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity';
+    toolbar.setAttribute('data-markdown', 'mermaid-toolbar');
+    toolbar.className = 'absolute top-1 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity';
 
     if (rendered.svg) {
+      block.setAttribute('data-mermaid-render', 'svg');
+      const viewport = document.createElement('div');
+      viewport.setAttribute('data-markdown', 'mermaid-viewport');
       const svgHost = document.createElement('div');
       svgHost.setAttribute('data-markdown', 'mermaid');
-      setHtml(svgHost, rendered.svg);
-      scroll.appendChild(svgHost);
-      const copy = makeIconButton('copy', ctx.labels.copyDiagram, 'mermaid-copy');
-      copy.setAttribute('data-md-source', source);
-      const download = makeIconButton('download', ctx.labels.downloadDiagram, 'mermaid-download');
-      download.setAttribute('data-md-svg', '1');
-      toolbar.appendChild(copy);
-      toolbar.appendChild(download);
+      svgHost.setAttribute('data-md-original-svg', rendered.svg);
+      svgHost.innerHTML = rendered.svg;
+      viewport.appendChild(svgHost);
+      scroll.appendChild(viewport);
+      if (ctx.mermaidControls.showPanZoomControls) {
+        toolbar.appendChild(makeIconButton('zoomIn', ctx.labels.zoomInDiagram, 'mermaid-zoom-in'));
+        toolbar.appendChild(makeIconButton('zoomOut', ctx.labels.zoomOutDiagram, 'mermaid-zoom-out'));
+        toolbar.appendChild(makeIconButton('fit', ctx.labels.resetDiagramView, 'mermaid-fit'));
+      }
+      if (ctx.mermaidControls.copy) {
+        const copy = makeIconButton('copy', ctx.labels.copyDiagram, 'mermaid-copy');
+        copy.setAttribute('data-md-source', source);
+        toolbar.appendChild(copy);
+      }
+      if (ctx.mermaidControls.download) {
+        const download = makeIconButton('download', ctx.labels.downloadDiagram, 'mermaid-download');
+        download.setAttribute('data-md-svg', '1');
+        toolbar.appendChild(download);
+      }
     } else {
+      block.setAttribute('data-mermaid-render', 'ascii');
       const asciiPre = document.createElement('pre');
       asciiPre.setAttribute('data-markdown', 'mermaid-ascii');
       asciiPre.textContent = rendered.ascii || source;
       scroll.appendChild(asciiPre);
-      const copy = makeIconButton('copy', ctx.labels.copyDiagram, 'mermaid-copy');
-      copy.setAttribute('data-md-source', rendered.ascii || source);
-      toolbar.appendChild(copy);
+      if (ctx.mermaidControls.copy) {
+        const copy = makeIconButton('copy', ctx.labels.copyDiagram, 'mermaid-copy');
+        copy.setAttribute('data-md-source', rendered.ascii || source);
+        toolbar.appendChild(copy);
+      }
     }
 
     block.appendChild(scroll);
@@ -322,7 +358,7 @@ const decorateLinks = (root: HTMLElement, ctx: DecorateContext): void => {
       preview.setAttribute('data-md-url', href);
       preview.setAttribute('title', ctx.labels.previewTitle);
       preview.setAttribute('aria-label', ctx.labels.previewLabel);
-      setHtml(preview, ICONS.download);
+      setIconHtml(preview, ICONS.download);
       anchor.parentNode?.insertBefore(preview, anchor.nextSibling);
     }
   }
@@ -430,10 +466,25 @@ export const attachMarkdownInteractions = (
       return;
     }
 
+    // Mermaid local pan/zoom controls
+    if (action === 'mermaid-zoom-in' || action === 'mermaid-zoom-out' || action === 'mermaid-fit') {
+      event.preventDefault();
+      const block = actionEl.closest('[data-markdown="mermaid-block"]');
+      const controller = getMermaidViewerController(block);
+      if (action === 'mermaid-zoom-in') {
+        controller?.zoomIn();
+      } else if (action === 'mermaid-zoom-out') {
+        controller?.zoomOut();
+      } else {
+        controller?.fit();
+      }
+      return;
+    }
+
     // Mermaid download svg
     if (action === 'mermaid-download') {
       const svgHost = actionEl.closest('[data-markdown="mermaid-block"]')?.querySelector('[data-markdown="mermaid"]');
-      const svg = svgHost?.innerHTML ?? '';
+      const svg = svgHost?.getAttribute('data-md-original-svg') ?? svgHost?.innerHTML ?? '';
       if (svg) downloadBlob('diagram.svg', svg, 'image/svg+xml;charset=utf-8');
       return;
     }

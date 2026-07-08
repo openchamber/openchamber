@@ -76,7 +76,7 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify(packageJson.version),
   },
   optimizeDeps: {
-    include: ['@opencode-ai/sdk/v2'],
+    include: ['@opencode-ai/sdk/v2', 'shiki'],
   },
   server: {
     port: 5173,

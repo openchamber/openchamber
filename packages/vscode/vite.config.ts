@@ -47,7 +47,7 @@ export default defineConfig(({ mode }) => ({
     },
   },
   optimizeDeps: {
-    include: ['@opencode-ai/sdk/v2'],
+    include: ['@opencode-ai/sdk/v2', 'shiki'],
   },
   build: {
     outDir: path.resolve(__dirname, 'dist/webview'),
