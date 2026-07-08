@@ -26,6 +26,11 @@ const INITIAL_MESSAGE_PAGE_SIZE = 50
 const VSCODE_INITIAL_MESSAGE_PAGE_SIZE = 30
 const MOBILE_INITIAL_MESSAGE_PAGE_SIZE = 30
 const HISTORY_MESSAGE_PAGE_SIZE = 100
+// Perf cap (#2096): bound persisted prefetch limit so the next cold open
+// of a session does not initial-fetch the full materialized page (HAR
+// showed 7-8 MB single responses at limit=611). Older history remains
+// reachable via load-older (cursor). In-memory messages are untouched.
+const SESSION_PREFETCH_LIMIT_CAP = 150
 const INITIAL_PAGE_EXPANSION_LIMITS = [100, 150] as const
 const VSCODE_INITIAL_PAGE_EXPANSION_LIMITS = [50, 80, 120] as const
 const MAX_SEEN_DIRS = 30
@@ -478,12 +483,7 @@ export function useSync() {
           complete: committed.complete,
           loading: false,
         })
-        // Perf cap (#2096): bound persisted prefetch limit so the next
-        // cold open of this session does not initial-fetch the full
-        // materialized page (HAR showed 7-8 MB single responses at
-        // limit=611). Older history remains reachable via load-older
-        // (cursor). In-memory messages are untouched.
-        const SESSION_PREFETCH_LIMIT_CAP = 150
+
         setSessionPrefetch({
           directory,
           sessionID,
