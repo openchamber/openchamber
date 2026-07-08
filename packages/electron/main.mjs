@@ -1711,24 +1711,6 @@ const parseDeepLink = (raw) => {
   }
 };
 
-const parseConnectDeepLinkPayload = (raw) => {
-  if (typeof raw !== 'string') return null;
-  try {
-    const url = new URL(raw.trim());
-    if (url.protocol !== `${DEEP_LINK_PROTOCOL}:` || url.hostname !== 'connect') return null;
-    const version = url.searchParams.get('v');
-    const serverUrl = normalizeHostUrl(url.searchParams.get('server') || '');
-    const token = sanitizeClientTokenForStorage(url.searchParams.get('token') || '');
-    const label = typeof url.searchParams.get('label') === 'string'
-      ? url.searchParams.get('label').trim()
-      : '';
-    if (version !== '1' || !serverUrl || !token) return null;
-    return { serverUrl, token, label: label || serverUrl };
-  } catch {
-    return null;
-  }
-};
-
 const decodeBase64UrlJson = (value) => {
   if (typeof value !== 'string' || !value.trim()) return null;
   try {
@@ -1957,20 +1939,7 @@ const dispatchDeepLink = (link) => {
       });
       return;
     }
-    const payload = parseConnectDeepLinkPayload(link.raw);
-    if (!payload) {
-      log.warn('[electron] invalid connect deep-link payload');
-      return;
-    }
-    void confirmConnectDeepLink(payload).then((confirmed) => {
-      if (!confirmed) {
-        log.info('[electron] connect deep-link declined by user');
-        return;
-      }
-      return importConnectDeepLink(payload).then((id) => {
-        if (id) void switchToHostById(id);
-      });
-    });
+    log.warn('[electron] invalid connect deep-link payload');
     return;
   }
   if (link.type === 'session' && link.value) {

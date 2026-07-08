@@ -1,29 +1,21 @@
 // Connection payload parsing + native QR scanning for the dedicated mobile app.
 //
-// The legacy pairing link format is produced by `openchamber connect-url --qr`:
-//   openchamber://connect?v=1&server=<url>&token=<token>&label=<label>
-// Pairing v2 links use a one-time secret payload and are redeemed server-side.
-// We also accept a bare http(s) URL so a QR encoding only the server address works.
+// Pairing v2 links (openchamber://connect?v=2&p=<base64url>) carry a one-time
+// secret and a list of transport candidates (lan / tunnel / relay); they are
+// redeemed server-side over whichever candidate connects first. We also accept a
+// bare http(s) URL so a QR encoding only the server address works.
 //
 // QR scanning is delegated to a Capacitor barcode-scanner plugin if the native
 // shell registered one (`window.Capacitor.Plugins.BarcodeScanner`). We resolve it
 // at runtime instead of importing the package so the web build stays dependency-free
 // and the browser-hosted mobile UI degrades to `unsupported` cleanly.
 
-import { parseClientConnectionPayload, parsePairingConnectionPayload, type PairingConnectionPayload } from '@/lib/connectionPayload';
-import { parseRelayOfferUrl } from '@/lib/relay/offer';
-
-import type { MobileRelayConfig } from './mobileConnections';
+import { parsePairingConnectionPayload, type PairingConnectionPayload } from '@/lib/connectionPayload';
 
 export type MobileConnectionPayload = {
   url: string;
   clientToken?: string;
   label?: string;
-  // Present when the payload is a relay pairing offer (openchamber://connect?v=1&mode=relay#offer=...).
-  // `url` then holds the raw offer link so form fields and connect() can round-trip it.
-  relay?: MobileRelayConfig;
-  // One-time relay authorization grant from the offer. Never persisted.
-  relayGrant?: string;
 };
 
 export type MobilePairingPayload = {
@@ -124,29 +116,8 @@ export const parseConnectionPayload = (raw: string): MobileConnectionPayload | M
   if (!trimmed) return null;
 
   if (/^openchamber:\/\//i.test(trimmed)) {
-    // Relay pairing offers are a distinct format (mode=relay + fragment payload);
-    // try them first. Neither the pairing-v2 (?v=2&p=...) nor the legacy
-    // (?v=1&server=...&token=...) parser matches a relay offer, so the order is
-    // safe and existing payloads are untouched.
-    const offer = parseRelayOfferUrl(trimmed);
-    if (offer) {
-      return {
-        url: trimmed,
-        clientToken: offer.token,
-        label: offer.label,
-        relay: {
-          relayUrl: offer.relayUrl,
-          serverId: offer.serverId,
-          hostEncPubJwk: offer.hostEncPubJwk,
-        },
-        relayGrant: offer.grant,
-      };
-    }
     const pairing = parsePairingConnectionPayload(trimmed);
-    if (pairing) return { pairing };
-    const legacy = parseClientConnectionPayload(trimmed);
-    if (!legacy) return null;
-    return { url: legacy.serverUrl, clientToken: legacy.token, label: legacy.label };
+    return pairing ? { pairing } : null;
   }
 
   if (/^https?:\/\//i.test(trimmed)) return { url: trimmed };

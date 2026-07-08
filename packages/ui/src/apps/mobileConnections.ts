@@ -20,7 +20,6 @@ import React from 'react';
 import { useI18n } from '@/lib/i18n';
 import type { PairingConnectionPayload, PairingEndpointCandidate } from '@/lib/connectionPayload';
 import { isCapacitorApp } from '@/lib/platform';
-import { buildRelayOfferUrl, parseRelayOfferUrl } from '@/lib/relay/offer';
 import { isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -36,8 +35,8 @@ const MOBILE_SECURE_TIMEOUT_MS = 3000;
 export type MobileConnectionMode = 'direct' | 'relay';
 
 // Persisted relay transport config. This is connection metadata, not a secret
-// (the host public key is public by construction) — but never log it raw; use
-// redactOffer-style masking for any debug output.
+// (the host public key is public by construction) — but never log it raw; mask
+// the key coordinates in any debug output.
 export type MobileRelayConfig = {
   relayUrl: string;
   serverId: string;
@@ -146,16 +145,10 @@ export const relayConnectionRuntimeKey = (relay: MobileRelayConfig): string =>
 const connectionKeyOf = (connection: { url: string; relay?: MobileRelayConfig }): string =>
   connection.relay ? relayConnectionRuntimeKey(connection.relay) : getConnectionStorageKey(connection.url);
 
-// Canonical token-free offer link stored as the relay entry's `url`. Secret-free
-// by construction (no token/grant), safe for localStorage and display.
-const canonicalRelayUrl = (relay: MobileRelayConfig): string =>
-  buildRelayOfferUrl({
-    v: 1,
-    mode: 'relay',
-    relayUrl: relay.relayUrl,
-    serverId: relay.serverId,
-    hostEncPubJwk: relay.hostEncPubJwk,
-  });
+// Stable, non-fetchable pseudo-URL stored as a relay entry's `url` (display and
+// list-key only — relay dedupe/secure-store keys go through connectionKeyOf).
+// Secret-free by construction.
+const canonicalRelayUrl = (relay: MobileRelayConfig): string => `relay://${relay.serverId}`;
 
 const parseRelayConfig = (value: unknown): MobileRelayConfig | null => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -181,26 +174,16 @@ type ResolvedRelayInput = {
   grant?: string;
 };
 
-// Accepts relay input either as an explicit descriptor (saved connections) or as
-// a raw pairing link typed/pasted/scanned into the URL field.
+// Relay reconnect input is always an explicit saved descriptor now. Fresh relay
+// pairing arrives as a candidate inside a pairing-v2 payload and is handled by
+// redeemPairingConnection, not here.
 const resolveRelayInput = (input: MobileConnectInput): ResolvedRelayInput | null => {
-  if (input.relay) {
-    return {
-      relay: input.relay,
-      token: input.clientToken?.trim() || undefined,
-      label: input.label?.trim() || undefined,
-      grant: input.relayGrant,
-    };
-  }
-  const trimmed = input.url.trim();
-  if (!/^openchamber:\/\//i.test(trimmed)) return null;
-  const offer = parseRelayOfferUrl(trimmed);
-  if (!offer) return null;
+  if (!input.relay) return null;
   return {
-    relay: { relayUrl: offer.relayUrl, serverId: offer.serverId, hostEncPubJwk: offer.hostEncPubJwk },
-    token: input.clientToken?.trim() || offer.token,
-    label: input.label?.trim() || offer.label,
-    grant: offer.grant,
+    relay: input.relay,
+    token: input.clientToken?.trim() || undefined,
+    label: input.label?.trim() || undefined,
+    grant: input.relayGrant,
   };
 };
 
@@ -686,29 +669,54 @@ export const validateMobileConnectionSession = async (input: {
   return !(status && status.disabled !== true && status.authenticated === false);
 };
 
-const normalizePairingCandidates = (candidates: PairingEndpointCandidate[]): PairingEndpointCandidate[] => (
-  candidates
-    .map((candidate) => {
-      try {
-        return { ...candidate, url: normalizeConnectionUrl(candidate.url) };
-      } catch {
-        return null;
-      }
-    })
-    .filter((candidate): candidate is PairingEndpointCandidate => Boolean(candidate?.url))
-    .sort((left, right) => {
-      const priorityDelta = (left.priority ?? 100) - (right.priority ?? 100);
-      if (priorityDelta !== 0) return priorityDelta;
-      const leftHttps = left.url.startsWith('https://') ? 0 : 1;
-      const rightHttps = right.url.startsWith('https://') ? 0 : 1;
-      return leftHttps - rightHttps;
-    })
-);
+// The transport chosen for a pairing redeem: a reachable direct URL, or a live
+// relay tunnel (kept open so the single-use secret is redeemed over it).
+type PairingChosenTransport =
+  | { kind: 'direct'; url: string }
+  | { kind: 'relay'; relay: MobileRelayConfig; grant?: string; tunnel: ReturnType<typeof createRelayTunnelClient> };
 
-const choosePairingEndpoint = async (payload: PairingConnectionPayload): Promise<string | null> => {
-  for (const candidate of normalizePairingCandidates(payload.candidates)) {
-    const health = await requestWithTimeout(`${candidate.url}/health`, { method: 'GET' });
-    if (health?.ok) return candidate.url;
+// Order candidates by explicit priority, then by transport preference: prefer a
+// reachable local/tunnel URL (https before http) over relay, which is the
+// last-resort transport.
+const sortPairingCandidates = (candidates: PairingEndpointCandidate[]): PairingEndpointCandidate[] =>
+  [...candidates].sort((left, right) => {
+    const priorityDelta = (left.priority ?? 100) - (right.priority ?? 100);
+    if (priorityDelta !== 0) return priorityDelta;
+    const rank = (candidate: PairingEndpointCandidate): number =>
+      candidate.type === 'relay' ? 2 : candidate.url.startsWith('https://') ? 0 : 1;
+    return rank(left) - rank(right);
+  });
+
+// Establish the first reachable transport for a pairing payload: health-check a
+// direct URL, or open + health-check a relay tunnel. A returned relay transport
+// owns an OPEN tunnel the caller must close after redeeming.
+const establishPairingTransport = async (
+  candidates: PairingEndpointCandidate[],
+): Promise<PairingChosenTransport | null> => {
+  for (const candidate of sortPairingCandidates(candidates)) {
+    if (candidate.type === 'relay') {
+      const relay: MobileRelayConfig = {
+        relayUrl: candidate.relayUrl,
+        serverId: candidate.serverId,
+        hostEncPubJwk: candidate.hostEncPubJwk,
+      };
+      const tunnel = createRelayTunnelClient({ ...relay, ...(candidate.grant ? { grant: candidate.grant } : {}) });
+      const health = await raceWithTimeout(RELAY_CONNECT_TIMEOUT_MS, tunnel.fetch('/health').catch(() => null));
+      logConnect('pairing:relay:health', { ok: health?.ok === true, status: health?.status ?? null });
+      if (health?.ok) return { kind: 'relay', relay, grant: candidate.grant, tunnel };
+      tunnel.close();
+      continue;
+    }
+    let url = '';
+    try {
+      url = normalizeConnectionUrl(candidate.url);
+    } catch {
+      continue;
+    }
+    if (!url) continue;
+    const health = await requestWithTimeout(`${url}/health`, { method: 'GET' });
+    logConnect('pairing:direct:health', { ok: health?.ok === true, status: health?.status ?? null });
+    if (health?.ok) return { kind: 'direct', url };
   }
   return null;
 };
@@ -919,23 +927,33 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
     if (busyRef.current === 'pairing') return;
     setError(null);
     beginBusy('pairing');
+    // A chosen relay transport owns an open tunnel; always close it.
+    let chosen: PairingChosenTransport | null = null;
     try {
-      const url = await choosePairingEndpoint(payload);
-      if (!url) {
+      // 1. Find the first reachable transport across all candidates.
+      chosen = await establishPairingTransport(payload.candidates);
+      if (!chosen) {
         setError(t('mobile.connect.error.unreachable'));
         return;
       }
-      const response = await requestWithTimeout(`${url}/api/client-auth/pairing/redeem`, {
+
+      // 2. Redeem the one-time secret over that transport. Single-use: we never
+      // retry other candidates once redeem runs (the secret is consumed).
+      const redeemBody = JSON.stringify({
+        pairingId: payload.pairingId,
+        secret: payload.secret,
+        clientLabel: 'OpenChamber Mobile',
+        clientKind: 'mobile',
+        deviceName: 'OpenChamber Mobile',
+      });
+      const redeemInit = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({
-          pairingId: payload.pairingId,
-          secret: payload.secret,
-          clientLabel: 'OpenChamber Mobile',
-          clientKind: 'mobile',
-          deviceName: 'OpenChamber Mobile',
-        }),
-      });
+        body: redeemBody,
+      } as const;
+      const response = chosen.kind === 'relay'
+        ? await raceWithTimeout(RELAY_CONNECT_TIMEOUT_MS, chosen.tunnel.fetch('/api/client-auth/pairing/redeem', redeemInit).catch(() => null))
+        : await requestWithTimeout(`${chosen.url}/api/client-auth/pairing/redeem`, redeemInit);
       if (!response?.ok) {
         setError(t('mobile.connect.error.authRequired'));
         return;
@@ -946,24 +964,42 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
         setError(t('mobile.connect.error.authRequired'));
         return;
       }
-      if (isCapacitorApp()) {
-        const stored = await writeSecureToken(url, issuedToken);
-        if (!stored) {
-          setError(t('mobile.connect.error.authRequired'));
-          return;
+      const serverLabel = typeof result?.server?.label === 'string' ? result.server.label : '';
+      const clientLabel = typeof result?.client?.label === 'string' ? result.client.label : '';
+
+      // 3. Persist the token + switch the runtime for the chosen transport.
+      if (chosen.kind === 'relay') {
+        const { relay, grant } = chosen;
+        if (isCapacitorApp()) {
+          const stored = await writeSecureToken(relayConnectionRuntimeKey(relay), issuedToken);
+          if (!stored) {
+            setError(t('mobile.connect.error.authRequired'));
+            return;
+          }
         }
+        const url = canonicalRelayUrl(relay);
+        const label = payload.label || serverLabel || clientLabel || getConnectionLabel(relay.relayUrl);
+        persistMetadata({ label, url, relay, clientToken: issuedToken });
+        switchToRelayRuntime(relay, issuedToken, grant);
+      } else {
+        const { url } = chosen;
+        if (isCapacitorApp()) {
+          const stored = await writeSecureToken(getConnectionStorageKey(url), issuedToken);
+          if (!stored) {
+            setError(t('mobile.connect.error.authRequired'));
+            return;
+          }
+        }
+        const label = payload.label || serverLabel || clientLabel || getConnectionLabel(url);
+        persistMetadata({ label, url, clientToken: issuedToken });
+        switchRuntimeEndpoint({ apiBaseUrl: url, clientToken: issuedToken });
       }
-      const label = payload.label
-        || (typeof result?.server?.label === 'string' ? result.server.label : '')
-        || (typeof result?.client?.label === 'string' ? result.client.label : '')
-        || getConnectionLabel(url);
-      persistMetadata({ label, url, clientToken: issuedToken });
-      switchRuntimeEndpoint({ apiBaseUrl: url, clientToken: issuedToken });
       onConnected();
     } catch (error) {
       console.warn('[mobile-connect] pairing threw', error);
       setError(t('mobile.connect.error.authRequired'));
     } finally {
+      if (chosen?.kind === 'relay') chosen.tunnel.close();
       endBusy('pairing');
     }
   }, [beginBusy, endBusy, onConnected, persistMetadata, t]);

@@ -23,6 +23,7 @@ export const createBootstrapRuntime = (dependencies) => {
       tunnelAuthController,
       remoteClientAuthRuntime,
       clientPairingRuntime,
+      getRelayPairingCandidate,
       readSettingsFromDiskMigrated,
       normalizeTunnelSessionTtlMs,
       sayTTSCapability,
@@ -84,6 +85,7 @@ export const createBootstrapRuntime = (dependencies) => {
       uiAuthController,
       remoteClientAuthRuntime,
       clientPairingRuntime,
+      getRelayPairingCandidate,
       readSettingsFromDiskMigrated,
       normalizeTunnelSessionTtlMs,
     });

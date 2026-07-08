@@ -15,7 +15,6 @@ import express from 'express';
 
 import { createRelayIdentityRuntime } from './identity.js';
 import { startRelayHost } from './host-client.js';
-import { bytesToBase64Url } from './e2ee.js';
 
 export const DEFAULT_RELAY_URL = 'wss://relay.openchamber.dev/ws';
 
@@ -49,20 +48,16 @@ const envRelayUrlOverride = () => {
 /**
  * @param {{
  *   crypto: typeof import('node:crypto'),
- *   os: typeof import('node:os'),
  *   readSettingsFromDiskMigrated: () => Promise<object>,
  *   writeSettingsToDisk: (settings: object) => Promise<void>,
- *   remoteClientAuthRuntime: { createClient: (options: object) => Promise<{ client: object, token: string }> },
  *   getLocalPort: () => number,
  *   logger?: Pick<Console, 'warn'>,
  * }} deps
  */
 export const createRelayService = ({
   crypto,
-  os,
   readSettingsFromDiskMigrated,
   writeSettingsToDisk,
-  remoteClientAuthRuntime,
   getLocalPort,
   logger = console,
 }) => {
@@ -140,28 +135,22 @@ export const createRelayService = ({
     };
   };
 
-  const buildOffer = async ({ includeToken = false, clientLabel } = {}) => {
+  // Pairing candidate for the unified connection payload (pairing v2). Relay is
+  // just another transport: it carries the relay route + E2EE trust anchor, no
+  // embedded token — the client redeems the one-time pairing secret over the
+  // tunnel like any other candidate. Returns null when the host relay is off, so
+  // callers only advertise relay when it is actually reachable. Priority is high
+  // (tried after LAN/tunnel) since the relay path is the last-resort transport.
+  const getPairingCandidate = async () => {
     const config = await readConfig();
+    if (!config.enabled) return null;
     const identity = await identityRuntime.getRelayIdentity();
-    const offer = {
-      v: 1,
-      mode: 'relay',
+    return {
+      type: 'relay',
       relayUrl: config.relayUrl,
       serverId: identity.serverId,
       hostEncPubJwk: identity.hostEncPubJwk,
-      label: os.hostname(),
-    };
-    if (includeToken) {
-      const label = typeof clientLabel === 'string' && clientLabel.trim().length > 0
-        ? clientLabel.trim()
-        : 'Relay client';
-      const { token } = await remoteClientAuthRuntime.createClient({ label, clientKind: 'relay' });
-      offer.token = token;
-    }
-    const encoded = bytesToBase64Url(new TextEncoder().encode(JSON.stringify(offer)));
-    return {
-      offer,
-      url: `openchamber://connect?v=1&mode=relay#offer=${encoded}`,
+      priority: 30,
     };
   };
 
@@ -198,17 +187,6 @@ export const createRelayService = ({
       }
     });
 
-    app.post('/api/openchamber/relay/offer', express.json({ limit: '16kb' }), async (req, res) => {
-      try {
-        const result = await buildOffer({
-          includeToken: req.body?.includeToken === true,
-          clientLabel: req.body?.clientLabel,
-        });
-        res.json(result);
-      } catch (error) {
-        res.status(500).json({ error: error?.message ?? 'Failed to build relay offer' });
-      }
-    });
   };
 
   return {
@@ -216,6 +194,6 @@ export const createRelayService = ({
     startIfEnabled,
     stop,
     getStatus,
-    buildOffer,
+    getPairingCandidate,
   };
 };

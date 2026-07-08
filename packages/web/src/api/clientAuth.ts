@@ -1,5 +1,6 @@
 import type {
   ClientAuthAPI,
+  PairingSessionCreateResult,
   RemoteClientCreateResult,
   RemoteClientPurgeRevokedResult,
   RemoteClientRecord,
@@ -33,6 +34,23 @@ export const createWebClientAuthAPI = (): ClientAuthAPI => ({
     const payload = await jsonOrNull<RemoteClientCreateResult & { error?: string }>(response);
     if (!response.ok || !payload?.client || typeof payload.token !== 'string') {
       throw new Error(payload?.error || response.statusText || 'Failed to create remote client token');
+    }
+    return payload;
+  },
+
+  async createPairingSession(input = {}): Promise<PairingSessionCreateResult> {
+    const response = await runtimeFetch('/api/client-auth/pairing/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        label: input.label ?? '',
+        ...(input.allowedClientKinds ? { allowedClientKinds: input.allowedClientKinds } : {}),
+        ...(input.serverUrl ? { serverUrl: input.serverUrl } : {}),
+      }),
+    });
+    const payload = await jsonOrNull<PairingSessionCreateResult & { error?: string }>(response);
+    if (!response.ok || typeof payload?.pairing?.secret !== 'string' || !payload?.server) {
+      throw new Error(payload?.error || response.statusText || 'Failed to create pairing session');
     }
     return payload;
   },

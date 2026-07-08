@@ -1213,6 +1213,11 @@ async function main(options = {}) {
   server = http.createServer(app);
   let realtimeProxyRuntime = { stop: () => {} };
 
+  // The relay service is constructed further below (it depends on the tunnel
+  // runtime's active port). The pairing routes registered here only read the
+  // relay candidate lazily at request time, so a late-bound holder is enough.
+  let relayServiceInstance = null;
+
   const bootstrapResult = bootstrapRuntime.setupBaseRoutes(app, {
     process,
     openchamberVersion: OPENCHAMBER_VERSION,
@@ -1254,6 +1259,7 @@ async function main(options = {}) {
     tunnelAuthController,
     remoteClientAuthRuntime,
     clientPairingRuntime,
+    getRelayPairingCandidate: () => (relayServiceInstance ? relayServiceInstance.getPairingCandidate() : null),
     readSettingsFromDiskMigrated,
     normalizeTunnelSessionTtlMs,
     sayTTSCapability,
@@ -1308,6 +1314,7 @@ async function main(options = {}) {
     remoteClientAuthRuntime,
     getLocalPort: () => tunnelRuntimeContext.getActivePort(),
   });
+  relayServiceInstance = relayService;
   relayService.registerRoutes(app);
 
   await featureRoutesRuntime.registerRoutes(app, {

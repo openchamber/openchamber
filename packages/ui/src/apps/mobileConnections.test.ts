@@ -64,7 +64,7 @@ describe('mobile connection storage', () => {
 
       await upsertMobileConnection({
         label: 'My Desktop',
-        url: 'openchamber://connect?v=1&mode=relay',
+        url: 'relay://srv_example',
         clientToken: 'oc_client_secret',
         relay: testRelay,
       });
@@ -107,8 +107,8 @@ describe('mobile connection storage', () => {
     try {
       installTestWindow();
       await upsertMobileConnection({ label: 'Direct', url: 'http://host.example' });
-      await upsertMobileConnection({ label: 'Relay', url: 'openchamber://connect?v=1&mode=relay', relay: testRelay });
-      await upsertMobileConnection({ label: 'Relay renamed', url: 'openchamber://connect?v=1&mode=relay', relay: testRelay });
+      await upsertMobileConnection({ label: 'Relay', url: 'relay://srv_example', relay: testRelay });
+      await upsertMobileConnection({ label: 'Relay renamed', url: 'relay://srv_example', relay: testRelay });
 
       const connections = await loadMobileConnections();
       expect(connections).toHaveLength(2);

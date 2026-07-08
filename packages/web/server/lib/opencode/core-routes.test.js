@@ -298,6 +298,56 @@ describe('core-routes', () => {
     });
   });
 
+  it('advertises the caller-supplied serverUrl as the direct candidate over the request origin', async () => {
+    const { app } = createPairingRouteApp();
+
+    const response = await request(app)
+      .post('/api/client-auth/pairing/sessions')
+      .set('Host', 'runtime.example')
+      .send({ label: 'Pair phone', serverUrl: 'http://192.168.1.20:2606' })
+      .expect(201);
+
+    expect(response.body.server.candidates).toEqual([
+      { type: 'lan', url: 'http://192.168.1.20:2606', priority: 10 },
+    ]);
+  });
+
+  it('folds in a relay candidate when the host relay is enabled', async () => {
+    const relayCandidate = {
+      type: 'relay',
+      relayUrl: 'wss://relay.example/ws',
+      serverId: 'srv_1',
+      hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'aaa', y: 'bbb' },
+      priority: 30,
+    };
+    const { app } = createPairingRouteApp({ getRelayPairingCandidate: vi.fn(async () => relayCandidate) });
+
+    const response = await request(app)
+      .post('/api/client-auth/pairing/sessions')
+      .set('Host', 'runtime.example')
+      .send({ label: 'Pair phone' })
+      .expect(201);
+
+    expect(response.body.server.candidates).toEqual([
+      { type: 'lan', url: 'http://runtime.example', priority: 10 },
+      relayCandidate,
+    ]);
+  });
+
+  it('still returns the direct candidate when the relay candidate lookup throws', async () => {
+    const { app } = createPairingRouteApp({
+      getRelayPairingCandidate: vi.fn(async () => { throw new Error('relay status read failed'); }),
+    });
+
+    const response = await request(app)
+      .post('/api/client-auth/pairing/sessions')
+      .set('Host', 'runtime.example')
+      .send({ label: 'Pair phone' })
+      .expect(201);
+
+    expect(response.body.server.candidates).toEqual([{ type: 'lan', url: 'http://runtime.example', priority: 10 }]);
+  });
+
   it('requires owner auth before creating or cancelling pairing sessions', async () => {
     const { app, dependencies } = createPairingRouteApp({
       uiAuthController: {

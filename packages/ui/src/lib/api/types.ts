@@ -1123,9 +1123,35 @@ export interface RemoteClientPurgeRevokedResult {
   purged: number;
 }
 
+export interface PairingSessionCreateResult {
+  pairing: {
+    id: string;
+    label?: string;
+    fingerprint?: string | null;
+    expiresAt?: string;
+    secret: string;
+  };
+  server: {
+    label: string;
+    // Transport candidates for the pairing-v2 payload. Shape matches
+    // PairingEndpointCandidate in `@/lib/connectionPayload` (direct lan/tunnel or
+    // relay); left as a structural type here so this contract file stays leaf.
+    candidates: Array<Record<string, unknown>>;
+  };
+}
+
 export interface ClientAuthAPI {
   listClients(): Promise<RemoteClientRecord[]>;
   createClient(input?: { label?: string }): Promise<RemoteClientCreateResult>;
+  // Creates a one-time pairing session (pairing v2). `serverUrl` is the
+  // externally reachable URL to advertise as the direct candidate (the desktop
+  // UI talks to its server over loopback, so it must supply the LAN URL); the
+  // server folds in a relay candidate when its relay host is enabled.
+  createPairingSession(input?: {
+    label?: string;
+    allowedClientKinds?: Array<'mobile' | 'desktop'>;
+    serverUrl?: string;
+  }): Promise<PairingSessionCreateResult>;
   purgeRevokedClients(): Promise<RemoteClientPurgeRevokedResult>;
   revokeClient(id: string): Promise<RemoteClientRevokeResult>;
 }

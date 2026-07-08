@@ -361,6 +361,10 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     clientPairingRuntime,
     readSettingsFromDiskMigrated,
     normalizeTunnelSessionTtlMs,
+    // Returns the relay pairing candidate ({ type:'relay', relayUrl, serverId,
+    // hostEncPubJwk, priority }) when the host relay is enabled, else null.
+    // Injected lazily because the relay service is constructed after these routes.
+    getRelayPairingCandidate = async () => null,
   } = dependencies;
   const PAIRING_REDEEM_RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
   const PAIRING_REDEEM_RATE_LIMIT_MAX_ATTEMPTS = 10;
@@ -495,16 +499,45 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     pairingRedeemAttempts.delete(`${requestIp(req)}:${pairingIdFromRequest(req)}`);
   };
 
-  const pairingServerCandidates = (req) => {
-    const origin = requestOrigin(req);
-    if (!origin) return [];
-    let type = 'lan';
+  const normalizeCandidateUrl = (value) => {
+    if (typeof value !== 'string' || !value.trim()) return null;
     try {
-      const parsed = new URL(origin);
-      type = parsed.protocol === 'https:' ? 'tunnel' : 'lan';
+      const parsed = new URL(value.trim());
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+      parsed.hash = '';
+      parsed.search = '';
+      return parsed.toString().replace(/\/+$/, '');
     } catch {
+      return null;
     }
-    return [{ type, url: origin, priority: 10 }];
+  };
+
+  // `preferredServerUrl` is the caller-supplied externally reachable URL (the
+  // desktop UI reaches its own server over loopback, so the request origin is not
+  // scannable — it passes the LAN URL instead). Falls back to the request origin
+  // for remote callers where the Host header IS the reachable address.
+  const pairingServerCandidates = async (req, preferredServerUrl) => {
+    const candidates = [];
+    const direct = normalizeCandidateUrl(preferredServerUrl) || requestOrigin(req);
+    if (direct) {
+      let type = 'lan';
+      try {
+        const parsed = new URL(direct);
+        type = parsed.protocol === 'https:' ? 'tunnel' : 'lan';
+      } catch {
+      }
+      candidates.push({ type, url: direct, priority: 10 });
+    }
+    // Advertise the relay transport as an additional candidate when the host
+    // relay is on. The client races candidates and falls back to relay only if
+    // the direct URL is unreachable (relay carries a higher priority number).
+    try {
+      const relayCandidate = await getRelayPairingCandidate();
+      if (relayCandidate) candidates.push(relayCandidate);
+    } catch {
+      // A relay-status read failure must not break direct pairing.
+    }
+    return candidates;
   };
 
   const sendPairingRedeemError = (res, error) => {
@@ -714,7 +747,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
         ...result,
         server: {
           label: 'OpenChamber',
-          candidates: pairingServerCandidates(req),
+          candidates: await pairingServerCandidates(req, req.body?.serverUrl),
         },
       });
     });

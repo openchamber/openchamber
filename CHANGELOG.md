@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Remote access: a new private relay lets you reach your instance from anywhere — no open ports and no third-party tunnel. Enable it in Settings → Remote Instances, and pairing links (QR or `openchamber connect-url`) can carry the relay as a fallback so a device off your network connects over an end-to-end-encrypted tunnel.
+- Pairing: device pairing links are now single-use, expiring codes redeemed on connect instead of embedding a long-lived token in the QR.
 - Diff/Chat: added a Last turn mode to the Diff view, and latest-turn changed-file chips in chat now open that snapshot while older turn chips stay read-only.
 - Chat: if sending a message times out or loses the connection after OpenCode accepted it, the app now keeps the sent message instead of rolling it back as failed.
 - Mobile: the native app can now check for OpenChamber app updates; Android shows a persistent download toast when an update is available.

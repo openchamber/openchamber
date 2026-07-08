@@ -22,7 +22,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { RelaySection } from '@/components/sections/remote-instances/RelaySection';
-import { RELAY_UI_ENABLED } from '@/lib/relay/gate';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { toast } from '@/components/ui';
@@ -32,7 +31,7 @@ import { openExternalUrl } from '@/lib/url';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { RemoteClientRecord } from '@/lib/api/types';
-import { buildClientConnectionPayload, encodeClientConnectionPayload, parseClientConnectionPayload } from '@/lib/connectionPayload';
+import { buildPairingConnectionPayload, encodePairingConnectionPayload, parsePairingConnectionPayload, type PairingEndpointCandidate } from '@/lib/connectionPayload';
 import {
   desktopSshLogsClear,
   desktopSshLogs,
@@ -472,27 +471,66 @@ export const RemoteInstancesPage: React.FC = () => {
   }, [directDefaultHostId, directHeaders, directHosts, directLabel, directToken, directUrl, persistDirectHosts, t]);
 
   const importDirectConnectLink = React.useCallback(async () => {
-    const payload = parseClientConnectionPayload(directConnectLink);
+    const payload = parsePairingConnectionPayload(directConnectLink);
     if (!payload) {
       setDirectError(t('settings.remoteInstances.direct.error.invalidConnectLink'));
       return;
     }
-    const url = normalizeHostUrl(payload.serverUrl);
-    if (!url) {
+    // Desktop host-switching is direct HTTP only; a relay-only pairing link
+    // can't be imported as a switchable host.
+    const directCandidates = payload.candidates.filter(
+      (candidate): candidate is Extract<PairingEndpointCandidate, { type: 'lan' | 'tunnel' }> => candidate.type !== 'relay',
+    );
+    if (directCandidates.length === 0) {
       setDirectError(t('desktopHostSwitcher.error.invalidUrl'));
       return;
     }
+    // Redeem the one-time secret at the first candidate that answers to mint a
+    // client token for this desktop. The remote instance is a user-provided URL,
+    // so a plain cross-origin fetch is correct here (not the active runtime).
+    let redeemed: { url: string; token: string } | null = null;
+    for (const candidate of directCandidates) {
+      const candidateUrl = normalizeHostUrl(candidate.url);
+      if (!candidateUrl) continue;
+      try {
+        const response = await fetch(`${candidateUrl}/api/client-auth/pairing/redeem`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({
+            pairingId: payload.pairingId,
+            secret: payload.secret,
+            clientLabel: payload.label || 'OpenChamber Desktop',
+            clientKind: 'desktop',
+            deviceName: 'OpenChamber Desktop',
+          }),
+        });
+        if (!response.ok) continue;
+        const body = (await response.json().catch(() => null)) as { clientToken?: unknown } | null;
+        const token = typeof body?.clientToken === 'string' ? body.clientToken.trim() : '';
+        if (token) {
+          redeemed = { url: candidateUrl, token };
+          break;
+        }
+      } catch {
+        // Unreachable candidate — try the next one.
+      }
+    }
+    if (!redeemed) {
+      setDirectError(t('desktopHostSwitcher.error.invalidUrl'));
+      return;
+    }
+    const { url, token } = redeemed;
     const existing = directHosts.find((host) => normalizeHostUrl(host.apiUrl || host.url) === url);
     if (existing) {
       const nextHosts = directHosts.map((host) => host.id === existing.id
-        ? { ...host, label: payload.label || host.label, url, apiUrl: url, clientToken: payload.token }
+        ? { ...host, label: payload.label || host.label, url, apiUrl: url, clientToken: token }
         : host);
       await persistDirectHosts(nextHosts, directDefaultHostId);
     } else {
       const id = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
         ? crypto.randomUUID()
         : `host-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-      await persistDirectHosts([{ id, label: payload.label || redactSensitiveUrl(url), url, apiUrl: url, clientToken: payload.token }, ...directHosts], directDefaultHostId);
+      await persistDirectHosts([{ id, label: payload.label || redactSensitiveUrl(url), url, apiUrl: url, clientToken: token }, ...directHosts], directDefaultHostId);
     }
     setDirectConnectLink('');
     setDirectError(null);
@@ -598,14 +636,27 @@ export const RemoteInstancesPage: React.FC = () => {
   }, [clientAuth, loadRemoteClients, remoteClientLabel]);
 
   const createPairingLink = React.useCallback(async () => {
-    if (!clientAuth) return;
+    if (!clientAuth?.createPairingSession) return;
     setRemoteClientError(null);
     try {
       const serverUrl = await resolvePairingServerUrl();
-      const result = await clientAuth.createClient({ label: remoteClientLabel.trim() || 'Paired client' });
-      const payload = buildClientConnectionPayload({ serverUrl, token: result.token, label: remoteClientLabel || 'OpenChamber' });
-      const encoded = encodeClientConnectionPayload(payload);
-      setCreatedRemoteClientToken(result.token);
+      const label = remoteClientLabel.trim() || undefined;
+      // The server advertises `serverUrl` as the direct candidate and folds in a
+      // relay candidate when its relay host is enabled — one link, both transports.
+      const { pairing, server } = await clientAuth.createPairingSession({
+        label,
+        allowedClientKinds: ['mobile', 'desktop'],
+        serverUrl,
+      });
+      const payload = buildPairingConnectionPayload({
+        pairingId: pairing.id,
+        secret: pairing.secret,
+        label: label || server.label,
+        fingerprint: pairing.fingerprint ?? undefined,
+        expiresAt: pairing.expiresAt,
+        candidates: server.candidates as unknown as PairingEndpointCandidate[],
+      });
+      const encoded = encodePairingConnectionPayload(payload);
       setPairingUrl(encoded);
       setPairingQrDataUrl(await QRCode.toDataURL(encoded, { width: 192, margin: 1 }));
       setRemoteClientLabel('');
@@ -1117,7 +1168,7 @@ export const RemoteInstancesPage: React.FC = () => {
           </div>
         ) : null}
 
-        {clientAuth && RELAY_UI_ENABLED ? <RelaySection /> : null}
+        {clientAuth ? <RelaySection /> : null}
 
         {showInstanceManagement ? <div data-settings-item="remote-instances.direct-hosts" className="mb-8 border-t border-[var(--surface-subtle)] pt-8">
           <div className="mb-1 px-1 space-y-0.5">
