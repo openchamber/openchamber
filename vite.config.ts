@@ -25,7 +25,7 @@ export default defineConfig({
     global: 'globalThis',
   },
   optimizeDeps: {
-    include: ['@opencode-ai/sdk/v2', 'shiki'],
+    include: ['@opencode-ai/sdk/v2'],
   },
   build: {
     chunkSizeWarningLimit: 1200,

@@ -28,6 +28,7 @@ import { JsonTreeView } from '@/components/ui/JsonTreeView';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n, type I18nKey, type I18nParams } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { getMermaidDataUrlSourcePromise, isMermaidLoadFailure, type MermaidLoadFailure } from './toolOutputDialogMermaid';
 
 interface ToolOutputDialogProps {
     popup: ToolPopupContent;
@@ -35,19 +36,7 @@ interface ToolOutputDialogProps {
     isMobile: boolean;
 }
 
-type MermaidLoadFailure = {
-    key: I18nKey;
-    params?: I18nParams;
-};
-
 const mermaidLoadFailure = (key: I18nKey, params?: I18nParams): MermaidLoadFailure => ({ key, params });
-
-const isMermaidLoadFailure = (value: unknown): value is MermaidLoadFailure => (
-    typeof value === 'object'
-    && value !== null
-    && 'key' in value
-    && typeof (value as MermaidLoadFailure).key === 'string'
-);
 
 const getToolIcon = (toolName: string) => {
     const iconClass = 'h-3.5 w-3.5 flex-shrink-0';
@@ -708,20 +697,6 @@ const MermaidPreviewDialog: React.FC<{
         return isSafeLocalPath(decoded) ? decoded : (isSafeLocalPath(stripped) ? stripped : null);
     }, []);
 
-    const decodeDataUrl = React.useCallback((value: string): string => {
-        const commaIndex = value.indexOf(',');
-        if (commaIndex < 0) {
-            throw mermaidLoadFailure('chat.toolOutputDialog.mermaid.dataUrlMalformed');
-        }
-
-        const metadata = value.slice(0, commaIndex).toLowerCase();
-        const payload = value.slice(commaIndex + 1);
-        if (metadata.includes(';base64')) {
-            return atob(payload);
-        }
-        return decodeURIComponent(payload);
-    }, []);
-
     const loadMermaidSource = React.useCallback(async () => {
         const target = popup.mermaid;
         if (!target?.url) {
@@ -745,7 +720,7 @@ const MermaidPreviewDialog: React.FC<{
 
         let sourcePromise: Promise<string>;
         if (target.url.startsWith('data:')) {
-            sourcePromise = Promise.resolve(decodeDataUrl(target.url));
+            sourcePromise = getMermaidDataUrlSourcePromise(target.url);
         } else if (target.url.toLowerCase().startsWith('file://')) {
             const normalizedPath = normalizeFilePath(target.url);
             if (!normalizedPath) {
@@ -794,7 +769,7 @@ const MermaidPreviewDialog: React.FC<{
                 setStatus('error');
                 setErrorMessage(isMermaidLoadFailure(error) ? t(error.key, error.params) : t('chat.toolOutputDialog.mermaid.loadFailed'));
             });
-    }, [decodeDataUrl, normalizeFilePath, popup.mermaid, t]);
+    }, [normalizeFilePath, popup.mermaid, t]);
 
     React.useEffect(() => {
         if (!popup.open || !popup.mermaid) {

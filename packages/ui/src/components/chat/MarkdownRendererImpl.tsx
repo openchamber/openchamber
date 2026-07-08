@@ -1223,13 +1223,18 @@ const SimpleMarkdownRendererImpl: React.FC<{
 };
 
 export const SimpleMarkdownRenderer = React.memo(SimpleMarkdownRendererImpl, (prev, next) => {
+  const prevMermaidControls = prev.mermaidControls ?? DEFAULT_MERMAID_CONTROLS;
+  const nextMermaidControls = next.mermaidControls ?? DEFAULT_MERMAID_CONTROLS;
+
   return prev.content === next.content
     && prev.variant === next.variant
     && prev.className === next.className
     && prev.disableLinkSafety === next.disableLinkSafety
     && prev.stripFrontmatter === next.stripFrontmatter
     && prev.onShowPopup === next.onShowPopup
-    && prev.mermaidControls === next.mermaidControls
+    && prevMermaidControls.download === nextMermaidControls.download
+    && prevMermaidControls.copy === nextMermaidControls.copy
+    && prevMermaidControls.showPanZoomControls === nextMermaidControls.showPanZoomControls
     && prev.allowMermaidWheelEvents === next.allowMermaidWheelEvents
     && prev.enableFileReferences === next.enableFileReferences;
 });
