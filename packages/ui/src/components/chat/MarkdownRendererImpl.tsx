@@ -29,8 +29,10 @@ import {
   syncMarkdownCodeLineNumbers,
   type DecorateContext,
   type DecorateLabels,
+  type MermaidControlOptions,
   type MermaidRender,
 } from './markdown/decorate';
+import { createMermaidViewerRegistry, MERMAID_BLOCK_SELECTOR, shouldRefreshMermaidViewers } from './markdown/mermaidViewer';
 import {
   BLOCK_PATH_TOKEN_RE,
   isAbsoluteReferencePath,
@@ -103,27 +105,12 @@ const useExternalLinkInteractions = ({
   }, [containerRef, enabled]);
 };
 
-type MermaidControlOptions = {
-  download: boolean;
-  copy: boolean;
-  fullscreen: boolean;
-  panZoom: boolean;
+const DEFAULT_MERMAID_CONTROLS: MermaidControlOptions = {
+  download: true,
+  copy: true,
+  showPanZoomControls: true,
 };
-
-const extractMermaidBlocks = (markdown: string): string[] => {
-  if (!markdown.includes('mermaid')) return [];
-  const blocks: string[] = [];
-  const regex = /(?:^|\r?\n)(`{3,}|~{3,})mermaid[^\n\r]*\r?\n([\s\S]*?)\r?\n\1(?=\r?\n|$)/gi;
-  let match: RegExpExecArray | null = regex.exec(markdown);
-
-  while (match) {
-    const block = (match[2] ?? '').replace(/\s+$/, '');
-    blocks.push(block);
-    match = regex.exec(markdown);
-  }
-
-  return blocks;
-};
+const DEFAULT_MERMAID_FULLSCREEN_ENABLED = true;
 
 const stripLeadingFrontmatter = (markdown: string): string => {
   const frontmatterMatch = markdown.match(
@@ -153,7 +140,6 @@ interface MarkdownRendererProps {
   enableFileReferences?: boolean;
 }
 
-const MERMAID_BLOCK_SELECTOR = '[data-markdown="mermaid-block"]';
 const FILE_LINK_SELECTOR = '[data-openchamber-file-link="true"]';
 const BLOCK_PATH_TOKEN_ATTR = 'data-openchamber-block-path-token';
 const BLOCK_PATH_TOKEN_SELECTOR = `[${BLOCK_PATH_TOKEN_ATTR}]`;
@@ -666,14 +652,16 @@ const useFileReferenceInteractions = ({
 
 const useMermaidInlineInteractions = ({
   containerRef,
-  mermaidBlocks,
   onShowPopup,
-  allowWheelZoom,
+  enableFullscreen,
+  enablePanZoom,
+  allowMermaidWheelEvents,
 }: {
   containerRef: React.RefObject<HTMLDivElement | null>;
-  mermaidBlocks: string[];
   onShowPopup?: (content: ToolPopupContent) => void;
-  allowWheelZoom?: boolean;
+  enableFullscreen?: boolean;
+  enablePanZoom?: boolean;
+  allowMermaidWheelEvents?: boolean;
 }) => {
   React.useEffect(() => {
     const container = containerRef.current;
@@ -682,7 +670,7 @@ const useMermaidInlineInteractions = ({
     }
 
     const handleMermaidClick = (event: MouseEvent) => {
-      if (!onShowPopup) {
+      if (!enableFullscreen || !onShowPopup) {
         return;
       }
 
@@ -700,13 +688,18 @@ const useMermaidInlineInteractions = ({
         return;
       }
 
-      const renderedBlocks = Array.from(container.querySelectorAll(MERMAID_BLOCK_SELECTOR));
-      const blockIndex = renderedBlocks.indexOf(block);
+      if (block instanceof HTMLElement && block.hasAttribute('data-mermaid-suppress-click')) {
+        block.removeAttribute('data-mermaid-suppress-click');
+        return;
+      }
+
+      const renderedBlocks = Array.from(container.querySelectorAll<HTMLElement>(MERMAID_BLOCK_SELECTOR));
+      const blockIndex = renderedBlocks.indexOf(block as HTMLElement);
       if (blockIndex < 0) {
         return;
       }
 
-      const source = mermaidBlocks[blockIndex];
+      const source = block instanceof HTMLElement ? block.getAttribute('data-md-source') : null;
       if (!source || source.trim().length === 0) {
         return;
       }
@@ -729,7 +722,7 @@ const useMermaidInlineInteractions = ({
     };
 
     const handleInlineWheel = (event: WheelEvent) => {
-      if (allowWheelZoom) {
+      if (allowMermaidWheelEvents || ((event.ctrlKey || event.metaKey) && enablePanZoom)) {
         return;
       }
 
@@ -754,7 +747,7 @@ const useMermaidInlineInteractions = ({
       container.removeEventListener('click', handleMermaidClick);
       container.removeEventListener('wheel', handleInlineWheel, true);
     };
-  }, [allowWheelZoom, containerRef, mermaidBlocks, onShowPopup]);
+  }, [allowMermaidWheelEvents, containerRef, enableFullscreen, enablePanZoom, onShowPopup]);
 };
 
 // ---------------------------------------------------------------------------
@@ -862,17 +855,21 @@ const useDecorateContext = (
   currentTheme: Theme,
   deferCodeLineNumberSync: boolean,
   onPreviewLoopback?: (url: string) => void,
+  mermaidControls: MermaidControlOptions = DEFAULT_MERMAID_CONTROLS,
 ): DecorateContext => {
   const { t } = useI18n();
   const labels: DecorateLabels = React.useMemo(() => ({
-    copy: 'Copy code',
-    copied: 'Copied',
+    copy: t('markdownRenderer.code.actions.copyTitle'),
+    copied: t('markdownRenderer.code.actions.copiedTitle'),
     enableCodeWrap: t('markdownRenderer.code.actions.enableWrapTitle'),
     disableCodeWrap: t('markdownRenderer.code.actions.disableWrapTitle'),
     copyTable: t('markdownRenderer.table.actions.copyTitle'),
     downloadTable: t('markdownRenderer.table.actions.downloadTitle'),
     copyDiagram: t('markdownRenderer.mermaid.actions.copySourceTitle'),
     downloadDiagram: t('markdownRenderer.mermaid.actions.downloadSvgTitle'),
+    zoomInDiagram: t('markdownRenderer.mermaid.actions.zoomInTitle'),
+    zoomOutDiagram: t('markdownRenderer.mermaid.actions.zoomOutTitle'),
+    resetDiagramView: t('markdownRenderer.mermaid.actions.resetViewTitle'),
     previewLabel: t('terminalView.preview.open'),
     previewTitle: t('terminalView.preview.openTitle'),
   }), [t]);
@@ -896,8 +893,8 @@ const useDecorateContext = (
           return {};
         }
       });
-    return { labels, codeBlockLineWrap, deferCodeLineNumberSync, onToggleCodeBlockLineWrap: toggleCodeBlockLineWrap, renderMermaid, onPreviewLoopback };
-  }, [currentTheme, labels, codeBlockLineWrap, deferCodeLineNumberSync, toggleCodeBlockLineWrap, onPreviewLoopback]);
+    return { labels, mermaidControls, codeBlockLineWrap, deferCodeLineNumberSync, onToggleCodeBlockLineWrap: toggleCodeBlockLineWrap, renderMermaid, onPreviewLoopback };
+  }, [currentTheme, labels, mermaidControls, codeBlockLineWrap, deferCodeLineNumberSync, toggleCodeBlockLineWrap, onPreviewLoopback]);
 };
 
 // Runs the async render pipeline into the container and keeps a stable
@@ -920,6 +917,22 @@ const useMorphdomMarkdown = ({
   React.useEffect(() => {
     ensureMarkdownShikiTheme();
   }, []);
+
+  const mermaidViewerRef = React.useRef<ReturnType<typeof createMermaidViewerRegistry> | null>(null);
+  const refreshMermaidViewers = React.useCallback(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+    if (!mermaidViewerRef.current) {
+      if (!shouldRefreshMermaidViewers(container)) {
+        return;
+      }
+      mermaidViewerRef.current = createMermaidViewerRegistry(container);
+      return;
+    }
+    mermaidViewerRef.current.refresh();
+  }, [containerRef]);
 
   // Synchronous first paint: while the async parse is in-flight, show escaped
   // plain text immediately so there is no blank frame on initial mount. Only
@@ -944,8 +957,16 @@ const useMorphdomMarkdown = ({
       // the structure here keeps the async morph to syntax colors only.
       decorateMarkdown(block, ctx);
       target.appendChild(block);
+      if (shouldRefreshMermaidViewers(block)) {
+        refreshMermaidViewers();
+      }
     }
-  }, [containerRef, text, ctx]);
+  }, [containerRef, text, ctx, refreshMermaidViewers]);
+
+  React.useEffect(() => () => {
+    mermaidViewerRef.current?.cleanup();
+    mermaidViewerRef.current = null;
+  }, []);
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -973,16 +994,30 @@ const useMorphdomMarkdown = ({
         const temp = document.createElement('div');
         temp.innerHTML = block.html;
         decorateMarkdown(temp, ctx);
+        const hadMermaidBlock = shouldRefreshMermaidViewers(el);
+        const tempHasMermaidBlock = shouldRefreshMermaidViewers(temp);
         morphdom(el, temp, {
           childrenOnly: true,
           onBeforeElUpdated: (fromEl, toEl) => !fromEl.isEqualNode(toEl),
         });
         el.setAttribute('data-md-id', block.id);
+        if (hadMermaidBlock || tempHasMermaidBlock || shouldRefreshMermaidViewers(el)) {
+          refreshMermaidViewers();
+        }
       });
 
       // Remove any trailing block elements no longer present.
+      const hadMermaidBeforeTrailingCleanup = shouldRefreshMermaidViewers(target);
+      let removedMermaidBlock = false;
       for (let i = existing.length - 1; i >= blocks.length; i -= 1) {
-        existing[i]?.remove();
+        const removed = existing[i];
+        if (removed && shouldRefreshMermaidViewers(removed)) {
+          removedMermaidBlock = true;
+        }
+        removed?.remove();
+      }
+      if (removedMermaidBlock || (existing.length > blocks.length && hadMermaidBeforeTrailingCleanup)) {
+        refreshMermaidViewers();
       }
 
       if (!ctx.deferCodeLineNumberSync) {
@@ -993,7 +1028,7 @@ const useMorphdomMarkdown = ({
     return () => {
       active = false;
     };
-  }, [containerRef, text, streaming, cacheKey, ctx]);
+  }, [containerRef, text, streaming, cacheKey, ctx, refreshMermaidViewers]);
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -1073,8 +1108,12 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   const live = isStreaming && !disableStreamAnimation;
   const pacedText = usePacedText(content, live);
 
-  const mermaidBlocks = React.useMemo(() => extractMermaidBlocks(content), [content]);
-  useMermaidInlineInteractions({ containerRef, mermaidBlocks, onShowPopup });
+  useMermaidInlineInteractions({
+    containerRef,
+    onShowPopup,
+    enableFullscreen: DEFAULT_MERMAID_FULLSCREEN_ENABLED,
+    enablePanZoom: DEFAULT_MERMAID_CONTROLS.showPanZoomControls,
+  });
   useFileReferenceInteractions({
     containerRef,
     effectiveDirectory,
@@ -1085,7 +1124,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   useExternalLinkInteractions({ containerRef });
 
   const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme), [currentTheme]);
-  const ctx = useDecorateContext(currentTheme, live, effectiveDirectory ? handlePreviewLoopback : undefined);
+  const ctx = useDecorateContext(currentTheme, live, effectiveDirectory ? handlePreviewLoopback : undefined, DEFAULT_MERMAID_CONTROLS);
   const cacheKey = `markdown-${part?.id ? `part-${part.id}` : `message-${messageId}`}`;
 
   useMorphdomMarkdown({ containerRef, text: pacedText, streaming: live, cacheKey, syntaxVars, ctx });
@@ -1129,7 +1168,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
   stripFrontmatter?: boolean;
   onShowPopup?: (content: ToolPopupContent) => void;
   mermaidControls?: MermaidControlOptions;
-  allowMermaidWheelZoom?: boolean;
+  allowMermaidWheelEvents?: boolean;
   enableFileReferences?: boolean;
 }> = ({
   content,
@@ -1138,7 +1177,8 @@ const SimpleMarkdownRendererImpl: React.FC<{
   disableLinkSafety,
   stripFrontmatter = false,
   onShowPopup,
-  allowMermaidWheelZoom = false,
+  mermaidControls = DEFAULT_MERMAID_CONTROLS,
+  allowMermaidWheelEvents = false,
   enableFileReferences = true,
 }) => {
   const { editor, runtime } = useRuntimeAPIs();
@@ -1151,12 +1191,12 @@ const SimpleMarkdownRendererImpl: React.FC<{
     [content, stripFrontmatter],
   );
 
-  const mermaidBlocks = React.useMemo(() => extractMermaidBlocks(renderedContent), [renderedContent]);
   useMermaidInlineInteractions({
     containerRef,
-    mermaidBlocks,
     onShowPopup,
-    allowWheelZoom: allowMermaidWheelZoom,
+    enableFullscreen: DEFAULT_MERMAID_FULLSCREEN_ENABLED,
+    enablePanZoom: mermaidControls.showPanZoomControls,
+    allowMermaidWheelEvents,
   });
   useFileReferenceInteractions({
     containerRef,
@@ -1168,7 +1208,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
   useExternalLinkInteractions({ containerRef, enabled: !disableLinkSafety });
 
   const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme), [currentTheme]);
-  const ctx = useDecorateContext(currentTheme, false);
+  const ctx = useDecorateContext(currentTheme, false, undefined, mermaidControls);
 
   useMorphdomMarkdown({
     containerRef,
@@ -1187,12 +1227,18 @@ const SimpleMarkdownRendererImpl: React.FC<{
 };
 
 export const SimpleMarkdownRenderer = React.memo(SimpleMarkdownRendererImpl, (prev, next) => {
+  const prevMermaidControls = prev.mermaidControls ?? DEFAULT_MERMAID_CONTROLS;
+  const nextMermaidControls = next.mermaidControls ?? DEFAULT_MERMAID_CONTROLS;
+
   return prev.content === next.content
     && prev.variant === next.variant
     && prev.className === next.className
     && prev.disableLinkSafety === next.disableLinkSafety
     && prev.stripFrontmatter === next.stripFrontmatter
     && prev.onShowPopup === next.onShowPopup
-    && prev.allowMermaidWheelZoom === next.allowMermaidWheelZoom
+    && prevMermaidControls.download === nextMermaidControls.download
+    && prevMermaidControls.copy === nextMermaidControls.copy
+    && prevMermaidControls.showPanZoomControls === nextMermaidControls.showPanZoomControls
+    && prev.allowMermaidWheelEvents === next.allowMermaidWheelEvents
     && prev.enableFileReferences === next.enableFileReferences;
 });
