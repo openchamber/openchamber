@@ -2590,7 +2590,7 @@ export const dict = {
   'mobile.projectEdit.deleteWorktreeTitle': 'Supprimer le worktree',
   'mobile.projectEdit.deleteWorktreeConfirmButton': 'Supprimer',
   'mobile.projectEdit.deleteWorktreeConfirm': 'Supprimer le worktree « {name} » ? Cette action est irréversible.',
-  'mobile.projectEdit.deleteWorktreeDirty': 'Ce worktree contient des modifications non validées qui seront perdues.',
+  'mobile.projectEdit.deleteWorktreeDirty': 'Ce worktree contient des modifications non commitées qui seront perdues.',
   'mobile.projectEdit.deleteWorktreeArchiveNote': '{count} session(s) associée(s) seront archivées.',
   'mobile.projectEdit.deleteLocalBranch': 'Supprimer aussi la branche locale',
   'mobile.projectEdit.deleteRemoteBranch': 'Supprimer aussi la branche distante',

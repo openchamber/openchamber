@@ -1851,7 +1851,7 @@ export const settingsDict = {
   'settings.magicPrompts.page.group.sessionFeaturePlan.title': 'Planification de fonctionnalité',
   'settings.magicPrompts.page.group.sessionFeaturePlan.description': 'Prompts utilisés par la commande slash /plan-feature : message utilisateur visible + instructions masquées. Lance un dialogue guidé qui étudie le code et pose des questions de clarification par petits lots avant de produire un plan d’implémentation.',
   'settings.magicPrompts.page.group.sessionCatchUp.title': 'Rattrapage',
-  'settings.magicPrompts.page.group.sessionCatchUp.description': 'Prompts utilisés par la commande slash /catch-up : message utilisateur visible + instructions masquées. Reconstruit le contexte de la branche — commits, PR et travail non validé — pour comprendre où vous en étiez, puis fournit un résumé digeste et une prochaine étape orientée produit.',
+  'settings.magicPrompts.page.group.sessionCatchUp.description': 'Prompts utilisés par la commande slash /catch-up : message utilisateur visible + instructions masquées. Reconstruit le contexte de la branche — commits, PR et travail non commité — pour comprendre où vous en étiez, puis fournit un résumé digeste et une prochaine étape orientée produit.',
   'settings.magicPrompts.page.group.sessionDebug.title': 'Débogage',
   'settings.magicPrompts.page.group.sessionDebug.description': 'Prompts utilisés par la commande slash /debug : message utilisateur visible + instructions masquées. Mène une investigation guidée de la cause racine — capture le symptôme, formule des hypothèses, les vérifie dans le code et confirme la cause avant de proposer une correction.',
   'settings.magicPrompts.page.group.sessionWeigh.title': 'Comparer les options',
