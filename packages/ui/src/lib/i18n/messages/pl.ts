@@ -1793,6 +1793,8 @@ export const dict: Record<I18nKey, string> = {
   'gitView.header.noIdentity': 'No identity',
   'gitView.header.noProfiles': 'No profiles available to apply.',
   'gitView.header.repositoryViews': 'Widoki repozytorium',
+  'gitView.header.worktreeTargetTooltip': 'Skieruj tę kartę na inny worktree',
+  'gitView.header.worktreeTargetRootLabel': 'Katalog główny repozytorium',
   'gitView.header.removeRemoteAria': 'Usuń remote {name}',
   'gitView.header.removeRemoteTitle': 'Usuń remote {name}',
   'gitView.header.upstreamSynced': 'zsynchronizowano',

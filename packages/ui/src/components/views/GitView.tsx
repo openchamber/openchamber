@@ -1,5 +1,8 @@
 import React from 'react';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
+import type { WorktreeTargetOption } from '@/components/views/git/WorktreeTargetDropdown';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useFireworksCelebration } from '@/contexts/FireworksContext';
 import type { GitIdentityProfile, CommitFileEntry, GitStatus } from '@/lib/api/types';
@@ -209,7 +212,65 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   const setDraftBootstrapPendingDirectory = useSessionUIStore((s) => s.setDraftBootstrapPendingDirectory);
   const worktreeMap = useSessionUIStore((s) => s.worktreeMetadata);
   const availableWorktrees = useSessionUIStore((s) => s.availableWorktrees);
+  const availableWorktreesByProject = useSessionUIStore((s) => s.availableWorktreesByProject);
+  const setWorktreeMetadata = useSessionUIStore((s) => s.setWorktreeMetadata);
+  const projects = useProjectsStore((s) => s.projects);
   const normalizedCurrentDirectory = normalizePath(currentDirectory);
+
+  // Lets an existing session point its Git/Diff/Files/Terminal tabs at a
+  // worktree other than the one it was created in (e.g. a worktree created
+  // mid-conversation), without touching the agent's own working directory.
+  const currentProjectForWorktreeTarget = React.useMemo(
+    () => resolveProjectForSessionDirectory(projects, availableWorktreesByProject, currentDirectory ?? null),
+    [availableWorktreesByProject, currentDirectory, projects]
+  );
+
+  const worktreesForCurrentProject = React.useMemo(() => {
+    if (!currentProjectForWorktreeTarget) return [];
+    return Array.from(availableWorktreesByProject.entries()).find(
+      ([key]) => normalizePath(key) === normalizePath(currentProjectForWorktreeTarget.path)
+    )?.[1] ?? [];
+  }, [availableWorktreesByProject, currentProjectForWorktreeTarget]);
+
+  const worktreeTargetOptions = React.useMemo<WorktreeTargetOption[]>(() => {
+    if (!currentSessionId || !normalizedCurrentDirectory || !currentProjectForWorktreeTarget) {
+      return [];
+    }
+    if (worktreesForCurrentProject.length === 0) {
+      return [];
+    }
+
+    const rootOption: WorktreeTargetOption = {
+      path: normalizePath(currentProjectForWorktreeTarget.path),
+      label: t('gitView.header.worktreeTargetRootLabel'),
+      isRoot: true,
+    };
+
+    const worktreeOptions: WorktreeTargetOption[] = worktreesForCurrentProject.map((metadata) => ({
+      path: normalizePath(metadata.path),
+      label: metadata.branch || metadata.label,
+      isRoot: false,
+    }));
+
+    return [rootOption, ...worktreeOptions];
+  }, [currentProjectForWorktreeTarget, currentSessionId, normalizedCurrentDirectory, t, worktreesForCurrentProject]);
+
+  const handleSelectWorktreeTarget = React.useCallback(
+    (option: WorktreeTargetOption) => {
+      if (!currentSessionId) return;
+
+      if (option.isRoot) {
+        setWorktreeMetadata(currentSessionId, null);
+        return;
+      }
+
+      const metadata = worktreesForCurrentProject.find((wt) => normalizePath(wt.path) === option.path);
+      if (metadata) {
+        setWorktreeMetadata(currentSessionId, metadata);
+      }
+    },
+    [currentSessionId, setWorktreeMetadata, worktreesForCurrentProject]
+  );
   const inferredWorktreeMetadata = React.useMemo(() => {
     if (!normalizedCurrentDirectory) {
       return undefined;
@@ -2403,6 +2464,9 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
         onSelectIdentity={handleApplyIdentity}
         isApplyingIdentity={isSettingIdentity}
             isWorktreeMode={!!worktreeMetadata}
+            worktreeTargetOptions={worktreeTargetOptions}
+            activeWorktreeTargetPath={normalizedCurrentDirectory}
+            onSelectWorktreeTarget={handleSelectWorktreeTarget}
             onOpenHistory={() => setGitLogDialogMode('history')}
             onOpenGraph={() => setGitLogDialogMode('graph')}
             onOpenStashes={openStashes}

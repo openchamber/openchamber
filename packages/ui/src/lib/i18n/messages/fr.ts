@@ -526,6 +526,8 @@ export const dict = {
   'gitView.header.noIdentity': 'Aucune identité',
   'gitView.header.noProfiles': 'Aucun profil disponible à appliquer.',
   'gitView.header.repositoryViews': 'Vues du dépôt',
+  'gitView.header.worktreeTargetTooltip': 'Pointer cet onglet vers un autre worktree',
+  'gitView.header.worktreeTargetRootLabel': 'Racine du dépôt',
   'gitView.header.removeRemoteAria': 'Supprimer le remote',
   'gitView.header.removeRemoteTitle': 'Supprimer le remote',
   'gitView.header.upstreamSynced': 'synchronisé',

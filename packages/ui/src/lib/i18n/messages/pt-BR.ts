@@ -685,6 +685,8 @@ export const dict: Record<I18nKey, string> = {
   "gitView.header.noIdentity": "Sem identidade",
   "gitView.header.noProfiles": "Não há perfiles disponíveis para aplicar.",
   "gitView.header.repositoryViews": "Visualizações do repositório",
+  "gitView.header.worktreeTargetTooltip": "Apontar esta aba para outro worktree",
+  "gitView.header.worktreeTargetRootLabel": "Raiz do repositório",
   "gitView.header.removeRemoteAria": "Excluir remoto",
   "gitView.header.removeRemoteTitle": "Excluir remoto",
   "gitView.header.upstreamSynced": "sincronizado",
