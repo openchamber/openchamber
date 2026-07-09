@@ -3,6 +3,9 @@ const TOKEN_COOKIE_NAME = 'oc_preview_token';
 const TOKEN_QUERY_PARAM = 'oc_preview_token';
 const CLIENT_TOKEN_QUERY_PARAM = 'oc_client_token';
 const URL_AUTH_TOKEN_QUERY_PARAM = 'oc_url_token';
+// Carried on cross-origin redirect Locations so the browser pane can rebuild the
+// upstream URL after the iframe follows a retargeted proxy path.
+const TARGET_ORIGIN_QUERY_PARAM = 'oc_preview_target_origin';
 const PREVIEW_PASSTHROUGH_REQUEST_HEADERS = ['x-inertia', 'x-inertia-version'];
 const PREVIEW_PASSTHROUGH_RESPONSE_HEADERS = ['x-inertia', 'x-inertia-location'];
 
@@ -13,6 +16,12 @@ const LOOPBACK_HOSTS = new Set([
   '[::1]',
   '0.0.0.0',
 ]);
+
+const isLoopbackHostname = (hostname) => {
+  if (!hostname) return false;
+  const host = hostname.toLowerCase();
+  return LOOPBACK_HOSTS.has(host) || host === 'localhost' || host.endsWith('.localhost');
+};
 
 const PREVIEW_BRIDGE_SCRIPT_ID = 'openchamber-preview-bridge';
 
@@ -1166,18 +1175,95 @@ export const rewritePreviewCspHeader = (cspValue, nonce) => {
   return rebuilt.length > 0 ? rebuilt.join('; ') : null;
 };
 
-export const rewritePreviewRedirectLocation = ({ location, proxyBasePath, targetOrigin, previewToken = '', urlAuthToken = '' }) => {
-  if (typeof location !== 'string' || !location) return location;
+const buildProxiedRedirectLocation = ({
+  proxyBasePath,
+  pathname,
+  search,
+  hash,
+  previewToken = '',
+  urlAuthToken = '',
+  targetOrigin = '',
+}) => {
   const prefix = proxyBasePath.endsWith('/') ? proxyBasePath.slice(0, -1) : proxyBasePath;
+  const withAuth = appendProxyAuthToProxyUrl(`${prefix}${pathname || '/'}${search || ''}${hash || ''}`, {
+    previewToken,
+    urlAuthToken,
+  });
+  if (!targetOrigin) return withAuth;
+  try {
+    const parsed = new URL(withAuth, 'http://openchamber-preview.local');
+    parsed.searchParams.set(TARGET_ORIGIN_QUERY_PARAM, targetOrigin);
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return withAuth;
+  }
+};
+
+// Keep HTTP redirects inside the same-origin preview proxy whenever possible.
+// Same-origin (incl. relative) redirects are rewritten onto the current proxy
+// path. Cross-origin redirects on allowExternal targets create/reuse a proxy
+// target for the new origin so the iframe never navigates to the bare upstream
+// URL (which would hit X-Frame-Options / CSP frame-ancestors).
+export const rewritePreviewRedirectLocation = ({
+  location,
+  proxyBasePath,
+  targetOrigin,
+  previewToken = '',
+  urlAuthToken = '',
+  allowExternal = false,
+  retarget = null,
+}) => {
+  if (typeof location !== 'string' || !location) return location;
   const target = targetOrigin ? new URL(targetOrigin) : null;
   if (!target) return location;
   try {
     const parsed = new URL(location, target);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return location;
-    const host = parsed.hostname;
-    const isLoopback = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1' || host === '[::1]';
-    if (!isLoopback || parsed.port !== target.port) return location;
-    return appendProxyAuthToProxyUrl(`${prefix}${parsed.pathname}${parsed.search}${parsed.hash}`, { previewToken, urlAuthToken });
+
+    const redirectIsLoopback = isLoopbackHostname(parsed.hostname);
+    const targetIsLoopback = isLoopbackHostname(target.hostname);
+    const sameOrigin = parsed.origin === target.origin;
+    const sameLoopbackPort = redirectIsLoopback && targetIsLoopback && parsed.port === target.port;
+
+    if (sameOrigin || sameLoopbackPort) {
+      return buildProxiedRedirectLocation({
+        proxyBasePath,
+        pathname: parsed.pathname,
+        search: parsed.search,
+        hash: parsed.hash,
+        previewToken,
+        urlAuthToken,
+      });
+    }
+
+    if (!allowExternal) {
+      // Loopback-only preview targets must not be widened to arbitrary hosts.
+      return location;
+    }
+
+    const normalized = normalizeProxyTargetUrl(parsed.toString(), { allowExternal: true });
+    if (!normalized.ok) {
+      return location;
+    }
+
+    if (typeof retarget !== 'function') {
+      return location;
+    }
+
+    const nextTarget = retarget(normalized.origin);
+    if (!nextTarget || typeof nextTarget.id !== 'string' || typeof nextTarget.token !== 'string') {
+      return location;
+    }
+
+    return buildProxiedRedirectLocation({
+      proxyBasePath: `/api/preview/proxy/${nextTarget.id}`,
+      pathname: parsed.pathname,
+      search: parsed.search,
+      hash: parsed.hash,
+      previewToken: nextTarget.token,
+      urlAuthToken,
+      targetOrigin: normalized.origin,
+    });
   } catch {
     return location;
   }
@@ -1212,7 +1298,7 @@ export const createPreviewProxyRuntime = ({
     sweepTimer.unref?.();
   };
 
-  const createTarget = (origin, ttlMs) => {
+  const createTarget = (origin, ttlMs, { allowExternal = false } = {}) => {
     const id = crypto.randomBytes(16).toString('hex');
     const token = crypto.randomBytes(16).toString('hex');
     const createdAt = now();
@@ -1221,10 +1307,30 @@ export const createPreviewProxyRuntime = ({
       id,
       origin,
       token,
+      allowExternal: allowExternal === true,
       createdAt,
       expiresAt,
     });
-    return { id, token, expiresAt };
+    return { id, token, expiresAt, allowExternal: allowExternal === true };
+  };
+
+  const findTargetByOrigin = (origin, { allowExternal = false } = {}) => {
+    const t = now();
+    for (const entry of targets.values()) {
+      if (entry.expiresAt <= t) continue;
+      if (entry.origin !== origin) continue;
+      if (Boolean(entry.allowExternal) !== Boolean(allowExternal)) continue;
+      return entry;
+    }
+    return null;
+  };
+
+  const retargetExternalOrigin = (origin, ttlMs) => {
+    const existing = findTargetByOrigin(origin, { allowExternal: true });
+    if (existing) {
+      return { id: existing.id, token: existing.token, expiresAt: existing.expiresAt };
+    }
+    return createTarget(origin, ttlMs, { allowExternal: true });
   };
 
   const resolveTargetFromRequest = (req) => {
@@ -1376,7 +1482,7 @@ export const createPreviewProxyRuntime = ({
           return res.status(400).json({ error: normalized.error });
         }
 
-        const target = createTarget(normalized.origin, ttlMs);
+        const target = createTarget(normalized.origin, ttlMs, { allowExternal });
         const cookiePath = `/api/preview/proxy/${target.id}`;
         const secure = Boolean(req.secure);
         res.setHeader('Set-Cookie', buildCookie({
@@ -1439,7 +1545,8 @@ export const createPreviewProxyRuntime = ({
         const withoutPreviewToken = removeRawQueryParam(withoutReloadParam, TOKEN_QUERY_PARAM);
         const withoutClientToken = removeRawQueryParam(withoutPreviewToken, CLIENT_TOKEN_QUERY_PARAM);
         const withoutUrlAuthToken = removeRawQueryParam(withoutClientToken, URL_AUTH_TOKEN_QUERY_PARAM);
-        return `${strippedPath}${withoutUrlAuthToken}`;
+        const withoutTargetOrigin = removeRawQueryParam(withoutUrlAuthToken, TARGET_ORIGIN_QUERY_PARAM);
+        return `${strippedPath}${withoutTargetOrigin}`;
       },
       on: {
         proxyReq: (proxyReq, req) => {
@@ -1468,13 +1575,49 @@ export const createPreviewProxyRuntime = ({
           const proxyBasePath = `/api/preview/proxy/${resolved.id}`;
           const urlAuthToken = resolved.parsed.searchParams.get(URL_AUTH_TOKEN_QUERY_PARAM) || '';
           if (typeof proxyRes.headers?.location === 'string') {
-            proxyRes.headers.location = rewritePreviewRedirectLocation({
+            const remainingTtlMs = Math.max(15_000, resolved.entry.expiresAt - now());
+            const rewrittenLocation = rewritePreviewRedirectLocation({
               location: proxyRes.headers.location,
               proxyBasePath,
               targetOrigin: resolved.entry.origin,
               previewToken: resolved.entry.token,
               urlAuthToken,
+              allowExternal: resolved.entry.allowExternal === true,
+              retarget: resolved.entry.allowExternal === true
+                ? (origin) => {
+                    const next = retargetExternalOrigin(origin, remainingTtlMs);
+                    // Scope the new target's auth cookie so the iframe can follow
+                    // the redirected Location without a second /targets round-trip.
+                    if (typeof res?.appendHeader === 'function') {
+                      res.appendHeader('Set-Cookie', buildCookie({
+                        name: TOKEN_COOKIE_NAME,
+                        value: next.token,
+                        path: `/api/preview/proxy/${next.id}`,
+                        maxAgeSeconds: Math.round((next.expiresAt - now()) / 1000),
+                        secure: Boolean(req.secure),
+                      }));
+                    } else if (typeof res?.setHeader === 'function') {
+                      const existing = res.getHeader?.('Set-Cookie');
+                      const nextCookie = buildCookie({
+                        name: TOKEN_COOKIE_NAME,
+                        value: next.token,
+                        path: `/api/preview/proxy/${next.id}`,
+                        maxAgeSeconds: Math.round((next.expiresAt - now()) / 1000),
+                        secure: Boolean(req.secure),
+                      });
+                      if (!existing) {
+                        res.setHeader('Set-Cookie', nextCookie);
+                      } else if (Array.isArray(existing)) {
+                        res.setHeader('Set-Cookie', [...existing, nextCookie]);
+                      } else {
+                        res.setHeader('Set-Cookie', [String(existing), nextCookie]);
+                      }
+                    }
+                    return next;
+                  }
+                : null,
             });
+            proxyRes.headers.location = rewrittenLocation;
           }
 
           const contentType = String(proxyRes.headers?.['content-type'] || '').toLowerCase();
@@ -1581,6 +1724,7 @@ export const createPreviewProxyRuntime = ({
           parsed.searchParams.delete(TOKEN_QUERY_PARAM);
           parsed.searchParams.delete(CLIENT_TOKEN_QUERY_PARAM);
           parsed.searchParams.delete(URL_AUTH_TOKEN_QUERY_PARAM);
+          parsed.searchParams.delete(TARGET_ORIGIN_QUERY_PARAM);
           const search = parsed.searchParams.toString();
           req.url = `${nextPath}${search ? `?${search}` : ''}`;
           proxy.upgrade(req, socket, head);

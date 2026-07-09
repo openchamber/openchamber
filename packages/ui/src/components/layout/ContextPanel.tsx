@@ -518,9 +518,42 @@ const stripPreviewQueryParams = (value: string): string => {
     parsed.searchParams.delete('oc_preview_token');
     parsed.searchParams.delete('oc_client_token');
     parsed.searchParams.delete('oc_url_token');
+    parsed.searchParams.delete('oc_preview_target_origin');
     return parsed.toString();
   } catch {
     return value;
+  }
+};
+
+const PREVIEW_PROXY_PATH_PATTERN = /^\/api\/preview\/proxy\/([a-f0-9]{16,64})(?=\/|$)/i;
+
+const resolveUpstreamUrlFromProxyFrameUrl = (
+  frameUrl: string,
+  fallbackUpstreamOrigin: string,
+): { upstreamUrl: string; proxyBasePath: string; previewToken: string } | null => {
+  if (!frameUrl) return null;
+  try {
+    const parsedFrameUrl = new URL(frameUrl, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+    if (typeof window !== 'undefined' && parsedFrameUrl.origin !== window.location.origin) {
+      return null;
+    }
+
+    const match = parsedFrameUrl.pathname.match(PREVIEW_PROXY_PATH_PATTERN);
+    if (!match) return null;
+
+    const proxyBasePath = `/api/preview/proxy/${match[1]}`;
+    const rest = parsedFrameUrl.pathname.slice(proxyBasePath.length) || '/';
+    const previewToken = parsedFrameUrl.searchParams.get('oc_preview_token') || '';
+    const hintedOrigin = parsedFrameUrl.searchParams.get('oc_preview_target_origin') || '';
+    const upstreamOrigin = hintedOrigin || fallbackUpstreamOrigin;
+    if (!upstreamOrigin) return null;
+
+    const upstreamUrl = stripPreviewQueryParams(
+      new URL(`${rest}${parsedFrameUrl.search}${parsedFrameUrl.hash}`, upstreamOrigin).toString(),
+    );
+    return { upstreamUrl, proxyBasePath, previewToken };
+  } catch {
+    return null;
   }
 };
 
@@ -1335,6 +1368,16 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
       setIsLoading(Boolean(nextUrl));
     } else {
       setIsLoading(false);
+      // Cross-origin proxy retargets (e.g. google.com → www.google.com) must
+      // advance loadedUrl so later reloads/proxySrc rebuilds use the new origin,
+      // without treating every same-origin SPA hop as a full remount.
+      try {
+        if (nextUrl && loadedUrl && new URL(nextUrl).origin !== new URL(loadedUrl).origin) {
+          setLoadedUrl(nextUrl);
+        }
+      } catch {
+        // Ignore invalid URL comparisons and keep the in-frame path.
+      }
     }
     persistUrl(nextUrl);
 
@@ -1359,7 +1402,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
       setHistoryIndex(nextHistory.length - 1);
       return nextHistory;
     });
-  }, [historyIndex, persistUrl]);
+  }, [historyIndex, loadedUrl, persistUrl]);
 
   const goToHistory = React.useCallback((nextIndex: number) => {
     const nextUrl = history[nextIndex];
@@ -1493,24 +1536,39 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
 
   const iframeSrc = proxySrc || (proxyState.status === 'error' ? loadedUrl : '');
 
-  const getCurrentUrlFromFrameUrl = React.useCallback((frameUrl: string): string => {
-    if (!frameUrl || !loadedUrl || proxyState.status !== 'ready') return '';
-    try {
-      const parsedFrameUrl = new URL(frameUrl, window.location.origin);
-      const proxyBasePath = proxyState.proxyBasePath.endsWith('/')
-        ? proxyState.proxyBasePath.slice(0, -1)
-        : proxyState.proxyBasePath;
-      if (parsedFrameUrl.origin !== window.location.origin || !parsedFrameUrl.pathname.startsWith(proxyBasePath)) {
-        return '';
-      }
+  const adoptProxyFrameUrl = React.useCallback((frameUrl: string, options?: { inFrame?: boolean }) => {
+    const resolved = resolveUpstreamUrlFromProxyFrameUrl(
+      frameUrl,
+      loadedUrl ? new URL(loadedUrl).origin : '',
+    );
+    if (!resolved?.upstreamUrl) return false;
 
-      const rest = parsedFrameUrl.pathname.slice(proxyBasePath.length) || '/';
-      const upstreamOrigin = new URL(loadedUrl).origin;
-      return stripPreviewQueryParams(new URL(`${rest}${parsedFrameUrl.search}${parsedFrameUrl.hash}`, upstreamOrigin).toString());
-    } catch {
-      return '';
+    const nextProxyBasePath = resolved.proxyBasePath;
+    const nextPreviewToken = resolved.previewToken || (proxyState.status === 'ready' ? proxyState.previewToken : '') || '';
+    if (nextPreviewToken && (proxyState.status !== 'ready'
+      || proxyState.proxyBasePath !== nextProxyBasePath
+      || proxyState.previewToken !== nextPreviewToken)) {
+      const expiresAt = proxyState.status === 'ready'
+        ? proxyState.expiresAt
+        : Date.now() + 30 * 60 * 1000;
+      previewProxyTargetCache.set(getBrowserProxyTargetKey(resolved.upstreamUrl), {
+        proxyBasePath: nextProxyBasePath,
+        previewToken: nextPreviewToken,
+        expiresAt,
+      });
+      setProxyState({
+        status: 'ready',
+        proxyBasePath: nextProxyBasePath,
+        previewToken: nextPreviewToken,
+        expiresAt,
+      });
     }
-  }, [loadedUrl, proxyState]);
+
+    if (resolved.upstreamUrl !== currentUrl) {
+      applyUrl(resolved.upstreamUrl, { inFrame: options?.inFrame ?? true });
+    }
+    return true;
+  }, [applyUrl, currentUrl, loadedUrl, proxyState]);
 
   const getUpstreamUrlFromLocalFrameUrl = React.useCallback((frameUrl: string): string => {
     if (!frameUrl || !loadedUrl || proxyState.status !== 'ready') return '';
@@ -1524,7 +1582,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
       const proxyBasePath = proxyState.proxyBasePath.endsWith('/')
         ? proxyState.proxyBasePath.slice(0, -1)
         : proxyState.proxyBasePath;
-      if (parsedFrameUrl.pathname.startsWith(proxyBasePath)) {
+      if (parsedFrameUrl.pathname.startsWith(proxyBasePath) || PREVIEW_PROXY_PATH_PATTERN.test(parsedFrameUrl.pathname)) {
         return '';
       }
 
@@ -1619,9 +1677,8 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
 
       if (data.type === 'ready') {
         const frameUrl = typeof data.url === 'string' ? data.url : '';
-        const nextUrl = getCurrentUrlFromFrameUrl(frameUrl);
-        if (nextUrl && nextUrl !== currentUrl) {
-          applyUrl(nextUrl, { inFrame: true });
+        if (frameUrl) {
+          adoptProxyFrameUrl(frameUrl, { inFrame: true });
         }
         return;
       }
@@ -1641,6 +1698,9 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
 
       if (data.type === 'navigate-preview') {
         const nextUrl = typeof data.url === 'string' ? data.url : '';
+        if (nextUrl && adoptProxyFrameUrl(nextUrl, { inFrame: false })) {
+          return;
+        }
         const upstreamUrl = getUpstreamUrlFromLocalFrameUrl(nextUrl);
         if (upstreamUrl) {
           applyUrl(upstreamUrl);
@@ -1654,7 +1714,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
 
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
-  }, [applyUrl, attachBrowserAnnotation, currentUrl, getCurrentUrlFromFrameUrl, getUpstreamUrlFromLocalFrameUrl, postInspectMode]);
+  }, [adoptProxyFrameUrl, applyUrl, attachBrowserAnnotation, getUpstreamUrlFromLocalFrameUrl, postInspectMode]);
 
   const handleInspect = React.useCallback(() => {
     const iframe = iframeRef.current;
@@ -1690,6 +1750,13 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
   const handleIframeLoad = React.useCallback(() => {
     try {
       const frameUrl = iframeRef.current?.contentWindow?.location.href || '';
+      if (frameUrl && adoptProxyFrameUrl(frameUrl, { inFrame: true })) {
+        setIsLoading(false);
+        if (isInspecting && proxySrc) {
+          postInspectMode(true);
+        }
+        return;
+      }
       const upstreamUrl = getUpstreamUrlFromLocalFrameUrl(frameUrl);
       if (upstreamUrl) {
         applyUrl(upstreamUrl, { inFrame: true });
@@ -1703,7 +1770,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
     if (isInspecting && proxySrc) {
       postInspectMode(true);
     }
-  }, [applyUrl, getUpstreamUrlFromLocalFrameUrl, isInspecting, postInspectMode, proxySrc]);
+  }, [adoptProxyFrameUrl, applyUrl, getUpstreamUrlFromLocalFrameUrl, isInspecting, postInspectMode, proxySrc]);
 
   return (
     <div className="absolute inset-0 flex flex-col bg-background">
