@@ -207,6 +207,20 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
   if (window.__openchamberPreviewBridgeInstalled) return;
   window.__openchamberPreviewBridgeInstalled = true;
 
+  // Keep a real parent handle for postMessage, then mask top/parent/frameElement
+  // so same-origin proxied pages cannot escape the iframe sandbox or navigate
+  // the OpenChamber shell via classic frame-bust checks.
+  const realParent = window.parent;
+  try {
+    Object.defineProperty(window, 'frameElement', { configurable: false, get() { return null; } });
+  } catch {}
+  try {
+    if (realParent && realParent !== window) {
+      Object.defineProperty(window, 'parent', { configurable: false, get() { return window; } });
+      Object.defineProperty(window, 'top', { configurable: false, get() { return window; } });
+    }
+  } catch {}
+
   const SOURCE = 'openchamber-preview-bridge';
   const VERSION = 1;
   const MAX_TEXT = 500;
@@ -233,9 +247,9 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
 
   const post = (payload) => {
     try {
-      if (parentOrigin && window.parent && typeof window.parent.postMessage === 'function') {
+      if (parentOrigin && realParent && typeof realParent.postMessage === 'function') {
         const message = Object.assign({ source: SOURCE, version: VERSION }, payload || {});
-        window.parent.postMessage(message, parentOrigin);
+        realParent.postMessage(message, parentOrigin);
       }
     } catch {}
   };
@@ -867,7 +881,7 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
   });
 
   window.addEventListener('message', (event) => {
-    if (event.source !== window.parent) return;
+    if (event.source !== realParent) return;
     const data = event.data;
     if (!data || data.source !== 'openchamber-preview-parent' || data.version !== VERSION) return;
     if (data.type === 'set-inspect-mode') {
@@ -950,6 +964,32 @@ const buildCookie = ({
   chunks.push('SameSite=Lax');
   if (secure) chunks.push('Secure');
   return chunks.join('; ');
+};
+
+const appendResponseSetCookie = (res, cookie) => {
+  if (!res || typeof cookie !== 'string' || !cookie) return;
+  if (typeof res.appendHeader === 'function') {
+    res.appendHeader('Set-Cookie', cookie);
+    return;
+  }
+  if (typeof res.setHeader !== 'function') return;
+  const existing = typeof res.getHeader === 'function' ? res.getHeader('Set-Cookie') : undefined;
+  if (!existing) {
+    res.setHeader('Set-Cookie', cookie);
+    return;
+  }
+  res.setHeader('Set-Cookie', Array.isArray(existing) ? [...existing, cookie] : [String(existing), cookie]);
+};
+
+// responseInterceptor copies upstream headers onto `res` before our callback, so
+// header mutations must update both proxyRes.headers and the Express response.
+const setProxyResponseHeader = (proxyRes, res, name, value) => {
+  if (proxyRes?.headers && typeof name === 'string') {
+    proxyRes.headers[name] = value;
+  }
+  if (typeof res?.setHeader === 'function') {
+    res.setHeader(name, value);
+  }
 };
 
 // SSRF guard for the `allowExternal` path: refuse to proxy private, loopback and
@@ -1408,26 +1448,56 @@ export const createPreviewProxyRuntime = ({
     }
   };
 
-  // responseInterceptor copies upstream headers onto `res` before our callback,
-  // so frame-busting mutations on proxyRes.headers alone never reach the client.
+  // Mirror stripped frame-busting headers onto the Express response. The
+  // responseInterceptor copies upstream headers onto `res` before our callback.
   const applyFrameBustingHeadersToResponse = (res, proxyHeaders) => {
     if (!res || typeof res.removeHeader !== 'function' || typeof res.setHeader !== 'function') {
       return;
     }
 
     res.removeHeader('x-frame-options');
-
-    const cspNames = ['content-security-policy', 'content-security-policy-report-only'];
-    for (const name of cspNames) {
-      const entry = proxyHeaders
-        ? Object.entries(proxyHeaders).find(([key]) => key.toLowerCase() === name)
-        : undefined;
-      if (!entry) {
+    for (const name of ['content-security-policy', 'content-security-policy-report-only']) {
+      const value = readHeader(proxyHeaders, name);
+      if (value === undefined) {
         res.removeHeader(name);
         continue;
       }
-      res.setHeader(name, entry[1]);
+      res.setHeader(name, value);
     }
+  };
+
+  const issueRetargetCookie = (req, res, target) => {
+    appendResponseSetCookie(res, buildCookie({
+      name: TOKEN_COOKIE_NAME,
+      value: target.token,
+      path: `/api/preview/proxy/${target.id}`,
+      maxAgeSeconds: Math.round((target.expiresAt - now()) / 1000),
+      secure: Boolean(req.secure),
+    }));
+  };
+
+  const rewriteOutgoingRedirect = ({ req, res, proxyRes, resolved, proxyBasePath, urlAuthToken }) => {
+    const location = proxyRes.headers?.location;
+    if (typeof location !== 'string' || !location) return;
+
+    const allowExternal = resolved.entry.allowExternal === true;
+    const remainingTtlMs = Math.max(15_000, resolved.entry.expiresAt - now());
+    const rewrittenLocation = rewritePreviewRedirectLocation({
+      location,
+      proxyBasePath,
+      targetOrigin: resolved.entry.origin,
+      previewToken: resolved.entry.token,
+      urlAuthToken,
+      allowExternal,
+      retarget: allowExternal
+        ? (origin) => {
+            const next = retargetExternalOrigin(origin, remainingTtlMs);
+            issueRetargetCookie(req, res, next);
+            return next;
+          }
+        : null,
+    });
+    setProxyResponseHeader(proxyRes, res, 'location', rewrittenLocation);
   };
 
   const attach = (app, {
@@ -1596,57 +1666,7 @@ export const createPreviewProxyRuntime = ({
 
           const proxyBasePath = `/api/preview/proxy/${resolved.id}`;
           const urlAuthToken = resolved.parsed.searchParams.get(URL_AUTH_TOKEN_QUERY_PARAM) || '';
-          if (typeof proxyRes.headers?.location === 'string') {
-            const remainingTtlMs = Math.max(15_000, resolved.entry.expiresAt - now());
-            const rewrittenLocation = rewritePreviewRedirectLocation({
-              location: proxyRes.headers.location,
-              proxyBasePath,
-              targetOrigin: resolved.entry.origin,
-              previewToken: resolved.entry.token,
-              urlAuthToken,
-              allowExternal: resolved.entry.allowExternal === true,
-              retarget: resolved.entry.allowExternal === true
-                ? (origin) => {
-                    const next = retargetExternalOrigin(origin, remainingTtlMs);
-                    // Scope the new target's auth cookie so the iframe can follow
-                    // the redirected Location without a second /targets round-trip.
-                    if (typeof res?.appendHeader === 'function') {
-                      res.appendHeader('Set-Cookie', buildCookie({
-                        name: TOKEN_COOKIE_NAME,
-                        value: next.token,
-                        path: `/api/preview/proxy/${next.id}`,
-                        maxAgeSeconds: Math.round((next.expiresAt - now()) / 1000),
-                        secure: Boolean(req.secure),
-                      }));
-                    } else if (typeof res?.setHeader === 'function') {
-                      const existing = res.getHeader?.('Set-Cookie');
-                      const nextCookie = buildCookie({
-                        name: TOKEN_COOKIE_NAME,
-                        value: next.token,
-                        path: `/api/preview/proxy/${next.id}`,
-                        maxAgeSeconds: Math.round((next.expiresAt - now()) / 1000),
-                        secure: Boolean(req.secure),
-                      });
-                      if (!existing) {
-                        res.setHeader('Set-Cookie', nextCookie);
-                      } else if (Array.isArray(existing)) {
-                        res.setHeader('Set-Cookie', [...existing, nextCookie]);
-                      } else {
-                        res.setHeader('Set-Cookie', [String(existing), nextCookie]);
-                      }
-                    }
-                    return next;
-                  }
-                : null,
-            });
-            // responseInterceptor copies upstream headers onto `res` before this
-            // callback runs, so mutating proxyRes.headers alone is ignored by the
-            // client. Write the rewritten Location onto both.
-            proxyRes.headers.location = rewrittenLocation;
-            if (typeof res?.setHeader === 'function') {
-              res.setHeader('location', rewrittenLocation);
-            }
-          }
+          rewriteOutgoingRedirect({ req, res, proxyRes, resolved, proxyBasePath, urlAuthToken });
 
           const contentType = String(proxyRes.headers?.['content-type'] || '').toLowerCase();
           const isHtml = contentType.includes('text/html');

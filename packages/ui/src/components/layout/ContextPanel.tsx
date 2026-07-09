@@ -1819,6 +1819,10 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
               className="absolute inset-0 h-full w-full border-0 bg-background"
               allow="clipboard-read; clipboard-write; fullscreen"
               allowFullScreen
+              // Same-origin proxy pages need scripts + same-origin for inspect.
+              // Omit allow-top-navigation so JS frame-busts cannot leave the panel;
+              // the injected bridge also masks top/parent/frameElement.
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"
               onLoad={handleIframeLoad}
             />
             {isInspecting && hoverTarget ? (
