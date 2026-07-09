@@ -820,7 +820,7 @@ export const settingsDict = {
   'settings.openchamber.desktopNetwork.title': 'Desktop 네트워크 접속',
   'settings.openchamber.desktopNetwork.field.launchAtLoginAria': '로그인 시 OpenChamber 시작',
   'settings.openchamber.desktopNetwork.field.launchAtLogin': '로그인 시 OpenChamber 시작',
-  'settings.openchamber.desktopNetwork.field.launchAtLoginDescription': '창을 열지 않고 백그라운드에서 앱을 시작합니다. Dock 또는 시스템 트레이 아이콘으로 열 수 있습니다.',
+  'settings.openchamber.desktopNetwork.field.launchAtLoginDescription': '창을 열지 않고 백그라운드에서 앱을 시작합니다. 데스크톱 상태 아이콘으로 열 수 있습니다.',
   'settings.openchamber.desktopNetwork.field.minimizeToTrayAria': 'OpenChamber를 시스템 트레이로 최소화하거나 닫기',
   'settings.openchamber.desktopNetwork.field.minimizeToTray': '시스템 트레이로 최소화하고 닫기',
   'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription': '메인 창을 최소화하거나 닫아도 OpenChamber가 Windows 시스템 트레이에서 계속 실행됩니다.',

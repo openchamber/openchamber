@@ -820,7 +820,7 @@ export const settingsDict = {
   "settings.openchamber.desktopNetwork.title": "Мережевий доступ десктопного застосунку",
   "settings.openchamber.desktopNetwork.field.launchAtLoginAria": "Запускати OpenChamber під час входу в систему",
   "settings.openchamber.desktopNetwork.field.launchAtLogin": "Запускати OpenChamber під час входу в систему",
-  "settings.openchamber.desktopNetwork.field.launchAtLoginDescription": "Запускає застосунок у фоні без відкриття вікна. Відкрийте його через Dock або іконку в системному треї.",
+  "settings.openchamber.desktopNetwork.field.launchAtLoginDescription": "Запускає застосунок у фоні без відкриття вікна. Відкрийте його через піктограму стану на робочому столі.",
   "settings.openchamber.desktopNetwork.field.minimizeToTrayAria": "Згортати й закривати OpenChamber у системний трей",
   "settings.openchamber.desktopNetwork.field.minimizeToTray": "Згортати й закривати в системний трей",
   "settings.openchamber.desktopNetwork.field.minimizeToTrayDescription": "Залишає OpenChamber запущеним у системному треї Windows, коли головне вікно згорнуто або закрито.",

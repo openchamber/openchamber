@@ -704,7 +704,7 @@ export const settingsDict = {
   'settings.openchamber.desktopNetwork.field.allowLanAccessDescription': 'Restartuje aplikację, aby telefony, tablety i inne komputery w Twojej sieci Wi-Fi mogły ją otworzyć.',
   'settings.openchamber.desktopNetwork.field.launchAtLogin': 'Uruchamiaj OpenChamber przy logowaniu',
   'settings.openchamber.desktopNetwork.field.launchAtLoginAria': 'Uruchamiaj OpenChamber przy logowaniu',
-  'settings.openchamber.desktopNetwork.field.launchAtLoginDescription': 'Uruchamia aplikację w tle bez otwierania okna. Otworzysz ją z Docka lub ikony w zasobniku systemowym.',
+  'settings.openchamber.desktopNetwork.field.launchAtLoginDescription': 'Uruchamia aplikację w tle bez otwierania okna. Otworzysz ją z ikony stanu na pulpicie.',
   'settings.openchamber.desktopNetwork.field.minimizeToTrayAria': 'Minimalizuj i zamykaj OpenChamber do zasobnika systemowego',
   'settings.openchamber.desktopNetwork.field.minimizeToTray': 'Minimalizuj i zamykaj do zasobnika systemowego',
   'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription': 'Utrzymuje OpenChamber w zasobniku systemowym Windows, gdy główne okno jest zminimalizowane lub zamknięte.',

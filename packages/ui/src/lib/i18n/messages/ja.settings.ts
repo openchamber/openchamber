@@ -853,7 +853,7 @@ export const settingsDict = {
   'settings.openchamber.desktopNetwork.title': 'Desktop ネットワークアクセス',
   'settings.openchamber.desktopNetwork.field.launchAtLoginAria': 'ログイン時に OpenChamber を起動',
   'settings.openchamber.desktopNetwork.field.launchAtLogin': 'ログイン時に OpenChamber を起動',
-  'settings.openchamber.desktopNetwork.field.launchAtLoginDescription': 'ウィンドウを開かずにバックグラウンドでアプリを起動します。Dock またはシステムトレイのアイコンから開けます。',
+  'settings.openchamber.desktopNetwork.field.launchAtLoginDescription': 'ウィンドウを開かずにバックグラウンドでアプリを起動します。デスクトップのステータスアイコンから開けます。',
   'settings.openchamber.desktopNetwork.field.minimizeToTrayAria': 'OpenChamber をシステムトレイへ最小化または閉じる',
   'settings.openchamber.desktopNetwork.field.minimizeToTray': 'システムトレイへ最小化または閉じる',
   'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription': 'メインウィンドウを最小化または閉じたときも、OpenChamber を Windows のシステムトレイで実行し続けます。',

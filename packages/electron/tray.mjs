@@ -125,6 +125,7 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
 
   const startAnim = () => {
     if (animTimer || !tray || tray.isDestroyed?.()) return;
+    if (breathFrames.length < 2) return;
     animIndex = 0;
     animDir = 1;
     animTimer = setInterval(() => {
@@ -142,7 +143,8 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
     iconState = nextState;
     if (!tray || tray.isDestroyed?.()) return;
     if (nextState === 'busy') {
-      startAnim();
+      if (breathFrames.length > 1) startAnim();
+      else tray.setImage(breathFrames[0] || idleFrame);
     } else if (nextState === 'unseen') {
       stopAnim();
       tray.setImage(unseenFrame);

@@ -853,7 +853,7 @@ export const settingsDict = {
   'settings.openchamber.desktopNetwork.title': 'Desktop Network Access',
   'settings.openchamber.desktopNetwork.field.launchAtLoginAria': 'Start OpenChamber at login',
   'settings.openchamber.desktopNetwork.field.launchAtLogin': 'Start OpenChamber when you log in',
-  'settings.openchamber.desktopNetwork.field.launchAtLoginDescription': 'Starts the app in the background without opening a window. Use the Dock or system tray icon to open it.',
+  'settings.openchamber.desktopNetwork.field.launchAtLoginDescription': 'Starts the app in the background without opening a window. Use the desktop status icon to open it.',
   'settings.openchamber.desktopNetwork.field.minimizeToTrayAria': 'Minimize and close OpenChamber to the system tray',
   'settings.openchamber.desktopNetwork.field.minimizeToTray': 'Minimize and close to the system tray',
   'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription': 'Keeps OpenChamber running in the Windows system tray when the main window is minimized or closed.',

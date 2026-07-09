@@ -772,7 +772,7 @@ export const settingsDict = {
   'settings.openchamber.desktopNetwork.title': 'Accès au réseau de bureau',
   'settings.openchamber.desktopNetwork.field.launchAtLoginAria': 'Démarrez OpenChamber lors de la connexion',
   'settings.openchamber.desktopNetwork.field.launchAtLogin': 'Démarrez OpenChamber lorsque vous vous connectez',
-  'settings.openchamber.desktopNetwork.field.launchAtLoginDescription': 'Démarre l\'application en arrière-plan sans ouvrir de fenêtre. Utilisez l\'icône du Dock ou de la zone de notification pour l\'ouvrir.',
+  'settings.openchamber.desktopNetwork.field.launchAtLoginDescription': 'Démarre l\'application en arrière-plan sans ouvrir de fenêtre. Utilisez l\'icône d\'état du bureau pour l\'ouvrir.',
   'settings.openchamber.desktopNetwork.field.minimizeToTrayAria': 'Réduire et fermer OpenChamber dans la zone de notification',
   'settings.openchamber.desktopNetwork.field.minimizeToTray': 'Réduire et fermer dans la zone de notification',
   'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription': 'Garde OpenChamber actif dans la zone de notification Windows lorsque la fenêtre principale est réduite ou fermée.',

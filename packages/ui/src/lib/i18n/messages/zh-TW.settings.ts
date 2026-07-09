@@ -1795,7 +1795,7 @@
   'settings.openchamber.desktopNetwork.error.keepAwakeSaveFailed': '無法更新保持喚醒設定',
   'settings.openchamber.desktopNetwork.field.launchAtLogin': '登入時自動啟動 OpenChamber',
   'settings.openchamber.desktopNetwork.field.launchAtLoginAria': '登入時自動啟動 OpenChamber',
-  'settings.openchamber.desktopNetwork.field.launchAtLoginDescription': '在背景啟動應用程式，不開啟視窗。可透過 Dock 或系統匣圖示開啟。',
+  'settings.openchamber.desktopNetwork.field.launchAtLoginDescription': '在背景啟動應用程式，不開啟視窗。可透過桌面狀態圖示開啟。',
   'settings.openchamber.desktopNetwork.field.minimizeToTrayAria': '將 OpenChamber 最小化和關閉到系統匣',
   'settings.openchamber.desktopNetwork.field.minimizeToTray': '最小化和關閉到系統匣',
   'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription': '主視窗最小化或關閉時，讓 OpenChamber 繼續在 Windows 系統匣中執行。',

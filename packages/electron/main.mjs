@@ -242,6 +242,7 @@ const readDesktopMinimizeToTrayStatus = () => {
 
 const shouldHideMainWindowToTray = (browserWindow) => {
   if (process.platform !== 'win32') return false;
+  if (!state.trayController) return false;
   if (!browserWindow || browserWindow.isDestroyed()) return false;
   if (browserWindow.__ocMiniChat === true) return false;
   return readSettingsRoot().desktopMinimizeToTrayEnabled === true;

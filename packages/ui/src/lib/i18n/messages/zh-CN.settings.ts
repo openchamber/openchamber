@@ -820,7 +820,7 @@ export const settingsDict = {
   'settings.openchamber.desktopNetwork.title': '桌面端网络访问',
   'settings.openchamber.desktopNetwork.field.launchAtLoginAria': '登录时启动 OpenChamber',
   'settings.openchamber.desktopNetwork.field.launchAtLogin': '登录时启动 OpenChamber',
-  'settings.openchamber.desktopNetwork.field.launchAtLoginDescription': '在后台启动应用且不打开窗口。可通过 Dock 或系统托盘图标打开。',
+  'settings.openchamber.desktopNetwork.field.launchAtLoginDescription': '在后台启动应用且不打开窗口。可通过桌面状态图标打开。',
   'settings.openchamber.desktopNetwork.field.minimizeToTrayAria': '将 OpenChamber 最小化和关闭到系统托盘',
   'settings.openchamber.desktopNetwork.field.minimizeToTray': '最小化和关闭到系统托盘',
   'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription': '主窗口最小化或关闭时，让 OpenChamber 继续在 Windows 系统托盘中运行。',

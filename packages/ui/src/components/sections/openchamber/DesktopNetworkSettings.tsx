@@ -247,7 +247,10 @@ export const DesktopNetworkSettings: React.FC = () => {
 
     try {
       const status = await setDesktopMinimizeToTray(nextValue);
-      if (!status?.supported) {
+      if (!status) {
+        throw new Error(t('settings.openchamber.desktopNetwork.error.minimizeToTraySaveFailed'));
+      }
+      if (!status.supported) {
         throw new Error(t('settings.openchamber.desktopNetwork.error.minimizeToTrayUnsupported'));
       }
       setMinimizeToTrayEnabled(status.enabled);

@@ -820,7 +820,7 @@ export const settingsDict = {
   "settings.openchamber.desktopNetwork.title": "Acesso de rede do desktop",
   "settings.openchamber.desktopNetwork.field.launchAtLoginAria": "Iniciar o OpenChamber ao fazer login",
   "settings.openchamber.desktopNetwork.field.launchAtLogin": "Iniciar o OpenChamber ao fazer login",
-  "settings.openchamber.desktopNetwork.field.launchAtLoginDescription": "Inicia o app em segundo plano sem abrir uma janela. Use o ícone do Dock ou da bandeja do sistema para abrir.",
+  "settings.openchamber.desktopNetwork.field.launchAtLoginDescription": "Inicia o app em segundo plano sem abrir uma janela. Use o ícone de status da área de trabalho para abrir.",
   "settings.openchamber.desktopNetwork.field.minimizeToTrayAria": "Minimizar e fechar o OpenChamber na bandeja do sistema",
   "settings.openchamber.desktopNetwork.field.minimizeToTray": "Minimizar e fechar na bandeja do sistema",
   "settings.openchamber.desktopNetwork.field.minimizeToTrayDescription": "Mantém o OpenChamber em execução na bandeja do sistema do Windows quando a janela principal é minimizada ou fechada.",
