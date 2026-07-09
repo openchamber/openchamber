@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   RiDiscordLine,
   RiCheckLine,
-  RiCloseLine,
   RiLoader4Line,
   RiAddLine,
   RiSendPlaneLine,
@@ -28,7 +27,17 @@ import { useOttoEventsStore, type OttoUiRealtimeEvent } from '@/stores/useOttoEv
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Collapsible, CollapsibleContent } from '@/components/ui/collapsible';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
+import { useI18n } from '@/lib/i18n';
 import { DiscordOnboardingWizard } from './DiscordOnboardingWizard';
 import { DiscordCommandsButton } from './DiscordCommandPalette';
 
@@ -1144,6 +1153,7 @@ function DiscordAdvancedSettings({
 }
 
 function ConnectionCard({ conn }: { conn: MessengerConnection }) {
+  const { t } = useI18n();
   const onboardingStep = useMessengerStore((s) => s.onboardingStep);
   const onboardingType = useMessengerStore((s) => s.onboardingType);
   const showWizard = onboardingStep !== null && onboardingType === 'discord';
@@ -1187,6 +1197,7 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
   const [showToken, setShowToken] = useState(false);
   const [tokenInput, setTokenInput] = useState('');
   const [showTokenPlain, setShowTokenPlain] = useState(false);
+  const [disconnectConfirmOpen, setDisconnectConfirmOpen] = useState(false);
 
   const token = conn.botToken;
   const target = conn.defaultChannelId;
@@ -1272,14 +1283,15 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
           >
             {conn.status === 'connecting' ? 'Testing…' : 'Verify token'}
           </button>
-          <button
+          <Button
             type="button"
-            onClick={() => removeConnection(conn.type)}
-            className="text-muted-foreground hover:text-destructive"
-            title={`Disconnect ${meta.name}`}
+            variant="destructive"
+            size="xs"
+            className="!font-normal"
+            onClick={() => setDisconnectConfirmOpen(true)}
           >
-            <RiCloseLine className="size-4" />
-          </button>
+            {t('settings.integrations.discord.disconnect.button')}
+          </Button>
         </div>
       </div>
 
@@ -1440,6 +1452,38 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
           />
         </div>
       )}
+
+      <Dialog open={disconnectConfirmOpen} onOpenChange={setDisconnectConfirmOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t('settings.integrations.discord.disconnect.dialog.title')}</DialogTitle>
+            <DialogDescription>
+              {t('settings.integrations.discord.disconnect.dialog.description')}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setDisconnectConfirmOpen(false)}
+            >
+              {t('settings.common.actions.cancel')}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              onClick={() => {
+                removeConnection(conn.type);
+                setDisconnectConfirmOpen(false);
+              }}
+            >
+              {t('settings.integrations.discord.disconnect.dialog.confirm')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

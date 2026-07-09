@@ -107,6 +107,11 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.commands.desc.share': 'Generate public URL for session',
     'settings.integrations.discord.commands.desc.unshare': 'Revoke public session URL',
     'settings.integrations.discord.commands.desc.schedule': 'Schedule a prompt (UTC ISO or cron)',
+    'settings.integrations.discord.disconnect.button': 'Disconnect',
+    'settings.integrations.discord.disconnect.dialog.title': 'Disconnect Discord?',
+    'settings.integrations.discord.disconnect.dialog.description':
+      'This removes the bot token and stops syncing from this device. The listener and bridge will stop. You can reconnect anytime by adding your token again.',
+    'settings.integrations.discord.disconnect.dialog.confirm': 'Disconnect',
   },
   uk: {
     'settings.integrations.discord.wizard.title': 'Налаштування Discord',
@@ -216,5 +221,10 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.commands.desc.share': 'Публічний URL сесії',
     'settings.integrations.discord.commands.desc.unshare': 'Скасувати публічний URL',
     'settings.integrations.discord.commands.desc.schedule': 'Запланувати промпт (UTC або cron)',
+    'settings.integrations.discord.disconnect.button': 'Відключити',
+    'settings.integrations.discord.disconnect.dialog.title': 'Відключити Discord?',
+    'settings.integrations.discord.disconnect.dialog.description':
+      'Це видалить токен бота та зупинить синхронізацію на цьому пристрої. Listener і bridge буде зупинено. Ви зможете підключитися знову, додавши токен.',
+    'settings.integrations.discord.disconnect.dialog.confirm': 'Відключити',
   },
 } as const;
