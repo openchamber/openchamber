@@ -64,5 +64,12 @@ describe('preview proxy redirect integration', () => {
     expect(follow.headers.get('x-frame-options')).toBeNull();
     const body = await follow.text();
     expect(body).toContain('openchamber-preview-bridge');
+    // Frame-bust hardening: bridge keeps a real parent for postMessage, then
+    // masks top/parent/frameElement so same-origin proxied pages cannot escape.
+    expect(body).toContain('const realParent = window.parent');
+    expect(body).toContain("Object.defineProperty(window, 'frameElement'");
+    expect(body).toContain("Object.defineProperty(window, 'parent'");
+    expect(body).toContain("Object.defineProperty(window, 'top'");
+    expect(body).toContain('realParent.postMessage');
   }, 20_000);
 });
