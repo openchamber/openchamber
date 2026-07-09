@@ -2277,6 +2277,8 @@ export const dict: Record<I18nKey, string> = {
   "mcpDropdown.status.unknownError": "Невідома помилка",
   "mcpDropdown.status.needsAuth": "Потребує аутентифікації",
   "mcpDropdown.status.needsRegistration": "Потребує реєстрації: {error}",
+  "mcpDropdown.status.configured": "Configured",
+  "mcpDropdown.status.notConnected": "Not connected",
   "mcpDropdown.empty.configureInConfig": "Налаштуйте сервери MCP у Налаштуваннях.",
   "sessionAuth.error.rateLimitTitle": "Забагато спроб",
   "sessionAuth.error.networkTitle": "Неможливо отримати доступ до сервера",
