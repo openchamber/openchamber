@@ -30,8 +30,12 @@
     padding-inline: calc(clamp(0.75rem, 2.5vw, 1rem) * var(--padding-scale, 1));
   }
 
-  .wide-chat-layout .chat-column {
+  .chat-message-width-wide .chat-column {
     width: min(100%, 64rem);
+  }
+
+  .chat-message-width-fluid .chat-column {
+    width: 100%;
   }
 
   .chat-input-column {
@@ -40,8 +44,12 @@
     padding-inline: calc(clamp(0.75rem, 2.5vw, 1rem) * var(--padding-scale, 1));
   }
 
-  .wide-chat-layout .chat-input-column {
+  .chat-message-width-wide .chat-input-column {
     width: min(100%, 64rem);
+  }
+
+  .chat-message-width-fluid .chat-input-column {
+    width: 100%;
   }
 
   .chat-message-column {
@@ -50,8 +58,12 @@
     padding-inline: calc(clamp(0.75rem, 2.5vw, 1rem) * var(--padding-scale, 1));
   }
 
-  .wide-chat-layout .chat-message-column {
+  .chat-message-width-wide .chat-message-column {
     width: min(100%, 64rem);
+  }
+
+  .chat-message-width-fluid .chat-message-column {
+    width: 100%;
   }
 
   @media (min-width: 1024px) {
@@ -170,6 +182,10 @@
   width: min(100%, 48rem);
 }
 
-.wide-chat-layout .chat-message-column {
+.chat-message-width-wide .chat-message-column {
   width: min(100%, 64rem);
+}
+
+.chat-message-width-fluid .chat-message-column {
+  width: 100%;
 }

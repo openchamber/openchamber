@@ -1,6 +1,6 @@
 import type { DesktopSettings } from '@/lib/desktop';
 import { createProjectIdFromPath } from '@/lib/projectId';
-import { useUIStore } from '@/stores/useUIStore';
+import { normalizeChatMessageWidthMode, useUIStore } from '@/stores/useUIStore';
 import { isMonoFontOption, isUiFontOption } from '@/lib/fontOptions';
 import { isFollowUpBehavior, normalizeFollowUpBehavior, useMessageQueueStore, type FollowUpBehavior } from '@/stores/messageQueueStore';
 import { setDirectoryShowHidden } from '@/lib/directoryShowHidden';
@@ -570,8 +570,11 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.expandedEditorToolbar === 'boolean' && settings.expandedEditorToolbar !== store.expandedEditorToolbar) {
     store.setExpandedEditorToolbar(settings.expandedEditorToolbar);
   }
-  if (typeof settings.wideChatLayoutEnabled === 'boolean' && settings.wideChatLayoutEnabled !== store.wideChatLayoutEnabled) {
-    store.setWideChatLayoutEnabled(settings.wideChatLayoutEnabled);
+  const chatMessageWidthMode = typeof settings.chatMessageWidthMode === 'string'
+    ? normalizeChatMessageWidthMode(settings.chatMessageWidthMode)
+    : null;
+  if (chatMessageWidthMode && chatMessageWidthMode !== store.chatMessageWidthMode) {
+    store.setChatMessageWidthMode(chatMessageWidthMode);
   }
   if (
     typeof settings.showSplitAssistantMessageActions === 'boolean'
@@ -1093,8 +1096,11 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.stickyUserHeader === 'boolean') {
     result.stickyUserHeader = candidate.stickyUserHeader;
   }
-  if (typeof candidate.wideChatLayoutEnabled === 'boolean') {
-    result.wideChatLayoutEnabled = candidate.wideChatLayoutEnabled;
+  if (typeof candidate.chatMessageWidthMode === 'string') {
+    result.chatMessageWidthMode = normalizeChatMessageWidthMode(candidate.chatMessageWidthMode);
+  }
+  if (!result.chatMessageWidthMode && typeof candidate.wideChatLayoutEnabled === 'boolean') {
+    result.chatMessageWidthMode = candidate.wideChatLayoutEnabled ? 'wide' : 'narrow';
   }
   if (typeof candidate.showSplitAssistantMessageActions === 'boolean') {
     result.showSplitAssistantMessageActions = candidate.showSplitAssistantMessageActions;

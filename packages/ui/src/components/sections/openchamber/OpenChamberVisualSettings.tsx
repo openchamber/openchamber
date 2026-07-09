@@ -4,7 +4,7 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import type { ThemeMode } from '@/types/theme';
-import { useUIStore } from '@/stores/useUIStore';
+import { useUIStore, type ChatMessageWidthMode } from '@/stores/useUIStore';
 import { useMessageQueueStore, type FollowUpBehavior } from '@/stores/messageQueueStore';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -152,6 +152,21 @@ const USER_MESSAGE_RENDERING_OPTIONS: Option<'markdown' | 'plain'>[] = [
     },
 ];
 
+const CHAT_MESSAGE_WIDTH_OPTIONS: Option<ChatMessageWidthMode>[] = [
+    {
+        id: 'narrow',
+        labelKey: 'settings.openchamber.visual.option.chatMessageWidth.narrow.label',
+    },
+    {
+        id: 'wide',
+        labelKey: 'settings.openchamber.visual.option.chatMessageWidth.wide.label',
+    },
+    {
+        id: 'fluid',
+        labelKey: 'settings.openchamber.visual.option.chatMessageWidth.fluid.label',
+    },
+];
+
 const CHAT_RENDER_MODE_OPTIONS: Option<'sorted' | 'live'>[] = [
     {
         id: 'sorted',
@@ -245,7 +260,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-type VisibleSetting = 'sessionAssist' | 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar';
+type VisibleSetting = 'sessionAssist' | 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'chatMessageWidth' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -277,8 +292,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setStickyUserHeader = useUIStore(state => state.setStickyUserHeader);
     const expandedEditorToolbar = useUIStore(state => state.expandedEditorToolbar);
     const setExpandedEditorToolbar = useUIStore(state => state.setExpandedEditorToolbar);
-    const wideChatLayoutEnabled = useUIStore(state => state.wideChatLayoutEnabled);
-    const setWideChatLayoutEnabled = useUIStore(state => state.setWideChatLayoutEnabled);
+    const chatMessageWidthMode = useUIStore(state => state.chatMessageWidthMode);
+    const setChatMessageWidthMode = useUIStore(state => state.setChatMessageWidthMode);
     const codeBlockLineWrap = useUIStore(state => state.codeBlockLineWrap);
     const setCodeBlockLineWrap = useUIStore(state => state.setCodeBlockLineWrap);
     const chatRenderMode = useUIStore(state => state.chatRenderMode);
@@ -441,10 +456,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         void updateDesktopSettings({ collapsibleUserMessages: enabled });
     }, [setCollapsibleUserMessages]);
 
-    const handleWideChatLayoutChange = React.useCallback((enabled: boolean) => {
-        setWideChatLayoutEnabled(enabled);
-        void updateDesktopSettings({ wideChatLayoutEnabled: enabled });
-    }, [setWideChatLayoutEnabled]);
+    const handleChatMessageWidthChange = React.useCallback((mode: ChatMessageWidthMode) => {
+        setChatMessageWidthMode(mode);
+        void updateDesktopSettings({ chatMessageWidthMode: mode });
+    }, [setChatMessageWidthMode]);
 
     const handleShowSplitAssistantMessageActionsChange = React.useCallback((enabled: boolean) => {
         setShowSplitAssistantMessageActions(enabled);
@@ -562,7 +577,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted')
         || shouldShow('collapsibleUserMessages')
         || shouldShow('stickyUserHeader')
-        || shouldShow('wideChatLayout')
+        || shouldShow('chatMessageWidth')
         || shouldShow('codeBlockLineWrap')
         || shouldShow('splitAssistantMessageActions')
         || shouldShow('diffLayout')
@@ -1782,7 +1797,43 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 </div>
                             )}
 
-                            {(shouldShow('sessionAssist') || shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || shouldShow('wideChatLayout') || shouldShow('codeBlockLineWrap') || shouldShow('splitAssistantMessageActions') || shouldShow('dotfiles') || shouldShow('fileViewerPreview') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || shouldShow('showTurnChangedFiles') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning')) && (
+                            {shouldShow('chatMessageWidth') && (
+                                <section className="p-2" data-settings-item="chat.message-width">
+                                    <h4 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.visual.section.chatMessageWidth')}</h4>
+                                    <div role="radiogroup" aria-label={t('settings.openchamber.visual.section.chatMessageWidthAria')} className="mt-0.5 space-y-0">
+                                        {CHAT_MESSAGE_WIDTH_OPTIONS.map((option) => {
+                                            const selected = chatMessageWidthMode === option.id;
+                                            return (
+                                                <div
+                                                    key={option.id}
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    aria-pressed={selected}
+                                                    onClick={() => handleChatMessageWidthChange(option.id)}
+                                                    onKeyDown={(event) => {
+                                                        if (event.key === ' ' || event.key === 'Enter') {
+                                                            event.preventDefault();
+                                                            handleChatMessageWidthChange(option.id);
+                                                        }
+                                                    }}
+                                                    className="flex w-full items-center gap-2 py-0 text-left"
+                                                >
+                                                    <Radio
+                                                        checked={selected}
+                                                        onChange={() => handleChatMessageWidthChange(option.id)}
+                                                        ariaLabel={t('settings.openchamber.visual.field.chatMessageWidthAria', { option: tUnsafe(option.labelKey) })}
+                                                    />
+                                                    <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
+                                                        {tUnsafe(option.labelKey)}
+                                                    </span>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </section>
+                            )}
+
+                            {(shouldShow('sessionAssist') || shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || shouldShow('codeBlockLineWrap') || shouldShow('splitAssistantMessageActions') || shouldShow('dotfiles') || shouldShow('fileViewerPreview') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || shouldShow('showTurnChangedFiles') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning')) && (
                                 <section className="p-2 space-y-0.5">
                                     {shouldShow('sessionAssist') && (
                                         <>
@@ -1922,30 +1973,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 ariaLabel={t('settings.openchamber.visual.field.stickyUserHeaderAria')}
                                             />
                                             <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.stickyUserHeader')}</span>
-                                        </div>
-                                    )}
-
-                                    {shouldShow('wideChatLayout') && (
-                                        <div
-                                            data-settings-item="chat.wide-layout"
-                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={wideChatLayoutEnabled}
-                                            onClick={() => handleWideChatLayoutChange(!wideChatLayoutEnabled)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    handleWideChatLayoutChange(!wideChatLayoutEnabled);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
-                                                checked={wideChatLayoutEnabled}
-                                                onChange={handleWideChatLayoutChange}
-                                                ariaLabel={t('settings.openchamber.visual.field.wideChatLayoutAria')}
-                                            />
-                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.wideChatLayout')}</span>
                                         </div>
                                     )}
 
