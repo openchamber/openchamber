@@ -7,11 +7,13 @@ import {
   getDesktopLanAddress,
   getDesktopKeepAwake,
   getDesktopLaunchAtLogin,
+  getDesktopMinimizeToTray,
   isDesktopLocalOriginActive,
   isDesktopShell,
   restartDesktopApp,
   setDesktopKeepAwake,
   setDesktopLaunchAtLogin,
+  setDesktopMinimizeToTray,
 } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -31,6 +33,9 @@ export const DesktopNetworkSettings: React.FC = () => {
   const [launchAtLoginSupported, setLaunchAtLoginSupported] = React.useState(false);
   const [launchAtLoginEnabled, setLaunchAtLoginEnabled] = React.useState(false);
   const [isSavingLaunchAtLogin, setIsSavingLaunchAtLogin] = React.useState(false);
+  const [minimizeToTraySupported, setMinimizeToTraySupported] = React.useState(false);
+  const [minimizeToTrayEnabled, setMinimizeToTrayEnabled] = React.useState(false);
+  const [isSavingMinimizeToTray, setIsSavingMinimizeToTray] = React.useState(false);
   const [keepAwakeSupported, setKeepAwakeSupported] = React.useState(false);
   const [keepAwakeEnabled, setKeepAwakeEnabled] = React.useState(false);
   const [isSavingKeepAwake, setIsSavingKeepAwake] = React.useState(false);
@@ -105,6 +110,27 @@ export const DesktopNetworkSettings: React.FC = () => {
       }
       setLaunchAtLoginSupported(status?.supported === true);
       setLaunchAtLoginEnabled(status?.enabled === true);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isLocalDesktop]);
+
+  React.useEffect(() => {
+    if (!isLocalDesktop) {
+      setMinimizeToTraySupported(false);
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      const status = await getDesktopMinimizeToTray();
+      if (cancelled) {
+        return;
+      }
+      setMinimizeToTraySupported(status?.supported === true);
+      setMinimizeToTrayEnabled(status?.enabled === true);
     })();
 
     return () => {
@@ -209,6 +235,30 @@ export const DesktopNetworkSettings: React.FC = () => {
     }
   }, [isSavingLaunchAtLogin, launchAtLoginEnabled, launchAtLoginSupported, t]);
 
+  const handleMinimizeToTrayToggle = React.useCallback(async () => {
+    if (!minimizeToTraySupported || isSavingMinimizeToTray) {
+      return;
+    }
+
+    const nextValue = !minimizeToTrayEnabled;
+    setMinimizeToTrayEnabled(nextValue);
+    setIsSavingMinimizeToTray(true);
+    setError(null);
+
+    try {
+      const status = await setDesktopMinimizeToTray(nextValue);
+      if (!status?.supported) {
+        throw new Error(t('settings.openchamber.desktopNetwork.error.minimizeToTrayUnsupported'));
+      }
+      setMinimizeToTrayEnabled(status.enabled);
+    } catch (cause) {
+      setMinimizeToTrayEnabled(!nextValue);
+      setError(cause instanceof Error ? cause.message : t('settings.openchamber.desktopNetwork.error.minimizeToTraySaveFailed'));
+    } finally {
+      setIsSavingMinimizeToTray(false);
+    }
+  }, [isSavingMinimizeToTray, minimizeToTrayEnabled, minimizeToTraySupported, t]);
+
   const handleKeepAwakeToggle = React.useCallback(async () => {
     if (!keepAwakeSupported || isSavingKeepAwake) {
       return;
@@ -306,6 +356,35 @@ export const DesktopNetworkSettings: React.FC = () => {
               <div className="typography-ui-label text-foreground">{t('settings.openchamber.desktopNetwork.field.launchAtLogin')}</div>
               <div className="typography-micro text-muted-foreground/70">
                 {t('settings.openchamber.desktopNetwork.field.launchAtLoginDescription')}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {minimizeToTraySupported ? (
+          <div
+            data-settings-item="sessions.desktop-minimize-to-tray"
+            className="group flex cursor-pointer items-start gap-2 py-1.5"
+            role="button"
+            tabIndex={0}
+            onClick={handleMinimizeToTrayToggle}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                handleMinimizeToTrayToggle();
+              }
+            }}
+          >
+            <Checkbox
+              checked={minimizeToTrayEnabled}
+              onChange={handleMinimizeToTrayToggle}
+              ariaLabel={t('settings.openchamber.desktopNetwork.field.minimizeToTrayAria')}
+              disabled={isSavingMinimizeToTray}
+            />
+            <div className="min-w-0 flex-1">
+              <div className="typography-ui-label text-foreground">{t('settings.openchamber.desktopNetwork.field.minimizeToTray')}</div>
+              <div className="typography-micro text-muted-foreground/70">
+                {t('settings.openchamber.desktopNetwork.field.minimizeToTrayDescription')}
               </div>
             </div>
           </div>

@@ -23,6 +23,8 @@ interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
   isDesktopLocalOrigin: boolean;
   // macOS desktop shell — for controls that only render on darwin (e.g. dock badge).
   isMac: boolean;
+  // Windows desktop shell — for controls that only render on win32.
+  isWindows: boolean;
 }
 
 const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
@@ -312,6 +314,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     descriptionKey: 'settings.openchamber.desktopNetwork.field.launchAtLoginDescription',
     keywords: ['desktop', 'startup', 'login'],
     isAvailable: (ctx) => ctx.isDesktopLocalOrigin,
+  },
+  {
+    id: 'sessions.desktop-minimize-to-tray',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.desktopNetwork.field.minimizeToTray',
+    descriptionKey: 'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription',
+    keywords: ['desktop', 'tray', 'system tray', 'minimize', 'close', 'background', 'windows'],
+    isAvailable: (ctx) => ctx.isDesktopLocalOrigin && ctx.isWindows,
   },
   {
     id: 'sessions.desktop-keep-awake',
