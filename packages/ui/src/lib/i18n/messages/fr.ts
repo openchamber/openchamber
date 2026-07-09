@@ -2654,6 +2654,7 @@ export const dict = {
   'worktree.bootstrap.toast.failedDescription': 'Le worktree a été créé, mais la configuration en arrière-plan ne s’est pas terminée.',
   'worktree.bootstrap.toast.timeoutDescription': 'Le worktree a été créé, mais la configuration en arrière-plan a expiré.',
   'contextPanel.browser.inspectUnavailable': 'Cette page ne peut pas être inspectée depuis le panneau de navigateur.',
+  'contextPanel.browser.authError': 'Impossible d\'authentifier le proxy du navigateur.',
   'contextPanel.browser.trustNotice': 'Les pages ouvertes ici s’exécutent avec un accès complet à OpenChamber — nécessaire pour l’inspection et les captures d’écran. N’ouvrez que des sites de confiance : une page malveillante pourrait lire vos données ou agir en votre nom.',
   'filesView.diagram.closeDiagramView': 'Fermer la vue diagramme',
   'filesView.diagram.saveDiagram': 'Enregistrer le diagramme',

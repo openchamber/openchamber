@@ -1022,6 +1022,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.empty': 'ウェブブラウザ',
   'contextPanel.browser.emptyHint': '上のアドレスバーにURLを入力してウェブを閲覧',
   'contextPanel.browser.inspectUnavailable': 'このページはブラウザパネルから検査できません。',
+  'contextPanel.browser.authError': 'ブラウザプロキシの認証に失敗しました。',
   'contextPanel.browser.trustNotice': 'ここで開かれたページはOpenChamberへの完全なアクセス権を持ちます — 検査とスクリーンショットに必要です。信頼できるサイトのみを開いてください: 悪意のあるページがデータを読み取ったりあなたの代わりに行動したりする可能性があります。',
   'contextPanel.tab.closeTabAria': '{label}タブを閉じる',
   'contextPanel.actions.collapsePanel': 'パネルを折りたたむ',

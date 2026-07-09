@@ -1026,6 +1026,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.empty': '网页浏览器',
   'contextPanel.browser.emptyHint': '在上方输入网址开始浏览',
   'contextPanel.browser.inspectUnavailable': '无法从浏览器面板检查此页面。',
+  'contextPanel.browser.authError': '无法验证浏览器代理。',
   'contextPanel.browser.trustNotice': '在此打开的页面以对 OpenChamber 的完全访问权限运行 — 检查和截图需要此权限。仅打开你信任的站点：恶意页面可能读取你的数据或以你的身份执行操作。',
   'contextPanel.tab.closeTabAria': '关闭 {label} 标签',
   'contextPanel.actions.collapsePanel': '折叠面板',

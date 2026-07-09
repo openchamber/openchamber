@@ -37,6 +37,7 @@ import {
   desktopAnnotationToFile,
   getCachedProxyTarget,
   getBrowserProxyTargetKey,
+  isLoopbackPreviewUrl,
   previewProxyTargetCache,
 } from '@/lib/preview/screenshot-capture';
 
@@ -1310,6 +1311,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
   const [history, setHistory] = React.useState<string[]>(() => startUrl ? [startUrl] : []);
   const [historyIndex, setHistoryIndex] = React.useState(() => startUrl ? 0 : -1);
   const [reloadNonce, bumpReload] = React.useReducer((value: number) => value + 1, 0);
+  const [proxyRegistrationNonce, bumpProxyRegistration] = React.useReducer((value: number) => value + 1, 0);
   const [isLoading, setIsLoading] = React.useState(Boolean(startUrl));
   const [isInspecting, setIsInspecting] = React.useState(false);
   const [hoverTarget, setHoverTarget] = React.useState<PreviewElementMetadata | null>(null);
@@ -1404,11 +1406,17 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
 
     void (async () => {
       try {
+        // Loopback hosts must use the non-external path. allowExternal:true
+        // rejects localhost/private addresses (SSRF guard), which previously
+        // forced a direct iframe fallback that most pages refuse to frame.
+        const allowExternal = !isLoopbackPreviewUrl(loadedUrl);
         const response = await runtimeFetch('/api/preview/targets', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ url: loadedUrl, allowExternal: true }),
+          body: JSON.stringify(allowExternal
+            ? { url: loadedUrl, allowExternal: true }
+            : { url: loadedUrl }),
         });
 
         if (!response.ok) {
@@ -1418,6 +1426,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
             : `HTTP ${response.status}`;
           if (!cancelled) {
             setProxyState({ status: 'error', message });
+            setIsLoading(false);
           }
           return;
         }
@@ -1429,6 +1438,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
         if (!proxyBasePath || !previewToken) {
           if (!cancelled) {
             setProxyState({ status: 'error', message: t('contextPanel.preview.proxyError') });
+            setIsLoading(false);
           }
           return;
         }
@@ -1441,6 +1451,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
         if (!cancelled) {
           const message = error instanceof Error ? error.message : String(error);
           setProxyState({ status: 'error', message });
+          setIsLoading(false);
         }
       }
     })();
@@ -1448,7 +1459,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
     return () => {
       cancelled = true;
     };
-  }, [loadedUrl, t]);
+  }, [loadedUrl, proxyRegistrationNonce, t]);
 
   const proxyUrlAuthKey = loadedUrl && proxyState.status === 'ready'
     ? `${proxyState.proxyBasePath}|${proxyState.previewToken || ''}|${reloadNonce}`
@@ -1464,14 +1475,25 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
     setUrlAuthReadyKey('');
     void refreshRuntimeUrlAuthToken(getRuntimeApiBaseUrl())
       .then((token) => {
-        if (!cancelled && token) setUrlAuthReadyKey(proxyUrlAuthKey);
+        if (cancelled) return;
+        if (token) {
+          setUrlAuthReadyKey(proxyUrlAuthKey);
+          return;
+        }
+        setProxyState({ status: 'error', message: t('contextPanel.browser.authError') });
+        setIsLoading(false);
       })
-      .catch(() => {});
+      .catch((error) => {
+        if (cancelled) return;
+        const message = error instanceof Error ? error.message : t('contextPanel.browser.authError');
+        setProxyState({ status: 'error', message });
+        setIsLoading(false);
+      });
 
     return () => {
       cancelled = true;
     };
-  }, [proxyUrlAuthKey]);
+  }, [proxyUrlAuthKey, t]);
 
   const proxySrc = React.useMemo(() => {
     if (urlAuthReadyKey !== proxyUrlAuthKey) return '';
@@ -1491,7 +1513,12 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
     }
   }, [loadedUrl, proxyState, proxyUrlAuthKey, reloadNonce, urlAuthReadyKey]);
 
-  const iframeSrc = proxySrc || (proxyState.status === 'error' ? loadedUrl : '');
+  // Only fall back to a direct iframe for public hosts when proxy registration
+  // fails. Loopback must stay on the proxy path — a direct localhost iframe
+  // loses inspect/bridge and often fails framing when auth is required.
+  const iframeSrc = proxySrc
+    || (proxyState.status === 'error' && loadedUrl && !isLoopbackPreviewUrl(loadedUrl) ? loadedUrl : '');
+  const showProxyError = proxyState.status === 'error' && !iframeSrc;
 
   const getCurrentUrlFromFrameUrl = React.useCallback((frameUrl: string): string => {
     if (!frameUrl || !loadedUrl || proxyState.status !== 'ready') return '';
@@ -1770,6 +1797,24 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
               </div>
             ) : null}
           </div>
+        ) : showProxyError ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background p-6 text-center">
+            <div className="typography-ui-header text-muted-foreground">{t('contextPanel.preview.proxyError')}</div>
+            {proxyState.status === 'error' && proxyState.message ? (
+              <div className="max-w-md typography-micro text-muted-foreground">{proxyState.message}</div>
+            ) : null}
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setProxyState({ status: 'idle' });
+                bumpProxyRegistration();
+              }}
+            >
+              {t('contextPanel.preview.actions.retry')}
+            </Button>
+          </div>
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 bg-background p-6 text-center">
             <OpenChamberLogo width={140} height={140} className="opacity-20" />
@@ -1778,7 +1823,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
             <span className="max-w-md typography-micro leading-relaxed text-status-warning/70">{t('contextPanel.browser.trustNotice')}</span>
           </div>
         )}
-        {isLoading ? (
+        {isLoading && !showProxyError ? (
           <div className="absolute inset-0 flex items-center justify-center bg-background/70 typography-micro text-muted-foreground">
             {t('common.loading')}
           </div>

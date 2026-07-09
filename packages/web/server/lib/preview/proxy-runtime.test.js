@@ -348,6 +348,13 @@ describe('proxy target normalization (SSRF guard)', () => {
     }
   });
 
+  it('still accepts loopback on the non-external path used by local preview/browser', () => {
+    expect(normalizeProxyTargetUrl('http://localhost:5173/', { allowExternal: false }))
+      .toEqual({ ok: true, origin: 'http://127.0.0.1:5173' });
+    expect(normalizeProxyTargetUrl('http://127.0.0.1:3000/', { allowExternal: false }))
+      .toEqual({ ok: true, origin: 'http://127.0.0.1:3000' });
+  });
+
   it('still blocks private hosts even via IPv4-mapped IPv6', () => {
     expect(normalizeProxyTargetUrl('http://[::ffff:127.0.0.1]/', { allowExternal: true }).ok).toBe(false);
   });

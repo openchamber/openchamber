@@ -1026,6 +1026,7 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.browser.empty": "Веб-браузер",
   "contextPanel.browser.emptyHint": "Введіть адресу вище, щоб почати перегляд",
   "contextPanel.browser.inspectUnavailable": "Цю сторінку неможливо інспектувати з панелі браузера.",
+  "contextPanel.browser.authError": "Не вдалося автентифікувати проксі браузера.",
   "contextPanel.browser.trustNotice": "Сторінки, відкриті тут, працюють із повним доступом до OpenChamber — це потрібно для inspect і скріншотів. Відкривайте лише сайти, яким довіряєте: шкідлива сторінка може прочитати ваші дані чи діяти від вашого імені.",
   "contextPanel.tab.closeTabAria": "Закрити вкладку {label}",
   "contextPanel.actions.collapsePanel": "Згорнути панель",

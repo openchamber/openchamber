@@ -1026,6 +1026,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.empty': '웹 브라우저',
   'contextPanel.browser.emptyHint': '위에 주소를 입력하여 탐색을 시작하세요',
   'contextPanel.browser.inspectUnavailable': '브라우저 패널에서 이 페이지를 검사할 수 없습니다.',
+  'contextPanel.browser.authError': '브라우저 프록시를 인증할 수 없습니다.',
   'contextPanel.browser.trustNotice': '여기서 여는 페이지는 OpenChamber에 대한 전체 액세스 권한으로 실행됩니다 — 검사와 스크린샷에 필요합니다. 신뢰하는 사이트만 여세요: 악성 페이지가 데이터를 읽거나 사용자를 대신해 동작할 수 있습니다.',
   'contextPanel.preview.actions.reload': '미리보기 새로고침',
   'contextPanel.preview.actions.openExternal': '브라우저에서 열기',

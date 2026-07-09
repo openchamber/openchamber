@@ -1038,6 +1038,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.empty': '網頁瀏覽器',
   'contextPanel.browser.emptyHint': '在上方輸入網址開始瀏覽',
   'contextPanel.browser.inspectUnavailable': '無法從瀏覽器面板檢查此頁面。',
+  'contextPanel.browser.authError': '無法驗證瀏覽器代理。',
   'contextPanel.browser.trustNotice': '在此開啟的頁面以對 OpenChamber 的完整存取權限執行 — 檢查與截圖需要此權限。僅開啟你信任的網站：惡意頁面可能讀取你的資料或以你的身分執行操作。',
   'contextPanel.tab.closeTabAria': '關閉 {label} 分頁',
   'contextPanel.actions.collapsePanel': '摺疊面板',

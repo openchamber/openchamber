@@ -1026,6 +1026,7 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.browser.empty": "Navegador web",
   "contextPanel.browser.emptyHint": "Ingrese una dirección arriba para comenzar a navegar",
   "contextPanel.browser.inspectUnavailable": "Esta página no se puede inspeccionar desde el panel del navegador.",
+  "contextPanel.browser.authError": "No se pudo autenticar el proxy del navegador.",
   "contextPanel.browser.trustNotice": "Las páginas que abras aquí se ejecutan con acceso completo a OpenChamber: necesario para la inspección y las capturas. Abre solo sitios de confianza: una página maliciosa podría leer tus datos o actuar en tu nombre.",
   "contextPanel.tab.closeTabAria": "Cerrar pestaña {label}",
   "contextPanel.actions.collapsePanel": "Colapsar panel",

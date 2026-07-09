@@ -223,6 +223,26 @@ export const getBrowserProxyTargetKey = (url: string): string => {
   }
 };
 
+// Matches the server's LOOPBACK_HOSTS set used by /api/preview/targets when
+// allowExternal is false. The browser pane must use that path for these hosts —
+// allowExternal:true rejects loopback/private addresses as SSRF.
+export const isLoopbackPreviewHostname = (hostname: string): boolean => {
+  const host = hostname.toLowerCase();
+  return host === 'localhost'
+    || host === '127.0.0.1'
+    || host === '::1'
+    || host === '[::1]'
+    || host === '0.0.0.0';
+};
+
+export const isLoopbackPreviewUrl = (url: string): boolean => {
+  try {
+    return isLoopbackPreviewHostname(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+};
+
 function getCaptureBackgroundColor(document: Document): string {
   const fallback = '#ffffff';
   const view = document.defaultView ?? window;
@@ -475,11 +495,16 @@ const getExternalResourceProxyUrl = async (url: URL): Promise<string> => {
   const existingRequest = previewProxyTargetRequests.get(targetKey);
   const request = existingRequest ?? (async () => {
     try {
+      // Loopback must use the non-external registration path; allowExternal
+      // rejects private/loopback hosts and would leave screenshot fetches broken.
+      const requestBody = isLoopbackPreviewHostname(url.hostname)
+        ? { url: url.toString() }
+        : { url: url.toString(), allowExternal: true };
       const response = await runtimeFetch('/api/preview/targets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ url: url.toString(), allowExternal: true }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
