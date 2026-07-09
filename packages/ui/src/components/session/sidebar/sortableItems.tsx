@@ -14,6 +14,8 @@ import { cn } from '@/lib/utils';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/projectMeta';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
+import { CollapsedActivityIndicator } from './collapsedActivityIndicator';
+import type { CollapsedActivityState } from './collapsedActivityState';
 
 export interface SortableProjectItemProps {
   id: string;
@@ -28,6 +30,7 @@ export interface SortableProjectItemProps {
   isRepo: boolean;
   isDesktopShell: boolean;
   isStuck: boolean;
+  collapsedActivityState?: CollapsedActivityState;
   hideDirectoryControls: boolean;
   mobileVariant: boolean;
   alwaysShowActions: boolean;
@@ -62,6 +65,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   isRepo,
   isDesktopShell,
   isStuck,
+  collapsedActivityState = null,
   hideDirectoryControls,
   alwaysShowActions,
   onToggle,
@@ -233,6 +237,13 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                     )}>
                       {projectLabel}
                     </span>
+                    {collapsedActivityState ? (
+                      <CollapsedActivityIndicator
+                        state={collapsedActivityState}
+                        activeLabel={t('sessions.sidebar.session.status.active')}
+                        unreadLabel={t('sessions.sidebar.session.status.unread')}
+                      />
+                    ) : null}
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="right" sideOffset={8}>

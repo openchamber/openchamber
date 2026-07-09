@@ -7,7 +7,7 @@ import { isDesktopShell } from '@/lib/desktop';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { formatDirectoryName, cn } from '@/lib/utils';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useAllLiveSessions } from '@/sync/sync-context';
+import { useAllLiveSessions, useAllSessionStatuses } from '@/sync/sync-context';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSync } from '@/sync/use-sync';
 import { useSessionPrefetch } from './sidebar/hooks/useSessionPrefetch';
@@ -60,6 +60,8 @@ import {
 import { BulkActionBar } from './sidebar/BulkActionBar';
 import { useSidebarBulkActions } from './sidebar/hooks/useSidebarBulkActions';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { useNotificationStore } from '@/sync/notification-store';
+import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { type SessionGroup, type SessionNode } from './sidebar/types';
 import {
   deriveRecentSessions,
@@ -318,6 +320,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const sync = useSync();
   const liveSessions = useAllLiveSessions();
+  const liveSessionStatuses = useAllSessionStatuses();
+  const globalSessionStatusById = useGlobalSessionStatusStore((state) => state.statusById);
+  const unseenCountBySessionId = useNotificationStore((state) => state.index.session.unseenCount);
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
   const hasLoadedGlobalSessions = useGlobalSessionsStore((state) => state.hasLoaded);
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
@@ -405,6 +410,31 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     () => new Map(liveSessions.map((session) => [session.id, session] as const)),
     [liveSessions],
   );
+
+  const activeActivitySessionIds = React.useMemo(() => {
+    const ids = new Set<string>();
+    Object.entries(liveSessionStatuses).forEach(([sessionId, status]) => {
+      if (status?.type === 'busy' || status?.type === 'retry') {
+        ids.add(sessionId);
+      }
+    });
+    globalSessionStatusById.forEach((entry, sessionId) => {
+      if (entry.status === 'busy' || entry.status === 'retry') {
+        ids.add(sessionId);
+      }
+    });
+    return ids;
+  }, [globalSessionStatusById, liveSessionStatuses]);
+
+  const unreadActivitySessionIds = React.useMemo(() => {
+    const ids = new Set<string>();
+    Object.entries(unseenCountBySessionId).forEach(([sessionId, count]) => {
+      if (count > 0) {
+        ids.add(sessionId);
+      }
+    });
+    return ids;
+  }, [unseenCountBySessionId]);
 
   const projectWorktreeDiscoveryKey = React.useMemo(
     () => projects
@@ -1466,6 +1496,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         openSidebarMenuKey={openSidebarMenuKey}
         liveSessionById={liveSessionById}
         prVisualStateByDirectoryBranch={prVisualStateByDirectoryBranch}
+        activeActivitySessionIds={activeActivitySessionIds}
+        unreadActivitySessionIds={unreadActivitySessionIds}
+        notifyOnSubtasks={notifyOnSubtasks}
         onToggleCollapsedGroup={toggleCollapsedGroup}
         dragHandleProps={dragHandleProps}
         scrollContainerRef={scrollContainerRef}
@@ -1507,6 +1540,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       openSidebarMenuKey,
       liveSessionById,
       prVisualStateByDirectoryBranch,
+      activeActivitySessionIds,
+      unreadActivitySessionIds,
+      notifyOnSubtasks,
       toggleCollapsedGroup,
     ],
   );
@@ -1630,6 +1666,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         openSidebarMenuKey={openSidebarMenuKey}
         setOpenSidebarMenuKey={setOpenSidebarMenuKey}
         isInlineEditing={isInlineEditing}
+        activeActivitySessionIds={activeActivitySessionIds}
+        unreadActivitySessionIds={unreadActivitySessionIds}
+        notifyOnSubtasks={notifyOnSubtasks}
       />
 
       {selectionModeEnabled && hasSelection ? (
