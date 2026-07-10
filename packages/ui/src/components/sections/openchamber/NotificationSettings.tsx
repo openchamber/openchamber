@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { getClientPlatform } from '@/lib/platform';
 import { useI18n } from '@/lib/i18n';
+import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 
 const DEFAULT_NOTIFICATION_TEMPLATES = {
   completion: {
@@ -448,17 +449,13 @@ export const NotificationSettings: React.FC = () => {
   };
 
   return (
-    <div className="space-y-8">
-
-        {/* --- Global Delivery Settings --- */}
-        <div data-settings-item="notifications.delivery" className="mb-8">
-          <div className="mb-1 px-1">
-              <h3 className="typography-ui-header font-medium text-foreground">
-                {t('settings.notifications.page.delivery.title')}
-              </h3>
-          </div>
-
-          <section className="px-2 pb-2 pt-0 space-y-0.5">
+    <>
+        <SettingsSection
+          settingsItem="notifications.delivery"
+          title={t('settings.notifications.page.delivery.title')}
+          divider={false}
+        >
+          <div className="space-y-0.5">
             <div
               className="group flex cursor-pointer items-center gap-2 py-1.5"
               role="button"
@@ -522,10 +519,10 @@ export const NotificationSettings: React.FC = () => {
                 </div>
               </>
             )}
-          </section>
+          </div>
 
           {isBrowser && (
-            <div className="mt-1 px-2">
+            <div className="mt-1">
               <p className="typography-meta text-muted-foreground/70">
                 {t('settings.notifications.page.delivery.browserPermissionHint')}
               </p>
@@ -542,25 +539,21 @@ export const NotificationSettings: React.FC = () => {
             </div>
           )}
           {isVSCode && (
-            <div className="mt-1 px-2">
+            <div className="mt-1">
               <p className="typography-meta text-muted-foreground/70">
                 {t('settings.notifications.page.delivery.vscodeHint')}
               </p>
             </div>
           )}
-        </div>
+        </SettingsSection>
 
         {nativeNotificationsEnabled && canShowNotifications && (
           <>
-            {/* --- Events --- */}
-            <div data-settings-item="notifications.events" className="mb-8">
-              <div className="mb-1 px-1">
-                <h3 className="typography-ui-header font-medium text-foreground">
-                  {t('settings.notifications.page.events.title')}
-                </h3>
-              </div>
-
-              <section className="px-2 pb-2 pt-0 space-y-0.5">
+            <SettingsSection
+              settingsItem="notifications.events"
+              title={t('settings.notifications.page.events.title')}
+            >
+              <div className="space-y-0.5">
                 <div
                   className="group flex cursor-pointer items-center gap-2 py-1.5"
                   role="button"
@@ -628,17 +621,14 @@ export const NotificationSettings: React.FC = () => {
                   <Checkbox checked={notifyOnQuestion} onChange={setNotifyOnQuestion} ariaLabel={t('settings.notifications.page.events.questionAria')} />
                   <span className="typography-ui-label text-foreground">{t('settings.notifications.page.events.questionLabel')}</span>
                 </div>
-              </section>
-            </div>
+              </div>
+            </SettingsSection>
 
-            {/* --- Template Customization (not on the native app — it uses generic text) --- */}
             {!isNativeApp && (
-            <div className="mb-8">
-              <div className="mb-1 px-1">
-                <h3 className="typography-ui-header font-medium text-foreground">
-                  {t('settings.notifications.page.template.title')}
-                </h3>
-                <p className="typography-meta text-muted-foreground mt-0.5">
+            <SettingsSection
+              title={t('settings.notifications.page.template.title')}
+              description={(
+                <>
                   {t('settings.notifications.page.template.variablesLabel')}{' '}
                   <code className="text-[var(--primary-base)]">{'{project_name}'}</code>{' '}
                   <code className="text-[var(--primary-base)]">{'{worktree}'}</code>{' '}
@@ -647,9 +637,9 @@ export const NotificationSettings: React.FC = () => {
                   <code className="text-[var(--primary-base)]">{'{agent_name}'}</code>{' '}
                   <code className="text-[var(--primary-base)]">{'{model_name}'}</code>{' '}
                   <code className="text-[var(--primary-base)]">{'{last_message}'}</code>
-                </p>
-              </div>
-
+                </>
+              )}
+            >
               <div className="grid grid-cols-1 gap-2 md:grid-cols-2 md:gap-3">
                 {(['completion', 'subtask', 'error', 'question'] as const).map((event: NotificationTemplateEvent) => (
                   <section key={event} className="p-2">
@@ -679,55 +669,48 @@ export const NotificationSettings: React.FC = () => {
                   </section>
                 ))}
               </div>
-            </div>
+            </SettingsSection>
             )}
 
           </>
         )}
 
-        {/* --- Background Push Notifications --- */}
         {isBrowser && (
-          <div data-settings-item="notifications.push" className="mb-8">
-            <div className="mb-1 px-1">
-              <h3 className="typography-ui-header font-medium text-foreground">
-                {t('settings.notifications.page.push.title')}
-              </h3>
-            </div>
-
-            <section className="px-2 pb-2 pt-0">
-              <div className="flex items-start gap-2 py-1.5">
-                <Checkbox
-                  checked={pushSupported ? pushSubscribed : false}
-                  disabled={!pushSupported || pushBusy}
-                  onChange={(checked: boolean) => {
-                    if (checked) {
-                      void handleEnableBackgroundNotifications();
-                    } else {
-                      void handleDisableBackgroundNotifications();
-                    }
-                  }}
-                  ariaLabel={t('settings.notifications.page.push.enableAria')}
-                />
-                <div className="flex min-w-0 flex-col">
-                  <span className={cn("typography-ui-label", !pushSupported ? "text-muted-foreground" : "text-foreground")}>
-                    {t('settings.notifications.page.push.enableLabel')}
-                  </span>
-                  <span className="typography-meta text-muted-foreground">
-                    {!pushSupported
-                      ? t('settings.notifications.page.push.unsupportedHint')
-                      : t('settings.notifications.page.push.supportedHint')}
-                  </span>
-                </div>
-                {pushBusy && (
-                  <div className="pt-0.5 text-muted-foreground">
-                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-current animate-busy-pulse" aria-label={t('settings.notifications.page.push.loadingAria')} />
-                  </div>
-                )}
+          <SettingsSection
+            settingsItem="notifications.push"
+            title={t('settings.notifications.page.push.title')}
+          >
+            <div className="flex items-start gap-2 py-1.5">
+              <Checkbox
+                checked={pushSupported ? pushSubscribed : false}
+                disabled={!pushSupported || pushBusy}
+                onChange={(checked: boolean) => {
+                  if (checked) {
+                    void handleEnableBackgroundNotifications();
+                  } else {
+                    void handleDisableBackgroundNotifications();
+                  }
+                }}
+                ariaLabel={t('settings.notifications.page.push.enableAria')}
+              />
+              <div className="flex min-w-0 flex-col">
+                <span className={cn("typography-ui-label", !pushSupported ? "text-muted-foreground" : "text-foreground")}>
+                  {t('settings.notifications.page.push.enableLabel')}
+                </span>
+                <span className="typography-meta text-muted-foreground">
+                  {!pushSupported
+                    ? t('settings.notifications.page.push.unsupportedHint')
+                    : t('settings.notifications.page.push.supportedHint')}
+                </span>
               </div>
-            </section>
-          </div>
+              {pushBusy && (
+                <div className="pt-0.5 text-muted-foreground">
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-current animate-busy-pulse" aria-label={t('settings.notifications.page.push.loadingAria')} />
+                </div>
+              )}
+            </div>
+          </SettingsSection>
         )}
-
-    </div>
+    </>
   );
 };

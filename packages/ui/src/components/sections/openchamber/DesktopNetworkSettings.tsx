@@ -16,6 +16,7 @@ import {
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 
 export const DesktopNetworkSettings: React.FC = () => {
   const { t } = useI18n();
@@ -276,12 +277,8 @@ export const DesktopNetworkSettings: React.FC = () => {
   }
 
   return (
-    <div className="mb-8">
-      <div className="mb-1 px-1">
-        <h3 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.desktopNetwork.title')}</h3>
-      </div>
-
-      <section className="space-y-2 px-2 pb-2 pt-0">
+    <SettingsSection title={t('settings.openchamber.desktopNetwork.title')}>
+      <div className="space-y-2">
         {launchAtLoginSupported ? (
           <div
             data-settings-item="sessions.desktop-launch-at-login"
@@ -396,11 +393,11 @@ export const DesktopNetworkSettings: React.FC = () => {
         </div>
 
         {error ? (
-          <div className="px-2 typography-micro text-[var(--status-error)]">{error}</div>
+          <div className="typography-micro text-[var(--status-error)]">{error}</div>
         ) : null}
 
         {lanUrl ? (
-          <div className="px-2 typography-micro text-muted-foreground/80">
+          <div className="typography-micro text-muted-foreground/80">
             {isDirty && !savedValue
               ? t('settings.openchamber.desktopNetwork.hint.openAfterRestart')
               : t('settings.openchamber.desktopNetwork.hint.openNow')}
@@ -419,7 +416,7 @@ export const DesktopNetworkSettings: React.FC = () => {
             {isSaving ? t('settings.common.actions.saving') : t('settings.openchamber.desktopNetwork.actions.saveAndRestart')}
           </Button>
         </div>
-      </section>
-    </div>
+      </div>
+    </SettingsSection>
   );
 };

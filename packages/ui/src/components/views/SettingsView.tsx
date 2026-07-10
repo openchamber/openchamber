@@ -37,6 +37,7 @@ import { GitPage } from '@/components/sections/git-identities/GitPage';
 import type { OpenChamberSection } from '@/components/sections/openchamber/types';
 import { OpenChamberPage } from '@/components/sections/openchamber/OpenChamberPage';
 import { AboutSettings } from '@/components/sections/openchamber/AboutSettings';
+import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { useDeviceInfo } from '@/lib/device';
 import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
@@ -801,7 +802,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       case 'usage':
         return <UsagePage />;
       case 'about':
-        return <div className="h-full overflow-auto px-5 py-6"><AboutSettings /></div>;
+        return (
+          <SettingsPageLayout title={t('settings.page.about.title')} showSaveStatus={false}>
+            <AboutSettings />
+          </SettingsPageLayout>
+        );
       case 'magic-prompts':
         return <MagicPromptsPage />;
       case 'snippets':
@@ -821,7 +826,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       default:
         return <SettingsHome onOpen={openPage} />;
     }
-  }, [openChamberSectionBySlug, openPage, renderUnavailable, runtimeCtx]);
+  }, [openChamberSectionBySlug, openPage, renderUnavailable, runtimeCtx, t]);
 
   // Mobile: if opened via deep-link / palette to a non-home page, jump into it once.
   React.useEffect(() => {

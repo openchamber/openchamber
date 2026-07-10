@@ -8,6 +8,8 @@ import { toast } from '@/components/ui';
 import { useSkillsStore, type SkillConfig, type SkillScope, type SupportingFile, type PendingFile } from '@/stores/useSkillsStore';
 import { useShallow } from 'zustand/react/shallow';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
+import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import {
   Select,
   SelectContent,
@@ -501,34 +503,25 @@ const SkillsInstalledPage: React.FC = () => {
   }
 
   return (
-    <ScrollableOverlay outerClassName="h-full" className="w-full">
-      <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8">
+    <>
+      <SettingsPageLayout
+        title={isNewSkill ? t('settings.skills.page.title.newSkill') : selectedSkillName}
+        description={selectedSkill
+          ? t('settings.skills.page.subtitle.skillLocation', {
+              location: locationLabelText(locationValueFrom(selectedSkill.scope, selectedSkill.source)),
+            })
+          : t('settings.skills.page.subtitle.newSkill')}
+        showSaveStatus={false}
+      >
 
-        {/* Header */}
-        <div className="mb-4">
-          <div className="min-w-0">
-            <h2 className="typography-ui-header font-semibold text-foreground truncate flex items-center gap-2">
-              {isNewSkill ? t('settings.skills.page.title.newSkill') : selectedSkillName}
-            </h2>
-            <p className="typography-meta text-muted-foreground truncate">
-              {selectedSkill
-                ? t('settings.skills.page.subtitle.skillLocation', {
-                    location: locationLabelText(locationValueFrom(selectedSkill.scope, selectedSkill.source)),
-                  })
-                : t('settings.skills.page.subtitle.newSkill')}
-            </p>
-          </div>
-        </div>
 
-        {/* Basic Information */}
-        <div data-settings-item="skills.basic-information" className="mb-8">
-          <div className="mb-1 px-1">
-            <h3 className="typography-ui-header font-medium text-foreground">
-              {t('settings.skills.page.section.basicInformation')}
-            </h3>
-          </div>
 
-          <section className="px-2 pb-2 pt-0 space-y-0">
+        <SettingsSection
+          title={t('settings.skills.page.section.basicInformation')}
+          divider={false}
+          settingsItem="skills.basic-information"
+          contentClassName="space-y-0"
+        >
 
             {isNewSkill && (
               <div className="py-1.5">
@@ -592,22 +585,18 @@ const SkillsInstalledPage: React.FC = () => {
               </div>
             </div>
 
-          </section>
-        </div>
+        </SettingsSection>
 
-        {/* Instructions */}
-        <div data-settings-item="skills.instructions" className="mb-8">
-          <div className="mb-1 px-1 flex items-center justify-between gap-2">
-            <h3 className="typography-ui-header font-medium text-foreground">
-              {t('settings.skills.page.section.instructions')}
-            </h3>
+        <SettingsSection
+          title={t('settings.skills.page.section.instructions')}
+          headerAction={(
             <PreviewToggleButton
               currentMode={skillEditorMode === 'preview' ? 'preview' : 'edit'}
               onToggle={() => setSkillEditorMode((mode) => mode === 'preview' ? 'edit' : 'preview')}
             />
-          </div>
-
-          <section className="px-2 pb-2 pt-0">
+          )}
+          settingsItem="skills.instructions"
+        >
             <div
               className={cn(
                 'overflow-hidden rounded-md border border-[var(--surface-subtle)] bg-background',
@@ -636,21 +625,17 @@ const SkillsInstalledPage: React.FC = () => {
                 />
               )}
             </div>
-          </section>
-        </div>
+        </SettingsSection>
 
-        {/* Supporting Files */}
-        <div data-settings-item="skills.supporting-files" className="mb-2">
-          <div className="mb-1 px-1 flex items-center gap-2">
-            <h3 className="typography-ui-header font-medium text-foreground">
-              {t('settings.skills.page.section.supportingFiles')}
-            </h3>
+        <SettingsSection
+          title={t('settings.skills.page.section.supportingFiles')}
+          headerAction={(
             <Button variant="outline" size="xs" className="!font-normal gap-1" onClick={handleAddFile} disabled={isReadOnlySkill}>
               <Icon name="add" className="h-3.5 w-3.5" /> {t('settings.skills.page.actions.addFile')}
             </Button>
-          </div>
-
-          <section className="px-2 pb-2 pt-0">
+          )}
+          settingsItem="skills.supporting-files"
+        >
             {(() => {
               const filesToShow = isNewSkill ? pendingFiles : supportingFiles;
 
@@ -694,11 +679,9 @@ const SkillsInstalledPage: React.FC = () => {
                 </div>
               );
             })()}
-          </section>
-        </div>
+        </SettingsSection>
 
-        {/* Save action */}
-        <div className="px-2 py-1">
+        <div className="pb-8">
           <Button
             onClick={handleSave}
             disabled={isReadOnlySkill || isSaving || !hasSkillChanges}
@@ -708,8 +691,8 @@ const SkillsInstalledPage: React.FC = () => {
             {isSaving ? t('settings.common.actions.saving') : isNewSkill ? t('settings.skills.page.actions.createSkill') : t('settings.common.actions.saveChanges')}
           </Button>
         </div>
+      </SettingsPageLayout>
 
-      </div>
 
       {/* Add/Edit File Dialog */}
       <Dialog
@@ -810,7 +793,8 @@ const SkillsInstalledPage: React.FC = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </ScrollableOverlay>
+
+    </>
   );
 };
 

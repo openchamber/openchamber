@@ -14,6 +14,7 @@ import {
   type PasskeyStatus,
   type StoredPasskey,
 } from '@/lib/passkeys';
+import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 
@@ -172,12 +173,8 @@ export const PasskeySettings: React.FC = () => {
   }, [t]);
 
   return (
-    <div className="mb-8">
-      <div className="mb-1 px-1">
-        <h3 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.passkeys.title')}</h3>
-      </div>
-
-      <section className="px-2 pb-2 pt-0 space-y-2">
+    <SettingsSection title={t('settings.openchamber.passkeys.title')}>
+      <div className="space-y-2">
         <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
           <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
             <span className="typography-ui-label text-foreground">{t('settings.openchamber.passkeys.field.currentDevice')}</span>
@@ -254,13 +251,13 @@ export const PasskeySettings: React.FC = () => {
             ))}
           </div>
         )}
-      </section>
+      </div>
 
       {errorMessage && (
-        <div className="mt-1 px-2 py-1.5">
+        <div className="mt-1 py-1.5">
           <p className="typography-meta text-[var(--status-error)]">{errorMessage}</p>
         </div>
       )}
-    </div>
+    </SettingsSection>
   );
 };

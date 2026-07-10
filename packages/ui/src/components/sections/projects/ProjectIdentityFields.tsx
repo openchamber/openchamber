@@ -64,6 +64,7 @@ export const ProjectIdentityFields: React.FC<ProjectIdentityFieldsProps> = ({ fo
       <ProjectSettingsSubsection
         title={t('settings.projects.page.field.projectName')}
         settingsItem="projects.name"
+        divider={false}
       >
         <Input
           value={name}

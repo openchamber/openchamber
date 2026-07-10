@@ -1,7 +1,6 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { toast } from '@/components/ui';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -22,6 +21,8 @@ import {
 } from '@/lib/responseStyle';
 import type { DesktopSettings } from '@/lib/desktop';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
+import { SettingsSection, SETTINGS_SELECT_TRIGGER_CLASS } from '@/components/sections/shared/SettingsSection';
 
 const AGENTS_MD_PATH = '~/.config/opencode/AGENTS.md';
 
@@ -235,126 +236,114 @@ export const BehaviorPage: React.FC = () => {
   };
 
   return (
-    <ScrollableOverlay outerClassName="h-full" className="w-full">
-      <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8 space-y-6">
-        <div className="space-y-1">
-          <h2 className="typography-ui-header font-semibold text-foreground">
-            {t('settings.behavior.page.title')}
-          </h2>
-        </div>
+    <SettingsPageLayout
+      title={t('settings.behavior.page.title')}
+      description={t('settings.page.behavior.description')}
+      showSaveStatus
+    >
+      <SettingsSection
+        title={t('settings.behavior.page.section.systemPrompt')}
+        titleAccessory={(
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+            </TooltipTrigger>
+            <TooltipContent sideOffset={8} className="max-w-xs">
+              <div className="space-y-1">
+                <p className="font-medium text-foreground">
+                  {t('settings.behavior.page.warning.title')}
+                </p>
+                <p>
+                  {t('settings.behavior.page.warning.description', { path: AGENTS_MD_PATH })}
+                </p>
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        )}
+        divider={false}
+        settingsItem="behavior.system-prompt"
+        contentClassName="space-y-3"
+      >
+        <Textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder={t('settings.behavior.page.field.systemPromptPlaceholder')}
+          rows={12}
+          disabled={isLoading}
+          outerClassName="min-h-[160px] max-h-[70vh]"
+          className="w-full font-mono typography-meta bg-transparent"
+        />
+        <Button
+          onClick={handleSave}
+          disabled={isSaving || !isPromptDirty || isLoading}
+          size="xs"
+          className="!font-normal"
+        >
+          {isSaving ? t('settings.common.actions.saving') : t('settings.common.actions.saveChanges')}
+        </Button>
+      </SettingsSection>
 
-        <div data-settings-item="behavior.system-prompt">
-          <div className="mb-1 px-1">
-            <div className="flex items-center gap-1.5">
-              <h3 className="typography-ui-header font-medium text-foreground">
-                {t('settings.behavior.page.section.systemPrompt')}
-              </h3>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-                </TooltipTrigger>
-                <TooltipContent sideOffset={8} className="max-w-xs">
-                  <div className="space-y-1">
-                    <p className="font-medium text-foreground">
-                      {t('settings.behavior.page.warning.title')}
-                    </p>
-                    <p>
-                      {t('settings.behavior.page.warning.description', { path: AGENTS_MD_PATH })}
-                    </p>
-                  </div>
-                </TooltipContent>
-              </Tooltip>
-            </div>
-          </div>
+      <SettingsSection
+        title={t('settings.behavior.page.section.responseStyle')}
+        titleAccessory={(
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+            </TooltipTrigger>
+            <TooltipContent sideOffset={8} className="max-w-xs">
+              {t('settings.behavior.page.responseStyle.tooltip')}
+            </TooltipContent>
+          </Tooltip>
+        )}
+        settingsItem="behavior.response-style"
+        contentClassName="space-y-3"
+      >
+        <label className="flex items-center gap-2 typography-ui-label text-foreground">
+          <Checkbox
+            checked={responseStyleEnabled}
+            onChange={setResponseStyleEnabled}
+            disabled={isLoading}
+            ariaLabel={t('settings.behavior.page.responseStyle.enableAria')}
+          />
+          {t('settings.behavior.page.responseStyle.enable')}
+        </label>
 
-          <section className="px-2 pb-2 pt-0 space-y-3">
-            <Textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder={t('settings.behavior.page.field.systemPromptPlaceholder')}
-              rows={12}
-              disabled={isLoading}
-              outerClassName="min-h-[160px] max-h-[70vh]"
-              className="w-full font-mono typography-meta bg-transparent"
-            />
-            <Button
-              onClick={handleSave}
-              disabled={isSaving || !isPromptDirty || isLoading}
-              size="xs"
-              className="!font-normal"
-            >
-              {isSaving ? t('settings.common.actions.saving') : t('settings.common.actions.saveChanges')}
-            </Button>
-          </section>
-        </div>
+        <Select<ResponseStyleValue>
+          value={responseStylePreset}
+          onValueChange={(value) => setResponseStylePreset(value)}
+          disabled={isLoading || !responseStyleEnabled}
+        >
+          <SelectTrigger className={SETTINGS_SELECT_TRIGGER_CLASS}>
+            <SelectValue>
+              {(value) => {
+                if (value === 'custom') return t('settings.behavior.page.responseStyle.option.custom');
+                if (isResponseStylePreset(value)) return t(RESPONSE_STYLE_OPTION_LABEL_KEYS[value]);
+                return null;
+              }}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {RESPONSE_STYLE_PRESETS.map((preset) => (
+              <SelectItem key={preset} value={preset}>
+                {t(RESPONSE_STYLE_OPTION_LABEL_KEYS[preset])}
+              </SelectItem>
+            ))}
+            <SelectItem value="custom">
+              {t('settings.behavior.page.responseStyle.option.custom')}
+            </SelectItem>
+          </SelectContent>
+        </Select>
 
-        <div data-settings-item="behavior.response-style">
-          <div className="mb-1 px-1">
-            <div className="flex items-center gap-1.5">
-              <h3 className="typography-ui-header font-medium text-foreground">
-                {t('settings.behavior.page.section.responseStyle')}
-              </h3>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-                </TooltipTrigger>
-                <TooltipContent sideOffset={8} className="max-w-xs">
-                  {t('settings.behavior.page.responseStyle.tooltip')}
-                </TooltipContent>
-              </Tooltip>
-            </div>
-          </div>
-
-          <section className="px-2 pb-2 pt-0 space-y-3">
-            <label className="flex items-center gap-2 typography-ui-label text-foreground">
-              <Checkbox
-                checked={responseStyleEnabled}
-                onChange={setResponseStyleEnabled}
-                disabled={isLoading}
-                ariaLabel={t('settings.behavior.page.responseStyle.enableAria')}
-              />
-              {t('settings.behavior.page.responseStyle.enable')}
-            </label>
-
-            <Select<ResponseStyleValue>
-              value={responseStylePreset}
-              onValueChange={(value) => setResponseStylePreset(value)}
-              disabled={isLoading || !responseStyleEnabled}
-            >
-              <SelectTrigger className="w-full sm:w-56">
-                <SelectValue>
-                  {(value) => {
-                    if (value === 'custom') return t('settings.behavior.page.responseStyle.option.custom');
-                    if (isResponseStylePreset(value)) return t(RESPONSE_STYLE_OPTION_LABEL_KEYS[value]);
-                    return null;
-                  }}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {RESPONSE_STYLE_PRESETS.map((preset) => (
-                  <SelectItem key={preset} value={preset}>
-                    {t(RESPONSE_STYLE_OPTION_LABEL_KEYS[preset])}
-                  </SelectItem>
-                ))}
-                <SelectItem value="custom">
-                  {t('settings.behavior.page.responseStyle.option.custom')}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Textarea
-              value={responseStylePreview}
-              onChange={(event) => setResponseStyleCustomInstructions(event.target.value)}
-              placeholder={t('settings.behavior.page.responseStyle.customPlaceholder')}
-              rows={5}
-              disabled={isLoading || !responseStyleEnabled || responseStylePreset !== 'custom'}
-              outerClassName="min-h-[120px]"
-              className="w-full font-mono typography-meta bg-transparent"
-            />
-          </section>
-        </div>
-
-      </div>
-    </ScrollableOverlay>
+        <Textarea
+          value={responseStylePreview}
+          onChange={(event) => setResponseStyleCustomInstructions(event.target.value)}
+          placeholder={t('settings.behavior.page.responseStyle.customPlaceholder')}
+          rows={5}
+          disabled={isLoading || !responseStyleEnabled || responseStylePreset !== 'custom'}
+          outerClassName="min-h-[120px]"
+          className="w-full font-mono typography-meta bg-transparent"
+        />
+      </SettingsSection>
+    </SettingsPageLayout>
   );
 };

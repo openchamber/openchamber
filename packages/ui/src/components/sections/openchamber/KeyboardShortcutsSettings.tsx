@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
+import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { useUIStore } from '@/stores/useUIStore';
 import { cn } from '@/lib/utils';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -150,39 +151,41 @@ export const KeyboardShortcutsSettings: React.FC = () => {
   }, [clearShortcutOverride, persistShortcutOverrides, shortcutOverrides]);
 
   return (
-    <div data-settings-item="shortcuts.keyboard-shortcuts" className="mb-8">
-      <div className="mb-1 px-1">
-        <div className="flex items-center gap-2">
-          <h3 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.keyboardShortcuts.title')}</h3>
-          <Button
-            type="button"
-            variant="outline"
-            size="xs"
-            className="!font-normal"
-            onClick={() => {
-              resetAllShortcutOverrides();
-              persistShortcutOverrides({});
-              setDraftByAction({});
-              setPendingOverwrite(null);
-              setErrorText('');
-              setWarningText('');
-            }}
-          >
-            {t('settings.openchamber.keyboardShortcuts.actions.resetAll')}
-          </Button>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-            </TooltipTrigger>
-            <TooltipContent sideOffset={8} className="max-w-xs">
-              {t('settings.openchamber.keyboardShortcuts.tooltip')}
-            </TooltipContent>
-          </Tooltip>
-        </div>
-      </div>
-
+    <SettingsSection
+      settingsItem="shortcuts.keyboard-shortcuts"
+      title={t('settings.openchamber.keyboardShortcuts.title')}
+      divider={false}
+      titleAccessory={(
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+          </TooltipTrigger>
+          <TooltipContent sideOffset={8} className="max-w-xs">
+            {t('settings.openchamber.keyboardShortcuts.tooltip')}
+          </TooltipContent>
+        </Tooltip>
+      )}
+      headerAction={(
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          className="!font-normal"
+          onClick={() => {
+            resetAllShortcutOverrides();
+            persistShortcutOverrides({});
+            setDraftByAction({});
+            setPendingOverwrite(null);
+            setErrorText('');
+            setWarningText('');
+          }}
+        >
+          {t('settings.openchamber.keyboardShortcuts.actions.resetAll')}
+        </Button>
+      )}
+    >
       {(errorText || warningText || pendingOverwrite) && (
-        <div className="mb-2 space-y-2 px-1">
+        <div className="mb-2 space-y-2">
           {pendingOverwrite && (
             <div className="rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-background)] p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <span className="typography-meta text-foreground">
@@ -207,7 +210,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
         </div>
       )}
 
-      <section className="px-2 pb-2 pt-0 space-y-0.5">
+      <div className="space-y-0.5">
         {actions.map((action, index) => {
           const effective = getEffectiveShortcutCombo(action.id, shortcutOverrides);
           const draft = draftByAction[action.id];
@@ -280,7 +283,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
             </div>
           );
         })}
-      </section>
-    </div>
+      </div>
+    </SettingsSection>
   );
 };

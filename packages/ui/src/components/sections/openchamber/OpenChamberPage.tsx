@@ -48,30 +48,12 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
         return (
             <SettingsPageLayout showSaveStatus className="openchamber-page-body space-y-3 sm:space-y-6">
                 <OpenChamberVisualSettings />
-                <div className="border-t border-border/40 pt-6">
-                    <DefaultsSettings />
-                </div>
-                {showDesktopNetworkSettings && (
-                    <div className="border-t border-border/40 pt-6">
-                        <DesktopNetworkSettings />
-                    </div>
-                )}
-                {!isVSCode && (
-                    <div className="border-t border-border/40 pt-6">
-                        <OpenCodeCliSettings />
-                    </div>
-                )}
-                <div className="border-t border-border/40 pt-6">
-                    <SessionRetentionSettings />
-                </div>
-                <div className="border-t border-border/40 pt-6">
-                    <PasskeySettings />
-                </div>
-                {showAbout && (
-                    <div className="border-t border-border/40 pt-6">
-                        <AboutSettings />
-                    </div>
-                )}
+                <DefaultsSettings />
+                {showDesktopNetworkSettings && <DesktopNetworkSettings />}
+                {!isVSCode && <OpenCodeCliSettings />}
+                <SessionRetentionSettings />
+                <PasskeySettings />
+                {showAbout && <AboutSettings />}
             </SettingsPageLayout>
         );
     }
@@ -114,9 +96,17 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
         tunnel: t('settings.page.tunnel.title'),
     }[section];
 
-    const pageDescription = section === 'visual'
-        ? t('settings.page.appearance.description')
-        : undefined;
+    const pageDescription = {
+        visual: t('settings.page.appearance.description'),
+        chat: t('settings.page.chat.description'),
+        sessions: t('settings.page.sessions.description'),
+        shortcuts: t('settings.page.shortcuts.description'),
+        git: undefined,
+        github: undefined,
+        notifications: t('settings.page.notifications.description'),
+        voice: t('settings.page.voice.description'),
+        tunnel: t('settings.page.tunnel.description'),
+    }[section];
 
     return (
         <SettingsPageLayout
@@ -167,35 +157,19 @@ const SessionsSectionContent: React.FC = () => {
     void runtimeEndpointEpoch;
     const showDesktopNetworkSettings = isDesktopShell() && isDesktopLocalOriginActive();
     return (
-        <div className="space-y-6">
+        <>
             <DefaultsSettings />
-            {showDesktopNetworkSettings && (
-                <div className="border-t border-border/40 pt-6">
-                    <DesktopNetworkSettings />
-                </div>
-            )}
-            {!isVSCode && (
-                <div className="border-t border-border/40 pt-6">
-                    <OpenCodeCliSettings />
-                </div>
-            )}
-            <div className="border-t border-border/40 pt-6">
-                <SessionRetentionSettings />
-            </div>
-            <div className="border-t border-border/40 pt-6">
-                <PasskeySettings />
-            </div>
-        </div>
+            {showDesktopNetworkSettings && <DesktopNetworkSettings />}
+            {!isVSCode && <OpenCodeCliSettings />}
+            <SessionRetentionSettings />
+            <PasskeySettings />
+        </>
     );
 };
 
 // Git section: Commit message model, Worktree settings
 const GitSectionContent: React.FC = () => {
-    return (
-        <div className="space-y-6">
-            <GitSettings />
-        </div>
-    );
+    return <GitSettings />;
 };
 
 // GitHub section: Connect account for PR/issue workflows

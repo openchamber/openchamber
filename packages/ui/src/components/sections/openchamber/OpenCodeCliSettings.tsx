@@ -4,6 +4,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
+import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { isDesktopShell, requestFileAccess } from '@/lib/desktop';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
@@ -96,27 +97,23 @@ export const OpenCodeCliSettings: React.FC = () => {
   }, [setShowOpenCodeUpdateNotifications]);
 
   return (
-    <div className="mb-8">
-      <div className="mb-1 px-1">
-        <div className="flex items-center gap-2">
-          <h3 className="typography-ui-header font-medium text-foreground">
-            {t('settings.openchamber.opencodeCli.title')}
-          </h3>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-            </TooltipTrigger>
-            <TooltipContent sideOffset={8} className="max-w-xs">
-              {t('settings.openchamber.opencodeCli.tooltipPrefix')}
-              {' '}
-              <code className="font-mono text-xs">opencode</code>
-              {t('settings.openchamber.opencodeCli.tooltipSuffix')}
-            </TooltipContent>
-          </Tooltip>
-        </div>
-      </div>
-
-      <section className="px-2 pb-2 pt-0 space-y-0.5">
+    <SettingsSection
+      title={t('settings.openchamber.opencodeCli.title')}
+      titleAccessory={(
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+          </TooltipTrigger>
+          <TooltipContent sideOffset={8} className="max-w-xs">
+            {t('settings.openchamber.opencodeCli.tooltipPrefix')}
+            {' '}
+            <code className="font-mono text-xs">opencode</code>
+            {t('settings.openchamber.opencodeCli.tooltipSuffix')}
+          </TooltipContent>
+        </Tooltip>
+      )}
+    >
+      <div className="space-y-0.5">
         <div data-settings-item="sessions.opencode-binary" className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-3">
           <div className="flex min-w-0 flex-col shrink-0">
             <span className="typography-ui-label text-foreground">{t('settings.openchamber.opencodeCli.field.binaryPath')}</span>
@@ -179,7 +176,7 @@ export const OpenCodeCliSettings: React.FC = () => {
             {isSaving ? t('settings.common.actions.saving') : t('settings.openchamber.opencodeCli.actions.saveAndReload')}
           </Button>
         </div>
-      </section>
-    </div>
+      </div>
+    </SettingsSection>
   );
 };

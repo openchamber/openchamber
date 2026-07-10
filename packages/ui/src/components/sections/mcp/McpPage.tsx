@@ -23,7 +23,8 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { cn } from '@/lib/utils';
-import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
+import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { MCP_OAUTH_CALLBACK_PATH, parseMcpOAuthCallbackContext, parseMcpOAuthCallbackStateKey } from '@/components/sections/mcp/mcpOAuth';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
@@ -1323,83 +1324,75 @@ export const McpPage: React.FC = () => {
   };
 
   return (
-    <ScrollableOverlay outerClassName="h-full" className="w-full">
-      <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8">
-
-        {/* Header */}
-        <div className="mb-4">
-          <div className="min-w-0">
-            {isNewServer ? (
-              <h2 className="typography-ui-header font-semibold text-foreground truncate">{t('settings.mcp.page.header.newServer')}</h2>
-            ) : (
-              <div className="flex items-center gap-2 min-w-0">
-                <h2 className="typography-ui-header font-semibold text-foreground truncate">{selectedMcpName}</h2>
-                <StatusBadge status={effectiveRuntimeStatus?.status} enabled={enabled} getStatusLabel={getStatusLabel} variant="pill" />
-              </div>
-            )}
-            <div className="flex items-center gap-2 mt-0.5">
-              <p className="typography-meta text-muted-foreground truncate">
-                {isNewServer
-                  ? t('settings.mcp.page.header.configureNewServer')
-                  : t('settings.mcp.page.header.transport', { type: mcpType === 'local' ? t('settings.mcp.page.transport.local') : t('settings.mcp.page.transport.remote') })}
-              </p>
-              {!isNewServer && (
-                <>
-                  <Button
-                    variant={isConnected ? 'outline' : 'default'}
-                    size="xs"
-                    className="!font-normal"
-                    onClick={handleToggleConnect}
-                    disabled={isConnecting || !enabled}
-                    >
-                      {isConnecting ? t('settings.mcp.page.actions.working') : isConnected ? t('settings.mcp.page.actions.disconnect') : t('settings.mcp.page.actions.connect')}
-                    </Button>
-                  {mcpType === 'remote' && (
-                    <>
-                      <Button
-                        variant={needsAuthorization ? 'default' : 'outline'}
-                        size="xs"
-                        className="!font-normal"
-                        onClick={() => void handleStartAuthorization()}
-                        disabled={isAuthorizing || !enabled}
-                      >
-                        {isAuthorizing
-                          ? t('settings.mcp.page.actions.starting')
-                          : needsAuthorization
-                            ? t('settings.mcp.page.actions.authorize')
-                            : t('settings.mcp.page.actions.reauthorize')}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        className="!font-normal gap-1 text-muted-foreground"
-                        onClick={() => void handleClearAuthorization()}
-                        disabled={isClearingAuth || !enabled}
-                      >
-                        {isClearingAuth ? t('settings.mcp.page.actions.clearing') : t('settings.mcp.page.actions.clearAuth')}
-                      </Button>
-                    </>
-                  )}
-                  {isConnected && (
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      className="!font-normal gap-1 text-muted-foreground"
-                      onClick={() => void handleTestConnection()}
-                      disabled={isTestingConnection || !enabled}
-                    >
-                      {isTestingConnection ? t('settings.mcp.page.actions.testing') : t('settings.mcp.page.actions.test')}
-                    </Button>
-                  )}
-                </>
-              )}
-            </div>
+    <>
+      <SettingsPageLayout
+        title={isNewServer ? t('settings.mcp.page.header.newServer') : (
+          <div className="flex items-center gap-2 min-w-0">
+            <h1 className="typography-ui-header font-semibold text-foreground truncate">{selectedMcpName}</h1>
+            <StatusBadge status={effectiveRuntimeStatus?.status} enabled={enabled} getStatusLabel={getStatusLabel} variant="pill" />
           </div>
+        )}
+        description={isNewServer
+          ? t('settings.mcp.page.header.configureNewServer')
+          : t('settings.mcp.page.header.transport', { type: mcpType === 'local' ? t('settings.mcp.page.transport.local') : t('settings.mcp.page.transport.remote') })}
+        headerEnd={!isNewServer ? (
+          <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant={isConnected ? 'outline' : 'default'}
+            size="xs"
+            className="!font-normal"
+            onClick={handleToggleConnect}
+            disabled={isConnecting || !enabled}
+          >
+            {isConnecting ? t('settings.mcp.page.actions.working') : isConnected ? t('settings.mcp.page.actions.disconnect') : t('settings.mcp.page.actions.connect')}
+          </Button>
+          {mcpType === 'remote' && (
+            <>
+              <Button
+                variant={needsAuthorization ? 'default' : 'outline'}
+                size="xs"
+                className="!font-normal"
+                onClick={() => void handleStartAuthorization()}
+                disabled={isAuthorizing || !enabled}
+              >
+                {isAuthorizing
+                  ? t('settings.mcp.page.actions.starting')
+                  : needsAuthorization
+                    ? t('settings.mcp.page.actions.authorize')
+                    : t('settings.mcp.page.actions.reauthorize')}
+              </Button>
+              <Button
+                variant="ghost"
+                size="xs"
+                className="!font-normal gap-1 text-muted-foreground"
+                onClick={() => void handleClearAuthorization()}
+                disabled={isClearingAuth || !enabled}
+              >
+                {isClearingAuth ? t('settings.mcp.page.actions.clearing') : t('settings.mcp.page.actions.clearAuth')}
+              </Button>
+            </>
+          )}
+          {isConnected && (
+            <Button
+              variant="ghost"
+              size="xs"
+              className="!font-normal gap-1 text-muted-foreground"
+              onClick={() => void handleTestConnection()}
+              disabled={isTestingConnection || !enabled}
+            >
+              {isTestingConnection ? t('settings.mcp.page.actions.testing') : t('settings.mcp.page.actions.test')}
+            </Button>
+          )}
         </div>
+      ) : undefined}
+      showSaveStatus={false}
+    >
+
+
 
         {/* Runtime Status - Simplified for connected, expanded for errors */}
         {!isNewServer && shouldShowFullStatusCard(effectiveRuntimeStatus?.status, authUrl, needsAuthorization, isAuthPolling) && (
-          <div className="mb-6 px-2">
+          <div className="pb-8">
             <div className={cn('rounded-lg border p-3', statusCardClass(effectiveRuntimeStatus?.status))}>
               <div className="space-y-4">
                 <div className="min-w-0 space-y-1">
@@ -1492,13 +1485,12 @@ export const McpPage: React.FC = () => {
           </div>
         )}
 
-        {/* Server Identity */}
-        <div data-settings-item="mcp.server" className="mb-6">
-          <div className="mb-1 px-1">
-            <h3 className="typography-ui-header font-medium text-foreground">{t('settings.mcp.page.server.title')}</h3>
-          </div>
-
-          <section className="px-2 pb-2 pt-0 space-y-0">
+        <SettingsSection
+          title={t('settings.mcp.page.server.title')}
+          divider={false}
+          settingsItem="mcp.server"
+          contentClassName="space-y-0"
+        >
 
             {isNewServer && (
               <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
@@ -1600,18 +1592,12 @@ export const McpPage: React.FC = () => {
               </div>
             </div>
 
-          </section>
-        </div>
+        </SettingsSection>
 
-        {/* Connection */}
-        <div data-settings-item="mcp.command" className="mb-6">
-          <div className="mb-1 px-1">
-            <h3 className="typography-ui-header font-medium text-foreground">
-              {mcpType === 'local' ? t('settings.mcp.page.connection.command') : t('settings.mcp.page.connection.serverUrl')}
-            </h3>
-          </div>
-
-          <section className="px-2 pb-2 pt-0">
+        <SettingsSection
+          title={mcpType === 'local' ? t('settings.mcp.page.connection.command') : t('settings.mcp.page.connection.serverUrl')}
+          settingsItem="mcp.command"
+        >
             {mcpType === 'local' ? (
               <CommandTextarea
                 value={command}
@@ -1630,16 +1616,13 @@ export const McpPage: React.FC = () => {
                 className="font-mono typography-meta"
               />
             )}
-          </section>
-        </div>
+        </SettingsSection>
 
         {mcpType === 'remote' && (
-          <div data-settings-item="mcp.advanced" className="mb-6">
-            <div className="mb-1 px-1">
-              <h3 className="typography-ui-header font-medium text-foreground">{t('settings.mcp.page.advanced.title')}</h3>
-            </div>
-
-            <section className="px-2 pb-2 pt-0">
+          <SettingsSection
+            title={t('settings.mcp.page.advanced.title')}
+            settingsItem="mcp.advanced"
+          >
               <Collapsible
                 open={isAdvancedRemoteOptionsOpen}
                 onOpenChange={setIsAdvancedRemoteOptionsOpen}
@@ -1782,24 +1765,22 @@ export const McpPage: React.FC = () => {
                   </div>
                 </CollapsibleContent>
               </Collapsible>
-            </section>
-          </div>
+          </SettingsSection>
         )}
 
-        {/* Environment Variables */}
-        <div data-settings-item="mcp.environment" className="mb-2">
-          <div className="mb-1 px-1">
-            <h3 className="typography-ui-header font-medium text-foreground">
+        <SettingsSection
+          title={(
+            <>
               {t('settings.mcp.page.env.title')}
               {envEntries.length > 0 && (
                 <span className="ml-1.5 typography-micro text-muted-foreground font-normal">
                   ({envEntries.length})
                 </span>
               )}
-            </h3>
-          </div>
-
-          <section className="px-2 pb-2 pt-0">
+            </>
+          )}
+          settingsItem="mcp.environment"
+        >
             {envEntries.length === 0 ? (
               <Button
                 variant="outline"
@@ -1830,11 +1811,9 @@ export const McpPage: React.FC = () => {
                 removeVariableAria={t('settings.mcp.page.env.removeVariableAria')}
               />
             )}
-          </section>
-        </div>
+        </SettingsSection>
 
-        {/* Actions */}
-        <div className="flex items-center gap-2 px-2 py-1">
+        <div className="flex items-center gap-2 pb-8">
           <Button
             onClick={handleSave}
             disabled={isSaving || (!isDirty && !isNewServer)}
@@ -1853,8 +1832,8 @@ export const McpPage: React.FC = () => {
               {t('settings.common.actions.delete')}
             </Button>
           )}
-        </div>
-      </div>
+        </div>      </SettingsPageLayout>
+
 
       {/* Import JSON dialog */}
       <Dialog
@@ -1962,6 +1941,7 @@ export const McpPage: React.FC = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </ScrollableOverlay>
+
+    </>
   );
 };

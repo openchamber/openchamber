@@ -1,5 +1,4 @@
 import React from 'react';
-import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Checkbox } from '@/components/ui/checkbox';
 import { UsageCard } from './UsageCard';
 import { QUOTA_PROVIDERS } from '@/lib/quota';
@@ -18,6 +17,8 @@ import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { formatTimeForPreference } from '@/lib/timeFormat';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
+import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
+import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 
 const formatTime = (timestamp: number | null, timeFormatPreference: TimeFormatPreference) => {
   if (!timestamp) return '-';
@@ -149,222 +150,211 @@ export const UsagePage: React.FC = () => {
   }
 
   return (
-    <ScrollableOverlay outerClassName="h-full" className="w-full">
-      <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8">
-
-        {/* Header */}
-        <div className="mb-4 flex items-center gap-3">
+    <SettingsPageLayout
+      title={(
+        <div className="flex items-center gap-3 min-w-0">
           <ProviderLogo providerId={selectedProviderId} className="h-5 w-5 shrink-0" />
-          <div className="min-w-0">
-            <h2 className="typography-ui-header font-semibold text-foreground truncate">
-              {t('settings.usage.page.header.providerUsage', { provider: providerName })}
-            </h2>
-            <p className="typography-meta text-muted-foreground truncate">
-              {isLoading ? (
-                <span className="animate-pulse">{t('settings.usage.page.header.refreshing')}</span>
-              ) : (
-                t('settings.usage.page.header.lastUpdated', { time: formatTime(lastUpdated, timeFormatPreference) })
-              )}
-            </p>
+          <h1 className="typography-ui-header font-semibold text-foreground truncate">
+            {t('settings.usage.page.header.providerUsage', { provider: providerName })}
+          </h1>
+        </div>
+      )}
+      description={
+        isLoading ? (
+          <span className="animate-pulse">{t('settings.usage.page.header.refreshing')}</span>
+        ) : (
+          t('settings.usage.page.header.lastUpdated', { time: formatTime(lastUpdated, timeFormatPreference) })
+        )
+      }
+      showSaveStatus
+    >
+      <SettingsSection divider={false} settingsItem="usage.header-menu">
+        <div
+          className="group flex cursor-pointer items-center gap-2 py-1.5"
+          role="button"
+          tabIndex={0}
+          aria-pressed={showInDropdown}
+          onClick={() => handleDropdownToggle(!showInDropdown)}
+          onKeyDown={(event) => {
+            if (event.key === ' ' || event.key === 'Enter') {
+              event.preventDefault();
+              handleDropdownToggle(!showInDropdown);
+            }
+          }}
+        >
+          <Checkbox
+            checked={showInDropdown}
+            onChange={handleDropdownToggle}
+            ariaLabel={t('settings.usage.page.options.showInHeaderAria')}
+          />
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className="typography-ui-label text-foreground">{t('settings.usage.page.options.showInHeader')}</span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+              </TooltipTrigger>
+              <TooltipContent sideOffset={8} className="max-w-xs">
+                {t('settings.usage.page.options.showInHeaderTooltip')}
+              </TooltipContent>
+            </Tooltip>
           </div>
         </div>
+      </SettingsSection>
 
-        {/* Options */}
-        <div data-settings-item="usage.header-menu" className="mb-8 px-2">
-          <div
-            className="group flex cursor-pointer items-center gap-2 py-1.5"
-            role="button"
-            tabIndex={0}
-            aria-pressed={showInDropdown}
-            onClick={() => handleDropdownToggle(!showInDropdown)}
-            onKeyDown={(event) => {
-              if (event.key === ' ' || event.key === 'Enter') {
-                event.preventDefault();
-                handleDropdownToggle(!showInDropdown);
-              }
-            }}
-          >
-              <Checkbox
-                checked={showInDropdown}
-                onChange={handleDropdownToggle}
-                ariaLabel={t('settings.usage.page.options.showInHeaderAria')}
-              />
-              <div className="flex min-w-0 items-center gap-1.5">
-              <span className="typography-ui-label text-foreground">{t('settings.usage.page.options.showInHeader')}</span>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-                </TooltipTrigger>
-                <TooltipContent sideOffset={8} className="max-w-xs">
-                  {t('settings.usage.page.options.showInHeaderTooltip')}
-                </TooltipContent>
-              </Tooltip>
-            </div>
-          </div>
-        </div>
+      {!selectedResult && (
+        <SettingsSection>
+          <p className="typography-ui-label text-foreground">{t('settings.usage.page.state.noData')}</p>
+        </SettingsSection>
+      )}
 
-        {/* State Messages */}
-        {!selectedResult && (
-          <div className="mb-8 px-2">
-            <p className="typography-ui-label text-foreground">{t('settings.usage.page.state.noData')}</p>
-          </div>
-        )}
-
-        {error && (
-          <div className="mb-8 rounded-lg border border-[var(--status-error-border)] bg-[var(--status-error-background)] px-4 py-3">
+      {error && (
+        <SettingsSection>
+          <div className="rounded-lg border border-[var(--status-error-border)] bg-[var(--status-error-background)] px-4 py-3">
             <p className="typography-ui-label font-medium text-[var(--status-error)]">{t('settings.usage.page.state.refreshFailedTitle')}</p>
             <p className="typography-meta text-[var(--status-error)]/80 mt-1">{error}</p>
           </div>
-        )}
+        </SettingsSection>
+      )}
 
-        {selectedResult && !selectedResult.configured && (
-          <div className="mb-8 rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-background)] px-4 py-3">
+      {selectedResult && !selectedResult.configured && (
+        <SettingsSection>
+          <div className="rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-background)] px-4 py-3">
             <p className="typography-ui-label font-medium text-[var(--status-warning)]">{t('settings.usage.page.state.providerNotConfiguredTitle')}</p>
             <p className="typography-meta text-[var(--status-warning)]/80 mt-1">
               {t('settings.usage.page.state.providerNotConfiguredDescription')}
             </p>
           </div>
-        )}
+        </SettingsSection>
+      )}
 
-        {/* Overall Usage Windows */}
-        {usage?.windows && Object.keys(usage.windows).length > 0 && (
-          <div data-settings-item="usage.model-quotas" className="mb-8">
-            <section className="px-2 pb-2 pt-0">
-              <div className="divide-y divide-[var(--surface-subtle)]">
-                {Object.entries(usage.windows).map(([label, window]) => (
-                  <UsageCard key={label} title={label} window={window} />
-                ))}
-              </div>
-            </section>
+      {usage?.windows && Object.keys(usage.windows).length > 0 && (
+        <SettingsSection settingsItem="usage.model-quotas">
+          <div className="divide-y divide-[var(--surface-subtle)]">
+            {Object.entries(usage.windows).map(([label, window]) => (
+              <UsageCard key={label} title={label} window={window} />
+            ))}
           </div>
-        )}
+        </SettingsSection>
+      )}
 
-        {/* Models Section */}
-        {providerModels.length > 0 && (
-          <div className="mb-8">
-            <div className="mb-1 px-1">
-              <h3 className="typography-ui-header font-medium text-foreground">{t('settings.usage.page.section.modelQuotas')}</h3>
-            </div>
+      {providerModels.length > 0 && (
+        <SettingsSection
+          title={t('settings.usage.page.section.modelQuotas')}
+          contentClassName="space-y-3"
+        >
+          {sortedFamilies.map((family) => {
+            const familyModels = modelsByFamily.get(family.id) ?? [];
+            if (familyModels.length === 0) return null;
 
-            <div className="space-y-3">
-              {/* Predefined families */}
-              {sortedFamilies.map((family) => {
-                const familyModels = modelsByFamily.get(family.id) ?? [];
-                if (familyModels.length === 0) return null;
+            const isCollapsed = collapsedFamilies[family.id] ?? false;
 
-                const isCollapsed = collapsedFamilies[family.id] ?? false;
+            return (
+              <section key={family.id} className="p-2">
+                <Collapsible
+                  open={!isCollapsed}
+                  onOpenChange={() => toggleFamilyCollapsed(family.id)}
+                >
+                  <CollapsibleTrigger className="flex w-full items-center justify-between py-0.5 group">
+                    <div className="flex items-center gap-1.5 text-left">
+                      <span className="typography-ui-label font-normal text-foreground">{family.label}</span>
+                      <span className="typography-micro text-muted-foreground">
+                        ({familyModels.length})
+                      </span>
+                    </div>
+                    {isCollapsed ? (
+                      <Icon name="arrow-right-s" className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+                    ) : (
+                      <Icon name="arrow-down-s" className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+                    )}
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className="divide-y divide-[var(--surface-subtle)] mt-1">
+                      {familyModels.map((model) => {
+                        const entries = Object.entries(model.windows.windows);
+                        if (entries.length === 0) return null;
+                        const [label, window] = entries[0];
+                        const isSelected = providerSelectedModels.includes(model.name);
 
-                return (
-                  <section key={family.id} className="p-2">
-                    <Collapsible
-                      open={!isCollapsed}
-                      onOpenChange={() => toggleFamilyCollapsed(family.id)}
-                    >
-                      <CollapsibleTrigger className="flex w-full items-center justify-between py-0.5 group">
-                        <div className="flex items-center gap-1.5 text-left">
-                          <span className="typography-ui-label font-normal text-foreground">{family.label}</span>
-                          <span className="typography-micro text-muted-foreground">
-                            ({familyModels.length})
-                          </span>
-                        </div>
-                        {isCollapsed ? (
-                          <Icon name="arrow-right-s" className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
-                        ) : (
-                          <Icon name="arrow-down-s" className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
-                        )}
-                      </CollapsibleTrigger>
-                      <CollapsibleContent>
-                        <div className="divide-y divide-[var(--surface-subtle)] mt-1">
-                          {familyModels.map((model) => {
-                            const entries = Object.entries(model.windows.windows);
-                            if (entries.length === 0) return null;
-                            const [label, window] = entries[0];
-                            const isSelected = providerSelectedModels.includes(model.name);
+                        return (
+                          <UsageCard
+                            key={model.name}
+                            title={label}
+                            subtitle={getDisplayModelName(model.name)}
+                            window={window}
+                            showToggle
+                            toggleEnabled={isSelected}
+                            onToggle={() => handleModelToggle(model.name)}
+                          />
+                        );
+                      })}
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              </section>
+            );
+          })}
 
-                            return (
-                              <UsageCard
-                                key={model.name}
-                                title={label}
-                                subtitle={getDisplayModelName(model.name)}
-                                window={window}
-                                showToggle
-                                toggleEnabled={isSelected}
-                                onToggle={() => handleModelToggle(model.name)}
-                              />
-                            );
-                          })}
-                        </div>
-                      </CollapsibleContent>
-                    </Collapsible>
-                  </section>
-                );
-              })}
+          {(() => {
+            const otherModels = modelsByFamily.get(null) ?? [];
+            if (otherModels.length === 0) return null;
 
-              {/* Other family */}
-              {(() => {
-                const otherModels = modelsByFamily.get(null) ?? [];
-                if (otherModels.length === 0) return null;
+            const isCollapsed = collapsedFamilies['other'] ?? false;
 
-                const isCollapsed = collapsedFamilies['other'] ?? false;
+            return (
+              <section className="p-2">
+                <Collapsible
+                  open={!isCollapsed}
+                  onOpenChange={() => toggleFamilyCollapsed('other')}
+                >
+                  <CollapsibleTrigger className="flex w-full items-center justify-between py-0.5 group">
+                    <div className="flex items-center gap-1.5 text-left">
+                      <span className="typography-ui-label font-normal text-foreground">{t('settings.usage.page.section.otherModels')}</span>
+                      <span className="typography-micro text-muted-foreground">
+                        ({otherModels.length})
+                      </span>
+                    </div>
+                    {isCollapsed ? (
+                      <Icon name="arrow-right-s" className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+                    ) : (
+                      <Icon name="arrow-down-s" className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+                    )}
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className="divide-y divide-[var(--surface-subtle)] mt-1">
+                      {otherModels.map((model) => {
+                        const entries = Object.entries(model.windows.windows);
+                        if (entries.length === 0) return null;
+                        const [label, window] = entries[0];
+                        const isSelected = providerSelectedModels.includes(model.name);
 
-                return (
-                  <section className="p-2">
-                    <Collapsible
-                      open={!isCollapsed}
-                      onOpenChange={() => toggleFamilyCollapsed('other')}
-                    >
-                      <CollapsibleTrigger className="flex w-full items-center justify-between py-0.5 group">
-                        <div className="flex items-center gap-1.5 text-left">
-                          <span className="typography-ui-label font-normal text-foreground">{t('settings.usage.page.section.otherModels')}</span>
-                          <span className="typography-micro text-muted-foreground">
-                            ({otherModels.length})
-                          </span>
-                        </div>
-                        {isCollapsed ? (
-                          <Icon name="arrow-right-s" className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
-                        ) : (
-                          <Icon name="arrow-down-s" className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
-                        )}
-                      </CollapsibleTrigger>
-                      <CollapsibleContent>
-                        <div className="divide-y divide-[var(--surface-subtle)] mt-1">
-                          {otherModels.map((model) => {
-                            const entries = Object.entries(model.windows.windows);
-                            if (entries.length === 0) return null;
-                            const [label, window] = entries[0];
-                            const isSelected = providerSelectedModels.includes(model.name);
+                        return (
+                          <UsageCard
+                            key={model.name}
+                            title={label}
+                            subtitle={getDisplayModelName(model.name)}
+                            window={window}
+                            showToggle
+                            toggleEnabled={isSelected}
+                            onToggle={() => handleModelToggle(model.name)}
+                          />
+                        );
+                      })}
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              </section>
+            );
+          })()}
+        </SettingsSection>
+      )}
 
-                            return (
-                              <UsageCard
-                                key={model.name}
-                                title={label}
-                                subtitle={getDisplayModelName(model.name)}
-                                window={window}
-                                showToggle
-                                toggleEnabled={isSelected}
-                                onToggle={() => handleModelToggle(model.name)}
-                              />
-                            );
-                          })}
-                        </div>
-                      </CollapsibleContent>
-                    </Collapsible>
-                  </section>
-                );
-              })()}
-            </div>
-          </div>
-        )}
-
-        {selectedResult?.configured && usage && Object.keys(usage.windows ?? {}).length === 0 &&
-          providerModels.length === 0 && (
-          <div className="mb-8 px-2">
-            <p className="typography-ui-label text-foreground">{t('settings.usage.page.state.noQuotaWindowsTitle')}</p>
-            <p className="typography-meta text-muted-foreground mt-1">{t('settings.usage.page.state.noQuotaWindowsDescription')}</p>
-          </div>
-        )}
-
-      </div>
-    </ScrollableOverlay>
+      {selectedResult?.configured && usage && Object.keys(usage.windows ?? {}).length === 0 &&
+        providerModels.length === 0 && (
+        <SettingsSection>
+          <p className="typography-ui-label text-foreground">{t('settings.usage.page.state.noQuotaWindowsTitle')}</p>
+          <p className="typography-meta text-muted-foreground mt-1">{t('settings.usage.page.state.noQuotaWindowsDescription')}</p>
+        </SettingsSection>
+      )}
+    </SettingsPageLayout>
   );
 };

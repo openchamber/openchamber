@@ -16,6 +16,7 @@ import { openExternalUrl } from '@/lib/url';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { formatTimeForPreference } from '@/lib/timeFormat';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
+import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 
 type TunnelState =
   | 'checking'
@@ -1236,20 +1237,22 @@ export const TunnelSettings: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h3 className="typography-ui-header font-semibold text-foreground">{t('settings.openchamber.tunnel.title')}</h3>
-        <p className="typography-meta mt-0 text-muted-foreground/70">
-          {t('settings.openchamber.tunnel.description')}
-        </p>
-        <p className="typography-meta mt-0 text-muted-foreground/60">
-          {t('settings.openchamber.tunnel.note.serverSideEnforced')}
-        </p>
-        <p className="typography-meta mt-0 text-muted-foreground/60">
-          {t('settings.openchamber.tunnel.note.connectLinksOneTime')}
-        </p>
-      </div>
-
+    <SettingsSection
+      title={t('settings.openchamber.tunnel.title')}
+      description={(
+        <>
+          <p>{t('settings.openchamber.tunnel.description')}</p>
+          <p className="mt-0 text-muted-foreground/60">
+            {t('settings.openchamber.tunnel.note.serverSideEnforced')}
+          </p>
+          <p className="mt-0 text-muted-foreground/60">
+            {t('settings.openchamber.tunnel.note.connectLinksOneTime')}
+          </p>
+        </>
+      )}
+      divider={false}
+    >
+      <div className="space-y-6">
       {renderedSessionRecords.length > 0 && (
         <section className="space-y-2 px-2 pb-2 pt-0">
           <div className="rounded-lg border border-[var(--status-info-border)] bg-[var(--status-info-background)]/30 p-3">
@@ -1909,6 +1912,7 @@ export const TunnelSettings: React.FC = () => {
           <Button size="sm" variant="ghost" onClick={handleStart}>{t('settings.openchamber.tunnel.actions.retry')}</Button>
         </section>
       )}
-    </div>
+      </div>
+    </SettingsSection>
   );
 };

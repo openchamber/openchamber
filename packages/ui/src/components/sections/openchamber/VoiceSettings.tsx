@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { NumberInput } from '@/components/ui/number-input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
+import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { browserVoiceService } from '@/lib/voice/browserVoiceService';
 import { cn } from '@/lib/utils';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -759,18 +760,13 @@ export const VoiceSettings: React.FC = () => {
     const sliderClass = "flex-1 min-w-0 h-1.5 bg-[var(--interactive-border)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--primary-base)] [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-[var(--primary-base)] [&::-moz-range-thumb]:border-0 disabled:opacity-50";
 
     return (
-        <div className="space-y-8">
-
-            {/* Playback (read messages aloud) */}
-            <div data-settings-item="voice.playback" className="mb-8">
-                <div className="mb-1 px-1">
-                    <h3 className="typography-ui-header font-medium text-foreground">
-                        {t('settings.voice.page.section.playbackAndSummary')}
-                    </h3>
-                </div>
-
-                <section className="px-2 pb-2 pt-0 space-y-0">
-
+        <>
+            <SettingsSection
+                settingsItem="voice.playback"
+                title={t('settings.voice.page.section.playbackAndSummary')}
+                divider={false}
+            >
+                <div className="space-y-0">
                     <div
                         className="group flex cursor-pointer items-center gap-2 py-1.5"
                         role="button"
@@ -1147,18 +1143,14 @@ export const VoiceSettings: React.FC = () => {
                             </div>
                         </>
                     )}
-                </section>
-            </div>
+                </div>
+            </SettingsSection>
 
-            {/* Speech Recognition */}
-            <div data-settings-item="voice.speech-recognition" className="mb-8">
-                    <div className="mb-1 px-1">
-                        <h3 className="typography-ui-header font-medium text-foreground">
-                            {t('settings.voice.page.section.speechRecognition')}
-                        </h3>
-                    </div>
-
-                    <section className="px-2 pb-2 pt-0 space-y-0">
+            <SettingsSection
+                settingsItem="voice.speech-recognition"
+                title={t('settings.voice.page.section.speechRecognition')}
+            >
+                    <div className="space-y-0">
                         <div
                             className="group flex cursor-pointer items-center gap-2 py-1.5"
                             role="button"
@@ -1301,10 +1293,8 @@ export const VoiceSettings: React.FC = () => {
                         )}
 
                         </>)}
-                    </section>
-            </div>
-
-
-        </div>
+                    </div>
+            </SettingsSection>
+        </>
     );
 };

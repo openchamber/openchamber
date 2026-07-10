@@ -9,9 +9,11 @@ interface SettingsPageLayoutProps {
   /** Page content */
   children: React.ReactNode;
   /** Optional page title shown above settings content. */
-  title?: string;
+  title?: React.ReactNode;
   /** Optional supporting description under the page title. */
-  description?: string;
+  description?: React.ReactNode;
+  /** Optional content rendered at the end of the header row (before save status). */
+  headerEnd?: React.ReactNode;
   /** Show persistence feedback for instant-save settings. */
   showSaveStatus?: boolean;
   /** Additional className for the content container */
@@ -23,11 +25,6 @@ interface SettingsPageLayoutProps {
 /**
  * Standard layout wrapper for settings page content.
  * Provides scrolling and centered max-width container.
- *
- * @example
- * <SettingsPageLayout title="Appearance" description="..." showSaveStatus>
- *   ...
- * </SettingsPageLayout>
  */
 export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
   children,
@@ -35,8 +32,11 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
   outerClassName,
   title,
   description,
+  headerEnd,
   showSaveStatus = false,
 }) => {
+  const hasHeader = title != null || description != null || headerEnd != null || showSaveStatus;
+
   return (
     <ScrollableOverlay
       outerClassName={cn('h-full', outerClassName)}
@@ -44,21 +44,32 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
     >
       <div
         className={cn(
-          'mx-auto max-w-4xl space-y-8 p-3 sm:p-6 sm:pt-8',
+          'mx-auto max-w-4xl space-y-0 p-3 sm:p-6 sm:pt-8',
           className
         )}
       >
-        {(title || description || showSaveStatus) && (
-          <div className="flex items-start justify-between gap-4">
+        {hasHeader && (
+          <div className="mb-2 flex items-start justify-between gap-4 pb-6">
             <div className="min-w-0 space-y-1">
-              {title ? (
-                <h1 className="typography-ui-header font-semibold text-foreground">{title}</h1>
+              {title != null ? (
+                typeof title === 'string' || typeof title === 'number' ? (
+                  <h1 className="typography-ui-header font-semibold text-foreground">{title}</h1>
+                ) : (
+                  title
+                )
               ) : null}
-              {description ? (
-                <p className="typography-meta text-muted-foreground">{description}</p>
+              {description != null ? (
+                typeof description === 'string' || typeof description === 'number' ? (
+                  <p className="typography-meta text-muted-foreground">{description}</p>
+                ) : (
+                  description
+                )
               ) : null}
             </div>
-            {showSaveStatus && <SettingsSaveStatus />}
+            <div className="flex shrink-0 items-center gap-3">
+              {headerEnd}
+              {showSaveStatus && <SettingsSaveStatus />}
+            </div>
           </div>
         )}
         {children}

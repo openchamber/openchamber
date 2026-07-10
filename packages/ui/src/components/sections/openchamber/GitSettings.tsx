@@ -8,6 +8,7 @@ import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { setFilesViewShowGitignored, useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 
 export const GitSettings: React.FC = () => {
   const { t } = useI18n();
@@ -116,14 +117,10 @@ export const GitSettings: React.FC = () => {
   }
 
   return (
-    <div className="mb-8">
-      <div className="mb-1 px-1">
-        <h3 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.git.title')}</h3>
-      </div>
-
-      <section className="px-2 pb-2 pt-0 space-y-0.5">
+    <SettingsSection title={t('settings.openchamber.git.title')}>
+      <div className="space-y-0.5">
         <div data-settings-item="git.changes-view" className="pt-1 pb-1">
-          <h4 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.git.changesViewTitle')}</h4>
+          <span className="typography-ui-label text-foreground">{t('settings.openchamber.git.changesViewTitle')}</span>
           <div role="radiogroup" aria-label={t('settings.openchamber.git.changesViewAria')} className="mt-0.5 space-y-0">
             {viewOptions.map((option) => {
               const selected = gitChangesViewMode === option.id;
@@ -203,7 +200,7 @@ export const GitSettings: React.FC = () => {
           />
           <span className="typography-ui-label text-foreground">{t('settings.openchamber.git.showGitignored')}</span>
         </div>
-      </section>
-    </div>
+      </div>
+    </SettingsSection>
   );
 };

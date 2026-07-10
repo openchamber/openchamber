@@ -13,10 +13,11 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { cn } from '@/lib/utils';
 import { ModelSelector } from './ModelSelector';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useI18n } from '@/lib/i18n';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
+import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import {
   Select,
   SelectContent,
@@ -676,139 +677,117 @@ export const AgentsPage: React.FC = () => {
   }
 
   return (
-    <ScrollableOverlay outerClassName="h-full" className="w-full">
-      <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8">
-
-        {/* Header & Actions */}
-        <div className="mb-4 flex items-center justify-between gap-4">
-          <div className="min-w-0">
-            <h2 className="typography-ui-header font-semibold text-foreground truncate">
-              {isNewAgent ? t('settings.agents.page.title.new') : selectedAgentName}
-            </h2>
-            <p className="typography-meta text-muted-foreground truncate">
-              {isNewAgent ? t('settings.agents.page.subtitle.new') : t('settings.agents.page.subtitle.edit')}
-            </p>
-          </div>
-        </div>
-
-        {/* Identity & Role */}
-        <div className="mb-8">
-          <div className="mb-1 px-1">
-            <h3 className="typography-ui-header font-medium text-foreground">
-              {t('settings.agents.page.section.identityRole')}
-            </h3>
-          </div>
-
-          <section className="px-2 pb-2 pt-0 space-y-0">
-
-            {isNewAgent && (
-              <div data-settings-item="agents.name" className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
-                <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-                  <span className="typography-ui-label text-foreground">{t('settings.agents.page.field.agentName')}</span>
-                </div>
-                <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
-                  <div className="flex items-center">
-                    <span className="typography-ui-label text-muted-foreground mr-1">@</span>
-                    <Input
-                      value={draftName}
-                      onChange={(e) => setDraftName(e.target.value)}
-                      placeholder={t('settings.agents.page.field.agentNamePlaceholder')}
-                      className="h-7 w-40 px-2"
-                    />
-                  </div>
-                  <Select value={draftScope} onValueChange={(v) => setDraftScope(v as AgentScope)}>
-                    <SelectTrigger className="w-fit min-w-[100px]">
-                      <SelectValue placeholder={t('settings.agents.page.field.scopePlaceholder')} />
-                    </SelectTrigger>
-                    <SelectContent align="end">
-                      <SelectItem value="user">
-                        <div className="flex items-center gap-2">
-                          <Icon name="user-3" className="h-3.5 w-3.5" />
-                          <span>{t('settings.common.scope.global')}</span>
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="project">
-                        <div className="flex items-center gap-2">
-                          <Icon name="folder" className="h-3.5 w-3.5" />
-                          <span>{t('settings.common.scope.project')}</span>
-                        </div>
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            )}
-
-            <div className="py-1.5">
-              <span className="typography-ui-label text-foreground">{t('settings.common.field.description')}</span>
-              <div className="mt-1.5">
-                <Textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder={t('settings.agents.page.field.descriptionPlaceholder')}
-                  rows={2}
-                  className="w-full resize-none min-h-[60px] bg-transparent"
+    <SettingsPageLayout
+      title={isNewAgent ? t('settings.agents.page.title.new') : selectedAgentName}
+      description={isNewAgent ? t('settings.agents.page.subtitle.new') : t('settings.agents.page.subtitle.edit')}
+      showSaveStatus={false}
+    >
+      <SettingsSection
+        title={t('settings.agents.page.section.identityRole')}
+        divider={false}
+        contentClassName="space-y-0"
+      >
+        {isNewAgent && (
+          <div data-settings-item="agents.name" className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
+            <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
+              <span className="typography-ui-label text-foreground">{t('settings.agents.page.field.agentName')}</span>
+            </div>
+            <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
+              <div className="flex items-center">
+                <span className="typography-ui-label text-muted-foreground mr-1">@</span>
+                <Input
+                  value={draftName}
+                  onChange={(e) => setDraftName(e.target.value)}
+                  placeholder={t('settings.agents.page.field.agentNamePlaceholder')}
+                  className="h-7 w-40 px-2"
                 />
               </div>
+              <Select value={draftScope} onValueChange={(v) => setDraftScope(v as AgentScope)}>
+                <SelectTrigger className="w-fit min-w-[100px]">
+                  <SelectValue placeholder={t('settings.agents.page.field.scopePlaceholder')} />
+                </SelectTrigger>
+                <SelectContent align="end">
+                  <SelectItem value="user">
+                    <div className="flex items-center gap-2">
+                      <Icon name="user-3" className="h-3.5 w-3.5" />
+                      <span>{t('settings.common.scope.global')}</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="project">
+                    <div className="flex items-center gap-2">
+                      <Icon name="folder" className="h-3.5 w-3.5" />
+                      <span>{t('settings.common.scope.project')}</span>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
             </div>
+          </div>
+        )}
 
-            <div data-settings-item="agents.mode" className="pb-1.5 pt-0.5">
-              <div className="flex min-w-0 flex-col gap-1.5">
-                <div className="flex items-center gap-1.5">
-                  <span className="typography-ui-label text-foreground">{t('settings.agents.page.field.mode')}</span>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-                    </TooltipTrigger>
-                    <TooltipContent sideOffset={8} className="max-w-xs">
-                      {t('settings.agents.page.field.modeTooltip')}
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-                <div className="flex flex-wrap items-center gap-1">
-                <Button
-                  variant="chip"
-                  size="xs"
-                  aria-pressed={mode === 'primary'}
-                  onClick={() => setMode('primary')}
-                  className="!font-normal"
-                >
-                  {t('settings.agents.page.mode.primary')}
-                </Button>
-                <Button
-                  variant="chip"
-                  size="xs"
-                  aria-pressed={mode === 'subagent'}
-                  onClick={() => setMode('subagent')}
-                  className="!font-normal"
-                >
-                  {t('settings.agents.page.mode.subagent')}
-                </Button>
-                <Button
-                  variant="chip"
-                  size="xs"
-                  aria-pressed={mode === 'all'}
-                  onClick={() => setMode('all')}
-                  className="!font-normal"
-                >
-                  {t('settings.agents.page.mode.all')}
-                </Button>
-                </div>
-              </div>
-            </div>
-
-          </section>
+        <div className="py-1.5">
+          <span className="typography-ui-label text-foreground">{t('settings.common.field.description')}</span>
+          <div className="mt-1.5">
+            <Textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder={t('settings.agents.page.field.descriptionPlaceholder')}
+              rows={2}
+              className="w-full resize-none min-h-[60px] bg-transparent"
+            />
+          </div>
         </div>
 
-        {/* Model & Parameters */}
-        <div className="mb-8">
-          <div className="mb-1 px-1">
-            <h3 className="typography-ui-header font-medium text-foreground">
-              {t('settings.agents.page.section.modelParameters')}
-            </h3>
+        <div data-settings-item="agents.mode" className="pb-1.5 pt-0.5">
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <div className="flex items-center gap-1.5">
+              <span className="typography-ui-label text-foreground">{t('settings.agents.page.field.mode')}</span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent sideOffset={8} className="max-w-xs">
+                  {t('settings.agents.page.field.modeTooltip')}
+                </TooltipContent>
+              </Tooltip>
+            </div>
+            <div className="flex flex-wrap items-center gap-1">
+            <Button
+              variant="chip"
+              size="xs"
+              aria-pressed={mode === 'primary'}
+              onClick={() => setMode('primary')}
+              className="!font-normal"
+            >
+              {t('settings.agents.page.mode.primary')}
+            </Button>
+            <Button
+              variant="chip"
+              size="xs"
+              aria-pressed={mode === 'subagent'}
+              onClick={() => setMode('subagent')}
+              className="!font-normal"
+            >
+              {t('settings.agents.page.mode.subagent')}
+            </Button>
+            <Button
+              variant="chip"
+              size="xs"
+              aria-pressed={mode === 'all'}
+              onClick={() => setMode('all')}
+              className="!font-normal"
+            >
+              {t('settings.agents.page.mode.all')}
+            </Button>
+            </div>
           </div>
+        </div>
+      </SettingsSection>
 
-          <section className="px-2 pb-2 pt-0 space-y-0">
+      <SettingsSection
+        title={t('settings.agents.page.section.modelParameters')}
+        contentClassName="space-y-0"
+      >
 
             <div data-settings-item="agents.model" className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
               <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
@@ -978,46 +957,37 @@ export const AgentsPage: React.FC = () => {
               </div>
             </div>
 
-          </section>
-        </div>
+      </SettingsSection>
 
-        {/* System Prompt */}
-        <div data-settings-item="agents.system-prompt" className="mb-8">
-          <div className="mb-1 px-1">
-            <h3 className="typography-ui-header font-medium text-foreground">
-              {t('settings.agents.page.section.systemPrompt')}
-            </h3>
-          </div>
+      <SettingsSection
+        title={t('settings.agents.page.section.systemPrompt')}
+        settingsItem="agents.system-prompt"
+      >
+        <Textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder={t('settings.agents.page.field.systemPromptPlaceholder')}
+          rows={8}
+          className="w-full font-mono typography-meta min-h-[120px] max-h-[60vh] bg-transparent resize-y"
+        />
+      </SettingsSection>
 
-          <section className="px-2 pb-2 pt-0">
-            <Textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder={t('settings.agents.page.field.systemPromptPlaceholder')}
-              rows={8}
-              className="w-full font-mono typography-meta min-h-[120px] max-h-[60vh] bg-transparent resize-y"
-            />
-          </section>
-        </div>
-
-        {/* Tool Permissions */}
-        <div data-settings-item="agents.permissions" className="mb-2">
-          <div className="mb-1 px-1 flex items-center justify-between gap-4">
-            <h3 className="typography-ui-header font-medium text-foreground">
-              {t('settings.agents.page.section.toolPermissions')}
-            </h3>
-            <Button
-              variant="outline"
-              size="xs"
-              className="!font-normal"
-              onClick={() => setShowPermissionEditor((prev) => !prev)}
-            >
-              {showPermissionEditor ? t('settings.agents.page.permissions.hideEditor') : t('settings.agents.page.permissions.advancedEditor')}
-            </Button>
-          </div>
-
+      <SettingsSection
+        title={t('settings.agents.page.section.toolPermissions')}
+        headerAction={(
+          <Button
+            variant="outline"
+            size="xs"
+            className="!font-normal"
+            onClick={() => setShowPermissionEditor((prev) => !prev)}
+          >
+            {showPermissionEditor ? t('settings.agents.page.permissions.hideEditor') : t('settings.agents.page.permissions.advancedEditor')}
+          </Button>
+        )}
+        settingsItem="agents.permissions"
+      >
           {!showPermissionEditor ? (
-            <section className="px-2 pb-2 pt-0 space-y-0">
+            <div className="space-y-0">
               {summaryPermissionNames.map((permissionName, index) => {
                 const { defaultAction, patternRulesCount, patternSummary, hasDefaultHint } = getPermissionSummary(permissionName);
                 const label = formatPermissionLabel(permissionName);
@@ -1041,9 +1011,9 @@ export const AgentsPage: React.FC = () => {
                   </div>
                 );
               })}
-            </section>
+            </div>
           ) : (
-            <div className="space-y-6 px-2">
+            <div className="space-y-6">
               <div className="flex items-center justify-between gap-4 py-1.5">
                 <div className="flex items-center gap-2">
                   <span className="typography-ui-label text-foreground">{t('settings.agents.page.permissions.globalDefault')}</span>
@@ -1207,21 +1177,18 @@ export const AgentsPage: React.FC = () => {
               </div>
             </div>
           )}
-        </div>
+      </SettingsSection>
 
-        {/* Save action */}
-        <div className="px-2 py-1">
-          <Button
-            onClick={handleSave}
-            disabled={isSaving || !isDirty}
-            size="xs"
-            className="!font-normal"
-          >
-            {isSaving ? t('settings.common.actions.saving') : t('settings.common.actions.saveChanges')}
-          </Button>
-        </div>
-
+      <div className="pb-8">
+        <Button
+          onClick={handleSave}
+          disabled={isSaving || !isDirty}
+          size="xs"
+          className="!font-normal"
+        >
+          {isSaving ? t('settings.common.actions.saving') : t('settings.common.actions.saveChanges')}
+        </Button>
       </div>
-    </ScrollableOverlay>
+    </SettingsPageLayout>
   );
 };
