@@ -4,8 +4,6 @@ import {
   RiCheckLine,
   RiLoader4Line,
   RiAddLine,
-  RiSendPlaneLine,
-  RiRefreshLine,
   RiAlertLine,
   RiExternalLinkLine,
   RiEyeLine,
@@ -1319,11 +1317,10 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
       {/* Token / sync / advanced — only outside the wizard so fields aren't duplicated */}
       {!showWizard && (
         <>
-      {/* Step 1: Token */}
       {!token ? (
         <div ref={tokenSectionRef} className="space-y-2">
-          <div className="text-xs font-medium text-foreground">{meta.tokenLabel}</div>
-          <div className="text-[11px] text-muted-foreground leading-snug">{meta.tokenHelp}</div>
+          <div className="typography-ui-label font-medium text-foreground">{meta.tokenLabel}</div>
+          <div className="typography-meta text-muted-foreground leading-snug">{meta.tokenHelp}</div>
           <div className="flex gap-2">
             <div className="relative flex-1">
               <input
@@ -1346,100 +1343,101 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
                 )}
               </button>
             </div>
-            <button
+            <Button
               type="button"
+              size="xs"
+              className="!font-normal"
               onClick={handleSaveToken}
               disabled={!tokenInput.trim()}
-              className="shrink-0 rounded bg-primary px-3 py-1.5 text-xs text-primary-foreground disabled:opacity-50"
             >
-              Save
-            </button>
+              {t('settings.integrations.discord.wizard.save')}
+            </Button>
           </div>
         </div>
       ) : (
-        <div ref={tokenSectionRef} className="flex items-center gap-2 text-xs">
-          <RiCheckLine className="size-3 text-green-500" />
+        <div ref={tokenSectionRef} className="flex items-center gap-2 typography-ui-label">
+          <RiCheckLine className="size-3 text-[var(--status-success)]" />
           <span className="text-muted-foreground">Token configured</span>
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="xs"
+            className="!font-normal"
             onClick={() => setShowToken(!showToken)}
-            className="text-primary text-[10px]"
           >
-            {showToken ? 'Cancel' : 'Change'}
-          </button>
+            {showToken ? t('settings.common.actions.cancel') : t('settings.integrations.discord.token.change')}
+          </Button>
           {showToken && (
             <div className="flex gap-2 flex-1">
               <input
                 type="password"
                 value={tokenInput}
                 onChange={(e) => setTokenInput(e.target.value)}
-                placeholder="New token"
+                placeholder={t('settings.integrations.discord.wizard.step1.tokenLabel')}
                 className={inputClass}
               />
-              <button
+              <Button
                 type="button"
+                size="xs"
+                className="!font-normal"
                 onClick={handleSaveToken}
                 disabled={!tokenInput.trim()}
-                className="rounded bg-primary px-2 py-1 text-[10px] text-primary-foreground disabled:opacity-50"
               >
-                Update
-              </button>
+                {t('settings.integrations.discord.token.update')}
+              </Button>
             </div>
           )}
         </div>
       )}
 
-      {/* Step 3: Action buttons - the visible "what next" call to action.
-          For Discord, server-id alone also unlocks the CTA (Sync now works with just guildId). */}
+      {/* Sync actions */}
       {hasToken && (hasTarget || conn.discordGuildId) && (
         <div
           ref={testSectionRef}
-          className="space-y-2 rounded-md border border-primary/20 bg-primary/5 p-3"
+          className="space-y-2 rounded-md border border-[color-mix(in_srgb,var(--primary-base)_20%,transparent)] bg-[color-mix(in_srgb,var(--primary-base)_5%,var(--background))] p-3"
         >
           <div className="flex flex-wrap items-center gap-2">
-            <button
+            <Button
               type="button"
-              onClick={() => sendTestMessage(conn.type)}
+              size="xs"
+              className="!font-normal"
+              onClick={() => void sendTestMessage(conn.type)}
               disabled={conn.lastSyncStatus === 'sending'}
-              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
               {conn.lastSyncStatus === 'sending' ? (
                 <RiLoader4Line className="size-3.5 animate-spin" />
-              ) : (
-                <RiSendPlaneLine className="size-3.5" />
-              )}
-              Send test message
-            </button>
-            <button
+              ) : null}
+              {t('settings.integrations.discord.wizard.step3.sendTest')}
+            </Button>
+            <Button
               type="button"
+              variant="outline"
+              size="xs"
+              className="!font-normal"
               onClick={() => {
                 if (conn.discordGuildId) {
-                  // Server-wide sync: per-project channel + thread.
-                  syncDiscordGuildProjects(buildProjectPayloads(), buildSummary());
+                  void syncDiscordGuildProjects(buildProjectPayloads(), buildSummary());
                 } else {
-                  sendSyncSummary(conn.type, buildSummary());
+                  void sendSyncSummary(conn.type, buildSummary());
                 }
               }}
               disabled={conn.lastSyncStatus === 'sending'}
-              className="inline-flex items-center gap-1.5 rounded-md border border-primary/40 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/10 disabled:opacity-50"
             >
               {conn.lastSyncStatus === 'sending' ? (
                 <RiLoader4Line className="size-3.5 animate-spin" />
-              ) : (
-                <RiRefreshLine className="size-3.5" />
-              )}
-              Sync now
-            </button>
-            <div className="ml-auto text-[10px] text-muted-foreground">
+              ) : null}
+              {t('settings.integrations.discord.wizard.step3.syncNow')}
+            </Button>
+            <div className="ml-auto typography-meta text-muted-foreground">
               Last activity: {formatRelative(conn.lastSyncAt)}
             </div>
           </div>
           {conn.lastSyncMessage && (
             <div
               className={cn(
-                'text-[11px] leading-snug',
-                conn.lastSyncStatus === 'error' && 'text-destructive',
-                conn.lastSyncStatus === 'ok' && 'text-green-600 dark:text-green-400',
+                'typography-meta leading-snug',
+                conn.lastSyncStatus === 'error' && 'text-[var(--status-error)]',
+                conn.lastSyncStatus === 'ok' && 'text-[var(--status-success)]',
                 conn.lastSyncStatus === 'sending' && 'text-muted-foreground',
               )}
             >

@@ -6,6 +6,7 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.wizard.back': 'Back',
     'settings.integrations.discord.wizard.next': 'Next',
     'settings.integrations.discord.wizard.finish': 'Finish setup',
+    'settings.integrations.discord.wizard.save': 'Save',
     'settings.integrations.discord.wizard.step1.title': 'Create a Discord bot',
     'settings.integrations.discord.wizard.step1.description':
       'Otto connects through a Discord bot you own. Create one in the Developer Portal, copy its token, then paste it below.',
@@ -121,6 +122,8 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.disconnect.dialog.confirm': 'Disconnect',
     'settings.integrations.discord.verify.button': 'Verify token',
     'settings.integrations.discord.verify.testing': 'Verifying…',
+    'settings.integrations.discord.token.change': 'Change',
+    'settings.integrations.discord.token.update': 'Update',
   },
   uk: {
     'settings.integrations.discord.wizard.title': 'Налаштування Discord',
@@ -128,6 +131,7 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.wizard.back': 'Назад',
     'settings.integrations.discord.wizard.next': 'Далі',
     'settings.integrations.discord.wizard.finish': 'Завершити налаштування',
+    'settings.integrations.discord.wizard.save': 'Зберегти',
     'settings.integrations.discord.wizard.step1.title': 'Створіть Discord-бота',
     'settings.integrations.discord.wizard.step1.description':
       'Otto підключається через Discord-бота, яким ви володієте. Створіть його в Developer Portal, скопіюйте токен і вставте нижче.',
@@ -244,5 +248,7 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.disconnect.dialog.confirm': 'Відключити',
     'settings.integrations.discord.verify.button': 'Перевірити токен',
     'settings.integrations.discord.verify.testing': 'Перевірка…',
+    'settings.integrations.discord.token.change': 'Змінити',
+    'settings.integrations.discord.token.update': 'Оновити',
   },
 } as const;

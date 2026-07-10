@@ -15,6 +15,9 @@ const DEVELOPER_PORTAL_URL = 'https://discord.com/developers/applications';
 const DISCORD_ID_GUIDE_URL =
   'https://support.discord.com/hc/en-us/articles/206346498-Where-can-I-find-my-User-Server-Message-ID';
 
+/** Dense settings actions — same size/weight as Discord header controls. */
+const ACTION_BTN = '!font-normal';
+
 type DiscordOnboardingWizardProps = {
   conn: MessengerConnection;
   onScrollToSection?: (section: 'token' | 'guild' | 'channel' | 'test' | 'advanced') => void;
@@ -22,7 +25,6 @@ type DiscordOnboardingWizardProps = {
 
 export function DiscordOnboardingWizard({
   conn,
-  onScrollToSection,
 }: DiscordOnboardingWizardProps) {
   const { t } = useI18n();
   const step = useMessengerStore((s) => s.onboardingStep) ?? 0;
@@ -66,7 +68,7 @@ export function DiscordOnboardingWizard({
   })();
 
   const inputClass =
-    'w-full rounded-md border border-border bg-background px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring';
+    'w-full rounded-md border border-border bg-background px-3 py-1.5 typography-ui-label text-foreground focus:outline-none focus:ring-1 focus:ring-ring';
 
   const handleSaveToken = () => {
     if (!tokenInput.trim()) return;
@@ -95,13 +97,9 @@ export function DiscordOnboardingWizard({
     ].join('\n');
   };
 
-  const handleFinish = () => {
-    finishOnboarding();
-  };
-
   const handleNext = () => {
     if (step >= TOTAL_STEPS - 1) {
-      handleFinish();
+      finishOnboarding();
       return;
     }
     nextOnboardingStep();
@@ -131,8 +129,10 @@ export function DiscordOnboardingWizard({
         );
         return;
       }
-      if (!useMessengerStore.getState().connections.find((c) => c.type === 'discord')
-        ?.discordListenerConnected) {
+      if (
+        !useMessengerStore.getState().connections.find((c) => c.type === 'discord')
+          ?.discordListenerConnected
+      ) {
         setListenerStatusText(t('settings.integrations.discord.wizard.step4.listenerConnecting'));
         await refreshDiscordListenerStatus();
       }
@@ -141,6 +141,14 @@ export function DiscordOnboardingWizard({
       setStartingListener(false);
     }
   };
+
+  const stepTitle = (key: Parameters<typeof t>[0]) => (
+    <div className="typography-ui-label font-medium text-foreground">{t(key)}</div>
+  );
+
+  const stepDescription = (key: Parameters<typeof t>[0]) => (
+    <p className="mt-1 typography-meta text-muted-foreground leading-snug">{t(key)}</p>
+  );
 
   return (
     <div
@@ -151,7 +159,7 @@ export function DiscordOnboardingWizard({
         <h4 className="typography-ui-header font-medium text-foreground">
           {t('settings.integrations.discord.wizard.title')}
         </h4>
-        <p className="mt-0.5 text-[11px] text-muted-foreground">
+        <p className="mt-0.5 typography-meta text-muted-foreground">
           {t('settings.integrations.discord.wizard.stepOf', {
             current: step + 1,
             total: TOTAL_STEPS,
@@ -159,16 +167,13 @@ export function DiscordOnboardingWizard({
         </p>
       </div>
 
-      {/* Step indicators */}
       <div className="flex gap-1">
         {Array.from({ length: TOTAL_STEPS }, (_, i) => (
           <div
             key={i}
             className={cn(
               'h-1 flex-1 rounded-full transition-colors',
-              i <= step
-                ? 'bg-[var(--primary-base)]'
-                : 'bg-[var(--surface-muted)]',
+              i <= step ? 'bg-[var(--primary-base)]' : 'bg-[var(--surface-muted)]',
             )}
           />
         ))}
@@ -178,22 +183,17 @@ export function DiscordOnboardingWizard({
       {step === 0 && (
         <div className="space-y-4">
           <div>
-            <div className="typography-ui-label font-medium text-foreground">
-              {t('settings.integrations.discord.wizard.step1.title')}
-            </div>
-            <p className="mt-1 typography-meta text-muted-foreground leading-snug">
-              {t('settings.integrations.discord.wizard.step1.description')}
-            </p>
+            {stepTitle('settings.integrations.discord.wizard.step1.title')}
+            {stepDescription('settings.integrations.discord.wizard.step1.description')}
           </div>
 
           <Button
             type="button"
             variant="outline"
-            size="sm"
-            className="!font-normal"
+            size="xs"
+            className={ACTION_BTN}
             onClick={() => window.open(DEVELOPER_PORTAL_URL, '_blank', 'noopener,noreferrer')}
           >
-            <Icon name="external-link" className="size-3.5" />
             {t('settings.integrations.discord.wizard.step1.openPortal')}
           </Button>
 
@@ -261,7 +261,8 @@ export function DiscordOnboardingWizard({
                 />
                 <Button
                   type="button"
-                  size="sm"
+                  size="xs"
+                  className={ACTION_BTN}
                   disabled={!tokenInput.trim()}
                   onClick={handleSaveToken}
                 >
@@ -284,7 +285,7 @@ export function DiscordOnboardingWizard({
                   type="button"
                   variant="outline"
                   size="xs"
-                  className="!font-normal"
+                  className={ACTION_BTN}
                   disabled={conn.status === 'connecting'}
                   onClick={() => void testConnection('discord')}
                 >
@@ -302,29 +303,24 @@ export function DiscordOnboardingWizard({
       {step === 1 && (
         <div className="space-y-3">
           <div>
-            <div className="text-xs font-medium text-foreground">
-              {t('settings.integrations.discord.wizard.step2.title')}
-            </div>
-            <p className="mt-1 text-[11px] text-muted-foreground leading-snug">
-              {t('settings.integrations.discord.wizard.step2.description')}
-            </p>
+            {stepTitle('settings.integrations.discord.wizard.step2.title')}
+            {stepDescription('settings.integrations.discord.wizard.step2.description')}
           </div>
-          <div className="text-[11px] text-muted-foreground">
+          <p className="typography-meta text-muted-foreground">
             {(conn.discordGuilds?.length ?? 0) > 0
               ? t('settings.integrations.discord.wizard.step2.botInServers', {
                   count: conn.discordGuilds?.length ?? 0,
                 })
               : t('settings.integrations.discord.wizard.step2.botNotInServers')}
-          </div>
+          </p>
           {conn.discordInviteUrl ? (
             <Button
               type="button"
               variant="outline"
               size="xs"
-              className="!font-normal"
+              className={ACTION_BTN}
               onClick={() => window.open(conn.discordInviteUrl!, '_blank', 'noopener,noreferrer')}
             >
-              <Icon name="external-link" className="size-3.5" />
               {t('settings.integrations.discord.wizard.step2.openInvite')}
             </Button>
           ) : (
@@ -332,7 +328,7 @@ export function DiscordOnboardingWizard({
               type="button"
               variant="outline"
               size="xs"
-              className="!font-normal"
+              className={ACTION_BTN}
               onClick={() => void fetchDiscordInviteUrl()}
             >
               {t('settings.integrations.discord.wizard.step2.generateInvite')}
@@ -345,28 +341,23 @@ export function DiscordOnboardingWizard({
       {step === 2 && (
         <div className="space-y-3">
           <div>
-            <div className="text-xs font-medium text-foreground">
-              {t('settings.integrations.discord.wizard.step3.title')}
-            </div>
-            <p className="mt-1 text-[11px] text-muted-foreground leading-snug">
-              {t('settings.integrations.discord.wizard.step3.description')}
-            </p>
+            {stepTitle('settings.integrations.discord.wizard.step3.title')}
+            {stepDescription('settings.integrations.discord.wizard.step3.description')}
             <a
               href={DISCORD_ID_GUIDE_URL}
               target="_blank"
               rel="noreferrer"
-              className="mt-1 inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
+              className="mt-1 inline-flex items-center gap-1 typography-meta text-[var(--primary-base)] hover:underline"
             >
               {t('settings.integrations.discord.wizard.step3.idGuideLink')}
-              <Icon name="external-link" className="size-3" />
             </a>
           </div>
           {!conn.discordGuildId ? (
-            <div className="space-y-1">
-              <label className="text-[11px] font-medium text-foreground">
+            <div className="space-y-1.5">
+              <label className="typography-ui-label font-medium text-foreground">
                 {t('settings.integrations.discord.wizard.step3.guildLabel')}
               </label>
-              <p className="text-[10px] text-muted-foreground">
+              <p className="typography-meta text-muted-foreground leading-snug">
                 {t('settings.integrations.discord.wizard.step3.guildHint')}
               </p>
               <div className="flex gap-2">
@@ -379,7 +370,8 @@ export function DiscordOnboardingWizard({
                 />
                 <Button
                   type="button"
-                  size="sm"
+                  size="xs"
+                  className={ACTION_BTN}
                   disabled={!guildInput.trim()}
                   onClick={() => {
                     const v = guildInput.trim();
@@ -389,45 +381,47 @@ export function DiscordOnboardingWizard({
                     setTimeout(() => void resolveDiscordGuild(), 0);
                   }}
                 >
-                  Save
+                  {t('settings.integrations.discord.wizard.save')}
                 </Button>
               </div>
               {conn.discordGuilds && conn.discordGuilds.length > 0 && (
                 <div className="flex flex-wrap gap-1 pt-1">
                   {conn.discordGuilds.slice(0, 6).map((g) => (
-                    <button
+                    <Button
                       key={g.id}
                       type="button"
+                      variant="chip"
+                      size="xs"
+                      className={ACTION_BTN}
                       onClick={() => {
                         updateConnection('discord', { discordGuildId: g.id, guildName: g.name });
                         setTimeout(() => saveDiscordConfig(), 0);
                         setTimeout(() => void resolveDiscordGuild(), 0);
                       }}
-                      className="rounded-full border border-border bg-background px-2 py-0.5 text-[10px] text-foreground hover:border-[var(--primary-base)]/40"
                     >
                       {g.name}
-                    </button>
+                    </Button>
                   ))}
                 </div>
               )}
             </div>
           ) : (
-            <div className="flex items-center gap-2 text-xs">
+            <div className="flex items-center gap-2 typography-ui-label">
               <Icon name="check" className="size-3.5 text-[var(--status-success)]" />
-              <code className="rounded bg-muted px-1.5 py-0.5 text-[10px]">
+              <code className="rounded bg-[var(--surface-muted)] px-1.5 py-0.5 typography-micro text-foreground">
                 {conn.discordGuildId}
               </code>
               {conn.guildName && (
-                <span className="text-muted-foreground">{conn.guildName}</span>
+                <span className="typography-meta text-muted-foreground">{conn.guildName}</span>
               )}
             </div>
           )}
           {!conn.defaultChannelId && (
-            <div className="space-y-1">
-              <label className="text-[11px] font-medium text-foreground">
+            <div className="space-y-1.5">
+              <label className="typography-ui-label font-medium text-foreground">
                 {t('settings.integrations.discord.wizard.step3.channelLabel')}
               </label>
-              <p className="text-[10px] text-muted-foreground">
+              <p className="typography-meta text-muted-foreground leading-snug">
                 {t('settings.integrations.discord.wizard.step3.channelHint')}
               </p>
               <div className="flex gap-2">
@@ -440,7 +434,8 @@ export function DiscordOnboardingWizard({
                 />
                 <Button
                   type="button"
-                  size="sm"
+                  size="xs"
+                  className={ACTION_BTN}
                   disabled={!channelInput.trim()}
                   onClick={() => {
                     const v = channelInput.trim();
@@ -450,7 +445,7 @@ export function DiscordOnboardingWizard({
                     setTimeout(() => void resolveDiscordChannel(), 0);
                   }}
                 >
-                  Save
+                  {t('settings.integrations.discord.wizard.save')}
                 </Button>
               </div>
             </div>
@@ -461,7 +456,7 @@ export function DiscordOnboardingWizard({
                 type="button"
                 variant="outline"
                 size="xs"
-                className="!font-normal"
+                className={ACTION_BTN}
                 disabled={conn.lastSyncStatus === 'sending'}
                 onClick={() => void sendTestMessage('discord')}
               >
@@ -472,7 +467,7 @@ export function DiscordOnboardingWizard({
                   type="button"
                   variant="outline"
                   size="xs"
-                  className="!font-normal"
+                  className={ACTION_BTN}
                   disabled={conn.lastSyncStatus === 'sending'}
                   onClick={() =>
                     void syncDiscordGuildProjects(buildProjectPayloads(), buildSummary())
@@ -490,12 +485,8 @@ export function DiscordOnboardingWizard({
       {step === 3 && (
         <div className="space-y-3">
           <div>
-            <div className="text-xs font-medium text-foreground">
-              {t('settings.integrations.discord.wizard.step4.title')}
-            </div>
-            <p className="mt-1 text-[11px] text-muted-foreground leading-snug">
-              {t('settings.integrations.discord.wizard.step4.description')}
-            </p>
+            {stepTitle('settings.integrations.discord.wizard.step4.title')}
+            {stepDescription('settings.integrations.discord.wizard.step4.description')}
           </div>
           <label className="flex cursor-pointer items-center gap-2 py-1">
             <Checkbox
@@ -504,7 +495,7 @@ export function DiscordOnboardingWizard({
               onChange={handleEnableBridge}
               ariaLabel={t('settings.integrations.discord.wizard.step4.bridge')}
             />
-            <span className="text-xs text-foreground">
+            <span className="typography-ui-label text-foreground">
               {t('settings.integrations.discord.wizard.step4.bridge')}
             </span>
           </label>
@@ -513,22 +504,20 @@ export function DiscordOnboardingWizard({
               type="button"
               variant="outline"
               size="xs"
-              className="!font-normal"
+              className={ACTION_BTN}
               disabled={startingListener || (listenerRunning && listenerLive)}
               onClick={() => void handleStartListener()}
             >
               {startingListener ? (
                 <Icon name="loader-4" className="size-3.5 animate-spin" />
-              ) : (
-                <Icon name="play" className="size-3.5" />
-              )}
+              ) : null}
               {listenerStuck
                 ? t('settings.integrations.discord.wizard.step4.retryListener')
                 : t('settings.integrations.discord.wizard.step4.startListener')}
             </Button>
             <span
               className={cn(
-                'text-[10px]',
+                'typography-meta',
                 listenerLive
                   ? 'text-[var(--status-success)]'
                   : listenerRunning
@@ -544,40 +533,41 @@ export function DiscordOnboardingWizard({
             </span>
           </div>
           {conn.discordListenerError && (
-            <p className="text-[11px] text-[var(--status-error)]">{conn.discordListenerError}</p>
+            <p className="typography-meta text-[var(--status-error)]">{conn.discordListenerError}</p>
           )}
           {listenerStatusText && (
-            <p className="text-[11px] text-muted-foreground">{listenerStatusText}</p>
+            <p className="typography-meta text-muted-foreground">{listenerStatusText}</p>
           )}
           {canAdvance && (
-            <p className="text-[11px] text-[var(--status-success)]">
+            <p className="typography-meta text-[var(--status-success)]">
               {t('settings.integrations.discord.wizard.step4.complete')}
             </p>
           )}
         </div>
       )}
 
-      {/* Navigation */}
-      <div className="flex items-center justify-between gap-2 border-t border-border/60 pt-3">
+      {/* Navigation — Back is omitted on the first step */}
+      <div
+        className={cn(
+          'flex items-center gap-2 border-t border-border/60 pt-3',
+          step > 0 ? 'justify-between' : 'justify-end',
+        )}
+      >
+        {step > 0 && (
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            className={ACTION_BTN}
+            onClick={() => prevOnboardingStep()}
+          >
+            {t('settings.integrations.discord.wizard.back')}
+          </Button>
+        )}
         <Button
           type="button"
-          variant="ghost"
           size="xs"
-          className="!font-normal"
-          disabled={step === 0}
-          onClick={() => {
-            if (step === 0) return;
-            prevOnboardingStep();
-            if (step === 1) onScrollToSection?.('token');
-            if (step === 2) onScrollToSection?.('guild');
-            if (step === 3) onScrollToSection?.('advanced');
-          }}
-        >
-          {t('settings.integrations.discord.wizard.back')}
-        </Button>
-        <Button
-          type="button"
-          size="sm"
+          className={ACTION_BTN}
           disabled={!canAdvance}
           onClick={handleNext}
         >
