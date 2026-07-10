@@ -13,7 +13,6 @@ import { getMessagePreview } from '../lib/messagePreview';
 type PromptEntry = {
     turnId: string;
     preview: string;
-    index: number;
 };
 
 type PromptNavigatorRailProps = {
@@ -34,12 +33,11 @@ const buildPromptEntries = (
     turnIds: string[],
     previewsByTurnId: Map<string, Part[]>,
 ): PromptEntry[] => {
-    return turnIds.map((turnId, index) => {
+    return turnIds.map((turnId) => {
         const parts = previewsByTurnId.get(turnId) ?? [];
         return {
             turnId,
             preview: getMessagePreview(parts, 120),
-            index,
         };
     });
 };
@@ -134,71 +132,47 @@ export function PromptNavigatorRail({
             >
                 <div
                     className={cn(
-                        'flex flex-col items-stretch rounded-2xl px-1.5 py-1.5',
+                        'flex flex-col items-center rounded-full px-1 py-1.5',
                         lineGapClass,
                         needsBackdrop
                             ? 'border border-[var(--interactive-border)]/40 bg-[var(--surface-background)]/90 shadow-sm backdrop-blur-sm'
-                            : 'border border-[var(--interactive-border)]/30 bg-[var(--surface-background)]/80 shadow-sm backdrop-blur-sm',
+                            : 'bg-transparent',
                     )}
                 >
-                    {canLoadEarlier ? (
-                        <button
-                            type="button"
-                            className={cn(
-                                'mb-1 flex max-w-[7.5rem] items-center justify-center gap-1 rounded-full px-2 py-1',
-                                'border border-[var(--interactive-border)]/50 bg-[var(--surface-elevated)]',
-                                'typography-micro font-medium text-[var(--surface-foreground)]',
-                                'hover:bg-[var(--interactive-hover)]/60',
-                                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focusRing)]',
-                                isLoadingOlder ? 'cursor-wait opacity-70' : undefined,
-                            )}
-                            aria-label={t('chat.promptNavigator.loadMore')}
-                            disabled={isLoadingOlder}
-                            onClick={handleLoadEarlier}
-                        >
-                            {isLoadingOlder ? (
-                                <Icon name="loader-4" className="size-3 shrink-0 animate-spin" />
-                            ) : (
-                                <Icon name="arrow-up-s" className="size-3 shrink-0" />
-                            )}
-                            <span className="truncate">{t('chat.promptNavigator.loadMore')}</span>
-                        </button>
-                    ) : null}
-                    <div className={cn('flex flex-col items-center', lineGapClass)}>
-                        {prompts.map((prompt) => {
-                            const isActive = prompt.turnId === activeTurnId;
+                    {prompts.map((prompt) => {
+                        const isActive = prompt.turnId === activeTurnId;
+                        const preview = prompt.preview.trim() || t('chat.timeline.noTextContent');
 
-                            return (
-                                <button
-                                    key={prompt.turnId}
-                                    type="button"
+                        return (
+                            <button
+                                key={prompt.turnId}
+                                type="button"
+                                className={cn(
+                                    'flex shrink-0 items-center justify-center rounded-full',
+                                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focusRing)]',
+                                )}
+                                style={{
+                                    width: '16px',
+                                    height: `${LINE_HIT_HEIGHT_PX}px`,
+                                }}
+                                aria-label={preview}
+                                aria-current={isActive ? 'true' : undefined}
+                                onClick={() => {
+                                    handleSelectPrompt(prompt.turnId);
+                                }}
+                            >
+                                <span
+                                    aria-hidden="true"
                                     className={cn(
-                                        'flex shrink-0 items-center justify-center rounded-full',
-                                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focusRing)]',
+                                        'block h-0.5 rounded-full transition-colors',
+                                        isActive
+                                            ? 'w-3.5 bg-[var(--surface-foreground)]'
+                                            : 'w-3 bg-[var(--surface-foreground)]/40',
                                     )}
-                                    style={{
-                                        width: '16px',
-                                        height: `${LINE_HIT_HEIGHT_PX}px`,
-                                    }}
-                                    aria-label={t('chat.promptNavigator.goToPrompt', { number: prompt.index + 1 })}
-                                    aria-current={isActive ? 'true' : undefined}
-                                    onClick={() => {
-                                        handleSelectPrompt(prompt.turnId);
-                                    }}
-                                >
-                                    <span
-                                        aria-hidden="true"
-                                        className={cn(
-                                            'block h-0.5 rounded-full transition-colors',
-                                            isActive
-                                                ? 'w-3.5 bg-[var(--surface-foreground)]'
-                                                : 'w-3 bg-[var(--surface-foreground)]/40',
-                                        )}
-                                    />
-                                </button>
-                            );
-                        })}
-                    </div>
+                                />
+                            </button>
+                        );
+                    })}
                 </div>
 
                 {isPanelOpen ? (
@@ -243,7 +217,7 @@ export function PromptNavigatorRail({
                                         <button
                                             type="button"
                                             className={cn(
-                                                'flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors',
+                                                'flex w-full items-start rounded-lg px-2.5 py-2 text-left transition-colors',
                                                 'hover:bg-[var(--interactive-hover)]/60',
                                                 isActive
                                                     ? 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]'
@@ -254,16 +228,6 @@ export function PromptNavigatorRail({
                                                 handleSelectPrompt(prompt.turnId);
                                             }}
                                         >
-                                            <span
-                                                className={cn(
-                                                    'typography-meta w-5 shrink-0 text-right tabular-nums',
-                                                    isActive
-                                                        ? 'text-[var(--interactive-selection-foreground)]/75'
-                                                        : 'text-[var(--surface-mutedForeground)]',
-                                                )}
-                                            >
-                                                {prompt.index + 1}.
-                                            </span>
                                             <span className="min-w-0 flex-1">
                                                 <span className="typography-meta line-clamp-2">{preview}</span>
                                                 {isActive ? (

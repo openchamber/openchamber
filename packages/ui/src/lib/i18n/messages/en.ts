@@ -1710,7 +1710,6 @@ export const dict = {
   'chat.draftStarters.remove': 'Remove',
   'chat.scrollToBottom.aria': 'Scroll to bottom',
   'chat.promptNavigator.aria': 'Prompt navigation',
-  'chat.promptNavigator.goToPrompt': 'Go to prompt {number}',
   'chat.promptNavigator.currentPrompt': 'Current prompt',
   'chat.promptNavigator.loadMore': 'Load more prompts',
   'chat.timeline.relative.justNow': 'just now',

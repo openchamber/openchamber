@@ -1521,7 +1521,6 @@ export const dict = {
   'chat.emptyState.draftTitleWithProject': 'Sur quoi travaillons-nous dans {project} ?',
   'chat.scrollToBottom.aria': 'Faire défiler vers le bas',
   'chat.promptNavigator.aria': 'Navigation des prompts',
-  'chat.promptNavigator.goToPrompt': 'Aller au prompt {number}',
   'chat.promptNavigator.currentPrompt': 'Prompt actuel',
   'chat.promptNavigator.loadMore': 'Charger plus de prompts',
   'chat.timeline.relative.justNow': 'à l’instant',

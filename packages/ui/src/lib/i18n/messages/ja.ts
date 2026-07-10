@@ -1706,7 +1706,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.draftStarters.remove': '削除',
   'chat.scrollToBottom.aria': '一番下にスクロール',
   'chat.promptNavigator.aria': 'プロンプトナビゲーション',
-  'chat.promptNavigator.goToPrompt': 'プロンプト {number} へ移動',
   'chat.promptNavigator.currentPrompt': '現在のプロンプト',
   'chat.promptNavigator.loadMore': 'さらにプロンプトを読み込む',
   'chat.timeline.relative.justNow': 'たった今',
