@@ -14,6 +14,9 @@ import { ElectronSshManager } from './ssh-manager.mjs';
 import { createTrayController } from './tray.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
+import { assertUpdaterCapability } from './updater-capability.mjs';
+import { checkForDesktopUpdate } from './updater-check.mjs';
+import { resolveUpdaterFeed } from './updater-feed.mjs';
 import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
 
 const execFileAsync = promisify(execFile);
@@ -60,6 +63,9 @@ const shouldStartInBackground = (loginItemSettings = readLoginItemSettings()) =>
 // Set the product name early so electron-log derives its log directory as
 // ~/Library/Logs/OpenChamber/ (not ~/Library/Logs/@openchamber/electron/).
 app.setName('OpenChamber');
+if (process.platform === 'linux') {
+  app.setDesktopName('openchamber.desktop');
+}
 if (isDev) {
   app.setPath('userData', path.join(app.getPath('appData'), 'OpenChamber Dev'));
 }
@@ -2158,12 +2164,11 @@ const readThemeSource = () => {
 };
 
 const getWindowIconPath = () => {
-  if (process.platform !== 'win32' && process.platform !== 'linux') {
-    return undefined;
-  }
+  if (process.platform !== 'win32' && process.platform !== 'linux') return undefined;
+  const iconFileName = process.platform === 'linux' ? 'icon.png' : 'icon.ico';
   const iconPath = isDev
-    ? path.join(__dirname, 'resources', 'icons', 'icon.ico')
-    : path.join(process.resourcesPath, 'icons', 'icon.ico');
+    ? path.join(__dirname, 'resources', 'icons', iconFileName)
+    : path.join(process.resourcesPath, 'icons', iconFileName);
   return fs.existsSync(iconPath) ? iconPath : undefined;
 };
 
@@ -2795,10 +2800,6 @@ const compareSemver = (left, right) => {
   return 0;
 };
 
-const parseGithubRepo = () => {
-  return { owner: 'openchamber', repo: 'openchamber' };
-};
-
 const setupAutoUpdater = () => {
   if (!app.isPackaged) {
     return;
@@ -2810,11 +2811,13 @@ const setupAutoUpdater = () => {
   autoUpdater.disableWebInstaller = false;
   autoUpdater.logger = log;
 
-  const { owner, repo } = parseGithubRepo();
-  autoUpdater.setFeedURL({
-    provider: 'github',
-    owner,
-    repo,
+  const testBuild = typeof __OPENCHAMBER_UPDATER_E2E_BUILD__ !== 'undefined'
+    && __OPENCHAMBER_UPDATER_E2E_BUILD__ === true;
+  const feed = resolveUpdaterFeed({ testBuild });
+  autoUpdater.setFeedURL(feed);
+  log.info('[electron] updater feed configured', {
+    provider: feed.provider,
+    target: feed.provider === 'github' ? `${feed.owner}/${feed.repo}` : feed.url,
   });
 
   autoUpdater.on('download-progress', (progress) => {
@@ -3877,22 +3880,18 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     }
 
     case 'desktop_check_for_updates': {
+      assertUpdaterCapability({ packaged: app.isPackaged });
       const currentVersion = APP_VERSION;
-      let updateResult = null;
-      try {
-        updateResult = await autoUpdater.checkForUpdates();
-      } catch {
-      }
-
-      const updateInfo = updateResult?.updateInfo;
-      const nextVersion =
-        (typeof updateInfo?.version === 'string' && updateInfo.version) ||
-        currentVersion;
-      const available = compareSemver(nextVersion, currentVersion) > 0;
+      const { available, updateInfo, updateResult, nextVersion, pendingUpdate } = await checkForDesktopUpdate({
+        autoUpdater,
+        currentVersion,
+        pendingUpdate: state.pendingUpdate,
+        compareVersions: compareSemver,
+      });
       const body =
         (typeof updateInfo?.releaseNotes === 'string' && updateInfo.releaseNotes.trim() ? updateInfo.releaseNotes : null) ||
         await parseRelevantChangelogNotes(currentVersion, nextVersion);
-      state.pendingUpdate = available ? { version: nextVersion, electronUpdate: updateResult } : null;
+      state.pendingUpdate = pendingUpdate;
       return {
         available,
         currentVersion,
@@ -3905,6 +3904,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     }
 
     case 'desktop_download_and_install_update':
+      assertUpdaterCapability({ packaged: app.isPackaged });
       if (!state.pendingUpdate) {
         throw new Error('No pending update');
       }
@@ -3950,6 +3950,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
 
     case 'desktop_restart': {
       const applyUpdate = Boolean(state.pendingUpdate?.downloaded && app.isPackaged);
+      if (applyUpdate) assertUpdaterCapability({ packaged: app.isPackaged });
       log.info(`[electron] desktop_restart applyUpdate=${applyUpdate} packaged=${app.isPackaged}`);
       if (applyUpdate && process.platform === 'darwin' && typeof app.isInApplicationsFolder === 'function') {
         try {
