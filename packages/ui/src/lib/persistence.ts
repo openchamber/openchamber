@@ -140,7 +140,35 @@ const dispatchSettingsSynced = (settings: DesktopSettings): void => {
   window.dispatchEvent(new CustomEvent<DesktopSettings>('openchamber:settings-synced', { detail: settings }));
 };
 
+type SettingsSaveState = 'idle' | 'saving' | 'saved';
+
+let _settingsSaveState: SettingsSaveState = 'idle';
+let _settingsSaveStateResetTimer: ReturnType<typeof setTimeout> | null = null;
+const _settingsSaveStateListeners = new Set<() => void>();
+
+export const getSettingsSaveState = (): SettingsSaveState => _settingsSaveState;
+
+export const subscribeToSettingsSaveState = (listener: () => void): (() => void) => {
+  _settingsSaveStateListeners.add(listener);
+  return () => _settingsSaveStateListeners.delete(listener);
+};
+
 const dispatchSettingsSaveState = (state: 'saving' | 'saved' | 'error'): void => {
+  if (_settingsSaveStateResetTimer) {
+    clearTimeout(_settingsSaveStateResetTimer);
+    _settingsSaveStateResetTimer = null;
+  }
+
+  const nextState: SettingsSaveState = state === 'error' ? 'idle' : state;
+  if (nextState !== _settingsSaveState) {
+    _settingsSaveState = nextState;
+    _settingsSaveStateListeners.forEach((listener) => listener());
+  }
+
+  if (nextState === 'saved') {
+    _settingsSaveStateResetTimer = setTimeout(() => dispatchSettingsSaveState('error'), 1800);
+  }
+
   if (typeof window === 'undefined') {
     return;
   }

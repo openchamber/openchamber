@@ -2,6 +2,7 @@ import React from 'react';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
+import { getSettingsSaveState, subscribeToSettingsSaveState } from '@/lib/persistence';
 import { cn } from '@/lib/utils';
 
 interface SettingsPageLayoutProps {
@@ -65,33 +66,11 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
 
 const SettingsSaveStatus: React.FC = () => {
   const { t } = useI18n();
-  const [status, setStatus] = React.useState<'idle' | 'saving' | 'saved'>('idle');
-
-  React.useEffect(() => {
-    let timeout: number | undefined;
-    const handleSaveState = (event: Event) => {
-      const state = (event as CustomEvent<'saving' | 'saved' | 'error'>).detail;
-      if (state === 'saving') {
-        setStatus('saving');
-        return;
-      }
-
-      window.clearTimeout(timeout);
-      if (state === 'saved') {
-        setStatus('saved');
-        timeout = window.setTimeout(() => setStatus('idle'), 1800);
-        return;
-      }
-
-      setStatus('idle');
-    };
-
-    window.addEventListener('openchamber:settings-save-state', handleSaveState);
-    return () => {
-      window.removeEventListener('openchamber:settings-save-state', handleSaveState);
-      window.clearTimeout(timeout);
-    };
-  }, []);
+  const status = React.useSyncExternalStore(
+    subscribeToSettingsSaveState,
+    getSettingsSaveState,
+    getSettingsSaveState,
+  );
 
   if (status === 'idle') {
     return null;
