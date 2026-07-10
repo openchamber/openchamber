@@ -177,7 +177,6 @@ export function DiscordCommandsButton({ className }: DiscordCommandsButtonProps)
         className={cn('!font-normal', className)}
         onClick={() => setOpen(true)}
       >
-        <Icon name="command" className="size-3.5" />
         {t('settings.integrations.discord.commands.button')}
       </Button>
       <DiscordCommandPalette open={open} onOpenChange={setOpen} />

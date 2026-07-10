@@ -119,6 +119,8 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.disconnect.dialog.description':
       'This removes the bot token and stops syncing from this device. The listener and bridge will stop. You can reconnect anytime by adding your token again.',
     'settings.integrations.discord.disconnect.dialog.confirm': 'Disconnect',
+    'settings.integrations.discord.verify.button': 'Verify token',
+    'settings.integrations.discord.verify.testing': 'Verifying…',
   },
   uk: {
     'settings.integrations.discord.wizard.title': 'Налаштування Discord',
@@ -240,5 +242,7 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.disconnect.dialog.description':
       'Це видалить токен бота та зупинить синхронізацію на цьому пристрої. Listener і bridge буде зупинено. Ви зможете підключитися знову, додавши токен.',
     'settings.integrations.discord.disconnect.dialog.confirm': 'Відключити',
+    'settings.integrations.discord.verify.button': 'Перевірити токен',
+    'settings.integrations.discord.verify.testing': 'Перевірка…',
   },
 } as const;

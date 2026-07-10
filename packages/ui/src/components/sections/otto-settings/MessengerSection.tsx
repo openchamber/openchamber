@@ -1204,6 +1204,7 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
 
   const hasToken = Boolean(token);
   const hasTarget = Boolean(target);
+  const isConnected = conn.status === 'connected';
 
   // Auto-save Discord config to server-side settings.json on mount so that
   // the server-side auto-start on reboot picks it up. Runs when the
@@ -1273,18 +1274,21 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
           )}
         </div>
         <div className="flex items-center gap-2">
-          {hasToken && (
+          {isConnected && (
             <>
               <DiscordCommandsButton />
-              <button
+              <Button
                 type="button"
-                onClick={() => testConnection(conn.type)}
+                variant="outline"
+                size="xs"
+                className="!font-normal"
                 disabled={conn.status === 'connecting'}
-                className="rounded px-2 py-1 text-[10px] font-medium text-primary bg-primary/10 hover:bg-primary/20 disabled:opacity-50"
-                title="Verify the bot token by calling the messenger API"
+                onClick={() => void testConnection(conn.type)}
               >
-                {conn.status === 'connecting' ? 'Testing…' : 'Verify token'}
-              </button>
+                {conn.status === 'connecting'
+                  ? t('settings.integrations.discord.verify.testing')
+                  : t('settings.integrations.discord.verify.button')}
+              </Button>
               <Button
                 type="button"
                 variant="destructive"
