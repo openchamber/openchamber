@@ -6,7 +6,6 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.wizard.back': 'Back',
     'settings.integrations.discord.wizard.next': 'Next',
     'settings.integrations.discord.wizard.finish': 'Finish setup',
-    'settings.integrations.discord.wizard.skipToAdvanced': 'Skip to full settings',
     'settings.integrations.discord.wizard.step1.title': 'Create a Discord bot',
     'settings.integrations.discord.wizard.step1.description':
       'Otto connects through a Discord bot you own. Create one in the Developer Portal, copy its token, then paste it below.',
@@ -127,7 +126,6 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.wizard.back': 'Назад',
     'settings.integrations.discord.wizard.next': 'Далі',
     'settings.integrations.discord.wizard.finish': 'Завершити налаштування',
-    'settings.integrations.discord.wizard.skipToAdvanced': 'Перейти до повних налаштувань',
     'settings.integrations.discord.wizard.step1.title': 'Створіть Discord-бота',
     'settings.integrations.discord.wizard.step1.description':
       'Otto підключається через Discord-бота, яким ви володієте. Створіть його в Developer Portal, скопіюйте токен і вставте нижче.',

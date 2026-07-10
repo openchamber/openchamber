@@ -147,25 +147,16 @@ export function DiscordOnboardingWizard({
       className="rounded-lg border border-[color-mix(in_srgb,var(--primary-base)_20%,transparent)] bg-[color-mix(in_srgb,var(--primary-base)_5%,var(--background))] p-4 space-y-4"
       data-settings-item="integrations.discord.wizard"
     >
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h4 className="typography-ui-header font-medium text-foreground">
-            {t('settings.integrations.discord.wizard.title')}
-          </h4>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">
-            {t('settings.integrations.discord.wizard.stepOf', {
-              current: step + 1,
-              total: TOTAL_STEPS,
-            })}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={handleFinish}
-          className="text-[10px] text-muted-foreground hover:text-foreground"
-        >
-          {t('settings.integrations.discord.wizard.skipToAdvanced')}
-        </button>
+      <div>
+        <h4 className="typography-ui-header font-medium text-foreground">
+          {t('settings.integrations.discord.wizard.title')}
+        </h4>
+        <p className="mt-0.5 text-[11px] text-muted-foreground">
+          {t('settings.integrations.discord.wizard.stepOf', {
+            current: step + 1,
+            total: TOTAL_STEPS,
+          })}
+        </p>
       </div>
 
       {/* Step indicators */}
