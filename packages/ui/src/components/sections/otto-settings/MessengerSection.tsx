@@ -1273,25 +1273,29 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <DiscordCommandsButton />
-          <button
-            type="button"
-            onClick={() => testConnection(conn.type)}
-            disabled={!token || conn.status === 'connecting'}
-            className="rounded px-2 py-1 text-[10px] font-medium text-primary bg-primary/10 hover:bg-primary/20 disabled:opacity-50"
-            title="Verify the bot token by calling the messenger API"
-          >
-            {conn.status === 'connecting' ? 'Testing…' : 'Verify token'}
-          </button>
-          <Button
-            type="button"
-            variant="destructive"
-            size="xs"
-            className="!font-normal"
-            onClick={() => setDisconnectConfirmOpen(true)}
-          >
-            {t('settings.integrations.discord.disconnect.button')}
-          </Button>
+          {hasToken && (
+            <>
+              <DiscordCommandsButton />
+              <button
+                type="button"
+                onClick={() => testConnection(conn.type)}
+                disabled={conn.status === 'connecting'}
+                className="rounded px-2 py-1 text-[10px] font-medium text-primary bg-primary/10 hover:bg-primary/20 disabled:opacity-50"
+                title="Verify the bot token by calling the messenger API"
+              >
+                {conn.status === 'connecting' ? 'Testing…' : 'Verify token'}
+              </button>
+              <Button
+                type="button"
+                variant="destructive"
+                size="xs"
+                className="!font-normal"
+                onClick={() => setDisconnectConfirmOpen(true)}
+              >
+                {t('settings.integrations.discord.disconnect.button')}
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
