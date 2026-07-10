@@ -40,18 +40,21 @@ interface Option<T extends string> {
     descriptionKey?: string;
 }
 
-const THEME_MODE_OPTIONS: Array<{ value: ThemeMode; labelKey: string }> = [
+const THEME_MODE_OPTIONS: Array<{ value: ThemeMode; labelKey: string; descriptionKey: string }> = [
     {
         value: 'system',
         labelKey: 'settings.openchamber.visual.option.themeMode.system',
+        descriptionKey: 'settings.openchamber.visual.option.themeMode.system.description',
     },
     {
         value: 'light',
         labelKey: 'settings.openchamber.visual.option.themeMode.light',
+        descriptionKey: 'settings.openchamber.visual.option.themeMode.light.description',
     },
     {
         value: 'dark',
         labelKey: 'settings.openchamber.visual.option.themeMode.dark',
+        descriptionKey: 'settings.openchamber.visual.option.themeMode.dark.description',
     },
 ];
 
@@ -711,132 +714,163 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     }, [setMobileKeyboardMode, showMobileKeyboardModeSetting, showPwaInstallNameSetting, showPwaOrientationSetting]);
 
     return (
-        <div className="space-y-8">
+        <div className="space-y-0">
 
                 {/* --- Appearance & Themes --- */}
                 {hasAppearanceSettings && (
-                    <div className="mb-8 space-y-6">
+                    <div className="space-y-0">
                         {hasThemeSettings && (
-                            <section className="px-2 pb-2 pt-0 space-y-2">
-                                <div className="flex min-w-0 flex-col gap-1.5">
-                                    <span className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.visual.section.colorMode')}</span>
-                                    <div className="flex flex-wrap items-center gap-1">
-                                        {THEME_MODE_OPTIONS.map((option) => (
-                                            <Button
-                                                key={option.value}
-                                                variant="chip"
-                                                size="xs"
-                                                aria-pressed={themeMode === option.value}
-                                                className="!font-normal"
-                                                onClick={() => setThemeMode(option.value)}
-                                            >
-                                                {tUnsafe(option.labelKey)}
-                                            </Button>
-                                        ))}
-                                    </div>
-                                </div>
+                            <section className="space-y-4 pb-8">
+                                <h2 className="typography-ui-header font-medium text-foreground">
+                                    {t('settings.openchamber.visual.section.colorModeAndTheme')}
+                                </h2>
 
-                                {showMobileLayoutSetting && (
-                                    <div className="flex min-w-0 flex-col gap-1.5 py-1.5">
-                                        <span className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.visual.section.mobileLayout')}</span>
-                                        <div className="flex flex-wrap items-center gap-1">
-                                            {MOBILE_LAYOUT_OPTIONS.map((option) => (
-                                                <Button
-                                                    key={option.value}
-                                                    variant="chip"
-                                                    size="xs"
-                                                    aria-pressed={mobileLayoutPreference === option.value}
-                                                    className="!font-normal"
-                                                    onClick={() => handleMobileLayoutPreferenceChange(option.value)}
-                                                >
-                                                    {tUnsafe(option.labelKey)}
-                                                </Button>
-                                            ))}
+                                <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:gap-10">
+                                    <div className="space-y-3">
+                                        <div
+                                            role="radiogroup"
+                                            aria-label={t('settings.openchamber.visual.section.colorMode')}
+                                            className="space-y-1"
+                                        >
+                                            {THEME_MODE_OPTIONS.map((option) => {
+                                                const selected = themeMode === option.value;
+                                                return (
+                                                    <div
+                                                        key={option.value}
+                                                        className="flex cursor-pointer items-start gap-2 py-1"
+                                                        role="button"
+                                                        tabIndex={0}
+                                                        aria-pressed={selected}
+                                                        onClick={() => setThemeMode(option.value)}
+                                                        onKeyDown={(event) => {
+                                                            if (event.key === ' ' || event.key === 'Enter') {
+                                                                event.preventDefault();
+                                                                setThemeMode(option.value);
+                                                            }
+                                                        }}
+                                                    >
+                                                        <Radio
+                                                            checked={selected}
+                                                            onChange={() => setThemeMode(option.value)}
+                                                            ariaLabel={tUnsafe(option.labelKey)}
+                                                        />
+                                                        <div className="flex min-w-0 flex-col">
+                                                            <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
+                                                                {tUnsafe(option.labelKey)}
+                                                            </span>
+                                                            <span className="typography-meta text-muted-foreground">
+                                                                {tUnsafe(option.descriptionKey)}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
                                         </div>
-                                    </div>
-                                )}
 
-                                <div className="space-y-2 py-1.5">
-                                    <div data-settings-item="appearance.light-theme" className="grid grid-cols-1 gap-2 md:grid-cols-[14rem_minmax(0,1fr)] md:items-center md:gap-x-8">
-                                        <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.lightTheme')}</span>
-                                        <Select value={selectedLightTheme?.metadata.id ?? ''} onValueChange={setLightThemePreference}>
-                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectLightThemeAria')} className="w-full max-w-56">
-                                                <SelectValue placeholder={t('settings.openchamber.visual.field.selectThemePlaceholder')}>
-                                                    {selectedLightTheme
-                                                        ? formatThemeLabel(selectedLightTheme.metadata.name, 'light')
-                                                        : undefined}
-                                                </SelectValue>
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {lightThemes.map((theme) => (
-                                                    <SelectItem key={theme.metadata.id} value={theme.metadata.id}>
-                                                        {formatThemeLabel(theme.metadata.name, 'light')}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
+                                        {showMobileLayoutSetting && (
+                                            <div className="flex min-w-0 flex-col gap-1.5 border-t border-border/40 pt-3">
+                                                <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.section.mobileLayout')}</span>
+                                                <div className="flex flex-wrap items-center gap-1">
+                                                    {MOBILE_LAYOUT_OPTIONS.map((option) => (
+                                                        <Button
+                                                            key={option.value}
+                                                            variant="chip"
+                                                            size="xs"
+                                                            aria-pressed={mobileLayoutPreference === option.value}
+                                                            className="!font-normal"
+                                                            onClick={() => handleMobileLayoutPreferenceChange(option.value)}
+                                                        >
+                                                            {tUnsafe(option.labelKey)}
+                                                        </Button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
-                                    <div data-settings-item="appearance.dark-theme" className="grid grid-cols-1 gap-2 md:grid-cols-[14rem_minmax(0,1fr)] md:items-center md:gap-x-8">
-                                        <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.darkTheme')}</span>
-                                        <Select value={selectedDarkTheme?.metadata.id ?? ''} onValueChange={setDarkThemePreference}>
-                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectDarkThemeAria')} className="w-full max-w-56">
-                                                <SelectValue placeholder={t('settings.openchamber.visual.field.selectThemePlaceholder')}>
-                                                    {selectedDarkTheme
-                                                        ? formatThemeLabel(selectedDarkTheme.metadata.name, 'dark')
-                                                        : undefined}
-                                                </SelectValue>
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {darkThemes.map((theme) => (
-                                                    <SelectItem key={theme.metadata.id} value={theme.metadata.id}>
-                                                        {formatThemeLabel(theme.metadata.name, 'dark')}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                </div>
 
-                                <div className="flex items-center gap-2 py-1.5">
-                                    <button
-                                        type="button"
-                                        disabled={customThemesLoading || themesReloading}
-                                        onClick={() => {
-                                            const startedAt = Date.now();
-                                            setThemesReloading(true);
-                                            void reloadCustomThemes().finally(() => {
-                                                const elapsed = Date.now() - startedAt;
-                                                if (elapsed < 500) {
-                                                    window.setTimeout(() => {
-                                                        setThemesReloading(false);
-                                                    }, 500 - elapsed);
-                                                    return;
-                                                }
-                                                setThemesReloading(false);
-                                            });
-                                        }}
-                                        className="inline-flex items-center typography-ui-label font-normal text-foreground underline decoration-[1px] underline-offset-2 hover:text-foreground/80 disabled:cursor-not-allowed disabled:text-muted-foreground/60"
-                                    >
-                                        {themesReloading ? t('settings.openchamber.visual.actions.reloadingThemes') : t('settings.openchamber.visual.actions.reloadThemes')}
-                                    </button>
-                                    <Tooltip>
-                                        <TooltipTrigger asChild>
+                                    <div className="space-y-3">
+                                        <div data-settings-item="appearance.light-theme" className="space-y-1.5">
+                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.lightTheme')}</span>
+                                            <Select value={selectedLightTheme?.metadata.id ?? ''} onValueChange={setLightThemePreference}>
+                                                <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectLightThemeAria')} className="w-full sm:w-56">
+                                                    <SelectValue placeholder={t('settings.openchamber.visual.field.selectThemePlaceholder')}>
+                                                        {selectedLightTheme
+                                                            ? formatThemeLabel(selectedLightTheme.metadata.name, 'light')
+                                                            : undefined}
+                                                    </SelectValue>
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {lightThemes.map((theme) => (
+                                                        <SelectItem key={theme.metadata.id} value={theme.metadata.id}>
+                                                            {formatThemeLabel(theme.metadata.name, 'light')}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                        <div data-settings-item="appearance.dark-theme" className="space-y-1.5">
+                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.darkTheme')}</span>
+                                            <Select value={selectedDarkTheme?.metadata.id ?? ''} onValueChange={setDarkThemePreference}>
+                                                <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectDarkThemeAria')} className="w-full sm:w-56">
+                                                    <SelectValue placeholder={t('settings.openchamber.visual.field.selectThemePlaceholder')}>
+                                                        {selectedDarkTheme
+                                                            ? formatThemeLabel(selectedDarkTheme.metadata.name, 'dark')
+                                                            : undefined}
+                                                    </SelectValue>
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {darkThemes.map((theme) => (
+                                                        <SelectItem key={theme.metadata.id} value={theme.metadata.id}>
+                                                            {formatThemeLabel(theme.metadata.name, 'dark')}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+
+                                        <div className="flex items-center gap-2 pt-1">
                                             <button
                                                 type="button"
-                                                className="flex items-center justify-center rounded-md p-1 text-muted-foreground/70 hover:text-foreground"
-                                                aria-label={t('settings.openchamber.visual.field.themeImportInfoAria')}
+                                                disabled={customThemesLoading || themesReloading}
+                                                onClick={() => {
+                                                    const startedAt = Date.now();
+                                                    setThemesReloading(true);
+                                                    void reloadCustomThemes().finally(() => {
+                                                        const elapsed = Date.now() - startedAt;
+                                                        if (elapsed < 500) {
+                                                            window.setTimeout(() => {
+                                                                setThemesReloading(false);
+                                                            }, 500 - elapsed);
+                                                            return;
+                                                        }
+                                                        setThemesReloading(false);
+                                                    });
+                                                }}
+                                                className="inline-flex items-center gap-1.5 typography-ui-label font-normal text-foreground underline decoration-[1px] underline-offset-2 hover:text-foreground/80 disabled:cursor-not-allowed disabled:text-muted-foreground/60"
                                             >
-                                                <Icon name="information" className="h-3.5 w-3.5" />
+                                                <Icon name="restart" className={cn('h-3.5 w-3.5', themesReloading && 'animate-spin')} />
+                                                {themesReloading ? t('settings.openchamber.visual.actions.reloadingThemes') : t('settings.openchamber.visual.actions.reloadThemes')}
                                             </button>
-                                        </TooltipTrigger>
-                                        <TooltipContent sideOffset={8}>
-                                            {t('settings.openchamber.visual.field.themeImportInfoTooltip')}
-                                        </TooltipContent>
-                                    </Tooltip>
+                                            <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                    <button
+                                                        type="button"
+                                                        className="flex items-center justify-center rounded-md p-1 text-muted-foreground/70 hover:text-foreground"
+                                                        aria-label={t('settings.openchamber.visual.field.themeImportInfoAria')}
+                                                    >
+                                                        <Icon name="information" className="h-3.5 w-3.5" />
+                                                    </button>
+                                                </TooltipTrigger>
+                                                <TooltipContent sideOffset={8}>
+                                                    {t('settings.openchamber.visual.field.themeImportInfoTooltip')}
+                                                </TooltipContent>
+                                            </Tooltip>
+                                        </div>
+                                    </div>
                                 </div>
 
                                 {macVibrancySupported && (
-                                    <div data-settings-item="appearance.window-transparency" className="flex flex-col gap-1.5 border-t border-border/40 pt-3">
+                                    <div data-settings-item="appearance.window-transparency" className="flex flex-col gap-1.5 border-t border-border/40 pt-4">
                                         <div
                                             className="group flex cursor-pointer items-start gap-2 py-0.5"
                                             role="button"
@@ -886,7 +920,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 )}
 
                                 {dockBadgeSupported && (
-                                    <div data-settings-item="appearance.dock-badge" className="flex flex-col gap-1.5 border-t border-border/40 pt-3">
+                                    <div data-settings-item="appearance.dock-badge" className="flex flex-col gap-1.5 border-t border-border/40 pt-4">
                                         <div
                                             className="group flex cursor-pointer items-start gap-2 py-0.5"
                                             role="button"
@@ -920,68 +954,75 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                         )}
 
                         {hasLocalizationSettings && (
-                            <section className="border-t border-border/40 px-2 pb-2 pt-6 space-y-2">
-                                <h4 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.visual.section.localization')}</h4>
+                            <section className="space-y-4 border-t border-border/40 py-8">
+                                <h2 className="typography-ui-header font-medium text-foreground">
+                                    {t('settings.openchamber.visual.section.localization')}
+                                </h2>
 
-                                <div data-settings-item="appearance.language" className="grid grid-cols-1 gap-2 py-1.5 md:grid-cols-[14rem_minmax(0,1fr)] md:gap-x-8 md:gap-y-2">
-                                    <div className="flex min-w-0 flex-col">
-                                        <span className="typography-ui-label text-foreground shrink-0">{t('settings.appearance.language.label')}</span>
-                                        <span className="typography-meta text-muted-foreground">{t('settings.appearance.language.description')}</span>
+                                <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:gap-10">
+                                    <div data-settings-item="appearance.language" className="space-y-1.5">
+                                        <div className="flex min-w-0 flex-col">
+                                            <span className="typography-ui-label text-foreground">{t('settings.appearance.language.label')}</span>
+                                            <span className="typography-meta text-muted-foreground">{t('settings.appearance.language.description')}</span>
+                                        </div>
+                                        <Select value={locale} onValueChange={(value) => setLocale(value as Locale)}>
+                                            <SelectTrigger aria-label={t('settings.appearance.language.select')} className="w-full sm:w-56">
+                                                <SelectValue>{label(locale)}</SelectValue>
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {locales.map((availableLocale) => (
+                                                    <SelectItem key={availableLocale} value={availableLocale}>
+                                                        {label(availableLocale)}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
                                     </div>
-                                    <Select value={locale} onValueChange={(value) => setLocale(value as Locale)}>
-                                        <SelectTrigger aria-label={t('settings.appearance.language.select')} className="w-full max-w-56">
-                                            <SelectValue>{label(locale)}</SelectValue>
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {locales.map((availableLocale) => (
-                                                <SelectItem key={availableLocale} value={availableLocale}>
-                                                    {label(availableLocale)}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
+
+                                    {(shouldShow('timeFormat') || shouldShow('weekStart')) && (
+                                        <div className="space-y-3">
+                                            {shouldShow('timeFormat') && (
+                                                <div data-settings-item="appearance.time-format" className="space-y-1.5">
+                                                    <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.timeFormat')}</span>
+                                                    <Select value={timeFormatPreference} onValueChange={(value: 'auto' | '12h' | '24h') => handleTimeFormatPreferenceChange(value)}>
+                                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectTimeFormatAria')} className="w-full sm:w-56">
+                                                            <SelectValue>{selectedTimeFormatLabel}</SelectValue>
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {TIME_FORMAT_OPTIONS.map((option) => (
+                                                                <SelectItem key={option.id} value={option.id}>{tUnsafe(option.labelKey)}</SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                            )}
+
+                                            {shouldShow('weekStart') && (
+                                                <div data-settings-item="appearance.week-start" className="space-y-1.5">
+                                                    <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.weekStartsOn')}</span>
+                                                    <Select value={weekStartPreference} onValueChange={(value: 'auto' | 'monday' | 'sunday') => handleWeekStartPreferenceChange(value)}>
+                                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectWeekStartAria')} className="w-full sm:w-56">
+                                                            <SelectValue>{selectedWeekStartLabel}</SelectValue>
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {WEEK_START_OPTIONS.map((option) => (
+                                                                <SelectItem key={option.id} value={option.id}>{tUnsafe(option.labelKey)}</SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
-
-                                {(shouldShow('timeFormat') || shouldShow('weekStart')) && (
-                                    <div className="space-y-2 py-1.5">
-                                        {shouldShow('timeFormat') && (
-                                            <div data-settings-item="appearance.time-format" className="grid grid-cols-1 gap-2 md:grid-cols-[14rem_minmax(0,1fr)] md:items-center md:gap-x-8">
-                                                <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.timeFormat')}</span>
-                                                <Select value={timeFormatPreference} onValueChange={(value: 'auto' | '12h' | '24h') => handleTimeFormatPreferenceChange(value)}>
-                                                    <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectTimeFormatAria')} className="w-full max-w-56">
-                                                        <SelectValue>{selectedTimeFormatLabel}</SelectValue>
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        {TIME_FORMAT_OPTIONS.map((option) => (
-                                                            <SelectItem key={option.id} value={option.id}>{tUnsafe(option.labelKey)}</SelectItem>
-                                                        ))}
-                                                    </SelectContent>
-                                                </Select>
-                                            </div>
-                                        )}
-
-                                        {shouldShow('weekStart') && (
-                                            <div data-settings-item="appearance.week-start" className="grid grid-cols-1 gap-2 md:grid-cols-[14rem_minmax(0,1fr)] md:items-center md:gap-x-8">
-                                                <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.weekStartsOn')}</span>
-                                                <Select value={weekStartPreference} onValueChange={(value: 'auto' | 'monday' | 'sunday') => handleWeekStartPreferenceChange(value)}>
-                                                    <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectWeekStartAria')} className="w-full max-w-56">
-                                                        <SelectValue>{selectedWeekStartLabel}</SelectValue>
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        {WEEK_START_OPTIONS.map((option) => (
-                                                            <SelectItem key={option.id} value={option.id}>{tUnsafe(option.labelKey)}</SelectItem>
-                                                        ))}
-                                                    </SelectContent>
-                                                </Select>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
                             </section>
                         )}
 
                         {(showPwaInstallNameSetting || showPwaOrientationSetting || showMobileKeyboardModeSetting) && (
-                            <section className="border-t border-border/40 px-2 pb-2 pt-6 space-y-2">
+                            <section className="space-y-4 border-t border-border/40 py-8">
+                            <h2 className="typography-ui-header font-medium text-foreground">
+                                {t('settings.openchamber.visual.section.appInstall')}
+                            </h2>
 
                             {showPwaInstallNameSetting && (
                                 <div data-settings-item="appearance.pwa-install-name" className="py-1.5 space-y-1.5">
@@ -1121,171 +1162,167 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                     </div>
                 )}
 
-                {/* --- UI Scaling & Layout --- */}
+                {/* --- Density & type --- */}
                 {hasLayoutSettings && (
-                    <div className="border-t border-border/40 pt-6 space-y-3">
-                        <section className="p-2 space-y-0.5">
-                            <h4 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.visual.section.spacingAndLayout')}</h4>
-                            <div className="pl-2">
+                    <section className="space-y-4 border-t border-border/40 py-8">
+                        <h2 className="typography-ui-header font-medium text-foreground">
+                            {t('settings.openchamber.visual.section.densityAndType')}
+                        </h2>
 
-                            {shouldShow('fontSize') && !isMobile && (
-                                <div data-settings-item="appearance.interface-font-size" className="flex items-center gap-8 py-1">
-                                    <div className="flex min-w-0 flex-col w-56 shrink-0">
-                                        <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.interfaceFont')}</span>
+                        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:gap-10">
+                            <div className="space-y-3">
+                                {shouldShow('fontSize') && !isMobile && (
+                                    <div data-settings-item="appearance.interface-font-size" className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                                        <span className="typography-ui-label text-foreground shrink-0">{t('settings.openchamber.visual.field.interfaceFont')}</span>
+                                        <div className="flex items-center gap-2">
+                                            <Select value={uiFont} onValueChange={(value) => setUiFont(value as UiFontOption)}>
+                                                <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectInterfaceFontAria')} className="w-full sm:w-56">
+                                                    <SelectValue>{UI_FONT_OPTIONS.find((option) => option.id === uiFont)?.label}</SelectValue>
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {UI_FONT_OPTIONS.map((option) => (
+                                                        <SelectItem key={option.id} value={option.id}>
+                                                            <span style={{ fontFamily: option.stack }}>{option.label}</span>
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                            <Button size="sm"
+                                                type="button"
+                                                variant="ghost"
+                                                onClick={() => setUiFont(DEFAULT_UI_FONT)}
+                                                disabled={uiFont === DEFAULT_UI_FONT}
+                                                className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
+                                                aria-label={t('settings.openchamber.visual.actions.resetInterfaceFontAria')}
+                                                title={t('settings.common.actions.reset')}
+                                            >
+                                                <Icon name="restart" className="h-3.5 w-3.5" />
+                                            </Button>
+                                        </div>
                                     </div>
-                                    <div className="flex items-center gap-2 w-fit">
-                                        <Select value={uiFont} onValueChange={(value) => setUiFont(value as UiFontOption)}>
-                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectInterfaceFontAria')} className="w-56">
-                                                <SelectValue>{UI_FONT_OPTIONS.find((option) => option.id === uiFont)?.label}</SelectValue>
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {UI_FONT_OPTIONS.map((option) => (
-                                                    <SelectItem key={option.id} value={option.id}>
-                                                        <span style={{ fontFamily: option.stack }}>{option.label}</span>
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                        <Button size="sm"
-                                            type="button"
-                                            variant="ghost"
-                                            onClick={() => setUiFont(DEFAULT_UI_FONT)}
-                                            disabled={uiFont === DEFAULT_UI_FONT}
-                                            className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
-                                            aria-label={t('settings.openchamber.visual.actions.resetInterfaceFontAria')}
-                                            title={t('settings.common.actions.reset')}
-                                        >
-                                            <Icon name="restart" className="h-3.5 w-3.5" />
-                                        </Button>
-                                    </div>
-                                </div>
-                            )}
+                                )}
 
-                            {shouldShow('terminalFontSize') && (
-                                <div className={cn("py-1", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
-                                    <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "w-56 shrink-0")}>
-                                        <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.codeFont')}</span>
+                                {shouldShow('terminalFontSize') && (
+                                    <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                                        <span className="typography-ui-label text-foreground shrink-0">{t('settings.openchamber.visual.field.codeFont')}</span>
+                                        <div className="flex items-center gap-2">
+                                            <Select value={monoFont} onValueChange={(value) => setMonoFont(value as MonoFontOption)}>
+                                                <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectCodeFontAria')} className="w-full sm:w-56">
+                                                    <SelectValue>{CODE_FONT_OPTIONS.find((option) => option.id === monoFont)?.label}</SelectValue>
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {CODE_FONT_OPTIONS.map((option) => (
+                                                        <SelectItem key={option.id} value={option.id}>
+                                                            <span style={{ fontFamily: option.stack }}>{option.label}</span>
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                            <Button size="sm"
+                                                type="button"
+                                                variant="ghost"
+                                                onClick={() => setMonoFont(DEFAULT_MONO_FONT)}
+                                                disabled={monoFont === DEFAULT_MONO_FONT}
+                                                className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
+                                                aria-label={t('settings.openchamber.visual.actions.resetCodeFontAria')}
+                                                title={t('settings.common.actions.reset')}
+                                            >
+                                                <Icon name="restart" className="h-3.5 w-3.5" />
+                                            </Button>
+                                        </div>
                                     </div>
-                                    <div className={cn("flex items-center gap-2", isMobile ? "w-full" : "w-fit")}>
-                                        <Select value={monoFont} onValueChange={(value) => setMonoFont(value as MonoFontOption)}>
-                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectCodeFontAria')} className="w-56">
-                                                <SelectValue>{CODE_FONT_OPTIONS.find((option) => option.id === monoFont)?.label}</SelectValue>
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {CODE_FONT_OPTIONS.map((option) => (
-                                                    <SelectItem key={option.id} value={option.id}>
-                                                        <span style={{ fontFamily: option.stack }}>{option.label}</span>
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                        <Button size="sm"
-                                            type="button"
-                                            variant="ghost"
-                                            onClick={() => setMonoFont(DEFAULT_MONO_FONT)}
-                                            disabled={monoFont === DEFAULT_MONO_FONT}
-                                            className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
-                                            aria-label={t('settings.openchamber.visual.actions.resetCodeFontAria')}
-                                            title={t('settings.common.actions.reset')}
-                                        >
-                                            <Icon name="restart" className="h-3.5 w-3.5" />
-                                        </Button>
-                                    </div>
-                                </div>
-                            )}
+                                )}
 
-                            {shouldShow('fontSize') && !isMobile && (
-                                <div className="flex items-center gap-8 py-1">
-                                    <div className="flex min-w-0 flex-col w-56 shrink-0">
-                                        <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.interfaceFontSize')}</span>
+                                {shouldShow('fontSize') && !isMobile && (
+                                    <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                                        <span className="typography-ui-label text-foreground shrink-0">{t('settings.openchamber.visual.field.interfaceFontSize')}</span>
+                                        <div className="flex items-center gap-2">
+                                            <NumberInput
+                                                value={fontSize}
+                                                onValueChange={setFontSize}
+                                                min={50}
+                                                max={200}
+                                                step={5}
+                                                aria-label={t('settings.openchamber.visual.field.fontSizePercentageAria')}
+                                                className="w-16"
+                                            />
+                                            <span className="typography-meta text-muted-foreground tabular-nums">%</span>
+                                            <Button size="sm"
+                                                type="button"
+                                                variant="ghost"
+                                                onClick={() => setFontSize(100)}
+                                                disabled={fontSize === 100}
+                                                className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
+                                                aria-label={t('settings.openchamber.visual.actions.resetFontSizeAria')}
+                                                title={t('settings.common.actions.reset')}
+                                            >
+                                                <Icon name="restart" className="h-3.5 w-3.5" />
+                                            </Button>
+                                        </div>
                                     </div>
-                                    <div className="flex items-center gap-2 w-fit">
-                                        <NumberInput
-                                            value={fontSize}
-                                            onValueChange={setFontSize}
-                                            min={50}
-                                            max={200}
-                                            step={5}
-                                            aria-label={t('settings.openchamber.visual.field.fontSizePercentageAria')}
-                                            className="w-16"
-                                        />
-                                        <Button size="sm"
-                                            type="button"
-                                            variant="ghost"
-                                            onClick={() => setFontSize(100)}
-                                            disabled={fontSize === 100}
-                                            className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
-                                            aria-label={t('settings.openchamber.visual.actions.resetFontSizeAria')}
-                                            title={t('settings.common.actions.reset')}
-                                        >
-                                            <Icon name="restart" className="h-3.5 w-3.5" />
-                                        </Button>
-                                    </div>
-                                </div>
-                            )}
+                                )}
 
-                            {shouldShow('terminalFontSize') && (
-                                <div data-settings-item="appearance.terminal-font-size" className={cn("py-1", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
-                                    <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "w-56 shrink-0")}>
-                                        <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.terminalFontSize')}</span>
+                                {shouldShow('terminalFontSize') && (
+                                    <div data-settings-item="appearance.terminal-font-size" className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                                        <span className="typography-ui-label text-foreground shrink-0">{t('settings.openchamber.visual.field.terminalFontSize')}</span>
+                                        <div className="flex items-center gap-2">
+                                            <NumberInput
+                                                value={terminalFontSize}
+                                                onValueChange={setTerminalFontSize}
+                                                min={9}
+                                                max={52}
+                                                step={1}
+                                                className="w-16"
+                                            />
+                                            <span className="typography-meta text-muted-foreground tabular-nums">px</span>
+                                            <Button size="sm"
+                                                type="button"
+                                                variant="ghost"
+                                                onClick={() => setTerminalFontSize(13)}
+                                                disabled={terminalFontSize === 13}
+                                                className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
+                                                aria-label={t('settings.openchamber.visual.actions.resetTerminalFontSizeAria')}
+                                                title={t('settings.common.actions.reset')}
+                                            >
+                                                <Icon name="restart" className="h-3.5 w-3.5" />
+                                            </Button>
+                                        </div>
                                     </div>
-                                    <div className={cn("flex items-center gap-2", isMobile ? "w-full" : "w-fit")}>
-                                        <NumberInput
-                                            value={terminalFontSize}
-                                            onValueChange={setTerminalFontSize}
-                                            min={9}
-                                            max={52}
-                                            step={1}
-                                            className="w-16"
-                                        />
-                                        <Button size="sm"
-                                            type="button"
-                                            variant="ghost"
-                                            onClick={() => setTerminalFontSize(13)}
-                                            disabled={terminalFontSize === 13}
-                                            className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
-                                            aria-label={t('settings.openchamber.visual.actions.resetTerminalFontSizeAria')}
-                                            title={t('settings.common.actions.reset')}
-                                        >
-                                            <Icon name="restart" className="h-3.5 w-3.5" />
-                                        </Button>
-                                    </div>
-                                </div>
-                            )}
+                                )}
+                            </div>
 
-                            {shouldShow('spacing') && (
-                                <div data-settings-item="appearance.spacing-density" className={cn("py-1", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
-                                    <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "w-56 shrink-0")}>
-                                        <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.spacingDensity')}</span>
+                            <div className="space-y-3">
+                                {shouldShow('spacing') && (
+                                    <div data-settings-item="appearance.spacing-density" className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                                        <span className="typography-ui-label text-foreground shrink-0">{t('settings.openchamber.visual.field.spacingDensity')}</span>
+                                        <div className="flex items-center gap-2">
+                                            <NumberInput
+                                                value={padding}
+                                                onValueChange={setPadding}
+                                                min={50}
+                                                max={200}
+                                                step={5}
+                                                className="w-16"
+                                            />
+                                            <span className="typography-meta text-muted-foreground tabular-nums">%</span>
+                                            <Button size="sm"
+                                                type="button"
+                                                variant="ghost"
+                                                onClick={() => setPadding(100)}
+                                                disabled={padding === 100}
+                                                className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
+                                                aria-label={t('settings.openchamber.visual.actions.resetSpacingAria')}
+                                                title={t('settings.common.actions.reset')}
+                                            >
+                                                <Icon name="restart" className="h-3.5 w-3.5" />
+                                            </Button>
+                                        </div>
                                     </div>
-                                    <div className={cn("flex items-center gap-2", isMobile ? "w-full" : "w-fit")}>
-                                        <NumberInput
-                                            value={padding}
-                                            onValueChange={setPadding}
-                                            min={50}
-                                            max={200}
-                                            step={5}
-                                            className="w-16"
-                                        />
-                                        <Button size="sm"
-                                            type="button"
-                                            variant="ghost"
-                                            onClick={() => setPadding(100)}
-                                            disabled={padding === 100}
-                                            className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
-                                            aria-label={t('settings.openchamber.visual.actions.resetSpacingAria')}
-                                            title={t('settings.common.actions.reset')}
-                                        >
-                                            <Icon name="restart" className="h-3.5 w-3.5" />
-                                        </Button>
-                                    </div>
-                                </div>
-                            )}
+                                )}
 
-                            {shouldShow('inputBarOffset') && (
-                                <div data-settings-item="appearance.input-bar-offset" className={cn("py-1", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
-                                    <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "w-56 shrink-0")}>
-                                        <div className="flex items-center gap-1.5">
+                                {shouldShow('inputBarOffset') && (
+                                    <div data-settings-item="appearance.input-bar-offset" className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                                        <div className="flex items-center gap-1.5 shrink-0">
                                             <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.inputBarOffset')}</span>
                                             <Tooltip>
                                                 <TooltipTrigger asChild>
@@ -1296,42 +1333,39 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 </TooltipContent>
                                             </Tooltip>
                                         </div>
+                                        <div className="flex items-center gap-2">
+                                            <NumberInput
+                                                value={inputBarOffset}
+                                                onValueChange={setInputBarOffset}
+                                                min={0}
+                                                max={100}
+                                                step={5}
+                                                className="w-16"
+                                            />
+                                            <span className="typography-meta text-muted-foreground tabular-nums">px</span>
+                                            <Button size="sm"
+                                                type="button"
+                                                variant="ghost"
+                                                onClick={() => setInputBarOffset(0)}
+                                                disabled={inputBarOffset === 0}
+                                                className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
+                                                aria-label={t('settings.openchamber.visual.actions.resetInputBarOffsetAria')}
+                                                title={t('settings.common.actions.reset')}
+                                            >
+                                                <Icon name="restart" className="h-3.5 w-3.5" />
+                                            </Button>
+                                        </div>
                                     </div>
-                                    <div className={cn("flex items-center gap-2", isMobile ? "w-full" : "w-fit")}>
-                                        <NumberInput
-                                            value={inputBarOffset}
-                                            onValueChange={setInputBarOffset}
-                                            min={0}
-                                            max={100}
-                                            step={5}
-                                            className="w-16"
-                                        />
-                                        <Button size="sm"
-                                            type="button"
-                                            variant="ghost"
-                                            onClick={() => setInputBarOffset(0)}
-                                            disabled={inputBarOffset === 0}
-                                            className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
-                                            aria-label={t('settings.openchamber.visual.actions.resetInputBarOffsetAria')}
-                                            title={t('settings.common.actions.reset')}
-                                        >
-                                            <Icon name="restart" className="h-3.5 w-3.5" />
-                                        </Button>
-                                    </div>
-                                </div>
-                            )}
-
+                                )}
                             </div>
-
-                        </section>
-                    </div>
+                        </div>
+                    </section>
                 )}
 
                 {/* --- Navigation --- */}
                 {hasNavigationSettings && (
-                    <div className="border-t border-border/40 pt-6 space-y-3">
-                        <section className="px-2 pb-2 pt-0">
-                            <h4 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.visual.section.navigation')}</h4>
+                    <section className="space-y-4 border-t border-border/40 py-8">
+                            <h2 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.visual.section.navigation')}</h2>
                             {shouldShow('fileEditorKeymap') && (
                                 <div data-settings-item="appearance.file-editor-keymap" className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-start sm:gap-8">
                                     <span className="typography-ui-label text-foreground sm:w-56 shrink-0">
@@ -1430,8 +1464,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     </div>
                                 </div>
                             )}
-                        </section>
-                    </div>
+                    </section>
                 )}
 
                 {hasBehaviorSettings && (
@@ -2160,38 +2193,36 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                 {/* --- Privacy & Data --- */}
                 {shouldShow('reportUsage') && (
-                    <div className="border-t border-border/40 pt-6 space-y-3">
-                        <section className="px-2 pb-2 pt-0">
-                            <h4 className="typography-ui-header font-medium text-foreground mb-2">{t('settings.openchamber.visual.section.privacy')}</h4>
-                            <div data-settings-item="appearance.usage-reports" className="flex items-start gap-2 py-1.5">
-                                <Checkbox
-                                    checked={reportUsage}
-                                    onChange={handleReportUsageChange}
-                                    ariaLabel={t('settings.openchamber.visual.field.sendAnonymousUsageReportsAria')}
-                                />
-                                <div className="flex min-w-0 flex-col gap-0.5">
-                                    <div
-                                        className="group flex cursor-pointer"
-                                        role="button"
-                                        tabIndex={0}
-                                        aria-pressed={reportUsage}
-                                        onClick={() => handleReportUsageChange(!reportUsage)}
-                                        onKeyDown={(event) => {
-                                            if (event.key === ' ' || event.key === 'Enter') {
-                                                event.preventDefault();
-                                                handleReportUsageChange(!reportUsage);
-                                            }
-                                        }}
-                                    >
-                                        <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.sendAnonymousUsageReports')}</span>
-                                    </div>
-                                    <span className="typography-meta text-muted-foreground pointer-events-none">
-                                        {t('settings.openchamber.visual.field.sendAnonymousUsageReportsHint')}
-                                    </span>
+                    <section className="space-y-4 border-t border-border/40 py-8">
+                        <h2 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.visual.section.privacy')}</h2>
+                        <div data-settings-item="appearance.usage-reports" className="flex items-start gap-2 py-1.5">
+                            <Checkbox
+                                checked={reportUsage}
+                                onChange={handleReportUsageChange}
+                                ariaLabel={t('settings.openchamber.visual.field.sendAnonymousUsageReportsAria')}
+                            />
+                            <div className="flex min-w-0 flex-col gap-0.5">
+                                <div
+                                    className="group flex cursor-pointer"
+                                    role="button"
+                                    tabIndex={0}
+                                    aria-pressed={reportUsage}
+                                    onClick={() => handleReportUsageChange(!reportUsage)}
+                                    onKeyDown={(event) => {
+                                        if (event.key === ' ' || event.key === 'Enter') {
+                                            event.preventDefault();
+                                            handleReportUsageChange(!reportUsage);
+                                        }
+                                    }}
+                                >
+                                    <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.sendAnonymousUsageReports')}</span>
                                 </div>
+                                <span className="typography-meta text-muted-foreground pointer-events-none">
+                                    {t('settings.openchamber.visual.field.sendAnonymousUsageReportsHint')}
+                                </span>
                             </div>
-                        </section>
-                    </div>
+                        </div>
+                    </section>
                 )}
 
             </div>

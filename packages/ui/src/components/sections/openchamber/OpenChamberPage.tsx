@@ -114,8 +114,17 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
         tunnel: t('settings.page.tunnel.title'),
     }[section];
 
+    const pageDescription = section === 'visual'
+        ? t('settings.page.appearance.description')
+        : undefined;
+
     return (
-        <SettingsPageLayout title={pageTitle} showSaveStatus className="openchamber-page-body">
+        <SettingsPageLayout
+            title={pageTitle}
+            description={pageDescription}
+            showSaveStatus
+            className="openchamber-page-body"
+        >
             {renderSectionContent()}
         </SettingsPageLayout>
     );
