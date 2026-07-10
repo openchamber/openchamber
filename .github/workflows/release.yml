@@ -560,6 +560,7 @@ jobs:
           VERSION: ${{ needs.create-release.outputs.version }}
         run: |
           node - <<'NODE'
+          (async () => {
           const { REPOSITORY: repo, VERSION: version, GITHUB_TOKEN: token } = process.env;
           const expected = [
             `OpenChamber-${version}-linux-x86_64.AppImage`,
@@ -580,6 +581,10 @@ jobs:
             }
           }
           console.log(`Verified ${expected.length} Linux release assets and both architecture manifests.`);
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
           NODE
 
       - name: Publish release
