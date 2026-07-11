@@ -8,6 +8,7 @@ import { useUIStore, type ContextPanelTab } from '@/stores/useUIStore';
 import { ContextTileBody } from '../ContextPanel';
 import { buildContextTabItems } from '../contextPanelShared';
 import { SplitAnchors } from './SplitAnchors';
+import { isSoleTileSourceRegion } from './tileGroupIds';
 import { useTileDragState } from './tileDragContext';
 import type { TabGroupLeaf } from './splitTree';
 
@@ -43,6 +44,10 @@ export const TabGroupRegion: React.FC<TabGroupRegionProps> = ({
 
   const { activeTileId } = useTileDragState();
   const isDragActive = activeTileId !== null;
+  // Suppress this region's split anchors when the dragged tile is its SOLE tile:
+  // dropping a lone tile on its own region's anchor is a guaranteed splitLeaf no-op,
+  // and closestCenter would otherwise pick it and swallow the drag.
+  const showSplitAnchors = isDragActive && !isSoleTileSourceRegion(group.tileIds, activeTileId);
   const { setNodeRef: setStripDropRef } = useDroppable({
     id: `strip:${group.id}`,
     data: { type: 'strip', groupId: group.id },
@@ -118,7 +123,7 @@ export const TabGroupRegion: React.FC<TabGroupRegionProps> = ({
           renderChatFrames={!tiled}
         />
       </div>
-      {isDragActive ? <SplitAnchors groupId={group.id} /> : null}
+      {showSplitAnchors ? <SplitAnchors groupId={group.id} /> : null}
     </div>
   );
 };

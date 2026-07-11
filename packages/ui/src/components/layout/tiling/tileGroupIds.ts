@@ -12,3 +12,9 @@ export const mapTileIdsToGroupIds = (root: SplitNode): ReadonlyMap<string, strin
   visit(root);
   return result;
 };
+
+export const isSoleTileSourceRegion = (
+  groupTileIds: readonly string[],
+  activeTileId: string | null,
+): boolean =>
+  activeTileId !== null && groupTileIds.length === 1 && groupTileIds[0] === activeTileId;
