@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test';
 
 import { dict as en } from '../messages/en';
 import { dict as es } from '../messages/es';
+import { dict as fr } from '../messages/fr';
+import { dict as ja } from '../messages/ja';
 import { dict as ko } from '../messages/ko';
 import { dict as pl } from '../messages/pl';
 import { dict as ptBR } from '../messages/pt-BR';
@@ -25,6 +27,8 @@ const TILING_KEYS = [
 const DICTS: Record<Locale, Record<string, string>> = {
   en,
   es,
+  fr,
+  ja,
   ko,
   pl,
   uk,
