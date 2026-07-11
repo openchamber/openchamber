@@ -170,9 +170,11 @@ const LOCAL_DESKTOP_CLIENT_DEDUPE_KEY = 'desktop-local';
 // connecting to someone else's server).
 const REMOTE_DESKTOP_CLIENT_KIND = 'desktop';
 const ENV_OVERRIDE_HOST_ID = '__env';
-const CHANGELOG_URL = 'https://raw.githubusercontent.com/openchamber/openchamber/main/CHANGELOG.md';
-const GITHUB_BUG_REPORT_URL = 'https://github.com/openchamber/openchamber/issues/new?template=bug_report.yml';
-const GITHUB_FEATURE_REQUEST_URL = 'https://github.com/openchamber/openchamber/issues/new?template=feature_request.yml';
+const GITHUB_REPOSITORY = Object.freeze({ owner: 'yee94', repo: 'openchamber' });
+const GITHUB_REPOSITORY_URL = `https://github.com/${GITHUB_REPOSITORY.owner}/${GITHUB_REPOSITORY.repo}`;
+const CHANGELOG_URL = `https://raw.githubusercontent.com/${GITHUB_REPOSITORY.owner}/${GITHUB_REPOSITORY.repo}/main/CHANGELOG.md`;
+const GITHUB_BUG_REPORT_URL = `${GITHUB_REPOSITORY_URL}/issues/new?template=bug_report.yml`;
+const GITHUB_FEATURE_REQUEST_URL = `${GITHUB_REPOSITORY_URL}/issues/new?template=feature_request.yml`;
 const DISCORD_INVITE_URL = 'https://discord.gg/ZYRSdnwwKA';
 const INSTALLED_APPS_CACHE_TTL_SECS = 60 * 60 * 24;
 const INSTALLED_APPS_CACHE_FILE = 'discovered-apps.json';
@@ -2878,7 +2880,7 @@ const compareSemver = (left, right) => {
 };
 
 const parseGithubRepo = () => {
-  return { owner: 'openchamber', repo: 'openchamber' };
+  return GITHUB_REPOSITORY;
 };
 
 const setupAutoUpdater = () => {

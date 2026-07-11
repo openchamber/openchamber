@@ -14,7 +14,7 @@ on:
         default: feat/windows-desktop-app
         type: string
       build_macos:
-        description: Build signed/notarized macOS Electron artifacts
+        description: Build ad-hoc-signed macOS Electron artifacts
         required: false
         default: true
         type: boolean
@@ -84,34 +84,9 @@ jobs:
           restore-keys: |
             opencode-cli-${{ runner.os }}-${{ matrix.arch }}-
 
-      - name: Install Apple Certificate
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-        run: |
-          KEYCHAIN_PATH=$RUNNER_TEMP/electron-signing.keychain-db
-          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
-
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-
-          echo "$APPLE_CERTIFICATE" | base64 --decode > $RUNNER_TEMP/certificate.p12
-          security import $RUNNER_TEMP/certificate.p12 \
-            -P "$APPLE_CERTIFICATE_PASSWORD" \
-            -A -t cert -f pkcs12 \
-            -k "$KEYCHAIN_PATH"
-
-          security list-keychain -d user -s "$KEYCHAIN_PATH"
-          security set-key-partition-list -S apple-tool:,apple:,codesign: \
-            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-
       - name: Build Electron app
         working-directory: packages/electron
         env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           ELECTRON_BUILDER_ARCH: ${{ matrix.arch }}
         run: |
           bun run build:web-assets
@@ -125,7 +100,7 @@ jobs:
           bunx electron-builder --mac --${{ matrix.arch }} --publish=never
           bun run verify:opencode-cli:packaged
 
-      - name: Verify signature + entitlements + notarization
+      - name: Verify ad-hoc macOS app signature
         run: |
           set -euo pipefail
 
@@ -139,33 +114,17 @@ jobs:
             exit 1
           fi
 
-          echo "Verifying $APP_PATH"
-          codesign -vv --deep --strict "$APP_PATH"
-
-          CS_INFO=$(codesign -dv --verbose=4 "$APP_PATH" 2>&1)
-          echo "$CS_INFO"
-          if ! echo "$CS_INFO" | grep -q "flags=.*runtime"; then
-            echo "Error: hardened runtime flag missing"
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+          SIGN_INFO=$(codesign -dv --verbose=4 "$APP_PATH" 2>&1)
+          if echo "$SIGN_INFO" | grep -q "Authority=Developer ID Application"; then
+            echo "Error: expected an ad-hoc macOS build, but found a Developer ID signature"
             exit 1
           fi
-
-          xcrun stapler validate "$APP_PATH"
-
-          ENTITLEMENTS=$(codesign -d --entitlements :- "$APP_PATH" 2>&1 || true)
-          if echo "$ENTITLEMENTS" | grep -q "com.apple.security.app-sandbox"; then
-            echo "Error: app sandbox entitlement is present"
+          if ! echo "$SIGN_INFO" | grep -q "Signature=adhoc"; then
+            echo "Error: expected a valid ad-hoc signature"
             exit 1
           fi
-          for key in \
-            com.apple.security.cs.allow-jit \
-            com.apple.security.cs.allow-unsigned-executable-memory \
-            com.apple.security.cs.disable-library-validation
-          do
-            if ! echo "$ENTITLEMENTS" | grep -q "<key>$key</key>"; then
-              echo "Error: required entitlement missing: $key"
-              exit 1
-            fi
-          done
+          echo "Ad-hoc macOS app prepared at $APP_PATH"
 
       - name: Upload macOS installable artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -175,7 +134,6 @@ jobs:
             packages/electron/dist/*.dmg
             packages/electron/dist/*.zip
             packages/electron/dist/*.blockmap
-            packages/electron/dist/latest-mac.yml
           if-no-files-found: error
           retention-days: ${{ fromJSON(inputs.retention_days) }}
 

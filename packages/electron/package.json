@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/electron",
-  "version": "1.15.0",
+  "version": "1.15.1",
   "private": true,
   "description": "Electron desktop runtime for OpenChamber",
   "author": "OpenChamber",
@@ -20,7 +20,7 @@
   "desktopPrerequisites": [
     "Electron runtime dependencies installed via bun install",
     "Bun available for sidecar compilation",
-    "macOS: Xcode + build tools for notarized packaging",
+    "macOS: Xcode + build tools for ad-hoc packaging and icon asset compilation",
     "Windows: NSIS installed for installer creation"
   ],
   "scripts": {
@@ -77,15 +77,14 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "resources/icons/icon.icns",
+      "identity": "-",
       "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
       "extendInfo": {
         "CFBundleIconName": "AppIcon"
       },
-      "hardenedRuntime": true,
+      "hardenedRuntime": false,
       "gatekeeperAssess": false,
-      "entitlements": "resources/entitlements.mac.plist",
-      "entitlementsInherit": "resources/entitlements.mac.plist",
-      "notarize": true,
+      "notarize": false,
       "target": [
         "dmg",
         "zip"
@@ -107,7 +106,7 @@
       "installerHeaderIcon": "resources/icons/icon.ico"
     },
     "dmg": {
-      "sign": true,
+      "sign": false,
       "title": "${productName} ${version}",
       "backgroundColor": "#FFFCF0",
       "iconSize": 100,
@@ -132,7 +131,7 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "openchamber",
+      "owner": "yee94",
       "repo": "openchamber"
     }
   }

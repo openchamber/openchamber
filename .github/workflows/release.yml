@@ -15,6 +15,14 @@ on:
         required: false
         default: false
         type: boolean
+      release_scope:
+        description: 'Targets to publish'
+        required: false
+        default: desktop
+        type: choice
+        options:
+          - desktop
+          - all
 
 env:
   CARGO_INCREMENTAL: 0
@@ -46,6 +54,26 @@ jobs:
           else
             echo "version=0.0.0-dev" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Validate release version
+        env:
+          VERSION: ${{ steps.get_version.outputs.version }}
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const expected = process.env.VERSION;
+          const manifests = ['package.json', 'packages/electron/package.json'];
+          const mismatches = manifests.flatMap((file) => {
+            const actual = JSON.parse(fs.readFileSync(file, 'utf8')).version;
+            return actual === expected ? [] : [`${file}: ${actual}`];
+          });
+          if (mismatches.length > 0) {
+            throw new Error(
+              `Release version ${expected} does not match:\n${mismatches.join('\n')}\n` +
+              'Run bun run version:bump -- <version> and commit the result before releasing.'
+            );
+          }
+          NODE
 
       - name: Extract changelog for release
         env:
@@ -83,6 +111,7 @@ jobs:
 
   publish-npm:
     needs: create-release
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.release_scope == 'all' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -164,34 +193,9 @@ jobs:
           restore-keys: |
             opencode-cli-${{ runner.os }}-${{ matrix.arch }}-
 
-      - name: Install Apple Certificate
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-        run: |
-          KEYCHAIN_PATH=$RUNNER_TEMP/electron-signing.keychain-db
-          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
-
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-
-          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
-          security import "$RUNNER_TEMP/certificate.p12" \
-            -P "$APPLE_CERTIFICATE_PASSWORD" \
-            -A -t cert -f pkcs12 \
-            -k "$KEYCHAIN_PATH"
-
-          security list-keychain -d user -s "$KEYCHAIN_PATH"
-          security set-key-partition-list -S apple-tool:,apple:,codesign: \
-            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-
       - name: Build Electron app
         working-directory: packages/electron
         env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           # rebuild-native.mjs reads this to target the right arch when
           # cross-building (runner is arm64; x64 matrix needs the hint).
           ELECTRON_BUILDER_ARCH: ${{ matrix.arch }}
@@ -208,7 +212,7 @@ jobs:
           bunx electron-builder --mac --${{ matrix.arch }} --publish=never
           bun run verify:opencode-cli:packaged
 
-      - name: Verify signature + entitlements + notarization
+      - name: Verify ad-hoc macOS app signature
         run: |
           set -euo pipefail
 
@@ -222,35 +226,17 @@ jobs:
             exit 1
           fi
 
-          echo "Verifying $APP_PATH"
-          codesign -vv --deep --strict "$APP_PATH"
-
-          # Require hardened runtime
-          CS_INFO=$(codesign -dv --verbose=4 "$APP_PATH" 2>&1)
-          echo "$CS_INFO"
-          if ! echo "$CS_INFO" | grep -q "flags=.*runtime"; then
-            echo "Error: hardened runtime flag missing"
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+          SIGN_INFO=$(codesign -dv --verbose=4 "$APP_PATH" 2>&1)
+          if echo "$SIGN_INFO" | grep -q "Authority=Developer ID Application"; then
+            echo "Error: expected an ad-hoc macOS build, but found a Developer ID signature"
             exit 1
           fi
-
-          # Require notary ticket stapled
-          xcrun stapler validate "$APP_PATH"
-
-          ENTITLEMENTS=$(codesign -d --entitlements :- "$APP_PATH" 2>&1 || true)
-          if echo "$ENTITLEMENTS" | grep -q "com.apple.security.app-sandbox"; then
-            echo "Error: app sandbox entitlement is present"
+          if ! echo "$SIGN_INFO" | grep -q "Signature=adhoc"; then
+            echo "Error: expected a valid ad-hoc signature"
             exit 1
           fi
-          for key in \
-            com.apple.security.cs.allow-jit \
-            com.apple.security.cs.allow-unsigned-executable-memory \
-            com.apple.security.cs.disable-library-validation
-          do
-            if ! echo "$ENTITLEMENTS" | grep -q "<key>$key</key>"; then
-              echo "Error: required entitlement missing: $key"
-              exit 1
-            fi
-          done
+          echo "Ad-hoc macOS app prepared at $APP_PATH"
 
       - name: Upload DMG / ZIP / blockmaps to release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
@@ -383,18 +369,16 @@ jobs:
           OPENCHAMBER_VERSION: ${{ needs.create-release.outputs.version }}
         run: node packages/electron/scripts/finalize-latest-yml.mjs
 
-      - name: Upload combined manifests to release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+      - name: Archive combined macOS manifest for diagnostics
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          tag_name: v${{ needs.create-release.outputs.version }}
-          files: |
-            ${{ runner.temp }}/latest-mac.yml
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: unsigned-macos-update-manifest
+          path: ${{ runner.temp }}/latest-mac.yml
+          retention-days: 7
 
   mobile-release:
     needs: create-release
-    if: ${{ github.event.inputs.dry_run != 'true' }}
+    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.release_scope == 'all' && !inputs.dry_run) }}
     uses: ./.github/workflows/mobile-release.yml
     with:
       version_name: ${{ needs.create-release.outputs.version }}
@@ -405,6 +389,18 @@ jobs:
 
   finalize-release:
     needs: [create-release, build-desktop-electron-macos, build-desktop-electron-windows, publish-npm, combine-electron-manifests, mobile-release]
+    if: >-
+      ${{
+        always() &&
+        !cancelled() &&
+        (github.event_name != 'workflow_dispatch' || !inputs.dry_run) &&
+        needs.create-release.result == 'success' &&
+        needs.build-desktop-electron-macos.result == 'success' &&
+        needs.build-desktop-electron-windows.result == 'success' &&
+        needs.combine-electron-manifests.result == 'success' &&
+        (needs.publish-npm.result == 'success' || needs.publish-npm.result == 'skipped') &&
+        (needs.mobile-release.result == 'success' || needs.mobile-release.result == 'skipped')
+      }}
     runs-on: ubuntu-latest
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}

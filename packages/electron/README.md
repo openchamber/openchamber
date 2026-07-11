@@ -70,7 +70,7 @@ macOS builds produce `dmg` and `zip` artifacts. Windows builds produce an NSIS i
 
 ## Platform Notes
 
-macOS packaging needs Xcode/build tools for notarized builds and icon asset compilation.
+macOS packaging needs Xcode/build tools for ad-hoc-signed builds and icon asset compilation. Ad-hoc signing requires no Apple account and keeps Apple Silicon executables runnable, but it is not Developer ID signing or notarization, so users must explicitly allow the app in macOS Privacy & Security on first launch.
 
 Windows packaging needs NSIS support through `electron-builder`. If no Windows signing env is set, `package.mjs` disables code signing and builds an unsigned installer.
 
@@ -79,6 +79,19 @@ The package supports macOS and Windows desktop features. Some native discovery h
 ## Bundled OpenCode CLI
 
 Packaged Desktop builds include the official OpenCode CLI that matches the pinned `@opencode-ai/sdk` version in the root `package.json`. `prepare:opencode-cli` downloads the platform-specific release artifact, caches it under `packages/electron/.cache/opencode-cli`, stages `opencode` or `opencode.exe` into `resources/opencode-cli`, and verifies `opencode --version` before packaging. Re-running the step is fast when the staged binary already matches the pinned version.
+
+## Releases and automatic updates
+
+Packaged desktop apps read updates from GitHub Releases in `yee94/openchamber`. The publish target in `package.json` and the runtime feed in `main.mjs` must continue to point to the same repository.
+
+The `Release` GitHub Actions workflow runs for `v*` tags or by manual dispatch. Before starting a release:
+
+1. Run `bun run version:bump -- <version>` and update the matching `CHANGELOG.md` section.
+2. No Apple signing or notarization secrets are required for the ad-hoc macOS desktop build.
+3. Configure `NPM_TOKEN` and the mobile signing secrets only when using the manual `all` scope or the tag-triggered full release.
+4. For a desktop-only release, manually dispatch the workflow with scope `desktop` (the default). Pushing tag `v<version>` retains the full-release behavior.
+
+The workflow creates the GitHub Release and uploads the desktop artifacts. Windows retains in-app automatic updates. Ad-hoc macOS builds cannot use Electron's in-app updater, so macOS users must download and install each release manually. A dry run keeps the Release as a draft. The version validation step fails early if the requested version differs from the root or Electron package version.
 
 Managed local Desktop startup prefers OpenCode binaries in this order:
 

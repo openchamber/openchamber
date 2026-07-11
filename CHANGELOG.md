@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.15.1] - 2026-07-11
+
+- **Desktop releases:** GitHub Releases and update metadata now publish from `yee94/openchamber`.
+- **macOS packaging:** desktop artifacts use ad-hoc signing with no Apple Developer account or notarization requirement; macOS updates are installed manually, while Windows retains in-app automatic updates.
+- **Release automation:** manual GitHub Actions releases can publish desktop artifacts without npm or mobile signing credentials, validate version consistency, and preserve dry-run releases as drafts.
+
 ## [1.15.0] - 2026-07-10
 
 - **Remote access:** a new [private relay](https://docs.openchamber.dev/private-relay/) lets you reach your instance from anywhere — no open ports and no third-party tunnel, over an end-to-end-encrypted tunnel. It turns on by itself when you pair a device over it and turns off once no paired device uses it (thanks to @yulia-ivashko).
