@@ -369,6 +369,34 @@
       },
       "items": [
         {
+          "label": "Connect a Device",
+          "link": "/connect-devices/",
+          "translations": {
+            "uk": "Підключення пристрою",
+            "zh-CN": "连接设备",
+            "es": "Conectar un dispositivo",
+            "pt-BR": "Conectar um dispositivo",
+            "ko": "기기 연결",
+            "pl": "Podłączanie urządzenia",
+            "fr": "Connecter un appareil",
+            "ja": "デバイスを接続"
+          }
+        },
+        {
+          "label": "Private Relay",
+          "link": "/private-relay/",
+          "translations": {
+            "uk": "Приватний Relay",
+            "zh-CN": "私密中继",
+            "es": "Relay privado",
+            "pt-BR": "Relay privado",
+            "ko": "프라이빗 릴레이",
+            "pl": "Prywatny relay",
+            "fr": "Relay privé",
+            "ja": "プライベートリレー"
+          }
+        },
+        {
           "label": "Tunnels",
           "link": "/tunnels/",
           "translations": {
@@ -397,17 +425,17 @@
           }
         },
         {
-          "label": "PWA & Mobile",
+          "label": "Mobile Apps & PWA",
           "link": "/mobile/",
           "translations": {
-            "uk": "PWA та мобільний доступ",
-            "zh-CN": "PWA 与移动端",
-            "es": "PWA y móvil",
-            "pt-BR": "PWA e celular",
-            "ko": "PWA 및 모바일",
-            "pl": "PWA i urządzenia mobilne",
-            "fr": "PWA et mobile",
-            "ja": "PWA とモバイル"
+            "uk": "Мобільні застосунки та PWA",
+            "zh-CN": "移动应用与 PWA",
+            "es": "Apps móviles y PWA",
+            "pt-BR": "Apps móveis e PWA",
+            "ko": "모바일 앱 및 PWA",
+            "pl": "Aplikacje mobilne i PWA",
+            "fr": "Apps mobiles et PWA",
+            "ja": "モバイルアプリと PWA"
           }
         },
         {

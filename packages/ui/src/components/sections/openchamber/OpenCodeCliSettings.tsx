@@ -71,7 +71,15 @@ export const OpenCodeCliSettings: React.FC = () => {
   const handleSaveAndReload = React.useCallback(async () => {
     setIsSaving(true);
     try {
-      await updateDesktopSettings({ opencodeBinary: value.trim() });
+      // Strip a wrapping quote pair (Windows "Copy as path" pastes) — literal
+      // quotes are never part of a real path.
+      const trimmed = value.trim();
+      const unquoted = trimmed.length >= 2
+        && ((trimmed.startsWith('"') && trimmed.endsWith('"'))
+          || (trimmed.startsWith("'") && trimmed.endsWith("'")))
+        ? trimmed.slice(1, -1).trim()
+        : trimmed;
+      await updateDesktopSettings({ opencodeBinary: unquoted });
       await reloadOpenCodeConfiguration({
         message: t('settings.openchamber.opencodeCli.actions.restartingOpenCode'),
         mode: 'projects',

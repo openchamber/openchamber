@@ -67,12 +67,13 @@ Options:
   --web-mode <hmr|hmr-lan|full>
   --mobile-mode <ios-sim-local|ios-sim-lan|android-local|android-lan>
   --mobile-task <task>
+  --adb-address <host:port>        Wireless ADB address for android-connect
   --vsix-cleanup <delete|keep>
   --version <semver>
   -h, --help
 
 Mobile tasks:
-  build, sync, android-devices, android-deploy-usb, android-run, android-logcat,
+  build, sync, android-devices, android-connect, android-deploy-usb, android-run, android-logcat,
   ios-sim-build, ios-sim-run, ios-sim-serve, ios-sim-kill, ios-device-sync-debug
 `);
 }
@@ -114,6 +115,9 @@ function parseArgs(argv) {
         break;
       case '--mobile-task':
         options.mobileTask = readValue();
+        break;
+      case '--adb-address':
+        options.adbAddress = readValue();
         break;
       case '--vsix-cleanup':
         options.vsixCleanup = readValue();
@@ -169,6 +173,18 @@ function step(label, fn) {
   return result;
 }
 
+function printReleaseNextSteps(version) {
+  log.success(`Release v${version} prepared locally`);
+  log.info('Next steps:');
+  console.log(`  git add -A`);
+  console.log(`  git commit -m "release v${version}"`);
+  console.log(`  git tag v${version}`);
+  console.log(`  git push origin main --tags`);
+  console.log('');
+  console.log('This will trigger the GitHub Actions release workflow.');
+  console.log(`Make sure CHANGELOG.md contains a section like "## [${version}] - YYYY-MM-DD" before pushing.`);
+}
+
 function normalizeAction(action = '') {
   const normalized = action.toLowerCase();
   const aliases = {
@@ -204,6 +220,29 @@ async function chooseValue(current, choices, message) {
     process.exit(130);
   }
   return value;
+}
+
+async function chooseText(current, message, placeholder) {
+  if (current) return current;
+  ensurePromptable();
+  const value = await text({ message, placeholder });
+  if (isCancel(value)) {
+    cancel('Operation cancelled.');
+    process.exit(130);
+  }
+  return value;
+}
+
+function validateAdbAddress(address) {
+  const normalized = String(address || '').trim();
+  if (!/^[^\s:]+:\d{1,5}$/.test(normalized)) {
+    throw new Error('Invalid wireless ADB address. Use host:port, e.g. 192.168.1.139:38181');
+  }
+  const port = Number(normalized.split(':').at(-1));
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error('Invalid wireless ADB port. Use a port between 1 and 65535.');
+  }
+  return normalized;
 }
 
 function detectLanIp() {
@@ -245,6 +284,11 @@ function resetDirectory(directory) {
 function installedWebCli(directory) {
   const cliPath = path.join(directory, 'node_modules', '@openchamber', 'web', 'bin', 'cli.js');
   return existsSync(cliPath) ? cliPath : '';
+}
+
+function installedGlobalWebCli() {
+  const bunInstall = process.env.BUN_INSTALL || path.join(os.homedir(), '.bun');
+  return installedWebCli(path.join(bunInstall, 'install', 'global'));
 }
 
 function stopInstalledInstance(directory, port) {
@@ -331,7 +375,11 @@ async function deployWeb(options, config) {
     run('bun', ['remove', '-g', 'openchamber'], { allowFail: true, label: 'remove openchamber' });
   });
   step('Installing package globally', () => run('bun', ['add', '-g', packageFile]));
-  step(`Starting global instance on ${GLOBAL_PORT}`, () => run('openchamber', ['--port', GLOBAL_PORT], { env: { OPENCHAMBER_UI_PASSWORD: process.env.OPENCHAMBER_PASSWORD || '', OPENCHAMBER_HOST: '0.0.0.0' } }));
+  step(`Starting global instance on ${GLOBAL_PORT}`, () => {
+    const cliPath = installedGlobalWebCli();
+    if (!cliPath) throw new Error('Global OpenChamber CLI was not installed by bun add -g');
+    run('node', [cliPath, '--port', GLOBAL_PORT], { env: { OPENCHAMBER_UI_PASSWORD: process.env.OPENCHAMBER_PASSWORD || '', OPENCHAMBER_HOST: '0.0.0.0' } });
+  });
 }
 
 async function deployRemoteWeb(options, config) {
@@ -432,6 +480,7 @@ async function mobileTools(options, config) {
     { value: 'build', label: 'Build mobile web assets' },
     { value: 'sync', label: 'Sync native projects' },
     { value: 'android-devices', label: 'Android: list USB devices' },
+    { value: 'android-connect', label: 'Android: connect wireless ADB device' },
     { value: 'android-deploy-usb', label: 'Android: rebuild + deploy to USB device' },
     { value: 'android-run', label: 'Android: install + launch existing APK' },
     { value: 'android-logcat', label: 'Android: logcat' },
@@ -453,6 +502,11 @@ async function mobileTools(options, config) {
     case 'build': return mobileRun('Building mobile web assets', 'build');
     case 'sync': return mobileRun('Syncing native projects', 'sync');
     case 'android-devices': return mobileRun('Listing Android USB devices', 'android:devices');
+    case 'android-connect': {
+      const address = validateAdbAddress(await chooseText(options.adbAddress, 'Enter wireless ADB address', '192.168.1.139:38181'));
+      step(`Connecting wireless ADB device at ${address}`, () => run('node', ['scripts/with-mobile-env.mjs', `adb connect ${quote(address)}`], { cwd: mobileCwd }));
+      return mobileRun('Listing Android devices', 'android:devices');
+    }
     case 'android-deploy-usb':
       mobileRun('Building Android debug APK', 'build:android:debug');
       return mobileRun('Installing and launching Android app on USB device', 'android:run');
@@ -542,7 +596,7 @@ async function createRelease(options) {
   if (!/^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$/.test(version)) throw new Error('Invalid version format. Use semver, e.g. 1.4.7 or 1.4.7-beta.1');
   step('Validating codebase', () => run('bun', ['run', 'release:prepare']));
   step(`Bumping version to ${version}`, () => run('node', ['scripts/bump-version.mjs', version]));
-  log.success(`Release v${version} prepared locally`);
+  printReleaseNextSteps(version);
 }
 
 async function chooseAction(config) {

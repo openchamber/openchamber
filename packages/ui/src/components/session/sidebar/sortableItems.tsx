@@ -110,7 +110,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
       )}
       <Item onClick={onRenameStart}>
         <Icon name="pencil-ai" className="mr-1.5 h-4 w-4" />
-        {t('sessions.sidebar.session.menu.rename')}
+        {t('sessions.sidebar.project.actions.edit')}
       </Item>
       <Item onClick={onClose} className="text-destructive focus:text-destructive">
         <Icon name="close" className="mr-1.5 h-4 w-4" />

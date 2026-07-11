@@ -113,7 +113,10 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
       localStorage.removeItem('opencode-update-toast-dismissed-version');
     }
   }
-  if (settings.sttProvider === 'browser' || settings.sttProvider === 'server') {
+  if (typeof settings.dictationEnabled === 'boolean') {
+    localStorage.setItem('dictationEnabled', String(settings.dictationEnabled));
+  }
+  if (settings.sttProvider === 'local' || settings.sttProvider === 'openai-compatible') {
     localStorage.setItem('sttProvider', settings.sttProvider);
   }
   if (typeof settings.sttServerUrl === 'string') {
@@ -122,17 +125,11 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   if (typeof settings.sttModel === 'string') {
     localStorage.setItem('sttModel', settings.sttModel);
   }
+  if (typeof settings.sttLocalModel === 'string') {
+    localStorage.setItem('sttLocalModel', settings.sttLocalModel);
+  }
   if (typeof settings.sttLanguage === 'string') {
     localStorage.setItem('sttLanguage', settings.sttLanguage);
-  }
-  if (typeof settings.sttSilenceThresholdDb === 'number' && Number.isFinite(settings.sttSilenceThresholdDb)) {
-    localStorage.setItem('sttSilenceThresholdDb', String(settings.sttSilenceThresholdDb));
-  }
-  if (typeof settings.sttSilenceHoldMs === 'number' && Number.isFinite(settings.sttSilenceHoldMs)) {
-    localStorage.setItem('sttSilenceHoldMs', String(settings.sttSilenceHoldMs));
-  }
-  if (typeof settings.sttTranscribeOnStop === 'boolean') {
-    localStorage.setItem('sttTranscribeOnStop', String(settings.sttTranscribeOnStop));
   }
 };
 
@@ -426,6 +423,12 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.showReasoningTraces === 'boolean' && settings.showReasoningTraces !== store.showReasoningTraces) {
     store.setShowReasoningTraces(settings.showReasoningTraces);
   }
+  if (typeof settings.sessionRecapEnabled === 'boolean' && settings.sessionRecapEnabled !== store.sessionRecapEnabled) {
+    store.setSessionRecapEnabled(settings.sessionRecapEnabled);
+  }
+  if (typeof settings.sessionSuggestionEnabled === 'boolean' && settings.sessionSuggestionEnabled !== store.sessionSuggestionEnabled) {
+    store.setSessionSuggestionEnabled(settings.sessionSuggestionEnabled);
+  }
   if (typeof settings.collapsibleThinkingBlocks === 'boolean' && settings.collapsibleThinkingBlocks !== store.collapsibleThinkingBlocks) {
     store.setCollapsibleThinkingBlocks(settings.collapsibleThinkingBlocks);
   }
@@ -506,6 +509,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
   if (typeof settings.showToolFileIcons === 'boolean' && settings.showToolFileIcons !== store.showToolFileIcons) {
     store.setShowToolFileIcons(settings.showToolFileIcons);
+  }
+  if (typeof settings.codeBlockLineWrap === 'boolean' && settings.codeBlockLineWrap !== store.codeBlockLineWrap) {
+    store.setCodeBlockLineWrap(settings.codeBlockLineWrap);
   }
   if (typeof settings.showTurnChangedFiles === 'boolean' && settings.showTurnChangedFiles !== store.showTurnChangedFiles) {
     store.setShowTurnChangedFiles(settings.showTurnChangedFiles);
@@ -617,7 +623,10 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
   if (configStoreApi && configStore) {
     const nextConfigState: Partial<typeof configStore> = {};
-    if ((settings.sttProvider === 'browser' || settings.sttProvider === 'server') && settings.sttProvider !== configStore.sttProvider) {
+    if (typeof settings.dictationEnabled === 'boolean' && settings.dictationEnabled !== configStore.dictationEnabled) {
+      nextConfigState.dictationEnabled = settings.dictationEnabled;
+    }
+    if ((settings.sttProvider === 'local' || settings.sttProvider === 'openai-compatible') && settings.sttProvider !== configStore.sttProvider) {
       nextConfigState.sttProvider = settings.sttProvider;
     }
     if (typeof settings.sttServerUrl === 'string' && settings.sttServerUrl !== configStore.sttServerUrl) {
@@ -626,17 +635,11 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
     if (typeof settings.sttModel === 'string' && settings.sttModel !== configStore.sttModel) {
       nextConfigState.sttModel = settings.sttModel;
     }
+    if (typeof settings.sttLocalModel === 'string' && settings.sttLocalModel !== configStore.sttLocalModel) {
+      nextConfigState.sttLocalModel = settings.sttLocalModel;
+    }
     if (typeof settings.sttLanguage === 'string' && settings.sttLanguage !== configStore.sttLanguage) {
       nextConfigState.sttLanguage = settings.sttLanguage;
-    }
-    if (typeof settings.sttSilenceThresholdDb === 'number' && Number.isFinite(settings.sttSilenceThresholdDb) && settings.sttSilenceThresholdDb !== configStore.sttSilenceThresholdDb) {
-      nextConfigState.sttSilenceThresholdDb = settings.sttSilenceThresholdDb;
-    }
-    if (typeof settings.sttSilenceHoldMs === 'number' && Number.isFinite(settings.sttSilenceHoldMs) && settings.sttSilenceHoldMs !== configStore.sttSilenceHoldMs) {
-      nextConfigState.sttSilenceHoldMs = settings.sttSilenceHoldMs;
-    }
-    if (typeof settings.sttTranscribeOnStop === 'boolean' && settings.sttTranscribeOnStop !== configStore.sttTranscribeOnStop) {
-      nextConfigState.sttTranscribeOnStop = settings.sttTranscribeOnStop;
     }
     if (Object.keys(nextConfigState).length > 0) {
       configStoreApi.setState(nextConfigState);
@@ -747,6 +750,12 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.desktopLanAccessEnabled === 'boolean') {
     result.desktopLanAccessEnabled = candidate.desktopLanAccessEnabled;
   }
+  if (typeof candidate.desktopKeepAwakeEnabled === 'boolean') {
+    result.desktopKeepAwakeEnabled = candidate.desktopKeepAwakeEnabled;
+  }
+  if (typeof candidate.desktopMinimizeToTrayEnabled === 'boolean') {
+    result.desktopMinimizeToTrayEnabled = candidate.desktopMinimizeToTrayEnabled;
+  }
 
   const projects = sanitizeProjects(candidate.projects);
   if (projects) {
@@ -773,6 +782,12 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.showReasoningTraces === 'boolean') {
     result.showReasoningTraces = candidate.showReasoningTraces;
+  }
+  if (typeof candidate.sessionRecapEnabled === 'boolean') {
+    result.sessionRecapEnabled = candidate.sessionRecapEnabled;
+  }
+  if (typeof candidate.sessionSuggestionEnabled === 'boolean') {
+    result.sessionSuggestionEnabled = candidate.sessionSuggestionEnabled;
   }
   if (typeof candidate.collapsibleThinkingBlocks === 'boolean') {
     result.collapsibleThinkingBlocks = candidate.collapsibleThinkingBlocks;
@@ -840,6 +855,12 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.defaultAgent === 'string' && candidate.defaultAgent.length > 0) {
     result.defaultAgent = candidate.defaultAgent;
+  }
+  if (typeof candidate.smallModelUseDefault === 'boolean') {
+    result.smallModelUseDefault = candidate.smallModelUseDefault;
+  }
+  if (typeof candidate.smallModelOverride === 'string' && candidate.smallModelOverride.length > 0) {
+    result.smallModelOverride = candidate.smallModelOverride;
   }
   if (typeof candidate.autoCreateWorktree === 'boolean') {
     result.autoCreateWorktree = candidate.autoCreateWorktree;
@@ -1038,6 +1059,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.showToolFileIcons === 'boolean') {
     result.showToolFileIcons = candidate.showToolFileIcons;
   }
+  if (typeof candidate.codeBlockLineWrap === 'boolean') {
+    result.codeBlockLineWrap = candidate.codeBlockLineWrap;
+  }
   if (typeof candidate.showTurnChangedFiles === 'boolean') {
     result.showTurnChangedFiles = candidate.showTurnChangedFiles;
   }
@@ -1206,8 +1230,16 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.responseStyleCustomInstructions === 'string') {
     result.responseStyleCustomInstructions = candidate.responseStyleCustomInstructions;
   }
-  if (candidate.sttProvider === 'browser' || candidate.sttProvider === 'server') {
+  if (typeof candidate.dictationEnabled === 'boolean') {
+    result.dictationEnabled = candidate.dictationEnabled;
+  }
+  if (candidate.sttProvider === 'local' || candidate.sttProvider === 'openai-compatible') {
     result.sttProvider = candidate.sttProvider;
+  } else if (candidate.sttProvider === 'server') {
+    // Legacy provider migration: 'server' was the OpenAI-compatible endpoint.
+    result.sttProvider = 'openai-compatible';
+  } else if (candidate.sttProvider === 'browser' || candidate.sttProvider === 'wasm') {
+    result.sttProvider = 'local';
   }
   if (typeof candidate.sttServerUrl === 'string') {
     result.sttServerUrl = candidate.sttServerUrl.trim();
@@ -1215,17 +1247,11 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.sttModel === 'string') {
     result.sttModel = candidate.sttModel.trim();
   }
+  if (typeof candidate.sttLocalModel === 'string') {
+    result.sttLocalModel = candidate.sttLocalModel.trim();
+  }
   if (typeof candidate.sttLanguage === 'string') {
     result.sttLanguage = candidate.sttLanguage.trim();
-  }
-  if (typeof candidate.sttSilenceThresholdDb === 'number' && Number.isFinite(candidate.sttSilenceThresholdDb)) {
-    result.sttSilenceThresholdDb = candidate.sttSilenceThresholdDb;
-  }
-  if (typeof candidate.sttSilenceHoldMs === 'number' && Number.isFinite(candidate.sttSilenceHoldMs)) {
-    result.sttSilenceHoldMs = candidate.sttSilenceHoldMs;
-  }
-  if (typeof candidate.sttTranscribeOnStop === 'boolean') {
-    result.sttTranscribeOnStop = candidate.sttTranscribeOnStop;
   }
 
   return result;
