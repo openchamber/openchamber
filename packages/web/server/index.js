@@ -91,6 +91,9 @@ import { createClientPairingRuntime } from './lib/client-auth/pairing.js';
 import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
 import { attachRealtimeProxy } from './lib/realtime-proxy.js';
 import { createRelayService } from './lib/relay/service.js';
+import { createDaytonaService } from './lib/daytona/service.js';
+import { registerDaytonaRoutes } from './lib/daytona/routes.js';
+import { registerDaytonaProxyRoutes, attachDaytonaWsProxy } from './lib/daytona/proxy.js';
 import { createProxyMiddleware, responseInterceptor } from 'http-proxy-middleware';
 import webPush from 'web-push';
 
@@ -1394,6 +1397,25 @@ async function main(options = {}) {
   relayServiceInstance = relayService;
   relayService.registerRoutes(app);
 
+  // Daytona sandbox orchestration service: conditionally enabled when
+  // DAYTONA_API_KEY is set. Manages sandbox lifecycle, inactivity timeout,
+  // and proxies requests to OpenCode inside sandboxes.
+  const daytonaService = createDaytonaService({
+    logger: console,
+    onSandboxTimeout: (sessionId, sandboxId) => {
+      console.log(`[Daytona] Sandbox ${sandboxId} timed out for session ${sessionId}`);
+    },
+  });
+  if (daytonaService.isEnabled()) {
+    console.log('[Daytona] Service enabled, registering routes...');
+    registerDaytonaRoutes(app, { daytonaService, logger: console });
+    registerDaytonaProxyRoutes(app, { daytonaService, logger: console });
+    attachDaytonaWsProxy(server, { daytonaService, logger: console });
+    daytonaService.monitor.start();
+  } else {
+    console.log('[Daytona] Service disabled (DAYTONA_API_KEY not set)');
+  }
+
   await featureRoutesRuntime.registerRoutes(app, {
     crypto,
     fs,
@@ -1545,7 +1567,7 @@ async function main(options = {}) {
         port: managed ? openCodePort : null,
       };
     },
-    stop: (shutdownOptions = {}) => {
+    stop: async (shutdownOptions = {}) => {
       realtimeProxyRuntime.stop();
       clearInterval(relayReconcileTimer);
       try {
@@ -1557,6 +1579,13 @@ async function main(options = {}) {
         dictationRuntime?.stop?.();
       } catch {
         // best-effort shutdown of the dictation worker
+      }
+      if (daytonaService.isEnabled()) {
+        try {
+          await daytonaService.dispose();
+        } catch {
+          // best-effort teardown of Daytona sandboxes
+        }
       }
       return gracefulShutdown({ exitProcess: shutdownOptions.exitProcess ?? false });
     }
