@@ -25,13 +25,20 @@ openchamber --ui-password be-creative-here
 
 passkey 与当前密码绑定。如果你更改或移除密码，已保存的 passkey 会被清除，你需要重新添加它们。
 
+## 设备令牌
+
+通过 [连接设备](/zh-cn/connect-devices/) 配对的设备使用各自独立的设备令牌进行认证，而不是 UI 密码。配对链接只能使用一次，未使用也会过期；每台已配对的设备都会列在 **Settings → Remote Instances → 连接到此服务器** 中，你可以随时撤销任何一台。外出时的连接经由 [Private Relay](/zh-cn/private-relay/) 传输，它是端到端加密的，无法读取你的流量。
+
 ## 在暴露它之前
 
 - 默认情况下 OpenChamber 只监听你自己的机器（`127.0.0.1`）。需要一次刻意的更改才能更广泛地监听，并且你应该先设置密码。
-- 相比向互联网开放一个端口，更推荐使用 [隧道](/zh-cn/tunnels/) 或专用网络（比如 VPN）。
+- 对于你自己的设备，优先使用 [配对](/zh-cn/connect-devices/) 加 [Private Relay](/zh-cn/private-relay/) — 完全不对外暴露任何内容。
+- 如果你需要一个公开 URL，相比向互联网开放一个端口，更推荐使用 [隧道](/zh-cn/tunnels/) 或专用网络（比如 VPN）。
 - 如果你把 OpenChamber 放在你自己的 HTTPS 服务器后面，请参阅 [反向代理](/zh-cn/reverse-proxy/)。
 
 ## 相关内容
 
-- [隧道](/zh-cn/tunnels/) — 远程访问实例的推荐方式
+- [连接设备](/zh-cn/connect-devices/) — 一次性配对与设备级令牌
+- [Private Relay](/zh-cn/private-relay/) — 从任何地方进行端到端加密访问
+- [隧道](/zh-cn/tunnels/) — 需要时开放一个公开 URL
 - [反向代理](/zh-cn/reverse-proxy/) — 在你自己的服务器后面运行 OpenChamber

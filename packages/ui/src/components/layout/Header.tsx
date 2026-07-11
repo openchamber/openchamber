@@ -481,22 +481,23 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
               </div>
             ) : null}
 
-            <div className="py-2">
-              {rateLimitGroups.map((group, index) => {
+            {/* One elevated card per provider (same card language as the mobile
+                usage popover) instead of a flat run of divider-separated rows. */}
+            <div className="space-y-2 px-3 py-2.5">
+              {rateLimitGroups.map((group) => {
                 const providerExpandedFamilies = expandedFamilies[group.providerId] ?? [];
                 return (
-                  <React.Fragment key={group.providerId}>
-                    {index > 0 ? <div className="mx-4 my-2 border-t border-[var(--interactive-border)]" /> : null}
-                    <div className="flex items-center gap-2 px-4 py-2">
+                  <div key={group.providerId} className="min-w-0 rounded-xl bg-[var(--surface-muted)] p-3">
+                    <div className="flex items-center gap-2 pb-2">
                       <ProviderLogo providerId={group.providerId} className="h-4 w-4" />
                       <span className="typography-ui-label font-medium text-foreground">{group.providerName}</span>
                     </div>
                     {group.entries.length === 0 && (!group.modelFamilies || group.modelFamilies.length === 0) ? (
-                      <div className="px-4 pb-2">
-              <span className="typography-ui-label text-muted-foreground">{group.error ?? t('header.services.noRateLimitsReported')}</span>
+                      <div>
+                        <span className="typography-ui-label text-muted-foreground">{group.error ?? t('header.services.noRateLimitsReported')}</span>
                       </div>
                     ) : (
-                      <div className="space-y-3 px-4 pb-2">
+                      <div className="space-y-3">
                         {group.entries.map(([label, window]) => {
                           const displayPercent = quotaDisplayMode === 'remaining' ? window.remainingPercent : window.usedPercent;
                           const paceInfo = calculatePace(window.usedPercent, window.resetAt, window.windowSeconds, label);
@@ -585,7 +586,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
                         ) : null}
                       </div>
                     )}
-                  </React.Fragment>
+                  </div>
                 );
               })}
             </div>

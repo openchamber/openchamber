@@ -25,13 +25,20 @@ Une fois un mot de passe défini, vous pouvez ajouter des passkeys (Face ID, Tou
 
 Les passkeys sont liées au mot de passe actuel. Si vous changez ou supprimez le mot de passe, les passkeys enregistrées sont effacées et vous devrez les ajouter à nouveau.
 
+## Tokens d’appareil
+
+Les appareils associés via [Connecter un appareil](/connect-devices/) s’authentifient avec leurs propres tokens par appareil, pas avec le mot de passe UI. Les liens d’association sont à usage unique et expirent s’ils ne sont pas utilisés ; chaque appareil associé est listé dans **Paramètres → Instances distantes → Se connecter à ce serveur**, où vous pouvez révoquer n’importe lequel à tout moment. Les connexions hors du domicile passent par le [Relais privé](/private-relay/), qui est chiffré de bout en bout et ne peut pas lire votre trafic.
+
 ## Avant de l’exposer
 
 - Par défaut, OpenChamber n’écoute que sur votre propre machine (`127.0.0.1`). Écouter plus largement demande un changement volontaire, et vous devriez définir un mot de passe d’abord.
-- Préférez un [tunnel](/tunnels/) ou un réseau privé (comme un VPN) plutôt que d’ouvrir un port sur internet.
+- Pour vos propres appareils, préférez l’[association](/connect-devices/) avec le [Relais privé](/private-relay/) — rien n’est exposé publiquement du tout.
+- S’il vous faut une URL publique, préférez un [tunnel](/tunnels/) ou un réseau privé (comme un VPN) plutôt que d’ouvrir un port sur internet.
 - Si vous placez OpenChamber derrière votre propre serveur HTTPS, consultez [Reverse proxy](/reverse-proxy/).
 
 ## Pages liées
 
-- [Tunnels](/tunnels/) — la façon recommandée de joindre une instance à distance
+- [Connecter un appareil](/connect-devices/) — association à usage unique et tokens par appareil
+- [Relais privé](/private-relay/) — accès chiffré de bout en bout depuis n’importe où
+- [Tunnels](/tunnels/) — exposer une URL publique quand il en faut une
 - [Reverse proxy](/reverse-proxy/) — exécuter OpenChamber derrière votre propre serveur

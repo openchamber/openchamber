@@ -8,7 +8,6 @@ import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import { createEventPipeline } from "./event-pipeline"
 import { isVSCodeRuntime } from "@/lib/desktop"
 import { isMobileSurfaceRuntime } from "@/lib/runtimeSurface"
-import { isCapacitorApp } from "@/lib/platform"
 import { reduceGlobalEvent, applyGlobalProject, applyDirectoryEvent, type SessionMaterializationReason } from "./event-reducer"
 import { useGlobalSyncStore } from "./global-sync-store"
 import { ChildStoreManager, type DirectoryStore } from "./child-store"
@@ -547,19 +546,13 @@ export function needsSnapshotAfterStatusPoll(
 }
 
 export function shouldUseDisconnectedTransportPhase(reason: string | null): boolean {
-  if (typeof reason !== "string" || reason.length === 0) return false
-  // A close before the WS stream ever becomes ready typically means the
-  // server rejected the upgrade (for example missing/expired URL auth). Treat
-  // it as a terminal disconnect so the indicator stays red instead of looking
-  // like an in-progress reconnect that can self-heal without user action.
+  if (!reason) return false
   if (reason === "ws_closed_before_ready") return true
-  return (
-    reason.includes("auth")
+  return reason.includes("auth")
     || reason === "401"
     || reason === "403"
     || reason === "unauthorized"
     || reason === "forbidden"
-  )
 }
 
 // Decide whether the event stream is genuinely stale and warrants a full
@@ -1708,12 +1701,13 @@ export function SyncProvider(props: {
   directory: string
   children: React.ReactNode
 }) {
-  const storedMessageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport)
-  // Capacitor apps are locked to SSE: native WebSocket streaming is unreliable there (on
-  // Android events only arrive once the run finishes), while SSE streams correctly. The Chat
-  // settings UI disables the other options on mobile, but force it here too so the effective
-  // transport can't drift. Remove this override (and the UI lock) to re-enable WS on mobile.
-  const messageStreamTransport: 'auto' | 'ws' | 'sse' = isCapacitorApp() ? 'sse' : storedMessageStreamTransport
+  // Capacitor apps were previously locked to SSE because Android WebSocket
+  // upgrades appeared broken. Root cause was server-side: the Android WebView
+  // origin (https://localhost, androidScheme 'https') was missing from the
+  // packaged-client origin allowlist, so every WS upgrade was rejected with
+  // 403. With the origin allowlisted, mobile uses the same transport
+  // selection as everywhere else ('auto' falls back to SSE on WS failure).
+  const messageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport)
   const childStoresRef = useRef<ChildStoreManager | null>(null)
   if (!childStoresRef.current) childStoresRef.current = new ChildStoreManager()
   const childStores = childStoresRef.current
@@ -1729,11 +1723,6 @@ export function SyncProvider(props: {
   const pipelineReconnectRef = useRef<((reason?: string) => void) | null>(null)
   const pipelineHasConnectedRef = useRef(false)
   const pipelineDisconnectedBeforeFirstConnectRef = useRef(false)
-  // Phase observed immediately before the most recent browser `offline`
-  // transition. Captured in the `offline` listener (sibling useEffect below)
-  // and consumed by the `online` listener to restore the previous narrow
-  // state. Reset to `null` whenever the transport is observed to be online
-  // again, so each new offline transition re-records a fresh pre-offline phase.
   const preOfflinePhaseRef = useRef<RuntimeTransportPhase | null>(null)
 
   const system = useMemo<SyncSystem>(
@@ -1959,16 +1948,13 @@ export function SyncProvider(props: {
         }
         const { hasEverConnected } = useConfigStore.getState()
         const connectionPhase = hasEverConnected ? "reconnecting" : "connecting"
-        const runtimePhase = shouldUseDisconnectedTransportPhase(reason)
-          ? "disconnected"
-          : connectionPhase
         useConfigStore.setState({
           isConnected: false,
           connectionPhase,
           lastDisconnectReason: reason,
         })
         useConfigStore.getState().setRuntimeTransportState({
-          phase: runtimePhase,
+          phase: shouldUseDisconnectedTransportPhase(reason) ? "disconnected" : connectionPhase,
           reason,
           updatedAt: Date.now(),
         })
@@ -2000,47 +1986,24 @@ export function SyncProvider(props: {
     }
   }, [props.sdk, childStores, routingIndex, messageStreamTransport, triggerDirectoryResync])
 
-  // Browser-level online/offline observability for the narrow
-  // `runtimeTransportState` field. The pipeline itself only reads
-  // `navigator.onLine` synchronously inside `computeRetryDelay`; it does NOT
-  // install `online`/`offline` listeners, so subscribing here is safe and
-  // non-conflicting. The existing `connectionPhase`/`isConnected` readiness
-  // gating is intentionally NOT touched by these handlers — they only
-  // adjust the per-hop narrow state.
   useEffect(() => {
-    if (typeof window === "undefined") {
-      return
-    }
+    if (typeof window === "undefined") return
 
     const handleOffline = () => {
       const current = useConfigStore.getState().runtimeTransportState.phase
-      if (current === "offline") {
-        return
-      }
-      if (
-        current === "connected"
-        || current === "connecting"
-        || current === "reconnecting"
-        || current === "disconnected"
-      ) {
-        preOfflinePhaseRef.current = current
-        useConfigStore.getState().setRuntimeTransportState({
-          phase: "offline",
-          reason: "offline",
-          updatedAt: Date.now(),
-        })
-      }
+      if (current === "offline") return
+      preOfflinePhaseRef.current = current
+      useConfigStore.getState().setRuntimeTransportState({
+        phase: "offline",
+        reason: "offline",
+        updatedAt: Date.now(),
+      })
     }
 
     const handleOnline = () => {
       const restored = preOfflinePhaseRef.current
       preOfflinePhaseRef.current = null
-      if (restored === null || restored === "offline") {
-        // No recorded pre-offline phase, or the pre-offline state was
-        // already `offline` — let the event pipeline's `onReconnect`
-        // eventually set the narrow state to `connected`.
-        return
-      }
+      if (!restored || restored === "offline") return
       useConfigStore.getState().setRuntimeTransportState({
         phase: restored,
         reason: null,
