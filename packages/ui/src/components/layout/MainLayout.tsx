@@ -21,6 +21,7 @@ import { DrawerProvider } from '@/contexts/DrawerContext';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUpdatePolling } from '@/hooks/useUpdatePolling';
+import { useMobileDrawerSwipe } from '@/hooks/useMobileDrawerSwipe';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
@@ -356,6 +357,20 @@ export const MainLayout: React.FC = () => {
         setMobileRightSidebarOpen(!mobileRightSidebarOpen);
     }, [mobileLeftDrawerOpen, mobileRightSidebarOpen, setMobileSessionPanelOpen]);
 
+    // Edge swipe-right opens the session drawer; swipe-left closes it.
+    const {
+        onEdgePointerDown: onMobileLeftDrawerEdgePointerDown,
+        onDrawerPointerDown: onMobileLeftDrawerPointerDown,
+    } = useMobileDrawerSwipe({
+        isMobile,
+        isSettingsDialogOpen,
+        rightDrawerOpen: mobileRightSidebarOpen,
+        drawerOpen: mobileLeftDrawerOpen,
+        drawerX: leftDrawerX,
+        drawerWidthRef: leftDrawerWidth,
+        setDrawerOpen: setMobileSessionPanelOpen,
+    });
+
     const secondaryView = React.useMemo(() => {
         switch (activeMainTab) {
             case 'plan':
@@ -458,7 +473,7 @@ export const MainLayout: React.FC = () => {
                                 </div>
                             )}
                             {mobileLeftDrawerVisible && (
-                                <motion.div className="absolute inset-0 z-20 bg-sidebar" data-page-scroll-lock="true" style={{ x: leftDrawerX }} aria-hidden={!mobileLeftDrawerOpen}>
+                                <motion.div className="oc-mobile-session-drawer absolute inset-0 z-20 bg-sidebar" data-page-scroll-lock="true" style={{ x: leftDrawerX }} aria-hidden={!mobileLeftDrawerOpen} onPointerDown={onMobileLeftDrawerPointerDown}>
                                     <ErrorBoundary>
                                         <SessionSidebar mobileVariant />
                                     </ErrorBoundary>
@@ -470,6 +485,14 @@ export const MainLayout: React.FC = () => {
                                         <React.Suspense fallback={null}><GitView isActive={mobileRightSidebarOpen} /></React.Suspense>
                                     </ErrorBoundary>
                                 </motion.div>
+                            )}
+                            {!mobileLeftDrawerOpen && !mobileRightSidebarOpen && !isSettingsDialogOpen && (
+                                <div
+                                    className="absolute left-0 top-0 z-30 h-full w-7"
+                                    style={{ touchAction: 'pan-y' }}
+                                    onPointerDown={onMobileLeftDrawerEdgePointerDown}
+                                    aria-hidden
+                                />
                             )}
                         </main>
                     </div>

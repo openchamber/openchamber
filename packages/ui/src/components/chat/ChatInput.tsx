@@ -40,6 +40,7 @@ import { MobileAgentButton } from './MobileAgentButton';
 import { MobileModelButton } from './MobileModelButton';
 import { MobileSessionStatusBar, MobileSessionPanelTrigger } from './MobileSessionStatusBar';
 import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
+import { useSwipeUpToOpen } from '@/hooks/useSwipeUpToOpen';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 // useMessageStore removed — messages now come from sync system
@@ -1129,6 +1130,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const isExpandedInput = useUIStore((state) => state.isExpandedInput);
     const setExpandedInput = useUIStore((state) => state.setExpandedInput);
     const setTimelineDialogOpen = useUIStore((state) => state.setTimelineDialogOpen);
+    const setMobileSessionPanelOpen = useUIStore((state) => state.setMobileSessionPanelOpen);
+    const openMobileSessionPanelFromSwipe = React.useCallback(() => setMobileSessionPanelOpen(true), [setMobileSessionPanelOpen]);
+    const { onPointerDown: onComposerFooterSwipeUp } = useSwipeUpToOpen({ enabled: isMobile, onOpen: openMobileSessionPanelFromSwipe });
     const { git: runtimeGit, vscode: vscodeApi } = useRuntimeAPIs();
     const cycleAgentShortcutOverride = useUIStore((state) => state.shortcutOverrides.cycle_agent);
     const cycleAgentShortcut = React.useMemo(() => (
@@ -5285,8 +5289,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         style={{
                             borderBottomLeftRadius: chatInputRadius,
                             borderBottomRightRadius: chatInputRadius,
+                            touchAction: isMobile ? 'pan-x' : undefined,
                         }}
                         data-chat-input-footer="true"
+                        onPointerDown={onComposerFooterSwipeUp}
                     >
                         {isMobile ? (
                             <>
