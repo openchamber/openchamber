@@ -4,7 +4,7 @@ import type { Part } from '@opencode-ai/sdk/v2';
 import UserTextPart from './parts/UserTextPart';
 import ToolPart from './parts/ToolPart';
 import AssistantTextPart from './parts/AssistantTextPart';
-import ReasoningPart, { MergedReasoningPart } from './parts/ReasoningPart';
+import ReasoningPart from './parts/ReasoningPart';
 import { MessageFilesDisplay } from '../FileAttachment';
 import { TurnChangedFilesDropdown } from '../TurnChangedFilesDropdown';
 import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
@@ -1210,7 +1210,6 @@ const AssistantMessageBody = React.memo(({
     const [isForkSubmitting, setIsForkSubmitting] = React.useState(false);
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const collapsibleThinkingBlocks = useUIStore((state) => state.collapsibleThinkingBlocks);
-    const groupReasoningBlocks = useUIStore((state) => state.groupReasoningBlocks);
     const showSplitAssistantMessageActions = useUIStore((state) => state.showSplitAssistantMessageActions);
     const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
     const vscodeApi = useRuntimeAPIs().vscode;
@@ -1712,15 +1711,6 @@ const AssistantMessageBody = React.memo(({
         // Group consecutive static tools (read, grep, glob, etc.) into compact rows.
         // Expandable tools (bash, edit, task) get individual rows.
         // Text renders inline at its natural position.
-        // Reasoning: all reasoning parts for this message are merged into ONE block
-        // at the position of the first reasoning part (VSCode Copilot pattern).
-        const flatReasoningParts = visibleParts.filter((p) => {
-            if (p.type !== 'reasoning') return false;
-            const a = activityByPart.get(p);
-            return a?.kind !== 'reasoning';
-        });
-        let reasoningMergeRendered = false;
-
         let i = 0;
         while (i < visibleParts.length) {
             const part = visibleParts[i];
@@ -1782,20 +1772,6 @@ const AssistantMessageBody = React.memo(({
                                 onShowPopup={onShowPopup}
                             />
                         );
-                    } else if (groupReasoningBlocks) {
-                        // Merged mode (VSCode pattern): one block for all reasoning parts.
-                        if (!reasoningMergeRendered) {
-                            reasoningMergeRendered = true;
-                            rendered.push(
-                                <MergedReasoningPart
-                                    key={`reasoning-merged-${messageId}`}
-                                    parts={flatReasoningParts}
-                                    messageId={messageId}
-                                    streamPhase={effectiveStreamPhase}
-                                    onContentChange={onContentChange}
-                                />
-                            );
-                        }
                     } else {
                         // Per-part mode: each reasoning block at its natural position.
                         rendered.push(
@@ -1893,7 +1869,6 @@ const AssistantMessageBody = React.memo(({
         animateActivityRows,
         chatRenderMode,
         collapsibleThinkingBlocks,
-        groupReasoningBlocks,
         collapsedPreviewCount,
         expandedTools,
         isMobile,

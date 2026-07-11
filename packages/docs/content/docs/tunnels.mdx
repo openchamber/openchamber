@@ -5,7 +5,9 @@ description: Expose OpenChamber safely for remote and mobile access.
 
 # Tunnels
 
-A tunnel is a public link to your OpenChamber, so you can reach it from your phone or another network. Use `openchamber tunnel` to create one for a running instance.
+A tunnel is a public link to your OpenChamber, so you can reach it from an ordinary browser on another network. Use `openchamber tunnel` to create one for a running instance.
+
+> Connecting your **own devices** (the mobile app, another desktop) usually doesn't need a tunnel — [pair them](/connect-devices/) instead and let the end-to-end encrypted [Private Relay](/private-relay/) handle away-from-home access with zero setup.
 
 ## Prerequisites
 
@@ -111,6 +113,7 @@ openchamber tunnel stop --port 3000
 
 ## Related
 
+- [Connect a Device](/connect-devices/) — pair your own devices without a public URL
 - [Security](/security/) — protect the UI before exposing it
 - [Desktop Tunnels](/desktop-tunnels/) — desktop app tunnel setup without CLI startup
 - [PWA & Mobile](/mobile/) — reach OpenChamber from your phone

@@ -2,6 +2,7 @@ import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { prunePinnedSessionIds } from './pinnedSessionCleanup';
 
 type SafeStorageLike = {
   getItem: (key: string) => string | null;
@@ -154,22 +155,8 @@ export const useSidebarPersistence = (args: Args) => {
       return;
     }
 
-    if (sessions.length === 0) {
-      return;
-    }
-
-    const existingSessionIds = new Set(sessions.map((session) => session.id));
     setPinnedSessionIds((prev) => {
-      let changed = false;
-      const next = new Set<string>();
-      prev.forEach((id) => {
-        if (existingSessionIds.has(id)) {
-          next.add(id);
-        } else {
-          changed = true;
-        }
-      });
-      return changed ? next : prev;
+      return prunePinnedSessionIds(sessions, prev);
     });
   }, [hasLoadedGlobalSessions, sessions, setPinnedSessionIds]);
 

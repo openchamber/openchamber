@@ -18,6 +18,7 @@ import { formatProjectLabel } from './utils';
 import { useI18n } from '@/lib/i18n';
 import type { MainTab } from '@/stores/useUIStore';
 import { getSessionNodesActivityState } from './collapsedActivityState';
+import type { ProjectSortOrder } from '@/stores/useSessionDisplayStore';
 
 type ProjectSection = {
   project: {
@@ -70,6 +71,7 @@ type Props = {
   removeProject: (id: string) => void;
   projectHeaderSentinelRefs: React.MutableRefObject<Map<string, HTMLDivElement | null>>;
   reorderProjects: (fromIndex: number, toIndex: number) => void;
+  projectSortOrder: ProjectSortOrder;
   getOrderedGroups: (projectId: string, groups: SessionGroup[]) => SessionGroup[];
   setGroupOrderByProject: React.Dispatch<React.SetStateAction<Map<string, string[]>>>;
   openSidebarMenuKey: string | null;
@@ -192,6 +194,8 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
             collisionDetection={closestCenter}
             onDragEnd={(event) => {
               if (props.isInlineEditing) return;
+              // Drag only allowed in manual sort mode - indices from visual order don't match store order in other modes
+              if (props.projectSortOrder !== 'manual') return;
               const { active, over } = event;
               if (!over || active.id === over.id) return;
               const oldIndex = props.sectionsForRender.findIndex((section) => section.project.id === active.id);
@@ -231,6 +235,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                   <SortableProjectItem
                     key={projectKey}
                     id={projectKey}
+                    disabled={props.projectSortOrder !== 'manual'}
                     projectLabel={projectLabel}
                     projectDescription={projectDescription}
                     projectIcon={project.icon}

@@ -30,6 +30,7 @@ export const buildEmbeddedSessionChatURL = (
 
   const url = new URL(window.location.pathname, window.location.origin);
   url.searchParams.set('ocPanel', 'session-chat');
+  url.searchParams.set('surface', 'desktop');
   url.searchParams.set('sessionId', sessionID);
   if (readOnly) {
     url.searchParams.set('readOnly', '1');
