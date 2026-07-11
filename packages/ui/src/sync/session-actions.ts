@@ -27,6 +27,8 @@ import {
   withoutReviewSessionLink,
   type SessionMetadataRecord,
 } from "@/lib/sessionReviewMetadata"
+import { useDaytonaSandboxStore } from "@/stores/useDaytonaSandboxStore"
+import { createDaytonaSandbox } from "@/lib/daytona/api"
 
 const MESSAGE_REFETCH_LIMIT = 100
 const SEND_CONFIRMATION_REFETCH_LIMIT = 30
@@ -35,6 +37,26 @@ const SEND_CONFIRMATION_REFETCH_RETRY_MS = 150
 const MESSAGE_REFETCH_SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const UNREVERT_REFETCH_ATTEMPTS = 3
 const UNREVERT_REFETCH_RETRY_MS = 150
+
+// ---------------------------------------------------------------------------
+// Daytona sandbox provisioning (fire-and-forget, non-fatal)
+// ---------------------------------------------------------------------------
+async function provisionSandboxForSession(sessionId: string): Promise<void> {
+  const { sandboxMode, setSandboxStatus } = useDaytonaSandboxStore.getState()
+  if (!sandboxMode) return
+
+  setSandboxStatus(sessionId, { status: 'creating' })
+  try {
+    const info = await createDaytonaSandbox(sessionId)
+    setSandboxStatus(sessionId, info)
+  } catch (error) {
+    console.error("[session-actions] sandbox provisioning failed (non-fatal):", error)
+    setSandboxStatus(sessionId, {
+      status: 'error',
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
 
 // Reference set by SyncProvider — allows actions to access SDK and stores
 let _sdk: OpencodeClient | null = null
@@ -441,6 +463,11 @@ export async function createSession(
     useSessionUIStore.getState().setCurrentSession(session.id, sessionDirectory)
     useSessionUIStore.getState().markSessionAsOpenChamberCreated(session.id)
     useGlobalSessionsStore.getState().upsertSession(session)
+
+    // Provision a Daytona sandbox for this session if sandbox mode is enabled.
+    // Failures are non-fatal: the session still works without a sandbox.
+    void provisionSandboxForSession(session.id)
+
     return session
   } catch (error) {
     console.error("[session-actions] createSession failed", error)
