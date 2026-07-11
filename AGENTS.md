@@ -2,21 +2,20 @@
 
 ## Core purpose
 
-OpenChamber provides UI runtimes (web/desktop/VS Code) for interacting with an OpenCode server (local auto-start or remote URL). Official OpenCode traffic goes through `@opencode-ai/sdk`; OpenChamber-owned runtime capabilities go through `RuntimeAPIs`, `runtimeFetch`, and browser/realtime URL helpers.
+OpenChamber provides UI runtimes (web and Android) for interacting with an OpenCode server (local auto-start or remote URL). Official OpenCode traffic goes through `@opencode-ai/sdk`; OpenChamber-owned runtime capabilities go through `RuntimeAPIs`, `runtimeFetch`, and browser/realtime URL helpers.
 
 ## Runtime architecture (IMPORTANT)
 
-- `Desktop` (Electron) boots the web server **in the same Node process** as the Electron main, then loads the web UI from `http://127.0.0.1:<port>`. No sidecar subprocess.
-- Backend/domain logic lives in `packages/web/server/*` (and `packages/vscode/*` for VS Code bridge/runtime parity). Electron owns the desktop shell/security boundary: windows, menus, dialogs, notifications, updater, deep-links, runtime host switching, local IPC gates, and SSH/tunnel management.
+- The web runtime serves the UI from `packages/web` and boots/attaches to an OpenCode server. Backend/domain logic lives in `packages/web/server/*`.
+- The Android app (`packages/mobile`) is a Capacitor shell that wraps the built web UI and connects to a self-hosted OpenChamber server over LAN, Cloudflare tunnel, or relay.
 - Do not add OpenCode feature backends to the native shell. Shared UI features should remain server/runtime APIs unless the capability is inherently native.
 
-### Desktop Shell
+### Android Shell
 
-- **Desktop work goes into `packages/electron/`.**
-- Desktop-side changes (IPC handlers, native integrations, window/quit/notification behavior) land in `packages/electron/main.mjs` + `packages/electron/preload.mjs`.
-- Electron imports the server via `@openchamber/web/server/index.js` (workspace dep) and calls `startWebUiServer({...})`. The returned handle has `getPort()` / `stop()`. Notifications flow via an `onDesktopNotification` callback injected at startup — no stdout-parsing IPC.
-- Windows OS integrations must avoid console-window flashes. Any non-user-visible `child_process` call on Windows (system probes, tool discovery, updater/install helpers, SSH/tunnel helpers, cleanup, etc.) should run the target executable directly with `windowsHide: true`; detached/background helpers usually also need `stdio: 'ignore'`. Avoid `cmd.exe /c` pipelines and wrappers that spawn console grandchildren (`taskkill`, `ping`, nested `powershell`, batch shims), because `windowsHide` only reliably applies to the first child. If a delayed/background operation must outlive the app process, use a single hidden first-level helper (for example `powershell.exe -WindowStyle Hidden -EncodedCommand ...`) or a native Node/Electron API. Only omit this for intentionally user-visible shells/apps.
-- Build/release: Electron is the desktop release target.
+- **Android work goes into `packages/mobile/`.** The native project is `packages/mobile/android` (Capacitor).
+- The app bundles the web build via `packages/mobile/scripts/prepare-web-assets.mjs`; there is no separate mobile UI codebase — it reuses `packages/web`.
+- Native plugin config (status bar, keyboard, push notifications) lives in `packages/mobile/capacitor.config.ts`.
+- Build/release: the Android APK/AAB is the mobile release target (see `.github/workflows/mobile-release.yml`).
 
 ## Tech stack (source of truth: `package.json`, resolved: `bun.lock`)
 
@@ -25,8 +24,7 @@ OpenChamber provides UI runtimes (web/desktop/VS Code) for interacting with an O
 - State: Zustand stores and sync layer (`packages/ui/src/stores/`, `packages/ui/src/sync/`)
 - UI primitives: Base UI (`@base-ui/react`, primary source for dropdown/select/dialog/menu/tooltip/etc. — wrappers live in `packages/ui/src/components/ui/`), Radix UI (`package.json` deps, legacy usages being migrated), HeroUI (`package.json` deps), Remixicon as SVG sprite source only (use shared `Icon`, never direct `@remixicon/react` imports)
 - Server: Express (`packages/web/server/index.js`)
-- Desktop: Electron 41 (`packages/electron/`)
-- VS Code: extension + webview (`packages/vscode/`)
+- Android: Capacitor (`packages/mobile/`)
 
 ## Monorepo layout
 
@@ -34,8 +32,8 @@ Workspaces are `packages/*` (see `package.json`).
 
 - Shared UI: `packages/ui`
 - Web app + server + CLI: `packages/web`
-- Desktop shell: `packages/electron`
-- VS Code extension: `packages/vscode`
+- Android app: `packages/mobile`
+- Documentation site: `packages/docs`
 
 ## Documentation map
 
@@ -173,19 +171,16 @@ All scripts are in `package.json`.
 
 - Validate: `bun run type-check`, `bun run lint`
 - Build all: `bun run build`
-- Desktop build (Electron — primary): `bun run electron:build`
-- Desktop dev (Electron): `bun run electron:dev`
-- VS Code build: `bun run vscode:build`
-- Release smoke build: `bun run release:test` (shell script: `scripts/test-release-build.sh`)
+- Web build: `bun run build:web`
+- Android build (debug APK): `bun run mobile:build:android:debug`
+- Android sync (build web + copy into native project): `bun run mobile:sync`
 
 ## Runtime entry points
 
 - Web bootstrap: `packages/web/src/main.tsx`
 - Web server: `packages/web/server/index.js`
 - Web CLI: `packages/web/bin/cli.js` (package bin: `packages/web/package.json`)
-- Desktop: `packages/electron/main.mjs` (boots the web server in-process via `startWebUiServer`, loads web UI over loopback; preload at `packages/electron/preload.mjs` exposes the desktop IPC bridge)
-- VS Code extension host: `packages/vscode/src/extension.ts`
-- VS Code webview bootstrap: `packages/vscode/webview/main.tsx`
+- Android: `packages/mobile/android` (Capacitor shell wrapping the built web UI; config at `packages/mobile/capacitor.config.ts`)
 
 ## OpenCode integration
 
@@ -232,7 +227,7 @@ All scripts are in `package.json`.
 
 - Keep diffs tight; avoid drive-by refactors.
 - Follow local precedent; inspect nearby code before introducing new patterns.
-- Backend changes: keep web, desktop, and VS Code behavior consistent when they share contracts.
+- Backend changes: keep web and Android behavior consistent when they share contracts.
 - TypeScript: avoid `any`, blind casts, and shape guessing.
 - React: prefer function components + hooks; use classes only when required.
 - Control flow: prefer early returns and explicit branching over nested ternaries.
@@ -266,7 +261,7 @@ All scripts are in `package.json`.
 
 ### Cross-runtime parity
 
-- If web defines a route or payload contract that shared UI depends on, keep VS Code and desktop parity where applicable.
+- If web defines a route or payload contract that shared UI depends on, keep Android parity where applicable.
 - Shared behavior differences must be intentional and visible in code.
 - Do not ship a web-only assumption into shared UI.
 
@@ -341,7 +336,7 @@ Project skills live under `.agents/skills/*/SKILL.md`. Before editing, agents **
 | Work being done | Required skill call |
 |---|---|
 | Terminal CLI commands, prompts, or output formatting, especially `packages/web/bin/*` | `skill({ name: "clack-cli-patterns" })` |
-| Shared UI data access, `RuntimeAPIs`, `runtimeFetch`, `runtime-url`, OpenCode SDK calls, VS Code bridges/proxies, authenticated browser assets, Electron runtime switching, or web server API endpoints | `skill({ name: "ui-api-decoupling" })` |
+| Shared UI data access, `RuntimeAPIs`, `runtimeFetch`, `runtime-url`, OpenCode SDK calls, authenticated browser assets, runtime switching, or web server API endpoints | `skill({ name: "ui-api-decoupling" })` |
 | UI components, styling, visual elements, colors, buttons, or icons | `skill({ name: "theme-system" })` |
 | User-facing UI text: labels, buttons, placeholders, aria labels, empty/error/loading states, toasts, dialogs, settings copy, or navigation labels | `skill({ name: "locale-ui-patterns" })` |
 | Settings pages, settings dialogs, configuration UI, or visual/layout changes inside Settings | `skill({ name: "settings-ui-patterns" })` |
@@ -412,7 +407,7 @@ A single store with N properties means every subscriber re-evaluates on every st
 
 ### Bootstrap resilience
 
-- **Treat startup 502/503 as transient.** Retry bootstrap/session-list flows with bounded retries/intervals, especially in VS Code where API readiness can lag bridge startup.
+- **Treat startup 502/503 as transient.** Retry bootstrap/session-list flows with bounded retries/intervals, since API readiness can lag server startup.
 - **Use polling recovery when failures are swallowed.** If an async loader resolves without throwing on failure, recover with interval retries gated by loaded-state checks.
 
 ### Scroll and DOM
@@ -454,7 +449,7 @@ A single store with N properties means every subscriber re-evaluates on every st
 - When adding store fields, ask: who reads this, how often does it change, and should it live elsewhere?
 - When touching polling or bootstrap, ask: can a lighter payload erase richer existing data?
 - When handling optimistic updates, ask: where is rollback, reconciliation, and duplicate prevention?
-- When changing shared routes or state contracts, ask: what breaks in web, desktop, and VS Code?
+- When changing shared routes or state contracts, ask: what breaks in web and Android?
 - When fixing a bug with a heuristic, prefer narrowing the heuristic over widening it.
 
 ## Validation expectations

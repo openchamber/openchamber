@@ -1,8 +1,7 @@
 // Install / launch the debug APK on a connected Android device via adb.
 //
-// Mirrors scripts/ios-sim.mjs for the iOS simulator. Run through with-mobile-env.mjs so adb
-// (ANDROID_HOME/platform-tools) and the JDK are on PATH. Build the APK first with
-// `bun run build:android:debug`; `run` installs + launches it.
+// Run through with-mobile-env.mjs so adb (ANDROID_HOME/platform-tools) and the JDK are
+// on PATH. Build the APK first with `bun run build:android:debug`; `run` installs + launches it.
 
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';

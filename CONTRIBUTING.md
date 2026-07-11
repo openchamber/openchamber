@@ -23,37 +23,22 @@ Run commands from the project root unless a section says otherwise.
 
 Both are configurable via env vars: `OPENCHAMBER_PORT`, `OPENCHAMBER_HMR_UI_PORT`, `OPENCHAMBER_HMR_API_PORT`.
 
-### Desktop (Electron)
+### Android (Mobile)
+
+The Android app is a [Capacitor](https://capacitorjs.com/) shell that wraps the built web UI from `packages/web`.
 
 ```bash
-bun run electron:dev          # HMR web UI + Electron shell
-bun run electron:dev:bundled  # Electron shell using built web assets
-bun run electron:build        # Package desktop app for the current platform
+bun run mobile:build                 # Build web assets and stage them for the app
+bun run mobile:sync                  # Build + copy assets into the native Android project
+bun run mobile:build:android:debug   # Build a debug APK
+bun run mobile:open:android          # Open the project in Android Studio
 ```
 
-Desktop supports macOS and Windows. The build output is written to `packages/electron/dist`.
-
-macOS builds create `dmg` and `zip` files. You need Xcode/build tools for notarized packaging and icon asset work.
-
-Windows builds create an NSIS installer. If signing env vars are not set, the build script makes an unsigned installer.
-
-For desktop-specific details, see [`packages/electron/README.md`](./packages/electron/README.md).
-
-### VS Code Extension
-
-```bash
-bun run vscode:dev      # Watch mode + Extension Development Host
-bun run vscode:build    # Build extension + webview
-bun run vscode:package  # Create a local .vsix package
-```
-
-`bun run vscode:dev` opens an Extension Development Host automatically. You can override the editor or workspace with `OPENCHAMBER_VSCODE_BIN` and `OPENCHAMBER_VSCODE_DEV_WORKSPACE`.
-
-Example: `OPENCHAMBER_VSCODE_BIN=cursor bun run vscode:dev`.
+Requires the Android SDK (and a JDK). The native project lives in `packages/mobile/android`. See [`packages/mobile/README.md`](./packages/mobile/README.md) for device/emulator workflows.
 
 ### Shared UI (`packages/ui`)
 
-No standalone app server. This is a source-level library used by Web, Desktop, and VS Code.
+No standalone app server. This is a source-level library used by Web and the Android app.
 
 Useful package commands:
 
@@ -70,31 +55,9 @@ bun run lint:ui
 | `bun run build` | Build all workspaces |
 | `bun run build:web` | Build only `packages/web` |
 | `bun run build:ui` | Build only `packages/ui` |
-| `bun run build:electron` | Run Electron package build script without full packaging |
-| `bun run electron:build` | Build packaged desktop app for the current OS |
-| `bun run vscode:build` | Build the VS Code extension |
-| `bun run vscode:package` | Package the VS Code extension as `.vsix` |
+| `bun run mobile:build` | Build web assets and stage them for the Android app |
+| `bun run mobile:build:android:debug` | Build a debug Android APK |
 | `bun run pack:web` | Create a package archive for `@openchamber/web` |
-
-## Platform Build Notes
-
-You usually build desktop installers on the target platform.
-
-macOS:
-
-```bash
-bun run electron:build
-bun run release:test:intel
-bun run release:test:arm
-```
-
-Windows:
-
-```bash
-bun run electron:build
-```
-
-Linux is supported for web/CLI development. A Linux desktop app is still planned, so Electron packaging is mainly macOS and Windows right now.
 
 ## Before Submitting
 
@@ -132,8 +95,8 @@ bun run docs:validate
 packages/
   ui/        Shared React components, hooks, stores, and theme system
   web/       Web server (Express) + frontend (Vite) + CLI
-  electron/  Electron desktop shell
-  vscode/    VS Code extension (extension host + webview)
+  mobile/    Android app (Capacitor shell wrapping the web UI)
+  docs/      Documentation site source
 ```
 
 See [AGENTS.md](./AGENTS.md) for detailed architecture reference.

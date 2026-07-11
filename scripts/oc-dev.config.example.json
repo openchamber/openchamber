@@ -1,9 +1,4 @@
 {
-  "ios": {
-    "deviceName": "iPhone Example",
-    "useXcodeBeta": false,
-    "xcodeAppName": "Xcode"
-  },
   "features": {
     "releaseTools": false
   },

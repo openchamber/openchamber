@@ -6,7 +6,7 @@
 [![Discord](https://img.shields.io/badge/Discord-join.svg?style=flat&labelColor=100F0F&color=8B7EC8&logo=discord&logoColor=FFFCF0)](https://discord.gg/ZYRSdnwwKA)
 [![Support the project](https://img.shields.io/badge/Support-Project-black?style=flat&labelColor=100F0F&color=EC8B49&logo=ko-fi&logoColor=FFFCF0)](https://ko-fi.com/G2G41SAWNS)
 
-## **OpenCode, everywhere.** Desktop. Browser. Phone.
+## **OpenCode, everywhere.** Self-hosted server. Browser. Android.
 
 ### A rich interface for [OpenCode](https://opencode.ai). Review diffs, manage agents, run dev servers, and keep the big picture while your AI codes.
 
@@ -18,7 +18,6 @@
 ![Tool Output](docs/references/tool_output_example.png)
 ![Settings](docs/references/settings_example.png)
 ![Diff View](docs/references/diff_example.png)
-![VS Code Extension](packages/vscode/extension.jpg)
 
 <p>
 <img src="docs/references/pwa_chat_example.png" width="45%" alt="PWA Chat">
@@ -57,42 +56,23 @@
 - Background notifications plus reliable cross-tab session activity tracking
 - Built-in self-update + restart flow that keeps your server settings intact
 
-### Desktop (macOS + Windows)
+### Android
 
-- Floating Mini Chat: keep a small always-on-top assistant beside your editor, browser, or terminal
-- Multiple native windows for separate projects or sessions
-- Native notifications for task alerts while OpenChamber is hidden
-- One-click open in VS Code, Cursor, Terminal, Finder, Explorer, and more
-- Desktop host switcher for local and remote OpenChamber instances
-- Convenient tunnel management without manual setup
-- Deep-link connections for joining remote OpenChamber from a link
-- SSH remote access with host import, connection management, and port forwarding
+- Native Android app (Capacitor shell) wrapping the mobile-optimized web UI
+- Connect to your self-hosted OpenChamber server over LAN, Cloudflare tunnel, or relay
+- Push notifications for task alerts
+- Mobile-first chat controls and keyboard-safe layouts
 
-### VS Code Extension
-
-- Editor-native workflow: open files directly from tool output and keep sessions beside your code
-- Agent Manager for parallel multi-model runs from a single prompt
-- Right-click actions to add context, explain selections, and improve code in-place
-- In-extension settings, responsive layout, and theme mapping that matches your editor
-- Hardened runtime lifecycle and health checks for faster startup and fewer stuck reconnect states
-
-### Custom Themes
+### Highlights
 
 - **Use it from anywhere** - Cloudflare tunnel with QR code onboarding. Scan, connect, code from your couch.
 - **Branchable chat timeline** - Undo, redo, fork from any turn. Explore different approaches without losing your place.
 - **GitHub-native workflows** - Start sessions from issues and PRs with context already attached. Review checks, merge - all in-app.
 - **Project Actions** - Run dev servers, configure SSH port forwarding, open remote URLs locally. Your project commands, one click away.
-- **Connect to remote machines** - Desktop app connects to remote OpenChamber instances over SSH, with dedicated lifecycle and UX flows.
 
 ## Quick Start
 
-> **Prerequisite:** Desktop bundles the matching OpenCode CLI. CLI/Web and VS Code use your installed [OpenCode CLI](https://opencode.ai).
-
-### **Desktop (macOS + Windows)**
-Download from [Releases](https://github.com/btriapitsyn/openchamber/releases).
-
-### **VS Code**
-Install from [Marketplace](https://marketplace.visualstudio.com/items?itemName=fedaykindev.openchamber) or search "OpenChamber" in Extensions.
+> **Prerequisite:** The server uses your installed [OpenCode CLI](https://opencode.ai).
 
 ### **CLI (Web + PWA)**
 _requires Node.js 22+_
@@ -121,7 +101,7 @@ openchamber tunnel start --provider cloudflare --mode quick --qr
 openchamber tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
 openchamber tunnel status --all      # Show tunnel state across instances
 openchamber tunnel stop --port 3000  # Stop tunnel only (server stays running)
-openchamber connect-url --port 3000  # Add this server to OpenChamber Desktop
+openchamber connect-url --port 3000  # Add this server to another OpenChamber instance
 openchamber connect-url --server http://host:3000 --qr
 openchamber connect-url --port 3000 --qr
 openchamber logs                     # Follow latest instance logs
@@ -149,7 +129,7 @@ Expose OpenChamber itself on your LAN:
 openchamber --lan --port 3000 --ui-password secret
 ```
 
-Add this server to OpenChamber Desktop or another OpenChamber app:
+Add this server to another OpenChamber app or instance:
 ```bash
 openchamber connect-url --port 3000 --qr
 ```
@@ -161,11 +141,11 @@ Headless/API-only setup for a remote machine:
 openchamber connect-url --port 3000 --api-only --lan --server http://your-host-or-ip:3000 --qr --ui-password secret
 ```
 
-This runs OpenChamber as an API-only server without the desktop app or browser UI assets on that machine, then creates a link for Desktop to import. `--lan` makes the server reachable from other machines. `--server` is the address Desktop should use.
+This runs OpenChamber as an API-only server without the browser UI assets on that machine, then creates a link for another OpenChamber instance to import. `--lan` makes the server reachable from other machines. `--server` is the address the client should use.
 
 When OpenChamber was started with `--lan` or `--host 0.0.0.0`, `connect-url` automatically uses a detected LAN IP instead of `127.0.0.1`. Use `--server http://host:3000` to override the advertised address, and include `--lan` when `connect-url` needs to start the server for LAN access.
 
-Paste the printed `openchamber://connect?...` link in Desktop under Settings -> Remote Instances -> Direct Instances -> Import Link. The link contains the server URL and a client token. It does not enable browser UI password protection; use `--ui-password` when exposing a server beyond localhost.
+Paste the printed `openchamber://connect?...` link in another OpenChamber instance under Settings -> Remote Instances -> Direct Instances -> Import Link. The link contains the server URL and a client token. It does not enable browser UI password protection; use `--ui-password` when exposing a server beyond localhost.
 
 </details>
 
@@ -352,27 +332,12 @@ chown -R 1000:1000 data/
 </details>
 
 <details>
-<summary><strong>Desktop (macOS + Windows)</strong></summary>
+<summary><strong>Android</strong></summary>
 
-- Floating Mini Chat: keep a small always-on-top assistant beside your editor, browser, or terminal
-- Multiple native windows for separate projects or sessions
-- Native notifications for task alerts while OpenChamber is hidden
-- One-click open in VS Code, Cursor, Terminal, Finder, Explorer, and more
-- Desktop host switcher for local and remote OpenChamber instances
-- Convenient tunnel management without manual setup
-- Deep-link connections for joining remote OpenChamber from a link
-- SSH remote access with host import, connection management, and port forwarding
-
-</details>
-
-<details>
-<summary><strong>VS Code Extension</strong></summary>
-
-- Editor-native: open files from tool output, keep sessions beside your code
-- Agent Manager for parallel multi-model runs from a single prompt
-- Right-click actions: add context, explain selections, improve code in-place
-- Session editor panel, responsive layout, and theme mapping to your editor
-- Edit-style tool results open directly in focused diff views
+- Native Android app (Capacitor shell) wrapping the mobile-optimized web UI
+- Connects to your self-hosted OpenChamber server over LAN, Cloudflare tunnel, or relay
+- Push notifications for task alerts
+- Mobile-first chat controls, keyboard-safe layouts, and drag-to-reorder projects
 
 </details>
 
@@ -406,8 +371,7 @@ chown -R 1000:1000 data/
 
 Active development. Here's what's being worked on or planned:
 
-- Linux desktop app
-- Mobile app with remote instance and laptop connectivity
+- Android app enhancements: remote instance and laptop connectivity
 - More built-in tunneling options
 - Kanban board for multi-agent management - keeping the human in the loop and in control
 - Custom OpenCode plugins/tools built-in catalog
