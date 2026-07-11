@@ -23,10 +23,6 @@ import { getSyncConfig, subscribeToSyncConfigChanges } from "@/sync/sync-refs";
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
 const MODELS_DEV_PROXY_URL = "/api/openchamber/models-metadata";
-const STT_SILENCE_THRESHOLD_DB_MIN = -100;
-const STT_SILENCE_THRESHOLD_DB_MAX = 0;
-const STT_SILENCE_HOLD_MS_MIN = 250;
-const STT_SILENCE_HOLD_MS_MAX = 10000;
 
 const FALLBACK_PROVIDER_ID = "opencode";
 const FALLBACK_MODEL_ID = "big-pickle";
@@ -38,18 +34,19 @@ const GIT_UTILITY_PROVIDER_ID = "zen";
 const GIT_UTILITY_PREFERRED_MODEL_ID = "big-pickle";
 const PROVIDER_CONFIG_REFRESH_CONCURRENCY = 4;
 
-const normalizeSttSilenceThresholdDb = (value: unknown): number | undefined => {
-    if (typeof value !== 'number' || !Number.isFinite(value)) {
-        return undefined;
+const normalizeSttProvider = (value: unknown): 'local' | 'openai-compatible' | undefined => {
+    if (value === 'local' || value === 'openai-compatible') {
+        return value;
     }
-    return Math.max(STT_SILENCE_THRESHOLD_DB_MIN, Math.min(STT_SILENCE_THRESHOLD_DB_MAX, value));
-};
-
-const normalizeSttSilenceHoldMs = (value: unknown): number | undefined => {
-    if (typeof value !== 'number' || !Number.isFinite(value)) {
-        return undefined;
+    // Legacy providers: 'server' used an OpenAI-compatible endpoint;
+    // 'browser' and 'wasm' map to the local default.
+    if (value === 'server') {
+        return 'openai-compatible';
     }
-    return Math.max(STT_SILENCE_HOLD_MS_MIN, Math.min(STT_SILENCE_HOLD_MS_MAX, Math.round(value)));
+    if (value === 'browser' || value === 'wasm') {
+        return 'local';
+    }
+    return undefined;
 };
 
 interface OpenChamberDefaults {
@@ -61,13 +58,11 @@ interface OpenChamberDefaults {
     defaultFileViewerPreview?: boolean;
     zenModel?: string;
     messageStreamTransport?: 'auto' | 'ws' | 'sse';
-    sttProvider?: 'browser' | 'server' | 'wasm';
+    sttProvider?: 'local' | 'openai-compatible';
     sttServerUrl?: string;
-    wasmSttModel?: string;
     sttModel?: string;
+    sttLocalModel?: string;
     sttLanguage?: string;
-    sttSilenceThresholdDb?: number;
-    sttSilenceHoldMs?: number;
 }
 
 const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
@@ -101,12 +96,11 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
                         data?.messageStreamTransport === 'ws' || data?.messageStreamTransport === 'sse' || data?.messageStreamTransport === 'auto'
                             ? data.messageStreamTransport
                             : undefined;
-                    const sttProvider = data?.sttProvider === 'browser' || data?.sttProvider === 'server' || data?.sttProvider === 'wasm' ? data.sttProvider : undefined;
+                    const sttProvider = normalizeSttProvider(data?.sttProvider);
                     const sttServerUrl = typeof data?.sttServerUrl === 'string' ? data.sttServerUrl.trim() : undefined;
                     const sttModel = typeof data?.sttModel === 'string' ? data.sttModel.trim() : undefined;
+                    const sttLocalModel = typeof data?.sttLocalModel === 'string' ? data.sttLocalModel.trim() : undefined;
                     const sttLanguage = typeof data?.sttLanguage === 'string' ? data.sttLanguage.trim() : undefined;
-                    const sttSilenceThresholdDb = normalizeSttSilenceThresholdDb(data?.sttSilenceThresholdDb);
-                    const sttSilenceHoldMs = normalizeSttSilenceHoldMs(data?.sttSilenceHoldMs);
 
                     return finish('runtime-settings', {
                         defaultModel: defaultModel.length > 0 ? defaultModel : undefined,
@@ -120,9 +114,8 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
                         sttProvider,
                         sttServerUrl,
                         sttModel,
+                        sttLocalModel,
                         sttLanguage,
-                        sttSilenceThresholdDb,
-                        sttSilenceHoldMs,
                     });
                 }
             } catch {
@@ -149,12 +142,11 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
             data?.messageStreamTransport === 'ws' || data?.messageStreamTransport === 'sse' || data?.messageStreamTransport === 'auto'
                 ? data.messageStreamTransport
                 : undefined;
-        const sttProvider = data?.sttProvider === 'browser' || data?.sttProvider === 'server' ? data.sttProvider : undefined;
+        const sttProvider = normalizeSttProvider(data?.sttProvider);
         const sttServerUrl = typeof data?.sttServerUrl === 'string' ? data.sttServerUrl.trim() : undefined;
         const sttModel = typeof data?.sttModel === 'string' ? data.sttModel.trim() : undefined;
+        const sttLocalModel = typeof data?.sttLocalModel === 'string' ? data.sttLocalModel.trim() : undefined;
         const sttLanguage = typeof data?.sttLanguage === 'string' ? data.sttLanguage.trim() : undefined;
-        const sttSilenceThresholdDb = normalizeSttSilenceThresholdDb(data?.sttSilenceThresholdDb);
-        const sttSilenceHoldMs = normalizeSttSilenceHoldMs(data?.sttSilenceHoldMs);
 
         return finish('settings-route', {
             defaultModel: defaultModel.length > 0 ? defaultModel : undefined,
@@ -168,9 +160,8 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
             sttProvider,
             sttServerUrl,
             sttModel,
+            sttLocalModel,
             sttLanguage,
-            sttSilenceThresholdDb,
-            sttSilenceHoldMs,
         });
     } catch (error) {
         markStartupTrace('config.defaults:error', { error: error instanceof Error ? error.message : String(error) });
@@ -290,7 +281,7 @@ type DefaultAgentModelSelection = {
 // fresh draft (applyDefaultModelAgentSelection), so the two paths stay identical.
 //
 //   Agent: settings.defaultAgent → opencode default_agent → build → first primary → first
-//   Model: settings.defaultModel → resolved agent's pinned model+variant → opencode config.model
+//   Model: project.defaultModel → settings.defaultModel → resolved agent's pinned model+variant → opencode config.model
 //          → opencode/big-pickle → first
 //
 // The opencode default_agent / default model (config fields on the OpenCode server) are honored
@@ -301,6 +292,7 @@ type DefaultAgentModelSelection = {
 const resolveDefaultAgentModelSelection = ({
     agents,
     providers,
+    projectDefaultModel,
     settingsDefaultAgent,
     settingsDefaultModel,
     settingsDefaultVariant,
@@ -309,6 +301,7 @@ const resolveDefaultAgentModelSelection = ({
 }: {
     agents: Agent[];
     providers: ProviderWithModelList[];
+    projectDefaultModel?: string;
     settingsDefaultAgent?: string;
     settingsDefaultModel?: string;
     settingsDefaultVariant?: string;
@@ -357,12 +350,14 @@ const resolveDefaultAgentModelSelection = ({
     let modelId: string | undefined;
     let variant: string | undefined;
 
-    if (settingsDefaultModel) {
-        const parsed = parseModelString(settingsDefaultModel);
+    const effectiveDefaultModel = projectDefaultModel || settingsDefaultModel;
+
+    if (effectiveDefaultModel) {
+        const parsed = parseModelString(effectiveDefaultModel);
         if (parsed && hasProviderModel(providers, parsed.providerId, parsed.modelId)) {
             providerId = parsed.providerId;
             modelId = parsed.modelId;
-            variant = resolveVariant(providerId, modelId, settingsDefaultVariant);
+            variant = resolveVariant(providerId, modelId, projectDefaultModel ? undefined : settingsDefaultVariant);
         }
     }
 
@@ -1015,33 +1010,31 @@ interface ConfigStore {
     settingsZenModel: string | undefined;
     settingsMessageStreamTransport: 'auto' | 'ws' | 'sse';
     // Voice provider preference ('browser', 'openai', 'openai-compatible', or 'say' for macOS)
-    voiceProvider: 'browser' | 'openai' | 'openai-compatible' | 'say';
-    setVoiceProvider: (provider: 'browser' | 'openai' | 'openai-compatible' | 'say') => void;
+    voiceProvider: 'browser' | 'local' | 'openai' | 'openai-compatible' | 'say';
+    setVoiceProvider: (provider: 'browser' | 'local' | 'openai' | 'openai-compatible' | 'say') => void;
     // TTS settings
     speechRate: number;
     speechPitch: number;
     speechVolume: number;
     sayVoice: string;
     browserVoice: string;
+    localTtsVoiceId: number;
     openaiVoice: string;
     openaiApiKey: string;
     openaiCompatibleUrl: string;
     openaiCompatibleApiKey: string;
     openaiCompatibleVoice: string;
     openaiCompatibleTtsModel: string;
-    // STT (speech-to-text) settings
-    sttProvider: 'browser' | 'server' | 'wasm';
+    // STT (dictation) settings
+    dictationEnabled: boolean;
+    sttProvider: 'local' | 'openai-compatible';
     sttServerUrl: string;
     sttApiKey: string;
     sttModel: string;
-    wasmSttModel: string;
+    sttLocalModel: string;
     sttLanguage: string;
-    sttSilenceThresholdDb: number;
-    sttSilenceHoldMs: number;
-    sttTranscribeOnStop: boolean;
     showMessageTTSButtons: boolean;
-    ttsInputMode: 'sanitized' | 'raw';
-    voiceModeEnabled: boolean;
+    ttsInputMode: 'sanitized' | 'raw' | 'summarized';
     // Summarization settings
     summarizeMessageTTS: boolean;
     summarizeVoiceConversation: boolean;
@@ -1052,24 +1045,22 @@ interface ConfigStore {
     setSpeechVolume: (volume: number) => void;
     setSayVoice: (voice: string) => void;
     setBrowserVoice: (voice: string) => void;
+    setLocalTtsVoiceId: (voiceId: number) => void;
     setOpenaiVoice: (voice: string) => void;
     setOpenaiApiKey: (apiKey: string) => void;
     setOpenaiCompatibleUrl: (url: string) => void;
     setOpenaiCompatibleApiKey: (apiKey: string) => void;
     setOpenaiCompatibleVoice: (voice: string) => void;
     setOpenaiCompatibleTtsModel: (model: string) => void;
-    setSttProvider: (provider: 'browser' | 'server' | 'wasm') => void;
+    setDictationEnabled: (enabled: boolean) => void;
+    setSttProvider: (provider: 'local' | 'openai-compatible') => void;
     setSttServerUrl: (url: string) => void;
     setSttApiKey: (apiKey: string) => void;
     setSttModel: (model: string) => void;
-    setWasmSttModel: (model: string) => void;
+    setSttLocalModel: (model: string) => void;
     setSttLanguage: (lang: string) => void;
-    setSttSilenceThresholdDb: (db: number) => void;
-    setSttSilenceHoldMs: (ms: number) => void;
-    setSttTranscribeOnStop: (enabled: boolean) => void;
     setShowMessageTTSButtons: (show: boolean) => void;
-    setTtsInputMode: (mode: 'sanitized' | 'raw') => void;
-    setVoiceModeEnabled: (enabled: boolean) => void;
+    setTtsInputMode: (mode: 'sanitized' | 'raw' | 'summarized') => void;
     setSummarizeMessageTTS: (enabled: boolean) => void;
     setSummarizeVoiceConversation: (enabled: boolean) => void;
     setSummarizeCharacterThreshold: (threshold: number) => void;
@@ -1087,7 +1078,7 @@ interface ConfigStore {
     cycleCurrentVariant: () => void;
     getCurrentModelVariants: () => string[];
     setAgent: (agentName: string | undefined) => void;
-    applyDefaultModelAgentSelection: () => void;
+    applyDefaultModelAgentSelection: (options?: { projectDefaultModel?: string }) => void;
     applyOpenCodeConfigDefaults: (directory?: string | null, source?: string, config?: Config) => void;
     setSelectedProvider: (providerId: string) => void;
     setSettingsDefaultModel: (model: string | undefined) => void;
@@ -1197,7 +1188,7 @@ export const useConfigStore = create<ConfigStore>()(
                 voiceProvider: (() => {
                     if (typeof window !== 'undefined') {
                         const saved = localStorage.getItem('voiceProvider');
-                        if (saved === 'openai' || saved === 'browser' || saved === 'say' || saved === 'openai-compatible') return saved;
+                        if (saved === 'openai' || saved === 'browser' || saved === 'local' || saved === 'say' || saved === 'openai-compatible') return saved;
                     }
                     return 'browser';
                 })(),
@@ -1239,6 +1230,17 @@ export const useConfigStore = create<ConfigStore>()(
                         if (saved) return saved;
                     }
                     return 'Samantha';
+                })(),
+                // Local (Kokoro) TTS speaker id - load from localStorage or default to 0
+                localTtsVoiceId: (() => {
+                    if (typeof window !== 'undefined') {
+                        const saved = localStorage.getItem('localTtsVoiceId');
+                        if (saved !== null) {
+                            const parsed = Number.parseInt(saved, 10);
+                            if (Number.isInteger(parsed) && parsed >= 0) return parsed;
+                        }
+                    }
+                    return 0;
                 })(),
                 // Browser voice - load from localStorage or default to empty (auto-select)
                 browserVoice: (() => {
@@ -1296,17 +1298,24 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                     return 'kokoro';
                 })(),
-                // STT provider: 'browser' (Web Speech API), 'server' (OpenAI-compat), 'wasm' (local Whisper)
+                // Voice input (dictation) master toggle - default enabled
+                dictationEnabled: (() => {
+                    if (typeof window !== 'undefined') {
+                        const saved = localStorage.getItem('dictationEnabled');
+                        if (saved === 'false') return false;
+                    }
+                    return true;
+                })(),
+                // STT provider: 'local' (server-side sherpa-onnx) or 'openai-compatible'
                 sttProvider: (() => {
                     if (typeof window !== 'undefined') {
                         const saved = localStorage.getItem('sttProvider');
-                        if (saved === 'browser' || saved === 'server' || saved === 'wasm') return saved;
-                        // Electron/Chromium's Web Speech API requires Google API keys
-                        // not available in Electron, so default to WASM local Whisper.
-                        const electron = (window as unknown as { __OPENCHAMBER_ELECTRON__?: { runtime?: string } }).__OPENCHAMBER_ELECTRON__;
-                        if (electron?.runtime === 'electron') return 'wasm' as const;
+                        if (saved === 'local' || saved === 'openai-compatible') return saved;
+                        // Migrate legacy providers: 'server' used an OpenAI-compatible
+                        // endpoint; 'browser' and 'wasm' map to the local default.
+                        if (saved === 'server') return 'openai-compatible' as const;
                     }
-                    return 'browser' as const;
+                    return 'local' as const;
                 })(),
                 sttServerUrl: (() => {
                     if (typeof window !== 'undefined') {
@@ -1329,12 +1338,12 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                     return 'deepdml/faster-whisper-large-v3-turbo-ct2';
                 })(),
-                wasmSttModel: (() => {
+                sttLocalModel: (() => {
                     if (typeof window !== 'undefined') {
-                        const saved = localStorage.getItem('wasmSttModel');
+                        const saved = localStorage.getItem('sttLocalModel');
                         if (saved) return saved;
                     }
-                    return 'Xenova/whisper-base.en';
+                    return 'parakeet-tdt-0.6b-v2-int8';
                 })(),
                 sttLanguage: (() => {
                     if (typeof window !== 'undefined') {
@@ -1342,33 +1351,6 @@ export const useConfigStore = create<ConfigStore>()(
                         if (saved !== null) return saved;
                     }
                     return '';
-                })(),
-                sttSilenceThresholdDb: (() => {
-                    if (typeof window !== 'undefined') {
-                        const saved = localStorage.getItem('sttSilenceThresholdDb');
-                        if (saved) {
-                            const parsed = parseFloat(saved);
-                            if (!isNaN(parsed)) return parsed;
-                        }
-                    }
-                    return -45;
-                })(),
-                sttSilenceHoldMs: (() => {
-                    if (typeof window !== 'undefined') {
-                        const saved = localStorage.getItem('sttSilenceHoldMs');
-                        if (saved) {
-                            const parsed = parseInt(saved, 10);
-                            if (!isNaN(parsed)) return parsed;
-                        }
-                    }
-                    return 1500;
-                })(),
-                sttTranscribeOnStop: (() => {
-                    if (typeof window !== 'undefined') {
-                        const saved = localStorage.getItem('sttTranscribeOnStop');
-                        if (saved === 'true') return true;
-                    }
-                    return false;
                 })(),
                 // Show TTS buttons on messages - disabled by default until user enables it
                 showMessageTTSButtons: (() => {
@@ -1382,16 +1364,9 @@ export const useConfigStore = create<ConfigStore>()(
                     if (typeof window !== 'undefined') {
                         const saved = localStorage.getItem('ttsInputMode');
                         if (saved === 'raw') return 'raw' as const;
+                        if (saved === 'summarized') return 'summarized' as const;
                     }
                     return 'sanitized' as const;
-                })(),
-                // Voice mode enabled - load from localStorage or default to false
-                voiceModeEnabled: (() => {
-                    if (typeof window !== 'undefined') {
-                        const saved = localStorage.getItem('voiceModeEnabled');
-                        if (saved === 'true') return true;
-                    }
-                    return false;
                 })(),
                 // Summarization settings
                 summarizeMessageTTS: (() => {
@@ -2121,9 +2096,8 @@ export const useConfigStore = create<ConfigStore>()(
                                     sttProvider: openChamberDefaults.sttProvider ?? state.sttProvider,
                                     sttServerUrl: openChamberDefaults.sttServerUrl ?? state.sttServerUrl,
                                     sttModel: openChamberDefaults.sttModel ?? state.sttModel,
+                                    sttLocalModel: openChamberDefaults.sttLocalModel ?? state.sttLocalModel,
                                     sttLanguage: openChamberDefaults.sttLanguage ?? state.sttLanguage,
-                                    sttSilenceThresholdDb: openChamberDefaults.sttSilenceThresholdDb ?? state.sttSilenceThresholdDb,
-                                    sttSilenceHoldMs: openChamberDefaults.sttSilenceHoldMs ?? state.sttSilenceHoldMs,
                                     directoryScoped: {
                                         ...state.directoryScoped,
                                         [directoryKey]: nextSnapshot,
@@ -2588,10 +2562,10 @@ export const useConfigStore = create<ConfigStore>()(
 
                 // Re-applies the same priority cascade used at app startup (see loadAgents):
                 //   agent: settings.defaultAgent → build → first primary → first agent
-                //   model: settings.defaultModel → agent's preferred model → opencode/big-pickle → first
+                //   model: project.defaultModel → settings.defaultModel → agent's preferred model → opencode/big-pickle → first
                 // Used when entering a fresh draft session so model/agent reset to defaults
                 // instead of sticking to the previously open session's selection.
-                applyDefaultModelAgentSelection: () => {
+                applyDefaultModelAgentSelection: (options) => {
                     const {
                         agents,
                         providers,
@@ -2614,6 +2588,7 @@ export const useConfigStore = create<ConfigStore>()(
                     } = resolveDefaultAgentModelSelection({
                         agents,
                         providers,
+                        projectDefaultModel: options?.projectDefaultModel,
                         settingsDefaultAgent,
                         settingsDefaultModel,
                         settingsDefaultVariant,
@@ -2861,7 +2836,7 @@ export const useConfigStore = create<ConfigStore>()(
                     });
                 },
 
-                setVoiceProvider: (provider: 'browser' | 'openai' | 'openai-compatible' | 'say') => {
+                setVoiceProvider: (provider: 'browser' | 'local' | 'openai' | 'openai-compatible' | 'say') => {
                     set({ voiceProvider: provider });
                     if (typeof window !== 'undefined') {
                         localStorage.setItem('voiceProvider', provider);
@@ -2896,6 +2871,13 @@ export const useConfigStore = create<ConfigStore>()(
                     set({ sayVoice: voice });
                     if (typeof window !== 'undefined') {
                         localStorage.setItem('sayVoice', voice);
+                    }
+                },
+
+                setLocalTtsVoiceId: (voiceId: number) => {
+                    set({ localTtsVoiceId: voiceId });
+                    if (typeof window !== 'undefined') {
+                        localStorage.setItem('localTtsVoiceId', String(voiceId));
                     }
                 },
 
@@ -2948,7 +2930,15 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                 },
 
-                setSttProvider: (provider: 'browser' | 'server' | 'wasm') => {
+                setDictationEnabled: (enabled: boolean) => {
+                    set({ dictationEnabled: enabled });
+                    if (typeof window !== 'undefined') {
+                        localStorage.setItem('dictationEnabled', String(enabled));
+                    }
+                    updateDesktopSettings({ dictationEnabled: enabled }).catch(() => {});
+                },
+
+                setSttProvider: (provider: 'local' | 'openai-compatible') => {
                     set({ sttProvider: provider });
                     if (typeof window !== 'undefined') {
                         localStorage.setItem('sttProvider', provider);
@@ -2979,12 +2969,12 @@ export const useConfigStore = create<ConfigStore>()(
                     updateDesktopSettings({ sttModel: model }).catch(() => {});
                 },
 
-                setWasmSttModel: (model: string) => {
-                    set({ wasmSttModel: model });
+                setSttLocalModel: (model: string) => {
+                    set({ sttLocalModel: model });
                     if (typeof window !== 'undefined') {
-                        localStorage.setItem('wasmSttModel', model);
+                        localStorage.setItem('sttLocalModel', model);
                     }
-                    updateDesktopSettings({ wasmSttModel: model }).catch(() => {});
+                    updateDesktopSettings({ sttLocalModel: model }).catch(() => {});
                 },
 
                 setSttLanguage: (lang: string) => {
@@ -2995,30 +2985,6 @@ export const useConfigStore = create<ConfigStore>()(
                     updateDesktopSettings({ sttLanguage: lang }).catch(() => {});
                 },
 
-                setSttSilenceThresholdDb: (db: number) => {
-                    set({ sttSilenceThresholdDb: db });
-                    if (typeof window !== 'undefined') {
-                        localStorage.setItem('sttSilenceThresholdDb', String(db));
-                    }
-                    updateDesktopSettings({ sttSilenceThresholdDb: db }).catch(() => {});
-                },
-
-                setSttSilenceHoldMs: (ms: number) => {
-                    set({ sttSilenceHoldMs: ms });
-                    if (typeof window !== 'undefined') {
-                        localStorage.setItem('sttSilenceHoldMs', String(ms));
-                    }
-                    updateDesktopSettings({ sttSilenceHoldMs: ms }).catch(() => {});
-                },
-
-                setSttTranscribeOnStop: (enabled: boolean) => {
-                    set({ sttTranscribeOnStop: enabled });
-                    if (typeof window !== 'undefined') {
-                        localStorage.setItem('sttTranscribeOnStop', String(enabled));
-                    }
-                    updateDesktopSettings({ sttTranscribeOnStop: enabled }).catch(() => {});
-                },
-
                 setShowMessageTTSButtons: (show: boolean) => {
                     set({ showMessageTTSButtons: show });
                     if (typeof window !== 'undefined') {
@@ -3026,17 +2992,10 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                 },
 
-                setTtsInputMode: (mode: 'sanitized' | 'raw') => {
+                setTtsInputMode: (mode: 'sanitized' | 'raw' | 'summarized') => {
                     set({ ttsInputMode: mode });
                     if (typeof window !== 'undefined') {
                         localStorage.setItem('ttsInputMode', mode);
-                    }
-                },
-
-                setVoiceModeEnabled: (enabled: boolean) => {
-                    set({ voiceModeEnabled: enabled });
-                    if (typeof window !== 'undefined') {
-                        localStorage.setItem('voiceModeEnabled', String(enabled));
                     }
                 },
 

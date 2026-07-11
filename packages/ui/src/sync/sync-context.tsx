@@ -8,7 +8,6 @@ import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import { createEventPipeline } from "./event-pipeline"
 import { isVSCodeRuntime } from "@/lib/desktop"
 import { isMobileSurfaceRuntime } from "@/lib/runtimeSurface"
-import { isCapacitorApp } from "@/lib/platform"
 import { reduceGlobalEvent, applyGlobalProject, applyDirectoryEvent, type SessionMaterializationReason } from "./event-reducer"
 import { useGlobalSyncStore } from "./global-sync-store"
 import { ChildStoreManager, type DirectoryStore } from "./child-store"
@@ -1692,12 +1691,13 @@ export function SyncProvider(props: {
   directory: string
   children: React.ReactNode
 }) {
-  const storedMessageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport)
-  // Capacitor apps are locked to SSE: native WebSocket streaming is unreliable there (on
-  // Android events only arrive once the run finishes), while SSE streams correctly. The Chat
-  // settings UI disables the other options on mobile, but force it here too so the effective
-  // transport can't drift. Remove this override (and the UI lock) to re-enable WS on mobile.
-  const messageStreamTransport: 'auto' | 'ws' | 'sse' = isCapacitorApp() ? 'sse' : storedMessageStreamTransport
+  // Capacitor apps were previously locked to SSE because Android WebSocket
+  // upgrades appeared broken. Root cause was server-side: the Android WebView
+  // origin (https://localhost, androidScheme 'https') was missing from the
+  // packaged-client origin allowlist, so every WS upgrade was rejected with
+  // 403. With the origin allowlisted, mobile uses the same transport
+  // selection as everywhere else ('auto' falls back to SSE on WS failure).
+  const messageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport)
   const childStoresRef = useRef<ChildStoreManager | null>(null)
   if (!childStoresRef.current) childStoresRef.current = new ChildStoreManager()
   const childStores = childStoresRef.current
@@ -1883,12 +1883,7 @@ export function SyncProvider(props: {
   // Event pipeline — created once per mount. No class, no start/stop.
   // Abort controller owned by the pipeline closure. Cleanup aborts + flushes.
   useEffect(() => {
-    // Stamp the pipeline lifecycle start for the warmup guard (#1769).
-    // Set before createEventPipeline so the anchor is in place for any
-    // early isWarmupGuarded() read. The cleanup resets transportConnectedAt
-    // and the next effect body re-stamps transportMountedAt on remount.
     useConfigStore.getState().setTransportMountedAt(Date.now())
-
     const pipeline = createEventPipeline({
       sdk: props.sdk,
       transport: messageStreamTransport,
@@ -1915,8 +1910,6 @@ export function SyncProvider(props: {
         handleEvent(directory, payload, childStores, routingIndex)
       },
       onReconnect: () => {
-        // Atomic single store write: connected fields + transport marker
-        // for the warmup-guard (see #1769).
         useConfigStore.setState({
           isConnected: true,
           hasEverConnected: true,
@@ -1968,11 +1961,6 @@ export function SyncProvider(props: {
         pipelineReconnectRef.current = null
       }
       pipeline.cleanup()
-      // Reset the transport marker so the next pipeline lifecycle starts
-      // in the warmup-guarded state. Without this, a stale timestamp from
-      // the previous lifecycle causes probeConnection to bypass the guard.
-      // `transportMountedAt` bounds the warmup window (see #1769 and
-      // `isWarmupGuarded` in useConfigStore).
       const configStore = useConfigStore.getState()
       configStore.setTransportConnectedAt(null)
       configStore.setTransportMountedAt(Date.now())

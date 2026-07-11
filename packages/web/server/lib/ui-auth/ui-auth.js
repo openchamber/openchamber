@@ -310,6 +310,7 @@ const isUrlAuthWebSocketPath = (pathname) => {
     || pathname === '/api/global/event/ws'
     || pathname === '/api/openchamber/realtime-proxy/ws'
     || pathname === '/api/terminal/ws'
+    || pathname === '/api/dictation/ws'
     || pathname.startsWith('/api/preview/proxy/');
 };
 
@@ -828,6 +829,11 @@ export const createUiAuth = ({
         expiresAt: new Date(Date.now() + ttlMs).toISOString(),
         clientKind: req.body?.clientKind,
         dedupeKey: req.body?.dedupeKey,
+        authMethod: 'password',
+        deviceName: req.body?.deviceName,
+        devicePlatform: req.body?.devicePlatform,
+        deviceModel: req.body?.deviceModel,
+        appVersion: req.body?.appVersion,
       });
     }
     res.setHeader('Cache-Control', 'no-store');
@@ -891,6 +897,11 @@ export const createUiAuth = ({
           expiresAt: new Date(Date.now() + ttlMs).toISOString(),
           clientKind: req.body?.clientKind,
           dedupeKey: req.body?.dedupeKey,
+          authMethod: 'passkey',
+          deviceName: req.body?.deviceName,
+          devicePlatform: req.body?.devicePlatform,
+          deviceModel: req.body?.deviceModel,
+          appVersion: req.body?.appVersion,
         });
       }
       res.json({
