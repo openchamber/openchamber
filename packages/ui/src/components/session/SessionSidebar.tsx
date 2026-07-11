@@ -320,6 +320,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const liveSessions = useAllLiveSessions();
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
   const hasLoadedGlobalSessions = useGlobalSessionsStore((state) => state.hasLoaded);
+  const hasAuthoritativeGlobalSessions = useGlobalSessionsStore((state) => state.status === 'ready');
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const archivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
@@ -539,7 +540,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const { scheduleCollapsedProjectsPersist } = useSidebarPersistence({
     isVSCode,
-    hasLoadedGlobalSessions,
+    hasAuthoritativeGlobalSessions,
     safeStorage,
     keys: {
       sessionExpanded: SESSION_EXPANDED_STORAGE_KEY,

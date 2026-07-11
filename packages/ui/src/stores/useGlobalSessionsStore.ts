@@ -420,7 +420,10 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
           // instance — drop it.
           return { activeSessions: [], archivedSessions: [] };
         }
-        set((state) => applySnapshot(state, nextActiveSessions, nextArchivedSessions, 'ready'));
+        const status = activeResult.status === 'fulfilled' && archivedResult.status === 'fulfilled'
+          ? 'ready'
+          : 'error';
+        set((state) => applySnapshot(state, nextActiveSessions, nextArchivedSessions, status));
         return { activeSessions: nextActiveSessions, archivedSessions: nextArchivedSessions };
       } catch (error) {
         if (generation !== loadGeneration) {
