@@ -4,15 +4,18 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Radio } from '@/components/ui/radio';
 import { cn } from '@/lib/utils';
 
-/** Settings select trigger: kit-aligned width (pair with size="settings" for 36px height). */
-export const SETTINGS_SELECT_TRIGGER_CLASS = 'w-full min-w-40 sm:w-56';
+/** Settings select trigger: full column width in stacked cells; capped in field rows via parent. */
+export const SETTINGS_SELECT_TRIGGER_CLASS = 'w-full min-w-40';
 export const SETTINGS_SELECT_SIZE = 'settings' as const;
+
+/** Fixed-width select used inside full-width SettingsFieldRow control columns. */
+export const SETTINGS_SELECT_ROW_TRIGGER_CLASS = 'w-full min-w-40 sm:w-56';
 
 /** Compact reset / icon action next to a settings control (matches h-9 controls). */
 export const SETTINGS_ICON_BUTTON_CLASS =
   'h-9 w-9 px-0 text-muted-foreground hover:text-foreground';
 
-/** Custom dropdown triggers (ModelSelector / AgentSelector) in settings rows. */
+/** Custom dropdown triggers (ModelSelector / AgentSelector) in settings field rows. */
 export const SETTINGS_CUSTOM_TRIGGER_CLASS =
   'h-9 min-h-9 w-full min-w-40 sm:w-56 rounded-md px-3';
 

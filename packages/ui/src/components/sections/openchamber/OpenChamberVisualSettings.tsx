@@ -1047,7 +1047,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             void applyPwaOrientation(orientation);
                                         }}
                                     >
-                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.pwaInstallOrientationAria')} size={SETTINGS_SELECT_SIZE} className={cn(SETTINGS_SELECT_TRIGGER_CLASS, 'sm:w-full')}>
+                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.pwaInstallOrientationAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                             <SelectValue placeholder={t('settings.openchamber.visual.field.selectOrientationPlaceholder')}>
                                                 {selectedPwaOrientationLabel}
                                             </SelectValue>
@@ -1092,7 +1092,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             void updateDesktopSettings({ mobileKeyboardMode: mode });
                                         }}
                                     >
-                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.mobileKeyboardModeAria')} size={SETTINGS_SELECT_SIZE} className={cn(SETTINGS_SELECT_TRIGGER_CLASS, 'sm:w-full')}>
+                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.mobileKeyboardModeAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                             <SelectValue placeholder={t('settings.openchamber.visual.field.selectMobileKeyboardModePlaceholder')}>
                                                 {selectedMobileKeyboardModeLabel}
                                             </SelectValue>
@@ -1529,79 +1529,75 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                             <SettingsSection
                                 title={t('settings.openchamber.visual.section.chatMessageOptions')}
                                 divider={showBehaviorDisplaySettings || behaviorSectionDivider}
-                                contentClassName="space-y-0"
                             >
-                                <SettingsTwoColumn>
-                                    <div className={SETTINGS_FIELDS_STACK_CLASS}>
-                                        {shouldShow('userMessageRendering') && (
-                                            <SettingsControlGroup title={t('settings.openchamber.visual.section.userMessageRendering')}>
-                                                <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.userMessageRenderingAria')}>
-                                                    {USER_MESSAGE_RENDERING_OPTIONS.map((option) => (
-                                                        <SettingsRadioOption
-                                                            key={option.id}
-                                                            selected={normalizeUserMessageRenderingMode(userMessageRenderingMode) === option.id}
-                                                            onSelect={() => handleUserMessageRenderingModeChange(option.id)}
-                                                            label={tUnsafe(option.labelKey)}
-                                                            ariaLabel={t('settings.openchamber.visual.field.userMessageRenderingAria', { option: tUnsafe(option.labelKey) })}
-                                                        />
-                                                    ))}
-                                                </SettingsRadioGroup>
-                                            </SettingsControlGroup>
-                                        )}
+                                {/* Flat 2×2 grid so row headers share a baseline (not stacked columns). */}
+                                <SettingsTwoColumn className="lg:gap-y-6">
+                                    {shouldShow('userMessageRendering') && (
+                                        <SettingsControlGroup title={t('settings.openchamber.visual.section.userMessageRendering')}>
+                                            <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.userMessageRenderingAria')}>
+                                                {USER_MESSAGE_RENDERING_OPTIONS.map((option) => (
+                                                    <SettingsRadioOption
+                                                        key={option.id}
+                                                        selected={normalizeUserMessageRenderingMode(userMessageRenderingMode) === option.id}
+                                                        onSelect={() => handleUserMessageRenderingModeChange(option.id)}
+                                                        label={tUnsafe(option.labelKey)}
+                                                        ariaLabel={t('settings.openchamber.visual.field.userMessageRenderingAria', { option: tUnsafe(option.labelKey) })}
+                                                    />
+                                                ))}
+                                            </SettingsRadioGroup>
+                                        </SettingsControlGroup>
+                                    )}
 
-                                        {shouldShow('diffLayout') && !isVSCode && (
-                                            <SettingsControlGroup title={t('settings.openchamber.visual.section.diffLayout')}>
-                                                <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.diffLayoutAria')}>
-                                                    {DIFF_LAYOUT_OPTIONS.map((option) => (
-                                                        <SettingsRadioOption
-                                                            key={option.id}
-                                                            selected={diffLayoutPreference === option.id}
-                                                            onSelect={() => setDiffLayoutPreference(option.id)}
-                                                            label={tUnsafe(option.labelKey)}
-                                                            ariaLabel={t('settings.openchamber.visual.field.diffLayoutAria', { option: tUnsafe(option.labelKey) })}
-                                                        />
-                                                    ))}
-                                                </SettingsRadioGroup>
-                                            </SettingsControlGroup>
-                                        )}
-                                    </div>
+                                    {shouldShow('mermaidRendering') && (
+                                        <SettingsControlGroup title={t('settings.openchamber.visual.section.mermaidRendering')}>
+                                            <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.mermaidRenderingAria')}>
+                                                {MERMAID_RENDERING_OPTIONS.map((option) => (
+                                                    <SettingsRadioOption
+                                                        key={option.id}
+                                                        selected={mermaidRenderingMode === option.id}
+                                                        onSelect={() => handleMermaidRenderingModeChange(option.id)}
+                                                        label={tUnsafe(option.labelKey)}
+                                                        ariaLabel={t('settings.openchamber.visual.field.mermaidRenderingAria', { option: tUnsafe(option.labelKey) })}
+                                                    />
+                                                ))}
+                                            </SettingsRadioGroup>
+                                        </SettingsControlGroup>
+                                    )}
 
-                                    <div className={SETTINGS_FIELDS_STACK_CLASS}>
-                                        {shouldShow('mermaidRendering') && (
-                                            <SettingsControlGroup title={t('settings.openchamber.visual.section.mermaidRendering')}>
-                                                <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.mermaidRenderingAria')}>
-                                                    {MERMAID_RENDERING_OPTIONS.map((option) => (
-                                                        <SettingsRadioOption
-                                                            key={option.id}
-                                                            selected={mermaidRenderingMode === option.id}
-                                                            onSelect={() => handleMermaidRenderingModeChange(option.id)}
-                                                            label={tUnsafe(option.labelKey)}
-                                                            ariaLabel={t('settings.openchamber.visual.field.mermaidRenderingAria', { option: tUnsafe(option.labelKey) })}
-                                                        />
-                                                    ))}
-                                                </SettingsRadioGroup>
-                                            </SettingsControlGroup>
-                                        )}
+                                    {shouldShow('diffLayout') && !isVSCode && (
+                                        <SettingsControlGroup title={t('settings.openchamber.visual.section.diffLayout')}>
+                                            <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.diffLayoutAria')}>
+                                                {DIFF_LAYOUT_OPTIONS.map((option) => (
+                                                    <SettingsRadioOption
+                                                        key={option.id}
+                                                        selected={diffLayoutPreference === option.id}
+                                                        onSelect={() => setDiffLayoutPreference(option.id)}
+                                                        label={tUnsafe(option.labelKey)}
+                                                        ariaLabel={t('settings.openchamber.visual.field.diffLayoutAria', { option: tUnsafe(option.labelKey) })}
+                                                    />
+                                                ))}
+                                            </SettingsRadioGroup>
+                                        </SettingsControlGroup>
+                                    )}
 
-                                        {shouldShow('followUpBehavior') && (
-                                            <SettingsControlGroup
-                                                title={t('settings.openchamber.visual.section.followUpBehavior')}
-                                                settingsItem="chat.follow-up-behavior"
-                                            >
-                                                <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.followUpBehaviorAria')}>
-                                                    {FOLLOW_UP_BEHAVIOR_OPTIONS.map((option) => (
-                                                        <SettingsRadioOption
-                                                            key={option.id}
-                                                            selected={followUpBehavior === option.id}
-                                                            onSelect={() => setFollowUpBehavior(option.id)}
-                                                            label={tUnsafe(option.labelKey)}
-                                                            ariaLabel={t('settings.openchamber.visual.field.followUpBehaviorAria', { option: tUnsafe(option.labelKey) })}
-                                                        />
-                                                    ))}
-                                                </SettingsRadioGroup>
-                                            </SettingsControlGroup>
-                                        )}
-                                    </div>
+                                    {shouldShow('followUpBehavior') && (
+                                        <SettingsControlGroup
+                                            title={t('settings.openchamber.visual.section.followUpBehavior')}
+                                            settingsItem="chat.follow-up-behavior"
+                                        >
+                                            <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.followUpBehaviorAria')}>
+                                                {FOLLOW_UP_BEHAVIOR_OPTIONS.map((option) => (
+                                                    <SettingsRadioOption
+                                                        key={option.id}
+                                                        selected={followUpBehavior === option.id}
+                                                        onSelect={() => setFollowUpBehavior(option.id)}
+                                                        label={tUnsafe(option.labelKey)}
+                                                        ariaLabel={t('settings.openchamber.visual.field.followUpBehaviorAria', { option: tUnsafe(option.labelKey) })}
+                                                    />
+                                                ))}
+                                            </SettingsRadioGroup>
+                                        </SettingsControlGroup>
+                                    )}
                                 </SettingsTwoColumn>
                             </SettingsSection>
                         )}

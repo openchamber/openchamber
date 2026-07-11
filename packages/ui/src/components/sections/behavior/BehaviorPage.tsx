@@ -24,7 +24,7 @@ import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLay
 import {
   SettingsSection,
   SettingsCheckboxRow,
-  SETTINGS_SELECT_TRIGGER_CLASS,
+  SETTINGS_SELECT_ROW_TRIGGER_CLASS,
   SETTINGS_SELECT_SIZE,
 } from '@/components/sections/shared/SettingsSection';
 
@@ -315,7 +315,7 @@ export const BehaviorPage: React.FC = () => {
           onValueChange={(value) => setResponseStylePreset(value)}
           disabled={isLoading || !responseStyleEnabled}
         >
-          <SelectTrigger size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+          <SelectTrigger size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
             <SelectValue>
               {(value) => {
                 if (value === 'custom') return t('settings.behavior.page.responseStyle.option.custom');

@@ -7,7 +7,7 @@ import {
   SettingsFieldRow,
   SettingsCheckboxRow,
   SETTINGS_CUSTOM_TRIGGER_CLASS,
-  SETTINGS_SELECT_TRIGGER_CLASS,
+  SETTINGS_SELECT_ROW_TRIGGER_CLASS,
   SETTINGS_SELECT_SIZE,
 } from '@/components/sections/shared/SettingsSection';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -322,7 +322,7 @@ export const DefaultsSettings: React.FC = () => {
             label={t('settings.openchamber.defaults.field.defaultThinking')}
           >
             <Select value={defaultVariant ?? DEFAULT_VARIANT_VALUE} onValueChange={handleVariantChange} disabled={!supportsVariants}>
-              <SelectTrigger size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+              <SelectTrigger size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
                 <SelectValue placeholder={t('settings.openchamber.defaults.field.thinkingPlaceholder')}>
                   {formatVariantLabel(defaultVariant ?? DEFAULT_VARIANT_VALUE)}
                 </SelectValue>
