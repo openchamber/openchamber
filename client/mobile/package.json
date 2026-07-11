@@ -1,0 +1,35 @@
+{
+  "name": "@openchamber/mobile",
+  "version": "1.13.2",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun run --cwd ../web build && node scripts/prepare-web-assets.mjs",
+    "sync": "node scripts/with-mobile-env.mjs \"bun run build && cap sync\"",
+    "add:android": "cap add android",
+    "build:android:debug": "node scripts/with-mobile-env.mjs \"bun run sync && ./android/gradlew -p android assembleDebug\"",
+    "android:devices": "node scripts/with-mobile-env.mjs \"node scripts/android-device.mjs devices\"",
+    "android:install": "node scripts/with-mobile-env.mjs \"node scripts/android-device.mjs install\"",
+    "android:launch": "node scripts/with-mobile-env.mjs \"node scripts/android-device.mjs launch\"",
+    "android:run": "node scripts/with-mobile-env.mjs \"node scripts/android-device.mjs run\"",
+    "android:logcat": "node scripts/with-mobile-env.mjs \"node scripts/android-device.mjs logcat\"",
+    "open:android": "cap open android",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint \"./**/*.{ts,tsx,js,mjs}\" --config ../eslint.config.js --ignore-pattern dist --ignore-pattern android"
+  },
+  "dependencies": {
+    "@aparajita/capacitor-secure-storage": "^8.0.0",
+    "@capacitor-mlkit/barcode-scanning": "^8.1.0",
+    "@capacitor/app": "^8.0.0",
+    "@capacitor/core": "^8.4.1",
+    "@capacitor/keyboard": "^8.0.0",
+    "@capacitor/push-notifications": "^8.1.1",
+    "@capacitor/status-bar": "^8.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^8.4.1",
+    "@capacitor/cli": "^8.4.1",
+    "@types/node": "^24.3.1",
+    "typescript": "~5.9.0"
+  }
+}

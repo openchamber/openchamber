@@ -18,7 +18,7 @@ See `docs/CUSTOM_THEMES.md` for full format reference.
 
 ### 1. Create JSON Files
 
-Add to `packages/ui/src/lib/theme/themes/`:
+Add to `client/ui/src/lib/theme/themes/`:
 - `<id>-light.json`
 - `<id>-dark.json`
 
@@ -45,7 +45,7 @@ bun run type-check && bun run lint && bun run build
 
 ## Key Files
 
-- Theme types: `packages/ui/src/types/theme.ts`
-- Presets: `packages/ui/src/lib/theme/themes/presets.ts`
-- Example: `packages/ui/src/lib/theme/themes/flexoki-dark.json`
+- Theme types: `client/ui/src/types/theme.ts`
+- Presets: `client/ui/src/lib/theme/themes/presets.ts`
+- Example: `client/ui/src/lib/theme/themes/flexoki-dark.json`
 - Custom themes doc: `docs/CUSTOM_THEMES.md`

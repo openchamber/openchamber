@@ -2,7 +2,7 @@ import { readdir, readFile } from "node:fs/promises"
 import path from "node:path"
 
 const repoRoot = path.resolve(import.meta.dirname, "..", "..")
-const docsRoot = path.join(repoRoot, "packages", "docs")
+const docsRoot = path.join(repoRoot, "docs-site")
 const contentRoot = path.join(docsRoot, "content", "docs")
 const sidebarPath = path.join(docsRoot, "sidebar.config.json")
 

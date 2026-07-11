@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "packages/docs/**"
+      - "docs-site/**"
       - "scripts/docs/**"
       - "package.json"
   release:
@@ -32,14 +32,14 @@ jobs:
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
       - name: Validate docs source
-        run: bun run docs:validate
+        run: node scripts/docs/validate-docs.mjs
 
       - name: Build docs source archive
         id: archive
         run: |
           mkdir -p artifacts
           ARCHIVE_NAME="openchamber-docs-source-${GITHUB_SHA::8}.tar.gz"
-          tar -czf "artifacts/${ARCHIVE_NAME}" -C packages/docs .
+          tar -czf "artifacts/${ARCHIVE_NAME}" -C docs-site .
           echo "archive_name=${ARCHIVE_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Upload workflow artifact

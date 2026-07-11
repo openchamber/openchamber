@@ -81,47 +81,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  publish-npm:
-    needs: create-release
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-
-      - name: Setup bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Build packages
-        run: bun run build
-
-      - name: Create npm tarball
-        working-directory: packages/web
-        run: npm pack
-
-      - name: Upload npm tarball to release
-        if: ${{ github.event.inputs.dry_run != 'true' }}
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
-        with:
-          tag_name: v${{ needs.create-release.outputs.version }}
-          files: packages/web/*.tgz
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Publish to npm
-        if: ${{ github.event.inputs.dry_run != 'true' }}
-        working-directory: packages/web
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
   mobile-release:
     needs: create-release
     if: ${{ github.event.inputs.dry_run != 'true' }}
@@ -134,7 +93,7 @@ jobs:
     secrets: inherit
 
   finalize-release:
-    needs: [create-release, publish-npm, mobile-release]
+    needs: [create-release, mobile-release]
     runs-on: ubuntu-latest
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}

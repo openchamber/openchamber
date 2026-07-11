@@ -19,11 +19,11 @@ If you genuinely cannot translate a language, say so explicitly to the user inst
 
 ## Required Flow
 
-1. Add or reuse a key in `packages/ui/src/lib/i18n/messages/en.ts`.
-2. Add the same key — fully translated, not the English text — to every non-English dictionary in `packages/ui/src/lib/i18n/messages/`.
+1. Add or reuse a key in `client/ui/src/lib/i18n/messages/en.ts`.
+2. Add the same key — fully translated, not the English text — to every non-English dictionary in `client/ui/src/lib/i18n/messages/`.
 3. In components, call `const { t } = useI18n()` from `@/lib/i18n` and render `t('key')`.
 4. For locale names or language picker labels, use `label(locale)` from `useI18n()`.
-5. Keep locale state in `packages/ui/src/lib/i18n/*`; do not add locale fields to broad stores like `useUIStore`.
+5. Keep locale state in `client/ui/src/lib/i18n/*`; do not add locale fields to broad stores like `useUIStore`.
 6. Do not remount the app to update language. Components must re-render through `useI18n()`.
 
 ## Component Usage Rules

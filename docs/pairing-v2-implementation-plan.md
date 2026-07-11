@@ -31,13 +31,13 @@ Use the existing `client-auth` domain.
 New module:
 
 ```text
-packages/web/server/lib/client-auth/pairing.js
+backend/server/lib/client-auth/pairing.js
 ```
 
 Existing durable token module remains:
 
 ```text
-packages/web/server/lib/client-auth/remote-clients.js
+backend/server/lib/client-auth/remote-clients.js
 ```
 
 Conceptual names:
@@ -65,7 +65,7 @@ v=2 => one-time pairing handshake
 
 ## New Files
 
-### 1. `packages/web/server/lib/client-auth/pairing.js`
+### 1. `backend/server/lib/client-auth/pairing.js`
 
 Create a new backend runtime module for short-lived pairing sessions.
 
@@ -134,7 +134,7 @@ createClientPairingRuntime({
 
 ## Existing Files To Update
 
-### 2. `packages/web/server/lib/client-auth/remote-clients.js`
+### 2. `backend/server/lib/client-auth/remote-clients.js`
 
 Extend trusted-device metadata backward-compatibly.
 
@@ -200,7 +200,7 @@ legacy
 
 Do not force migration for old records. Treat missing `authMethod` as legacy/null.
 
-### 3. `packages/web/server/index.js`
+### 3. `backend/server/index.js`
 
 Instantiate the new pairing runtime next to `remoteClientAuthRuntime`.
 
@@ -238,7 +238,7 @@ const clientPairingRuntime = createClientPairingRuntime({
 
 Pass `clientPairingRuntime` into `registerAuthAndAccessRoutes` dependencies.
 
-### 4. `packages/web/server/lib/opencode/core-routes.js`
+### 4. `backend/server/lib/opencode/core-routes.js`
 
 Add pairing routes near existing client-auth routes:
 
@@ -458,7 +458,7 @@ Failure response should be generic:
 
 Do not reveal whether id, secret, expiry, used, or cancellation caused failure.
 
-### 5. `packages/web/server/lib/ui-auth/ui-auth.js`
+### 5. `backend/server/lib/ui-auth/ui-auth.js`
 
 Preserve existing password/passkey behavior.
 
@@ -497,7 +497,7 @@ Existing clientToken issuance still works.
 Password login remains disabled for tunnel/public scope.
 ```
 
-### 6. `packages/ui/src/lib/connectionPayload.ts`
+### 6. `client/ui/src/lib/connectionPayload.ts`
 
 Extend existing connect payload helpers.
 
@@ -563,7 +563,7 @@ Reject expired payload locally if expiresAt is clearly in the past.
 
 Do not break current exports used by mobile QR/manual connect.
 
-### 7. `packages/ui/src/apps/mobileQrScan.ts`
+### 7. `client/ui/src/apps/mobileQrScan.ts`
 
 Update parser only.
 
@@ -586,7 +586,7 @@ plain URL
 
 Do not implement full mobile UI flow in this scope unless there is already a non-UI callable path.
 
-### 8. `packages/ui/src/apps/mobileConnections.ts`
+### 8. `client/ui/src/apps/mobileConnections.ts`
 
 Add non-visual callable mechanism for redeeming pairing payload.
 
@@ -662,7 +662,7 @@ No change expected unless a renderer-side desktop API is needed for pairing rede
 
 Prefer keeping pairing redeem in main process only for deep-link handling if desktop v2 is implemented there.
 
-### 11. `packages/web/server/lib/ui-auth/DOCUMENTATION.md`
+### 11. `backend/server/lib/ui-auth/DOCUMENTATION.md`
 
 Update module documentation to reflect the unified issuance model:
 
@@ -675,7 +675,7 @@ Pairing v2 uses one-time secrets and issues remote client tokens.
 Optionally add:
 
 ```text
-packages/web/server/lib/client-auth/DOCUMENTATION.md
+backend/server/lib/client-auth/DOCUMENTATION.md
 ```
 
 if the client-auth module needs ownership docs.
@@ -710,7 +710,7 @@ Place near existing /api/client-auth/clients routes.
 Files:
 
 ```text
-packages/web/server/lib/client-auth/remote-clients.js
+backend/server/lib/client-auth/remote-clients.js
 ```
 
 Do:
@@ -728,7 +728,7 @@ Do not change token generation/authentication behavior.
 Files:
 
 ```text
-packages/web/server/lib/ui-auth/ui-auth.js
+backend/server/lib/ui-auth/ui-auth.js
 ```
 
 Do:
@@ -745,7 +745,7 @@ Preserve response shape.
 Files:
 
 ```text
-packages/web/server/lib/client-auth/pairing.js
+backend/server/lib/client-auth/pairing.js
 ```
 
 Do:
@@ -764,7 +764,7 @@ Integrate remoteClientAuthRuntime.createClient in redeem.
 Files:
 
 ```text
-packages/web/server/index.js
+backend/server/index.js
 ```
 
 Do:
@@ -780,7 +780,7 @@ Pass clientPairingRuntime to registerAuthAndAccessRoutes.
 Files:
 
 ```text
-packages/web/server/lib/opencode/core-routes.js
+backend/server/lib/opencode/core-routes.js
 ```
 
 Do:
@@ -800,7 +800,7 @@ Keep error responses generic for redeem.
 Files:
 
 ```text
-packages/ui/src/lib/connectionPayload.ts
+client/ui/src/lib/connectionPayload.ts
 ```
 
 Do:
@@ -820,7 +820,7 @@ Reject malformed/expired/oversized payloads.
 Files:
 
 ```text
-packages/ui/src/apps/mobileQrScan.ts
+client/ui/src/apps/mobileQrScan.ts
 ```
 
 Do:
@@ -837,7 +837,7 @@ Do not break v1/manual URL behavior.
 Files:
 
 ```text
-packages/ui/src/apps/mobileConnections.ts
+client/ui/src/apps/mobileConnections.ts
 ```
 
 Do:
@@ -877,13 +877,13 @@ If desktop client deep-link support is deferred, skip this step and document tha
 Files:
 
 ```text
-packages/web/server/lib/ui-auth/DOCUMENTATION.md
+backend/server/lib/ui-auth/DOCUMENTATION.md
 ```
 
 Optionally add:
 
 ```text
-packages/web/server/lib/client-auth/DOCUMENTATION.md
+backend/server/lib/client-auth/DOCUMENTATION.md
 ```
 
 Document:

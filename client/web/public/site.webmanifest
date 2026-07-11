@@ -1,0 +1,21 @@
+{
+  "name": "OpenChamber - AI Coding Companion",
+  "short_name": "OpenChamber",
+  "description": "OpenChamber desktop companion for the OpenCode AI coding agent",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#151313",
+  "theme_color": "#edb449",
+  "icons": [
+    { "src": "/pwa-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/pwa-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/pwa-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/pwa-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/apple-touch-icon-180x180.png", "sizes": "180x180", "type": "image/png", "purpose": "any" },
+    { "src": "/apple-touch-icon-152x152.png", "sizes": "152x152", "type": "image/png", "purpose": "any" },
+    { "src": "/favicon-32.png", "sizes": "32x32", "type": "image/png" },
+    { "src": "/favicon-16.png", "sizes": "16x16", "type": "image/png" }
+  ],
+  "categories": ["developer", "tools", "productivity"],
+  "lang": "en"
+}

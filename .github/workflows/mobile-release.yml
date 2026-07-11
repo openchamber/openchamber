@@ -55,8 +55,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  MOBILE_PACKAGE_DIR: packages/mobile
-  ANDROID_PROJECT_DIR: packages/mobile/android
+  MOBILE_PACKAGE_DIR: client/mobile
+  ANDROID_PROJECT_DIR: client/mobile/android
 
 jobs:
   resolve-version:
@@ -79,7 +79,7 @@ jobs:
           input_build='${{ inputs.build_number }}'
           input_release_tag='${{ inputs.release_tag }}'
           build_android='${{ inputs.build_android }}'
-          package_version="$(node -p "require('./package.json').version")"
+          package_version="$(node -p "require('./client/package.json').version")"
 
           if [[ "$build_android" != "true" ]]; then
             echo "build_android must be true; Android is the only supported mobile platform."
@@ -117,6 +117,7 @@ jobs:
 
       - name: Install dependencies
         run: bun install
+        working-directory: client
 
       - name: Prepare Android keystore
         shell: bash
@@ -138,17 +139,18 @@ jobs:
           OPENCHAMBER_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           OPENCHAMBER_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           OPENCHAMBER_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        working-directory: client
         run: |
           bun run mobile:sync
-          ./packages/mobile/android/gradlew -p packages/mobile/android bundleRelease assembleRelease
+          ./mobile/android/gradlew -p mobile/android bundleRelease assembleRelease
 
       - name: Upload Android artifacts
         uses: actions/upload-artifact@v4
         with:
           name: openchamber-android-${{ needs.resolve-version.outputs.version_name }}-${{ needs.resolve-version.outputs.build_number }}
           path: |
-            packages/mobile/android/app/build/outputs/bundle/release/*.aab
-            packages/mobile/android/app/build/outputs/apk/release/*.apk
+            client/mobile/android/app/build/outputs/bundle/release/*.aab
+            client/mobile/android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 
       - name: Upload Android artifacts to GitHub Release

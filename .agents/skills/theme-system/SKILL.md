@@ -7,7 +7,7 @@ compatibility: opencode
 
 ## Overview
 
-OpenChamber uses a JSON-based theme system. Themes are defined in `packages/ui/src/lib/theme/themes/`. Users can also add custom themes via `~/.config/openchamber/themes/`.
+OpenChamber uses a JSON-based theme system. Themes are defined in `client/ui/src/lib/theme/themes/`. Users can also add custom themes via `~/.config/openchamber/themes/`.
 
 **Core principle:** UI colors must use theme tokens - never hardcoded hex colors or Tailwind color classes.
 
@@ -36,7 +36,7 @@ OpenChamber uses a JSON-based theme system. Themes are defined in `packages/ui/s
 
 ## Button Rules (MANDATORY)
 
-Use only the shared `Button` component from `packages/ui/src/components/ui/button.tsx`.
+Use only the shared `Button` component from `client/ui/src/components/ui/button.tsx`.
 
 - Do not create wrapper button components (for example `ButtonLarge`, `ButtonSmall`).
 - Do not hardcode button height/padding classes when a `size` variant exists.
@@ -339,12 +339,12 @@ import { Icon } from "@/components/icon/Icon";
 
 ## Key Files
 
-- Theme types: `packages/ui/src/types/theme.ts`
-- Theme hook: `packages/ui/src/contexts/useThemeSystem.ts`
-- CSS generator: `packages/ui/src/lib/theme/cssGenerator.ts`
-- Built-in themes: `packages/ui/src/lib/theme/themes/`
-- Icon component: `packages/ui/src/components/icon/Icon.tsx`
-- Icon sprite data: `packages/ui/src/components/icon/sprite.ts` (auto-generated)
-- Icon types: `packages/ui/src/components/icon/icons.ts`
+- Theme types: `client/ui/src/types/theme.ts`
+- Theme hook: `client/ui/src/contexts/useThemeSystem.ts`
+- CSS generator: `client/ui/src/lib/theme/cssGenerator.ts`
+- Built-in themes: `client/ui/src/lib/theme/themes/`
+- Icon component: `client/ui/src/components/icon/Icon.tsx`
+- Icon sprite data: `client/ui/src/components/icon/sprite.ts` (auto-generated)
+- Icon types: `client/ui/src/components/icon/icons.ts`
 - Icon sprite generator: `scripts/generate-icon-sprite.mjs`
-- Icon docs: `packages/ui/src/components/icon/README.md`
+- Icon docs: `client/ui/src/components/icon/README.md`

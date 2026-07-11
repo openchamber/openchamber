@@ -11,6 +11,9 @@ jobs:
   android-debug:
     name: Android debug APK
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
     steps:
       - uses: actions/checkout@v4
 
@@ -39,5 +42,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: openchamber-android-debug-apk
-          path: packages/mobile/android/app/build/outputs/apk/debug/*.apk
+          path: client/mobile/android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error

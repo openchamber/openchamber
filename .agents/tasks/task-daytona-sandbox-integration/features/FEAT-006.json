@@ -18,7 +18,7 @@
     "All tests pass"
   ],
   "verification": [
-    "bun run --cwd packages/web test",
+    "bun run --cwd client/web test",
     "bun run type-check",
     "bun run lint"
   ],

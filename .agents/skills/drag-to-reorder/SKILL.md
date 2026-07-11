@@ -10,8 +10,8 @@ compatibility: opencode
 OpenChamber uses **@dnd-kit** (`@dnd-kit/core`, `@dnd-kit/sortable`, `@dnd-kit/utilities`) for drag-to-reorder. Getting it to feel right on both desktop and mobile — especially for chips/tags of **variable width that wrap onto multiple rows** — has several non-obvious gotchas. This skill captures the configuration that works, and the bugs to avoid.
 
 **Reference implementations in this repo:**
-- `packages/ui/src/components/chat/DraftPresetChips.tsx` — variable-width chips that wrap (the hardest case; mobile long-press).
-- `packages/ui/src/components/ui/sortable-tabs-strip.tsx` — single-row scrollable tabs.
+- `client/ui/src/components/chat/DraftPresetChips.tsx` — variable-width chips that wrap (the hardest case; mobile long-press).
+- `client/ui/src/components/ui/sortable-tabs-strip.tsx` — single-row scrollable tabs.
 
 ## When to Use
 
@@ -139,6 +139,6 @@ Reordering variable-width chips across wrapped rows is a documented rough edge i
 
 ## Key Files
 
-- Variable-width wrapping chips: `packages/ui/src/components/chat/DraftPresetChips.tsx`
-- Single-row tab strip: `packages/ui/src/components/ui/sortable-tabs-strip.tsx`
-- Library: `@dnd-kit/core`, `@dnd-kit/sortable`, `@dnd-kit/utilities` (already in `packages/ui/package.json`)
+- Variable-width wrapping chips: `client/ui/src/components/chat/DraftPresetChips.tsx`
+- Single-row tab strip: `client/ui/src/components/ui/sortable-tabs-strip.tsx`
+- Library: `@dnd-kit/core`, `@dnd-kit/sortable`, `@dnd-kit/utilities` (already in `client/ui/package.json`)

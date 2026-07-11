@@ -1,0 +1,59 @@
+{
+  "name": "@openchamber/backend",
+  "version": "1.15.0",
+  "private": true,
+  "type": "module",
+  "main": "./server/index.js",
+  "types": "./server/index.d.ts",
+  "bin": {
+    "openchamber": "./bin/cli.js"
+  },
+  "scripts": {
+    "start": "node bin/cli.js serve",
+    "dev": "node server/index.js --port ${OPENCHAMBER_PORT:-3001}",
+    "dev:watch": "nodemon --watch server --ext js --exec \"node server/index.js --port ${OPENCHAMBER_PORT:-3001}\"",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint \"./server/**/*.js\" --config eslint.config.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@clack/prompts": "^1.1.0",
+    "@daytona/sdk": "^0.196.0",
+    "@octokit/rest": "^22.0.1",
+    "@opencode-ai/sdk": "1.17.18",
+    "@simplewebauthn/server": "13.3.1",
+    "adm-zip": "^0.5.16",
+    "better-sqlite3": "^12.10.0",
+    "bun-pty": "^0.4.5",
+    "compression": "^1.8.1",
+    "cors": "^2.8.5",
+    "cron-parser": "^4.9.0",
+    "express": "^5.1.0",
+    "http-proxy-middleware": "^3.0.5",
+    "jose": "^6.1.3",
+    "jsonc-parser": "^3.3.1",
+    "luxon": "^3.5.0",
+    "node-pty": "1.2.0-beta.12",
+    "openai": "^4.79.0",
+    "qrcode-terminal": "^0.12.0",
+    "reflect-metadata": "^0.2.2",
+    "sherpa-onnx-node": "1.12.28",
+    "simple-git": "^3.28.0",
+    "web-push": "^3.6.7",
+    "ws": "^8.18.3",
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.7",
+    "@types/node": "^24.3.1",
+    "@types/supertest": "^7.2.0",
+    "eslint": "^9.33.0",
+    "nodemon": "^3.1.7",
+    "supertest": "^7.2.2",
+    "typescript": "~5.9.0",
+    "vitest": "^4.1.4"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

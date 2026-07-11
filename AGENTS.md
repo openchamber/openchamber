@@ -6,34 +6,45 @@ OpenChamber provides UI runtimes (web and Android) for interacting with an OpenC
 
 ## Runtime architecture (IMPORTANT)
 
-- The web runtime serves the UI from `packages/web` and boots/attaches to an OpenCode server. Backend/domain logic lives in `packages/web/server/*`.
-- The Android app (`packages/mobile`) is a Capacitor shell that wraps the built web UI and connects to a self-hosted OpenChamber server over LAN, Cloudflare tunnel, or relay.
+- The **client** (`client/web`, built with Vite) is a static frontend. It does not host an OpenCode server itself; it talks to the **backend** over the backend's public URL (`VITE_API_URL` → `window.__OPENCHAMBER_API_BASE_URL__`).
+- The **backend** (`backend/server/*`, Express) is API-only. It orchestrates OpenCode: each chat session spins up an isolated Daytona sandbox running OpenCode, and the backend proxies the client's API/realtime traffic to that sandbox (see `backend/server/lib/daytona/*`).
+- The Android app (`client/mobile`) is a Capacitor shell that wraps the built web UI and points at the backend's public URL.
 - Do not add OpenCode feature backends to the native shell. Shared UI features should remain server/runtime APIs unless the capability is inherently native.
 
 ### Android Shell
 
-- **Android work goes into `packages/mobile/`.** The native project is `packages/mobile/android` (Capacitor).
-- The app bundles the web build via `packages/mobile/scripts/prepare-web-assets.mjs`; there is no separate mobile UI codebase — it reuses `packages/web`.
-- Native plugin config (status bar, keyboard, push notifications) lives in `packages/mobile/capacitor.config.ts`.
+- **Android work goes into `client/mobile/`.** The native project is `client/mobile/android` (Capacitor).
+- The app bundles the web build via `client/mobile/scripts/prepare-web-assets.mjs`; there is no separate mobile UI codebase — it reuses `client/web`.
+- Native plugin config (status bar, keyboard, push notifications) lives in `client/mobile/capacitor.config.ts`.
 - Build/release: the Android APK/AAB is the mobile release target (see `.github/workflows/mobile-release.yml`).
 
 ## Tech stack (source of truth: `package.json`, resolved: `bun.lock`)
 
 - Runtime/tooling: Bun (`package.json` `packageManager`), Node >=22 (`package.json` `engines`)
 - UI: React, TypeScript, Vite, Tailwind v4
-- State: Zustand stores and sync layer (`packages/ui/src/stores/`, `packages/ui/src/sync/`)
-- UI primitives: Base UI (`@base-ui/react`, primary source for dropdown/select/dialog/menu/tooltip/etc. — wrappers live in `packages/ui/src/components/ui/`), Radix UI (`package.json` deps, legacy usages being migrated), HeroUI (`package.json` deps), Remixicon as SVG sprite source only (use shared `Icon`, never direct `@remixicon/react` imports)
-- Server: Express (`packages/web/server/index.js`)
-- Android: Capacitor (`packages/mobile/`)
+- State: Zustand stores and sync layer (`client/ui/src/stores/`, `client/ui/src/sync/`)
+- UI primitives: Base UI (`@base-ui/react`, primary source for dropdown/select/dialog/menu/tooltip/etc. — wrappers live in `client/ui/src/components/ui/`), Radix UI (`package.json` deps, legacy usages being migrated), HeroUI (`package.json` deps), Remixicon as SVG sprite source only (use shared `Icon`, never direct `@remixicon/react` imports)
+- Server: Express (`backend/server/index.js`)
+- Android: Capacitor (`client/mobile/`)
 
-## Monorepo layout
+## Repository layout
 
-Workspaces are `packages/*` (see `package.json`).
+The repo is split into two **independent** projects plus a docs site:
 
-- Shared UI: `packages/ui`
-- Web app + server + CLI: `packages/web`
-- Android app: `packages/mobile`
-- Documentation site: `packages/docs`
+- **`client/`** — a self-contained Bun workspace (deploys as a static site / Android APK):
+  - Web/PWA frontend: `client/web`
+  - Shared UI library: `client/ui` (resolved via the `@openchamber/ui` / `@` aliases)
+  - Android app (Capacitor): `client/mobile`
+  - The client talks to the backend over its public URL, set at build time via
+    `VITE_API_URL` (see `client/web/src/apiBase.ts`).
+- **`backend/`** — a standalone Express server (deploys to Render):
+  - Server: `backend/server`
+  - CLI: `backend/bin`
+  - API-only; orchestrates per-session Daytona sandboxes running OpenCode.
+- **`docs-site/`** — documentation website content.
+
+The two projects have separate `package.json` files, dependency trees, and
+lockfiles, and can be built/deployed on their own.
 
 ## Documentation map
 
@@ -51,91 +62,91 @@ Server-side integration modules used by API routes and runtime services.
 
 OpenChamber-owned event stream helpers for server-sent runtime events.
 
-- Module docs: `packages/web/server/lib/event-stream/DOCUMENTATION.md`
+- Module docs: `backend/server/lib/event-stream/DOCUMENTATION.md`
 
 ##### fs
 
 Filesystem routes, raw file access, search helpers, and workspace-scoped file operations.
 
-- Module docs: `packages/web/server/lib/fs/DOCUMENTATION.md`
+- Module docs: `backend/server/lib/fs/DOCUMENTATION.md`
 
 ##### quota
 
 Quota provider registry, dispatch, and provider integrations for usage endpoints.
 
-- Module docs: `packages/web/server/lib/quota/DOCUMENTATION.md`
+- Module docs: `backend/server/lib/quota/DOCUMENTATION.md`
 
 ##### git
 
 Git repository operations for the web server runtime.
 
-- Module docs: `packages/web/server/lib/git/DOCUMENTATION.md`
+- Module docs: `backend/server/lib/git/DOCUMENTATION.md`
 
 ##### github
 
 GitHub authentication, OAuth device flow, Octokit client factory, and repository URL parsing.
 
-- Module docs: `packages/web/server/lib/github/DOCUMENTATION.md`
+- Module docs: `backend/server/lib/github/DOCUMENTATION.md`
 
 ##### opencode
 
 OpenCode server integration utilities including config management, provider authentication, and UI authentication.
 
-- Module docs: `packages/web/server/lib/opencode/DOCUMENTATION.md`
+- Module docs: `backend/server/lib/opencode/DOCUMENTATION.md`
 
 ##### notifications
 
 Notification message preparation utilities for system notifications, including text truncation and optional summarization.
 
-- Module docs: `packages/web/server/lib/notifications/DOCUMENTATION.md`
+- Module docs: `backend/server/lib/notifications/DOCUMENTATION.md`
 
 ##### scheduled-tasks
 
 Scheduled task persistence, execution, and event fanout for recurring sessions.
 
-- Module docs: `packages/web/server/lib/scheduled-tasks/DOCUMENTATION.md`
+- Module docs: `backend/server/lib/scheduled-tasks/DOCUMENTATION.md`
 
 ##### text
 
 Text processing helpers shared by server-side routes and summarization flows.
 
-- Module docs: `packages/web/server/lib/text/DOCUMENTATION.md`
+- Module docs: `backend/server/lib/text/DOCUMENTATION.md`
 
 ##### terminal
 
 WebSocket protocol utilities for terminal input handling including message normalization, control frame parsing, and rate limiting.
 
-- Module docs: `packages/web/server/lib/terminal/DOCUMENTATION.md`
+- Module docs: `backend/server/lib/terminal/DOCUMENTATION.md`
 
 ##### tts
 
 Server-side text-to-speech services and summarization helpers for `/api/tts/*` endpoints.
 
-- Module docs: `packages/web/server/lib/tts/DOCUMENTATION.md`
+- Module docs: `backend/server/lib/tts/DOCUMENTATION.md`
 
 ##### relay
 
 Host side of the private relay: outbound E2EE tunnel that lets remote clients reach this instance through OpenChamber-hosted relay infrastructure without inbound exposure. Load the `relay-transport` skill before changing it or any WebSocket/streaming endpoint that rides it.
 
-- Module docs: `packages/web/server/lib/relay/DOCUMENTATION.md`
+- Module docs: `backend/server/lib/relay/DOCUMENTATION.md`
 
 ##### tunnels
 
 Tunnel provider setup and runtime helpers for exposing OpenChamber over remote URLs.
 
-- Module docs: `packages/web/server/lib/tunnels/DOCUMENTATION.md`
+- Module docs: `backend/server/lib/tunnels/DOCUMENTATION.md`
 
 ##### ui-auth
 
 UI session auth, client tokens, URL-token scoping, passkey/reset flows, and route-level auth gates.
 
-- Module docs: `packages/web/server/lib/ui-auth/DOCUMENTATION.md`
+- Module docs: `backend/server/lib/ui-auth/DOCUMENTATION.md`
 
 ##### skills-catalog
 
 Skills catalog management including discovery, installation, and configuration of agent skill packages.
 
-- Module docs: `packages/web/server/lib/skills-catalog/DOCUMENTATION.md`
+- Module docs: `backend/server/lib/skills-catalog/DOCUMENTATION.md`
 
 ### ui
 
@@ -145,25 +156,25 @@ Shared React UI, sync layer, runtime API contracts, and stores.
 
 Session synchronization, event pipeline, optimistic updates, caches, and live-state stores.
 
-- Module docs: `packages/ui/src/sync/DOCUMENTATION.md`
+- Module docs: `client/ui/src/sync/DOCUMENTATION.md`
 
 #### stores
 
 Zustand store ownership, persistence expectations, and store-splitting guidance.
 
-- Module docs: `packages/ui/src/stores/DOCUMENTATION.md`
+- Module docs: `client/ui/src/stores/DOCUMENTATION.md`
 
 #### session sidebar
 
 Session sidebar grouping, ordering, virtualization-adjacent behavior, and project/worktree display.
 
-- Module docs: `packages/ui/src/components/session/sidebar/DOCUMENTATION.md`
+- Module docs: `client/ui/src/components/session/sidebar/DOCUMENTATION.md`
 
 #### message parts
 
 Chat message part rendering and message-row performance expectations.
 
-- Module docs: `packages/ui/src/components/chat/message/parts/DOCUMENTATION.md`
+- Module docs: `client/ui/src/components/chat/message/parts/DOCUMENTATION.md`
 
 ## Build / dev commands (verified)
 
@@ -177,35 +188,35 @@ All scripts are in `package.json`.
 
 ## Runtime entry points
 
-- Web bootstrap: `packages/web/src/main.tsx`
-- Web server: `packages/web/server/index.js`
-- Web CLI: `packages/web/bin/cli.js` (package bin: `packages/web/package.json`)
-- Android: `packages/mobile/android` (Capacitor shell wrapping the built web UI; config at `packages/mobile/capacitor.config.ts`)
+- Web bootstrap: `client/web/src/main.tsx`
+- Web server: `backend/server/index.js`
+- Web CLI: `backend/bin/cli.js` (package bin: `client/web/package.json`)
+- Android: `client/mobile/android` (Capacitor shell wrapping the built web UI; config at `client/mobile/capacitor.config.ts`)
 
 ## OpenCode integration
 
-- UI client wrapper: `packages/ui/src/lib/opencode/client.ts` (imports `@opencode-ai/sdk/v2`)
-- Sync/event pipeline: app roots mount `SyncProvider` from `packages/ui/src/sync/sync-context.tsx`; OpenCode SSE/WS event handling lives in `packages/ui/src/sync/event-pipeline.ts`
-- Web server embeds/starts OpenCode server: `packages/web/server/index.js` (`createOpencodeServer`)
-- Web runtime filesystem endpoints: `packages/web/server/lib/fs/routes.js`, registered by `packages/web/server/lib/opencode/feature-routes-runtime.js`
+- UI client wrapper: `client/ui/src/lib/opencode/client.ts` (imports `@opencode-ai/sdk/v2`)
+- Sync/event pipeline: app roots mount `SyncProvider` from `client/ui/src/sync/sync-context.tsx`; OpenCode SSE/WS event handling lives in `client/ui/src/sync/event-pipeline.ts`
+- Web server embeds/starts OpenCode server: `backend/server/index.js` (`createOpencodeServer`)
+- Web runtime filesystem endpoints: `backend/server/lib/fs/routes.js`, registered by `backend/server/lib/opencode/feature-routes-runtime.js`
 - External server support: Set `OPENCODE_HOST` (full base URL, e.g. `http://hostname:4096`) or `OPENCODE_PORT`, plus `OPENCODE_SKIP_START=true`, to connect to existing OpenCode instance
 
 ## Key UI patterns (reference files)
 
-- Settings shell: `packages/ui/src/components/views/SettingsView.tsx`
-- Settings shared primitives: `packages/ui/src/components/sections/shared/`
-- Settings sections: `packages/ui/src/components/sections/` (incl `skills/`)
-- Chat UI: `packages/ui/src/components/chat/` and `packages/ui/src/components/chat/message/`
-- Theme + typography: `packages/ui/src/lib/theme/`, `packages/ui/src/lib/typography.ts`
-- Terminal UI: `packages/ui/src/components/terminal/` (uses `ghostty-web`)
+- Settings shell: `client/ui/src/components/views/SettingsView.tsx`
+- Settings shared primitives: `client/ui/src/components/sections/shared/`
+- Settings sections: `client/ui/src/components/sections/` (incl `skills/`)
+- Chat UI: `client/ui/src/components/chat/` and `client/ui/src/components/chat/message/`
+- Theme + typography: `client/ui/src/lib/theme/`, `client/ui/src/lib/typography.ts`
+- Terminal UI: `client/ui/src/components/terminal/` (uses `ghostty-web`)
 
 ## External / system integrations (active)
 
-- Runtime API contracts: `packages/ui/src/lib/api/types.ts`; React consumption via `packages/ui/src/hooks/useRuntimeAPIs.ts`
-- Runtime transport/auth: `packages/ui/src/lib/runtime-fetch.ts`, `packages/ui/src/lib/runtime-url.ts`, `packages/ui/src/lib/runtime-auth.ts`
-- Git: `packages/ui/src/lib/gitApi.ts`, `packages/web/server/lib/git/service.js` (`simple-git`)
-- Terminal PTY: `packages/web/server/lib/terminal/runtime.js` (`bun-pty`/`node-pty`)
-- Skills catalog: `packages/web/server/lib/skills-catalog/`, UI: `packages/ui/src/components/sections/skills/`
+- Runtime API contracts: `client/ui/src/lib/api/types.ts`; React consumption via `client/ui/src/hooks/useRuntimeAPIs.ts`
+- Runtime transport/auth: `client/ui/src/lib/runtime-fetch.ts`, `client/ui/src/lib/runtime-url.ts`, `client/ui/src/lib/runtime-auth.ts`
+- Git: `client/ui/src/lib/gitApi.ts`, `backend/server/lib/git/service.js` (`simple-git`)
+- Terminal PTY: `backend/server/lib/terminal/runtime.js` (`bun-pty`/`node-pty`)
+- Skills catalog: `backend/server/lib/skills-catalog/`, UI: `client/ui/src/components/sections/skills/`
 
 ## Agent constraints
 
@@ -231,7 +242,7 @@ All scripts are in `package.json`.
 - TypeScript: avoid `any`, blind casts, and shape guessing.
 - React: prefer function components + hooks; use classes only when required.
 - Control flow: prefer early returns and explicit branching over nested ternaries.
-- Styling: Tailwind v4, typography via `packages/ui/src/lib/typography.ts`, theme vars via `packages/ui/src/lib/theme/`.
+- Styling: Tailwind v4, typography via `client/ui/src/lib/typography.ts`, theme vars via `client/ui/src/lib/theme/`.
 - Shared UI patterns: reuse shared primitives before introducing feature-local markup patterns.
 - Toasts: use the wrapper from `@/components/ui`; do not import `sonner` directly in feature code.
 - No new deps unless asked.
@@ -277,7 +288,7 @@ Client API methods that feed authoritative state (bootstrap, reconnect resync, r
 
 - **Decide which methods are authoritative.** A method is authoritative if any caller uses its result to delete, clear, or replace persisted/sync state. UI-display-only methods (autocomplete, dropdowns, settings pages) can keep silent-empty fallback because the user's next action refreshes them.
 - **For authoritative methods, pick one of two patterns** — both already exist in the codebase, do not invent a third:
-  - **Throw on failure** (e.g. `listPendingPermissions`, `listPendingQuestions`, `listAgents`, the `unwrap()` helper in `packages/ui/src/sync/bootstrap.ts`). Use this when the caller has an outer `try/catch` per logical block — the throw skips the block and preserves prior state.
+  - **Throw on failure** (e.g. `listPendingPermissions`, `listPendingQuestions`, `listAgents`, the `unwrap()` helper in `client/ui/src/sync/bootstrap.ts`). Use this when the caller has an outer `try/catch` per logical block — the throw skips the block and preserves prior state.
   - **Return `T | null` on failure, where `null` strictly means "fetch failed"** (e.g. `getSessionStatusForDirectory`, the `.catch(() => null)` + early-return-on-null pattern at the per-session reconnect loop in `sync-context.tsx`). Use this when the caller has follow-up work that should still run when one fetch fails.
 - **Never swallow inside the method while returning the same type as success.** The SDK's `{data, error}` shape already does this silently — wrap with `if (result.error) throw …` so the failure can't be lost.
 - **Verify the caller actually preserves state on failure.** Adding the throw is only half the fix; the consumer must not run the "delete missing" / "overwrite" branch unless it knows the fetch succeeded. The relevant outer `try/catch` is often already there but dormant.
@@ -287,7 +298,7 @@ This rule is the API-layer counterpart of "Use live server/session state for liv
 
 ### Reconnect-loop pacing
 
-The SSE/WebSocket reconnect loop in `packages/ui/src/sync/event-pipeline.ts` retries indefinitely. To avoid burning battery and server load on dead/idle connections, the loop's pacing must respect three signals:
+The SSE/WebSocket reconnect loop in `client/ui/src/sync/event-pipeline.ts` retries indefinitely. To avoid burning battery and server load on dead/idle connections, the loop's pacing must respect three signals:
 
 - **`navigator.onLine`**: when the browser reports offline, use the long backoff cap (~60s) instead of the short one (~5s). The expected recovery path is the `online` event, not the next probe.
 - **`document.visibilityState`**: when hidden, use the long cap too. A backgrounded PWA shouldn't hammer the network at 1/5s; the browser may also throttle our timers, but state the intent in code rather than relying on it.
@@ -335,14 +346,14 @@ Project skills live under `.agents/skills/*/SKILL.md`. Before editing, agents **
 
 | Work being done | Required skill call |
 |---|---|
-| Terminal CLI commands, prompts, or output formatting, especially `packages/web/bin/*` | `skill({ name: "clack-cli-patterns" })` |
+| Terminal CLI commands, prompts, or output formatting, especially `backend/bin/*` | `skill({ name: "clack-cli-patterns" })` |
 | Shared UI data access, `RuntimeAPIs`, `runtimeFetch`, `runtime-url`, OpenCode SDK calls, authenticated browser assets, runtime switching, or web server API endpoints | `skill({ name: "ui-api-decoupling" })` |
 | UI components, styling, visual elements, colors, buttons, or icons | `skill({ name: "theme-system" })` |
 | User-facing UI text: labels, buttons, placeholders, aria labels, empty/error/loading states, toasts, dialogs, settings copy, or navigation labels | `skill({ name: "locale-ui-patterns" })` |
 | Settings pages, settings dialogs, configuration UI, or visual/layout changes inside Settings | `skill({ name: "settings-ui-patterns" })` |
 | Drag-to-reorder, sortable lists/chips/grids, or `@dnd-kit` behavior including touch/mobile and wrapping variable-width items | `skill({ name: "drag-to-reorder" })` |
 | iOS Simulator preview/control for the mobile app, `serve-sim`, simulator taps/typing/gestures/rotation, or headless install/launch workflows outside Xcode | `skill({ name: "serve-sim" })` |
-| WebSocket/SSE/streaming endpoints (terminal, dictation/voice, event stream, notifications), opening a WebSocket in shared UI, runtime transport refactors (`runtime-fetch`/`runtime-url`/`runtime-switch`/`runtime-auth`), the private relay tunnel, or anything under `packages/ui/src/lib/relay` or `packages/web/server/lib/relay` | `skill({ name: "relay-transport" })` |
+| WebSocket/SSE/streaming endpoints (terminal, dictation/voice, event stream, notifications), opening a WebSocket in shared UI, runtime transport refactors (`runtime-fetch`/`runtime-url`/`runtime-switch`/`runtime-auth`), the private relay tunnel, or anything under `client/ui/src/lib/relay` or `backend/server/lib/relay` | `skill({ name: "relay-transport" })` |
 
 Skill docs are the source of truth for detailed patterns. Do not duplicate their full guidance here; load the skill and follow it before making matching changes.
 

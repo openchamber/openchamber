@@ -259,7 +259,7 @@ Managed-local path note: `OPENCHAMBER_TUNNEL_CONFIG` must point to a path inside
 ### Reverse proxy notes
 
 - For a complete reverse proxy setup guide, see [`docs/REVERSE_PROXY.md`](./docs/REVERSE_PROXY.md).
-- Website docs source lives at `packages/docs/content/docs/reverse-proxy.mdx`.
+- Website docs source lives at `docs-site/content/docs/reverse-proxy.mdx`.
 
 ### Tunnel behavior notes
 
@@ -396,7 +396,7 @@ Independent project, not affiliated with the OpenCode team.
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup and guidelines.
 
-Docs source lives in [`packages/docs`](packages/docs/README.md).
+Docs source lives in [`docs-site`](docs-site/README.md).
 
 ## License
 

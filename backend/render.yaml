@@ -1,0 +1,34 @@
+# Render Blueprint for the OpenChamber backend.
+# Deploy: point Render at this repo and set the root directory to `backend/`,
+# or use this blueprint directly (https://render.com/docs/blueprint-spec).
+services:
+  - type: web
+    name: openchamber-backend
+    runtime: node
+    rootDir: backend
+    plan: starter
+    buildCommand: npm install
+    startCommand: node server/index.js --host 0.0.0.0
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: OPENCHAMBER_HOST
+        value: 0.0.0.0
+      - key: OPENCHAMBER_API_ONLY
+        value: "1"
+      # PORT is provided automatically by Render and honored by the server.
+      - key: OPENCHAMBER_UI_PASSWORD
+        sync: false
+      - key: OPENCHAMBER_CLIENT_URL
+        sync: false
+      - key: DAYTONA_API_KEY
+        sync: false
+      - key: DAYTONA_API_URL
+        value: https://app.daytona.io
+      - key: DAYTONA_SANDBOX_IMAGE
+        value: daytonaio/ai-opencode:latest
+      - key: DAYTONA_SANDBOX_TIMEOUT_MS
+        value: "600000"
+      - key: DAYTONA_OPENCODE_PORT
+        value: "4096"

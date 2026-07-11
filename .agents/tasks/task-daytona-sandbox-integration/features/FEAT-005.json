@@ -24,7 +24,7 @@
   "verification": [
     "bun run type-check",
     "bun run lint",
-    "bun run --cwd packages/web test",
+    "bun run --cwd client/web test",
     "bun run build"
   ],
   "blocked_reason": null,

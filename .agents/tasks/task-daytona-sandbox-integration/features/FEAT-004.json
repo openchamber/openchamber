@@ -4,14 +4,14 @@
   "description": "Add unit tests for the Daytona service modules and ensure the integration is properly tested. Write tests for the sandbox registry, inactivity monitor, configuration parsing, and route handlers following the existing test patterns in the codebase (colocated .test.js files with vitest).",
   "status": "completed",
   "steps": [
-    "Create packages/web/server/lib/daytona/config.test.js - Test resolveDaytonaConfig() with various env var combinations: missing API key (should indicate disabled), custom API URL, custom timeout, default values.",
-    "Create packages/web/server/lib/daytona/sandbox-registry.test.js - Test the in-memory registry: register a sandbox, retrieve it, update activity timestamp, list active sandboxes, unregister a sandbox, verify it returns null for unknown sessions.",
-    "Create packages/web/server/lib/daytona/inactivity-monitor.test.js - Test the inactivity monitor: verify it calls destroy callback when a sandbox exceeds the timeout, verify resetTimer prevents destruction, verify start/stop lifecycle, use fake timers (vi.useFakeTimers) to control time advancement.",
-    "Create packages/web/server/lib/daytona/routes.test.js - Test route handlers using supertest (already a devDependency). Test: POST /api/daytona/sandbox returns 201 with sandbox info, DELETE returns 200, GET status returns current state, proper error responses for missing sessionId or when Daytona is not configured.",
-    "Ensure all new test files follow the existing vitest patterns seen in packages/web/server/lib/opencode/lifecycle.test.js and packages/web/server/lib/opencode/proxy.test.js"
+    "Create backend/server/lib/daytona/config.test.js - Test resolveDaytonaConfig() with various env var combinations: missing API key (should indicate disabled), custom API URL, custom timeout, default values.",
+    "Create backend/server/lib/daytona/sandbox-registry.test.js - Test the in-memory registry: register a sandbox, retrieve it, update activity timestamp, list active sandboxes, unregister a sandbox, verify it returns null for unknown sessions.",
+    "Create backend/server/lib/daytona/inactivity-monitor.test.js - Test the inactivity monitor: verify it calls destroy callback when a sandbox exceeds the timeout, verify resetTimer prevents destruction, verify start/stop lifecycle, use fake timers (vi.useFakeTimers) to control time advancement.",
+    "Create backend/server/lib/daytona/routes.test.js - Test route handlers using supertest (already a devDependency). Test: POST /api/daytona/sandbox returns 201 with sandbox info, DELETE returns 200, GET status returns current state, proper error responses for missing sessionId or when Daytona is not configured.",
+    "Ensure all new test files follow the existing vitest patterns seen in backend/server/lib/opencode/lifecycle.test.js and backend/server/lib/opencode/proxy.test.js"
   ],
   "acceptance_criteria": [
-    "All test files run successfully with 'bun run --cwd packages/web test'",
+    "All test files run successfully with 'bun run --cwd client/web test'",
     "Config tests cover: valid config, missing API key, custom values, defaults",
     "Registry tests cover: register, get, update, list, unregister",
     "Inactivity monitor tests cover: timeout trigger, timer reset, start/stop",
@@ -19,8 +19,8 @@
     "Tests mock the Daytona SDK to avoid actual API calls"
   ],
   "verification": [
-    "Run 'bun run --cwd packages/web test' and confirm all new tests pass",
-    "Run 'bun run --cwd packages/web test -- --reporter=verbose' to see individual test results"
+    "Run 'bun run --cwd client/web test' and confirm all new tests pass",
+    "Run 'bun run --cwd client/web test -- --reporter=verbose' to see individual test results"
   ],
   "blocked_reason": null,
   "findings": "All 38 new tests pass successfully (9 config, 8 registry, 7 inactivity-monitor, 14 routes). Key note: vi.advanceTimersByTimeAsync() must be used instead of vi.advanceTimersByTime() + flushPromises when testing the inactivity monitor because the sweep function is async and runs inside a setInterval callback. The sandbox-registry listActive() filters by status === 'active' (not 'running' as briefing stated). Full suite: 81 test files, 677 tests passing, 3 skipped (pre-existing)."

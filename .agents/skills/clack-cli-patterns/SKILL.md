@@ -13,7 +13,7 @@ OpenChamber terminal CLI uses `@clack/prompts` for interactive UX, but command p
 
 ## Scope
 
-Use this skill for terminal CLI work only (for example `packages/web/bin/*`).
+Use this skill for terminal CLI work only (for example `backend/bin/*`).
 
 Do not use this skill for web UI or VS Code webview styling work.
 
@@ -212,5 +212,5 @@ outro('done');
 ## References
 
 - Policy source: `AGENTS.md` (CLI Parity and Safety Policy)
-- Terminal CLI precedent: `packages/web/bin/cli.js`
-- Output adapter precedent: `packages/web/bin/cli-output.js`
+- Terminal CLI precedent: `backend/bin/cli.js`
+- Output adapter precedent: `backend/bin/cli-output.js`

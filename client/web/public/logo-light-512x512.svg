@@ -1,0 +1,16 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!-- OpenChamber logo - simplified, no background (for light backgrounds) -->
+  <g transform="translate(256, 256) scale(4)">
+    <!-- Left face - simplified, no grid cells -->
+    <path d="M0 0 L-41.568 -24 L-41.568 24 L0 48 Z" fill="black" fill-opacity="0.2" stroke="black" stroke-width="3" stroke-linejoin="round"/>
+    <!-- Right face - simplified, no grid cells -->
+    <path d="M0 0 L41.568 -24 L41.568 24 L0 48 Z" fill="black" fill-opacity="0.35" stroke="black" stroke-width="3" stroke-linejoin="round"/>
+    <!-- Top face - open -->
+    <path d="M0 -48 L-41.568 -24 L0 0 L41.568 -24 Z" fill="none" stroke="black" stroke-width="3" stroke-linejoin="round"/>
+    <!-- OpenCode logo on top face -->
+    <g transform="matrix(0.866, 0.5, -0.866, 0.5, 0, -24) scale(0.75)">
+      <path fill-rule="evenodd" clip-rule="evenodd" d="M-16 -20 L16 -20 L16 20 L-16 20 Z M-8 -12 L-8 12 L8 12 L8 -12 Z" fill="black"/>
+      <path d="M-8 -4 L8 -4 L8 12 L-8 12 Z" fill="black" fill-opacity="0.4"/>
+    </g>
+  </g>
+</svg>

@@ -1,22 +1,22 @@
 {
   "id": "FEAT-001",
   "type": "feat",
-  "description": "Create the Daytona sandbox orchestration service module at packages/web/server/lib/daytona/. This is the core backend service that manages Daytona sandbox lifecycle: creating sandboxes with OpenCode pre-installed, destroying them, tracking active sandboxes per chat session, implementing the 10-minute inactivity timeout, and handling the exit command. Uses the @daytona/sdk TypeScript SDK for API communication. Follows the existing createXxxRuntime() factory pattern used by other server modules.",
+  "description": "Create the Daytona sandbox orchestration service module at backend/server/lib/daytona/. This is the core backend service that manages Daytona sandbox lifecycle: creating sandboxes with OpenCode pre-installed, destroying them, tracking active sandboxes per chat session, implementing the 10-minute inactivity timeout, and handling the exit command. Uses the @daytona/sdk TypeScript SDK for API communication. Follows the existing createXxxRuntime() factory pattern used by other server modules.",
   "status": "completed",
   "steps": [
-    "Install @daytona/sdk as a dependency in packages/web/package.json",
-    "Create packages/web/server/lib/daytona/ directory with the following files:",
-    "Create packages/web/server/lib/daytona/config.js - Daytona configuration module that reads env vars: DAYTONA_API_KEY (required), DAYTONA_API_URL (default: https://app.daytona.io), DAYTONA_SANDBOX_IMAGE (default image with OpenCode pre-installed), DAYTONA_SANDBOX_TIMEOUT_MS (default: 600000 = 10 min). Export a resolveDaytonaConfig() function.",
-    "Create packages/web/server/lib/daytona/sandbox-registry.js - In-memory registry that tracks active sandboxes. Maps chatSessionId -> { sandboxId, sandboxInfo, createdAt, lastActivityAt, status, wsConnection }. Provides register/unregister/get/updateActivity/listActive methods. Each entry tracks the WebSocket connection to OpenCode in that sandbox.",
-    "Create packages/web/server/lib/daytona/lifecycle.js - Core sandbox lifecycle management using the createDaytonaSandboxLifecycle() factory pattern. Methods: createSandbox(chatSessionId) - creates a new Daytona sandbox via SDK, waits for it to be ready, registers it; destroySandbox(chatSessionId) - stops and removes the sandbox, cleans up registry; destroyAllSandboxes() - cleanup on server shutdown. The sandbox creation should configure the sandbox with OpenCode installed and running.",
-    "Create packages/web/server/lib/daytona/inactivity-monitor.js - Inactivity timeout manager. Uses setInterval to check all active sandboxes. If lastActivityAt exceeds DAYTONA_SANDBOX_TIMEOUT_MS (default 10 min), automatically calls destroySandbox. Provides start()/stop()/resetTimer(chatSessionId) methods. Emits events when sandboxes are about to be destroyed (gives frontend a warning).",
-    "Create packages/web/server/lib/daytona/ws-bridge.js - WebSocket bridge that connects the frontend chat session to the OpenCode instance running inside the Daytona sandbox. When a new sandbox is created, establishes a WebSocket/HTTP connection to the OpenCode server inside the sandbox. Relays messages bidirectionally between the frontend (via the existing Express server SSE/WS) and the OpenCode instance in the sandbox. Handles reconnection and error recovery.",
-    "Create packages/web/server/lib/daytona/service.js - Thin entrypoint that composes all the above into a single createDaytonaService() export, similar to packages/web/server/lib/relay/service.js pattern. Returns { lifecycle, registry, monitor, bridge, routes } and a dispose() for shutdown.",
-    "Create packages/web/server/lib/daytona/DOCUMENTATION.md - Module documentation following the pattern of other DOCUMENTATION.md files in the codebase."
+    "Install @daytona/sdk as a dependency in client/web/package.json",
+    "Create backend/server/lib/daytona/ directory with the following files:",
+    "Create backend/server/lib/daytona/config.js - Daytona configuration module that reads env vars: DAYTONA_API_KEY (required), DAYTONA_API_URL (default: https://app.daytona.io), DAYTONA_SANDBOX_IMAGE (default image with OpenCode pre-installed), DAYTONA_SANDBOX_TIMEOUT_MS (default: 600000 = 10 min). Export a resolveDaytonaConfig() function.",
+    "Create backend/server/lib/daytona/sandbox-registry.js - In-memory registry that tracks active sandboxes. Maps chatSessionId -> { sandboxId, sandboxInfo, createdAt, lastActivityAt, status, wsConnection }. Provides register/unregister/get/updateActivity/listActive methods. Each entry tracks the WebSocket connection to OpenCode in that sandbox.",
+    "Create backend/server/lib/daytona/lifecycle.js - Core sandbox lifecycle management using the createDaytonaSandboxLifecycle() factory pattern. Methods: createSandbox(chatSessionId) - creates a new Daytona sandbox via SDK, waits for it to be ready, registers it; destroySandbox(chatSessionId) - stops and removes the sandbox, cleans up registry; destroyAllSandboxes() - cleanup on server shutdown. The sandbox creation should configure the sandbox with OpenCode installed and running.",
+    "Create backend/server/lib/daytona/inactivity-monitor.js - Inactivity timeout manager. Uses setInterval to check all active sandboxes. If lastActivityAt exceeds DAYTONA_SANDBOX_TIMEOUT_MS (default 10 min), automatically calls destroySandbox. Provides start()/stop()/resetTimer(chatSessionId) methods. Emits events when sandboxes are about to be destroyed (gives frontend a warning).",
+    "Create backend/server/lib/daytona/ws-bridge.js - WebSocket bridge that connects the frontend chat session to the OpenCode instance running inside the Daytona sandbox. When a new sandbox is created, establishes a WebSocket/HTTP connection to the OpenCode server inside the sandbox. Relays messages bidirectionally between the frontend (via the existing Express server SSE/WS) and the OpenCode instance in the sandbox. Handles reconnection and error recovery.",
+    "Create backend/server/lib/daytona/service.js - Thin entrypoint that composes all the above into a single createDaytonaService() export, similar to backend/server/lib/relay/service.js pattern. Returns { lifecycle, registry, monitor, bridge, routes } and a dispose() for shutdown.",
+    "Create backend/server/lib/daytona/DOCUMENTATION.md - Module documentation following the pattern of other DOCUMENTATION.md files in the codebase."
   ],
   "acceptance_criteria": [
-    "@daytona/sdk is added to packages/web/package.json dependencies",
-    "All files in packages/web/server/lib/daytona/ are syntactically valid JS ESM modules",
+    "@daytona/sdk is added to client/web/package.json dependencies",
+    "All files in backend/server/lib/daytona/ are syntactically valid JS ESM modules",
     "The service module exports a createDaytonaService() factory following the existing runtime pattern",
     "Config module reads DAYTONA_API_KEY, DAYTONA_API_URL, DAYTONA_SANDBOX_IMAGE, DAYTONA_SANDBOX_TIMEOUT_MS env vars",
     "Inactivity monitor correctly implements 10-minute timeout with configurable duration",
@@ -26,7 +26,7 @@
   "verification": [
     "Run 'bun run type-check:web' and confirm no new type errors are introduced",
     "Run 'bun run lint:web' and confirm no lint errors in new files",
-    "Run 'bun run --cwd packages/web test' and confirm existing tests still pass"
+    "Run 'bun run --cwd client/web test' and confirm existing tests still pass"
   ],
   "blocked_reason": null,
   "findings": "All files created and verified. Node --check passes for all 6 JS modules. Lint passes (server JS files are not covered by the project's eslint config which only targets src/**/*.{ts,tsx}). Type-check passes. All 77 existing test files (639 tests) pass. @daytona/sdk@0.196.0 installed successfully. The Daytona SDK uses 'new Daytona({ apiKey, apiUrl })' for client initialization and 'client.create()' / 'client.delete(id)' for sandbox lifecycle."

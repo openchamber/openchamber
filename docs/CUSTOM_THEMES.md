@@ -225,5 +225,5 @@ Common issues:
 ## Tips
 
 - Use hex with alpha for transparency (e.g., `#FFFFFF20`)
-- Reference built-in themes in `packages/ui/src/lib/theme/themes/` for more examples
+- Reference built-in themes in `client/ui/src/lib/theme/themes/` for more examples
 - Theme `id` must be unique; duplicates are skipped

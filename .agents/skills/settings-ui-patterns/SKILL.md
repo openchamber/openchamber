@@ -22,7 +22,7 @@ Use this as source of truth for new settings UI work.
 - **Minimal row chrome**: Avoid row hover/background highlighting by default; keep only where explicitly needed.
 
 ## Typography Guidelines
-Always utilize the standard OpenChamber typography classes defined in `packages/ui/src/lib/typography.ts`.
+Always utilize the standard OpenChamber typography classes defined in `client/ui/src/lib/typography.ts`.
 
 - **Page Title**: Use `typography-ui-header font-semibold text-foreground` for the top-most title of a settings page/dialog.
 - **Section Header**: Use `typography-ui-header font-medium text-foreground` for settings sections (e.g. `Notification Events`, `Session Defaults`).
@@ -160,9 +160,9 @@ Use compact stepper input (`- value +`) plus reset button.
 
 - Prefer shared `NumberInput` stepper style over slider + numeric combo in dense settings pages.
 - Keep reset button adjacent to control (`gap-2`).
-- Avoid using Tailwind `overflow-hidden` on mobile for controls; `packages/ui/src/styles/mobile.css` forces `.overflow-hidden { overflow-y: auto !important; }`.
+- Avoid using Tailwind `overflow-hidden` on mobile for controls; `client/ui/src/styles/mobile.css` forces `.overflow-hidden { overflow-y: auto !important; }`.
   Use `overflow-x-hidden overflow-y-hidden` if you truly need clipping.
-- Touch devices: `packages/ui/src/styles/mobile.css` enforces `min-height: 36px` on `button`. If you build custom segmented controls with `<button>`, ensure the container height can accommodate that (e.g. `h-9`).
+- Touch devices: `client/ui/src/styles/mobile.css` enforces `min-height: 36px` on `button`. If you build custom segmented controls with `<button>`, ensure the container height can accommodate that (e.g. `h-9`).
 
 #### Optional numeric overrides
 For "override unless empty" fields (e.g. agent Temperature/Top P), keep the value optional and provide a fallback for stepping.
@@ -232,10 +232,10 @@ Every Settings UI addition must preserve item search. The registry is explicit: 
 
 ### Required Files
 
-- Add or update search items in `packages/ui/src/lib/settings/search.ts`.
+- Add or update search items in `client/ui/src/lib/settings/search.ts`.
 - Add matching `data-settings-item="..."` anchors in the rendered Settings UI.
-- Reuse existing localized labels/descriptions where possible; otherwise add keys to all `packages/ui/src/lib/i18n/messages/*.settings.ts` files.
-- If adding a new top-level Settings page, add metadata in `packages/ui/src/lib/settings/metadata.ts` and at least one searchable item unless the page is purely navigational like `home`.
+- Reuse existing localized labels/descriptions where possible; otherwise add keys to all `client/ui/src/lib/i18n/messages/*.settings.ts` files.
+- If adding a new top-level Settings page, add metadata in `client/ui/src/lib/settings/metadata.ts` and at least one searchable item unless the page is purely navigational like `home`.
 
 ### What To Index
 
@@ -268,7 +268,7 @@ For split pages, search should target predictable static surfaces only.
 
 - Put `data-settings-item` on the smallest stable container that visually owns the setting.
 - Avoid adding layout-only wrappers just for search anchors.
-- Highlight styling is intentionally subtle and lives in `packages/ui/src/index.css` under `[data-settings-search-highlight="true"]`; keep it token-based and non-aggressive.
+- Highlight styling is intentionally subtle and lives in `client/ui/src/index.css` under `[data-settings-search-highlight="true"]`; keep it token-based and non-aggressive.
 
 ### Audit Checklist
 

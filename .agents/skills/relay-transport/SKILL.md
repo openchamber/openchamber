@@ -1,6 +1,6 @@
 ---
 name: relay-transport
-description: Use when adding or changing any WebSocket, SSE, or streaming endpoint (terminal, dictation/voice, event stream, notifications), opening a WebSocket in shared UI, refactoring the runtime transport (runtime-fetch/runtime-url/runtime-switch/runtime-auth), touching anything under packages/ui/src/lib/relay or packages/web/server/lib/relay, or porting a realtime feature. These changes silently break OpenChamber's private relay (mobile→desktop over an E2EE tunnel) in ways that pass local/desktop testing and only fail over the relay on a real device. Load this before such work to know the invariants and the traps already hit.
+description: Use when adding or changing any WebSocket, SSE, or streaming endpoint (terminal, dictation/voice, event stream, notifications), opening a WebSocket in shared UI, refactoring the runtime transport (runtime-fetch/runtime-url/runtime-switch/runtime-auth), touching anything under client/ui/src/lib/relay or backend/server/lib/relay, or porting a realtime feature. These changes silently break OpenChamber's private relay (mobile→desktop over an E2EE tunnel) in ways that pass local/desktop testing and only fail over the relay on a real device. Load this before such work to know the invariants and the traps already hit.
 license: MIT
 compatibility: opencode
 ---
@@ -9,7 +9,7 @@ compatibility: opencode
 
 OpenChamber has a private relay: a client (mobile app, browser, another desktop) reaches a user's instance through an OpenChamber-hosted relay over an **end-to-end encrypted tunnel**. All of the app's traffic — many HTTP requests, the event stream (SSE), and WebSockets (terminal, dictation) — is multiplexed and encrypted through **one** connection per client.
 
-Architecture overview: `packages/web/server/lib/relay/DOCUMENTATION.md`. Code: `packages/ui/src/lib/relay/` (client + shared, TS) and `packages/web/server/lib/relay/` (host, JS).
+Architecture overview: `backend/server/lib/relay/DOCUMENTATION.md`. Code: `client/ui/src/lib/relay/` (client + shared, TS) and `backend/server/lib/relay/` (host, JS).
 
 **Why this skill exists:** relay bugs do not show up in normal testing. The event stream is SSE (which behaves differently from WebSockets), so a new WebSocket feature is often the *first* real WebSocket to cross the tunnel on mobile — and it fails there while working everywhere else. We have fixed the same class of bug across several iterations. The rules below are those lessons.
 
@@ -24,17 +24,17 @@ Architecture overview: `packages/web/server/lib/relay/DOCUMENTATION.md`. Code: `
 
 Adding a new WS endpoint (or porting one, e.g. the planned terminal port) requires ALL of these, or it breaks over the relay:
 
-1. **Open it via `openRuntimeWebSocket`** (`packages/ui/src/lib/relay/runtime-socket.ts`), never `new WebSocket(...)` directly. A raw `new WebSocket` against a runtime URL fails in relay mode (the resolver yields a tunnel-virtual/custom-scheme URL the platform rejects — surfaced as "The string did not match the expected pattern").
+1. **Open it via `openRuntimeWebSocket`** (`client/ui/src/lib/relay/runtime-socket.ts`), never `new WebSocket(...)` directly. A raw `new WebSocket` against a runtime URL fails in relay mode (the resolver yields a tunnel-virtual/custom-scheme URL the platform rejects — surfaced as "The string did not match the expected pattern").
 2. **Add the path to BOTH allowlists** (they are separate and both required):
-   - Host tunnel dispatcher: `ALLOWED_WS_PATHS` in `packages/web/server/lib/relay/tunnel-host.js`.
-   - URL-token auth gate: `isUrlAuthWebSocketPath` in `packages/web/server/lib/ui-auth/ui-auth.js` (otherwise the `oc_url_token` is refused for that path → 401).
+   - Host tunnel dispatcher: `ALLOWED_WS_PATHS` in `backend/server/lib/relay/tunnel-host.js`.
+   - URL-token auth gate: `isUrlAuthWebSocketPath` in `backend/server/lib/ui-auth/ui-auth.js` (otherwise the `oc_url_token` is refused for that path → 401).
 3. **Mint the URL token before connecting.** Call `refreshRuntimeUrlAuthToken()` and build the URL through the resolver's `websocket(...)` so `oc_url_token` is appended. SSE/HTTP do not need this; WS does.
 4. **Do not touch origin handling.** The server rejects WS upgrades whose `Origin` it does not trust. Over the tunnel the host dials loopback and presents the loopback origin (`http://127.0.0.1:<port>`), which the server trusts as same-origin — this already covers every allowlisted WS path. **Never reintroduce reliance on `window.location.origin`**: in the iOS WKWebView it is `"null"`/empty for the custom scheme, so forwarding it produces a 403.
 5. **Test over the relay, not just direct/desktop.** A new WS may be the first WebSocket the mobile client runs through the tunnel (events are SSE-locked on Capacitor). Passing on desktop or a direct connection proves nothing about the relay path.
 
 ## Rules for the tunnel/crypto/codec internals
 
-- **Two implementations must stay byte-compatible.** The E2EE and framing exist as TS (`packages/ui/src/lib/relay/{crypto,handshake,tunnel-codec}.ts`, normative) and a JS host mirror (`packages/web/server/lib/relay/{e2ee,tunnel-codec}.js`). Any wire-format, frame-type, handshake, or batching change must update **both** and keep `packages/web/server/lib/relay/cross-compat.test.js` green.
+- **Two implementations must stay byte-compatible.** The E2EE and framing exist as TS (`client/ui/src/lib/relay/{crypto,handshake,tunnel-codec}.ts`, normative) and a JS host mirror (`backend/server/lib/relay/{e2ee,tunnel-codec}.js`). Any wire-format, frame-type, handshake, or batching change must update **both** and keep `backend/server/lib/relay/cross-compat.test.js` green.
 - **Frame types live in `protocol.ts`** and must match across `protocol.ts`, `tunnel-codec.ts`, and `tunnel-codec.js`. Adding a frame type without mirroring it corrupts the stream on one side.
 - **Frame batching is capability-negotiated** in the handshake with a legacy fallback, so mixed client/host app versions still interoperate. Preserve the negotiation and the single-frame fallback; do not make batching unconditional.
 - **The encrypted-frame counter/IV is per-direction and strictly increasing.** One encrypted WS message = one encrypt call = one counter tick. Keep encrypt+send serialized per direction; do not reorder or parallelize it.
@@ -48,7 +48,7 @@ Adding a new WS endpoint (or porting one, e.g. the planned terminal port) requir
 
 - Exercise the real auth and origin gates. An end-to-end test whose stub server accepts any WS upgrade will pass while the real server rejects it — this is precisely how the origin-check bug shipped. When writing a relay integration test, mirror the real gates (`ensureSessionToken` via `oc_url_token`, `isRequestOriginAllowed`) or run against the real server pieces.
 - Run relay tests per file (`bun test <file>`); the suite has order sensitivity.
-- Validate both sides: `packages/ui` `type-check`/`lint`, and `node --check` on changed JS host files.
+- Validate both sides: `client/ui` `type-check`/`lint`, and `node --check` on changed JS host files.
 
 ## Quick checklist before finishing relay-adjacent work
 

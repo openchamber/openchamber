@@ -1,31 +1,49 @@
 # Contributing to OpenChamber
 
+The repo is split into two **independent** projects. Each has its own
+`package.json`, dependency tree, and lockfile, and is built/deployed separately.
+
+- **`client/`** — web/PWA frontend, shared UI, and the Android app.
+- **`backend/`** — the Express API server (deploys to Render).
+
 ## Getting Started
 
 ```bash
 git clone https://github.com/btriapitsyn/openchamber.git
 cd openchamber
-bun install
+
+# Client
+cd client && bun install
+
+# Backend (separate install)
+cd ../backend && bun install
 ```
 
-## Dev Scripts
+## Client
 
-Run commands from the project root unless a section says otherwise.
+Run commands from `client/`.
 
-### Web
+| Script | Description |
+|--------|-------------|
+| `bun run dev` | Vite build watcher for the web/PWA frontend |
+| `bun run build` | Production build of the web/PWA frontend (`client/web/dist`) |
+| `bun run type-check` | Type-check web + ui + mobile |
+| `bun run lint` | Lint web + ui + mobile |
 
-| Script | Description | Ports |
-|--------|-------------|-------|
-| `bun run dev` | Default web HMR dev flow. | auto-selected dev ports |
-| `bun run dev:web:full` | Build watcher + Express server. No HMR — manual refresh after changes. | `3001` (server + static) |
-| `bun run dev:web:hmr` | Vite dev server + Express API. **Open the Vite URL for HMR**, not the backend. | `5180` (Vite HMR), `3902` (API) |
-| `bun run start:web` | Start the packaged web server. | `3000` by default |
+The client talks to the backend over its public URL. Set it at build time:
 
-Both are configurable via env vars: `OPENCHAMBER_PORT`, `OPENCHAMBER_HMR_UI_PORT`, `OPENCHAMBER_HMR_API_PORT`.
+```bash
+# client/.env  (see client/.env.example)
+VITE_API_URL=https://openchamber-backend.onrender.com
+```
+
+When `VITE_API_URL` is unset, local dev proxies `/api`, `/auth`, and `/health`
+to `http://127.0.0.1:3001` (see `client/web/vite.config.ts`).
 
 ### Android (Mobile)
 
-The Android app is a [Capacitor](https://capacitorjs.com/) shell that wraps the built web UI from `packages/web`.
+The Android app is a [Capacitor](https://capacitorjs.com/) shell that wraps the
+built web UI from `client/web`. Run from `client/`:
 
 ```bash
 bun run mobile:build                 # Build web assets and stage them for the app
@@ -34,53 +52,51 @@ bun run mobile:build:android:debug   # Build a debug APK
 bun run mobile:open:android          # Open the project in Android Studio
 ```
 
-Requires the Android SDK (and a JDK). The native project lives in `packages/mobile/android`. See [`packages/mobile/README.md`](./packages/mobile/README.md) for device/emulator workflows.
+Requires the Android SDK (and a JDK). The native project lives in
+`client/mobile/android`. See [`client/mobile/README.md`](./client/mobile/README.md).
 
-### Shared UI (`packages/ui`)
+### Shared UI (`client/ui`)
 
-No standalone app server. This is a source-level library used by Web and the Android app.
+A source-level library consumed by the web app and the Android shell via the
+`@openchamber/ui` / `@` Vite + TS path aliases (no separate build step).
 
-Useful package commands:
+## Backend
 
-```bash
-bun run build:ui
-bun run type-check:ui
-bun run lint:ui
-```
+Run commands from `backend/`.
 
-## Build And Package Commands
+| Script | Description |
+|--------|-------------|
+| `bun run dev` | Start the Express server on `OPENCHAMBER_PORT` (default 3001) |
+| `npm start` | `openchamber serve` — production start |
+| `bun run type-check` | Type-check the server |
+| `bun run test` | Run server tests (Vitest) |
 
-| Command | What it does |
-|---------|--------------|
-| `bun run build` | Build all workspaces |
-| `bun run build:web` | Build only `packages/web` |
-| `bun run build:ui` | Build only `packages/ui` |
-| `bun run mobile:build` | Build web assets and stage them for the Android app |
-| `bun run mobile:build:android:debug` | Build a debug Android APK |
-| `bun run pack:web` | Create a package archive for `@openchamber/web` |
+Configuration is via env vars (see `backend/.env.example`). Key ones:
+`OPENCHAMBER_HOST`, `PORT`, `OPENCHAMBER_UI_PASSWORD`, `OPENCHAMBER_CLIENT_URL`,
+and the `DAYTONA_*` sandbox settings.
 
 ## Before Submitting
 
+Client:
+
 ```bash
-bun run type-check   # Must pass
-bun run lint         # Must pass
-bun run build        # Must succeed
+cd client && bun run type-check && bun run lint && bun run build
 ```
 
-For docs-only changes, validation may be enough:
+Backend:
 
 ```bash
-bun run docs:validate
+cd backend && bun run type-check && bun run test
 ```
 
 ## Code Style
 
 - Functional React components only
 - TypeScript strict mode — no `any` without justification
-- Use existing theme colors/typography from `packages/ui/src/lib/theme/` — don't add new ones
+- Use existing theme colors/typography from `client/ui/src/lib/theme/` — don't add new ones
 - Components must support light and dark themes
 - Prefer early returns and `if/else`/`switch` over nested ternaries
-- Tailwind v4 for styling; typography via `packages/ui/src/lib/typography.ts`
+- Tailwind v4 for styling; typography via `client/ui/src/lib/typography.ts`
 
 ## Pull Requests
 
@@ -92,11 +108,14 @@ bun run docs:validate
 ## Project Structure
 
 ```
-packages/
-  ui/        Shared React components, hooks, stores, and theme system
-  web/       Web server (Express) + frontend (Vite) + CLI
-  mobile/    Android app (Capacitor shell wrapping the web UI)
-  docs/      Documentation site source
+client/            Independent Bun workspace (deploys as static site / Android APK)
+  web/             Web/PWA frontend (Vite)
+  ui/              Shared React components, hooks, stores, theme system
+  mobile/          Android app (Capacitor shell wrapping the web UI)
+backend/           Independent Express API server (deploys to Render)
+  server/          Server + OpenCode/Daytona orchestration + proxies
+  bin/             CLI entrypoint
+docs-site/         Documentation website content
 ```
 
 See [AGENTS.md](./AGENTS.md) for detailed architecture reference.
