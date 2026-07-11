@@ -1686,7 +1686,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.themeImportInfoTooltip': '~/.config/openchamber/themes/에서 사용자 정의 테마를 가져옵니다',
   'settings.openchamber.visual.field.installAppName': '설치 앱 이름',
   'settings.openchamber.visual.field.sidebarBrand': '사이드바 브랜드',
-  'settings.openchamber.visual.field.sidebarBrandHint': '사이드바 로고의 전체 텍스트를 입력하세요. 공백으로 구분한 마지막 단어에는 강조 색상이 적용됩니다.',
+  'settings.openchamber.visual.field.sidebarBrandHint': '사이드바 로고의 전체 텍스트를 입력하세요. 공백으로 구분한 마지막 단어에는 강조 색상이 적용됩니다. 비워 두면 로고가 표시되지 않습니다.',
   'settings.openchamber.visual.field.sidebarBrandAria': '사이드바 브랜드',
   'settings.openchamber.visual.field.installAppNameHint': 'PWA 설치 과정에서 사용됩니다.',
   'settings.openchamber.visual.field.pwaInstallAppNameAria': 'PWA 설치 앱 이름',

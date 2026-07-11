@@ -1686,7 +1686,7 @@ export const settingsDict = {
   "settings.openchamber.visual.field.themeImportInfoTooltip": "Імпорт спеціальних тем із ~/.config/openchamber/themes/",
   "settings.openchamber.visual.field.installAppName": "Назва встановленого застосунку",
   "settings.openchamber.visual.field.sidebarBrand": "Бренд бічної панелі",
-  "settings.openchamber.visual.field.sidebarBrandHint": "Введіть повний текст логотипу бічної панелі. Останнє слово, відділене пробілом, використовує акцентний колір.",
+  "settings.openchamber.visual.field.sidebarBrandHint": "Введіть повний текст логотипу бічної панелі. Останнє слово, відділене пробілом, використовує акцентний колір. Залиште порожнім, щоб приховати логотип.",
   "settings.openchamber.visual.field.sidebarBrandAria": "Бренд бічної панелі",
   "settings.openchamber.visual.field.installAppNameHint": "Використовується процесом встановлення PWA.",
   "settings.openchamber.visual.field.pwaInstallAppNameAria": "Назва встановленого PWA",

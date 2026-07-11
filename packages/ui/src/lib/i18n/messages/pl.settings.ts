@@ -956,7 +956,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.inputBarOffsetTooltip': 'Podnieś pasek wpisywania, aby uniknąć zasłaniania przez systemowe elementy ekranu, takie jak pasek gestów.',
   'settings.openchamber.visual.field.installAppName': 'Nazwa aplikacji do instalacji',
   'settings.openchamber.visual.field.sidebarBrand': 'Marka paska bocznego',
-  'settings.openchamber.visual.field.sidebarBrandHint': 'Wpisz pełny tekst logo paska bocznego. Ostatnie słowo oddzielone spacją używa koloru akcentu.',
+  'settings.openchamber.visual.field.sidebarBrandHint': 'Wpisz pełny tekst logo paska bocznego. Ostatnie słowo oddzielone spacją używa koloru akcentu. Pozostaw puste, aby ukryć logo.',
   'settings.openchamber.visual.field.sidebarBrandAria': 'Marka paska bocznego',
   'settings.openchamber.visual.field.installAppNameHint': 'Używana przez proces instalacji PWA.',
   'settings.openchamber.visual.field.installOrientation': 'Orientacja instalacji',

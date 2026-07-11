@@ -1601,7 +1601,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.themeImportInfoTooltip': 'Importez des thèmes personnalisés depuis ~/.config/openchamber/themes/',
   'settings.openchamber.visual.field.installAppName': 'Installer le nom de l\'application',
   'settings.openchamber.visual.field.sidebarBrand': 'Marque de la barre latérale',
-  'settings.openchamber.visual.field.sidebarBrandHint': 'Saisissez le texte complet du logo de la barre latérale. Le dernier mot séparé par des espaces utilise la couleur d\'accent.',
+  'settings.openchamber.visual.field.sidebarBrandHint': 'Saisissez le texte complet du logo de la barre latérale. Le dernier mot séparé par des espaces utilise la couleur d\'accent. Laissez vide pour masquer le logo.',
   'settings.openchamber.visual.field.sidebarBrandAria': 'Marque de la barre latérale',
   'settings.openchamber.visual.field.installAppNameHint': 'Utilisé par le processus d\'installation de PWA.',
   'settings.openchamber.visual.field.pwaInstallAppNameAria': 'Nom de l\'application d\'installation PWA',

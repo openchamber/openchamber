@@ -1,6 +1,6 @@
 import React from 'react';
 import { loadBrandDisplayFont } from '@/lib/fontLoader';
-import { DEFAULT_SIDEBAR_BRAND_NAME, useSidebarBrandStore } from '@/stores/useSidebarBrandStore';
+import { useSidebarBrandStore } from '@/stores/useSidebarBrandStore';
 
 /**
  * Left-sidebar wordmark, rendered above the Recent section.
@@ -12,6 +12,9 @@ import { DEFAULT_SIDEBAR_BRAND_NAME, useSidebarBrandStore } from '@/stores/useSi
  * The configured text is split on whitespace: all but its final word use the
  * normal foreground and the final word uses the theme accent. Brand copy is
  * user content, so it is intentionally not localized.
+ *
+ * An empty (whitespace-only) config hides the mark entirely — no default
+ * fallback — so that logo slot stays vacant.
  */
 export const SidebarBrandMark: React.FC = () => {
   const sidebarBrandName = useSidebarBrandStore((state) => state.sidebarBrandName);
@@ -20,8 +23,12 @@ export const SidebarBrandMark: React.FC = () => {
     void loadBrandDisplayFont();
   }, []);
 
-  const words = sidebarBrandName.trim().split(/\s+/).filter(Boolean);
-  const brandWords = words.length > 0 ? words : DEFAULT_SIDEBAR_BRAND_NAME.split(' ');
+  // Empty config → no custom logo; leave the sidebar brand slot empty.
+  const brandWords = sidebarBrandName.trim().split(/\s+/).filter(Boolean);
+  if (brandWords.length === 0) {
+    return null;
+  }
+
   const leadingWords = brandWords.slice(0, -1);
   const highlightedWord = brandWords.at(-1);
 

@@ -22,7 +22,7 @@ import { SessionFolderItem } from '../SessionFolderItem';
 import { DroppableFolderWrapper, SessionFolderDndScope } from './sessionFolderDnd';
 import type { SortableDragHandleProps } from './sortableItems';
 import type { GroupSearchData, SessionGroup, SessionNode } from './types';
-import { compareSessionsByPinnedAndTime, getSidebarRowPaddingLeft, isBranchDifferentFromLabel, normalizePath, renderHighlightedText, SIDEBAR_MUTED_HINT_CLASS } from './utils';
+import { compareSessionsByPinnedAndTime, getSidebarRowPaddingLeft, isBranchDifferentFromLabel, normalizePath, renderHighlightedText, SIDEBAR_MUTED_HINT_CLASS, SIDEBAR_ROW_HOVER_CLASS } from './utils';
 import {
   collectSubtreeContainingId,
   computeNodeStructureKey,
@@ -960,9 +960,13 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
     );
   };
 
-  // Nest one icon-column under the project/group header so all session titles
-  // share one vertical line under the folder *name*. Subagents add +1 (font-size).
-  const contentDepth = 1;
+  // Root (hideGroupLabel): depth 1 under the project name — same line as
+  // sibling folders / root sessions.
+  // Visible worktree/archived header: also depth 1 so "main" aligns with
+  // folder chips (e.g. opencode); body sessions/folders use depth 2 — one
+  // icon-column under the header name, matching folder children.
+  const groupHeaderDepth = hideGroupLabel ? 0 : 1;
+  const contentDepth = hideGroupLabel ? 1 : groupHeaderDepth + 1;
   const renderFolderItems = () => rootFolders.map(({ folder, nodes }) => renderOneFolderItem(folder, nodes, contentDepth));
   const hasWorktreeDeleteAction = Boolean(!group.isMain && group.worktree);
   const groupHeaderRightPadding = alwaysShowActions
@@ -1088,7 +1092,15 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
 
   // Codex-style: body content nests one step under the header icon column;
   // row chips stay full-width (indent is padding inside each chip).
-  const groupBodyPaddingClass = compactBodyPadding ? 'pb-2' : 'pb-3';
+  // Root (hideGroupLabel) sits above worktree/archived siblings — keep bottom
+  // pad minimal so the last session and the next group header share the same
+  // my-0.5 rhythm as adjacent session rows (pb-3 was leaving a large gap).
+  const groupBodyPaddingClass = hideGroupLabel
+    ? (compactBodyPadding ? 'pb-0' : 'pb-0.5')
+    : (compactBodyPadding ? 'pb-1' : 'pb-1.5');
+  // Worktree/archived headers share folder chip chrome (hover wash + depth-1
+  // nest pad) so they sit on the same vertical line as sibling folders.
+  const groupHeaderPadLeft = getSidebarRowPaddingLeft(groupHeaderDepth);
 
   if (hideGroupLabel) {
     return <div className="oc-group"><div className={cn('oc-group-body', groupBodyPaddingClass)}>{body}</div></div>;
@@ -1097,7 +1109,13 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
   return (
     <div className="oc-group">
       <div
-        className={cn('group/gh relative flex items-start justify-between gap-1 py-1 min-w-0 rounded-md', 'cursor-pointer')}
+        className={cn(
+          // No extra my-* — adjacent session my-0.5 already sets the row gap;
+          // adding my-0.5 here stacked with the previous group's body pad.
+          'group/gh relative flex min-w-0 cursor-pointer items-start justify-between gap-1.5 rounded-lg py-1.5 pr-2',
+          SIDEBAR_ROW_HOVER_CLASS,
+        )}
+        style={{ paddingLeft: groupHeaderPadLeft }}
         onClick={() => onToggleCollapsedGroup(groupKey)}
         role="button"
         tabIndex={0}
@@ -1115,7 +1133,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
         <div
           ref={dragHandleProps?.setActivatorNodeRef}
           className={cn(
-            'min-w-0 flex flex-1 items-start gap-1 overflow-hidden pl-0.5 transition-[padding] cursor-grab active:cursor-grabbing',
+            'min-w-0 flex flex-1 items-start gap-1.5 overflow-hidden transition-[padding] cursor-grab active:cursor-grabbing',
             groupHeaderRightPadding,
           )}
           {...(dragHandleProps?.listeners ?? {})}

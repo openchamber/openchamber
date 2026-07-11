@@ -1686,7 +1686,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.themeImportInfoTooltip': '从 ~/.config/openchamber/themes/ 导入自定义主题',
   'settings.openchamber.visual.field.installAppName': '安装应用名称',
   'settings.openchamber.visual.field.sidebarBrand': '侧边栏品牌',
-  'settings.openchamber.visual.field.sidebarBrandHint': '输入完整的侧边栏标识文本。以空格分隔的最后一个词会使用强调色。',
+  'settings.openchamber.visual.field.sidebarBrandHint': '输入完整的侧边栏标识文本。以空格分隔的最后一个词会使用强调色。完全留空则不显示 Logo。',
   'settings.openchamber.visual.field.sidebarBrandAria': '侧边栏品牌',
   'settings.openchamber.visual.field.installAppNameHint': '用于 PWA 安装流程。',
   'settings.openchamber.visual.field.pwaInstallAppNameAria': 'PWA 安装应用名称',

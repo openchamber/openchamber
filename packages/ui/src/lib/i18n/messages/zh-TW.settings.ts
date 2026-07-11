@@ -1595,7 +1595,7 @@
   'settings.openchamber.visual.field.themeImportInfoTooltip': '從 ~/.config/openchamber/themes/ 匯入自訂主題',
   'settings.openchamber.visual.field.installAppName': '安裝應用程式名稱',
   'settings.openchamber.visual.field.sidebarBrand': '側邊欄品牌',
-  'settings.openchamber.visual.field.sidebarBrandHint': '輸入完整的側邊欄標識文字。以空格分隔的最後一個詞會使用強調色。',
+  'settings.openchamber.visual.field.sidebarBrandHint': '輸入完整的側邊欄標識文字。以空格分隔的最後一個詞會使用強調色。完全留空則不顯示 Logo。',
   'settings.openchamber.visual.field.sidebarBrandAria': '側邊欄品牌',
   'settings.openchamber.visual.field.installAppNameHint': '用於 PWA 安裝流程。',
   'settings.openchamber.visual.field.pwaInstallAppNameAria': 'PWA 安裝應用程式名稱',

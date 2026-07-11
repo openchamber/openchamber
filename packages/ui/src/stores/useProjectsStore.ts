@@ -63,6 +63,7 @@ interface ProjectsStore {
   removeProjectIcon: (id: string) => Promise<{ ok: boolean; error?: string }>;
   discoverProjectIcon: (id: string, options?: { force?: boolean }) => Promise<{ ok: boolean; skipped?: boolean; reason?: string; error?: string }>;
   reorderProjects: (fromIndex: number, toIndex: number) => void;
+  moveProjectToTop: (id: string) => void;
   resetForRuntimeSwitch: () => void;
   validateProjectPath: (path: string) => ProjectPathValidationResult;
   synchronizeFromSettings: (settings: DesktopSettings) => void;
@@ -862,6 +863,24 @@ export const useProjectsStore = create<ProjectsStore>()(
       const nextProjects = [...projects];
       const [moved] = nextProjects.splice(fromIndex, 1);
       nextProjects.splice(toIndex, 0, moved);
+
+      set({ projects: nextProjects });
+      persistProjects(nextProjects, activeProjectId);
+    },
+
+    moveProjectToTop: (id: string) => {
+      if (isVSCodeProjectsRuntime) {
+        return;
+      }
+      const { projects, activeProjectId } = get();
+      const projectIndex = projects.findIndex((project) => project.id === id);
+      if (projectIndex <= 0) {
+        return;
+      }
+
+      const nextProjects = [...projects];
+      const [project] = nextProjects.splice(projectIndex, 1);
+      nextProjects.unshift(project);
 
       set({ projects: nextProjects });
       persistProjects(nextProjects, activeProjectId);

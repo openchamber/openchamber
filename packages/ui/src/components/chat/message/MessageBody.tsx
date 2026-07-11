@@ -55,7 +55,16 @@ import {
 
 const CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const, transform: 'translateZ(0)' };
 const MESSAGE_FOOTER_CONTAINER_STYLE = { containerType: 'inline-size' as const, containerName: 'message-footer' };
-const INLINE_MESSAGE_ACTIONS_CLASS_NAME = 'mt-2 mb-1 flex items-center justify-start gap-1.5';
+const INLINE_MESSAGE_ACTIONS_CLASS_NAME = 'mt-1.5 mb-0.5 flex items-center justify-start gap-3';
+/** Icon-only message-footer actions — 12px glyphs; leave icon+label meta alone. */
+const MESSAGE_ACTION_ICON_BUTTON_CLASS =
+  'size-5! p-0 text-muted-foreground/70 bg-transparent hover:text-foreground/90 hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50';
+const MESSAGE_ACTION_ICON_CLASS = 'size-3!';
+const MESSAGE_ACTION_GROUP_CLASS = 'flex items-center gap-3';
+/** Duration / timestamp meta next to icon-only actions — one shared chrome. */
+const MESSAGE_FOOTER_META_CLASS =
+  'text-xs text-muted-foreground/60 tabular-nums flex items-center gap-0.5';
+const MESSAGE_FOOTER_META_ICON_CLASS = 'h-2.5 w-2.5';
 
 const getDisplayFileName = (file: string): string => {
     const normalized = file.replace(/\\/g, '/');
@@ -541,7 +550,7 @@ const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActi
         )}>
             <div
                 className={cn(
-                    'flex items-center justify-end gap-1',
+                    'flex items-center justify-end gap-2.5',
                     isMobile
                         ? userActionsMode === 'inline'
                             ? 'translate-x-5'
@@ -561,7 +570,7 @@ const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActi
                                 type="button"
                                 variant="ghost"
                                 size="icon"
-                                className="h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50"
+                                className={MESSAGE_ACTION_ICON_BUTTON_CLASS}
                                 aria-label={t('chat.messageBody.actions.revertAria')}
                                 onPointerDown={(event) => event.stopPropagation()}
                                 onClick={(event) => {
@@ -569,7 +578,7 @@ const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActi
                                     onRevert();
                                 }}
                             >
-                                <Icon name="arrow-go-back" className="h-3 w-3" />
+                                <Icon name="arrow-go-back" className={MESSAGE_ACTION_ICON_CLASS} />
                             </Button>
                         </TooltipTrigger>
                         <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.revert')}</TooltipContent>
@@ -582,7 +591,7 @@ const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActi
                                 type="button"
                                 variant="ghost"
                                 size="icon"
-                                className="h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50"
+                                className={MESSAGE_ACTION_ICON_BUTTON_CLASS}
                                 aria-label={t('chat.messageBody.actions.forkAria')}
                                 onPointerDown={(event) => event.stopPropagation()}
                                 onClick={(event) => {
@@ -590,7 +599,7 @@ const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActi
                                     effectiveOnFork();
                                 }}
                             >
-                                <Icon name="git-branch" className="h-3 w-3" />
+                                <Icon name="git-branch" className={MESSAGE_ACTION_ICON_CLASS} />
                             </Button>
                         </TooltipTrigger>
                         <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.fork')}</TooltipContent>
@@ -604,7 +613,7 @@ const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActi
                                 variant="ghost"
                                 size="icon"
                                 data-visible={copyHintVisible || isMessageCopied ? 'true' : undefined}
-                                className="h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50"
+                                className={MESSAGE_ACTION_ICON_BUTTON_CLASS}
                                 aria-label={t('chat.messageBody.actions.copyMessageAria')}
                                 onPointerDown={(event) => event.stopPropagation()}
                                 onClick={handleCopyButtonClick}
@@ -616,9 +625,9 @@ const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActi
                                 }}
                             >
                                 {isMessageCopied ? (
-                                    <Icon name="check" className="h-3 w-3 text-[color:var(--status-success)]" />
+                                    <Icon name="check" className={cn(MESSAGE_ACTION_ICON_CLASS, 'text-[color:var(--status-success)]')} />
                                 ) : (
-                                    <Icon name="file-copy" className="h-3 w-3" />
+                                    <Icon name="file-copy" className={MESSAGE_ACTION_ICON_CLASS} />
                                 )}
                             </Button>
                         </TooltipTrigger>
@@ -852,7 +861,7 @@ const AssistantMessageActionButtons = React.memo(({
                             size="icon"
                             data-visible={copyHintVisible || isMessageCopied ? 'true' : undefined}
                             className={cn(
-                                'h-8 w-8 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50',
+                                MESSAGE_ACTION_ICON_BUTTON_CLASS,
                                 !hasCopyableText && 'opacity-50'
                             )}
                             disabled={!hasCopyableText}
@@ -874,9 +883,9 @@ const AssistantMessageActionButtons = React.memo(({
                             }}
                         >
                             {isMessageCopied ? (
-                                <Icon name="check" className="h-3.5 w-3.5 text-[color:var(--status-success)]" />
+                                <Icon name="check" className={cn(MESSAGE_ACTION_ICON_CLASS, 'text-[color:var(--status-success)]')} />
                             ) : (
-                                <Icon name="file-copy" className="h-3.5 w-3.5" />
+                                <Icon name="file-copy" className={MESSAGE_ACTION_ICON_CLASS} />
                             )}
                         </Button>
                     </TooltipTrigger>
@@ -892,7 +901,7 @@ const AssistantMessageActionButtons = React.memo(({
                             variant="ghost"
                             disabled={isTransferringReview || !hasCopyableText}
                             className={cn(
-                                'h-8 w-8 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50',
+                                MESSAGE_ACTION_ICON_BUTTON_CLASS,
                                 (!hasCopyableText || isTransferringReview) && 'opacity-50'
                             )}
                             aria-label={reviewTransferAction.ariaLabel}
@@ -902,9 +911,9 @@ const AssistantMessageActionButtons = React.memo(({
                             }}
                         >
                             {isTransferringReview ? (
-                                <Icon name="loader-4" className="h-4 w-4 animate-spin" />
+                                <Icon name="loader-4" className={cn(MESSAGE_ACTION_ICON_CLASS, 'animate-spin')} />
                             ) : (
-                                <Icon name="arrow-left-right" className="h-4 w-4" />
+                                <Icon name="arrow-left-right" className={MESSAGE_ACTION_ICON_CLASS} />
                             )}
                         </Button>
                     </TooltipTrigger>
@@ -919,17 +928,17 @@ const AssistantMessageActionButtons = React.memo(({
                             variant="ghost"
                             size="icon"
                             className={cn(
-                                'h-8 w-8 bg-transparent hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50',
-                                isTTSPlaying ? 'text-green-500' : 'text-muted-foreground hover:text-foreground'
+                                MESSAGE_ACTION_ICON_BUTTON_CLASS,
+                                isTTSPlaying ? 'text-green-500' : 'hover:text-foreground/80'
                             )}
                             aria-label={isTTSPlaying ? t('chat.messageBody.tts.stopSpeaking') : t('chat.messageBody.tts.readAloud')}
                             onPointerDown={(event) => event.stopPropagation()}
                             onClick={handleTTSClick}
                         >
                             {isTTSPlaying ? (
-                                <Icon name="stop" className="h-3.5 w-3.5" />
+                                <Icon name="stop" className={MESSAGE_ACTION_ICON_CLASS} />
                             ) : (
-                                <Icon name="volume-up" className="h-3.5 w-3.5" />
+                                <Icon name="volume-up" className={MESSAGE_ACTION_ICON_CLASS} />
                             )}
                         </Button>
                     </TooltipTrigger>
@@ -1580,7 +1589,7 @@ const AssistantMessageBody = React.memo(({
                 if (shouldShowStandaloneMessageActions && i === lastRenderableTextPartIndex) {
                     rendered.push(
                         <div key={`message-actions-${messageId}`} className={INLINE_MESSAGE_ACTIONS_CLASS_NAME} data-message-actions="true">
-                            <div className="flex items-center gap-1.5" data-message-action-group="true">
+                            <div className={MESSAGE_ACTION_GROUP_CLASS} data-message-action-group="true">
                                 {messageActionButtons}
                             </div>
                         </div>
@@ -1751,7 +1760,6 @@ const AssistantMessageBody = React.memo(({
         return formatted.length > 0 ? formatted : null;
     }, [messageCompletedAt, messageCreatedAt, timeFormatPreference, locale]);
 
-    const footerTimestampClassName = 'text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1';
     const canOpenMessagePreview = !isMiniChatSurface && !isMobile && !isVSCode;
 
     const finalTurnActionButtons = (
@@ -1763,7 +1771,7 @@ const AssistantMessageBody = React.memo(({
                             type="button"
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50"
+                            className={MESSAGE_ACTION_ICON_BUTTON_CLASS}
                             aria-label={t('chat.messageBody.actions.openPreviewAria')}
                             onPointerDown={(event) => event.stopPropagation()}
                             onClick={() => {
@@ -1775,7 +1783,7 @@ const AssistantMessageBody = React.memo(({
                                 openContextPreview(directory, messagePreviewUrl);
                             }}
                         >
-                            <Icon name="global" className="h-4 w-4" />
+                            <Icon name="global" className={MESSAGE_ACTION_ICON_CLASS} />
                         </Button>
                     </TooltipTrigger>
                     <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.openPreview')}</TooltipContent>
@@ -1790,13 +1798,13 @@ const AssistantMessageBody = React.memo(({
                             variant="ghost"
                             disabled={!hasCopyableText || !currentProjectRef}
                             className={cn(
-                                'h-8 w-8 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50',
+                                MESSAGE_ACTION_ICON_BUTTON_CLASS,
                                 (!hasCopyableText || !currentProjectRef) && 'opacity-50'
                             )}
                             onPointerDown={(event) => event.stopPropagation()}
                             onClick={handleSaveAsPlanClick}
                         >
-                            <Icon name="booklet" className="h-4 w-4" />
+                            <Icon name="booklet" className={MESSAGE_ACTION_ICON_CLASS} />
                         </Button>
                     </TooltipTrigger>
                     <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.saveAsPlan')}</TooltipContent>
@@ -1808,11 +1816,11 @@ const AssistantMessageBody = React.memo(({
                         type="button"
                         size="icon"
                         variant="ghost"
-                        className="h-8 w-8 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50"
+                        className={MESSAGE_ACTION_ICON_BUTTON_CLASS}
                         onPointerDown={(event) => event.stopPropagation()}
                         onClick={handleForkClick}
                     >
-                        <Icon name="chat-new" className="h-4 w-4" />
+                        <Icon name="chat-new" className={MESSAGE_ACTION_ICON_CLASS} />
                     </Button>
                 </TooltipTrigger>
                 <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.startNewSession')}</TooltipContent>
@@ -1824,11 +1832,11 @@ const AssistantMessageBody = React.memo(({
                             type="button"
                             size="icon"
                             variant="ghost"
-                            className="h-8 w-8 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50"
+                            className={MESSAGE_ACTION_ICON_BUTTON_CLASS}
                             onPointerDown={(event) => event.stopPropagation()}
                             onClick={handleForkMultiRunClick}
                         >
-                            <ArrowsMerge className="h-4 w-4" />
+                            <ArrowsMerge className={MESSAGE_ACTION_ICON_CLASS} />
                         </Button>
                     </TooltipTrigger>
                     <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.startNewMultiRun')}</TooltipContent>
@@ -1907,25 +1915,25 @@ const AssistantMessageBody = React.memo(({
                 <MessageFilesDisplay files={parts} onShowPopup={onShowPopup} />
                 {shouldRenderStandaloneActionsAfterContent && (
                     <div className={INLINE_MESSAGE_ACTIONS_CLASS_NAME} data-message-actions="true">
-                        <div className="flex items-center gap-1.5" data-message-action-group="true">
+                        <div className={MESSAGE_ACTION_GROUP_CLASS} data-message-action-group="true">
                             {messageActionButtons}
                         </div>
                     </div>
                 )}
                 {shouldShowTurnFooter && (
                     <div
-                        className="mt-2 mb-1 flex flex-wrap items-center justify-start gap-1.5"
+                        className="mt-1.5 mb-0.5 flex flex-wrap items-center justify-start gap-3"
                         style={MESSAGE_FOOTER_CONTAINER_STYLE}
                     >
-                        <div className="flex items-center gap-1.5" data-message-action-group="true">
+                        <div className={MESSAGE_ACTION_GROUP_CLASS} data-message-action-group="true">
                             {messageActionButtons}
                             {finalTurnActionButtons}
                         </div>
                         {turnDurationText ? (
                             <Tooltip>
                                 <TooltipTrigger asChild>
-                                    <span className="text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1">
-                                        <Icon name="hourglass" className="h-3.5 w-3.5" />
+                                    <span className={MESSAGE_FOOTER_META_CLASS}>
+                                        <Icon name="hourglass" className={MESSAGE_FOOTER_META_ICON_CLASS} />
                                         <span className="message-footer__label">{turnDurationText}</span>
                                     </span>
                                 </TooltipTrigger>
@@ -1936,10 +1944,10 @@ const AssistantMessageBody = React.memo(({
                             <Tooltip>
                                 <TooltipTrigger asChild>
                                     <span
-                                        className={footerTimestampClassName}
+                                        className={MESSAGE_FOOTER_META_CLASS}
                                         aria-label={`Message time: ${footerTimestamp}`}
                                     >
-                                        <Icon name="time" className="h-3.5 w-3.5" />
+                                        <Icon name="time" className={MESSAGE_FOOTER_META_ICON_CLASS} />
                                         <span className="message-footer__label">{footerTimestamp}</span>
                                     </span>
                                 </TooltipTrigger>

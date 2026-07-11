@@ -439,6 +439,21 @@ const waitForWorktreeBootstrapIfConfigured = async (directory: string | null, pr
   }
 }
 
+const promoteProjectForConversation = (
+  directory: string | null,
+  availableWorktreesByProject: Map<string, WorktreeMetadata[]>,
+): void => {
+  const projectsState = useProjectsStore.getState()
+  const project = resolveProjectForSessionDirectory(
+    projectsState.projects,
+    availableWorktreesByProject,
+    directory,
+  )
+  if (project) {
+    projectsState.moveProjectToTop(project.id)
+  }
+}
+
 export async function materializeOpenDraftSession(selection: {
   providerID: string
   modelID: string
@@ -1078,6 +1093,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           })),
         })),
       })
+      promoteProjectForConversation(createdDraftSession.directory, get().availableWorktreesByProject)
       return
     }
 
@@ -1157,6 +1173,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         })),
       })),
     })
+    promoteProjectForConversation(currentSessionDirectory, get().availableWorktreesByProject)
   },
 
   // ---------------------------------------------------------------------------

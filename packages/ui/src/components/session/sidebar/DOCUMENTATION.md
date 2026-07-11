@@ -4,7 +4,7 @@
 
 - `SessionSidebar.tsx` now acts mainly as orchestration; core logic moved to focused hooks/components.
 - Sidebar is now a single multi-project tree: `recent` top section, then projects, then worktrees/archived groups, then sessions.
-- Project rows retain the persisted project-registry order while session and worktree data hydrates. Session activity never reorders the structural project tree; the Recent section represents recency instead.
+- Project rows retain the persisted project-registry order while session and worktree data hydrates. A successfully sent message promotes its owning project to the top; ordinary activity and selection do not reorder the structural project tree. The Recent section represents session recency instead.
 - The Projects section header shows a localized session-sync status while the global-session store is in its explicit idle/loading states. Worktree discovery is intentionally excluded because it can be long-running and no longer affects project ordering.
 - An idle global-session store always triggers a refresh, including after a runtime endpoint reset; the status therefore cannot remain idle after the sidebar's one-time mount effect has already run.
 - `NavRail` is no longer part of sidebar/navigation flow.
@@ -14,9 +14,13 @@
   padding *inside* the chip so hover/active wash stays full-width (reserved left gutter). Depth 1
   uses the folder icon column (`16 + 6`) so all project sessions share one vertical line under the
   parent folder *name*. Deeper levels (subagent) add ~one UI-label font size (`14px`) each.
-  Subsession expand chevrons align to the folder-icon column and stay hidden until row hover
-  (unless always-show-actions). Recent rows stay flat: no pin glyph, no subsession chevron, and
-  no nested children — that tree chrome belongs only under Projects.
+  Worktree/archived group headers reuse the same folder chip chrome (hover wash + depth-1
+  nest pad) so they share one vertical line with sibling folders; body sessions/folders nest
+  at depth 2 (one icon-column under the header name, matching folder children). Subsession
+  expand chevrons align to the folder-icon column and stay hidden until row hover (unless
+  always-show-actions).
+  Recent rows stay flat: no pin glyph, no subsession chevron, and no nested children — that tree
+  chrome belongs only under Projects.
 - Session rows are single-line (no inline timestamp); details (title, relative time, folder/project,
   branch) open in an immediate floating hover card (`delayDuration={0}`, top-left aligned).
 - Compact relative times use `common.relative.*Compact` i18n keys.

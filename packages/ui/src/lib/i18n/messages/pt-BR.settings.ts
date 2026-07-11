@@ -1686,7 +1686,7 @@ export const settingsDict = {
   "settings.openchamber.visual.field.themeImportInfoTooltip": "Importar temas personalizados de ~/.config/openchamber/themês/",
   "settings.openchamber.visual.field.installAppName": "Nome do aplicativo para instalação",
   "settings.openchamber.visual.field.sidebarBrand": "Marca da barra lateral",
-  "settings.openchamber.visual.field.sidebarBrandHint": "Insira o texto completo do logotipo da barra lateral. A última palavra separada por espaços usa a cor de destaque.",
+  "settings.openchamber.visual.field.sidebarBrandHint": "Insira o texto completo do logotipo da barra lateral. A última palavra separada por espaços usa a cor de destaque. Deixe em branco para ocultar o logo.",
   "settings.openchamber.visual.field.sidebarBrandAria": "Marca da barra lateral",
   "settings.openchamber.visual.field.installAppNameHint": "Usado pela instalação da PWA.",
   "settings.openchamber.visual.field.pwaInstallAppNameAria": "Nome do aplicativo para instalação da PWA",

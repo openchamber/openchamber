@@ -1719,7 +1719,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.themeImportInfoTooltip': '~/.config/openchamber/themes/ からカスタムテーマをインポート',
   'settings.openchamber.visual.field.installAppName': 'インストールアプリ名',
   'settings.openchamber.visual.field.sidebarBrand': 'サイドバーブランド',
-  'settings.openchamber.visual.field.sidebarBrandHint': 'サイドバーロゴの全文を入力します。空白で区切った最後の語にはアクセントカラーが適用されます。',
+  'settings.openchamber.visual.field.sidebarBrandHint': 'サイドバーロゴの全文を入力します。空白で区切った最後の語にはアクセントカラーが適用されます。空欄にするとロゴは表示されません。',
   'settings.openchamber.visual.field.sidebarBrandAria': 'サイドバーブランド',
   'settings.openchamber.visual.field.installAppNameHint': 'PWA インストールプロセスで使用されます。',
   'settings.openchamber.visual.field.pwaInstallAppNameAria': 'PWA インストールアプリ名',
