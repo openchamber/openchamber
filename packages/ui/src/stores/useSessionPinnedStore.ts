@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { getSafeStorage } from './utils/safeStorage';
+import { getDeferredSafeStorage } from './utils/safeStorage';
 
 const SESSION_PINNED_STORAGE_KEY = 'oc.sessions.pinned';
 
@@ -29,7 +29,7 @@ type SessionPinnedStore = {
   toggle: (sessionId: string) => void;
 };
 
-const safeStorage = getSafeStorage();
+const safeStorage = getDeferredSafeStorage();
 
 export const useSessionPinnedStore = create<SessionPinnedStore>((set, get) => ({
   ids: readPinned(safeStorage),

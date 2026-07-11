@@ -65,10 +65,24 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: Get bundled OpenCode CLI version
+        id: opencode_cli_version
+        run: |
+          VERSION=$(node -p "require('./package.json').dependencies['@opencode-ai/sdk']")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Cache bundled OpenCode CLI artifact
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: packages/electron/.cache/opencode-cli
+          key: opencode-cli-${{ runner.os }}-${{ matrix.arch }}-${{ steps.opencode_cli_version.outputs.version }}
+          restore-keys: |
+            opencode-cli-${{ runner.os }}-${{ matrix.arch }}-
 
       - name: Install Apple Certificate
         env:
@@ -101,12 +115,15 @@ jobs:
           ELECTRON_BUILDER_ARCH: ${{ matrix.arch }}
         run: |
           bun run build:web-assets
+          bun run prepare:opencode-cli
+          bun run verify:opencode-cli
           bun run bundle:main
           # npmRebuild=false in package.json, so electron-builder won't
           # recompile native deps on its own. Rebuild against the target
           # Electron ABI before packaging, matching the release workflow.
           bun run rebuild:native
           bunx electron-builder --mac --${{ matrix.arch }} --publish=never
+          bun run verify:opencode-cli:packaged
 
       - name: Verify signature + entitlements + notarization
         run: |
@@ -165,7 +182,10 @@ jobs:
   build-windows-electron:
     if: ${{ inputs.build_windows }}
     name: Build Windows Electron (x64)
-    runs-on: windows-latest
+    # Match the production release workflow. windows-latest currently resolves
+    # to a runner with Visual Studio 18, which this Electron/node-gyp stack does
+    # not detect correctly.
+    runs-on: windows-2022
     strategy:
       fail-fast: false
       matrix:
@@ -186,14 +206,36 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Get bundled OpenCode CLI version
+        id: opencode_cli_version
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').dependencies['@opencode-ai/sdk']")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Cache bundled OpenCode CLI artifact
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: packages/electron/.cache/opencode-cli
+          key: opencode-cli-${{ runner.os }}-${{ matrix.arch }}-${{ steps.opencode_cli_version.outputs.version }}
+          restore-keys: |
+            opencode-cli-${{ runner.os }}-${{ matrix.arch }}-
+
       - name: Build web assets
         working-directory: packages/electron
         run: bun run build:web-assets
+
+      - name: Prepare bundled OpenCode CLI
+        working-directory: packages/electron
+        shell: bash
+        run: |
+          bun run prepare:opencode-cli
+          bun run verify:opencode-cli
 
       - name: Bundle main process
         working-directory: packages/electron
@@ -210,7 +252,9 @@ jobs:
       - name: Build Windows app
         working-directory: packages/electron
         shell: bash
-        run: node ./scripts/package.mjs --win --${{ matrix.arch }} --publish=never
+        run: |
+          node ./scripts/package.mjs --win --${{ matrix.arch }} --publish=never
+          bun run verify:opencode-cli:packaged
 
       - name: Upload Windows installable artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

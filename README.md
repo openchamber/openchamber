@@ -86,7 +86,7 @@
 
 ## Quick Start
 
-> **Prerequisite:** [OpenCode CLI](https://opencode.ai) installed.
+> **Prerequisite:** Desktop bundles the matching OpenCode CLI. CLI/Web and VS Code use your installed [OpenCode CLI](https://opencode.ai).
 
 ### **Desktop (macOS + Windows)**
 Download from [Releases](https://github.com/btriapitsyn/openchamber/releases).

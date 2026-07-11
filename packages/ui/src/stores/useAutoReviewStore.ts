@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
-import { getSafeStorage } from '@/stores/utils/safeStorage';
+import { persist } from 'zustand/middleware';
+import { createDeferredSafeJSONStorage } from '@/stores/utils/safeStorage';
 
 type AutoReviewPhase = 'waiting_for_reviewer' | 'waiting_for_implementer';
 type AutoReviewStatus = 'running' | 'completed' | 'stopped' | 'error';
@@ -88,7 +88,7 @@ export const useAutoReviewStore = create<AutoReviewState>()(
     }),
     {
       name: 'auto-review-store',
-      storage: createJSONStorage(() => getSafeStorage()),
+      storage: createDeferredSafeJSONStorage(),
       partialize: (state) => ({ runsByOriginalSessionID: state.runsByOriginalSessionID }),
     },
   ),

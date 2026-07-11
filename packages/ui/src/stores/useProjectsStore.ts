@@ -6,7 +6,7 @@ import type { ProjectEntry } from '@/lib/api/types';
 import type { DesktopSettings } from '@/lib/desktop';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { createProjectIdFromPath } from '@/lib/projectId';
-import { getSafeStorage } from './utils/safeStorage';
+import { getDeferredSafeStorage } from './utils/safeStorage';
 import { useDirectoryStore } from './useDirectoryStore';
 import { streamDebugEnabled } from '@/stores/utils/streamDebug';
 import { PROJECT_COLORS } from '@/lib/projectMeta';
@@ -52,7 +52,13 @@ interface ProjectsStore {
   setActiveProject: (id: string) => void;
   setActiveProjectIdOnly: (id: string) => void;
   renameProject: (id: string, label: string) => void;
-  updateProjectMeta: (id: string, meta: { label?: string; icon?: string | null; color?: string | null; iconBackground?: string | null }) => void;
+  updateProjectMeta: (id: string, meta: {
+    label?: string;
+    icon?: string | null;
+    color?: string | null;
+    iconBackground?: string | null;
+    defaultModel?: string | null;
+  }) => void;
   uploadProjectIcon: (id: string, file: File) => Promise<{ ok: boolean; error?: string }>;
   removeProjectIcon: (id: string) => Promise<{ ok: boolean; error?: string }>;
   discoverProjectIcon: (id: string, options?: { force?: boolean }) => Promise<{ ok: boolean; skipped?: boolean; reason?: string; error?: string }>;
@@ -64,7 +70,7 @@ interface ProjectsStore {
   getActiveProject: () => ProjectEntry | null;
 }
 
-const safeStorage = getSafeStorage();
+const safeStorage = getDeferredSafeStorage();
 const PROJECTS_STORAGE_KEY = 'projects';
 const ACTIVE_PROJECT_STORAGE_KEY = 'activeProjectId';
 
@@ -115,6 +121,21 @@ const resolveTildePath = (value: string, homeDir?: string | null): string => {
 };
 
 const HEX_COLOR_PATTERN = /^#(?:[\da-fA-F]{3}|[\da-fA-F]{6})$/;
+
+const normalizeDefaultModel = (value: unknown): string | undefined => {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const separatorIndex = trimmed.indexOf('/');
+  if (separatorIndex <= 0 || separatorIndex >= trimmed.length - 1) {
+    return undefined;
+  }
+  return trimmed;
+};
 
 const normalizeIconBackground = (value: unknown): string | null => {
   if (typeof value !== 'string') {
@@ -253,6 +274,10 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
     }
     if (typeof candidate.color === 'string' && candidate.color.trim().length > 0) {
       project.color = candidate.color.trim();
+    }
+    const defaultModel = normalizeDefaultModel(candidate.defaultModel);
+    if (defaultModel) {
+      project.defaultModel = defaultModel;
     }
     if (candidate.iconBackground === null) {
       project.iconBackground = null;
@@ -470,6 +495,7 @@ const vscodeWorkspaceProjectsEqual = (left: ProjectEntry[], right: ProjectEntry[
       && leftProject.icon === rightProject.icon
       && leftProject.color === rightProject.color
       && leftProject.iconBackground === rightProject.iconBackground
+      && leftProject.defaultModel === rightProject.defaultModel
       && leftProject.addedAt === rightProject.addedAt
       && leftProject.lastOpenedAt === rightProject.lastOpenedAt
       && leftProject.sidebarCollapsed === rightProject.sidebarCollapsed
@@ -666,7 +692,13 @@ export const useProjectsStore = create<ProjectsStore>()(
       persistProjects(nextProjects, activeProjectId);
     },
 
-    updateProjectMeta: (id: string, meta: { label?: string; icon?: string | null; color?: string | null; iconBackground?: string | null }) => {
+    updateProjectMeta: (id: string, meta: {
+      label?: string;
+      icon?: string | null;
+      color?: string | null;
+      iconBackground?: string | null;
+      defaultModel?: string | null;
+    }) => {
       if (isVSCodeProjectsRuntime) {
         return;
       }
@@ -682,6 +714,14 @@ export const useProjectsStore = create<ProjectsStore>()(
         if (meta.color !== undefined) updated.color = meta.color;
         if (meta.iconBackground !== undefined) {
           updated.iconBackground = normalizeIconBackground(meta.iconBackground);
+        }
+        if (meta.defaultModel !== undefined) {
+          const normalized = normalizeDefaultModel(meta.defaultModel);
+          if (normalized) {
+            updated.defaultModel = normalized;
+          } else {
+            delete updated.defaultModel;
+          }
         }
         return updated;
       });
