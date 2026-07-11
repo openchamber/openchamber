@@ -344,7 +344,13 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const hasLoadedGlobalSessions = useGlobalSessionsStore((state) => state.hasLoaded);
   const globalSessionsStatus = useGlobalSessionsStore((state) => state.status);
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
-  const archivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
+  const archivedSessionsRaw = useGlobalSessionsStore((state) => state.archivedSessions);
+  const loadingDirectories = useGlobalSessionsStore((state) => state.loadingDirectories);
+  // Defer the heavy sidebar memo/DOM commit so typing/send stay on the urgent
+  // lane while a per-directory session wave lands. Without this, one project
+  // with a large history still freezes input for a frame when the list commits.
+  const deferredGlobalActiveSessions = React.useDeferredValue(globalActiveSessions);
+  const archivedSessions = React.useDeferredValue(archivedSessionsRaw);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const sessionFocus = useSessionFocusStore((state) => state.focus);
   const newSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
@@ -386,7 +392,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const sessions = React.useMemo(() => {
     const liveById = new Map(liveSessions.map((session) => [session.id, session]));
-    const merged = globalActiveSessions.map((session) => {
+    const merged = deferredGlobalActiveSessions.map((session) => {
       const liveSession = liveById.get(session.id);
       return liveSession ? mergeLiveSessionWithGlobalSession(liveSession, session) : session;
     });
@@ -403,7 +409,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       allowUnknownDirectory: !isVSCode,
       allowEmptyDirectorySet: !isVSCode,
     }));
-  }, [globalActiveSessions, isVSCode, knownSessionDirectories, liveSessions]);
+  }, [deferredGlobalActiveSessions, isVSCode, knownSessionDirectories, liveSessions]);
 
   const syncSessionStructureSignature = React.useMemo(
     () => liveSessions
@@ -441,8 +447,35 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     if (globalSessionsStatus !== 'idle') {
       return;
     }
-    void refreshGlobalSessions(syncSessionsSnapshotRef.current);
-  }, [globalSessionsStatus]);
+
+    // Cold start: only hydrate the current / active project directories.
+    // A global unfiltered session.list used to land thousands of rows in one
+    // commit and saturate OpenCode behind createSession. Other projects load
+    // when expanded (toggleProject / expandAll) or when their worktrees appear
+    // under an already-loaded project.
+    const priorityDirectories = new Set<string>();
+    const current = normalizePath(currentDirectory);
+    if (current) {
+      priorityDirectories.add(current);
+    }
+
+    const activeProject = projects.find((project) => project.id === activeProjectId)
+      ?? projects.find((project) => normalizePath(project.path) === current)
+      ?? null;
+    const activeProjectPath = normalizePath(activeProject?.path ?? null);
+    if (activeProjectPath) {
+      priorityDirectories.add(activeProjectPath);
+      if (!isVSCode) {
+        const worktrees = availableWorktreesByProject.get(activeProjectPath) ?? [];
+        worktrees.forEach((worktree) => {
+          const directory = normalizePath(worktree.path);
+          if (directory) priorityDirectories.add(directory);
+        });
+      }
+    }
+
+    void refreshGlobalSessionsForDirectories(priorityDirectories, syncSessionsSnapshotRef.current);
+  }, [activeProjectId, availableWorktreesByProject, currentDirectory, globalSessionsStatus, isVSCode, projects]);
 
   // Tracks the last project list we already kicked off discovery for.
   // A re-mount with the same project set shouldn't fan out another
@@ -881,6 +914,32 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     });
   }, []);
 
+  const collectDirectoriesForProjectId = React.useCallback((projectId: string): string[] => {
+    const project = projects.find((entry) => entry.id === projectId);
+    const projectPath = normalizePath(project?.path ?? null);
+    if (!projectPath) return [];
+    const directories = [projectPath];
+    if (!isVSCode) {
+      const worktrees = availableWorktreesByProject.get(projectPath) ?? [];
+      worktrees.forEach((worktree) => {
+        const directory = normalizePath(worktree.path);
+        if (directory) directories.push(directory);
+      });
+    }
+    return directories;
+  }, [availableWorktreesByProject, isVSCode, projects]);
+
+  // Lazy-load sessions when a project becomes visible. Keeps cold start scoped
+  // to the active project while still filling other trees on demand.
+  const ensureProjectSessionsLoaded = React.useCallback((projectId: string) => {
+    const directories = collectDirectoriesForProjectId(projectId);
+    if (directories.length === 0) return;
+    const loadedDirectories = useGlobalSessionsStore.getState().loadedDirectories;
+    const missing = directories.filter((directory) => !loadedDirectories.has(directory));
+    if (missing.length === 0) return;
+    void refreshGlobalSessionsForDirectories(missing, syncSessionsSnapshotRef.current);
+  }, [collectDirectoriesForProjectId]);
+
   const collapseAllProjects = React.useCallback(() => {
     ignoreIntersectionUntil.current = Date.now() + 150;
     setVisibleSessionCountByGroup(new Map());
@@ -909,7 +968,16 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       }
       return empty;
     });
-  }, [isVSCode, safeStorage, scheduleCollapsedProjectsPersist]);
+    // Expand-all is an explicit user action: hydrate every project, still
+    // per-directory (bounded concurrency in the store), never one global list.
+    const loadedDirectories = useGlobalSessionsStore.getState().loadedDirectories;
+    const missing = projects.flatMap((project) => (
+      collectDirectoriesForProjectId(project.id).filter((directory) => !loadedDirectories.has(directory))
+    ));
+    if (missing.length > 0) {
+      void refreshGlobalSessionsForDirectories(missing, syncSessionsSnapshotRef.current);
+    }
+  }, [collectDirectoriesForProjectId, isVSCode, projects, safeStorage, scheduleCollapsedProjectsPersist]);
 
   const toggleProject = React.useCallback((projectId: string) => {
     // Ignore intersection events for a short period after toggling
@@ -917,8 +985,11 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     resetProjectSessionLimits(projectId);
     setCollapsedProjects((prev) => {
       const next = new Set(prev);
-      if (next.has(projectId)) {
+      const expanding = next.has(projectId);
+      if (expanding) {
         next.delete(projectId);
+        // Load after expand so collapsed projects never pay the fetch cost.
+        queueMicrotask(() => ensureProjectSessionsLoaded(projectId));
       } else {
         next.add(projectId);
       }
@@ -932,10 +1003,11 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       }
       return next;
     });
-  }, [isVSCode, resetProjectSessionLimits, safeStorage, scheduleCollapsedProjectsPersist]);
+  }, [ensureProjectSessionsLoaded, isVSCode, resetProjectSessionLimits, safeStorage, scheduleCollapsedProjectsPersist]);
 
   const ensureProjectExpanded = React.useCallback((projectId: string) => {
     ignoreIntersectionUntil.current = Date.now() + 150;
+    ensureProjectSessionsLoaded(projectId);
     setCollapsedProjects((prev) => {
       if (!prev.has(projectId)) {
         return prev;
@@ -950,7 +1022,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       }
       return next;
     });
-  }, [isVSCode, safeStorage, scheduleCollapsedProjectsPersist]);
+  }, [ensureProjectSessionsLoaded, isVSCode, safeStorage, scheduleCollapsedProjectsPersist]);
 
   const normalizedProjects = React.useMemo(() => {
     return projects
@@ -997,9 +1069,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     const previousDirectories = knownProjectSessionDirectoriesRef.current;
     knownProjectSessionDirectoriesRef.current = nextDirectories;
     if (!previousDirectories) {
-      if (isVSCode && projectSessionDirectories.length > 0) {
-        void refreshGlobalSessionsForDirectories(projectSessionDirectories, syncSessionsSnapshotRef.current);
-      }
+      // First discovery pass: cold-start priority effect owns the initial
+      // wave. Do not fan out every project/worktree directory here.
       return;
     }
 
@@ -1008,8 +1079,43 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       return;
     }
 
-    void refreshGlobalSessionsForDirectories(addedDirectories, syncSessionsSnapshotRef.current);
-  }, [isVSCode, projectSessionDirectories]);
+    // Only auto-refresh newly discovered directories that belong to the active
+    // / current project (typically worktrees appearing after discovery).
+    // Other projects stay lazy until the user expands them.
+    const loadedDirectories = useGlobalSessionsStore.getState().loadedDirectories;
+    const current = normalizePath(currentDirectory);
+    const activeProject = normalizedProjects.find((project) => project.id === activeProjectId)
+      ?? normalizedProjects.find((project) => project.normalizedPath === current)
+      ?? null;
+    const allowed = new Set<string>();
+    if (current) allowed.add(current);
+    if (activeProject?.normalizedPath) {
+      allowed.add(activeProject.normalizedPath);
+      if (!isVSCode) {
+        const worktrees = availableWorktreesByProject.get(activeProject.normalizedPath) ?? [];
+        worktrees.forEach((worktree) => {
+          const directory = normalizePath(worktree.path);
+          if (directory) allowed.add(directory);
+        });
+      }
+    }
+
+    const toLoad = addedDirectories.filter((directory) => (
+      allowed.has(directory) && !loadedDirectories.has(directory)
+    ));
+    if (toLoad.length === 0) {
+      return;
+    }
+
+    void refreshGlobalSessionsForDirectories(toLoad, syncSessionsSnapshotRef.current);
+  }, [
+    activeProjectId,
+    availableWorktreesByProject,
+    currentDirectory,
+    isVSCode,
+    normalizedProjects,
+    projectSessionDirectories,
+  ]);
 
   const { github } = useRuntimeAPIs();
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
@@ -1050,7 +1156,29 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   // stable while sessions and worktrees hydrate instead of re-sorting the DOM
   // whenever another slice of session activity arrives.
   const normalizedProjectsForSidebar = normalizedProjects;
-  const isProjectSessionsSyncing = globalSessionsStatus === 'idle'
+  // Per-project loading: a project is loading when any of its directories (root or
+  // worktrees) are in the in-flight set. Used for folder spinner + body copy.
+  const loadingProjectIds = React.useMemo(() => {
+    const ids = new Set<string>();
+    if (loadingDirectories.size === 0) return ids;
+    for (const project of normalizedProjects) {
+      const directories = [project.normalizedPath];
+      if (!isVSCode) {
+        const worktrees = availableWorktreesByProject.get(project.normalizedPath) ?? [];
+        worktrees.forEach((worktree) => {
+          const directory = normalizePath(worktree.path);
+          if (directory) directories.push(directory);
+        });
+      }
+      if (directories.some((directory) => loadingDirectories.has(directory))) {
+        ids.add(project.id);
+      }
+    }
+    return ids;
+  }, [availableWorktreesByProject, isVSCode, loadingDirectories, normalizedProjects]);
+  // Gate focus reconcile while any directory refresh is still moving the tree.
+  const isProjectSessionsSyncing = loadingDirectories.size > 0
+    || globalSessionsStatus === 'idle'
     || globalSessionsStatus === 'loading';
 
   useArchivedAutoFolders({
@@ -1978,6 +2106,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         openSidebarMenuKey={openSidebarMenuKey}
         setOpenSidebarMenuKey={setOpenSidebarMenuKey}
         isInlineEditing={isInlineEditing}
+        loadingProjectIds={loadingProjectIds}
         isProjectSessionsSyncing={isProjectSessionsSyncing}
       />
 

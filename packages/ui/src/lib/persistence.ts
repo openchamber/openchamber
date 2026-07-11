@@ -519,8 +519,8 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.showExpandedBashTools === 'boolean' && settings.showExpandedBashTools !== store.showExpandedBashTools) {
     store.setShowExpandedBashTools(settings.showExpandedBashTools);
   }
-  if (typeof settings.showExpandedEditTools === 'boolean' && settings.showExpandedEditTools !== store.showExpandedEditTools) {
-    store.setShowExpandedEditTools(settings.showExpandedEditTools);
+  if (typeof settings.showSubagentTaskDetails === 'boolean' && settings.showSubagentTaskDetails !== store.showSubagentTaskDetails) {
+    store.setShowSubagentTaskDetails(settings.showSubagentTaskDetails);
   }
   if (typeof settings.timeFormatPreference === 'string'
     && (settings.timeFormatPreference === 'auto' || settings.timeFormatPreference === '12h' || settings.timeFormatPreference === '24h')) {
@@ -1068,8 +1068,8 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.showExpandedBashTools === 'boolean') {
     result.showExpandedBashTools = candidate.showExpandedBashTools;
   }
-  if (typeof candidate.showExpandedEditTools === 'boolean') {
-    result.showExpandedEditTools = candidate.showExpandedEditTools;
+  if (typeof candidate.showSubagentTaskDetails === 'boolean') {
+    result.showSubagentTaskDetails = candidate.showSubagentTaskDetails;
   }
   if (typeof candidate.timeFormatPreference === 'string'
     && (candidate.timeFormatPreference === 'auto' || candidate.timeFormatPreference === '12h' || candidate.timeFormatPreference === '24h')) {

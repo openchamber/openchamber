@@ -246,7 +246,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-type VisibleSetting = 'sessionAssist' | 'theme' | 'sidebarBrand' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar';
+type VisibleSetting = 'sessionAssist' | 'theme' | 'sidebarBrand' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'showSubagentTaskDetails' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -320,8 +320,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setShowTurnChangedFiles = useUIStore(state => state.setShowTurnChangedFiles);
     const showExpandedBashTools = useUIStore(state => state.showExpandedBashTools);
     const setShowExpandedBashTools = useUIStore(state => state.setShowExpandedBashTools);
-    const showExpandedEditTools = useUIStore(state => state.showExpandedEditTools);
-    const setShowExpandedEditTools = useUIStore(state => state.setShowExpandedEditTools);
+    const showSubagentTaskDetails = useUIStore(state => state.showSubagentTaskDetails);
+    const setShowSubagentTaskDetails = useUIStore(state => state.setShowSubagentTaskDetails);
     const timeFormatPreference = useUIStore(state => state.timeFormatPreference);
     const setTimeFormatPreference = useUIStore(state => state.setTimeFormatPreference);
     const weekStartPreference = useUIStore(state => state.weekStartPreference);
@@ -502,10 +502,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         void updateDesktopSettings({ showExpandedBashTools: enabled });
     }, [setShowExpandedBashTools]);
 
-    const handleShowExpandedEditToolsChange = React.useCallback((enabled: boolean) => {
-        setShowExpandedEditTools(enabled);
-        void updateDesktopSettings({ showExpandedEditTools: enabled });
-    }, [setShowExpandedEditTools]);
+    const handleShowSubagentTaskDetailsChange = React.useCallback((enabled: boolean) => {
+        setShowSubagentTaskDetails(enabled);
+        void updateDesktopSettings({ showSubagentTaskDetails: enabled });
+    }, [setShowSubagentTaskDetails]);
 
     const handleTimeFormatPreferenceChange = React.useCallback((value: 'auto' | '12h' | '24h') => {
         setTimeFormatPreference(value);
@@ -577,6 +577,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('followUpBehavior')
         || shouldShow('persistDraft')
         || shouldShow('showToolFileIcons')
+        || shouldShow('showSubagentTaskDetails')
         || shouldShow('expandedTools')
         || (!isMobile && shouldShow('inputSpellcheck'));
 
@@ -1634,27 +1635,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 />
                                                 <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.bash')}</span>
                                             </div>
-
-                                            <div
-                                                className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                                role="button"
-                                                tabIndex={0}
-                                                aria-pressed={showExpandedEditTools}
-                                                onClick={() => handleShowExpandedEditToolsChange(!showExpandedEditTools)}
-                                                onKeyDown={(event) => {
-                                                    if (event.key === ' ' || event.key === 'Enter') {
-                                                        event.preventDefault();
-                                                        handleShowExpandedEditToolsChange(!showExpandedEditTools);
-                                                    }
-                                                }}
-                                            >
-                                                <Checkbox
-                                                    checked={showExpandedEditTools}
-                                                    onChange={handleShowExpandedEditToolsChange}
-                                                    ariaLabel={t('settings.openchamber.visual.field.showExpandedEditToolsAria')}
-                                                />
-                                                <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.editTools')}</span>
-                                            </div>
                                         </section>
                                     )}
 
@@ -1805,7 +1785,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 </div>
                             )}
 
-                            {(shouldShow('sessionAssist') || shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || shouldShow('wideChatLayout') || shouldShow('codeBlockLineWrap') || shouldShow('splitAssistantMessageActions') || shouldShow('dotfiles') || shouldShow('fileViewerPreview') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || shouldShow('showTurnChangedFiles') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning')) && (
+                            {(shouldShow('sessionAssist') || shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || shouldShow('wideChatLayout') || shouldShow('codeBlockLineWrap') || shouldShow('splitAssistantMessageActions') || shouldShow('dotfiles') || shouldShow('fileViewerPreview') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || shouldShow('showSubagentTaskDetails') || shouldShow('showTurnChangedFiles') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning')) && (
                                 <section className="p-2 space-y-0.5">
                                     {shouldShow('sessionAssist') && (
                                         <>
@@ -2072,6 +2052,34 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 ariaLabel={t('settings.openchamber.visual.field.showToolFileIconsAria')}
                                             />
                                             <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.showToolFileIcons')}</span>
+                                        </div>
+                                    )}
+
+                                    {shouldShow('showSubagentTaskDetails') && (
+                                        <div
+                                            data-settings-item="chat.subagent-task-details"
+                                            className="group flex cursor-pointer items-start gap-2 py-0.5"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={showSubagentTaskDetails}
+                                            onClick={() => handleShowSubagentTaskDetailsChange(!showSubagentTaskDetails)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    handleShowSubagentTaskDetailsChange(!showSubagentTaskDetails);
+                                                }
+                                            }}
+                                        >
+                                            <Checkbox
+                                                checked={showSubagentTaskDetails}
+                                                onChange={handleShowSubagentTaskDetailsChange}
+                                                ariaLabel={t('settings.openchamber.visual.field.showSubagentTaskDetailsAria')}
+                                                className="mt-0.5"
+                                            />
+                                            <span className="min-w-0 flex flex-col gap-0.5">
+                                                <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.showSubagentTaskDetails')}</span>
+                                                <span className="typography-meta text-muted-foreground">{t('settings.openchamber.visual.field.showSubagentTaskDetailsHint')}</span>
+                                            </span>
                                         </div>
                                     )}
 

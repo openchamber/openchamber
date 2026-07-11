@@ -15,6 +15,24 @@ export const createInitialMarkdownHydratedKeys = (entryKeys: readonly string[]):
     return newestKey ? new Set([newestKey]) : new Set();
 };
 
+/**
+ * Live streaming already paints rich Markdown in the tail. When that turn
+ * remounts into virtualized history it must stay hydrated immediately — otherwise
+ * the deferred skeleton replaces finished content for a frame.
+ */
+export const ensureNewestMarkdownKeyHydrated = (
+    hydratedKeys: Set<string>,
+    entryKeys: readonly string[],
+): Set<string> => {
+    const newestKey = entryKeys[entryKeys.length - 1];
+    if (!newestKey || hydratedKeys.has(newestKey)) {
+        return hydratedKeys;
+    }
+    const next = new Set(hydratedKeys);
+    next.add(newestKey);
+    return next;
+};
+
 export const getMarkdownHydrationCandidates = ({
     entryKeys,
     mountedIndexes,

@@ -78,15 +78,16 @@ The trace showed four causal groups:
   history. Completed latest turns use the same virtualizer as older turns.
 - Initial history overscan starts at 2 and grows by 2 in the shared frame-budget
   queue instead of mounting 8 desktop / 16 mobile overscan turns at once.
-- Completed Markdown first paints a bounded skeleton over an invisible text-size
-  spacer. Once its turn enters the hydration window, the rich target parses and
-  commits while still invisible, then replaces the skeleton atomically. Raw
-  Markdown source is never painted. Work is cancelled when the row/session
-  unmounts.
+- Completed Markdown that has not entered the hydration window first paints a
+  bounded skeleton over an invisible text-size spacer. Once released, the first
+  layout pass sync-paints Markdown and reveals before the browser paints, then
+  async morphdom upgrades to the rich DOM. Raw Markdown source is never painted.
+  Work is cancelled when the row/session unmounts.
 - Markdown hydration is scroll-driven rather than equal to virtual-list overscan:
-  the newest turn is enabled first, visible turns follow from bottom to top, and
-  upward scrolling preloads only the nearest three mounted turns above the
-  viewport. Idle time no longer upgrades every mounted overscan row.
+  the newest turn stays hydrated immediately (including streaming-tail → history
+  remounts), visible turns follow from bottom to top, and upward scrolling
+  preloads only the nearest three mounted turns above the viewport. Idle time no
+  longer upgrades every mounted overscan row.
 - Hydrated history is tracked by stable entry keys, so prepends and far jumps do
   not accidentally hydrate unseen intermediate history. Streaming-tail Markdown
   remains immediate.

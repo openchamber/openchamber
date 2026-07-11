@@ -28,7 +28,11 @@ import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { Icon } from "@/components/icon/Icon";
 import { OpenChamberLogo } from "@/components/ui/OpenChamberLogo";
 import { invokeDesktopCommand } from '@/lib/desktopNative';
-import { getOrCreateEmbeddedSessionChatURL, type EmbeddedSessionChatURLCacheEntry } from './contextPanelEmbeddedChat';
+import {
+  EMBEDDED_SESSION_CHAT_CLOSE_TAB_EVENT,
+  getOrCreateEmbeddedSessionChatURL,
+  type EmbeddedSessionChatURLCacheEntry,
+} from './contextPanelEmbeddedChat';
 import {
   type PreviewElementMetadata,
   isPreviewElementMetadata,
@@ -2412,6 +2416,15 @@ export const ContextPanel: React.FC = () => {
       }
 
       const data = event.data as { type?: unknown };
+      if (data?.type === EMBEDDED_SESSION_CHAT_CLOSE_TAB_EVENT) {
+        const frameEntry = Array.from(chatFrameRefs.current.entries())
+          .find(([, frame]) => frame.contentWindow === event.source);
+        if (frameEntry && directoryKey) {
+          closeContextPanelTab(directoryKey, frameEntry[0]);
+        }
+        return;
+      }
+
       if (data?.type !== 'openchamber:cycle-theme-request') {
         return;
       }
@@ -2424,7 +2437,7 @@ export const ContextPanel: React.FC = () => {
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [setThemeMode, themeMode]);
+  }, [closeContextPanelTab, directoryKey, setThemeMode, themeMode]);
 
   React.useLayoutEffect(() => {
     const hasAnyChatTab = tabs.some((tab) => tab.mode === 'chat');

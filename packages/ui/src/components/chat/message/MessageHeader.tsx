@@ -2,6 +2,7 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 import { getAgentColor } from '@/lib/agentColors';
 import { useModelLogo } from '@/hooks/useModelLogo';
+import { AgentAvatar } from '@/components/chat/AgentAvatar';
 import { Icon } from "@/components/icon/Icon";
 
 interface MessageHeaderProps {
@@ -62,8 +63,11 @@ const MessageHeader: React.FC<MessageHeaderProps> = ({ isUser, providerID, model
                                     getAgentColor(agentName).class
                                 )}
                             >
-                                <Icon name="ai-agent" className="h-3 w-3 flex-shrink-0" />
-                                <span className="font-medium">{agentName}</span>
+                                {/* 与选择 Agent 一致：用 identicon 头像代替通用机器人图标 */}
+                                <AgentAvatar name={agentName} size={12} />
+                                <span className="font-medium">
+                                    {agentName.charAt(0).toUpperCase() + agentName.slice(1)}
+                                </span>
                             </div>
                         )}
                         {!isUser && variant && (

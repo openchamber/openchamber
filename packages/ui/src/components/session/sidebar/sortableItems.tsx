@@ -24,6 +24,8 @@ export interface SortableProjectItemProps {
   projectIconBackground?: string;
   isCollapsed: boolean;
   isActiveProject: boolean;
+  /** True while this project's session directories are still fetching. */
+  isSessionsLoading?: boolean;
   isRepo: boolean;
   isDesktopShell: boolean;
   isStuck: boolean;
@@ -55,6 +57,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   projectDescription,
   isCollapsed,
   isActiveProject,
+  isSessionsLoading = false,
   isRepo,
   isDesktopShell,
   isStuck,
@@ -187,20 +190,30 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                       )}
                     >
                     <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-muted-foreground">
-                      <span className={cn(
-                        'h-4 w-4 items-center justify-center',
-                        alwaysShowActions ? 'inline-flex' : 'hidden group-hover/project:inline-flex group-focus-within/project:inline-flex',
-                      )}>
-                        {isCollapsed ? <Icon name="arrow-right-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-down-s" className="h-3.5 w-3.5" />}
-                      </span>
-                      {/* Codex-style open folder (folder-open), not the closed boxy glyph */}
-                      <Icon
-                        name="folder-open"
-                        className={cn(
-                          'h-4 w-4',
-                          alwaysShowActions ? 'hidden' : 'group-hover/project:hidden group-focus-within/project:hidden',
-                        )}
-                      />
+                      {isSessionsLoading ? (
+                        <Icon
+                          name="loader-4"
+                          className="h-4 w-4 animate-spin"
+                          aria-label={t('sessions.sidebar.project.loadingSessions')}
+                        />
+                      ) : (
+                        <>
+                          <span className={cn(
+                            'h-4 w-4 items-center justify-center',
+                            alwaysShowActions ? 'inline-flex' : 'hidden group-hover/project:inline-flex group-focus-within/project:inline-flex',
+                          )}>
+                            {isCollapsed ? <Icon name="arrow-right-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-down-s" className="h-3.5 w-3.5" />}
+                          </span>
+                          {/* Codex-style open folder (folder-open), not the closed boxy glyph */}
+                          <Icon
+                            name="folder-open"
+                            className={cn(
+                              'h-4 w-4',
+                              alwaysShowActions ? 'hidden' : 'group-hover/project:hidden group-focus-within/project:hidden',
+                            )}
+                          />
+                        </>
+                      )}
                     </span>
                     <span className={cn(
                       'text-[14px] font-normal truncate lowercase',

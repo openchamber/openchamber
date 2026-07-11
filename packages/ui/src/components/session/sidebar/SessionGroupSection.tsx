@@ -962,11 +962,11 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
 
   // Root (hideGroupLabel): depth 1 under the project name — same line as
   // sibling folders / root sessions.
-  // Visible worktree/archived header: also depth 1 so "main" aligns with
-  // folder chips (e.g. opencode); body sessions/folders use depth 2 — one
-  // icon-column under the header name, matching folder children.
+  // Visible worktree/archived headers and their direct items share depth 1,
+  // so worktree sessions align with the surrounding project items instead of
+  // receiving an additional nested indent.
   const groupHeaderDepth = hideGroupLabel ? 0 : 1;
-  const contentDepth = hideGroupLabel ? 1 : groupHeaderDepth + 1;
+  const contentDepth = hideGroupLabel ? 1 : groupHeaderDepth;
   const renderFolderItems = () => rootFolders.map(({ folder, nodes }) => renderOneFolderItem(folder, nodes, contentDepth));
   const hasWorktreeDeleteAction = Boolean(!group.isMain && group.worktree);
   const groupHeaderRightPadding = alwaysShowActions
@@ -1090,8 +1090,8 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
     </SessionFolderDndScope>
   );
 
-  // Codex-style: body content nests one step under the header icon column;
-  // row chips stay full-width (indent is padding inside each chip).
+  // Row chips stay full-width; any hierarchy indent is padding inside each
+  // chip. Direct worktree items intentionally share the header depth.
   // Root (hideGroupLabel) sits above worktree/archived siblings — keep bottom
   // pad minimal so the last session and the next group header share the same
   // my-0.5 rhythm as adjacent session rows (pb-3 was leaving a large gap).

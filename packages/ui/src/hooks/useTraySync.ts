@@ -10,8 +10,7 @@ import { useNotificationStore } from '@/sync/notification-store';
 import { respondToPermission } from '@/sync/session-actions';
 import {
   useGlobalSessionsStore,
-  ensureGlobalSessionsLoaded,
-  refreshGlobalSessions,
+  refreshGlobalSessionsForDirectories,
   resolveGlobalSessionDirectory,
 } from '@/stores/useGlobalSessionsStore';
 import { useQuotaStore } from '@/stores/useQuotaStore';
@@ -522,11 +521,36 @@ export const useTraySync = (): void => {
     // event stream, and seeded/reconciled by the poll below.
     const unsubscribeGlobalStatus = useGlobalSessionStatusStore.subscribe(() => scheduleFlush());
 
-    // Make the tray self-sufficient: load the full cross-project list now
-    // (independent of the sidebar) and refresh it periodically so sessions from
-    // directories this client never opened still show up and stay current.
-    void ensureGlobalSessionsLoaded(getAllSyncSessions());
-    const refreshInterval = window.setInterval(() => { void refreshGlobalSessions(); }, GLOBAL_REFRESH_MS);
+    // Tray needs cross-project coverage, but must not cold-start with an
+    // unfiltered global session.list (that saturates OpenCode and freezes the
+    // sidebar). Refresh known project/worktree directories only, and defer the
+    // first wave so the active-project send path wins the startup race.
+    const collectKnownDirectories = (): string[] => {
+      const directories = new Set<string>();
+      const projectEntries = useProjectsStore.getState().projects;
+      const worktreesByProject = useSessionUIStore.getState().availableWorktreesByProject;
+      for (const project of projectEntries) {
+        const path = normalizeProjectPath(project.path);
+        if (path) directories.add(path);
+        const worktrees = worktreesByProject.get(path ?? '') ?? [];
+        for (const worktree of worktrees) {
+          const directory = normalizeProjectPath(worktree.path);
+          if (directory) directories.add(directory);
+        }
+      }
+      for (const session of getAllSyncSessions()) {
+        const directory = resolveGlobalSessionDirectory(session);
+        if (directory) directories.add(directory);
+      }
+      return [...directories];
+    };
+
+    const refreshTraySessions = () => {
+      void refreshGlobalSessionsForDirectories(collectKnownDirectories(), getAllSyncSessions());
+    };
+
+    const deferredTrayLoad = window.setTimeout(refreshTraySessions, 2500);
+    const refreshInterval = window.setInterval(refreshTraySessions, GLOBAL_REFRESH_MS);
 
     // Global busy/retry status: fetch now and poll, so unsynced sessions don't
     // sit looking idle. Synced directories stay instant via their SSE stores.
@@ -559,6 +583,7 @@ export const useTraySync = (): void => {
     return () => {
       disposed = true;
       if (flushTimer !== null) window.clearTimeout(flushTimer);
+      window.clearTimeout(deferredTrayLoad);
       window.clearInterval(interval);
       window.clearInterval(refreshInterval);
       window.clearInterval(globalStatusInterval);

@@ -54,7 +54,9 @@ type Props = {
 
 type RenderExtras = SessionNodeRenderExtras;
 
-const MAX_VISIBLE_RECENT_SESSIONS = 7;
+// Default Recent slice: keep the top of the sidebar short; Show more / Show
+// fewer expand and collapse in batches of the same size.
+const MAX_VISIBLE_RECENT_SESSIONS = 3;
 
 export function SidebarActivitySections({
   sections,

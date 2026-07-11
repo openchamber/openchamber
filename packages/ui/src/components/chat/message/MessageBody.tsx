@@ -37,6 +37,7 @@ import { Icon } from "@/components/icon/Icon";
 import { formatTimestampForDisplay } from './timeFormat';
 import { ToolRevealOnMount } from './parts/ToolRevealOnMount';
 import { StaticToolRow } from './parts/ProgressiveGroup';
+import { TOOL_ROW_CHIP_GEOMETRY_CLASS } from './parts/toolRowChrome';
 import { isExpandableTool, isStandaloneTool } from './parts/toolRenderUtils';
 import TurnActivity from '../components/TurnActivity';
 import { createProjectPlanFile } from '@/lib/openchamberConfig';
@@ -1877,16 +1878,21 @@ const AssistantMessageBody = React.memo(({
              ) : null}
               <div>
                  <div
-                     className="message-content-text leading-relaxed overflow-hidden text-foreground/90 [&_p:last-child]:mb-0 [&_ul:last-child]:mb-0 [&_ol:last-child]:mb-0"
+                     // 不用 overflow-hidden：工具行 -mx 洗底需要画进列 gutter，否则圆角会被裁成直角
+                     className="message-content-text leading-relaxed text-foreground/90 [&_p:last-child]:mb-0 [&_ul:last-child]:mb-0 [&_ol:last-child]:mb-0"
                  >
                     {renderedParts}
                     {showErrorMessage && (
                         <FadeInOnReveal key="assistant-error">
                             <div className={cn(
                                 'group/assistant-text relative break-words max-w-full',
-                                // Info: quiet single-line chip. Error: keep a clearer callout.
+                                // Info: quiet chip — 圆角/padding 与 tool row 几何一致
+                                // Error: keep a clearer callout.
                                 errorVariant === 'info'
-                                    ? 'mt-2 inline-flex w-fit max-w-full items-center gap-1.5 rounded-md border border-[var(--status-info-border)]/45 bg-[var(--status-info-background)]/40 px-2.5 py-1.5'
+                                    ? cn(
+                                        'inline-flex w-fit max-w-full items-center gap-1.5 border border-[var(--status-info-border)]/45 bg-[var(--status-info-background)]/40',
+                                        TOOL_ROW_CHIP_GEOMETRY_CLASS,
+                                    )
                                     : 'mt-3 flex items-center gap-2 rounded-lg border border-[var(--status-error-border)] bg-[var(--status-error-background)] p-3',
                             )}>
                                 <Icon name={errorIconName} className={cn(

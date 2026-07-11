@@ -460,8 +460,8 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.showExpandedBashTools === 'boolean') {
       result.showExpandedBashTools = candidate.showExpandedBashTools;
     }
-    if (typeof candidate.showExpandedEditTools === 'boolean') {
-      result.showExpandedEditTools = candidate.showExpandedEditTools;
+    if (typeof candidate.showSubagentTaskDetails === 'boolean') {
+      result.showSubagentTaskDetails = candidate.showSubagentTaskDetails;
     }
     if (typeof candidate.timeFormatPreference === 'string') {
       const mode = candidate.timeFormatPreference.trim();

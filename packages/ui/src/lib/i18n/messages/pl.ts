@@ -229,6 +229,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.activity.recentTitle': 'ostatnie',
   'sessions.sidebar.projectsTitle': 'projekty',
   'sessions.sidebar.projectsSyncing': 'synchronizowanie sesji',
+  'sessions.sidebar.project.loadingSessions': 'Ładowanie sesji…',
   'sessions.switcher.openAria': 'Otwórz przełącznik sesji',
   'sessions.switcher.empty': 'Brak ostatnich sesji',
   'sessions.switcher.draftTitle': 'Nowa sesja',

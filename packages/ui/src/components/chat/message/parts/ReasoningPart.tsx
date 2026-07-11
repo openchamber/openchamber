@@ -348,7 +348,12 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
 
                     {isStreaming ? (
                         <span className={cn('flex items-center gap-1', TOOL_ROW_TITLE_CLASS)} style={{ color: 'var(--tools-title)' }}>
-                            <span>{t(variant === 'justification' ? 'chat.reasoningTrace.justification' : 'chat.reasoningTrace.thinking')}</span>
+                            <span
+                                className="animate-text-shimmer"
+                                style={{ ['--oc-text-shimmer-base' as string]: 'var(--tools-title)' }}
+                            >
+                                {t(variant === 'justification' ? 'chat.reasoningTrace.justification' : 'chat.reasoningTrace.thinking')}
+                            </span>
                             <BusyDots />
                         </span>
                     ) : isExpanded ? (

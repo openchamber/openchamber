@@ -11,7 +11,7 @@ import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useDirectorySync, useSessionMessageRecords, useEnsureSessionMessages } from '@/sync/sync-context';
+import { useDirectorySync, useDirectoryStore, useSessionMessageRecords, useEnsureSessionMessages } from '@/sync/sync-context';
 import { useUIStore } from '@/stores/useUIStore';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
@@ -25,6 +25,8 @@ import type { ToolPopupContent } from '../types';
 import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import type { MessageRecord } from '@/lib/messageCompletion';
+import { ensureOutsideFileGrantForDesktop } from '@/lib/outsideFileGrants';
+import { getDirectoryForFilePath, isFilePathWithinDirectory, toAbsoluteFilePath } from '@/lib/path-utils';
 
 import { TOOL_ROW_CHIP_CLASS, TOOL_ROW_INTERACTIVE_CHROME_CLASS } from './toolRowChrome';
 import {
@@ -37,7 +39,8 @@ import {
 import { JsonTreeViewer } from '@/components/ui/JsonTreeViewer';
 import { JsonSummaryView } from './JsonSummaryView';
 import { Icon } from "@/components/icon/Icon";
-import { DiffViewToggle, type DiffViewMode } from '../DiffViewToggle';
+import { AgentAvatar } from '@/components/chat/AgentAvatar';
+import { type DiffViewMode } from '../DiffViewToggle';
 import { MinDurationShineText } from './MinDurationShineText';
 import { ToolRevealOnMount } from './ToolRevealOnMount';
 import { getToolIcon } from './toolPresentation';
@@ -54,6 +57,26 @@ import { DualLimitLru } from '@/lib/dualLimitLru';
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
 const TOOL_ROW_DESCRIPTION_CLASS = cn('typography-meta', TOOL_ROW_TEXT_CLASS);
+/** Agent Task 内部摘要行：比工具标题小一号，行高与行距保持匀称 */
+const TASK_SUMMARY_TEXT_CLASS = 'typography-micro !text-[length:calc(var(--text-meta)-0.0625rem)] !leading-5 tracking-normal';
+const TASK_SUMMARY_LIST_CLASS = 'w-full min-w-0 space-y-1';
+
+/** 从 task input 解析子 Agent 名（OpenCode 子 Agent 不一定在主选择器里） */
+const resolveTaskAgentName = (input: Record<string, unknown> | undefined): string | undefined => {
+    if (!input) return undefined;
+    // 优先官方 task 字段；兼容偶发的 agent / subagent 别名
+    const candidates = [input.subagent_type, input.agent, input.subagent];
+    for (const raw of candidates) {
+        if (typeof raw !== 'string') continue;
+        const trimmed = raw.trim();
+        if (trimmed.length > 0) return trimmed;
+    }
+    return undefined;
+};
+
+/** 与 MessageHeader / Agent 选择器一致的昵称首字母大写 */
+const formatAgentDisplayName = (name: string): string =>
+    name.length > 0 ? name.charAt(0).toUpperCase() + name.slice(1) : name;
 const hydratedHistoricalToolIds = new DualLimitLru<string, true>({
     maxEntries: 2000,
     maxBytes: 256 * 1024,
@@ -179,6 +202,18 @@ const GIT_REFRESH_MUTATING_TOOLS = new Set([
     'patch',
     'task',
 ]);
+
+/** Edit/write 类：不展开，点击在右侧打开改动行（与 Read 同属导航工具） */
+const FILE_NAV_TOOL_NAMES = new Set([
+    'edit',
+    'multiedit',
+    'apply_patch',
+    'write',
+    'create',
+    'file_write',
+]);
+
+const isFileNavToolName = (toolName: string): boolean => FILE_NAV_TOOL_NAMES.has(toolName);
 
 const formatDuration = (start: number, end?: number, now: number = Date.now()) => {
     const duration = Math.min(Math.max(0, (end ?? now) - start), MAX_DURATION_MS);
@@ -1160,10 +1195,10 @@ const TaskSummaryEntryRow = React.memo(({
 
     return (
         <ToolRevealOnMount animate={animateTailText} wipe>
-            <div className={cn('flex gap-2 min-w-0 w-full', isMobile ? 'items-start' : 'items-center')}>
-                <span className="flex-shrink-0 text-foreground/80">{getToolIcon(toolName)}</span>
+            <div className={cn('flex gap-1.5 min-w-0 w-full py-px', isMobile ? 'items-start' : 'items-center')}>
+                <span className="flex-shrink-0 scale-90 text-foreground/80">{getToolIcon(toolName)}</span>
                 <span
-                    className="typography-meta text-foreground/80 flex-shrink-0"
+                    className={cn(TASK_SUMMARY_TEXT_CLASS, 'text-foreground/80 flex-shrink-0')}
                     style={{ color: 'var(--tools-title)' }}
                     title={displayName}
                 >
@@ -1171,11 +1206,12 @@ const TaskSummaryEntryRow = React.memo(({
                 </span>
                 {hasLabel ? (
                     status !== 'error' && shouldRenderGitPathLabel(toolName, label) ? (
-                        renderAnimatedPathWithIcon(label, animateTailText, true, showToolFileIcons)
+                        renderAnimatedPathWithIcon(label, animateTailText, true, showToolFileIcons, TASK_SUMMARY_TEXT_CLASS)
                     ) : (
                         status === 'error' ? (
                             <span className={cn(
-                                'typography-meta flex-1 min-w-0 text-[var(--status-error)]',
+                                TASK_SUMMARY_TEXT_CLASS,
+                                'flex-1 min-w-0 text-[var(--status-error)]',
                                 isMobile ? 'whitespace-normal break-words' : 'truncate',
                             )}>
                                 {label}
@@ -1184,7 +1220,8 @@ const TaskSummaryEntryRow = React.memo(({
                             <Text
                                 variant={animateTailText ? 'generate-effect' : 'static'}
                                 className={cn(
-                                    'typography-meta flex-1 min-w-0 text-muted-foreground/70',
+                                    TASK_SUMMARY_TEXT_CLASS,
+                                    'flex-1 min-w-0 text-muted-foreground/70',
                                     isMobile ? 'whitespace-normal break-words' : 'truncate',
                                 )}
                                 style={{ color: 'var(--tools-description)' }}
@@ -1226,9 +1263,9 @@ const TaskSummaryEntriesList = React.memo(({
 
     return (
         <ToolScrollableSection maxHeightClass={isExpanded ? 'max-h-[40vh]' : 'max-h-56'} disableHorizontal>
-            <div className="w-full min-w-0 space-y-1">
+            <div className={TASK_SUMMARY_LIST_CLASS}>
                 {hiddenCount > 0 ? (
-                    <div className="typography-micro text-muted-foreground/70">+{hiddenCount} more…</div>
+                    <div className={cn(TASK_SUMMARY_TEXT_CLASS, 'text-muted-foreground/70')}>+{hiddenCount} more…</div>
                 ) : null}
 
                 {visibleEntries.map((entry, idx) => {
@@ -1379,6 +1416,8 @@ const TaskToolSummary: React.FC<{
         : '';
     const hasOutput = trimmedOutput.length > 0;
     const [isOutputExpanded, setIsOutputExpanded] = React.useState(false);
+    const agentType = resolveTaskAgentName(input) ?? 'subagent';
+    const agentDisplayName = formatAgentDisplayName(agentType);
 
     const handleOpenSession = (event: React.MouseEvent) => {
         event.stopPropagation();
@@ -1391,20 +1430,16 @@ const TaskToolSummary: React.FC<{
             openContextPanelTab(currentDirectory, {
                 mode: 'chat',
                 dedupeKey: `session:${sessionId}`,
-                label: agentType.charAt(0).toUpperCase() + agentType.slice(1),
+                label: agentDisplayName,
                 readOnly: true,
             });
         }
     };
 
-    const agentType = typeof input?.subagent_type === 'string'
-        ? input.subagent_type
-        : 'subagent';
-
     if (entries.length === 0 && !hasOutput && !sessionId) {
         return (
-            <div className="relative pr-2 pb-2 pt-2 space-y-2 pl-[1.4375rem]">
-                <div className="typography-meta text-muted-foreground/70">
+            <div className="relative pr-2 pb-1.5 pt-0.5 space-y-1 pl-[1.4375rem]">
+                <div className={cn(TASK_SUMMARY_TEXT_CLASS, 'text-muted-foreground/70')}>
                     {isActive ? 'Waiting for subagent activity...' : 'No subagent session id on task metadata.'}
                 </div>
             </div>
@@ -1414,9 +1449,9 @@ const TaskToolSummary: React.FC<{
     return (
         <div
             className={cn(
-                'relative pr-2 pb-2 pt-2 space-y-2 pl-[1.4375rem]',
+                'relative pr-2 pb-1.5 pt-0.5 space-y-1 pl-[1.4375rem]',
                 'before:absolute before:left-[0.4375rem] before:w-px before:bg-border/80 before:content-[""]',
-                'before:top-[-0.25rem] before:bottom-0'
+                'before:top-0 before:bottom-0'
             )}
         >
             {entries.length > 0 ? (
@@ -1432,12 +1467,12 @@ const TaskToolSummary: React.FC<{
             {sessionId && (
                 <button
                     type="button"
-                    className="flex items-center gap-2 typography-meta text-primary hover:text-primary/80 w-full"
+                    className={cn('flex items-center gap-1.5 text-primary hover:text-primary/80 w-full', TASK_SUMMARY_TEXT_CLASS)}
                     onPointerDown={(event) => event.stopPropagation()}
                     onClick={handleOpenSession}
                 >
-                    <Icon name="external-link" className="h-3.5 w-3.5 flex-shrink-0" />
-                    <span className="typography-meta text-primary font-medium">{t('chat.toolPart.openSubtask', { type: agentType.charAt(0).toUpperCase() + agentType.slice(1) })}</span>
+                    <Icon name="external-link" className="h-3 w-3 flex-shrink-0" />
+                    <span className={cn(TASK_SUMMARY_TEXT_CLASS, 'text-primary font-medium')}>{t('chat.toolPart.openSubtask', { type: agentDisplayName })}</span>
                 </button>
             )}
 
@@ -1446,7 +1481,7 @@ const TaskToolSummary: React.FC<{
                 >
                     <button
                         type="button"
-                        className="flex items-center gap-2 typography-meta text-foreground/80 hover:text-foreground w-full"
+                        className={cn('flex items-center gap-1.5 text-foreground/80 hover:text-foreground w-full', TASK_SUMMARY_TEXT_CLASS)}
                         onPointerDown={(event) => event.stopPropagation()}
                         onClick={(event) => {
                             event.stopPropagation();
@@ -1454,11 +1489,11 @@ const TaskToolSummary: React.FC<{
                         }}
                     >
                         {isOutputExpanded ? (
-                            <Icon name="arrow-down-s" className="h-3.5 w-3.5 flex-shrink-0" />
+                            <Icon name="arrow-down-s" className="h-3 w-3 flex-shrink-0" />
                         ) : (
-                            <Icon name="arrow-right-s" className="h-3.5 w-3.5 flex-shrink-0" />
+                            <Icon name="arrow-right-s" className="h-3 w-3 flex-shrink-0" />
                         )}
-                        <span className="typography-meta text-foreground/80 font-medium">{t('chat.toolPart.output')}</span>
+                        <span className={cn(TASK_SUMMARY_TEXT_CLASS, 'text-foreground/80 font-medium')}>{t('chat.toolPart.output')}</span>
                     </button>
                     {isOutputExpanded ? (
                         <ToolScrollableSection maxHeightClass="max-h-[50vh]">
@@ -1543,16 +1578,23 @@ const renderPathLikeGitChanges = (path: string, grow = true) => {
     );
 };
 
-const renderAnimatedPathWithIcon = (path: string, animate = true, grow = true, showFileIcons = true) => {
+const renderAnimatedPathWithIcon = (
+    path: string,
+    animate = true,
+    grow = true,
+    showFileIcons = true,
+    textClassName: string = TOOL_ROW_DESCRIPTION_CLASS,
+) => {
     const lastSlash = path.lastIndexOf('/');
+    const iconClass = textClassName === TASK_SUMMARY_TEXT_CLASS ? 'h-3 w-3 flex-shrink-0' : 'h-3.5 w-3.5 flex-shrink-0';
 
     if (lastSlash === -1) {
         return (
             <span className={cn('min-w-0 inline-flex items-center gap-1 overflow-hidden', grow && 'flex-1')} title={path}>
-                {showFileIcons ? <FileTypeIcon filePath={path} className="h-3.5 w-3.5 flex-shrink-0" /> : null}
+                {showFileIcons ? <FileTypeIcon filePath={path} className={iconClass} /> : null}
                 <Text
                     variant={animate ? 'generate-effect' : 'static'}
-                    className={cn('min-w-0 truncate whitespace-nowrap', TOOL_ROW_DESCRIPTION_CLASS, grow && 'flex-1')}
+                    className={cn('min-w-0 truncate whitespace-nowrap', textClassName, grow && 'flex-1')}
                     style={{ color: 'var(--tools-title)' }}
                 >
                     {path}
@@ -1568,8 +1610,8 @@ const renderAnimatedPathWithIcon = (path: string, animate = true, grow = true, s
 
     return (
         <span className={cn('min-w-0 inline-flex items-center gap-1 overflow-hidden', grow && 'flex-1')} title={path}>
-            {showFileIcons ? <FileTypeIcon filePath={path} className="h-3.5 w-3.5 flex-shrink-0" /> : null}
-            <span className={cn('min-w-0 inline-flex max-w-full items-baseline overflow-hidden', TOOL_ROW_DESCRIPTION_CLASS, grow && 'flex-1')}>
+            {showFileIcons ? <FileTypeIcon filePath={path} className={iconClass} /> : null}
+            <span className={cn('min-w-0 inline-flex max-w-full items-baseline overflow-hidden', textClassName, grow && 'flex-1')}>
                 {hasAbsoluteRoot ? <span className="flex-shrink-0" style={{ color: 'var(--tools-description)' }}>/</span> : null}
                 <span
                     className="min-w-0 shrink truncate whitespace-nowrap"
@@ -1690,7 +1732,6 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     onShowPopup,
 }) => {
     const { t } = useI18n();
-    const runtime = React.useContext(RuntimeAPIContext);
     const { pierreTheme, pierreThemeType } = usePierreThemeConfig();
     const [diffViewMode, setDiffViewMode] = React.useState<DiffViewMode>('unified');
     const stateWithData = state as ToolStateWithMetadata;
@@ -1710,7 +1751,6 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         () => getDiffPatchEntries(metadata, diffContent ?? undefined, (path) => getRelativePath(path, currentDirectory)),
         [currentDirectory, diffContent, metadata]
     );
-    const hasVisualDiffEntry = diffEntries.some((entry) => entry.renderMode === 'diff');
     const hideToolInputPreview = part.tool === 'apply_patch'
         || part.tool === 'edit'
         || part.tool === 'multiedit';
@@ -1776,36 +1816,6 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     );
 
     const renderResultContent = () => {
-        const getEntryAbsolutePath = (entry: DiffPatchEntry) => (
-            entry.title.startsWith('/') ? entry.title : `${currentDirectory}/${entry.title}`.replace(/\/+/g, '/')
-        );
-        const openEntryFile = (entry: DiffPatchEntry, event: React.MouseEvent<HTMLButtonElement>) => {
-            event.stopPropagation();
-            const line = extractFirstChangedLineFromDiff(entry.patch);
-            const absolutePath = getEntryAbsolutePath(entry);
-            if (runtime?.editor && runtime.runtime.isVSCode) {
-                void runtime.editor.openFile(absolutePath, line);
-                return;
-            }
-            useUIStore.getState().openContextFileAtLine(currentDirectory, absolutePath, line ?? 1, 1);
-        };
-        const openEntryDiff = (entry: DiffPatchEntry, event: React.MouseEvent<HTMLButtonElement>) => {
-            event.stopPropagation();
-            const line = extractFirstChangedLineFromDiff(entry.patch);
-            const absolutePath = getEntryAbsolutePath(entry);
-            if (runtime?.editor && runtime.runtime.isVSCode) {
-                void runtime.editor.openDiff('', absolutePath, `${getRelativePath(absolutePath, currentDirectory)} (changes)`, { line, patch: entry.patch });
-                return;
-            }
-            const store = useUIStore.getState();
-            const relativePath = getRelativePath(absolutePath, currentDirectory);
-            if (store.isMobile) {
-                store.navigateToDiff(relativePath);
-                store.setRightSidebarOpen(false);
-                return;
-            }
-            store.openContextDiff(currentDirectory, relativePath);
-        };
         const renderDiagnosticsSection = () => {
             if (!diagnosticSection) {
                 return null;
@@ -1929,31 +1939,6 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                 <div className="space-y-3">
                     {diffEntries.map((entry) => (
                         <div key={entry.id} className="w-full min-w-0">
-                            <div className="mb-1 flex min-w-0 items-center gap-1 px-2 py-1">
-                                <div className="min-w-0 flex-1 typography-meta font-medium text-muted-foreground">
-                                    {renderPathLikeGitChanges(entry.title)}
-                                </div>
-                                <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
-                                    onClick={(event) => openEntryFile(entry, event)}
-                                    aria-label={t('chat.toolPart.openFileAtFirstChange')}
-                                    title={t('chat.toolPart.openFileAtFirstChange')}
-                                >
-                                    <Icon name="file-edit" className="h-3.5 w-3.5" />
-                                </Button>
-                                <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
-                                    onClick={(event) => openEntryDiff(entry, event)}
-                                    aria-label={t('chat.toolPart.openFileDiff')}
-                                    title={t('chat.toolPart.openFileDiff')}
-                                >
-                                    <Icon name="git-pull-request" className="h-3.5 w-3.5" />
-                                </Button>
-                            </div>
                             {entry.renderMode === 'diff' ? (
                                 <DiffPreview
                                     diff={entry.patch}
@@ -2072,7 +2057,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                                         diffViewMode={diffViewMode}
                                     />
                                 ) : (
-                                    <blockquote className="tool-input-text whitespace-pre-wrap break-words typography-meta italic text-muted-foreground/70">
+                                    <blockquote className="tool-input-text m-0 whitespace-pre-wrap break-words typography-meta italic text-muted-foreground/70">
                                         {inputTextContent}
                                     </blockquote>
                                 ),
@@ -2086,15 +2071,6 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
 
                     {state.status === 'completed' && 'output' in state && (
                         <div>
-                            {(part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch' || part.tool === 'write') && hasVisualDiffEntry ? (
-                                <div className="mb-1 flex items-center justify-end gap-2">
-                                    <DiffViewToggle
-                                        mode={diffViewMode}
-                                        onModeChange={setDiffViewMode}
-                                        className="h-5 w-5 p-0"
-                                    />
-                                </div>
-                            ) : null}
                             {renderResultContent()}
                         </div>
                     )}
@@ -2130,11 +2106,17 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
 }) => {
     const state = part.state;
     const showToolFileIcons = useUIStore((s) => s.showToolFileIcons);
+    // Settings → Visual：「显示子智能体工作详情」；默认关闭，保持紧凑单行
+    const showSubagentTaskDetails = useUIStore((s) => s.showSubagentTaskDetails);
+    const openContextPanelTab = useUIStore((s) => s.openContextPanelTab);
     const currentDirectory = useEffectiveDirectory() ?? '';
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
+    const setCurrentSession = useSessionUIStore((s) => s.setCurrentSession);
 
     const normalizedPartTool = normalizeToolName(part.tool);
     const isTaskTool = normalizedPartTool === 'task';
+    // Edit/Write：单行导航，不展开详情
+    const isFileNavTool = isFileNavToolName(normalizedPartTool);
 
     const status = state?.status as string | undefined;
     const isFinalized = status === 'completed' || status === 'error' || status === 'aborted' || status === 'failed' || status === 'timeout' || status === 'cancelled';
@@ -2183,7 +2165,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     const expandedContentRef = React.useRef<HTMLDivElement>(null);
 
     React.useLayoutEffect(() => {
-        if (isTaskTool) {
+        if (isTaskTool || isFileNavTool) {
             return;
         }
 
@@ -2198,7 +2180,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         if (shouldNotifyStructuralChange) {
             onContentChangeRef.current?.('structural');
         }
-    }, [isExpanded, isTaskTool, shouldNotifyStructuralChange]);
+    }, [isExpanded, isFileNavTool, isTaskTool, shouldNotifyStructuralChange]);
 
     const stateWithData = state as ToolStateWithMetadata;
     const metadata = stateWithData.metadata;
@@ -2343,7 +2325,8 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     );
 
     const taskSessionId = explicitTaskSessionId ?? fallbackTaskSessionId;
-    const childSessionLookupId = hasFinalMetadataTaskSummary ? '' : (taskSessionId ?? '');
+    // 关闭详情时不必为竖线摘要拉取子会话消息
+    const childSessionLookupId = (!showSubagentTaskDetails || hasFinalMetadataTaskSummary) ? '' : (taskSessionId ?? '');
 
     const childSessionMessages = useSessionMessageRecords(childSessionLookupId, currentDirectory);
     useEnsureSessionMessages(childSessionLookupId, currentDirectory);
@@ -2460,6 +2443,9 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     const descriptionPath = getToolDescriptionPath(normalizedPart, state, currentDirectory);
     const description = getToolDescription(normalizedPart, state, currentDirectory);
     const displayName = getToolMetadata(normalizedPartTool || part.tool).displayName;
+    // Task 工具：用子 Agent 昵称替换通用 “Agent Task” 文案
+    const taskAgentName = isTaskTool ? resolveTaskAgentName(input) : undefined;
+    const taskTitle = taskAgentName ? formatAgentDisplayName(taskAgentName) : displayName;
     
     // Tool title/description — shown inline as context
     const justificationText = React.useMemo(() => {
@@ -2489,10 +2475,78 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         return null;
     }, [descriptionPath, normalizedPartTool, stateWithData, input]);
     const runtime = React.useContext(RuntimeAPIContext);
+    const directoryStore = useDirectoryStore(currentDirectory);
+    const pendingOpenTaskSessionRef = React.useRef(false);
+
+    /** 解析当前可用的子会话 id（含点击时加宽窗口的 fallback） */
+    const resolveTaskSessionIdNow = React.useCallback((widenFallback: boolean): string | undefined => {
+        if (taskSessionId) {
+            return taskSessionId;
+        }
+        const storeState = directoryStore.getState();
+        return resolveFallbackTaskSessionId({
+            isTaskTool: true,
+            parentSessionId: currentSessionId ?? undefined,
+            taskStartTime: taskSessionResolutionStart,
+            sessions: storeState.session,
+            sessionStatusMap: storeState.session_status,
+            hasRetried: widenFallback || taskFallbackRetried,
+        });
+    }, [
+        currentSessionId,
+        directoryStore,
+        taskFallbackRetried,
+        taskSessionId,
+        taskSessionResolutionStart,
+    ]);
+
+    /** 打开子 Agent 会话（context panel / 移动端切会话）；成功返回 true */
+    const openTaskSession = React.useCallback((sessionIdOverride?: string): boolean => {
+        const sessionId = sessionIdOverride ?? resolveTaskSessionIdNow(true);
+        if (!sessionId || !currentDirectory) {
+            return false;
+        }
+        pendingOpenTaskSessionRef.current = false;
+        if (isMobile || runtime?.runtime.isVSCode) {
+            setCurrentSession(sessionId, currentDirectory);
+            return true;
+        }
+        openContextPanelTab(currentDirectory, {
+            mode: 'chat',
+            dedupeKey: `session:${sessionId}`,
+            label: taskTitle,
+            readOnly: true,
+        });
+        return true;
+    }, [
+        currentDirectory,
+        isMobile,
+        openContextPanelTab,
+        resolveTaskSessionIdNow,
+        runtime?.runtime.isVSCode,
+        setCurrentSession,
+        taskTitle,
+    ]);
+
+    // loading 时点了但 id 尚未到位：等 sessionId 一到就打开
+    React.useEffect(() => {
+        if (!pendingOpenTaskSessionRef.current || !taskSessionId) {
+            return;
+        }
+        openTaskSession(taskSessionId);
+    }, [openTaskSession, taskSessionId]);
 
     const handleMainClick = (e: { stopPropagation: () => void }) => {
-        if (isTaskTool || !runtime?.editor) {
-            onToggle(part.id);
+        // Task：整行始终打开子会话（含 loading）；详情展开只走图标位箭头
+        if (isTaskTool) {
+            e.stopPropagation();
+            if (!openTaskSession()) {
+                // 子会话 id 还在路上：记下意图，id 到达后自动打开
+                pendingOpenTaskSessionRef.current = true;
+                if (!taskFallbackRetried) {
+                    setTaskFallbackRetried(true);
+                }
+            }
             return;
         }
 
@@ -2523,17 +2577,58 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
 
         if (typeof filePath === 'string') {
             e.stopPropagation();
-            let absolutePath = filePath;
-            if (!filePath.startsWith('/')) {
-                absolutePath = currentDirectory.endsWith('/') ? currentDirectory + filePath : currentDirectory + '/' + filePath;
-            }
-            if (runtime.runtime.isVSCode && toolDiff && (part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch')) {
-                const label = `${getRelativePath(absolutePath, currentDirectory)} (changes)`;
-                void runtime.editor.openDiff('', absolutePath, label, { line: targetLine, patch: toolDiff });
+            const absolutePath = toAbsoluteFilePath(currentDirectory, filePath) || (
+                filePath.startsWith('/')
+                    ? filePath
+                    : (currentDirectory.endsWith('/') ? currentDirectory + filePath : `${currentDirectory}/${filePath}`)
+            );
+
+            // Edit/Write：始终打开改动行，不再展开 diff 面板
+            if (isFileNavTool || part.tool === 'lsp') {
+                if (runtime?.editor) {
+                    if (
+                        runtime.runtime.isVSCode
+                        && toolDiff
+                        && (part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch')
+                    ) {
+                        const label = `${getRelativePath(absolutePath, currentDirectory)} (changes)`;
+                        void runtime.editor.openDiff('', absolutePath, label, { line: targetLine, patch: toolDiff });
+                        return;
+                    }
+                    void runtime.editor.openFile(absolutePath, targetLine);
+                    return;
+                }
+
+                const openInContext = () => {
+                    const uiStore = useUIStore.getState();
+                    const contextDirectory = getDirectoryForFilePath(currentDirectory, absolutePath);
+                    if (typeof targetLine === 'number' && Number.isFinite(targetLine)) {
+                        uiStore.openContextFileAtLine(contextDirectory, absolutePath, Math.max(1, Math.trunc(targetLine)), 1);
+                        return;
+                    }
+                    uiStore.openContextFile(contextDirectory, absolutePath);
+                };
+
+                if (!isFilePathWithinDirectory(absolutePath, currentDirectory)) {
+                    void ensureOutsideFileGrantForDesktop(absolutePath, currentDirectory).then(openInContext);
+                    return;
+                }
+                openInContext();
                 return;
             }
-            runtime.editor.openFile(absolutePath, targetLine);
-        } else {
+
+            if (runtime?.editor) {
+                if (runtime.runtime.isVSCode && toolDiff && (part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch')) {
+                    const label = `${getRelativePath(absolutePath, currentDirectory)} (changes)`;
+                    void runtime.editor.openDiff('', absolutePath, label, { line: targetLine, patch: toolDiff });
+                    return;
+                }
+                runtime.editor.openFile(absolutePath, targetLine);
+                return;
+            }
+        }
+
+        if (!isFileNavTool) {
             onToggle(part.id);
         }
     };
@@ -2548,8 +2643,13 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
 
     const iconStyle = !isTaskTool && isError ? TOOL_ERROR_ICON_STYLE : TOOL_NORMAL_ICON_STYLE;
     const titleStyle = !isTaskTool && isError ? TOOL_ERROR_TITLE_STYLE : TOOL_NORMAL_TITLE_STYLE;
-    const shouldRenderTaskSummary = useDeferredExpandedContent(isTaskTool && (taskSummaryEntries.length > 0 || isActive || shouldTreatAsFinalized || !!taskSessionId));
-    const shouldRenderExpandedContent = useDeferredExpandedContent(!isTaskTool && isExpanded);
+    const taskBusy = Boolean(isTaskTool && isActive && !isError);
+    const shouldRenderTaskSummary = useDeferredExpandedContent(
+        isTaskTool
+        && showSubagentTaskDetails
+        && (taskSummaryEntries.length > 0 || isActive || shouldTreatAsFinalized || !!taskSessionId)
+    );
+    const shouldRenderExpandedContent = useDeferredExpandedContent(!isTaskTool && !isFileNavTool && isExpanded);
 
     if (!shouldTreatAsFinalized && !isActive && !isTaskTool) {
         return null;
@@ -2562,6 +2662,8 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                 className={cn(
                 'group/tool flex gap-1.5 cursor-pointer',
                 TOOL_ROW_INTERACTIVE_CHROME_CLASS,
+                // Task 干活中也要有明确 hover 洗底（与其它工具行一致）
+                isTaskTool && 'hover:!bg-[color-mix(in_srgb,var(--surface-foreground)_6%,transparent)]',
                 isMultiFileApplyPatch ? 'flex-wrap items-start' : 'items-center'
             )}
                 onClick={handleMainClick}
@@ -2572,30 +2674,74 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                 <div className={cn('flex gap-1.5', isMultiFileApplyPatch ? 'w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5' : 'items-center flex-shrink-0')}>
                     {}
                     <div
-                        className="relative h-3.5 w-3.5 flex-shrink-0 cursor-pointer"
-                        onClick={(event) => { event.stopPropagation(); onToggle(part.id); }}
+                        className={cn(
+                            'relative h-3.5 w-3.5 flex-shrink-0',
+                            !isFileNavTool && 'group/taskicon cursor-pointer'
+                        )}
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            if (isFileNavTool) {
+                                handleMainClick(event);
+                                return;
+                            }
+                            if (isTaskTool) {
+                                // 图标位：开启详情时箭头负责展开；否则与整行一样打开子会话
+                                if (showSubagentTaskDetails) {
+                                    onToggle(part.id);
+                                    return;
+                                }
+                                if (!openTaskSession()) {
+                                    pendingOpenTaskSessionRef.current = true;
+                                    if (!taskFallbackRetried) {
+                                        setTaskFallbackRetried(true);
+                                    }
+                                }
+                                return;
+                            }
+                            onToggle(part.id);
+                        }}
                     >
                         {}
                         <div
                             className={cn(
-                                'absolute inset-0 transition-opacity',
-                                isExpanded && 'opacity-0',
-                                !isExpanded && 'group-hover/tool:opacity-0'
+                                'absolute inset-0 flex items-center justify-center transition-opacity',
+                                // Task：头像常显；仅悬停图标位且开启详情时才换成箭头（勿用整行 group-hover）
+                                // Edit/Write：固定工具图标，不换箭头
+                                // 其它工具：展开或 hover 整行时让位给箭头
+                                isFileNavTool
+                                    ? undefined
+                                    : isTaskTool
+                                        ? (showSubagentTaskDetails ? 'group-hover/taskicon:opacity-0' : undefined)
+                                        : cn(isExpanded && 'opacity-0', !isExpanded && 'group-hover/tool:opacity-0')
                             )}
-                            style={iconStyle}
+                            style={isTaskTool ? undefined : iconStyle}
                         >
-                            {getToolIcon(normalizedPartTool || part.tool)}
+                            {isTaskTool ? (
+                                <AgentAvatar
+                                    // 子 Agent（如 Explorer）不一定出现在主 Agent 选择器里；identicon 只吃名字种子
+                                    name={taskAgentName ?? 'subagent'}
+                                    size={14}
+                                    label={taskTitle}
+                                />
+                            ) : (
+                                getToolIcon(normalizedPartTool || part.tool)
+                            )}
                         </div>
                         {}
-                        <div
-                            className={cn(
-                                'absolute inset-0 transition-opacity flex items-center justify-center',
-                                isExpanded && 'opacity-100',
-                                !isExpanded && 'opacity-0 group-hover/tool:opacity-100'
-                            )}
-                        >
-                            {isExpanded ? <Icon name="arrow-down-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-right-s" className="h-3.5 w-3.5" />}
-                        </div>
+                        {!isFileNavTool ? (
+                            <div
+                                className={cn(
+                                    'absolute inset-0 transition-opacity flex items-center justify-center pointer-events-none',
+                                    isTaskTool
+                                        ? (showSubagentTaskDetails
+                                            ? 'opacity-0 group-hover/taskicon:opacity-100'
+                                            : 'opacity-0')
+                                        : cn(isExpanded && 'opacity-100', !isExpanded && 'opacity-0 group-hover/tool:opacity-100')
+                                )}
+                            >
+                                {isExpanded ? <Icon name="arrow-down-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-right-s" className="h-3.5 w-3.5" />}
+                            </div>
+                        ) : null}
                     </div>
                     {isMultiFileApplyPatch ? (
                         <>
@@ -2613,15 +2759,28 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                     ) : (
                         <>
                             <div className="flex items-center gap-2 min-w-0 flex-1">
-                                <MinDurationShineText
-                                    active={Boolean(isActive && !isError)}
-                                    minDurationMs={300}
-                                    className={cn(TOOL_ROW_TITLE_CLASS, 'flex-shrink-0')}
-                                    style={titleStyle}
-                                    title={displayName}
-                                >
-                                    {displayName}
-                                </MinDurationShineText>
+                                {taskBusy ? (
+                                    <span
+                                        className={cn(TOOL_ROW_TITLE_CLASS, 'flex-shrink-0 animate-text-shimmer')}
+                                        style={{
+                                            color: 'var(--tools-title)',
+                                            ['--oc-text-shimmer-base' as string]: 'var(--tools-title)',
+                                        }}
+                                        title={taskTitle}
+                                    >
+                                        {taskTitle}
+                                    </span>
+                                ) : (
+                                    <MinDurationShineText
+                                        active={Boolean(isActive && !isError)}
+                                        minDurationMs={300}
+                                        className={cn(TOOL_ROW_TITLE_CLASS, 'flex-shrink-0')}
+                                        style={titleStyle}
+                                        title={taskTitle}
+                                    >
+                                        {taskTitle}
+                                    </MinDurationShineText>
+                                )}
                             </div>
                             {normalizedPartTool === 'bash' && typeof effectiveTimeStart === 'number' ? (
                                 <span className={cn('flex-shrink-0 tabular-nums text-muted-foreground/80', TOOL_ROW_DESCRIPTION_CLASS)}>
@@ -2641,8 +2800,17 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                         <div className="flex items-center gap-1 flex-1 min-w-0">
                             {justificationText && (
                                 <span
-                                    className={cn('min-w-0 truncate', TOOL_ROW_DESCRIPTION_CLASS)}
-                                    style={{ color: 'var(--tools-description)', opacity: 0.8 }}
+                                    className={cn(
+                                        'min-w-0 truncate',
+                                        TOOL_ROW_DESCRIPTION_CLASS,
+                                        taskBusy && 'animate-text-shimmer',
+                                    )}
+                                    style={{
+                                        color: 'var(--tools-description)',
+                                        ...(taskBusy
+                                            ? { ['--oc-text-shimmer-base' as string]: 'var(--tools-description)' }
+                                            : { opacity: 0.8 }),
+                                    }}
                                     title={justificationText}
                                 >
                                     {justificationText}
@@ -2697,7 +2865,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                 />
             ) : null}
 
-            {!isTaskTool ? (
+            {!isTaskTool && !isFileNavTool ? (
                 <div
                     ref={expandedContentRef}
                     aria-hidden={!isExpanded}

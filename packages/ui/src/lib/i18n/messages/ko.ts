@@ -407,6 +407,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.activity.recentTitle': '최근',
   'sessions.sidebar.projectsTitle': '프로젝트',
   'sessions.sidebar.projectsSyncing': '세션 동기화 중',
+  'sessions.sidebar.project.loadingSessions': '세션 로딩 중…',
   'sessions.switcher.openAria': '세션 전환기 열기',
   'sessions.switcher.empty': '최근 세션 없음',
   'sessions.switcher.draftTitle': '새 세션',

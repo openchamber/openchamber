@@ -31,7 +31,9 @@ export const AgentAvatar: React.FC<AgentAvatarProps> = ({
         color.class,
         className,
       )}
-      style={{ width: size, height: size }}
+      // currentColor is the reliable SVG paint path; presentation-attribute
+      // fill="var(--agent-color)" often resolves transparent in Chromium.
+      style={{ width: size, height: size, color: `var(${color.var})` }}
       role={label ? 'img' : undefined}
       aria-label={label}
       aria-hidden={label ? undefined : true}
@@ -41,9 +43,10 @@ export const AgentAvatar: React.FC<AgentAvatarProps> = ({
         height={size}
         viewBox="0 0 5 5"
         shapeRendering="crispEdges"
-        className="block h-full w-full"
+        className="oc-agent-avatar block h-full w-full"
+        aria-hidden="true"
       >
-        <rect width="5" height="5" fill="rgb(from var(--agent-color) r g b / 0.14)" />
+        <rect width="5" height="5" fill="currentColor" opacity={0.14} />
         {matrix.map((row, y) =>
           row.map((on, x) =>
             on ? (
@@ -53,7 +56,7 @@ export const AgentAvatar: React.FC<AgentAvatarProps> = ({
                 y={y}
                 width="1"
                 height="1"
-                fill="var(--agent-color)"
+                fill="currentColor"
               />
             ) : null,
           ),

@@ -38,16 +38,6 @@ const expandedToolsStateCache = new Map<string, Set<string>>();
 const collapsedToolsStateCache = new Map<string, Set<string>>();
 
 const BASH_TOOL_NAMES = new Set(['bash', 'shell', 'cmd', 'terminal']);
-const EDIT_TOOL_NAMES = new Set([
-    'apply_patch',
-    'edit',
-    'write',
-    'multiedit',
-    'str_replace',
-    'str_replace_based_edit_tool',
-    'create',
-    'file_write',
-]);
 
 const normalizeToolName = (toolName: unknown): string => {
     if (typeof toolName !== 'string') return '';
@@ -166,13 +156,12 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     }
 
     const providers = useConfigStore((state) => state.providers);
-    const { showReasoningTraces, stickyUserHeader, chatRenderMode, showExpandedBashTools, showExpandedEditTools } = useUIStore(
+    const { showReasoningTraces, stickyUserHeader, chatRenderMode, showExpandedBashTools } = useUIStore(
         useShallow((state) => ({
             showReasoningTraces: state.showReasoningTraces,
             stickyUserHeader: state.stickyUserHeader,
             chatRenderMode: state.chatRenderMode,
             showExpandedBashTools: state.showExpandedBashTools,
-            showExpandedEditTools: state.showExpandedEditTools,
         }))
     );
 
@@ -461,7 +450,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     }, [isUser, turnGroupingContext?.activityParts]);
 
     const defaultOpenToolIds = React.useMemo(() => {
-        if (!showExpandedBashTools && !showExpandedEditTools) {
+        if (!showExpandedBashTools) {
             return new Set<string>();
         }
 
@@ -472,17 +461,13 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             const toolName = normalizeToolName((part as { tool?: string }).tool);
             if (!toolName) continue;
 
-            if (showExpandedBashTools && BASH_TOOL_NAMES.has(toolName)) {
-                next.add(toolId);
-                continue;
-            }
-            if (showExpandedEditTools && EDIT_TOOL_NAMES.has(toolName)) {
+            if (BASH_TOOL_NAMES.has(toolName)) {
                 next.add(toolId);
             }
         }
 
         return next;
-    }, [showExpandedBashTools, showExpandedEditTools, toolParts, turnActivityToolParts]);
+    }, [showExpandedBashTools, toolParts, turnActivityToolParts]);
 
     const effectiveExpandedTools = React.useMemo(() => {
         if (defaultOpenToolIds.size === 0 && collapsedTools.size === 0) {
@@ -550,6 +535,9 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
     const hasTurnGrouping = Boolean(turnGroupingContext);
     const isLastAssistantInTurn = turnGroupingContext?.isLastAssistantInTurn ?? false;
+    // Live working status sits directly under this turn — drop the idle pb-8 gap
+    // so "Delegating task …" etc. don't float far below the last tool row.
+    const tightenWorkingBottomGap = turnGroupingContext?.isWorking === true || isInActiveTurn;
 
     const isFollowedByAssistant = React.useMemo(() => {
         if (isUser) return false;
@@ -975,7 +963,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                 className={cn(
                     'group w-full',
                     isUser ? (isMobile ? 'pt-2' : 'pt-6') : assistantTopPaddingClass,
-                    isUser ? 'pb-0' : isFollowedByAssistant ? 'pb-0' : 'pb-8'
+                    isUser ? 'pb-0' : isFollowedByAssistant ? 'pb-0' : tightenWorkingBottomGap ? 'pb-1' : 'pb-8'
                 )}
                 id={`message-${message.info.id}`}
                 data-message-id={message.info.id}

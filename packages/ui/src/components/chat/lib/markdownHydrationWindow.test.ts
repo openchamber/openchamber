@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
     createInitialMarkdownHydratedKeys,
+    ensureNewestMarkdownKeyHydrated,
     getMarkdownHydrationCandidates,
     pruneMarkdownHydratedKeys,
 } from './markdownHydrationWindow';
@@ -12,6 +13,13 @@ describe('markdown hydration window', () => {
     test('starts with only the newest stable entry key hydrated', () => {
         expect([...createInitialMarkdownHydratedKeys(keys(100))]).toEqual(['turn-99']);
         expect(createInitialMarkdownHydratedKeys([]).size).toBe(0);
+    });
+
+    test('keeps a newly completed newest entry hydrated without waiting for scroll', () => {
+        const hydrated = new Set(['turn-0']);
+        const next = ensureNewestMarkdownKeyHydrated(hydrated, keys(2));
+        expect([...next]).toEqual(['turn-0', 'turn-1']);
+        expect(ensureNewestMarkdownKeyHydrated(next, keys(2))).toBe(next);
     });
 
     test('orders visible candidates from newest to oldest', () => {

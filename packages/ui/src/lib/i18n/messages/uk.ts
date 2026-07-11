@@ -407,6 +407,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.activity.recentTitle": "Останні",
   "sessions.sidebar.projectsTitle": "Проєкти",
   "sessions.sidebar.projectsSyncing": "синхронізація сеансів",
+  "sessions.sidebar.project.loadingSessions": "Завантаження сеансів…",
   "sessions.switcher.openAria": "Відкрити перемикач сесій",
   "sessions.switcher.empty": "Немає недавніх сесій",
   "sessions.switcher.draftTitle": "Нова сесія",

@@ -1,7 +1,12 @@
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import type { Theme } from '@/types/theme';
-import { buildEmbeddedSessionChatURL, getOrCreateEmbeddedSessionChatURL, type EmbeddedSessionChatURLCacheEntry } from './contextPanelEmbeddedChat';
+import {
+  buildEmbeddedSessionChatURL,
+  getOrCreateEmbeddedSessionChatURL,
+  isEmbeddedSessionChatSearch,
+  type EmbeddedSessionChatURLCacheEntry,
+} from './contextPanelEmbeddedChat';
 
 const originalWindow = globalThis.window;
 
@@ -42,6 +47,12 @@ afterAll(() => {
 });
 
 describe('embedded session chat URL', () => {
+  test('identifies only the session-chat panel URL', () => {
+    expect(isEmbeddedSessionChatSearch('?ocPanel=session-chat&sessionId=ses_1')).toBe(true);
+    expect(isEmbeddedSessionChatSearch('?ocPanel=preview')).toBe(false);
+    expect(isEmbeddedSessionChatSearch('')).toBe(false);
+  });
+
   test('includes parent effective system theme bootstrap data', () => {
     const currentTheme = makeTheme('custom-dark', 'dark');
 

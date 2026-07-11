@@ -4,19 +4,25 @@
 
 - `SessionSidebar.tsx` now acts mainly as orchestration; core logic moved to focused hooks/components.
 - Sidebar is now a single multi-project tree: `recent` top section, then projects, then worktrees/archived groups, then sessions.
+- The Recent section defaults to 3 visible sessions and supports the same Show more / Show fewer batching as project groups (batch size 3).
 - Project rows retain the persisted project-registry order while session and worktree data hydrates. A successfully sent message promotes its owning project to the top; ordinary activity and selection do not reorder the structural project tree. The Recent section represents session recency instead.
-- The Projects section header shows a localized session-sync status while the global-session store is in its explicit idle/loading states. Worktree discovery is intentionally excluded because it can be long-running and no longer affects project ordering.
-- An idle global-session store always triggers a refresh, including after a runtime endpoint reset; the status therefore cannot remain idle after the sidebar's one-time mount effect has already run.
+- The Projects section header no longer shows a global syncing accessory. While a
+  project's session directories are fetching, that project's folder icon swaps to a
+  spinner and the expanded body shows localized "Loading sessions…" copy.
+- Cold start hydrates **only the current / active project directories** via `refreshGlobalSessionsForDirectories`. Other projects load when expanded (or on expand-all). The store applies one directory at a time (concurrency 2) so the sidebar never jumps from empty → full catalog in a single commit; consumers also `useDeferredValue` the session arrays so typing/send stay on the urgent lane.
+- An idle global-session store always triggers a priority refresh, including after a runtime endpoint reset; the status therefore cannot remain idle after the sidebar's one-time mount effect has already run.
 - `NavRail` is no longer part of sidebar/navigation flow.
 - Project headers now own root sessions directly; there is no separate rendered `project root` subgroup.
-- Active/hover rows use Codex-style inset neutral chips (`SIDEBAR_ROW_*`); hover is a lighter wash
-  (`8%`) and active/selected is slightly deeper (`11%`) so the two states read apart. Nested rows indent via
-  padding *inside* the chip so hover/active wash stays full-width (reserved left gutter). Depth 1
+- Active/hover rows use Codex-style inset neutral chips (`SIDEBAR_ROW_*`); light mode
+  uses a soft wash (hover ~3.5%, active ~6%) so cream themes stay airy, while dark keeps
+  a slightly deeper wash (hover 8%, active 11%) so the two states still read apart. Nested
+  rows indent via padding *inside* the chip so hover/active wash stays full-width
+  (reserved left gutter). Depth 1
   uses the folder icon column (`16 + 6`) so all project sessions share one vertical line under the
   parent folder *name*. Deeper levels (subagent) add ~one UI-label font size (`14px`) each.
   Worktree/archived group headers reuse the same folder chip chrome (hover wash + depth-1
-  nest pad) so they share one vertical line with sibling folders; body sessions/folders nest
-  at depth 2 (one icon-column under the header name, matching folder children). Subsession
+  nest pad) so they share one vertical line with sibling folders; their direct sessions/folders
+  keep that same depth so worktree items align with surrounding project items. Subsession
   expand chevrons align to the folder-icon column and stay hidden until row hover (unless
   always-show-actions).
   Recent rows stay flat: no pin glyph, no subsession chevron, and no nested children — that tree
@@ -29,7 +35,8 @@
 - Session busy/unread status is a trailing shrink-0 marker on the right of the title
   (ContextUsage-style track+arc ring while busy, info-colored unread dot when
   idle+unseen). It owns its own gutter so long titles truncate before it, and
-  hides when hover/always-visible row actions take that edge.
+  hides instantly on row hover (no opacity/padding transition) when hover/always-visible
+  row actions take that edge.
 - Archived groups are collapsed by default and support bulk deletion at group/folder level.
 - Session rows support compact inline dates in minimal mode and simplified metadata in default mode.
 - Session-row visual selection is published through a narrow row-only Focus store before authoritative navigation. Focus includes the render scope (`recent` or `project`) plus session/project identity, so duplicate representations never both receive the Active background or satisfy the wrong paint barrier.

@@ -26,6 +26,7 @@ import { DeferredToolHydrationProvider } from './message/parts/DeferredToolHydra
 import { MarkdownHydrationProvider } from './markdown/MarkdownHydrationProvider';
 import {
     createInitialMarkdownHydratedKeys,
+    ensureNewestMarkdownKeyHydrated,
     getMarkdownHydrationCandidates,
     pruneMarkdownHydratedKeys,
     type MarkdownHydrationScrollDirection,
@@ -1157,6 +1158,16 @@ const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, 
     const [hydratedMarkdownEntryKeys, setHydratedMarkdownEntryKeys] = React.useState(() => (
         createInitialMarkdownHydratedKeys(entryKeys)
     ));
+    // Streaming-tail Markdown is already painted. When that turn remounts into
+    // history it must stay hydrated in this same render — an after-paint seed
+    // would flash the deferred skeleton over finished content.
+    const activeHydratedMarkdownEntryKeys = ensureNewestMarkdownKeyHydrated(
+        hydratedMarkdownEntryKeys,
+        entryKeys,
+    );
+    if (activeHydratedMarkdownEntryKeys !== hydratedMarkdownEntryKeys) {
+        setHydratedMarkdownEntryKeys(activeHydratedMarkdownEntryKeys);
+    }
     const lastScrollDirectionRef = React.useRef<MarkdownHydrationScrollDirection>(null);
     if (tanstackVirtualizer.scrollDirection) {
         lastScrollDirectionRef.current = tanstackVirtualizer.scrollDirection;
@@ -1174,7 +1185,7 @@ const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, 
         visibleEndIndex: visibleRangeEnd,
         scrollDirection: lastScrollDirectionRef.current,
         preloadEntries: MARKDOWN_PRELOAD_ENTRIES,
-        hydratedKeys: hydratedMarkdownEntryKeys,
+        hydratedKeys: activeHydratedMarkdownEntryKeys,
     });
     const nextMarkdownHydrationKey = markdownHydrationCandidates[0];
     const deferMarkdownHydrationForMobileScroll = isMobileSurfaceRuntime()
@@ -1293,7 +1304,7 @@ const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, 
                             >
                                 {renderEntry(
                                     entry,
-                                    hydratedMarkdownEntryKeys.has(entry.key),
+                                    activeHydratedMarkdownEntryKeys.has(entry.key),
                                 )}
                             </div>
                         );

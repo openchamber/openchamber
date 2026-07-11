@@ -1,5 +1,11 @@
 import type { Theme } from '@/types/theme';
 
+export const EMBEDDED_SESSION_CHAT_CLOSE_TAB_EVENT = 'openchamber:close-embedded-session-chat';
+
+export const isEmbeddedSessionChatSearch = (search: string): boolean => (
+  new URLSearchParams(search).get('ocPanel') === 'session-chat'
+);
+
 export type EmbeddedSessionChatThemeBootstrap = {
   mode: 'light' | 'dark' | 'system';
   lightThemeId: string;

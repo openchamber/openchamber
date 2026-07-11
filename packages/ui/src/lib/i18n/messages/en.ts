@@ -406,6 +406,7 @@ export const dict = {
   'sessions.sidebar.activity.recentTitle': 'recent',
   'sessions.sidebar.projectsTitle': 'projects',
   'sessions.sidebar.projectsSyncing': 'syncing sessions',
+  'sessions.sidebar.project.loadingSessions': 'Loading sessions…',
   'sessions.switcher.openAria': 'Open session switcher',
   'sessions.switcher.empty': 'No recent sessions',
   'sessions.switcher.draftTitle': 'New session',

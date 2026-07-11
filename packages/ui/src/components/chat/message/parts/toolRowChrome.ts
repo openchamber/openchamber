@@ -1,11 +1,19 @@
 /**
+ * Shared chip geometry for tool rows and related message chips (radius + padding).
+ * Keep info/status chips on this base so chat chrome stays visually consistent.
+ */
+export const TOOL_ROW_CHIP_GEOMETRY_CLASS = 'rounded-lg px-2 py-0.5';
+
+/**
  * Codex-style interactive chip for chat tool / reasoning headers.
  * Matches sidebar session-row wash (neutral foreground mix — never theme/primary tint).
  * Background only appears on hover — idle rows stay flush with the message body.
- * Tight py keeps the wash compact; my preserves inter-row spacing outside the chip.
+ * Tight `py-0.5` keeps row height compact; `my-1.5` spaces tool rows apart.
+ * `-mx-2` cancels `px-2` so hover wash expands outward without shifting icon/text.
+ * `oc-tool-row` opts into pointer cursor even under desktop-runtime neutralization.
  */
 export const TOOL_ROW_CHIP_CLASS =
-  'rounded-lg px-2 py-0.5 my-0.5';
+  `oc-tool-row -mx-2 ${TOOL_ROW_CHIP_GEOMETRY_CLASS} my-1.5 cursor-pointer`;
 
 /** Hover wash — same formula as sidebar `SIDEBAR_ROW_HOVER_CLASS`. */
 export const TOOL_ROW_CHIP_HOVER_CLASS =

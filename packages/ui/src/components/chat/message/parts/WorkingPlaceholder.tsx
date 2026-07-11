@@ -200,7 +200,7 @@ export function WorkingPlaceholder({
         aria-label={`${retryText}...`}
       >
         <span className="typography-ui-header">
-          {retryText}
+          <span className="animate-text-shimmer">{retryText}</span>
           <BusyDots />
         </span>
       </div>
@@ -224,7 +224,7 @@ export function WorkingPlaceholder({
       data-waiting={displayedPermission ? 'true' : undefined}
     >
       <span className="typography-ui-header">
-        {label}
+        <span className="animate-text-shimmer">{label}</span>
         <BusyDots />
       </span>
     </div>

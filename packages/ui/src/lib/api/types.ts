@@ -649,7 +649,7 @@ export interface SettingsPayload {
   codeBlockLineWrap?: boolean;
   showTurnChangedFiles?: boolean;
   showExpandedBashTools?: boolean;
-  showExpandedEditTools?: boolean;
+  showSubagentTaskDetails?: boolean;
   chatRenderMode?: 'sorted' | 'live';
   messageStreamTransport?: 'auto' | 'ws' | 'sse';
   activityRenderMode?: 'collapsed' | 'summary';

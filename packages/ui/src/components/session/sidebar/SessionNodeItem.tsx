@@ -194,7 +194,7 @@ const QuickSessionAction = React.memo(function QuickSessionAction({
         <button
           type="button"
           className={cn(
-            'inline-flex items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
+            'inline-flex items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-none',
             shiftHeld
               ? 'text-destructive hover:text-destructive hover:bg-[color-mix(in_srgb,var(--status-error)_12%,transparent)]'
               : 'text-muted-foreground hover:text-foreground hover:bg-[color-mix(in_srgb,var(--surface-foreground)_8%,transparent)]',
@@ -1117,7 +1117,9 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                       handleSessionDoubleClick(session.id, sessionTitle);
                     }}
                     className={cn(
-                      'relative flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none transition-[padding]',
+                      // No padding transition: busy ring / unread dot must snap away
+                      // the moment hover reveals actions (no slide-with-padding).
+                      'relative flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none',
                       isTouchPressed && 'bg-[color-mix(in_srgb,var(--surface-foreground)_8%,transparent)]',
                       alwaysShowActions
                         ? (isVSCode ? revealPaddingClass : alwaysActionPaddingClass)
@@ -1132,11 +1134,13 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                           <span className="leading-none">{pendingPermissionCount}</span>
                         </span>
                       ) : null}
-                      {/* Trailing busy/unread marker: shrink-0 so title truncates before it. */}
+                      {/* Trailing busy/unread marker: shrink-0 so title truncates before it.
+                          Snap hide on hover (no opacity/padding fade) so the ring/dot
+                          vanishes the instant row actions take the edge. */}
                       {showStatusMarker ? (
                         <span
                           className={cn(
-                            'inline-flex shrink-0 items-center justify-center',
+                            'inline-flex shrink-0 items-center justify-center transition-none',
                             hideTrailingStatusOnActionReveal
                               ? cn(
                                   'group-hover:hidden group-focus-within:hidden',
@@ -1200,7 +1204,8 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           ) : null}
 
           <div className={cn(
-            'absolute right-1 top-1/2 z-10 flex -translate-y-1/2 items-center gap-1 transition-opacity',
+            // Instant show/hide with the trailing status marker — no opacity fade.
+            'absolute right-1 top-1/2 z-10 flex -translate-y-1/2 items-center gap-1 transition-none',
             isSessionMenuOpen
               ? 'opacity-100'
               : (alwaysShowActions && !isVSCode)
@@ -1226,7 +1231,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                   <button
                     type="button"
                     className={cn(
-                      'inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-[color-mix(in_srgb,var(--surface-foreground)_8%,transparent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
+                      'inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-[color-mix(in_srgb,var(--surface-foreground)_8%,transparent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-none',
                       actionButtonSizeClass,
                     )}
                     aria-label={t('sessions.sidebar.session.actions.openInEditor')}
@@ -1248,7 +1253,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                 <button
                   type="button"
                   className={cn(
-                    'inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-[color-mix(in_srgb,var(--surface-foreground)_8%,transparent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
+                    'inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-[color-mix(in_srgb,var(--surface-foreground)_8%,transparent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-none',
                     actionButtonSizeClass,
                     isMinimalMode && !alwaysShowActions && !isSessionMenuOpen
                       ? cn('opacity-0', revealOnHoverClass)

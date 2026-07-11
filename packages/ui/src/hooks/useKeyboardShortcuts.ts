@@ -22,6 +22,25 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { activateSidebarNumberedSession } from '@/sync/sidebar-numbered-navigation';
+import {
+  EMBEDDED_SESSION_CHAT_CLOSE_TAB_EVENT,
+  isEmbeddedSessionChatSearch,
+} from '@/components/layout/contextPanelEmbeddedChat';
+
+// Context-panel chat tabs run in a separate iframe with their own UI store. A
+// close shortcut therefore has to be handled by the parent, which owns the tab.
+const requestEmbeddedSessionChatTabClose = (): boolean => {
+  if (typeof window === 'undefined' || window.parent === window) {
+    return false;
+  }
+
+  if (!isEmbeddedSessionChatSearch(window.location.search)) {
+    return false;
+  }
+
+  window.parent.postMessage({ type: EMBEDDED_SESSION_CHAT_CLOSE_TAB_EVENT }, window.location.origin);
+  return true;
+};
 
 // Close the active context-panel tab when open; otherwise close the desktop window.
 // Returns true when the shortcut was consumed (caller should preventDefault).
@@ -338,7 +357,7 @@ export const useKeyboardShortcuts = () => {
       // Cmd/Ctrl+W must run even when the terminal is focused: otherwise disabling
       // Electron's native Close accelerator would leave the shortcut dead in the PTY.
       if (eventMatchesShortcut(e, combo('close_context_panel_tab'))) {
-        if (handleCloseContextPanelTabOrWindow()) {
+        if (requestEmbeddedSessionChatTabClose() || handleCloseContextPanelTabOrWindow()) {
           e.preventDefault();
           e.stopPropagation();
         }

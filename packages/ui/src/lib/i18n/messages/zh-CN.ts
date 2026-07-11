@@ -407,6 +407,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.activity.recentTitle': '最近',
   'sessions.sidebar.projectsTitle': '项目',
   'sessions.sidebar.projectsSyncing': '正在同步会话',
+  'sessions.sidebar.project.loadingSessions': '正在加载会话中',
   'sessions.switcher.openAria': '打开会话切换器',
   'sessions.switcher.empty': '没有最近会话',
   'sessions.switcher.draftTitle': '新会话',

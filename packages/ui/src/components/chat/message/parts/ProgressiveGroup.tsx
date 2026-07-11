@@ -957,14 +957,14 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
     if (!showHeader) {
         return (
             <FadeInOnReveal>
-                <div className="mt-1 mb-2 space-y-1.5">{renderedRows}</div>
+                <div className="mt-1 mb-1 space-y-1.5">{renderedRows}</div>
             </FadeInOnReveal>
         );
     }
 
     return (
         <FadeInOnReveal>
-            <div className="mt-1 mb-2">
+            <div className="mt-1 mb-1">
                 <button
                     type="button"
                     className={cn(

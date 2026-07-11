@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { OpencodeClient, Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@opencode-ai/sdk/v2';
 import { opencodeClient } from '@/lib/opencode/client';
 import { listGlobalSessionPages } from '@/stores/globalSessions';
 import { getReviewTransferDirection, type ReviewTransferDirection } from '@/lib/reviewFlow';
@@ -17,6 +17,10 @@ type GlobalSessionsState = {
   archivedSessions: Session[];
   sessionsByDirectory: Map<string, Session[]>;
   reviewTransferBySessionId: Map<string, ReviewTransferDirection>;
+  /** Directories that have completed at least one successful per-directory refresh. */
+  loadedDirectories: Set<string>;
+  /** Directories with an in-flight per-directory session.list refresh. */
+  loadingDirectories: Set<string>;
   hasLoaded: boolean;
   status: GlobalSessionsStatus;
   loadSessions: (fallbackActive?: Session[]) => Promise<LoadResult>;
@@ -31,11 +35,15 @@ type GlobalSessionsState = {
 };
 
 const PAGE_SIZE = 500;
+/** Cap concurrent per-directory session.list fanout so OpenCode stays responsive for create/send. */
+const DIRECTORY_FETCH_CONCURRENCY = 2;
 
 let inflightLoad: Promise<LoadResult> | null = null;
 // Bumped on runtime switch: an in-flight load from the previous instance must
 // not apply its (stale) snapshot after the reset.
 let loadGeneration = 0;
+/** Coalesce overlapping per-directory refreshes for the same directory set. */
+const inflightDirectoryRefresh = new Map<string, Promise<LoadResult>>();
 
 const normalizePath = (value?: string | null): string | null => {
   if (typeof value !== 'string') {
@@ -214,38 +222,92 @@ const replaceSessionsForDirectories = (
   return sortSessionsByUpdated([...incomingById.values(), ...kept]);
 };
 
-type DirectoryPageResult = {
-  directories: Set<string>;
-  sessions: Session[];
-  errors: unknown[];
-};
+const directoryRefreshKey = (directories: Set<string>): string => [...directories].sort().join('\0');
 
-const fetchDirectoryPages = async (
-  sdk: OpencodeClient,
-  directories: Set<string>,
-  archived: boolean,
-): Promise<DirectoryPageResult> => {
-  const results = await Promise.allSettled(
-    [...directories].map(async (directory) => ({
-      directory,
-      sessions: await listGlobalSessionPages(sdk, { directory, archived, pageSize: PAGE_SIZE }),
-    })),
+const applyDirectoryRefreshPatch = (
+  state: GlobalSessionsState,
+  input: {
+    activeSessions: Session[];
+    archivedSessions: Session[];
+    directories: Set<string>;
+    fallbackActive?: Session[];
+    markReady: boolean;
+  },
+): Partial<GlobalSessionsState> | GlobalSessionsState => {
+  let nextActiveSessions = replaceSessionsForDirectories(
+    state.activeSessions,
+    input.activeSessions,
+    input.directories,
   );
+  nextActiveSessions = mergeSessionLists(nextActiveSessions, input.fallbackActive);
+  if (sameSessionList(state.activeSessions, nextActiveSessions)) {
+    nextActiveSessions = state.activeSessions;
+  }
 
-  const fulfilledDirectories = new Set<string>();
-  const sessions: Session[] = [];
-  const errors: unknown[] = [];
+  let nextArchivedSessions = replaceSessionsForDirectories(
+    state.archivedSessions,
+    input.archivedSessions,
+    input.directories,
+  );
+  if (sameSessionList(state.archivedSessions, nextArchivedSessions)) {
+    nextArchivedSessions = state.archivedSessions;
+  }
 
-  for (const result of results) {
-    if (result.status === 'fulfilled') {
-      fulfilledDirectories.add(result.value.directory);
-      sessions.push(...result.value.sessions);
-    } else {
-      errors.push(result.reason);
+  const nextSessionsByDirectory = nextActiveSessions === state.activeSessions
+    ? state.sessionsByDirectory
+    : buildSessionsByDirectory(nextActiveSessions);
+
+  let nextLoadedDirectories = state.loadedDirectories;
+  let loadedChanged = false;
+  for (const directory of input.directories) {
+    if (!nextLoadedDirectories.has(directory)) {
+      if (!loadedChanged) {
+        nextLoadedDirectories = new Set(state.loadedDirectories);
+        loadedChanged = true;
+      }
+      nextLoadedDirectories.add(directory);
     }
   }
 
-  return { directories: fulfilledDirectories, sessions, errors };
+  let nextLoadingDirectories = state.loadingDirectories;
+  let loadingChanged = false;
+  for (const directory of input.directories) {
+    if (nextLoadingDirectories.has(directory)) {
+      if (!loadingChanged) {
+        nextLoadingDirectories = new Set(state.loadingDirectories);
+        loadingChanged = true;
+      }
+      nextLoadingDirectories.delete(directory);
+    }
+  }
+
+  const nextStatus = input.markReady ? 'ready' as const : state.status;
+  const nextHasLoaded = input.markReady ? true : state.hasLoaded;
+
+  if (
+    nextActiveSessions === state.activeSessions
+    && nextArchivedSessions === state.archivedSessions
+    && nextSessionsByDirectory === state.sessionsByDirectory
+    && nextLoadedDirectories === state.loadedDirectories
+    && nextLoadingDirectories === state.loadingDirectories
+    && state.status === nextStatus
+    && state.hasLoaded === nextHasLoaded
+  ) {
+    return state;
+  }
+
+  return {
+    activeSessions: nextActiveSessions,
+    archivedSessions: nextArchivedSessions,
+    sessionsByDirectory: nextSessionsByDirectory,
+    reviewTransferBySessionId: nextActiveSessions === state.activeSessions
+      ? state.reviewTransferBySessionId
+      : buildReviewTransferMap(nextActiveSessions),
+    loadedDirectories: nextLoadedDirectories,
+    loadingDirectories: nextLoadingDirectories,
+    hasLoaded: nextHasLoaded,
+    status: nextStatus,
+  };
 };
 
 const upsertSessionIntoList = (sessions: Session[], session: Session): Session[] => {
@@ -362,6 +424,8 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
   archivedSessions: [],
   sessionsByDirectory: new Map(),
   reviewTransferBySessionId: new Map(),
+  loadedDirectories: new Set(),
+  loadingDirectories: new Set(),
   hasLoaded: false,
   status: 'idle',
 
@@ -372,11 +436,14 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
   resetForRuntimeSwitch: () => {
     loadGeneration += 1;
     inflightLoad = null;
+    inflightDirectoryRefresh.clear();
     set({
       activeSessions: [],
       archivedSessions: [],
       sessionsByDirectory: new Map(),
       reviewTransferBySessionId: new Map(),
+      loadedDirectories: new Set(),
+      loadingDirectories: new Set(),
       hasLoaded: false,
       status: 'idle',
     });
@@ -442,59 +509,132 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
   refreshSessionsForDirectories: async (directories, fallbackActive) => {
     const directorySet = normalizeDirectorySet(directories);
     if (directorySet.size === 0) {
+      // Stay idle when the caller has no directories yet (currentDirectory /
+      // projects still hydrating). The sidebar priority effect re-fires when
+      // those arrive; flipping to ready here would strand an empty catalog.
       const state = get();
       return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
     }
 
-    const sdk = opencodeClient.getSdkClient();
-    const [active, archived] = await Promise.all([
-      fetchDirectoryPages(sdk, directorySet, false),
-      fetchDirectoryPages(sdk, directorySet, true),
-    ]);
-
-    if (active.errors.length > 0) {
-      console.warn('[GlobalSessions] Failed to refresh active sessions for some directories:', active.errors[0]);
-    }
-    if (archived.errors.length > 0) {
-      console.warn('[GlobalSessions] Failed to refresh archived sessions for some directories:', archived.errors[0]);
+    const refreshKey = directoryRefreshKey(directorySet);
+    const existing = inflightDirectoryRefresh.get(refreshKey);
+    if (existing) {
+      return existing;
     }
 
+    const generation = loadGeneration;
+    // Mark directories loading immediately so the sidebar can swap the project
+    // folder icon for a spinner before the first page returns.
     set((state) => {
-      let nextActiveSessions = replaceSessionsForDirectories(state.activeSessions, active.sessions, active.directories);
-      nextActiveSessions = mergeSessionLists(nextActiveSessions, fallbackActive);
-      if (sameSessionList(state.activeSessions, nextActiveSessions)) {
-        nextActiveSessions = state.activeSessions;
+      const nextLoading = new Set(state.loadingDirectories);
+      for (const directory of directorySet) {
+        nextLoading.add(directory);
       }
-
-      let nextArchivedSessions = replaceSessionsForDirectories(state.archivedSessions, archived.sessions, archived.directories);
-      if (sameSessionList(state.archivedSessions, nextArchivedSessions)) {
-        nextArchivedSessions = state.archivedSessions;
-      }
-
-      const nextSessionsByDirectory = nextActiveSessions === state.activeSessions
-        ? state.sessionsByDirectory
-        : buildSessionsByDirectory(nextActiveSessions);
-
-      if (
-        nextActiveSessions === state.activeSessions
-        && nextArchivedSessions === state.archivedSessions
-        && nextSessionsByDirectory === state.sessionsByDirectory
-      ) {
-        return state;
-      }
-
       return {
-        activeSessions: nextActiveSessions,
-        archivedSessions: nextArchivedSessions,
-        sessionsByDirectory: nextSessionsByDirectory,
-        reviewTransferBySessionId: nextActiveSessions === state.activeSessions
-          ? state.reviewTransferBySessionId
-          : buildReviewTransferMap(nextActiveSessions),
+        loadingDirectories: nextLoading,
+        // Only the first cold-start wave flips idle → loading. Later expand-on-
+        // demand refreshes must not re-show a global syncing indicator.
+        status: state.status === 'idle' ? 'loading' : state.status,
       };
     });
 
-    const state = get();
-    return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
+    const run = (async (): Promise<LoadResult> => {
+      const sdk = opencodeClient.getSdkClient();
+      const list = [...directorySet];
+      let cursor = 0;
+      const errors: unknown[] = [];
+
+      // Apply one directory at a time (bounded concurrency). Each successful
+      // directory commits its own patch so the sidebar never jumps from empty
+      // → thousands of rows in a single React commit.
+      const workers = Array.from(
+        { length: Math.min(DIRECTORY_FETCH_CONCURRENCY, list.length) },
+        async () => {
+          while (true) {
+            const index = cursor;
+            cursor += 1;
+            if (index >= list.length) return;
+            if (generation !== loadGeneration) return;
+
+            const directory = list[index];
+            const dirSet = new Set([directory]);
+            try {
+              const [activeSessions, archivedSessions] = await Promise.all([
+                listGlobalSessionPages(sdk, { directory, archived: false, pageSize: PAGE_SIZE }),
+                listGlobalSessionPages(sdk, { directory, archived: true, pageSize: PAGE_SIZE }),
+              ]);
+              if (generation !== loadGeneration) return;
+
+              set((state) => applyDirectoryRefreshPatch(state, {
+                activeSessions,
+                archivedSessions,
+                directories: dirSet,
+                // Fallback live sessions only on the first directory so we
+                // don't re-merge the same snapshot N times.
+                fallbackActive: index === 0 ? fallbackActive : undefined,
+                markReady: true,
+              }));
+            } catch (error) {
+              errors.push(error);
+              // Clear the spinner even on failure so the project is not stuck
+              // loading forever; loadedDirectories stays unset for retry.
+              set((state) => {
+                if (!state.loadingDirectories.has(directory)) return state;
+                const nextLoading = new Set(state.loadingDirectories);
+                nextLoading.delete(directory);
+                return { loadingDirectories: nextLoading };
+              });
+            }
+          }
+        },
+      );
+
+      await Promise.all(workers);
+
+      if (generation !== loadGeneration) {
+        return { activeSessions: [], archivedSessions: [] };
+      }
+
+      if (errors.length > 0) {
+        console.warn('[GlobalSessions] Failed to refresh sessions for some directories:', errors[0]);
+      }
+
+      // Drop any directories still marked loading (e.g. aborted mid-flight) and
+      // settle global status if we never left the cold-start loading wave.
+      set((state) => {
+        let nextLoading = state.loadingDirectories;
+        let loadingChanged = false;
+        for (const directory of directorySet) {
+          if (nextLoading.has(directory)) {
+            if (!loadingChanged) {
+              nextLoading = new Set(state.loadingDirectories);
+              loadingChanged = true;
+            }
+            nextLoading.delete(directory);
+          }
+        }
+        const nextStatus = state.status === 'loading'
+          ? (errors.length === list.length ? 'error' as const : 'ready' as const)
+          : state.status;
+        if (!loadingChanged && state.status === nextStatus && state.hasLoaded) {
+          return state;
+        }
+        return {
+          loadingDirectories: nextLoading,
+          status: nextStatus,
+          hasLoaded: true,
+        };
+      });
+
+      return { activeSessions: get().activeSessions, archivedSessions: get().archivedSessions };
+    })();
+
+    inflightDirectoryRefresh.set(refreshKey, run);
+    try {
+      return await run;
+    } finally {
+      inflightDirectoryRefresh.delete(refreshKey);
+    }
   },
 
   upsertSession: (session) => {

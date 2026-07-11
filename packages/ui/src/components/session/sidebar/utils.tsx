@@ -207,13 +207,13 @@ export const formatProjectLabel = (label: string): string => {
 export const SIDEBAR_MUTED_HINT_CLASS =
   'box-border w-full px-2 py-1.5 text-left typography-micro text-muted-foreground/70 select-none';
 
-/** Codex-style active chip: deeper neutral wash — never theme/primary tint. */
+/** Active/selected chip: light mode stays soft; dark keeps a slightly deeper wash. */
 export const SIDEBAR_ROW_ACTIVE_CLASS =
-  'bg-[color-mix(in_srgb,var(--surface-foreground)_11%,transparent)]';
+  'bg-[color-mix(in_srgb,var(--surface-foreground)_6%,transparent)] dark:bg-[color-mix(in_srgb,var(--surface-foreground)_11%,transparent)]';
 
-/** Codex-style hover wash: lighter than active so idle→hover→active read as steps. */
+/** Hover wash: lighter than active so idle→hover→active still read as steps. */
 export const SIDEBAR_ROW_HOVER_CLASS =
-  'hover:bg-[color-mix(in_srgb,var(--surface-foreground)_8%,transparent)]';
+  'hover:bg-[color-mix(in_srgb,var(--surface-foreground)_3.5%,transparent)] dark:hover:bg-[color-mix(in_srgb,var(--surface-foreground)_8%,transparent)]';
 
 /** Base horizontal padding inside a sidebar row chip (matches `px-2`). */
 export const SIDEBAR_ROW_BASE_PAD_PX = 8;

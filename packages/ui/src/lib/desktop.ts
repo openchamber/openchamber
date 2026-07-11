@@ -141,7 +141,7 @@ export type DesktopSettings = {
   codeBlockLineWrap?: boolean;
   showTurnChangedFiles?: boolean;
   showExpandedBashTools?: boolean;
-  showExpandedEditTools?: boolean;
+  showSubagentTaskDetails?: boolean;
   timeFormatPreference?: 'auto' | '12h' | '24h';
   weekStartPreference?: 'auto' | 'sunday' | 'monday';
   chatRenderMode?: 'sorted' | 'live';

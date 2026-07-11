@@ -407,6 +407,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.activity.recentTitle': '最近',
   'sessions.sidebar.projectsTitle': 'プロジェクト',
   'sessions.sidebar.projectsSyncing': 'セッションを同期中',
+  'sessions.sidebar.project.loadingSessions': 'セッションを読み込み中…',
   'sessions.switcher.openAria': 'セッションスイッチャーを開く',
   'sessions.switcher.empty': '最近のセッションはありません',
   'sessions.switcher.draftTitle': '新しいセッション',

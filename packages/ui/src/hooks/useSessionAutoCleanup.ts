@@ -84,7 +84,12 @@ export const useSessionAutoCleanup = (enabledOrOptions?: boolean | CleanupOption
   const runningRef = React.useRef(false);
 
   React.useEffect(() => {
-    void ensureGlobalSessionsLoaded(getAllSyncSessions());
+    // Retention cleanup needs a broad catalog eventually, but must not race the
+    // active-project cold-start send path with an unfiltered global list.
+    const timer = window.setTimeout(() => {
+      void ensureGlobalSessionsLoaded(getAllSyncSessions());
+    }, 8000);
+    return () => window.clearTimeout(timer);
   }, []);
 
   const candidates = React.useMemo(() => {

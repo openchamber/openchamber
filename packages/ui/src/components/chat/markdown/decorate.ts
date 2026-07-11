@@ -1,6 +1,5 @@
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { getExternalFaviconUrl, isExternalHttpUrl, isLoopbackHttpUrl } from '@/lib/url';
-import { dropdownMenuItemClass, dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
 import type { IconName } from '@/components/icon/icons';
 import { getMermaidViewerController } from './mermaidViewer';
 
@@ -15,8 +14,6 @@ export type DecorateLabels = {
   copied: string;
   enableCodeWrap: string;
   disableCodeWrap: string;
-  copyTable: string;
-  downloadTable: string;
   copyDiagram: string;
   downloadDiagram: string;
   zoomInDiagram: string;
@@ -302,88 +299,17 @@ const decorateCodeBlocks = (root: HTMLElement, ctx: DecorateContext): void => {
 };
 
 // ---------------------------------------------------------------------------
-// Tables: wrapper + copy/download toolbars
+// Tables: wrapper + horizontal scrolling
 // ---------------------------------------------------------------------------
-
-const extractTableData = (table: HTMLTableElement): { headers: string[]; rows: string[][] } => {
-  const headers: string[] = [];
-  const rows: string[][] = [];
-  const headerCells = table.querySelectorAll('thead th');
-  for (const cell of Array.from(headerCells)) headers.push((cell.textContent ?? '').trim());
-  const bodyRows = table.querySelectorAll('tbody tr');
-  for (const row of Array.from(bodyRows)) {
-    const cells = Array.from(row.querySelectorAll('td')).map((c) => (c.textContent ?? '').trim());
-    if (cells.length > 0) rows.push(cells);
-  }
-  return { headers, rows };
-};
-
-const escapeCsv = (value: string): string =>
-  /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
-
-const tableToCSV = ({ headers, rows }: { headers: string[]; rows: string[][] }): string =>
-  [headers, ...rows].map((row) => row.map(escapeCsv).join(',')).join('\n');
-
-const tableToTSV = ({ headers, rows }: { headers: string[]; rows: string[][] }): string =>
-  [headers, ...rows].map((row) => row.join('\t')).join('\n');
-
-const tableToMarkdown = ({ headers, rows }: { headers: string[]; rows: string[][] }): string => {
-  const head = `| ${headers.join(' | ')} |`;
-  const sep = `| ${headers.map(() => '---').join(' | ')} |`;
-  const body = rows.map((row) => `| ${row.join(' | ')} |`).join('\n');
-  return `${head}\n${sep}\n${body}`;
-};
-
-const buildTableMenu = (action: string, items: Array<{ key: string; label: string }>): HTMLDivElement => {
-  const menu = document.createElement('div');
-  // Match the app's DropdownMenu look (same class tokens + surface colors).
-  menu.className = `absolute top-full right-0 mt-1 hidden ${dropdownMenuPopupClass}`;
-  menu.style.backgroundColor = 'var(--surface-elevated)';
-  menu.style.color = 'var(--surface-elevated-foreground)';
-  menu.setAttribute('data-md-menu', action);
-  for (const item of items) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = `w-full text-left ${dropdownMenuItemClass}`;
-    button.setAttribute('data-md-action', `${action}-${item.key}`);
-    button.textContent = item.label;
-    menu.appendChild(button);
-  }
-  return menu;
-};
-
-const decorateTables = (root: HTMLElement, labels: DecorateLabels): void => {
+const decorateTables = (root: HTMLElement): void => {
   const tables = root.querySelectorAll<HTMLTableElement>('table');
   for (const table of Array.from(tables)) {
     const existing = table.closest('[data-markdown="table-wrapper"]');
     if (existing) continue;
 
     const wrapper = document.createElement('div');
-    wrapper.className = 'group my-4 flex flex-col space-y-2';
+    wrapper.className = 'my-4';
     wrapper.setAttribute('data-markdown', 'table-wrapper');
-
-    const toolbar = document.createElement('div');
-    toolbar.className = 'flex items-center justify-end gap-1';
-
-    const copyGroup = document.createElement('div');
-    copyGroup.className = 'relative';
-    copyGroup.appendChild(makeIconButton('copy', labels.copyTable, 'table-copy-toggle'));
-    copyGroup.appendChild(buildTableMenu('table-copy', [
-      { key: 'csv', label: 'CSV' },
-      { key: 'tsv', label: 'TSV' },
-      { key: 'markdown', label: 'Markdown' },
-    ]));
-
-    const downloadGroup = document.createElement('div');
-    downloadGroup.className = 'relative';
-    downloadGroup.appendChild(makeIconButton('download', labels.downloadTable, 'table-download-toggle'));
-    downloadGroup.appendChild(buildTableMenu('table-download', [
-      { key: 'csv', label: 'CSV' },
-      { key: 'markdown', label: 'Markdown' },
-    ]));
-
-    toolbar.appendChild(copyGroup);
-    toolbar.appendChild(downloadGroup);
 
     const scroll = document.createElement('div');
     scroll.className = 'overflow-x-auto rounded-lg border border-border/80 bg-[var(--surface-elevated)]';
@@ -408,7 +334,6 @@ const decorateTables = (root: HTMLElement, labels: DecorateLabels): void => {
     }
 
     scroll.appendChild(table);
-    wrapper.appendChild(toolbar);
     wrapper.appendChild(scroll);
   }
 };
@@ -533,7 +458,7 @@ export const decorateMarkdown = (root: HTMLElement, ctx: DecorateContext): void 
   decorateInlineCode(root);
   decorateMermaid(root, ctx);
   decorateCodeBlocks(root, ctx);
-  decorateTables(root, ctx.labels);
+  decorateTables(root);
   decorateLinks(root, ctx);
 };
 
@@ -553,15 +478,9 @@ const downloadBlob = (filename: string, content: string, mime: string): void => 
   URL.revokeObjectURL(url);
 };
 
-const closeAllMenus = (container: HTMLElement): void => {
-  for (const menu of Array.from(container.querySelectorAll<HTMLElement>('[data-md-menu]'))) {
-    menu.classList.add('hidden');
-  }
-};
-
 /**
  * Attach a single delegated click listener for all in-markdown actions: code
- * copy, table copy/download menus, mermaid copy/download, loopback preview.
+ * and mermaid copy/download, plus loopback preview.
  * Returns a cleanup function.
  */
 export const attachMarkdownInteractions = (
@@ -574,7 +493,6 @@ export const attachMarkdownInteractions = (
 
     const actionEl = target.closest<HTMLElement>('[data-md-action]');
     if (!actionEl) {
-      closeAllMenus(container);
       return;
     }
     const action = actionEl.getAttribute('data-md-action') ?? '';
@@ -590,42 +508,6 @@ export const attachMarkdownInteractions = (
     if (action === 'toggle-code-wrap') {
       event.preventDefault();
       ctx.onToggleCodeBlockLineWrap?.();
-      return;
-    }
-
-    // Toggle table menus
-    if (action === 'table-copy-toggle' || action === 'table-download-toggle') {
-      event.preventDefault();
-      const menu = actionEl.parentElement?.querySelector<HTMLElement>('[data-md-menu]') ?? null;
-      const willOpen = menu?.classList.contains('hidden') ?? false;
-      closeAllMenus(container);
-      if (menu && willOpen) menu.classList.remove('hidden');
-      return;
-    }
-
-    // Table copy formats
-    if (action.startsWith('table-copy-')) {
-      const format = action.replace('table-copy-', '');
-      const table = actionEl.closest('[data-markdown="table-wrapper"]')?.querySelector('table');
-      if (table instanceof HTMLTableElement) {
-        const data = extractTableData(table);
-        const content = format === 'csv' ? tableToCSV(data) : format === 'tsv' ? tableToTSV(data) : tableToMarkdown(data);
-        void copyTextToClipboard(content);
-      }
-      closeAllMenus(container);
-      return;
-    }
-
-    // Table download formats
-    if (action.startsWith('table-download-')) {
-      const format = action.replace('table-download-', '');
-      const table = actionEl.closest('[data-markdown="table-wrapper"]')?.querySelector('table');
-      if (table instanceof HTMLTableElement) {
-        const data = extractTableData(table);
-        const content = format === 'csv' ? tableToCSV(data) : tableToMarkdown(data);
-        downloadBlob(format === 'csv' ? 'table.csv' : 'table.md', content, format === 'csv' ? 'text/csv' : 'text/markdown');
-      }
-      closeAllMenus(container);
       return;
     }
 

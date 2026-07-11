@@ -865,8 +865,6 @@ const useDecorateContext = (
     copied: t('markdownRenderer.code.actions.copiedTitle'),
     enableCodeWrap: t('markdownRenderer.code.actions.enableWrapTitle'),
     disableCodeWrap: t('markdownRenderer.code.actions.disableWrapTitle'),
-    copyTable: t('markdownRenderer.table.actions.copyTitle'),
-    downloadTable: t('markdownRenderer.table.actions.downloadTitle'),
     copyDiagram: t('markdownRenderer.mermaid.actions.copySourceTitle'),
     downloadDiagram: t('markdownRenderer.mermaid.actions.downloadSvgTitle'),
     zoomInDiagram: t('markdownRenderer.mermaid.actions.zoomInTitle'),
@@ -938,14 +936,16 @@ const useMorphdomMarkdown = ({
     mermaidViewerRef.current.refresh();
   }, [containerRef]);
 
-  // Streaming content needs formatted structure immediately. Completed history
-  // stays behind the React-owned skeleton until the async rich DOM is fully
-  // committed; never expose raw Markdown source between those two states.
+  // First paint must never flash a loading skeleton over Markdown that the user
+  // already saw while streaming. Sync-render into an empty target for both live
+  // and completed mounts; completed mounts also reveal in this layout pass so
+  // React can drop the placeholder before the browser paints. Async morphdom
+  // still upgrades to the rich DOM afterward — never expose raw source.
   React.useLayoutEffect(() => {
     const container = containerRef.current;
     const target = container?.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
     if (!target) return;
-    if (streaming && text && target.childNodes.length === 0) {
+    if (text && target.childNodes.length === 0) {
       const block = document.createElement('div');
       block.setAttribute('data-md-block', '');
       // `display:contents` keeps margin-collapsing/spacing identical to a flat
@@ -953,8 +953,11 @@ const useMorphdomMarkdown = ({
       block.style.display = 'contents';
       block.innerHTML = renderMarkdownSync(text);
       target.appendChild(block);
+      if (!streaming) {
+        onRichContentReady?.(target);
+      }
     }
-  }, [containerRef, streaming, text]);
+  }, [containerRef, onRichContentReady, streaming, text]);
 
   React.useEffect(() => () => {
     mermaidViewerRef.current?.cleanup();

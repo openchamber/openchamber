@@ -14,11 +14,10 @@ import { formatDirectoryName, formatPathForDisplay, cn } from '@/lib/utils';
 import type { SessionGroup } from './types';
 import type { SortableDragHandleProps } from './sortableItems';
 import { SortableGroupItem, SortableProjectItem } from './sortableItems';
-import { formatProjectLabel, SIDEBAR_MUTED_HINT_CLASS } from './utils';
+import { formatProjectLabel, SIDEBAR_MUTED_HINT_CLASS, getSidebarRowPaddingLeft } from './utils';
 import { useI18n } from '@/lib/i18n';
 import type { MainTab } from '@/stores/useUIStore';
 import { SidebarSectionHeader } from './SidebarSectionHeader';
-import { Icon } from '@/components/icon/Icon';
 
 type ProjectSection = {
   project: {
@@ -77,6 +76,9 @@ type Props = {
   openSidebarMenuKey: string | null;
   setOpenSidebarMenuKey: (key: string | null) => void;
   isInlineEditing: boolean;
+  /** Project ids whose session directories are currently fetching. */
+  loadingProjectIds: Set<string>;
+  /** True while any project session refresh is in flight (focus reconcile gate). */
   isProjectSessionsSyncing: boolean;
 };
 
@@ -187,21 +189,13 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
         </div>
       ) : (
         <>
-          {/* Codex-style section label above the project tree */}
+          {/* Codex-style section label above the project tree.
+              Per-project loading lives on the folder icon + body placeholder;
+              do not reintroduce a global "syncing sessions" accessory here. */}
           {!props.hasSessionSearchQuery ? (
             <SidebarSectionHeader
               title={t('sessions.sidebar.projectsTitle')}
               isFirst={!props.topContent}
-              accessory={props.isProjectSessionsSyncing ? (
-                <div
-                  className="flex items-center gap-1 pr-2 typography-micro text-muted-foreground/70"
-                  role="status"
-                  aria-live="polite"
-                >
-                  <Icon name="loader-4" className="size-3 animate-spin" />
-                  <span>{t('sessions.sidebar.projectsSyncing')}</span>
-                </div>
-              ) : null}
             />
           ) : null}
           <DndContext
@@ -229,6 +223,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                 const projectDescription = formatPathForDisplay(project.normalizedPath, props.homeDirectory);
                 const isCollapsed = props.collapsedProjects.has(projectKey);
                 const isActiveProject = projectKey === props.activeProjectId;
+                const isSessionsLoading = props.loadingProjectIds.has(projectKey);
                 const isRepo = props.projectRepoStatus.get(projectKey);
                 const orderedGroups = cachedGetOrderedGroups(projectKey, section.groups);
                 const rootGroup = orderedGroups.find((group) => group.isMain) ?? null;
@@ -248,6 +243,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                     projectIconBackground={project.iconBackground}
                     isCollapsed={isCollapsed}
                     isActiveProject={isActiveProject}
+                    isSessionsLoading={isSessionsLoading}
                     isRepo={Boolean(isRepo)}
                     isDesktopShell={props.isDesktopShellRuntime}
                     isStuck={props.stuckProjectHeaders.has(projectKey)}
@@ -276,7 +272,16 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                   >
                     {!isCollapsed ? (
                       <div className="space-y-0 pt-0 pb-0.5">
-                        {section.groups.length > 0 ? (
+                        {isSessionsLoading ? (
+                          <div
+                            className="box-border w-full py-1.5 text-left typography-ui-label font-normal text-muted-foreground/80 animate-pulse select-none"
+                            style={{ paddingLeft: getSidebarRowPaddingLeft(1) }}
+                            role="status"
+                            aria-live="polite"
+                          >
+                            {t('sessions.sidebar.project.loadingSessions')}
+                          </div>
+                        ) : section.groups.length > 0 ? (
                           <DndContext
                             sensors={groupSensors}
                             collisionDetection={closestCenter}

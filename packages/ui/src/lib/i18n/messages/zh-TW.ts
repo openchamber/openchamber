@@ -420,6 +420,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.activity.recentTitle': '最近',
   'sessions.sidebar.projectsTitle': '專案',
   'sessions.sidebar.projectsSyncing': '正在同步工作階段',
+  'sessions.sidebar.project.loadingSessions': '正在載入工作階段中',
   'sessions.switcher.openAria': '開啟會話切換器',
   'sessions.switcher.empty': '沒有最近會話',
   'sessions.switcher.draftTitle': '新會話',

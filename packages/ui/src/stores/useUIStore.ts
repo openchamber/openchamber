@@ -644,7 +644,8 @@ interface UIStore {
   showToolFileIcons: boolean;
   showTurnChangedFiles: boolean;
   showExpandedBashTools: boolean;
-  showExpandedEditTools: boolean;
+  /** 是否在消息里展开子 Agent（task）竖线工作详情；关闭后保持紧凑行，点击打开子会话 */
+  showSubagentTaskDetails: boolean;
   timeFormatPreference: TimeFormatPreference;
   weekStartPreference: WeekStartPreference;
   mermaidRenderingMode: MermaidRenderingMode;
@@ -798,7 +799,7 @@ interface UIStore {
   setShowToolFileIcons: (value: boolean) => void;
   setShowTurnChangedFiles: (value: boolean) => void;
   setShowExpandedBashTools: (value: boolean) => void;
-  setShowExpandedEditTools: (value: boolean) => void;
+  setShowSubagentTaskDetails: (value: boolean) => void;
   setTimeFormatPreference: (value: TimeFormatPreference) => void;
   setWeekStartPreference: (value: WeekStartPreference) => void;
   setMermaidRenderingMode: (value: MermaidRenderingMode) => void;
@@ -942,7 +943,8 @@ export const useUIStore = create<UIStore>()(
         showToolFileIcons: true,
         showTurnChangedFiles: false,
         showExpandedBashTools: false,
-        showExpandedEditTools: false,
+        // 默认紧凑：不展开子 Agent 竖线详情，点击行打开子会话
+        showSubagentTaskDetails: false,
         timeFormatPreference: 'auto',
         weekStartPreference: 'auto',
         mermaidRenderingMode: 'svg',
@@ -2101,8 +2103,8 @@ export const useUIStore = create<UIStore>()(
         setShowExpandedBashTools: (value) => {
           set({ showExpandedBashTools: value });
         },
-        setShowExpandedEditTools: (value) => {
-          set({ showExpandedEditTools: value });
+        setShowSubagentTaskDetails: (value) => {
+          set({ showSubagentTaskDetails: value });
         },
 
         setTimeFormatPreference: (value) => {
@@ -2360,7 +2362,7 @@ export const useUIStore = create<UIStore>()(
           showToolFileIcons: state.showToolFileIcons,
           showTurnChangedFiles: state.showTurnChangedFiles,
           showExpandedBashTools: state.showExpandedBashTools,
-          showExpandedEditTools: state.showExpandedEditTools,
+          showSubagentTaskDetails: state.showSubagentTaskDetails,
           timeFormatPreference: state.timeFormatPreference,
           weekStartPreference: state.weekStartPreference,
           mermaidRenderingMode: state.mermaidRenderingMode,

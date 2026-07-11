@@ -471,9 +471,15 @@ button svg:not(.animate-spin),
 /* Fix SVG elements inside buttons - remove any rect/circle backgrounds */
 /* Stroke icons: only clear decorative rects. Do not force path/circle fills —
    Lucide geometry is stroke-based; solid *-fill glyphs bake their own fill. */
-button svg rect,
-[role="button"] svg rect {
+button svg:not(.oc-agent-avatar) rect,
+[role="button"] svg:not(.oc-agent-avatar) rect {
   fill: none !important;
+}
+
+/* AgentAvatar identicon is rect-based — keep currentColor fills under role=button. */
+button svg.oc-agent-avatar rect,
+[role="button"] svg.oc-agent-avatar rect {
+  fill: currentColor !important;
 }
 
 /* Ensure SVG paths/shapes inherit color properly */
@@ -1557,6 +1563,33 @@ input[aria-label="Terminal input"] {
   animation: oc-busy-pulse 1.2s ease-in-out infinite;
 }
 
+/* Highlight sweep across live status / thinking labels (Delegating…, Thinking…). */
+@keyframes oc-text-shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: -100% 50%;
+  }
+}
+
+.animate-text-shimmer {
+  --oc-text-shimmer-base: var(--surface-muted-foreground);
+  background-image: linear-gradient(
+    90deg,
+    var(--oc-text-shimmer-base) 0%,
+    var(--oc-text-shimmer-base) 38%,
+    color-mix(in srgb, var(--oc-text-shimmer-base) 28%, var(--surface-foreground) 72%) 50%,
+    var(--oc-text-shimmer-base) 62%,
+    var(--oc-text-shimmer-base) 100%
+  );
+  background-size: 220% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent !important;
+  animation: oc-text-shimmer 1.7s linear infinite;
+}
+
 @keyframes navrail-dot-wave {
   0%, 100% {
     transform: scale(0.72);
@@ -1659,6 +1692,16 @@ input[aria-label="Terminal input"] {
     animation: none;
   }
 
+  .animate-text-shimmer {
+    animation: none;
+    color: var(--oc-text-shimmer-base, var(--surface-muted-foreground)) !important;
+    background-image: none;
+  }
+
+  .animate-busy-pulse {
+    animation: none;
+  }
+
   .open-file-name-marquee-track {
     display: block;
     min-width: 0;
@@ -1675,10 +1718,6 @@ input[aria-label="Terminal input"] {
 
   .open-file-name-marquee-track .open-file-name-marquee-item[aria-hidden="true"] {
     display: none;
-  }
-
-  .animate-busy-pulse {
-    animation: none;
   }
 
 }
@@ -1698,6 +1737,11 @@ html.desktop-runtime
 }
 html.desktop-runtime [class*="cursor-pointer"] {
   cursor: default !important;
+}
+/* Chat tool / reasoning rows: keep hand cursor so hover affordance is visible. */
+html.desktop-runtime .oc-tool-row,
+html.desktop-runtime .oc-tool-row[class*="cursor-pointer"] {
+  cursor: pointer !important;
 }
 html.desktop-runtime .markdown-content [data-openchamber-file-link="true"] {
   cursor: default;

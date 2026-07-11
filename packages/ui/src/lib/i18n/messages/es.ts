@@ -407,6 +407,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.activity.recentTitle": "reciente",
   "sessions.sidebar.projectsTitle": "proyectos",
   "sessions.sidebar.projectsSyncing": "sincronizando sesiones",
+  "sessions.sidebar.project.loadingSessions": "Cargando sesiones…",
   "sessions.switcher.openAria": "Abrir selector de sesiones",
   "sessions.switcher.empty": "No hay sesiones recientes",
   "sessions.switcher.draftTitle": "Nueva sesión",

@@ -22,6 +22,8 @@ describe('useGlobalSessionsStore', () => {
       activeSessions: [],
       archivedSessions: [],
       sessionsByDirectory: new Map(),
+      loadedDirectories: new Set(),
+      loadingDirectories: new Set(),
       hasLoaded: false,
       status: 'idle',
     });
