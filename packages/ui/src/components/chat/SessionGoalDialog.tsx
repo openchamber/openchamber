@@ -16,7 +16,7 @@ import {
   SESSION_GOAL_OBJECTIVE_CHAR_LIMIT,
 } from '@/lib/sessionGoalMetadata';
 import { sessionGoalStatusColor, sessionGoalStatusLabelKey } from '@/lib/sessionGoalPresentation';
-import { clearSessionGoal, setSessionGoal, setSessionGoalStatus } from '@/lib/sessionGoalActions';
+import { clearSessionGoal, setSessionGoal } from '@/lib/sessionGoalActions';
 import { useI18n } from '@/lib/i18n';
 
 interface SessionGoalDialogProps {
@@ -158,30 +158,13 @@ export function SessionGoalDialog({ open, onOpenChange, sessionId, directory }: 
             </>
           )}
 
-          <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-            <div className="flex items-center gap-2">
-              {goal && goal.status === 'active' && (
-                <Button variant="outline" size="sm" disabled={busy} onClick={() => run(() => setSessionGoalStatus(sessionId, directory, 'paused'), false)}>
-                  {t('chat.goal.action.pause')}
-                </Button>
-              )}
-              {goal && (goal.status === 'paused' || goal.status === 'blocked' || goal.status === 'budgetLimited') && (
-                <Button variant="outline" size="sm" disabled={busy} onClick={() => run(() => setSessionGoalStatus(sessionId, directory, 'active'), false)}>
-                  {t('chat.goal.action.resume')}
-                </Button>
-              )}
-              {goal && goal.status !== 'complete' && (
-                <Button variant="outline" size="sm" disabled={busy} onClick={() => run(() => setSessionGoalStatus(sessionId, directory, 'complete'), false)}>
-                  {t('chat.goal.action.markComplete')}
-                </Button>
-              )}
-              {goal && (
-                <Button variant="destructive" size="sm" disabled={busy} onClick={() => run(() => clearSessionGoal(sessionId, directory), true)}>
-                  {t('chat.goal.action.clear')}
-                </Button>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 pt-1">
+            {goal && (
+              <Button variant="destructive" size="sm" disabled={busy} onClick={() => run(() => clearSessionGoal(sessionId, directory), true)}>
+                {t('chat.goal.action.clear')}
+              </Button>
+            )}
+            <div className="flex flex-1 items-center justify-end gap-2">
               <Button variant="ghost" size="sm" disabled={busy} onClick={() => onOpenChange(false)}>
                 {t('chat.goal.action.cancel')}
               </Button>

@@ -107,5 +107,14 @@ export async function setSessionGoalStatus(
 }
 
 export async function clearSessionGoal(sessionId: string, directory: string | undefined): Promise<void> {
-  await writeGoal(sessionId, directory, () => null);
+  let wasActive = false;
+  await writeGoal(sessionId, directory, (currentGoal) => {
+    wasActive = currentGoal?.status === 'active';
+    return null;
+  });
+  // Removing a running goal is a "stop" too — abort the current turn like
+  // pause does. A no-op when the session is idle.
+  if (wasActive) {
+    void abortCurrentOperation(sessionId);
+  }
 }
