@@ -45,7 +45,7 @@
     --border: oklch(0.85 0.02 70); /* Warm border */
     --input: oklch(0.88 0.02 75); /* Input background */
     --ring: oklch(0.65 0.2 55); /* Focus ring color */
-    --radius: 0.625rem;
+    --radius: 0.5rem;
     --chart-1: oklch(0.58 0.15 230); /* Blue */
     --chart-2: oklch(0.58 0.15 145); /* Oasis green */
     --chart-3: oklch(0.65 0.2 55); /* Orange */
@@ -189,25 +189,47 @@
     display: list-item !important;
   }
 
-  /* Remove focus rings globally (except inputs/textareas/dropdowns/selects) */
-  *:focus:not(input):not(textarea):not([data-slot="dropdown-menu-content"]):not([data-slot="dropdown-menu-sub-content"]):not([data-slot="select-content"]) {
+  /* Remove focus rings globally (except inputs/textareas/dropdowns/selects/explicit accent rings) */
+  *:focus:not(input):not(textarea):not([data-slot="dropdown-menu-content"]):not([data-slot="dropdown-menu-sub-content"]):not([data-slot="select-content"]):not(.focus-ring-accent):not([data-focus-ring="accent"]) {
     outline: none !important;
     box-shadow: none !important;
   }
 
-  *:focus-visible:not(input):not(textarea):not([data-slot="dropdown-menu-content"]):not([data-slot="dropdown-menu-sub-content"]):not([data-slot="select-content"]) {
+  *:focus-visible:not(input):not(textarea):not([data-slot="dropdown-menu-content"]):not([data-slot="dropdown-menu-sub-content"]):not([data-slot="select-content"]):not(.focus-ring-accent):not([data-focus-ring="accent"]) {
     outline: none !important;
+    box-shadow: none !important;
+  }
+
+  .focus-ring-accent:focus-visible,
+  [data-focus-ring="accent"]:focus-visible {
+    outline: 2px solid var(--primary-base) !important;
+    outline-offset: 2px !important;
     box-shadow: none !important;
   }
 }
 
 @theme inline {
   --radius-none: 0;
-  --radius-sm: 0.25rem;
-  --radius-md: 0.5rem;
-  --radius-lg: 0.625rem;
-  --radius-xl: 0.75rem;
+  --radius-sm: 0.25rem; /* 4px */
+  --radius-md: 0.375rem; /* 6px */
+  --radius-lg: 0.5rem; /* 8px */
+  --radius-xl: 0.75rem; /* 12px */
   --radius-full: 9999px;
+
+  /* Semantic spacing aliases (4/8px grid) */
+  --space-1: var(--spacing-1); /* 4px */
+  --space-2: var(--spacing-2); /* 8px */
+  --space-3: var(--spacing-3); /* 12px */
+  --space-4: var(--spacing-4); /* 16px */
+  --space-6: var(--spacing-6); /* 24px */
+  --space-8: var(--spacing-8); /* 32px */
+
+  /* Elevation / stacking */
+  --z-base: 0;
+  --z-raised: 10;
+  --z-overlay: 40;
+  --z-modal: 50;
+  --transition-fast: 150ms ease-in-out;
 
   /* Override Tailwind spacing scale with custom properties that respect --padding-scale */
   --spacing-0: 0;

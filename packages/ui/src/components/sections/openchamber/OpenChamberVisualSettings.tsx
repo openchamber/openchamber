@@ -33,7 +33,7 @@ import {
     setDirectoryShowHidden,
     useDirectoryShowHidden,
 } from '@/lib/directoryShowHidden';
-import { SettingsSection, SettingsTwoColumn } from '@/components/sections/shared/SettingsSection';
+import { SettingsSection, SettingsTwoColumn, SETTINGS_SELECT_TRIGGER_CLASS, SETTINGS_SELECT_SIZE } from '@/components/sections/shared/SettingsSection';
 
 interface Option<T extends string> {
     id: T;
@@ -789,7 +789,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         <div data-settings-item="appearance.light-theme" className="space-y-1.5">
                                             <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.lightTheme')}</span>
                                             <Select value={selectedLightTheme?.metadata.id ?? ''} onValueChange={setLightThemePreference}>
-                                                <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectLightThemeAria')} className="w-full sm:w-56">
+                                                <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectLightThemeAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                                     <SelectValue placeholder={t('settings.openchamber.visual.field.selectThemePlaceholder')}>
                                                         {selectedLightTheme
                                                             ? formatThemeLabel(selectedLightTheme.metadata.name, 'light')
@@ -808,7 +808,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         <div data-settings-item="appearance.dark-theme" className="space-y-1.5">
                                             <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.darkTheme')}</span>
                                             <Select value={selectedDarkTheme?.metadata.id ?? ''} onValueChange={setDarkThemePreference}>
-                                                <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectDarkThemeAria')} className="w-full sm:w-56">
+                                                <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectDarkThemeAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                                     <SelectValue placeholder={t('settings.openchamber.visual.field.selectThemePlaceholder')}>
                                                         {selectedDarkTheme
                                                             ? formatThemeLabel(selectedDarkTheme.metadata.name, 'dark')
@@ -843,7 +843,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                         setThemesReloading(false);
                                                     });
                                                 }}
-                                                className="inline-flex items-center gap-1.5 typography-ui-label font-normal text-foreground underline decoration-[1px] underline-offset-2 hover:text-foreground/80 disabled:cursor-not-allowed disabled:text-muted-foreground/60"
+                                                className="typography-settings-link inline-flex items-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline"
                                             >
                                                 <Icon name="restart" className={cn('h-3.5 w-3.5', themesReloading && 'animate-spin')} />
                                                 {themesReloading ? t('settings.openchamber.visual.actions.reloadingThemes') : t('settings.openchamber.visual.actions.reloadThemes')}
@@ -959,7 +959,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             <span className="typography-meta text-muted-foreground">{t('settings.appearance.language.description')}</span>
                                         </div>
                                         <Select value={locale} onValueChange={(value) => setLocale(value as Locale)}>
-                                            <SelectTrigger aria-label={t('settings.appearance.language.select')} className="w-full sm:w-56">
+                                            <SelectTrigger aria-label={t('settings.appearance.language.select')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                                 <SelectValue>{label(locale)}</SelectValue>
                                             </SelectTrigger>
                                             <SelectContent>
@@ -978,7 +978,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 <div data-settings-item="appearance.time-format" className="space-y-1.5">
                                                     <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.timeFormat')}</span>
                                                     <Select value={timeFormatPreference} onValueChange={(value: 'auto' | '12h' | '24h') => handleTimeFormatPreferenceChange(value)}>
-                                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectTimeFormatAria')} className="w-full sm:w-56">
+                                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectTimeFormatAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                                             <SelectValue>{selectedTimeFormatLabel}</SelectValue>
                                                         </SelectTrigger>
                                                         <SelectContent>
@@ -994,7 +994,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 <div data-settings-item="appearance.week-start" className="space-y-1.5">
                                                     <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.weekStartsOn')}</span>
                                                     <Select value={weekStartPreference} onValueChange={(value: 'auto' | 'monday' | 'sunday') => handleWeekStartPreferenceChange(value)}>
-                                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectWeekStartAria')} className="w-full sm:w-56">
+                                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectWeekStartAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                                             <SelectValue>{selectedWeekStartLabel}</SelectValue>
                                                         </SelectTrigger>
                                                         <SelectContent>
@@ -1162,7 +1162,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         <span className="typography-ui-label text-foreground shrink-0">{t('settings.openchamber.visual.field.interfaceFont')}</span>
                                         <div className="flex items-center gap-2">
                                             <Select value={uiFont} onValueChange={(value) => setUiFont(value as UiFontOption)}>
-                                                <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectInterfaceFontAria')} className="w-full sm:w-56">
+                                                <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectInterfaceFontAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                                     <SelectValue>{UI_FONT_OPTIONS.find((option) => option.id === uiFont)?.label}</SelectValue>
                                                 </SelectTrigger>
                                                 <SelectContent>
@@ -1193,7 +1193,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         <span className="typography-ui-label text-foreground shrink-0">{t('settings.openchamber.visual.field.codeFont')}</span>
                                         <div className="flex items-center gap-2">
                                             <Select value={monoFont} onValueChange={(value) => setMonoFont(value as MonoFontOption)}>
-                                                <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectCodeFontAria')} className="w-full sm:w-56">
+                                                <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectCodeFontAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                                     <SelectValue>{CODE_FONT_OPTIONS.find((option) => option.id === monoFont)?.label}</SelectValue>
                                                 </SelectTrigger>
                                                 <SelectContent>
@@ -1230,7 +1230,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 max={200}
                                                 step={5}
                                                 aria-label={t('settings.openchamber.visual.field.fontSizePercentageAria')}
-                                                className="w-16"
                                             />
                                             <span className="typography-meta text-muted-foreground tabular-nums">%</span>
                                             <Button size="sm"

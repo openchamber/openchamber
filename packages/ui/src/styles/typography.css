@@ -10,18 +10,47 @@
 
   .typography-ui-header {
     font-size: var(--text-ui-header);
+    line-height: 1.2;
   }
 
   .typography-ui-label {
     font-size: var(--text-ui-label);
+    line-height: 1.2;
   }
 
   .typography-meta {
     font-size: var(--text-meta);
+    line-height: 1.5;
   }
 
   .typography-micro {
     font-size: var(--text-micro);
+    line-height: 1.2;
+  }
+
+  /* Settings-specific typography (UI Kit) */
+  .typography-settings-title {
+    font-size: var(--text-ui-header);
+    font-weight: 600;
+    line-height: 1.2;
+  }
+
+  .typography-settings-description {
+    font-size: var(--text-meta);
+    font-weight: 400;
+    line-height: 1.5;
+  }
+
+  .typography-settings-link {
+    font-size: 0.8125rem; /* 13px */
+    font-weight: 500;
+    line-height: 1.2;
+    color: var(--primary-base);
+    transition: color var(--transition-fast, 150ms ease-in-out);
+  }
+
+  .typography-settings-link:hover {
+    text-decoration: underline;
   }
 
   .chat-column {

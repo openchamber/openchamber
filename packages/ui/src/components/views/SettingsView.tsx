@@ -55,15 +55,10 @@ import {
 } from '@/lib/settings/metadata';
 import { buildSettingsSearchResults, type SettingsSearchResult } from '@/lib/settings/search';
 
-// Same constraints as main sidebar
-const SETTINGS_NAV_MIN_WIDTH = 176;
-const SETTINGS_NAV_MAX_WIDTH = 280;
-const SETTINGS_NAV_RESIZE_STEP = 8;
+// UI Kit: fixed settings navigation width
+const SETTINGS_NAV_WIDTH = 260;
+const SETTINGS_SPLIT_SIDEBAR_WIDTH = 280;
 const SETTINGS_DETAIL_HISTORY_KEY = '__openchamberSettingsDetail';
-
-function clampSettingsNavWidth(width: number): number {
-  return Math.min(SETTINGS_NAV_MAX_WIDTH, Math.max(SETTINGS_NAV_MIN_WIDTH, width));
-}
 
 type MobileStage = 'nav' | 'page-sidebar' | 'page-content';
 type SettingsDetailHistoryEntry = {
@@ -227,10 +222,10 @@ const SettingsHome: React.FC<{ onOpen: (slug: SettingsPageSlug) => void }> = ({ 
   const { t } = useI18n();
   return (
     <div className="h-full overflow-auto">
-      <div className="mx-auto w-full max-w-3xl px-6 py-6 space-y-6">
+      <div className="mx-auto w-full max-w-[840px] px-6 py-6 sm:px-12 sm:py-8 space-y-6">
         <div className="space-y-1">
-          <h1 className="typography-ui-header font-semibold text-foreground">{t('settings.view.home.title')}</h1>
-          <p className="typography-ui text-muted-foreground">{t('settings.view.home.description')}</p>
+          <h1 className="typography-settings-title text-foreground">{t('settings.view.home.title')}</h1>
+          <p className="typography-settings-description text-muted-foreground">{t('settings.view.home.description')}</p>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2">
@@ -312,14 +307,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   const [mobileStage, setMobileStage] = React.useState<MobileStage>(initialMobileStage);
   const autoNavSlugRef = React.useRef<string | null>(null);
 
-  const [navWidth, setNavWidth] = React.useState(216);
   const [settingsSearchQuery, setSettingsSearchQuery] = React.useState('');
   const [pendingSearchItemId, setPendingSearchItemId] = React.useState<string | null>(null);
   const [activeSearchResultIndex, setActiveSearchResultIndex] = React.useState(0);
-  const [hasManuallyResized, setHasManuallyResized] = React.useState(false);
-  const [isResizing, setIsResizing] = React.useState(false);
-  const startXRef = React.useRef(0);
-  const startWidthRef = React.useRef(navWidth);
   const containerRef = React.useRef<HTMLDivElement>(null);
   const searchResultRefs = React.useRef<(HTMLButtonElement | null)[]>([]);
   const activeSearchResultIndexRef = React.useRef(0);
@@ -358,68 +348,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   }, [visiblePages]);
 
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
-
-  React.useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const handleResize = () => {
-      if (!hasManuallyResized) {
-        const proportionalWidth = clampSettingsNavWidth(Math.floor(window.innerWidth * 0.12));
-        setNavWidth(proportionalWidth);
-      }
-    };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, [hasManuallyResized]);
-
-  React.useEffect(() => {
-    if (!isResizing) return;
-    const handlePointerMove = (event: PointerEvent) => {
-      const delta = event.clientX - startXRef.current;
-      const nextWidth = clampSettingsNavWidth(startWidthRef.current + delta);
-      setNavWidth(nextWidth);
-      setHasManuallyResized(true);
-    };
-    const handlePointerUp = () => setIsResizing(false);
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', handlePointerUp, { once: true });
-    return () => {
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', handlePointerUp);
-    };
-  }, [isResizing]);
-
-  const handlePointerDown = (event: React.PointerEvent) => {
-    setIsResizing(true);
-    startXRef.current = event.clientX;
-    startWidthRef.current = navWidth;
-    event.preventDefault();
-  };
-
-  const handleResizeKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    const step = event.shiftKey ? SETTINGS_NAV_RESIZE_STEP * 4 : SETTINGS_NAV_RESIZE_STEP;
-    let nextWidth: number;
-
-    switch (event.key) {
-      case 'ArrowLeft':
-        nextWidth = navWidth - step;
-        break;
-      case 'ArrowRight':
-        nextWidth = navWidth + step;
-        break;
-      case 'Home':
-        nextWidth = SETTINGS_NAV_MIN_WIDTH;
-        break;
-      case 'End':
-        nextWidth = SETTINGS_NAV_MAX_WIDTH;
-        break;
-      default:
-        return;
-    }
-
-    event.preventDefault();
-    setNavWidth(clampSettingsNavWidth(nextWidth));
-    setHasManuallyResized(true);
-  };
 
   // Load stores when project changes or when a page becomes active.
   React.useEffect(() => {
@@ -1132,7 +1060,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     if (activePageMeta.kind === 'split') {
       return (
         <div className="flex h-full min-h-0 overflow-hidden">
-          <div className={cn('w-[264px] min-w-[264px] border-r', runtimeCtx.isVSCode ? 'bg-background' : 'bg-sidebar')} style={{ borderColor: 'var(--interactive-border)' }}>
+          <div className={cn('border-r', runtimeCtx.isVSCode ? 'bg-background' : 'bg-sidebar')} style={{ width: SETTINGS_SPLIT_SIDEBAR_WIDTH, minWidth: SETTINGS_SPLIT_SIDEBAR_WIDTH, borderColor: 'var(--interactive-border)' }}>
             <ErrorBoundary>{renderPageSidebar(settingsSlug, {})}</ErrorBoundary>
           </div>
           <div className="flex-1 min-h-0 overflow-hidden bg-background">
@@ -1243,30 +1171,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                   : runtimeCtx.isVSCode
                     ? 'bg-background'
                     : 'bg-sidebar',
-                isResizing ? '' : 'transition-[width,min-width] duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)]'
               )}
               style={{
-                width: `${navWidth}px`,
-                minWidth: `${navWidth}px`,
+                width: `${SETTINGS_NAV_WIDTH}px`,
+                minWidth: `${SETTINGS_NAV_WIDTH}px`,
                 borderColor: 'var(--interactive-border)',
               }}
             >
-              <div
-                className={cn(
-                  'absolute right-0 top-0 z-20 h-full w-[6px] -mr-[3px] cursor-col-resize',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]',
-                  isResizing ? 'bg-primary/30' : 'bg-transparent hover:bg-primary/20'
-                )}
-                tabIndex={0}
-                onPointerDown={handlePointerDown}
-                onKeyDown={handleResizeKeyDown}
-                role="separator"
-                aria-orientation="vertical"
-                aria-valuemin={SETTINGS_NAV_MIN_WIDTH}
-                aria-valuemax={SETTINGS_NAV_MAX_WIDTH}
-                aria-valuenow={navWidth}
-                aria-label={t('settings.view.actions.resizeNavigation')}
-              />
               <ErrorBoundary>
                 {renderSettingsNav()}
               </ErrorBoundary>

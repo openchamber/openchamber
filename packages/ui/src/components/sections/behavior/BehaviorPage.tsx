@@ -22,7 +22,7 @@ import {
 import type { DesktopSettings } from '@/lib/desktop';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
-import { SettingsSection, SETTINGS_SELECT_TRIGGER_CLASS } from '@/components/sections/shared/SettingsSection';
+import { SettingsSection, SETTINGS_SELECT_TRIGGER_CLASS, SETTINGS_SELECT_SIZE } from '@/components/sections/shared/SettingsSection';
 
 const AGENTS_MD_PATH = '~/.config/opencode/AGENTS.md';
 
@@ -313,7 +313,7 @@ export const BehaviorPage: React.FC = () => {
           onValueChange={(value) => setResponseStylePreset(value)}
           disabled={isLoading || !responseStyleEnabled}
         >
-          <SelectTrigger className={SETTINGS_SELECT_TRIGGER_CLASS}>
+          <SelectTrigger size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
             <SelectValue>
               {(value) => {
                 if (value === 'custom') return t('settings.behavior.page.responseStyle.option.custom');

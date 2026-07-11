@@ -24,7 +24,7 @@ interface SettingsPageLayoutProps {
 
 /**
  * Standard layout wrapper for settings page content.
- * Provides scrolling and centered max-width container.
+ * UI Kit: max-width 840px, padding 32px vertical / 48px horizontal.
  */
 export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
   children,
@@ -44,7 +44,7 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
     >
       <div
         className={cn(
-          'mx-auto max-w-4xl space-y-0 p-3 sm:p-6 sm:pt-8',
+          'mx-auto max-w-[840px] space-y-0 px-6 py-6 sm:px-12 sm:py-8',
           className
         )}
       >
@@ -53,14 +53,14 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
             <div className="min-w-0 space-y-1">
               {title != null ? (
                 typeof title === 'string' || typeof title === 'number' ? (
-                  <h1 className="typography-ui-header font-semibold text-foreground">{title}</h1>
+                  <h1 className="typography-settings-title text-foreground">{title}</h1>
                 ) : (
                   title
                 )
               ) : null}
               {description != null ? (
                 typeof description === 'string' || typeof description === 'number' ? (
-                  <p className="typography-meta text-muted-foreground">{description}</p>
+                  <p className="typography-settings-description text-muted-foreground">{description}</p>
                 ) : (
                   description
                 )

@@ -3,7 +3,7 @@ import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { AgentSelector } from '@/components/sections/commands/AgentSelector';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
-import { SettingsSection, SETTINGS_SELECT_TRIGGER_CLASS } from '@/components/sections/shared/SettingsSection';
+import { SettingsSection, SETTINGS_SELECT_TRIGGER_CLASS, SETTINGS_SELECT_SIZE } from '@/components/sections/shared/SettingsSection';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -315,7 +315,7 @@ export const DefaultsSettings: React.FC = () => {
             </div>
             <div className="flex items-center gap-2 sm:w-fit">
               <Select value={defaultVariant ?? DEFAULT_VARIANT_VALUE} onValueChange={handleVariantChange} disabled={!supportsVariants}>
-                <SelectTrigger className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                <SelectTrigger size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                   <SelectValue placeholder={t('settings.openchamber.defaults.field.thinkingPlaceholder')}>
                     {formatVariantLabel(defaultVariant ?? DEFAULT_VARIANT_VALUE)}
                   </SelectValue>
