@@ -408,7 +408,12 @@ const upsertContextPanelTab = (
   const syncedLayout = current.layout
     ? syncLayoutWithTabs(current.layout, tabIDs, current.layout.focusedGroupId)
     : createSingleGroup(tabIDs, activeTabId);
-  const layout = setActiveTile(syncedLayout, activeTabId);
+  const activatedLayout = setActiveTile(syncedLayout, activeTabId);
+  // Reveal the opened tab: focus the region that actually holds it (whether it was
+  // just added to the focused group or already lived in another region), so opening
+  // an already-tiled session brings its region forward instead of being a no-op.
+  const owningGroupID = findContextPanelTileGroupID(activatedLayout.root, activeTabId);
+  const layout = owningGroupID ? setFocusedGroup(activatedLayout, owningGroupID) : activatedLayout;
 
   return {
     ...current,

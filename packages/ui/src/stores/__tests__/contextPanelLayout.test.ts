@@ -80,6 +80,20 @@ describe("ContextPanel split-tree layout", () => {
     expect(groups(layout().root)[0]?.activeTileId).toBe("context")
   })
 
+  test("re-opening an already-tiled tab focuses its region and activates it (no no-op)", () => {
+    openSplitPanel()
+    // openSplitPanel leaves group-2 (with plan) focused; context lives in group-1.
+    useUIStore.getState().setFocusedContextPanelRegion(DIR, "group-2")
+    expect(layout().focusedGroupId).toBe("group-2")
+
+    useUIStore.getState().openContextPanelTab(DIR, { mode: "context" })
+
+    expect(layout().focusedGroupId).toBe("group-1")
+    expect(groups(layout().root)[0]?.activeTileId).toBe("context")
+    expect(panel().activeTabId).toBe("context")
+    expect(panel().tabs.map((tab) => tab.id)).toEqual(["context", "plan"])
+  })
+
   test("setFocusedContextPanelRegion focuses region on body click", () => {
     openSplitPanel()
     expect(layout().focusedGroupId).toBe("group-2")
