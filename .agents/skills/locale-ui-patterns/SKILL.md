@@ -11,10 +11,16 @@ User-facing UI text must go through `@/lib/i18n`; do not hardcode English string
 
 Use this skill for any React UI change that adds or edits visible text, accessible labels, placeholders, tooltips, toasts, dialogs, settings labels, navigation labels, or empty/error states.
 
+## Translate everything immediately (no English placeholders)
+
+Every key you add to a non-English dictionary MUST contain a real translation in that language — never the English source string as a stand-in. There is NO "leave it in English for now" convention in this project; if an agent told you there was, it was wrong. Copying the English value into `es.ts`/`fr.ts`/`ko.ts`/`pl.ts`/`pt-BR.ts`/`uk.ts`/`zh-CN.ts`/`zh-TW.ts` is a defect, not a deferral. The app ships every locale at once, so an untranslated key is a visible bug for those users.
+
+If you genuinely cannot translate a language, say so explicitly to the user instead of silently pasting English. Do not invent a fallback policy.
+
 ## Required Flow
 
 1. Add or reuse a key in `packages/ui/src/lib/i18n/messages/en.ts`.
-2. Add the same key to every non-English dictionary in `packages/ui/src/lib/i18n/messages/`.
+2. Add the same key — fully translated, not the English text — to every non-English dictionary in `packages/ui/src/lib/i18n/messages/`.
 3. In components, call `const { t } = useI18n()` from `@/lib/i18n` and render `t('key')`.
 4. For locale names or language picker labels, use `label(locale)` from `useI18n()`.
 5. Keep locale state in `packages/ui/src/lib/i18n/*`; do not add locale fields to broad stores like `useUIStore`.

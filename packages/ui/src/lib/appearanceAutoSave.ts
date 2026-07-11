@@ -6,6 +6,8 @@ import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 
 type AppearanceSlice = {
   showReasoningTraces: boolean;
+  sessionRecapEnabled: boolean;
+  sessionSuggestionEnabled: boolean;
   collapsibleThinkingBlocks: boolean;
   showDeletionDialog: boolean;
   nativeNotificationsEnabled: boolean;
@@ -50,6 +52,8 @@ export const startAppearanceAutoSave = (): void => {
 
   let previous: AppearanceSlice = {
     showReasoningTraces: useUIStore.getState().showReasoningTraces,
+    sessionRecapEnabled: useUIStore.getState().sessionRecapEnabled,
+    sessionSuggestionEnabled: useUIStore.getState().sessionSuggestionEnabled,
     collapsibleThinkingBlocks: useUIStore.getState().collapsibleThinkingBlocks,
     showDeletionDialog: useUIStore.getState().showDeletionDialog,
     nativeNotificationsEnabled: useUIStore.getState().nativeNotificationsEnabled,
@@ -101,6 +105,8 @@ export const startAppearanceAutoSave = (): void => {
   useUIStore.subscribe((state) => {
     const current: AppearanceSlice = {
       showReasoningTraces: state.showReasoningTraces,
+      sessionRecapEnabled: state.sessionRecapEnabled,
+      sessionSuggestionEnabled: state.sessionSuggestionEnabled,
       collapsibleThinkingBlocks: state.collapsibleThinkingBlocks,
       showDeletionDialog: state.showDeletionDialog,
       nativeNotificationsEnabled: state.nativeNotificationsEnabled,
@@ -133,6 +139,12 @@ export const startAppearanceAutoSave = (): void => {
 
     if (current.showReasoningTraces !== previous.showReasoningTraces) {
       diff.showReasoningTraces = current.showReasoningTraces;
+    }
+    if (current.sessionRecapEnabled !== previous.sessionRecapEnabled) {
+      diff.sessionRecapEnabled = current.sessionRecapEnabled;
+    }
+    if (current.sessionSuggestionEnabled !== previous.sessionSuggestionEnabled) {
+      diff.sessionSuggestionEnabled = current.sessionSuggestionEnabled;
     }
     if (current.collapsibleThinkingBlocks !== previous.collapsibleThinkingBlocks) {
       diff.collapsibleThinkingBlocks = current.collapsibleThinkingBlocks;

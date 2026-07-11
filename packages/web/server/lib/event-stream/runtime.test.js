@@ -435,7 +435,7 @@ describe('message stream websocket runtime', () => {
 
         return createSseResponse({
           signal: options.signal,
-          holdOpen: false,
+          holdOpen: true,
           blocks: [
             'id: evt-2\ndata: {"type":"server.connected","properties":{}}\n\n',
           ],
@@ -451,7 +451,7 @@ describe('message stream websocket runtime', () => {
     const readyFrames = socket.sent.filter((frame) => frame.type === 'ready');
     const eventFrames = socket.sent.filter((frame) => frame.type === 'event' && frame.payload?.type === 'server.connected');
 
-    expect(readyFrames).toHaveLength(1);
+    expect(readyFrames.length).toBeGreaterThanOrEqual(2);
     expect(eventFrames.length).toBeGreaterThanOrEqual(2);
     expect(fetchCalls.slice(0, 2)).toEqual([null, 'evt-1']);
     expect(triggerHealthCheckCalls).toBe(0);

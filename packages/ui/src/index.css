@@ -708,11 +708,11 @@ html:not(.dark) .chat-scroll {
 
 /* Pierre diff viewer styling */
 .pierre-diff-wrapper {
-  --diffs-font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  --diffs-font-family: var(--font-mono, ui-monospace, monospace);
   --diffs-font-size: var(--text-code);
   --diffs-line-height: 24px;
   --diffs-tab-size: 2;
-  --diffs-header-font-family: var(--font-sans, 'IBM Plex Sans', sans-serif);
+  --diffs-header-font-family: var(--font-sans, system-ui, sans-serif);
   --diffs-min-number-column-width: 4ch;
   --diffs-gap-inline: 0;
   --diffs-gap-block: 0;
@@ -923,7 +923,7 @@ html:not(.dark) .chat-scroll {
   }
 }
 
-/* Text font: IBM Plex Sans */
+/* Text font */
 .markdown-content {
   font-family: var(--font-sans);
   font-size: var(--text-markdown);
@@ -1057,7 +1057,7 @@ html:not(.dark) .chat-scroll {
   margin-bottom: 0.25em;
 }
 
-/* Code font: IBM Plex Mono */
+/* Code font */
 .markdown-content code,
 .markdown-content pre {
   font-family: var(--font-mono);
@@ -1318,12 +1318,32 @@ html:not(.dark) .chat-scroll {
 
 [data-markdown="mermaid-block"] [data-markdown="mermaid-scroll"] {
   overflow: auto;
+  min-width: 0;
+}
+
+[data-markdown="mermaid-block"][data-mermaid-render="svg"] [data-markdown="mermaid-scroll"] {
+  overflow: hidden;
+}
+
+[data-markdown="mermaid-block"] [data-markdown="mermaid-viewport"] {
+  width: 100%;
+  min-width: 0;
+  height: min(24rem, 70vh);
+  min-height: 12rem;
+  overflow: hidden;
+  touch-action: none;
+  border-radius: 0.5rem;
+  background: var(--surface-elevated);
 }
 
 [data-markdown="mermaid-block"] [data-markdown="mermaid"] {
-  width: max-content;
-  min-width: 100%;
+  width: 100%;
+  height: 100%;
   display: block;
+}
+
+[data-markdown="mermaid-block"][data-mermaid-panning="true"] [data-markdown="mermaid-viewport"] {
+  cursor: grabbing;
 }
 
 [data-markdown="mermaid-block"] [data-markdown="mermaid-ascii"] {
@@ -1331,19 +1351,16 @@ html:not(.dark) .chat-scroll {
   white-space: pre;
   width: max-content;
   min-width: 100%;
-  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: var(--font-mono);
   color: var(--surface-foreground);
   background: transparent;
 }
 
 [data-markdown="mermaid-block"] [data-markdown="mermaid"] svg {
-  width: auto !important;
-  min-width: 100%;
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0;
   max-width: none !important;
-  height: auto !important;
-}
-
-[data-markdown="mermaid-block"] svg {
   display: block;
   background: var(--surface-elevated);
 }
@@ -1375,10 +1392,21 @@ html:not(.dark) .chat-scroll {
   overflow: auto;
 }
 
-.markdown-mermaid-fullscreen [data-markdown="mermaid-block"] [data-markdown="mermaid"] {
-  width: max-content;
+.markdown-mermaid-fullscreen [data-markdown="mermaid-block"][data-mermaid-render="svg"] [data-markdown="mermaid-scroll"] {
+  overflow: hidden;
+}
+
+.markdown-mermaid-fullscreen [data-markdown="mermaid-block"] [data-markdown="mermaid-viewport"] {
+  width: 100%;
+  height: 100%;
   min-width: 100%;
   min-height: 100%;
+  overflow: hidden;
+}
+
+.markdown-mermaid-fullscreen [data-markdown="mermaid-block"] [data-markdown="mermaid"] {
+  width: 100%;
+  height: 100%;
   display: block;
 }
 
@@ -1388,14 +1416,14 @@ html:not(.dark) .chat-scroll {
   width: max-content;
   min-width: 100%;
   min-height: 100%;
-  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: var(--font-mono);
   color: var(--surface-foreground);
   background: transparent;
 }
 
-.markdown-mermaid-fullscreen [data-markdown="mermaid-block"] svg {
-  width: auto !important;
-  height: auto !important;
+.markdown-mermaid-fullscreen [data-markdown="mermaid-block"] [data-markdown="mermaid"] svg {
+  width: 100% !important;
+  height: 100% !important;
   max-width: none !important;
   max-height: none !important;
   min-width: 100%;
