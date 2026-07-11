@@ -463,11 +463,15 @@ export const MainLayout: React.FC = () => {
                                 fetch, worktree discovery, repo status, PR status, and 10+ memo
                                 recomputations. On Android PWA this manifested as a >10s delay
                                 before the drawer became interactive (issue #1695). Visibility is
-                                controlled by the leftDrawerX transform (off-screen when closed). */}
+                                controlled by the leftDrawerX transform (off-screen when closed).
+                                The invisible class matters when fully hidden: leftDrawerWidth is
+                                not recomputed on resize/rotation, so a closed drawer translated by
+                                the old width could otherwise peek into the viewport; it also keeps
+                                the off-screen sidebar out of the tab order and skips painting it. */}
                             <motion.div
                                 className={cn(
                                     'absolute inset-0 z-20 bg-sidebar',
-                                    !mobileLeftDrawerVisible && 'pointer-events-none',
+                                    !mobileLeftDrawerVisible && 'pointer-events-none invisible',
                                 )}
                                 data-page-scroll-lock="true"
                                 style={{ x: leftDrawerX }}
