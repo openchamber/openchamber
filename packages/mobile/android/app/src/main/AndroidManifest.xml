@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- usesCleartextTraffic: OpenChamber connects to user-hosted servers over
+         plain http:// on the local network (LAN transport). Android blocks all
+         cleartext HTTP by default (targetSdk >= 28), which silently failed every
+         LAN probe and forced Android onto relay-only. This mirrors the iOS ATS
+         exceptions (NSAllowsArbitraryLoadsInWebContent + NSAllowsLocalNetworking). -->
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:usesCleartextTraffic="true"
+        android:theme="@style/AppTheme">
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation"
+            android:name=".MainActivity"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBarLaunch"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
+        </provider>
+
+        <!-- Tell Play Services to download the ML Kit barcode "code scanner" module (used by
+             @capacitor-mlkit/barcode-scanning's scan()) at install time, so the QR pairing scan
+             works without a per-scan module download. -->
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="barcode_ui" />
+
+        <!-- Small icon shown in the status bar / notification shade for FCM notifications the
+             system displays while the app is backgrounded. Must be a monochrome silhouette. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_stat_notify" />
+    </application>
+
+    <!-- Permissions -->
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Camera: QR pairing scan via @capacitor-mlkit/barcode-scanning. Without this declared,
+         requestPermissions() returns denied without ever prompting the user. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- Android 13+ requires this declared for FCM push notifications to be shown; the runtime
+         prompt is requested by @capacitor/push-notifications on register. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Microphone: voice dictation via WebView getUserMedia. Capacitor's
+         BridgeWebChromeClient forwards the WebView AUDIO_CAPTURE permission
+         request to the Android runtime prompt when this is declared. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+</manifest>

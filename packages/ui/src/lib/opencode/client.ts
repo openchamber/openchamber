@@ -22,14 +22,13 @@ import {
   assertProviderCircuitClosed,
   recordProviderSuccess,
   recordProviderError,
-  shouldRetry,
-  getRetryDelayMs,
 } from "./provider-tracker";
 
 // Use relative path by default (works with both dev and nginx proxy server)
 // Can be overridden with VITE_OPENCODE_URL for absolute URLs in special deployments
 const DEFAULT_BASE_URL = import.meta.env.VITE_OPENCODE_URL || "/api";
 const CONFIG_CACHE_TTL_MS = 10_000;
+const OPENCODE_HEALTH_TIMEOUT_MS = 4_000;
 
 /**
  * Render an SDK error payload into a short string for Error messages.
@@ -119,12 +118,6 @@ const ascendingId = (prefix: "msg"): string => {
   return `${prefix}_${hex}${randomBase62(ID_RANDOM_LENGTH)}`;
 };
 
-const isRetryableFetchError = (error: unknown): boolean => {
-  if (error instanceof DOMException && error.name === 'AbortError') return true;
-  if (error instanceof TypeError) return true;
-  return false;
-};
-
 const ensureAbsoluteBaseUrl = (candidate: string): string => {
   const normalized = typeof candidate === "string" && candidate.trim().length > 0 ? candidate.trim() : "/api";
 
@@ -155,6 +148,26 @@ const resolveRuntimeBaseUrl = (): string | null => {
   } catch {
     return null;
   }
+};
+
+type AbortSignalConstructorWithTimeout = typeof AbortSignal & {
+  timeout?: (milliseconds: number) => AbortSignal;
+};
+
+const createTimeoutSignal = (timeoutMs: number): { signal: AbortSignal; cleanup: () => void } => {
+  const abortSignal = typeof AbortSignal !== 'undefined'
+    ? AbortSignal as AbortSignalConstructorWithTimeout
+    : undefined;
+  if (typeof abortSignal?.timeout === 'function') {
+    return { signal: abortSignal.timeout(timeoutMs), cleanup: () => undefined };
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  return {
+    signal: controller.signal,
+    cleanup: () => clearTimeout(timeoutId),
+  };
 };
 
 const createRuntimeOpencodeClient = (config: { baseUrl: string; directory?: string }): OpencodeClient => {
@@ -735,6 +748,7 @@ class OpencodeService {
     }>;
     messageId?: string;
     agentMentions?: Array<{ name: string; source?: { value: string; start: number; end: number } }>;
+    delivery?: 'steer';
     format?: {
       type: 'json_schema';
       schema: Record<string, unknown>;
@@ -742,8 +756,8 @@ class OpencodeService {
     };
     directory?: string | null;
   }): Promise<string> {
-    // Reuse one client-side message ID across retries. The server accepts this
-    // as the real user message ID, making ambiguous network retries idempotent.
+    // Use the optimistic/client-generated ID as the real user message ID so SSE
+    // can reconcile the echoed server message in-place.
     const messageId = params.messageId ?? ascendingId("msg");
 
     // Build parts array using SDK types (TextPartInput | FilePartInput) plus lightweight agent parts
@@ -826,73 +840,62 @@ class OpencodeService {
 
     assertProviderCircuitClosed(params.providerID);
 
-    let response!: Response;
+    let response: Response;
 
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const result = await this.client.session.promptAsync({
-          sessionID: params.id,
-          ...(requestDirectory ? { directory: requestDirectory } : {}),
-          model: {
-            providerID: params.providerID,
-            modelID: params.modelID,
-          },
-          agent: params.agent,
-          variant: params.variant,
-          messageID: messageId,
-          ...(params.format ? { format: params.format } : {}),
-          parts,
-        });
-        if (result.response instanceof Response) {
-          response = result.response;
-        } else if (result.error) {
-          const status = (result as SdkResult<unknown>).response?.status || 500;
-          response = new Response(JSON.stringify(result.error), { status });
-        } else {
-          response = new Response(JSON.stringify(result.data ?? true), { status: 200 });
+    try {
+      const result = await this.client.session.promptAsync({
+        sessionID: params.id,
+        ...(requestDirectory ? { directory: requestDirectory } : {}),
+        model: {
+          providerID: params.providerID,
+          modelID: params.modelID,
+        },
+        agent: params.agent,
+        variant: params.variant,
+        messageID: messageId,
+        ...(params.delivery ? { delivery: params.delivery } : {}),
+        ...(params.format ? { format: params.format } : {}),
+        parts,
+      });
+      if (result.response instanceof Response) {
+        response = result.response;
+      } else if (result.error) {
+        const status = (result as SdkResult<unknown>).response?.status;
+        if (!status) {
+          // The SDK caught a thrown fetch error (network/tunnel transport
+          // failure) — there is no HTTP response to report. Never fabricate a
+          // status: surface it as a transport error so callers treat it like
+          // any other network failure instead of a server 500.
+          throw new Error(`Message send transport failure: ${formatSdkError(result.error)}`);
         }
-      } catch (error) {
-        if (attempt < 2 && isRetryableFetchError(error)) {
-          const delay = getRetryDelayMs(attempt);
-          console.warn(
-            `[prompt] fetch failed for ${params.providerID}/${params.modelID} (attempt ${attempt + 1}/3), retrying in ${delay}ms`,
-            (error as Error)?.message
-          );
-          await new Promise((resolve) => setTimeout(resolve, delay));
-          continue;
-        }
-        recordProviderError(params.providerID);
-        throw error;
+        response = new Response(JSON.stringify(result.error), { status });
+      } else {
+        response = new Response(JSON.stringify(result.data ?? true), { status: 200 });
       }
-
-      if (response.ok) {
-        recordProviderSuccess(params.providerID);
-        return messageId;
-      }
-
-      if (shouldRetry(params.providerID, response.status, attempt)) {
-        const delay = getRetryDelayMs(attempt);
-        console.warn(
-          `[prompt] ${response.status} for ${params.providerID}/${params.modelID} (attempt ${attempt + 1}/3), retrying in ${delay}ms`
-        );
-        await new Promise((resolve) => setTimeout(resolve, delay));
-        continue;
-      }
-
-      let detail = '';
-      try {
-        detail = await response.text();
-      } catch {
-        // ignore
-      }
-      const suffix = detail && detail.trim().length > 0 ? `: ${detail.trim()}` : '';
-      const error = new Error(`Failed to send message (${response.status})${suffix}`);
-      recordProviderError(params.providerID, response.status);
+    } catch (error) {
+      // Do not retry prompt_async after a transport failure: through a remote
+      // tunnel the POST may already be running server-side even though the
+      // client lost the response.
+      recordProviderError(params.providerID);
       throw error;
     }
-    // Defensive fallback — all loop paths return/throw, but TypeScript
-    // control flow analysis cannot prove exhaustiveness without this.
-    throw new Error('Failed to send message after retries');
+
+    if (response.ok) {
+      recordProviderSuccess(params.providerID);
+      return messageId;
+    }
+
+    let detail = '';
+    try {
+      detail = await response.text();
+    } catch {
+      // ignore
+    }
+    const suffix = detail && detail.trim().length > 0 ? `: ${detail.trim()}` : '';
+    const error = new Error(`Failed to send message (${response.status})${suffix}`) as Error & { status?: number };
+    error.status = response.status;
+    recordProviderError(params.providerID, response.status);
+    throw error;
   }
 
   async sendCommand(params: {
@@ -1541,7 +1544,8 @@ class OpencodeService {
         ? '/api/opencode/health'
         : `${normalizedBase}/opencode/health`;
       markStartupTrace('opencodeClient.checkHealth:url', { baseUrl: this.baseUrl, healthUrl });
-      const response = await runtimeFetch(healthUrl);
+      const timeout = createTimeoutSignal(OPENCODE_HEALTH_TIMEOUT_MS);
+      const response = await runtimeFetch(healthUrl, { signal: timeout.signal }).finally(timeout.cleanup);
       markStartupTrace('opencodeClient.checkHealth:response', { status: response.status });
       if (!response.ok) {
         return false;

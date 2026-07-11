@@ -16,17 +16,30 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { EditorAPI } from '@/lib/api/types';
 import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { ensureOutsideFileGrantForDesktop } from '@/lib/outsideFileGrants';
-import { getDirectoryForFilePath, isAbsoluteFilePath, isFilePathWithinDirectory, normalizeFilePath, toAbsoluteFilePath } from '@/lib/path-utils';
+import { getDirectoryForFilePath, isFilePathWithinDirectory, toAbsoluteFilePath } from '@/lib/path-utils';
 import { renderMarkdownBlocks, renderMarkdownSync, hash } from './markdown/markdownCore';
 import { ensureMarkdownShikiTheme, getMarkdownSyntaxVars } from './markdown/markdownTheme';
 import {
   attachMarkdownInteractions,
+  applyMarkdownCodeBlockWrapState,
   decorateMarkdown,
+  scheduleMarkdownCodeLineNumberSync,
+  syncMarkdownCodeLineNumbers,
   type DecorateContext,
   type DecorateLabels,
+  type MermaidControlOptions,
   type MermaidRender,
 } from './markdown/decorate';
+import { createMermaidViewerRegistry, MERMAID_BLOCK_SELECTOR, shouldRefreshMermaidViewers } from './markdown/mermaidViewer';
+import {
+  BLOCK_PATH_TOKEN_RE,
+  isAbsoluteReferencePath,
+  normalizeReferencePath,
+  parseFileReference,
+  type ParsedFileReference,
+} from './fileReferenceParser';
 
 const useCurrentMermaidTheme = () => {
   const themeSystem = useOptionalThemeSystem();
@@ -92,27 +105,12 @@ const useExternalLinkInteractions = ({
   }, [containerRef, enabled]);
 };
 
-type MermaidControlOptions = {
-  download: boolean;
-  copy: boolean;
-  fullscreen: boolean;
-  panZoom: boolean;
+const DEFAULT_MERMAID_CONTROLS: MermaidControlOptions = {
+  download: true,
+  copy: true,
+  showPanZoomControls: true,
 };
-
-const extractMermaidBlocks = (markdown: string): string[] => {
-  if (!markdown.includes('mermaid')) return [];
-  const blocks: string[] = [];
-  const regex = /(?:^|\r?\n)(`{3,}|~{3,})mermaid[^\n\r]*\r?\n([\s\S]*?)\r?\n\1(?=\r?\n|$)/gi;
-  let match: RegExpExecArray | null = regex.exec(markdown);
-
-  while (match) {
-    const block = (match[2] ?? '').replace(/\s+$/, '');
-    blocks.push(block);
-    match = regex.exec(markdown);
-  }
-
-  return blocks;
-};
+const DEFAULT_MERMAID_FULLSCREEN_ENABLED = true;
 
 const stripLeadingFrontmatter = (markdown: string): string => {
   const frontmatterMatch = markdown.match(
@@ -142,21 +140,13 @@ interface MarkdownRendererProps {
   enableFileReferences?: boolean;
 }
 
-const MERMAID_BLOCK_SELECTOR = '[data-markdown="mermaid-block"]';
 const FILE_LINK_SELECTOR = '[data-openchamber-file-link="true"]';
 const BLOCK_PATH_TOKEN_ATTR = 'data-openchamber-block-path-token';
 const BLOCK_PATH_TOKEN_SELECTOR = `[${BLOCK_PATH_TOKEN_ATTR}]`;
 const CODE_BLOCK_PATH_SCANNED_ATTR = 'data-openchamber-block-paths-scanned';
-// Matches `path[:line[:col]]` inside shell/grep-style output. Requires a file
-// extension (1-8 alphanumerics) so plain words don't qualify; the path itself
-// must contain at least one extension-bearing segment.
-//
-// Known limitation: backslash-separated Windows paths (e.g.
-// `C:\Users\test\file.ts:12`) are not matched because the path character class
-// does not include `\`. Compiler output inside fenced code blocks predominantly
-// uses forward slashes, so this is a niche gap. The inline-code pipeline is not
-// affected — it reads full text content rather than matching with a regex.
-const BLOCK_PATH_TOKEN_RE = /(?:[A-Za-z]:[\\/])?[\w.\-/@+]*[\w\-/@+]\.[A-Za-z0-9]{1,8}(?::\d+){0,2}/g;
+// Matches `path[:line[:col]]` or `path:start-end` inside shell/grep-style
+// output. The regex is defined in `./fileReferenceParser`; the inline-code
+// pipeline reads full text content rather than using this regex.
 const MAX_BLOCK_CODE_SCAN_LENGTH = 200_000;
 const FILE_REFERENCE_STAT_CONCURRENCY = 4;
 const FILE_REFERENCE_STAT_CACHE_MAX = 1000;
@@ -176,12 +166,6 @@ const getFileReferenceLinkLimit = (): number => (
   isVSCodeRuntime() ? VSCODE_FILE_REFERENCE_LINK_LIMIT : FILE_REFERENCE_LINK_LIMIT
 );
 
-type ParsedFileReference = {
-  path: string;
-  line?: number;
-  column?: number;
-};
-
 const KNOWN_FILE_BASENAMES = new Set([
   'dockerfile',
   'makefile',
@@ -191,124 +175,17 @@ const KNOWN_FILE_BASENAMES = new Set([
   '.gitignore',
   '.npmrc',
 ]);
-const KNOWN_BASENAME_PATTERN = Array.from(KNOWN_FILE_BASENAMES)
-  .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-  .join('|');
 
 const normalizePath = (value: string): string => {
-  return normalizeFilePath(value);
+  return normalizeReferencePath(value);
 };
 
 const isAbsolutePath = (value: string): boolean => {
-  return isAbsoluteFilePath(value);
+  return isAbsoluteReferencePath(value);
 };
 
 const toAbsolutePath = (basePath: string, targetPath: string): string => {
   return toAbsoluteFilePath(basePath, targetPath);
-};
-
-const trimPathCandidate = (value: string): string => {
-  let next = (value || '').trim();
-  if (!next) {
-    return '';
-  }
-
-  if ((next.startsWith('`') && next.endsWith('`')) || (next.startsWith('"') && next.endsWith('"')) || (next.startsWith("'") && next.endsWith("'"))) {
-    next = next.slice(1, -1).trim();
-  }
-
-  next = next.replace(/[.,;!?]+$/g, '');
-
-  if (next.endsWith(')') && !next.includes('(')) {
-    next = next.slice(0, -1);
-  }
-  if (next.endsWith(']') && !next.includes('[')) {
-    next = next.slice(0, -1);
-  }
-
-  return next;
-};
-
-const stripTrailingReference = (value: string): string => {
-  let next = trimPathCandidate(value);
-  if (!next) {
-    return '';
-  }
-
-  const semicolonIndex = next.indexOf(';');
-  if (semicolonIndex >= 0) {
-    next = next.slice(0, semicolonIndex);
-  }
-
-  next = next.replace(/#.*$/, '');
-
-  const extensionSuffixMatch = next.match(/^(.*\.[A-Za-z0-9_-]{1,16}):.*$/);
-  if (extensionSuffixMatch) {
-    next = extensionSuffixMatch[1] ?? next;
-  }
-
-  const basenameSuffixMatch = KNOWN_BASENAME_PATTERN.length > 0
-    ? next.match(new RegExp(`^(.*(?:/|^)(${KNOWN_BASENAME_PATTERN})):.*$`, 'i'))
-    : null;
-  if (basenameSuffixMatch) {
-    next = basenameSuffixMatch[1] ?? next;
-  }
-
-  return trimPathCandidate(next);
-};
-
-const parseFileReference = (value: string): ParsedFileReference | null => {
-  const trimmed = trimPathCandidate(value);
-  if (!trimmed) {
-    return null;
-  }
-
-  const semicolonIndex = trimmed.indexOf(';');
-  const withoutSemicolonSuffix = semicolonIndex >= 0
-    ? trimPathCandidate(trimmed.slice(0, semicolonIndex))
-    : trimmed;
-  if (!withoutSemicolonSuffix) {
-    return null;
-  }
-
-  const hashMatch = withoutSemicolonSuffix.match(/^(.*)#L(\d+)(?:C(\d+))?$/i);
-  if (hashMatch) {
-    const path = stripTrailingReference(hashMatch[1] ?? '');
-    const line = Number.parseInt(hashMatch[2] ?? '', 10);
-    const column = hashMatch[3] ? Number.parseInt(hashMatch[3], 10) : undefined;
-    if (!path || !Number.isFinite(line)) {
-      return null;
-    }
-
-    return {
-      path,
-      line,
-      column: Number.isFinite(column ?? Number.NaN) ? column : undefined,
-    };
-  }
-
-  const colonMatch = withoutSemicolonSuffix.match(/^(.*):(\d+)(?::(\d+))?$/);
-  if (colonMatch) {
-    const path = stripTrailingReference(colonMatch[1] ?? '');
-    const line = Number.parseInt(colonMatch[2] ?? '', 10);
-    const column = colonMatch[3] ? Number.parseInt(colonMatch[3], 10) : undefined;
-    if (!path || !Number.isFinite(line)) {
-      return null;
-    }
-
-    return {
-      path,
-      line,
-      column: Number.isFinite(column ?? Number.NaN) ? column : undefined,
-    };
-  }
-
-  const pathOnly = stripTrailingReference(withoutSemicolonSuffix);
-  if (!pathOnly) {
-    return null;
-  }
-
-  return { path: pathOnly };
 };
 
 const hasFileExtension = (path: string): boolean => {
@@ -570,6 +447,11 @@ const useFileReferenceInteractions = ({
     }
     let cancelled = false;
     const fileReferenceLinkLimit = getFileReferenceLinkLimit();
+    // On mobile surfaces, file-reference highlighting is disabled entirely — not
+    // just visually. The annotation pass is what issues the filesystem `stat`
+    // probes (fileReferenceExists → /api/fs/stat), so skipping it here guarantees
+    // no probe requests are ever sent from a mobile runtime.
+    const fileReferencesEnabled = enabled && !isMobileSurfaceRuntime();
 
     const clearFileLinkAttributes = (candidate: HTMLElement) => {
       candidate.removeAttribute('data-openchamber-file-link');
@@ -592,7 +474,7 @@ const useFileReferenceInteractions = ({
       unwrapBlockCodePathTokens(container);
     };
 
-    if (!enabled) {
+    if (!fileReferencesEnabled) {
       clearAnnotatedFileLinks();
       return;
     }
@@ -616,7 +498,7 @@ const useFileReferenceInteractions = ({
     };
 
     const annotateFileLinks = () => {
-      if (enabled) {
+      if (fileReferencesEnabled) {
         wrapBlockCodePathTokens(container);
       }
       const candidates = container.querySelectorAll<HTMLElement>(
@@ -770,14 +652,16 @@ const useFileReferenceInteractions = ({
 
 const useMermaidInlineInteractions = ({
   containerRef,
-  mermaidBlocks,
   onShowPopup,
-  allowWheelZoom,
+  enableFullscreen,
+  enablePanZoom,
+  allowMermaidWheelEvents,
 }: {
   containerRef: React.RefObject<HTMLDivElement | null>;
-  mermaidBlocks: string[];
   onShowPopup?: (content: ToolPopupContent) => void;
-  allowWheelZoom?: boolean;
+  enableFullscreen?: boolean;
+  enablePanZoom?: boolean;
+  allowMermaidWheelEvents?: boolean;
 }) => {
   React.useEffect(() => {
     const container = containerRef.current;
@@ -786,7 +670,7 @@ const useMermaidInlineInteractions = ({
     }
 
     const handleMermaidClick = (event: MouseEvent) => {
-      if (!onShowPopup) {
+      if (!enableFullscreen || !onShowPopup) {
         return;
       }
 
@@ -804,13 +688,18 @@ const useMermaidInlineInteractions = ({
         return;
       }
 
-      const renderedBlocks = Array.from(container.querySelectorAll(MERMAID_BLOCK_SELECTOR));
-      const blockIndex = renderedBlocks.indexOf(block);
+      if (block instanceof HTMLElement && block.hasAttribute('data-mermaid-suppress-click')) {
+        block.removeAttribute('data-mermaid-suppress-click');
+        return;
+      }
+
+      const renderedBlocks = Array.from(container.querySelectorAll<HTMLElement>(MERMAID_BLOCK_SELECTOR));
+      const blockIndex = renderedBlocks.indexOf(block as HTMLElement);
       if (blockIndex < 0) {
         return;
       }
 
-      const source = mermaidBlocks[blockIndex];
+      const source = block instanceof HTMLElement ? block.getAttribute('data-md-source') : null;
       if (!source || source.trim().length === 0) {
         return;
       }
@@ -833,7 +722,7 @@ const useMermaidInlineInteractions = ({
     };
 
     const handleInlineWheel = (event: WheelEvent) => {
-      if (allowWheelZoom) {
+      if (allowMermaidWheelEvents || ((event.ctrlKey || event.metaKey) && enablePanZoom)) {
         return;
       }
 
@@ -858,7 +747,7 @@ const useMermaidInlineInteractions = ({
       container.removeEventListener('click', handleMermaidClick);
       container.removeEventListener('wheel', handleInlineWheel, true);
     };
-  }, [allowWheelZoom, containerRef, mermaidBlocks, onShowPopup]);
+  }, [allowMermaidWheelEvents, containerRef, enableFullscreen, enablePanZoom, onShowPopup]);
 };
 
 // ---------------------------------------------------------------------------
@@ -959,24 +848,37 @@ const mermaidColorsFromTheme = (theme: Theme) => ({
   surface: theme.colors.surface.muted,
   border: theme.colors.interactive.border,
   transparent: true,
-  font: 'IBM Plex Sans, sans-serif',
+  font: 'system-ui, sans-serif',
 });
 
 const useDecorateContext = (
   currentTheme: Theme,
+  deferCodeLineNumberSync: boolean,
   onPreviewLoopback?: (url: string) => void,
+  mermaidControls: MermaidControlOptions = DEFAULT_MERMAID_CONTROLS,
 ): DecorateContext => {
   const { t } = useI18n();
   const labels: DecorateLabels = React.useMemo(() => ({
-    copy: 'Copy code',
-    copied: 'Copied',
+    copy: t('markdownRenderer.code.actions.copyTitle'),
+    copied: t('markdownRenderer.code.actions.copiedTitle'),
+    enableCodeWrap: t('markdownRenderer.code.actions.enableWrapTitle'),
+    disableCodeWrap: t('markdownRenderer.code.actions.disableWrapTitle'),
     copyTable: t('markdownRenderer.table.actions.copyTitle'),
     downloadTable: t('markdownRenderer.table.actions.downloadTitle'),
     copyDiagram: t('markdownRenderer.mermaid.actions.copySourceTitle'),
     downloadDiagram: t('markdownRenderer.mermaid.actions.downloadSvgTitle'),
+    zoomInDiagram: t('markdownRenderer.mermaid.actions.zoomInTitle'),
+    zoomOutDiagram: t('markdownRenderer.mermaid.actions.zoomOutTitle'),
+    resetDiagramView: t('markdownRenderer.mermaid.actions.resetViewTitle'),
     previewLabel: t('terminalView.preview.open'),
     previewTitle: t('terminalView.preview.openTitle'),
   }), [t]);
+
+  const codeBlockLineWrap = useUIStore((state) => state.codeBlockLineWrap);
+  const setCodeBlockLineWrap = useUIStore((state) => state.setCodeBlockLineWrap);
+  const toggleCodeBlockLineWrap = React.useCallback(() => {
+    setCodeBlockLineWrap(!useUIStore.getState().codeBlockLineWrap);
+  }, [setCodeBlockLineWrap]);
 
   return React.useMemo<DecorateContext>(() => {
     const colors = mermaidColorsFromTheme(currentTheme);
@@ -991,8 +893,8 @@ const useDecorateContext = (
           return {};
         }
       });
-    return { labels, renderMermaid, onPreviewLoopback };
-  }, [currentTheme, labels, onPreviewLoopback]);
+    return { labels, mermaidControls, codeBlockLineWrap, deferCodeLineNumberSync, onToggleCodeBlockLineWrap: toggleCodeBlockLineWrap, renderMermaid, onPreviewLoopback };
+  }, [currentTheme, labels, mermaidControls, codeBlockLineWrap, deferCodeLineNumberSync, toggleCodeBlockLineWrap, onPreviewLoopback]);
 };
 
 // Runs the async render pipeline into the container and keeps a stable
@@ -1015,6 +917,22 @@ const useMorphdomMarkdown = ({
   React.useEffect(() => {
     ensureMarkdownShikiTheme();
   }, []);
+
+  const mermaidViewerRef = React.useRef<ReturnType<typeof createMermaidViewerRegistry> | null>(null);
+  const refreshMermaidViewers = React.useCallback(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+    if (!mermaidViewerRef.current) {
+      if (!shouldRefreshMermaidViewers(container)) {
+        return;
+      }
+      mermaidViewerRef.current = createMermaidViewerRegistry(container);
+      return;
+    }
+    mermaidViewerRef.current.refresh();
+  }, [containerRef]);
 
   // Synchronous first paint: while the async parse is in-flight, show escaped
   // plain text immediately so there is no blank frame on initial mount. Only
@@ -1059,8 +977,16 @@ const useMorphdomMarkdown = ({
       } else {
         target.appendChild(block);
       }
+      if (shouldRefreshMermaidViewers(block)) {
+        refreshMermaidViewers();
+      }
     }
-  }, [containerRef, text, streaming, ctx]);
+  }, [containerRef, text, streaming, ctx, refreshMermaidViewers]);
+
+  React.useEffect(() => () => {
+    mermaidViewerRef.current?.cleanup();
+    mermaidViewerRef.current = null;
+  }, []);
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -1088,23 +1014,41 @@ const useMorphdomMarkdown = ({
         const temp = document.createElement('div');
         temp.innerHTML = block.html;
         decorateMarkdown(temp, ctx);
+        const hadMermaidBlock = shouldRefreshMermaidViewers(el);
+        const tempHasMermaidBlock = shouldRefreshMermaidViewers(temp);
         morphdom(el, temp, {
           childrenOnly: true,
           onBeforeElUpdated: (fromEl, toEl) => !fromEl.isEqualNode(toEl),
         });
         el.setAttribute('data-md-id', block.id);
+        if (hadMermaidBlock || tempHasMermaidBlock || shouldRefreshMermaidViewers(el)) {
+          refreshMermaidViewers();
+        }
       });
 
       // Remove any trailing block elements no longer present.
+      const hadMermaidBeforeTrailingCleanup = shouldRefreshMermaidViewers(target);
+      let removedMermaidBlock = false;
       for (let i = existing.length - 1; i >= blocks.length; i -= 1) {
-        existing[i]?.remove();
+        const removed = existing[i];
+        if (removed && shouldRefreshMermaidViewers(removed)) {
+          removedMermaidBlock = true;
+        }
+        removed?.remove();
+      }
+      if (removedMermaidBlock || (existing.length > blocks.length && hadMermaidBeforeTrailingCleanup)) {
+        refreshMermaidViewers();
+      }
+
+      if (!ctx.deferCodeLineNumberSync) {
+        scheduleMarkdownCodeLineNumberSync(target);
       }
     });
 
     return () => {
       active = false;
     };
-  }, [containerRef, text, streaming, cacheKey, ctx]);
+  }, [containerRef, text, streaming, cacheKey, ctx, refreshMermaidViewers]);
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -1121,6 +1065,33 @@ const useMorphdomMarkdown = ({
       target.style.setProperty(key, value);
     }
   }, [containerRef, syntaxVars]);
+
+  React.useEffect(() => {
+    const container = containerRef.current;
+    const target = container?.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
+    if (!target) return;
+    if (ctx.deferCodeLineNumberSync) return;
+    applyMarkdownCodeBlockWrapState(target, ctx.codeBlockLineWrap, ctx.labels);
+  }, [containerRef, ctx.codeBlockLineWrap, ctx.deferCodeLineNumberSync, ctx.labels]);
+
+  React.useEffect(() => {
+    const container = containerRef.current;
+    const target = container?.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
+    if (!target || typeof ResizeObserver === 'undefined') return;
+    let frame: number | null = null;
+    const observer = new ResizeObserver(() => {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        syncMarkdownCodeLineNumbers(target);
+      });
+    });
+    observer.observe(target);
+    return () => {
+      observer.disconnect();
+      if (frame !== null) window.cancelAnimationFrame(frame);
+    };
+  }, [containerRef]);
 };
 
 const markdownContentClassName = (variant: MarkdownVariant): string =>
@@ -1157,8 +1128,12 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   const live = isStreaming && !disableStreamAnimation;
   const pacedText = usePacedText(content, live);
 
-  const mermaidBlocks = React.useMemo(() => extractMermaidBlocks(content), [content]);
-  useMermaidInlineInteractions({ containerRef, mermaidBlocks, onShowPopup });
+  useMermaidInlineInteractions({
+    containerRef,
+    onShowPopup,
+    enableFullscreen: DEFAULT_MERMAID_FULLSCREEN_ENABLED,
+    enablePanZoom: DEFAULT_MERMAID_CONTROLS.showPanZoomControls,
+  });
   useFileReferenceInteractions({
     containerRef,
     effectiveDirectory,
@@ -1169,7 +1144,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   useExternalLinkInteractions({ containerRef });
 
   const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme), [currentTheme]);
-  const ctx = useDecorateContext(currentTheme, effectiveDirectory ? handlePreviewLoopback : undefined);
+  const ctx = useDecorateContext(currentTheme, live, effectiveDirectory ? handlePreviewLoopback : undefined, DEFAULT_MERMAID_CONTROLS);
   const cacheKey = `markdown-${part?.id ? `part-${part.id}` : `message-${messageId}`}`;
 
   useMorphdomMarkdown({ containerRef, text: pacedText, streaming: live, cacheKey, syntaxVars, ctx });
@@ -1213,7 +1188,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
   stripFrontmatter?: boolean;
   onShowPopup?: (content: ToolPopupContent) => void;
   mermaidControls?: MermaidControlOptions;
-  allowMermaidWheelZoom?: boolean;
+  allowMermaidWheelEvents?: boolean;
   enableFileReferences?: boolean;
   cacheKey?: string;
 }> = ({
@@ -1223,7 +1198,8 @@ const SimpleMarkdownRendererImpl: React.FC<{
   disableLinkSafety,
   stripFrontmatter = false,
   onShowPopup,
-  allowMermaidWheelZoom = false,
+  mermaidControls = DEFAULT_MERMAID_CONTROLS,
+  allowMermaidWheelEvents = false,
   enableFileReferences = true,
   cacheKey,
 }) => {
@@ -1237,12 +1213,12 @@ const SimpleMarkdownRendererImpl: React.FC<{
     [content, stripFrontmatter],
   );
 
-  const mermaidBlocks = React.useMemo(() => extractMermaidBlocks(renderedContent), [renderedContent]);
   useMermaidInlineInteractions({
     containerRef,
-    mermaidBlocks,
     onShowPopup,
-    allowWheelZoom: allowMermaidWheelZoom,
+    enableFullscreen: DEFAULT_MERMAID_FULLSCREEN_ENABLED,
+    enablePanZoom: mermaidControls.showPanZoomControls,
+    allowMermaidWheelEvents,
   });
   useFileReferenceInteractions({
     containerRef,
@@ -1254,7 +1230,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
   useExternalLinkInteractions({ containerRef, enabled: !disableLinkSafety });
 
   const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme), [currentTheme]);
-  const ctx = useDecorateContext(currentTheme);
+  const ctx = useDecorateContext(currentTheme, false, undefined, mermaidControls);
 
   useMorphdomMarkdown({
     containerRef,
@@ -1273,13 +1249,19 @@ const SimpleMarkdownRendererImpl: React.FC<{
 };
 
 export const SimpleMarkdownRenderer = React.memo(SimpleMarkdownRendererImpl, (prev, next) => {
+  const prevMermaidControls = prev.mermaidControls ?? DEFAULT_MERMAID_CONTROLS;
+  const nextMermaidControls = next.mermaidControls ?? DEFAULT_MERMAID_CONTROLS;
+
   return prev.content === next.content
     && prev.variant === next.variant
     && prev.className === next.className
     && prev.disableLinkSafety === next.disableLinkSafety
     && prev.stripFrontmatter === next.stripFrontmatter
     && prev.onShowPopup === next.onShowPopup
-    && prev.allowMermaidWheelZoom === next.allowMermaidWheelZoom
+    && prevMermaidControls.download === nextMermaidControls.download
+    && prevMermaidControls.copy === nextMermaidControls.copy
+    && prevMermaidControls.showPanZoomControls === nextMermaidControls.showPanZoomControls
+    && prev.allowMermaidWheelEvents === next.allowMermaidWheelEvents
     && prev.enableFileReferences === next.enableFileReferences
     && prev.cacheKey === next.cacheKey;
 });

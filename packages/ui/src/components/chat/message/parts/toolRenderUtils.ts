@@ -1,9 +1,7 @@
-const EXPANDABLE_TOOL_NAMES = new Set<string>([
-    'edit', 'multiedit', 'apply_patch', 'str_replace', 'str_replace_based_edit_tool',
-    'bash', 'shell', 'cmd', 'terminal',
-    'write', 'create', 'file_write',
-    'question', 'task', 'lsp',
-]);
+// Keep only tools with a direct in-app navigation destination compact. Every
+// other tool uses ToolPart so custom, plugin, and MCP calls expose their input
+// and output through the common expandable renderer.
+const STATIC_TOOL_NAMES = new Set<string>(['read', 'skill']);
 
 const STANDALONE_TOOL_NAMES = new Set<string>(['task']);
 
@@ -21,7 +19,7 @@ const normalizeToolName = (toolName: unknown): string => {
 };
 
 export const isExpandableTool = (toolName: unknown): boolean => {
-    return EXPANDABLE_TOOL_NAMES.has(normalizeToolName(toolName));
+    return !isStaticTool(toolName);
 };
 
 export const isStandaloneTool = (toolName: unknown): boolean => {
@@ -29,6 +27,5 @@ export const isStandaloneTool = (toolName: unknown): boolean => {
 };
 
 export const isStaticTool = (toolName: unknown): boolean => {
-    if (typeof toolName !== 'string') return false;
-    return !isExpandableTool(toolName) && !isStandaloneTool(toolName);
+    return STATIC_TOOL_NAMES.has(normalizeToolName(toolName));
 };

@@ -129,7 +129,23 @@ const deferred = <T,>() => {
 };
 
 mock.module('@/stores/utils/safeStorage', () => ({
+  getDeferredSafeStorage: () => makeStorage(),
   getSafeStorage: () => makeStorage(),
+  createDeferredSafeJSONStorage: () => {
+    const testStorage = makeStorage();
+    return {
+      getItem: (name: string) => {
+        const value = testStorage.getItem(name);
+        return value === null ? null : JSON.parse(value);
+      },
+      setItem: (name: string, value: unknown) => {
+        testStorage.setItem(name, JSON.stringify(value));
+      },
+      removeItem: (name: string) => {
+        testStorage.removeItem(name);
+      },
+    };
+  },
 }));
 
 mock.module('@/stores/useProjectsStore', () => ({

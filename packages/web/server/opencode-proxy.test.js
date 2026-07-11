@@ -536,4 +536,42 @@ describe('OpenCode proxy SSE forwarding', () => {
     expect(data.body).toEqual(payload);
     expect(Number(data.contentLength)).toBeGreaterThan(0);
   });
+
+  it('uses the long proxy timeout budget for slow upstream responses', async () => {
+    const upstream = express();
+    upstream.get('/slow', (_req, _res) => {
+      // Leave the response open so the proxy timeout path is exercised.
+    });
+    upstreamServer = await listen(upstream);
+    const upstreamPort = upstreamServer.address().port;
+    const externalBaseUrl = `http://127.0.0.1:${upstreamPort}`;
+
+    const app = express();
+    registerOpenCodeProxy(app, {
+      fs: {},
+      os: {},
+      path,
+      OPEN_CODE_READY_GRACE_MS: 0,
+      LONG_REQUEST_TIMEOUT_MS: 50,
+      getRuntime: () => ({
+        openCodePort: upstreamPort,
+        openCodeBaseUrl: externalBaseUrl,
+        isOpenCodeReady: true,
+        openCodeNotReadySince: 0,
+        isRestartingOpenCode: false,
+      }),
+      getOpenCodeAuthHeaders: () => ({}),
+      buildOpenCodeUrl: (requestPath) => `${externalBaseUrl}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+    });
+    proxyServer = await listen(app);
+    const proxyPort = proxyServer.address().port;
+
+    const response = await fetch(`http://127.0.0.1:${proxyPort}/api/slow`, {
+      signal: AbortSignal.timeout(2000),
+    });
+
+    expect(response.status).toBe(504);
+    await expect(response.json()).resolves.toMatchObject({ error: 'OpenCode upstream timed out' });
+  });
 });

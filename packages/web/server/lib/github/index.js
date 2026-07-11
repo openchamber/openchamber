@@ -21,6 +21,7 @@ export {
 
 export {
   getOctokitOrNull,
+  createOctokit,
 } from './octokit.js';
 
 export {
