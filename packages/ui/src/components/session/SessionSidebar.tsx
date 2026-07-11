@@ -45,8 +45,8 @@ import { SessionNodeItem } from './sidebar/SessionNodeItem';
 import type { SessionNodeRenderExtras } from './sidebar/sessionNodeItemUtils';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useShallow } from 'zustand/react/shallow';
-import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
 import { checkIsGitRepository } from '@/lib/gitApi';
+import { listProjectWorktrees, refreshAllProjectWorktrees } from '@/lib/worktrees/worktreeManager';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { SortableDragHandleProps } from './sidebar/sortableItems';
 import {
@@ -489,6 +489,15 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       cancelled = true;
     };
   }, [projectWorktreeDiscoveryKey]);
+
+  // Refresh worktrees when the window regains focus (detects externally-created worktrees)
+  React.useEffect(() => {
+    const handleFocus = () => {
+      void refreshAllProjectWorktrees();
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, []);
 
   React.useEffect(() => {
     let refreshTimeout: ReturnType<typeof setTimeout> | null = null;
