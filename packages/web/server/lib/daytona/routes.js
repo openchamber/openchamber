@@ -16,6 +16,15 @@ import express from 'express';
  *   logger?: Pick<Console, 'log' | 'warn' | 'error'>,
  * }} dependencies
  */
+/**
+ * Map internal registry status to the frontend-facing status enum.
+ * The registry stores 'active' internally; the frontend expects 'running'.
+ */
+const normalizeStatus = (internalStatus) => {
+  if (internalStatus === 'active') return 'running';
+  return internalStatus;
+};
+
 export const registerDaytonaRoutes = (app, { daytonaService, uiAuthController = null, logger = console }) => {
   const { lifecycle, registry, monitor } = daytonaService;
 
@@ -87,7 +96,7 @@ export const registerDaytonaRoutes = (app, { daytonaService, uiAuthController = 
     return res.json({
       sessionId: entry.sessionId,
       sandboxId: entry.sandboxId,
-      status: entry.status,
+      status: normalizeStatus(entry.status),
       openCodeUrl: entry.openCodeUrl,
       createdAt: entry.createdAt,
       lastActivityAt: entry.lastActivityAt,
@@ -102,7 +111,7 @@ export const registerDaytonaRoutes = (app, { daytonaService, uiAuthController = 
       sandboxes: active.map((entry) => ({
         sessionId: entry.sessionId,
         sandboxId: entry.sandboxId,
-        status: entry.status,
+        status: normalizeStatus(entry.status),
         createdAt: entry.createdAt,
         lastActivityAt: entry.lastActivityAt,
       })),

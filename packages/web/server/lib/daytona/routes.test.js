@@ -140,7 +140,7 @@ describe('Daytona routes', () => {
   });
 
   describe('GET /api/daytona/sandbox/:sessionId/status', () => {
-    it('returns 200 with sandbox info for existing sandbox', async () => {
+    it('returns 200 with sandbox info and normalized status for existing sandbox', async () => {
       mockRegistry.get.mockReturnValueOnce({
         sessionId: 'session-abc',
         sandboxId: 'sbx-123',
@@ -156,7 +156,7 @@ describe('Daytona routes', () => {
 
       expect(res.body.sessionId).toBe('session-abc');
       expect(res.body.sandboxId).toBe('sbx-123');
-      expect(res.body.status).toBe('active');
+      expect(res.body.status).toBe('running');
       expect(res.body.openCodeUrl).toBe('http://localhost:4000/session-abc');
       expect(res.body.createdAt).toBe(1700000000000);
       expect(res.body.lastActivityAt).toBe(1700000001000);
@@ -174,7 +174,7 @@ describe('Daytona routes', () => {
   });
 
   describe('GET /api/daytona/sandboxes', () => {
-    it('returns 200 with an array of active sandboxes', async () => {
+    it('returns 200 with an array of active sandboxes with normalized status', async () => {
       mockRegistry.listActive.mockReturnValueOnce([
         {
           sessionId: 'session-1',
@@ -199,7 +199,9 @@ describe('Daytona routes', () => {
       expect(res.body.count).toBe(2);
       expect(res.body.sandboxes).toHaveLength(2);
       expect(res.body.sandboxes[0].sessionId).toBe('session-1');
+      expect(res.body.sandboxes[0].status).toBe('running');
       expect(res.body.sandboxes[1].sessionId).toBe('session-2');
+      expect(res.body.sandboxes[1].status).toBe('running');
     });
 
     it('returns 200 with empty array when no active sandboxes', async () => {

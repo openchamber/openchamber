@@ -22,6 +22,13 @@ export const registerDaytonaProxyRoutes = (app, { daytonaService, uiAuthControll
   const { registry, monitor } = daytonaService;
 
   /**
+   * Cache for http-proxy-middleware instances keyed by target URL.
+   * Avoids creating a new middleware on every request for the same sandbox.
+   * @type {Map<string, Function>}
+   */
+  const proxyCache = new Map();
+
+  /**
    * Auth middleware for proxy routes. Applied when UI auth is enabled.
    */
   const authMiddleware = (req, res, next) => {
@@ -162,39 +169,44 @@ export const registerDaytonaProxyRoutes = (app, { daytonaService, uiAuthControll
 
   // ALL /api/daytona/sandbox/:sessionId/opencode/* - Generic OpenCode API proxy.
   // Uses http-proxy-middleware for pass-through proxying of any OpenCode API call.
+  // Proxy instances are cached per target URL to avoid per-request allocation.
   app.use('/api/daytona/sandbox/:sessionId/opencode', authMiddleware, resolveSandbox, (req, res, next) => {
     const { daytonaSandbox } = req;
     const target = daytonaSandbox.openCodeUrl;
 
-    // Create a per-request proxy since each sandbox has a different target.
-    const proxy = createProxyMiddleware({
-      target,
-      changeOrigin: true,
-      pathRewrite: (_path, proxyReq) => {
-        // Strip the prefix to get the path OpenCode expects.
-        // e.g. /api/daytona/sandbox/abc123/opencode/session -> /session
-        const prefix = `/api/daytona/sandbox/${daytonaSandbox.sessionId}/opencode`;
-        const rewritten = proxyReq.originalUrl?.replace(prefix, '') || '/';
-        return rewritten;
-      },
-      on: {
-        proxyReq: (proxyReq, clientReq) => {
-          // Replay parsed body for JSON requests
-          if (clientReq.body && typeof clientReq.body === 'object' && Object.keys(clientReq.body).length > 0) {
-            const bodyData = JSON.stringify(clientReq.body);
-            proxyReq.setHeader('content-type', 'application/json');
-            proxyReq.setHeader('content-length', Buffer.byteLength(bodyData).toString());
-            proxyReq.write(bodyData);
-          }
+    // Retrieve or create a cached proxy for this target URL.
+    let proxy = proxyCache.get(target);
+    if (!proxy) {
+      proxy = createProxyMiddleware({
+        target,
+        changeOrigin: true,
+        pathRewrite: (_path, proxyReq) => {
+          // Strip the prefix to get the path OpenCode expects.
+          // e.g. /api/daytona/sandbox/abc123/opencode/session -> /session
+          const prefix = `/api/daytona/sandbox/${req.params.sessionId}/opencode`;
+          const rewritten = proxyReq.originalUrl?.replace(prefix, '') || '/';
+          return rewritten;
         },
-        error: (err, _req, proxyRes) => {
-          logger.error(`[Daytona Proxy] Generic proxy error for session ${daytonaSandbox.sessionId}: ${err?.message ?? err}`);
-          if (proxyRes && !proxyRes.headersSent && typeof proxyRes.status === 'function') {
-            proxyRes.status(503).json({ error: 'Sandbox OpenCode service unavailable' });
-          }
+        on: {
+          proxyReq: (proxyReq, clientReq) => {
+            // Replay parsed body for JSON requests
+            if (clientReq.body && typeof clientReq.body === 'object' && Object.keys(clientReq.body).length > 0) {
+              const bodyData = JSON.stringify(clientReq.body);
+              proxyReq.setHeader('content-type', 'application/json');
+              proxyReq.setHeader('content-length', Buffer.byteLength(bodyData).toString());
+              proxyReq.write(bodyData);
+            }
+          },
+          error: (err, _req, proxyRes) => {
+            logger.error(`[Daytona Proxy] Generic proxy error: ${err?.message ?? err}`);
+            if (proxyRes && !proxyRes.headersSent && typeof proxyRes.status === 'function') {
+              proxyRes.status(503).json({ error: 'Sandbox OpenCode service unavailable' });
+            }
+          },
         },
-      },
-    });
+      });
+      proxyCache.set(target, proxy);
+    }
 
     proxy(req, res, next);
   });

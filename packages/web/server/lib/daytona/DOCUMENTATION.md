@@ -14,10 +14,18 @@ Sandboxes are automatically destroyed when:
 ```
 Android Client <-> Express Server <-> Daytona Sandbox (OpenCode)
                         |
-                   WsBridge (relay)
+                   SSE/HTTP Proxy (proxy.js)
+                   WebSocket Proxy (proxy.js attachDaytonaWsProxy)
                    InactivityMonitor
                    SandboxRegistry
 ```
+
+The Express server acts as the intermediary between the frontend client and the
+OpenCode instances running inside Daytona sandboxes. Communication uses:
+- **SSE** for streaming events from OpenCode to the frontend
+- **HTTP POST** for sending messages to OpenCode
+- **WebSocket** for bidirectional real-time communication
+- **Generic HTTP proxy** for all other OpenCode API calls
 
 ## Entrypoints and Structure
 
@@ -25,14 +33,15 @@ Android Client <-> Express Server <-> Daytona Sandbox (OpenCode)
 - `packages/web/server/lib/daytona/sandbox-registry.js`: In-memory registry tracking active sandboxes per session.
 - `packages/web/server/lib/daytona/lifecycle.js`: Sandbox creation and destruction via the @daytona/sdk.
 - `packages/web/server/lib/daytona/inactivity-monitor.js`: Periodic check for inactive sandboxes with auto-destroy.
-- `packages/web/server/lib/daytona/ws-bridge.js`: WebSocket bridge between Express server and OpenCode in sandboxes.
+- `packages/web/server/lib/daytona/proxy.js`: SSE, HTTP, and WebSocket proxy to OpenCode in sandboxes.
+- `packages/web/server/lib/daytona/routes.js`: REST endpoints for sandbox lifecycle management.
 - `packages/web/server/lib/daytona/service.js`: Composition entrypoint that wires all components together.
 
 ## Public Exports
 
 ### config.js
 - `resolveDaytonaConfig()`: Reads environment variables and returns the resolved configuration object.
-  - Returns `{ enabled, apiKey, apiUrl, sandboxImage, timeoutMs }`
+  - Returns `{ enabled, apiKey, apiUrl, sandboxImage, timeoutMs, openCodePort }`
 
 ### sandbox-registry.js
 - `createSandboxRegistry()`: Creates an in-memory sandbox registry instance.
@@ -46,13 +55,17 @@ Android Client <-> Express Server <-> Daytona Sandbox (OpenCode)
 - `createInactivityMonitor({ registry, lifecycle, config, logger, onTimeout })`: Creates the inactivity monitor.
   - Returns `{ start, stop, resetTimer, dispose }`
 
-### ws-bridge.js
-- `createWsBridge({ logger })`: Creates the WebSocket bridge manager.
-  - Returns `{ connect, disconnect, relay, isConnected }`
+### proxy.js
+- `registerDaytonaProxyRoutes(app, { daytonaService, uiAuthController, logger })`: Registers SSE, message, and generic proxy routes.
+- `attachDaytonaWsProxy(server, { daytonaService, logger })`: Attaches WebSocket upgrade handler for proxying WS connections to sandbox OpenCode instances.
+  - Returns `{ shutdown }`
+
+### routes.js
+- `registerDaytonaRoutes(app, { daytonaService, uiAuthController, logger })`: Registers REST endpoints for sandbox management.
 
 ### service.js
 - `createDaytonaService({ logger, onSandboxTimeout })`: Main entrypoint that composes all modules.
-  - Returns `{ config, registry, lifecycle, monitor, bridge, isEnabled, dispose }`
+  - Returns `{ config, registry, lifecycle, monitor, isEnabled, dispose }`
 
 ## Environment Variables
 
@@ -62,6 +75,7 @@ Android Client <-> Express Server <-> Daytona Sandbox (OpenCode)
 | `DAYTONA_API_URL` | No | `https://app.daytona.io` | Daytona API base URL |
 | `DAYTONA_SANDBOX_IMAGE` | No | `daytonaio/ai-opencode:latest` | Docker image for sandboxes |
 | `DAYTONA_SANDBOX_TIMEOUT_MS` | No | `600000` (10 min) | Inactivity timeout in milliseconds |
+| `DAYTONA_OPENCODE_PORT` | No | `4096` | Port where OpenCode listens inside the sandbox |
 
 ## Usage Example
 
@@ -82,18 +96,11 @@ if (daytona.isEnabled()) {
   // Create a sandbox for a new chat session
   const { sandboxId, openCodeUrl } = await daytona.lifecycle.createSandbox('session-123');
 
-  // Connect the WebSocket bridge
-  await daytona.bridge.connect('session-123', openCodeUrl);
-
-  // Relay messages from frontend to OpenCode in the sandbox
-  daytona.bridge.relay('session-123', { type: 'message', content: '...' });
-
   // Reset inactivity timer on user activity
   daytona.monitor.resetTimer('session-123');
 
   // Destroy sandbox when user exits
   await daytona.lifecycle.destroySandbox('session-123');
-  daytona.bridge.disconnect('session-123');
 }
 
 // On server shutdown
@@ -111,9 +118,18 @@ Each entry in the sandbox registry contains:
   openCodeUrl: string,    // URL to reach OpenCode in the sandbox
   createdAt: number,      // Unix timestamp (ms) when created
   lastActivityAt: number, // Unix timestamp (ms) of last activity
-  status: string,         // "active" or other lifecycle states
+  status: string,         // Internal status: "active" (mapped to "running" in API responses)
 }
 ```
+
+## Status Mapping
+
+The registry stores `status: 'active'` internally. API responses normalize this
+to `'running'` for consistency with the frontend status enum:
+
+| Internal (registry) | External (API response) |
+|---------------------|------------------------|
+| `active`            | `running`              |
 
 ## Notes for Contributors
 
@@ -121,5 +137,5 @@ Each entry in the sandbox registry contains:
 - All server code is plain JS ESM (import/export syntax, no transpilation).
 - The service is disabled (no-op) when `DAYTONA_API_KEY` is not set.
 - The inactivity monitor checks every 30 seconds and destroys sandboxes idle for longer than the configured timeout.
-- The WebSocket bridge handles reconnection automatically (up to 5 attempts with exponential backoff).
-- Sandbox images should have OpenCode pre-installed and configured to serve on port 4096.
+- Sandbox images should have OpenCode pre-installed and configured to serve on the port specified by `DAYTONA_OPENCODE_PORT` (default 4096).
+- The generic proxy middleware in `proxy.js` caches `http-proxy-middleware` instances per target URL to avoid per-request allocation overhead.
