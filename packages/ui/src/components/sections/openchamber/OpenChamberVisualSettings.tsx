@@ -7,7 +7,6 @@ import type { ThemeMode } from '@/types/theme';
 import { useUIStore } from '@/stores/useUIStore';
 import { useMessageQueueStore, type FollowUpBehavior } from '@/stores/messageQueueStore';
 import { cn } from '@/lib/utils';
-import { isCapacitorApp } from '@/lib/platform';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { NumberInput } from '@/components/ui/number-input';
@@ -246,7 +245,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-type VisibleSetting = 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar';
+type VisibleSetting = 'sessionAssist' | 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -260,6 +259,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const { browserTab } = usePwaDetection();
     const directoryShowHidden = useDirectoryShowHidden();
     const showReasoningTraces = useUIStore(state => state.showReasoningTraces);
+    const sessionRecapEnabled = useUIStore(state => state.sessionRecapEnabled);
+    const sessionSuggestionEnabled = useUIStore(state => state.sessionSuggestionEnabled);
+    const setSessionRecapEnabled = useUIStore(state => state.setSessionRecapEnabled);
+    const setSessionSuggestionEnabled = useUIStore(state => state.setSessionSuggestionEnabled);
     const setShowReasoningTraces = useUIStore(state => state.setShowReasoningTraces);
     const collapsibleThinkingBlocks = useUIStore(state => state.collapsibleThinkingBlocks);
     const setCollapsibleThinkingBlocks = useUIStore(state => state.setCollapsibleThinkingBlocks);
@@ -276,6 +279,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setExpandedEditorToolbar = useUIStore(state => state.setExpandedEditorToolbar);
     const wideChatLayoutEnabled = useUIStore(state => state.wideChatLayoutEnabled);
     const setWideChatLayoutEnabled = useUIStore(state => state.setWideChatLayoutEnabled);
+    const codeBlockLineWrap = useUIStore(state => state.codeBlockLineWrap);
+    const setCodeBlockLineWrap = useUIStore(state => state.setCodeBlockLineWrap);
     const chatRenderMode = useUIStore(state => state.chatRenderMode);
     const setChatRenderMode = useUIStore(state => state.setChatRenderMode);
     const activityRenderMode = useUIStore(state => state.activityRenderMode);
@@ -322,10 +327,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setShowSplitAssistantMessageActions = useUIStore(state => state.setShowSplitAssistantMessageActions);
     const messageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport);
     const setMessageStreamTransport = useConfigStore((state) => state.setSettingsMessageStreamTransport);
-    // Capacitor apps are locked to SSE (native WebSocket streaming is unreliable on mobile);
-    // sync-context forces it too. Show SSE selected and disable the other options here.
-    const isCapacitorAppRuntime = React.useMemo(() => isCapacitorApp(), []);
-    const effectiveMessageStreamTransport = isCapacitorAppRuntime ? 'sse' : messageStreamTransport;
+    const effectiveMessageStreamTransport = messageStreamTransport;
     const settingsDefaultFileViewerPreview = useConfigStore((state) => state.settingsDefaultFileViewerPreview);
     const setSettingsDefaultFileViewerPreview = useConfigStore((state) => state.setSettingsDefaultFileViewerPreview);
     const isSettingsDialogOpen = useUIStore(state => state.isSettingsDialogOpen);
@@ -561,6 +563,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('collapsibleUserMessages')
         || shouldShow('stickyUserHeader')
         || shouldShow('wideChatLayout')
+        || shouldShow('codeBlockLineWrap')
         || shouldShow('splitAssistantMessageActions')
         || shouldShow('diffLayout')
         || shouldShow('dotfiles')
@@ -1531,7 +1534,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                             variant="chip"
                                                             size="xs"
                                                             aria-pressed={effectiveMessageStreamTransport === option.id}
-                                                            disabled={isCapacitorAppRuntime && option.id !== 'sse'}
                                                             className="!font-normal"
                                                             onClick={() => handleMessageStreamTransportChange(option.id)}
                                                         >
@@ -1780,8 +1782,54 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 </div>
                             )}
 
-                            {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || shouldShow('dotfiles') || shouldShow('fileViewerPreview') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || shouldShow('showTurnChangedFiles') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning')) && (
+                            {(shouldShow('sessionAssist') || shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || shouldShow('wideChatLayout') || shouldShow('codeBlockLineWrap') || shouldShow('splitAssistantMessageActions') || shouldShow('dotfiles') || shouldShow('fileViewerPreview') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || shouldShow('showTurnChangedFiles') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning')) && (
                                 <section className="p-2 space-y-0.5">
+                                    {shouldShow('sessionAssist') && (
+                                        <>
+                                        <div
+                                            data-settings-item="chat.session-recap"
+                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={sessionRecapEnabled}
+                                            onClick={() => setSessionRecapEnabled(!sessionRecapEnabled)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    setSessionRecapEnabled(!sessionRecapEnabled);
+                                                }
+                                            }}
+                                        >
+                                            <Checkbox
+                                                checked={sessionRecapEnabled}
+                                                onChange={setSessionRecapEnabled}
+                                                ariaLabel={t('settings.openchamber.visual.field.sessionRecapAria')}
+                                            />
+                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.sessionRecap')}</span>
+                                        </div>
+                                        <div
+                                            data-settings-item="chat.session-suggestion"
+                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={sessionSuggestionEnabled}
+                                            onClick={() => setSessionSuggestionEnabled(!sessionSuggestionEnabled)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    setSessionSuggestionEnabled(!sessionSuggestionEnabled);
+                                                }
+                                            }}
+                                        >
+                                            <Checkbox
+                                                checked={sessionSuggestionEnabled}
+                                                onChange={setSessionSuggestionEnabled}
+                                                ariaLabel={t('settings.openchamber.visual.field.sessionSuggestionAria')}
+                                            />
+                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.sessionSuggestion')}</span>
+                                        </div>
+                                        </>
+                                    )}
                                     {shouldShow('reasoning') && (
                                         <div
                                             data-settings-item="chat.reasoning-traces"
@@ -1932,6 +1980,30 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                     </TooltipContent>
                                                 </Tooltip>
                                             </div>
+                                        </div>
+                                    )}
+
+                                    {shouldShow('codeBlockLineWrap') && (
+                                        <div
+                                            data-settings-item="chat.code-block-line-wrap"
+                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={codeBlockLineWrap}
+                                            onClick={() => setCodeBlockLineWrap(!codeBlockLineWrap)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    setCodeBlockLineWrap(!codeBlockLineWrap);
+                                                }
+                                            }}
+                                        >
+                                            <Checkbox
+                                                checked={codeBlockLineWrap}
+                                                onChange={setCodeBlockLineWrap}
+                                                ariaLabel={t('settings.openchamber.visual.field.codeBlockLineWrapAria')}
+                                            />
+                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.codeBlockLineWrap')}</span>
                                         </div>
                                     )}
 

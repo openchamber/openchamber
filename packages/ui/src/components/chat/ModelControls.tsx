@@ -386,7 +386,15 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const [isAgentSelectorOpen, setIsAgentSelectorOpen] = React.useState(false);
     const { favoriteModelsList, recentModelsList } = useModelLists();
 
-    const { isMobile } = useDeviceInfo();
+    const { isMobile: deviceIsMobile } = useDeviceInfo();
+    // The composer decides whether it renders the mobile layout from the UI
+    // store (the Capacitor shell forces it true even on tablets/iPad, where
+    // useDeviceInfo classifies the wide screen as non-mobile). The bottom-sheet
+    // panels must follow the SAME source: with the device flag alone, tapping
+    // the model/agent chip on an iPad set the panel state while the sheet
+    // itself rendered null.
+    const uiIsMobile = useUIStore((state) => state.isMobile);
+    const isMobile = deviceIsMobile || uiIsMobile;
     const isDesktop = React.useMemo(() => isDesktopShell(), []);
     const isVSCodeRuntime = useIsVSCodeRuntime();
     // Only use mobile panels on actual mobile devices, VSCode uses desktop dropdowns
