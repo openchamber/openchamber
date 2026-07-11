@@ -49,6 +49,7 @@ import { usePlanDetection } from '@/hooks/usePlanDetection';
 import { useI18n } from '@/lib/i18n';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { getEmbeddedSessionChatOriginSessionId } from '@/components/layout/contextPanelEmbeddedChat';
 
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
@@ -563,13 +564,22 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 
     const parentSession = useParentSession(currentSessionId, effectiveSessionDirectory);
 
+    // In the embedded session-chat iframe, hide "Return to parent" when
+    // viewing the panel's anchor session (the one recorded in the URL). Going
+    // up from the anchor would show the primary session that's already in the
+    // main chat. Drilling into a deeper subtask (currentSessionId ≠ anchor)
+    // re-enables the button to navigate back to the embedded session.
+    const embeddedPanelAnchorSessionId = getEmbeddedSessionChatOriginSessionId();
+    const hideReturnToParent =
+        embeddedPanelAnchorSessionId !== null && currentSessionId === embeddedPanelAnchorSessionId;
+
     const handleReturnToParentSession = React.useCallback(() => {
         if (!parentSession) return;
         const parentDirectory = (parentSession as Session & { directory?: string | null }).directory ?? null;
         setCurrentSession(parentSession.id, parentDirectory);
     }, [parentSession, setCurrentSession]);
 
-    const returnToParentButton = parentSession ? (
+    const returnToParentButton = parentSession && !hideReturnToParent ? (
         <Button
             type="button"
             variant="outline"

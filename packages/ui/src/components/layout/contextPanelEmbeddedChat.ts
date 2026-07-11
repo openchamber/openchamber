@@ -69,3 +69,60 @@ export const getOrCreateEmbeddedSessionChatURL = (
   cache.set(tabID, { signature, src });
   return src;
 };
+
+/**
+ * True when the current document is the embedded session-chat iframe
+ * (`?ocPanel=session-chat`). Used to distinguish the embedded iframe from
+ * the main app so callers can route behavior accordingly (e.g. in-place
+ * subtask navigation instead of opening a new side-panel tab, or skipping
+ * URL rewrites that would strip the iframe's identity params).
+ *
+ * Cached on first call (per JS realm): an iframe's embedded-ness is fixed
+ * at mount by the parent and cannot change during its lifetime — a parent
+ * src swap is a full browser reload, starting a fresh realm.
+ */
+let embeddedSessionChatCached: boolean | null = null;
+
+export const isEmbeddedSessionChat = (): boolean => {
+  if (embeddedSessionChatCached !== null) {
+    return embeddedSessionChatCached;
+  }
+  if (typeof window === 'undefined') {
+    embeddedSessionChatCached = false;
+    return false;
+  }
+  try {
+    embeddedSessionChatCached =
+      new URLSearchParams(window.location.search).get('ocPanel') === 'session-chat';
+    return embeddedSessionChatCached;
+  } catch {
+    embeddedSessionChatCached = false;
+    return false;
+  }
+};
+
+/**
+ * Reset the module-level cache. Intended for tests that simulate different
+ * JS realms by swapping `window.location` in the same process.
+ */
+export const resetEmbeddedSessionChatCache = (): void => {
+  embeddedSessionChatCached = null;
+};
+
+/**
+ * The session ID recorded in the embedded iframe's URL
+ * (`?ocPanel=session-chat&sessionId=…`), i.e. the session the panel was
+ * opened to show. Returns `null` outside the embedded iframe or when the
+ * URL is malformed.
+ */
+export const getEmbeddedSessionChatOriginSessionId = (): string | null => {
+  if (!isEmbeddedSessionChat()) {
+    return null;
+  }
+  try {
+    const sid = new URLSearchParams(window.location.search).get('sessionId');
+    return sid && sid.trim().length > 0 ? sid.trim() : null;
+  } catch {
+    return null;
+  }
+};

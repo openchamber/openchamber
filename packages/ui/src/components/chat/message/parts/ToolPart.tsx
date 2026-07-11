@@ -46,6 +46,7 @@ import { readTaskTagSessionIdFromOutput } from './taskSessionIdParser';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { useI18n } from '@/lib/i18n';
 import { getDiffPatchEntries, getPatchText, type DiffPatchEntry } from './toolDiffUtils';
+import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
@@ -1373,7 +1374,10 @@ const TaskToolSummary: React.FC<{
     const handleOpenSession = (event: React.MouseEvent) => {
         event.stopPropagation();
         if (sessionId && currentDirectory) {
-            if (isMobile || runtime?.runtime.isVSCode) {
+            // In contexts with no ContextPanel (embedded session-chat iframe)
+            // or single-surface layouts (mobile, VS Code), navigate in place.
+            // Otherwise open a new side-panel tab.
+            if (isEmbeddedSessionChat() || isMobile || runtime?.runtime.isVSCode) {
                 setCurrentSession(sessionId, currentDirectory);
                 return;
             }
