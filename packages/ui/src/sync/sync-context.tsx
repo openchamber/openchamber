@@ -8,7 +8,6 @@ import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import { createEventPipeline } from "./event-pipeline"
 import { isVSCodeRuntime } from "@/lib/desktop"
 import { isMobileSurfaceRuntime } from "@/lib/runtimeSurface"
-import { isCapacitorApp } from "@/lib/platform"
 import { reduceGlobalEvent, applyGlobalProject, applyDirectoryEvent, type SessionMaterializationReason } from "./event-reducer"
 import { useGlobalSyncStore } from "./global-sync-store"
 import { ChildStoreManager, type DirectoryStore } from "./child-store"
@@ -50,6 +49,7 @@ import { listGlobalSessionPages } from "@/stores/globalSessions"
 import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { areRequestArraysReferentiallyEqual, collectScopedBlockingRequests } from "./scoped-blocking-requests"
 import { EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT, buildUserMessageHistorySnapshot, type UserMessageHistorySnapshot } from "./user-message-history"
+import { runtimeFetch } from "@/lib/runtime-fetch"
 
 // ---------------------------------------------------------------------------
 // Context
@@ -248,6 +248,7 @@ async function materializeSessionFromServer(
   store: StoreApi<DirectoryStore>,
   options?: SessionMaterializationRequest & { isStale?: () => boolean },
 ) {
+  const statusBeforeMaterialization = store.getState().session_status?.[sessionID]
   syncDebug.recovery.materializing({
     reason: options?.reason ?? "ensure-session-messages",
     directory,
@@ -284,8 +285,15 @@ async function materializeSessionFromServer(
       })),
       { skipPartTypes: RECONNECT_SKIP_PARTS },
     )
+    if (!materialized.messagesChanged && !materialized.partsChanged) {
+      return state
+    }
     return { message: materialized.message, part: materialized.part }
   })
+
+  if (statusBeforeMaterialization && statusBeforeMaterialization.type !== "idle" && !options?.isStale?.()) {
+    await resyncDirectorySessionStatuses(directory, store, [sessionID], "authoritative")
+  }
 }
 
 // Module-level refs for notification viewed check.
@@ -1644,17 +1652,52 @@ const dispatchOpenCodeUpdateAvailable = (payload: { version: string }) => {
   window.dispatchEvent(new CustomEvent("openchamber:opencode-update-available", { detail: payload }))
 }
 
+let bundledOpenCodeRuntimeCache: { runtimeKey: string; promise: Promise<boolean> } | null = null
+
+const isBundledOpenCodeRuntime = async () => {
+  const runtimeKey = getRuntimeKey()
+  if (!bundledOpenCodeRuntimeCache || bundledOpenCodeRuntimeCache.runtimeKey !== runtimeKey) {
+    bundledOpenCodeRuntimeCache = {
+      runtimeKey,
+      promise: runtimeFetch("/api/config/opencode-resolution", { signal: AbortSignal.timeout(4000) })
+        .then(async (response) => {
+          if (response.ok) {
+            const resolution = await response.json() as { source?: unknown; detectedSourceNow?: unknown }
+            return resolution.source === "bundled" || resolution.detectedSourceNow === "bundled"
+          }
+
+          const healthResponse = await runtimeFetch("/health", { signal: AbortSignal.timeout(4000) })
+          if (!healthResponse.ok) return false
+          const health = await healthResponse.json() as { opencodeBinarySource?: unknown }
+          return health.opencodeBinarySource === "bundled"
+        })
+        .catch(() => false),
+    }
+  }
+  return bundledOpenCodeRuntimeCache.promise
+}
+
+const dispatchOpenCodeUpdateAvailableUnlessBundled = (payload: { version: string }) => {
+  if (typeof window === "undefined") return
+  void isBundledOpenCodeRuntime().then((isBundled) => {
+    if (!isBundled) {
+      dispatchOpenCodeUpdateAvailable(payload)
+    }
+  })
+}
+
 export function SyncProvider(props: {
   sdk: OpencodeClient
   directory: string
   children: React.ReactNode
 }) {
-  const storedMessageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport)
-  // Capacitor apps are locked to SSE: native WebSocket streaming is unreliable there (on
-  // Android events only arrive once the run finishes), while SSE streams correctly. The Chat
-  // settings UI disables the other options on mobile, but force it here too so the effective
-  // transport can't drift. Remove this override (and the UI lock) to re-enable WS on mobile.
-  const messageStreamTransport: 'auto' | 'ws' | 'sse' = isCapacitorApp() ? 'sse' : storedMessageStreamTransport
+  // Capacitor apps were previously locked to SSE because Android WebSocket
+  // upgrades appeared broken. Root cause was server-side: the Android WebView
+  // origin (https://localhost, androidScheme 'https') was missing from the
+  // packaged-client origin allowlist, so every WS upgrade was rejected with
+  // 403. With the origin allowlisted, mobile uses the same transport
+  // selection as everywhere else ('auto' falls back to SSE on WS failure).
+  const messageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport)
   const childStoresRef = useRef<ChildStoreManager | null>(null)
   if (!childStoresRef.current) childStoresRef.current = new ChildStoreManager()
   const childStores = childStoresRef.current
@@ -1668,6 +1711,8 @@ export function SyncProvider(props: {
   const resyncingDirectoriesRef = useRef(new Set<string>())
   const statusPollingDirectoriesRef = useRef(new Set<string>())
   const pipelineReconnectRef = useRef<((reason?: string) => void) | null>(null)
+  const pipelineHasConnectedRef = useRef(false)
+  const pipelineDisconnectedBeforeFirstConnectRef = useRef(false)
 
   const system = useMemo<SyncSystem>(
     () => ({
@@ -1858,7 +1903,7 @@ export function SyncProvider(props: {
             ? (payload.properties as { version: string }).version
             : ""
           if (version) {
-            dispatchOpenCodeUpdateAvailable({ version })
+            dispatchOpenCodeUpdateAvailableUnlessBundled({ version })
           }
         }
         handleEvent(directory, payload, childStores, routingIndex)
@@ -1869,6 +1914,11 @@ export function SyncProvider(props: {
           hasEverConnected: true,
           connectionPhase: "connected",
         })
+        const isFirstConnect = !pipelineHasConnectedRef.current
+        pipelineHasConnectedRef.current = true
+        if (isFirstConnect && !pipelineDisconnectedBeforeFirstConnectRef.current) {
+          return
+        }
         if (isRecentBoot()) {
           return
         }
@@ -1877,6 +1927,9 @@ export function SyncProvider(props: {
         }
       },
       onDisconnect: (reason) => {
+        if (!pipelineHasConnectedRef.current) {
+          pipelineDisconnectedBeforeFirstConnectRef.current = true
+        }
         const { hasEverConnected } = useConfigStore.getState()
         useConfigStore.setState({
           isConnected: false,

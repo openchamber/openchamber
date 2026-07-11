@@ -16,7 +16,6 @@ import {
   deriveUserSnippet,
   formatAssistantTokens,
   formatMessagePreviewTime,
-  truncateMessageId,
 } from './rawMessagePreview';
 import type { TimeFormatPreference } from '@/stores/useUIStore';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
@@ -544,23 +543,15 @@ export const ContextPanelContent: React.FC = () => {
               const partsLabel = derivePartsLabel(message.parts);
               const tokens = isAssistant ? extractTokenBreakdown({ info: message.info, parts: message.parts }) : null;
               const userSnippet = isUser ? deriveUserSnippet(message.parts) : '';
-              const shortId = truncateMessageId(message.info.id);
               const previewTime = formatMessagePreviewTime(messageCreatedAt, timeFormatPreference);
-              // User rows merge the first two columns into a single inline
-              // block: `**user:** <snippet>`. The bold prefix anchors the eye
-              // to the start of the block; the snippet flows inline until the
-              // truncation point chosen by CSS.
-              //
-              // Assistant rows keep two cells: parts label on the left, I/O
-              // tokens right-aligned in a fixed middle column. Other roles
-              // (tool/system) reuse the assistant layout with an empty tokens
-              // cell so columns still align across rows.
+              // Keep token/time columns stable; the message label owns all
+              // remaining space and truncates before it can push metrics.
               const assistantLeft = partsLabel || '\u2014';
               const assistantMiddle = tokens
                 ? formatAssistantTokens(tokens.input, tokens.output, formatNumber)
                 : '';
               const otherLeft = role || 'unknown';
-              const otherMiddle = partsLabel;
+              const otherLabel = partsLabel ? `${otherLeft}: ${partsLabel}` : otherLeft;
 
               const jsonValue = isExpanded
                 ? JSON.stringify({ info: message.info, parts: message.parts }, null, 2)
@@ -582,21 +573,13 @@ export const ContextPanelContent: React.FC = () => {
                       }));
                     }}
                   >
-                    {/*
-                      4-column grid: cols 1-2 = role+content area, col 3 = id,
-                      col 4 = time. User rows fuse cols 1-2 into a single
-                      inline `**user:** <snippet>` block via grid-column:
-                      span 2; assistant/other rows keep them split (label |
-                      value) so the I/O tokens line up vertically across rows.
-                    */}
                     <div
                       className="grid items-center gap-x-2 whitespace-nowrap typography-micro"
-                      style={{ gridTemplateColumns: 'auto minmax(0, 1fr) 5rem 4.5rem' }}
+                      style={{ gridTemplateColumns: isAssistant ? 'minmax(0, 1fr) 7.5rem max-content' : 'minmax(0, 1fr) max-content' }}
                     >
                       {isUser ? (
                         <span
                           className="min-w-0 truncate text-muted-foreground"
-                          style={{ gridColumn: 'span 2' }}
                         >
                           <span className="typography-ui-label text-foreground">user:</span>{' '}
                           {userSnippet}
@@ -607,23 +590,18 @@ export const ContextPanelContent: React.FC = () => {
                             className={
                               isAssistant
                                 ? 'min-w-0 truncate text-muted-foreground'
-                                : 'typography-ui-label text-foreground'
-                            }
-                          >
-                            {isAssistant ? assistantLeft : otherLeft}
-                          </span>
-                          <span
-                            className={
-                              isAssistant
-                                ? 'text-right text-muted-foreground tabular-nums'
                                 : 'min-w-0 truncate text-muted-foreground'
                             }
                           >
-                            {isAssistant ? assistantMiddle : otherMiddle}
+                            {isAssistant ? assistantLeft : otherLabel}
                           </span>
+                          {isAssistant && (
+                            <span className="text-right text-muted-foreground tabular-nums">
+                              {assistantMiddle}
+                            </span>
+                          )}
                         </>
                       )}
-                      <span className="text-right font-mono text-muted-foreground">{shortId}</span>
                       <span className="text-right text-muted-foreground">{previewTime}</span>
                     </div>
                   </button>

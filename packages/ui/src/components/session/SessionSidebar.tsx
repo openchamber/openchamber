@@ -35,6 +35,7 @@ import { useStickyProjectHeaders } from './sidebar/hooks/useStickyProjectHeaders
 import { getGitHubPrStatusKey, usePrVisualSummaryByKeys, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 import { ProjectEditDialog } from '@/components/layout/ProjectEditDialog';
 import { UpdateDialog } from '@/components/ui/UpdateDialog';
+import { ShareOpinionDialog } from '@/components/feedback/ShareOpinionDialog';
 import { SessionGroupSection } from './sidebar/SessionGroupSection';
 import { SidebarHeader } from './sidebar/SidebarHeader';
 import { SidebarActivitySections } from './sidebar/SidebarActivitySections';
@@ -80,6 +81,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 
+const SHARE_OPINION_TOAST_STORAGE_KEY = 'openchamber.shareOpinionToast.dismissed.v2';
 const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
 const GROUP_COLLAPSE_STORAGE_KEY = 'oc.sessions.groupCollapse';
@@ -196,6 +198,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const newWorktreeDialogOpen = useUIStore((state) => state.isNewWorktreeDialogOpen);
   const setNewWorktreeDialogOpen = useUIStore((state) => state.setNewWorktreeDialogOpen);
   const [updateDialogOpen, setUpdateDialogOpen] = React.useState(false);
+  const [shareOpinionDialogOpen, setShareOpinionDialogOpen] = React.useState(false);
   const [openSidebarMenuKey, setOpenSidebarMenuKey] = React.useState<string | null>(null);
   const [renamingFolderId, setRenamingFolderId] = React.useState<string | null>(null);
   const [renameFolderDraft, setRenameFolderDraft] = React.useState('');
@@ -631,12 +634,23 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     [projects, editingProjectDialogId],
   );
 
-  const handleSaveProjectEdit = React.useCallback((data: { label: string; icon: string | null; color: string | null; iconBackground: string | null }) => {
+  const handleSaveProjectEdit = React.useCallback((data: {
+    label: string;
+    icon: string | null;
+    color: string | null;
+    iconBackground: string | null;
+    defaultModel: string | null;
+  }) => {
     if (!editingProjectDialogId) {
       return;
     }
-    updateProjectMeta(editingProjectDialogId, data);
-    setEditingProjectDialogId(null);
+    updateProjectMeta(editingProjectDialogId, {
+      label: data.label,
+      icon: data.icon,
+      color: data.color,
+      iconBackground: data.iconBackground,
+      defaultModel: data.defaultModel ?? null,
+    });
   }, [editingProjectDialogId, updateProjectMeta]);
 
   const openNewWorktreeDialog = React.useCallback(() => {
@@ -663,6 +677,36 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       setUpdateDialogOpen(true);
     });
   }, [t, updateStore]);
+
+  const handleOpenShareOpinionDialog = React.useCallback(() => {
+    setShareOpinionDialogOpen(true);
+  }, []);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    try {
+      if (window.localStorage.getItem(SHARE_OPINION_TOAST_STORAGE_KEY) === 'true') {
+        return;
+      }
+      window.localStorage.setItem(SHARE_OPINION_TOAST_STORAGE_KEY, 'true');
+    } catch {
+      // If storage is unavailable, still show once for this sidebar mount.
+    }
+    const timeoutId = window.setTimeout(() => {
+      toast.info(t('shareOpinion.toast.title'), {
+        description: t('shareOpinion.toast.description'),
+        action: {
+          label: t('shareOpinion.actions.shareOpinion'),
+          onClick: () => setShareOpinionDialogOpen(true),
+        },
+        duration: 12_000,
+      });
+    }, 1_000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [t]);
 
   const handleOpenSettings = React.useCallback(() => {
     if (mobileVariant) {
@@ -1648,8 +1692,14 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         onOpenShortcuts={toggleHelpDialog}
         onOpenAbout={() => setAboutDialogOpen(true)}
         onOpenUpdate={handleOpenUpdateDialog}
+        onOpenShareOpinion={handleOpenShareOpinionDialog}
         showRuntimeButtons={!isVSCode}
         showUpdateButton={showSidebarUpdateButton}
+      />
+
+      <ShareOpinionDialog
+        open={shareOpinionDialogOpen}
+        onOpenChange={setShareOpinionDialogOpen}
       />
 
       <UpdateDialog
@@ -1665,23 +1715,16 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         runtimeType={updateStore.runtimeType}
       />
 
-      {editingProject ? (
-        <ProjectEditDialog
-          open={Boolean(editingProject)}
-          onOpenChange={(open) => {
-            if (!open) {
-              setEditingProjectDialogId(null);
-            }
-          }}
-          projectId={editingProject.id}
-          projectName={editingProject.label || formatDirectoryName(editingProject.path, homeDirectory)}
-          projectPath={editingProject.path}
-          initialIcon={editingProject.icon}
-          initialColor={editingProject.color}
-          initialIconBackground={editingProject.iconBackground}
-          onSave={handleSaveProjectEdit}
-        />
-      ) : null}
+      <ProjectEditDialog
+        open={Boolean(editingProject)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingProjectDialogId(null);
+          }
+        }}
+        project={editingProject}
+        onSave={handleSaveProjectEdit}
+      />
 
       <NewWorktreeDialog
         open={newWorktreeDialogOpen}

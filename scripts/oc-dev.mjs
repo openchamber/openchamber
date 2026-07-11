@@ -44,7 +44,7 @@ const isMac = process.platform === 'darwin';
 function printHelp() {
   console.log(`Usage:
   bun run oc-dev [action] [options]
-  bun scripts/oc-dev.mjs [action] [options]
+  node scripts/oc-dev.mjs [action] [options]
 
 Actions:
   build-deploy-web                 Build web package and deploy
@@ -53,6 +53,7 @@ Actions:
   start-mobile-dev                 Start mobile app with dev server live reload
   mobile-tools                     Mobile build/sync/deploy helper menu
   start-electron-app               Start Electron app in dev mode
+  prepare-opencode-cli             Download/cache bundled OpenCode CLI for Electron
   build-electron-app               Build Electron app artifacts
   start-vscode-extension           Build + launch VS Code extension host
   install-vscode-extension-local   Build, package, and install local VSIX
@@ -66,12 +67,13 @@ Options:
   --web-mode <hmr|hmr-lan|full>
   --mobile-mode <ios-sim-local|ios-sim-lan|android-local|android-lan>
   --mobile-task <task>
+  --adb-address <host:port>        Wireless ADB address for android-connect
   --vsix-cleanup <delete|keep>
   --version <semver>
   -h, --help
 
 Mobile tasks:
-  build, sync, android-devices, android-deploy-usb, android-run, android-logcat,
+  build, sync, android-devices, android-connect, android-deploy-usb, android-run, android-logcat,
   ios-sim-build, ios-sim-run, ios-sim-serve, ios-sim-kill, ios-device-sync-debug
 `);
 }
@@ -113,6 +115,9 @@ function parseArgs(argv) {
         break;
       case '--mobile-task':
         options.mobileTask = readValue();
+        break;
+      case '--adb-address':
+        options.adbAddress = readValue();
         break;
       case '--vsix-cleanup':
         options.vsixCleanup = readValue();
@@ -168,6 +173,18 @@ function step(label, fn) {
   return result;
 }
 
+function printReleaseNextSteps(version) {
+  log.success(`Release v${version} prepared locally`);
+  log.info('Next steps:');
+  console.log(`  git add -A`);
+  console.log(`  git commit -m "release v${version}"`);
+  console.log(`  git tag v${version}`);
+  console.log(`  git push origin main --tags`);
+  console.log('');
+  console.log('This will trigger the GitHub Actions release workflow.');
+  console.log(`Make sure CHANGELOG.md contains a section like "## [${version}] - YYYY-MM-DD" before pushing.`);
+}
+
 function normalizeAction(action = '') {
   const normalized = action.toLowerCase();
   const aliases = {
@@ -180,6 +197,8 @@ function normalizeAction(action = '') {
     'mobile-menu': 'mobile-tools',
     'remote-deploy-web': 'remote-deploy-web',
     'electron-dev': 'start-electron-app',
+    'opencode-cli': 'prepare-opencode-cli',
+    'electron-opencode-cli': 'prepare-opencode-cli',
     'electron-build': 'build-electron-app',
     'vscode-dev': 'start-vscode-extension',
     'vscode-install-local': 'install-vscode-extension-local',
@@ -201,6 +220,29 @@ async function chooseValue(current, choices, message) {
     process.exit(130);
   }
   return value;
+}
+
+async function chooseText(current, message, placeholder) {
+  if (current) return current;
+  ensurePromptable();
+  const value = await text({ message, placeholder });
+  if (isCancel(value)) {
+    cancel('Operation cancelled.');
+    process.exit(130);
+  }
+  return value;
+}
+
+function validateAdbAddress(address) {
+  const normalized = String(address || '').trim();
+  if (!/^[^\s:]+:\d{1,5}$/.test(normalized)) {
+    throw new Error('Invalid wireless ADB address. Use host:port, e.g. 192.168.1.139:38181');
+  }
+  const port = Number(normalized.split(':').at(-1));
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error('Invalid wireless ADB port. Use a port between 1 and 65535.');
+  }
+  return normalized;
 }
 
 function detectLanIp() {
@@ -242,6 +284,11 @@ function resetDirectory(directory) {
 function installedWebCli(directory) {
   const cliPath = path.join(directory, 'node_modules', '@openchamber', 'web', 'bin', 'cli.js');
   return existsSync(cliPath) ? cliPath : '';
+}
+
+function installedGlobalWebCli() {
+  const bunInstall = process.env.BUN_INSTALL || path.join(os.homedir(), '.bun');
+  return installedWebCli(path.join(bunInstall, 'install', 'global'));
 }
 
 function stopInstalledInstance(directory, port) {
@@ -328,7 +375,11 @@ async function deployWeb(options, config) {
     run('bun', ['remove', '-g', 'openchamber'], { allowFail: true, label: 'remove openchamber' });
   });
   step('Installing package globally', () => run('bun', ['add', '-g', packageFile]));
-  step(`Starting global instance on ${GLOBAL_PORT}`, () => run('openchamber', ['--port', GLOBAL_PORT], { env: { OPENCHAMBER_UI_PASSWORD: process.env.OPENCHAMBER_PASSWORD || '', OPENCHAMBER_HOST: '0.0.0.0' } }));
+  step(`Starting global instance on ${GLOBAL_PORT}`, () => {
+    const cliPath = installedGlobalWebCli();
+    if (!cliPath) throw new Error('Global OpenChamber CLI was not installed by bun add -g');
+    run('node', [cliPath, '--port', GLOBAL_PORT], { env: { OPENCHAMBER_UI_PASSWORD: process.env.OPENCHAMBER_PASSWORD || '', OPENCHAMBER_HOST: '0.0.0.0' } });
+  });
 }
 
 async function deployRemoteWeb(options, config) {
@@ -429,6 +480,7 @@ async function mobileTools(options, config) {
     { value: 'build', label: 'Build mobile web assets' },
     { value: 'sync', label: 'Sync native projects' },
     { value: 'android-devices', label: 'Android: list USB devices' },
+    { value: 'android-connect', label: 'Android: connect wireless ADB device' },
     { value: 'android-deploy-usb', label: 'Android: rebuild + deploy to USB device' },
     { value: 'android-run', label: 'Android: install + launch existing APK' },
     { value: 'android-logcat', label: 'Android: logcat' },
@@ -450,6 +502,11 @@ async function mobileTools(options, config) {
     case 'build': return mobileRun('Building mobile web assets', 'build');
     case 'sync': return mobileRun('Syncing native projects', 'sync');
     case 'android-devices': return mobileRun('Listing Android USB devices', 'android:devices');
+    case 'android-connect': {
+      const address = validateAdbAddress(await chooseText(options.adbAddress, 'Enter wireless ADB address', '192.168.1.139:38181'));
+      step(`Connecting wireless ADB device at ${address}`, () => run('node', ['scripts/with-mobile-env.mjs', `adb connect ${quote(address)}`], { cwd: mobileCwd }));
+      return mobileRun('Listing Android devices', 'android:devices');
+    }
     case 'android-deploy-usb':
       mobileRun('Building Android debug APK', 'build:android:debug');
       return mobileRun('Installing and launching Android app on USB device', 'android:run');
@@ -474,10 +531,16 @@ async function mobileTools(options, config) {
 }
 
 function startElectronApp() {
+  prepareOpenCodeCli();
   run('bun', ['run', 'electron:dev']);
 }
 
+function prepareOpenCodeCli() {
+  step('Preparing bundled OpenCode CLI', () => run('bun', ['--filter', '@openchamber/electron', 'prepare:opencode-cli']));
+}
+
 function buildElectronApp() {
+  prepareOpenCodeCli();
   run('bun', ['run', 'electron:build'], { env: { CSC_IDENTITY_AUTO_DISCOVERY: 'false' } });
   const distDir = path.join(repoRoot, 'packages/electron/dist');
   if (!existsSync(distDir) || !isMac) return;
@@ -493,19 +556,27 @@ function startVsCodeExtension() {
 }
 
 async function installVsCodeExtensionLocal(options) {
-  const cleanup = await chooseValue(options.vsixCleanup, [
-    { value: 'delete', label: 'Delete VSIX after install' },
-    { value: 'keep', label: 'Keep VSIX after install' },
-  ], 'Select VSIX cleanup mode');
+  let cleanup = options.vsixCleanup;
+  if (!cleanup && isTty) {
+    cleanup = await chooseValue('', [
+      { value: 'delete', label: 'Delete VSIX after install' },
+      { value: 'keep', label: 'Keep VSIX after install' },
+    ], 'Select VSIX cleanup mode');
+  }
+  cleanup ||= 'delete';
+  if (!['delete', 'keep'].includes(cleanup)) throw new Error('Invalid --vsix-cleanup. Use delete or keep.');
+
   const vscodeDir = path.join(repoRoot, 'packages/vscode');
   step('Building VS Code extension', () => run('bun', ['run', '--cwd', 'packages/vscode', 'build']));
-  removeFilesByPrefixSuffix(vscodeDir, 'openchamber-', '.vsix');
+  step('Removing found VSIX package(s) before install flow', () => removeFilesByPrefixSuffix(vscodeDir, 'openchamber-', '.vsix'));
   step('Packaging VSIX', () => run('bunx', ['vsce', 'package', '--no-dependencies'], { cwd: vscodeDir }));
-  run('code', ['--uninstall-extension', 'fedaykindev.openchamber'], { label: 'uninstall old extension', allowFail: true });
-  const vsix = latestFileByExtensions(vscodeDir, ['.vsix']);
-  if (!vsix) throw new Error('VSIX package was not created.');
-  step('Installing VSIX locally', () => run('code', ['--install-extension', vsix]));
-  if (cleanup === 'delete') removeFilesByPrefixSuffix(vscodeDir, 'openchamber-', '.vsix');
+  step('Installing VSIX locally', () => {
+    run('code', ['--uninstall-extension', 'fedaykindev.openchamber'], { label: 'uninstall old extension', allowFail: true });
+    run('code --install-extension packages/vscode/openchamber-*.vsix', [], { shell: true, label: 'install VSIX' });
+  });
+  if (cleanup === 'delete') {
+    step('Removing local VSIX package(s) after install', () => removeFilesByPrefixSuffix(vscodeDir, 'openchamber-', '.vsix'));
+  }
 }
 
 async function createRelease(options) {
@@ -525,7 +596,7 @@ async function createRelease(options) {
   if (!/^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$/.test(version)) throw new Error('Invalid version format. Use semver, e.g. 1.4.7 or 1.4.7-beta.1');
   step('Validating codebase', () => run('bun', ['run', 'release:prepare']));
   step(`Bumping version to ${version}`, () => run('node', ['scripts/bump-version.mjs', version]));
-  log.success(`Release v${version} prepared locally`);
+  printReleaseNextSteps(version);
 }
 
 async function chooseAction(config) {
@@ -535,6 +606,7 @@ async function chooseAction(config) {
     { value: 'start-mobile-dev', label: 'Start mobile dev' },
     { value: 'mobile-tools', label: 'Mobile tools' },
     { value: 'start-electron-app', label: 'Start Electron app' },
+    { value: 'prepare-opencode-cli', label: 'Prepare bundled OpenCode CLI' },
     { value: 'build-electron-app', label: 'Build Electron app' },
     { value: 'start-vscode-extension', label: 'Start VS Code extension' },
     { value: 'install-vscode-extension-local', label: 'Install VS Code extension locally' },
@@ -580,6 +652,9 @@ async function main() {
       break;
     case 'start-electron-app':
       startElectronApp();
+      break;
+    case 'prepare-opencode-cli':
+      prepareOpenCodeCli();
       break;
     case 'build-electron-app':
       buildElectronApp();

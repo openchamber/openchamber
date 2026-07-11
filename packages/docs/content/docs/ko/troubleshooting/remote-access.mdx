@@ -12,6 +12,15 @@ description: 터널, 원격 인스턴스, 다른 기기에서 OpenChamber에 접
 - 같은 컴퓨터에서 `http://localhost:3000`을 먼저 엽니다. 이것이 실패하면 원격 문제가 아닙니다. [OpenCode 연결](/ko/troubleshooting/opencode-connection/)을 참고하세요
 - `openchamber status`로 서버가 실행 중인지 확인합니다
 
+## 페어링된 기기가 연결되지 않음
+
+- QR 코드/페어링 링크는 **일회용**입니다. 이미 스캔되었거나 만료되었다면 **기기 추가**에서 새로 만드세요
+- 기기를 **집 네트워크 전용**으로 페어링했다면 그 네트워크 밖에서는 연결할 수 없습니다. **어디서나**로 다시 페어링하세요
+- **어디서나** 페어링이라면 서버의 **Settings → Remote Instances → OpenChamber Relay**를 확인하세요. **연결됨**으로 표시되어야 하며, 아니라면 껐다가 다시 켜세요
+- 기기가 **해지**되었다면 토큰은 영구히 사라진 것입니다. 새 QR 코드로 다시 페어링하세요
+
+이 연결의 작동 방식은 [기기 연결](/ko/connect-devices/)과 [Private Relay](/ko/private-relay/)를 참고하세요.
+
 ## 터널 링크가 작동하지 않음
 
 - `openchamber tunnel status --all`을 실행합니다
@@ -34,5 +43,5 @@ OpenChamber를 리버스 프록시 뒤에 두었는데 이상하게 로드되거
 
 ## 관련 항목
 
-- [Tunnels](/ko/tunnels/) · [Remote Instances](/ko/remote-instances/) · [Reverse Proxy](/ko/reverse-proxy/)
+- [기기 연결](/ko/connect-devices/) · [Private Relay](/ko/private-relay/) · [Tunnels](/ko/tunnels/) · [Remote Instances](/ko/remote-instances/) · [Reverse Proxy](/ko/reverse-proxy/)
 - [Security](/ko/security/) — 노출하기 전에 UI를 보호하세요

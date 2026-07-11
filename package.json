@@ -1,6 +1,6 @@
 {
   "name": "openchamber-monorepo",
-  "version": "1.13.8",
+  "version": "1.15.0",
   "description": "OpenChamber monorepo workspace for web, ui, and desktop runtimes",
   "private": true,
   "type": "module",
@@ -22,7 +22,7 @@
   "license": "MIT",
   "scripts": {
     "dev": "node ./scripts/dev-web-hmr.mjs",
-    "oc-dev": "bun scripts/oc-dev.mjs",
+    "oc-dev": "node scripts/oc-dev.mjs",
     "build": "bun run --filter '*' build",
     "build:web": "bun run --cwd packages/web build",
     "build:ui": "bun run --cwd packages/ui build",
@@ -102,15 +102,12 @@
     "@codemirror/search": "^6.6.0",
     "@codemirror/state": "^6.5.4",
     "@codemirror/view": "6.39.13",
-    "@fontsource/ibm-plex-mono": "^5.2.7",
-    "@fontsource/ibm-plex-sans": "^5.1.1",
     "@heroui/scroll-shadow": "^2.3.18",
     "@heroui/system": "^2.4.23",
     "@heroui/theme": "^2.4.23",
-    "@ibm/plex": "^6.4.1",
     "@lezer/highlight": "^1.2.3",
     "@octokit/rest": "^22.0.1",
-    "@opencode-ai/sdk": "^1.17.12",
+    "@opencode-ai/sdk": "1.17.18",
     "@radix-ui/react-collapsible": "^1.1.12",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
@@ -177,5 +174,8 @@
     "typescript": "~5.9.0",
     "typescript-eslint": "^8.39.1",
     "vite": "^7.1.2"
+  },
+  "patchedDependencies": {
+    "@tanstack/virtual-core@3.17.3": "patches/@tanstack%2Fvirtual-core@3.17.3.patch"
   }
 }

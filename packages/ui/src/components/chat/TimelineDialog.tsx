@@ -7,6 +7,7 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionMessageRecords } from '@/sync/sync-context';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -22,6 +23,9 @@ interface TimelineDialogProps {
     onScrollToMessage?: (messageId: string) => void | Promise<boolean>;
     onScrollByTurnOffset?: (offset: number) => void;
     onResumeToLatest?: () => void;
+    canLoadEarlier?: boolean;
+    isLoadingEarlier?: boolean;
+    onLoadEarlier?: () => void;
 }
 
 export const TimelineDialog: React.FC<TimelineDialogProps> = ({
@@ -30,6 +34,9 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
     onScrollToMessage,
     onScrollByTurnOffset,
     onResumeToLatest,
+    canLoadEarlier = false,
+    isLoadingEarlier = false,
+    onLoadEarlier,
 }) => {
     const { t } = useI18n();
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
@@ -43,31 +50,31 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
     const [searchQuery, setSearchQuery] = React.useState('');
     const [selectedIndex, setSelectedIndex] = React.useState(0);
     const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
+    const listRef = React.useRef<HTMLDivElement | null>(null);
+    const pendingLoadAnchorRef = React.useRef<{ messageId: string; top: number } | null>(null);
+    const preservingLoadPositionRef = React.useRef(false);
+    const wasOpenRef = React.useRef(open);
 
-    const formatRelativeTime = React.useCallback((timestamp: number): string => {
-        const now = Date.now();
-        const diffMs = now - timestamp;
-        const diffSecs = Math.floor(diffMs / 1000);
-        const diffMins = Math.floor(diffSecs / 60);
-        const diffHours = Math.floor(diffMins / 60);
-        const diffDays = Math.floor(diffHours / 24);
+    const formatDateGroup = React.useCallback((timestamp: number): string => {
+        return new Date(timestamp).toLocaleDateString(getCurrentIntlLocale(), {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+        });
+    }, []);
 
-        if (diffSecs < 60) return t('chat.timeline.relative.justNow');
-        if (diffMins < 60) return t('chat.timeline.relative.minutesAgo', { count: diffMins });
-        if (diffHours < 24) return t('chat.timeline.relative.hoursAgo', { count: diffHours });
-        if (diffDays < 7) return t('chat.timeline.relative.daysAgo', { count: diffDays });
-        return new Date(timestamp).toLocaleDateString(getCurrentIntlLocale());
-    }, [t]);
+    const formatMessageTime = React.useCallback((timestamp: number): string => {
+        return new Date(timestamp).toLocaleTimeString(getCurrentIntlLocale(), {
+            hour: 'numeric',
+            minute: '2-digit',
+        });
+    }, []);
 
     // Timeline actions are only valid for user messages.
     const userMessages = React.useMemo(() => {
         return messages
             .filter((message) => message.info.role === 'user')
-            .map((message, index) => ({
-                message,
-                messageNumber: index + 1,
-            }))
-            .reverse();
+            .map((message) => ({ message }));
     }, [messages]);
 
     // Filter by search query using all text parts in each user message.
@@ -83,18 +90,88 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
     }, [userMessages, searchQuery]);
 
     React.useEffect(() => {
-        setSelectedIndex(0);
-    }, [filteredMessages]);
+        if (preservingLoadPositionRef.current) {
+            return;
+        }
+
+        setSelectedIndex(searchQuery.trim() ? 0 : Math.max(0, filteredMessages.length - 1));
+    }, [filteredMessages, searchQuery]);
 
     React.useEffect(() => {
         itemRefs.current = itemRefs.current.slice(0, filteredMessages.length);
     }, [filteredMessages.length]);
 
     React.useEffect(() => {
+        if (preservingLoadPositionRef.current) {
+            return;
+        }
+
         itemRefs.current[selectedIndex]?.scrollIntoView({
             block: 'nearest',
         });
     }, [selectedIndex]);
+
+    React.useEffect(() => {
+        if (!preservingLoadPositionRef.current || pendingLoadAnchorRef.current || isLoadingEarlier) {
+            return;
+        }
+
+        preservingLoadPositionRef.current = false;
+    }, [filteredMessages.length, isLoadingEarlier]);
+
+    React.useLayoutEffect(() => {
+        const wasOpen = wasOpenRef.current;
+        wasOpenRef.current = open;
+
+        if (!open || wasOpen || preservingLoadPositionRef.current || searchQuery.trim()) {
+            return;
+        }
+
+        const container = listRef.current;
+        if (!container) {
+            return;
+        }
+
+        container.scrollTop = container.scrollHeight;
+    }, [open, searchQuery]);
+
+    React.useLayoutEffect(() => {
+        const anchor = pendingLoadAnchorRef.current;
+        const container = listRef.current;
+        if (!anchor || !container || isLoadingEarlier) {
+            return;
+        }
+
+        pendingLoadAnchorRef.current = null;
+        const anchoredRow = itemRefs.current.find((row) => row?.dataset.timelineMessageId === anchor.messageId);
+        if (!anchoredRow) {
+            return;
+        }
+
+        const nextTop = anchoredRow.getBoundingClientRect().top - container.getBoundingClientRect().top;
+        container.scrollTop += nextTop - anchor.top;
+    }, [filteredMessages.length, isLoadingEarlier]);
+
+    const handleLoadEarlier = React.useCallback(() => {
+        const container = listRef.current;
+        if (container) {
+            const containerTop = container.getBoundingClientRect().top;
+            const firstVisibleRow = itemRefs.current.find((row) => {
+                if (!row) return false;
+                return row.getBoundingClientRect().bottom >= containerTop;
+            });
+
+            if (firstVisibleRow?.dataset.timelineMessageId) {
+                pendingLoadAnchorRef.current = {
+                    messageId: firstVisibleRow.dataset.timelineMessageId,
+                    top: firstVisibleRow.getBoundingClientRect().top - containerTop,
+                };
+            }
+        }
+
+        preservingLoadPositionRef.current = true;
+        onLoadEarlier?.();
+    }, [onLoadEarlier]);
 
     const navigateToMessage = React.useCallback(async (messageId: string) => {
         const didNavigate = await onScrollToMessage?.(messageId);
@@ -171,16 +248,40 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                     />
                 </div>
 
-                <div className="flex-1 overflow-y-auto">
+                {canLoadEarlier && onLoadEarlier && (
+                    <div className="flex justify-center py-1">
+                        <Button
+                            type="button"
+                            variant="link"
+                            size="sm"
+                            onClick={handleLoadEarlier}
+                            disabled={isLoadingEarlier}
+                            className="h-auto px-1 py-0 text-muted-foreground hover:text-foreground"
+                        >
+                            {isLoadingEarlier && (
+                                <Icon name="loader-4" className="size-4 animate-spin" />
+                            )}
+                            {t('chat.history.loadOlder')}
+                        </Button>
+                    </div>
+                )}
+
+                <div ref={listRef} className="flex-1 overflow-y-auto">
                     {filteredMessages.length === 0 ? (
                         <div className="text-center text-muted-foreground py-8">
                             {searchQuery ? t('chat.timeline.empty.search') : t('chat.timeline.empty.session')}
                         </div>
                     ) : (
-                        filteredMessages.map(({ message, messageNumber }, index) => {
+                        filteredMessages.map(({ message }, index) => {
                             const preview = getMessagePreview(message.parts);
                             const timestamp = message.info.time.created;
-                            const relativeTime = formatRelativeTime(timestamp);
+                            const dateGroup = formatDateGroup(timestamp);
+                            const previous = filteredMessages[index - 1];
+                            const previousDateGroup = previous
+                                ? formatDateGroup(previous.message.info.time.created)
+                                : null;
+                            const showDateGroup = dateGroup !== previousDateGroup;
+                            const messageTime = formatMessageTime(timestamp);
                             const isSelected = index === selectedIndex;
 
                             const snippet = searchQuery.trim()
@@ -188,82 +289,85 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                                 : null;
 
                             return (
-                                <div
-                                    key={message.info.id}
-                                    ref={(element) => {
-                                        itemRefs.current[index] = element;
-                                    }}
-                                    className={cn(
-                                        "group flex items-center gap-2 py-1.5 hover:bg-interactive-hover/30 rounded transition-colors cursor-pointer",
-                                        isSelected && "bg-interactive-selection text-interactive-selection-foreground"
+                                <React.Fragment key={message.info.id}>
+                                    {showDateGroup && (
+                                        <div className="sticky top-0 z-10 flex items-center gap-3 bg-background/95 py-2 backdrop-blur-sm">
+                                            <div className="h-px flex-1 bg-border/60" />
+                                            <span className="typography-meta text-muted-foreground">
+                                                {dateGroup}
+                                            </span>
+                                            <div className="h-px flex-1 bg-border/60" />
+                                        </div>
                                     )}
-                                    onClick={() => void navigateToMessage(message.info.id)}
-                                    onMouseEnter={() => setSelectedIndex(index)}
-                                >
-                                    <span className={cn(
-                                        "typography-meta w-5 text-right flex-shrink-0",
-                                        isSelected ? "text-interactive-selection-foreground/70" : "text-muted-foreground"
-                                    )}>
-                                        {messageNumber}.
-                                    </span>
-                                    <p className={cn(
-                                        "flex-1 min-w-0 typography-small truncate ml-0.5",
-                                        isSelected ? "text-interactive-selection-foreground" : "text-foreground"
-                                    )}>
-                                        {snippet ?? (preview || t('chat.timeline.noTextContent'))}
-                                        {!snippet && preview && preview.length >= 80 && '…'}
-                                    </p>
-
-                                    <div className="flex-shrink-0 h-5 flex items-center mr-2">
+                                    <div
+                                        ref={(element) => {
+                                            itemRefs.current[index] = element;
+                                        }}
+                                        data-timeline-message-id={message.info.id}
+                                        className={cn(
+                                            "group flex items-center gap-3 py-1.5 hover:bg-interactive-hover/30 rounded transition-colors cursor-pointer",
+                                            isSelected && "bg-interactive-selection text-interactive-selection-foreground"
+                                        )}
+                                        onClick={() => void navigateToMessage(message.info.id)}
+                                        onMouseEnter={() => setSelectedIndex(index)}
+                                    >
                                         <span className={cn(
-                                            "typography-meta whitespace-nowrap",
-                                            isSelected ? "text-interactive-selection-foreground/70" : "text-muted-foreground",
-                                            alwaysShowActions ? "hidden" : "group-hover:hidden"
+                                            "typography-meta w-16 flex-shrink-0 text-right tabular-nums",
+                                            isSelected ? "text-interactive-selection-foreground/70" : "text-muted-foreground"
                                         )}>
-                                            {relativeTime}
+                                            {messageTime}
                                         </span>
+                                        <p className={cn(
+                                            "flex-1 min-w-0 typography-small truncate",
+                                            isSelected ? "text-interactive-selection-foreground" : "text-foreground"
+                                        )}>
+                                            {snippet ?? (preview || t('chat.timeline.noTextContent'))}
+                                            {!snippet && preview && preview.length >= 80 && '…'}
+                                        </p>
 
-                                        <div className={cn("gap-1", alwaysShowActions ? "flex" : "hidden group-hover:flex")}>
-                                            <Tooltip>
-                                                <TooltipTrigger asChild>
-                                                    <button
-                                                        type="button"
-                                                        className="h-5 w-5 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
-                                                        onClick={async (e) => {
-                                                            e.stopPropagation();
-                                                            await revertToMessage(currentSessionId, message.info.id);
-                                                            onOpenChange(false);
-                                                        }}
-                                                    >
-                                                        <Icon name="arrow-go-back" className="h-4 w-4" />
-                                                    </button>
-                                                </TooltipTrigger>
-                                                <TooltipContent sideOffset={6}>{t('chat.timeline.actions.revertFromHere')}</TooltipContent>
-                                            </Tooltip>
+                                        <div className="flex-shrink-0 h-5 flex items-center mr-2">
+                                            <div className={cn("gap-1", alwaysShowActions ? "flex" : "hidden group-hover:flex")}>
+                                                <Tooltip>
+                                                    <TooltipTrigger asChild>
+                                                        <button
+                                                            type="button"
+                                                            className="h-5 w-5 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+                                                            onClick={async (e) => {
+                                                                e.stopPropagation();
+                                                                await revertToMessage(currentSessionId, message.info.id);
+                                                                onOpenChange(false);
+                                                            }}
+                                                        >
+                                                            <Icon name="arrow-go-back" className="h-4 w-4" />
+                                                        </button>
+                                                    </TooltipTrigger>
+                                                    <TooltipContent sideOffset={6}>{t('chat.timeline.actions.revertFromHere')}</TooltipContent>
+                                                </Tooltip>
 
-                                            <Tooltip>
-                                                <TooltipTrigger asChild>
-                                                    <button
-                                                        type="button"
-                                                        className="h-5 w-5 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            handleFork(message.info.id);
-                                                        }}
-                                                        disabled={forkingMessageId === message.info.id}
-                                                    >
-                                                        {forkingMessageId === message.info.id ? (
-                                                            <Icon name="loader-4" className="h-4 w-4 animate-spin" />
-                                                        ) : (
-                                                            <Icon name="git-branch" className="h-4 w-4" />
-                                                        )}
-                                                    </button>
-                                                </TooltipTrigger>
-                                                <TooltipContent sideOffset={6}>{t('chat.timeline.actions.forkFromHere')}</TooltipContent>
-                                            </Tooltip>
+                                                <Tooltip>
+                                                    <TooltipTrigger asChild>
+                                                        <button
+                                                            type="button"
+                                                            className="h-5 w-5 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleFork(message.info.id);
+                                                            }}
+                                                            disabled={forkingMessageId === message.info.id}
+                                                        >
+                                                            {forkingMessageId === message.info.id ? (
+                                                                <Icon name="loader-4" className="h-4 w-4 animate-spin" />
+                                                            ) : (
+                                                                <Icon name="git-branch" className="h-4 w-4" />
+                                                            )}
+                                                        </button>
+                                                    </TooltipTrigger>
+                                                    <TooltipContent sideOffset={6}>{t('chat.timeline.actions.forkFromHere')}</TooltipContent>
+                                                </Tooltip>
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
+                                </React.Fragment>
                             );
                         })
                     )}
