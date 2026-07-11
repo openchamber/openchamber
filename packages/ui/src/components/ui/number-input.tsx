@@ -218,7 +218,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
             onTouchStart={handleMobileTouchActivate(handleMobileDecrement)}
             onClick={handleMobileClickActivate(handleMobileDecrement)}
             className={cn(
-              "grid h-full min-h-0 w-9 place-items-center overflow-x-hidden overflow-y-hidden border-r border-border p-0 leading-none touch-none",
+              "grid h-full min-h-0 w-9 shrink-0 place-items-center overflow-x-hidden overflow-y-hidden border-r border-border p-0 leading-none touch-none",
               "text-muted-foreground",
               "disabled:pointer-events-none disabled:opacity-50",
               !decrementDisabled && "active:bg-interactive-hover"
@@ -229,7 +229,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
 
           <div
             className={cn(
-              "flex h-full min-w-0 w-14 items-center justify-center bg-transparent px-1.5",
+              "flex h-full min-w-0 flex-1 items-center justify-center bg-transparent px-1.5",
               "text-center text-[16px] leading-none text-foreground [font-variant-numeric:tabular-nums]",
               className
             )}
@@ -245,7 +245,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
             onTouchStart={handleMobileTouchActivate(handleMobileIncrement)}
             onClick={handleMobileClickActivate(handleMobileIncrement)}
             className={cn(
-              "grid h-full min-h-0 w-9 place-items-center overflow-x-hidden overflow-y-hidden border-l border-border p-0 leading-none touch-none",
+              "grid h-full min-h-0 w-9 shrink-0 place-items-center overflow-x-hidden overflow-y-hidden border-l border-border p-0 leading-none touch-none",
               "text-muted-foreground",
               "disabled:pointer-events-none disabled:opacity-50",
               !incrementDisabled && "active:bg-interactive-hover"
@@ -272,7 +272,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
           disabled={decrementDisabled}
           onClick={() => commitValue(baseValue - step)}
           className={cn(
-            "flex h-full w-7 items-center justify-center overflow-x-hidden overflow-y-hidden border-r border-border p-0 leading-none touch-manipulation",
+            "flex h-full w-7 shrink-0 items-center justify-center overflow-x-hidden overflow-y-hidden border-r border-border p-0 leading-none touch-manipulation",
             "text-muted-foreground hover:bg-interactive-hover hover:text-foreground",
             "disabled:pointer-events-none disabled:opacity-50",
             "transition-colors duration-150 ease-in-out"
@@ -294,7 +294,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
           autoCorrect="off"
           autoCapitalize="off"
           className={cn(
-            "h-full min-w-0 w-10 bg-transparent px-1.5 text-center typography-ui-label leading-none text-foreground [font-variant-numeric:tabular-nums]",
+            "h-full min-w-0 w-10 flex-1 bg-transparent px-1.5 text-center typography-ui-label leading-none text-foreground [font-variant-numeric:tabular-nums]",
             "placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground",
             "appearance-none outline-none [appearance:textfield] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
             "disabled:pointer-events-none disabled:cursor-not-allowed",
@@ -307,7 +307,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
           disabled={incrementDisabled}
           onClick={() => commitValue(baseValue + step)}
           className={cn(
-            "flex h-full w-7 items-center justify-center overflow-x-hidden overflow-y-hidden border-l border-border p-0 leading-none touch-manipulation",
+            "flex h-full w-7 shrink-0 items-center justify-center overflow-x-hidden overflow-y-hidden border-l border-border p-0 leading-none touch-manipulation",
             "text-muted-foreground hover:bg-interactive-hover hover:text-foreground",
             "disabled:pointer-events-none disabled:opacity-50",
             "transition-colors duration-150 ease-in-out"

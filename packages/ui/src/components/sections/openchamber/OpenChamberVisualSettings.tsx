@@ -47,6 +47,8 @@ import {
     SETTINGS_ICON_BUTTON_CLASS,
     SETTINGS_CONTROL_CLUSTER_CLASS,
     SETTINGS_CLUSTER_CONTROL_CLASS,
+    SETTINGS_NUMBER_STEPPER_ROW_CLASS,
+    SETTINGS_NUMBER_UNIT_CLASS,
     SETTINGS_FIELDS_STACK_CLASS,
     SETTINGS_OPTION_STACK_CLASS,
 } from '@/components/sections/shared/SettingsSection';
@@ -1203,17 +1205,16 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         label={t('settings.openchamber.visual.field.interfaceFontSize')}
                                         controlClassName="w-full"
                                     >
-                                        <div className="flex w-full min-w-0 items-center gap-2">
+                                        <div className={SETTINGS_NUMBER_STEPPER_ROW_CLASS}>
                                             <NumberInput
                                                 value={fontSize}
                                                 onValueChange={setFontSize}
                                                 min={50}
                                                 max={200}
                                                 step={5}
-                                                containerClassName="min-w-0 flex-1"
                                                 aria-label={t('settings.openchamber.visual.field.fontSizePercentageAria')}
                                             />
-                                            <span className="typography-meta text-muted-foreground tabular-nums">%</span>
+                                            <span className={SETTINGS_NUMBER_UNIT_CLASS}>%</span>
                                             <Button size="sm"
                                                 type="button"
                                                 variant="ghost"
@@ -1235,17 +1236,15 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         settingsItem="appearance.terminal-font-size"
                                         controlClassName="w-full"
                                     >
-                                        <div className="flex w-full min-w-0 items-center gap-2">
+                                        <div className={SETTINGS_NUMBER_STEPPER_ROW_CLASS}>
                                             <NumberInput
                                                 value={terminalFontSize}
                                                 onValueChange={setTerminalFontSize}
                                                 min={9}
                                                 max={52}
                                                 step={1}
-                                                containerClassName="min-w-0 flex-1"
-                                                className="w-16"
                                             />
-                                            <span className="typography-meta text-muted-foreground tabular-nums">px</span>
+                                            <span className={SETTINGS_NUMBER_UNIT_CLASS}>px</span>
                                             <Button size="sm"
                                                 type="button"
                                                 variant="ghost"
@@ -1269,17 +1268,15 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         settingsItem="appearance.spacing-density"
                                         controlClassName="w-full"
                                     >
-                                        <div className="flex w-full min-w-0 items-center gap-2">
+                                        <div className={SETTINGS_NUMBER_STEPPER_ROW_CLASS}>
                                             <NumberInput
                                                 value={padding}
                                                 onValueChange={setPadding}
                                                 min={50}
                                                 max={200}
                                                 step={5}
-                                                containerClassName="min-w-0 flex-1"
-                                                className="w-16"
                                             />
-                                            <span className="typography-meta text-muted-foreground tabular-nums">%</span>
+                                            <span className={SETTINGS_NUMBER_UNIT_CLASS}>%</span>
                                             <Button size="sm"
                                                 type="button"
                                                 variant="ghost"
@@ -1313,17 +1310,15 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         settingsItem="appearance.input-bar-offset"
                                         controlClassName="w-full"
                                     >
-                                        <div className="flex w-full min-w-0 items-center gap-2">
+                                        <div className={SETTINGS_NUMBER_STEPPER_ROW_CLASS}>
                                             <NumberInput
                                                 value={inputBarOffset}
                                                 onValueChange={setInputBarOffset}
                                                 min={0}
                                                 max={100}
                                                 step={5}
-                                                containerClassName="min-w-0 flex-1"
-                                                className="w-16"
                                             />
-                                            <span className="typography-meta text-muted-foreground tabular-nums">px</span>
+                                            <span className={SETTINGS_NUMBER_UNIT_CLASS}>px</span>
                                             <Button size="sm"
                                                 type="button"
                                                 variant="ghost"

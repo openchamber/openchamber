@@ -25,6 +25,16 @@ export const SETTINGS_CONTROL_CLUSTER_CLASS = 'w-full max-w-[28rem]';
 /** Fill a control cluster the same way as a full-width select. */
 export const SETTINGS_CLUSTER_CONTROL_CLASS = 'min-w-0 flex-1';
 
+/**
+ * Row wrapping a NumberInput + unit label + reset.
+ * Keep the stepper intrinsic — never flex-grow it or +/- buttons stretch unevenly.
+ */
+export const SETTINGS_NUMBER_STEPPER_ROW_CLASS = 'flex w-full min-w-0 items-center gap-2';
+
+/** Unit suffix next to a settings number stepper (%, px, …). */
+export const SETTINGS_NUMBER_UNIT_CLASS =
+  'typography-meta shrink-0 text-muted-foreground tabular-nums';
+
 /** Vertical stack spacing for fields inside a column. */
 export const SETTINGS_FIELDS_STACK_CLASS = 'space-y-3';
 
