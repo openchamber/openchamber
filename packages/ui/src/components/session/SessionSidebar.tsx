@@ -605,12 +605,23 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     [projects, editingProjectDialogId],
   );
 
-  const handleSaveProjectEdit = React.useCallback((data: { label: string; icon: string | null; color: string | null; iconBackground: string | null }) => {
+  const handleSaveProjectEdit = React.useCallback((data: {
+    label: string;
+    icon: string | null;
+    color: string | null;
+    iconBackground: string | null;
+    defaultModel: string | null;
+  }) => {
     if (!editingProjectDialogId) {
       return;
     }
-    updateProjectMeta(editingProjectDialogId, data);
-    setEditingProjectDialogId(null);
+    updateProjectMeta(editingProjectDialogId, {
+      label: data.label,
+      icon: data.icon,
+      color: data.color,
+      iconBackground: data.iconBackground,
+      defaultModel: data.defaultModel ?? null,
+    });
   }, [editingProjectDialogId, updateProjectMeta]);
 
   const openNewWorktreeDialog = React.useCallback(() => {
@@ -1675,23 +1686,16 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         runtimeType={updateStore.runtimeType}
       />
 
-      {editingProject ? (
-        <ProjectEditDialog
-          open={Boolean(editingProject)}
-          onOpenChange={(open) => {
-            if (!open) {
-              setEditingProjectDialogId(null);
-            }
-          }}
-          projectId={editingProject.id}
-          projectName={editingProject.label || formatDirectoryName(editingProject.path, homeDirectory)}
-          projectPath={editingProject.path}
-          initialIcon={editingProject.icon}
-          initialColor={editingProject.color}
-          initialIconBackground={editingProject.iconBackground}
-          onSave={handleSaveProjectEdit}
-        />
-      ) : null}
+      <ProjectEditDialog
+        open={Boolean(editingProject)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingProjectDialogId(null);
+          }
+        }}
+        project={editingProject}
+        onSave={handleSaveProjectEdit}
+      />
 
       <NewWorktreeDialog
         open={newWorktreeDialogOpen}

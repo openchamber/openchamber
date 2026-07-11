@@ -267,7 +267,7 @@ const ChatViewport = React.memo(({
                             </div>
                         )}
 
-                        <SessionRecapNote sessionId={currentSessionId} isMobile={isMobile} />
+                        <SessionRecapNote sessionId={currentSessionId} directory={directory} isMobile={isMobile} />
 
                         <div className="mb-3">
                             <StatusRowContainer />

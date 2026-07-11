@@ -22,6 +22,8 @@ interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
   isDesktopLocalOrigin: boolean;
   // macOS desktop shell — for controls that only render on darwin (e.g. dock badge).
   isMac: boolean;
+  // Windows desktop shell — for controls that only render on win32.
+  isWindows: boolean;
 }
 
 const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
@@ -173,10 +175,16 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['streaming', 'sse', 'websocket'],
   },
   {
-    id: 'chat.session-assist',
+    id: 'chat.session-recap',
     page: 'chat',
-    titleKey: 'settings.openchamber.visual.field.sessionAssist',
-    keywords: ['recap', 'suggestion', 'assist', 'small model', 'summary'],
+    titleKey: 'settings.openchamber.visual.field.sessionRecap',
+    keywords: ['recap', 'assist', 'small model', 'summary'],
+  },
+  {
+    id: 'chat.session-suggestion',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.sessionSuggestion',
+    keywords: ['suggestion', 'assist', 'small model', 'follow up'],
   },
   {
     id: 'chat.reasoning-traces',
@@ -201,6 +209,12 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.wideChatLayout',
     keywords: ['layout', 'wide', 'messages'],
+  },
+  {
+    id: 'chat.code-block-line-wrap',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.codeBlockLineWrap',
+    keywords: ['code', 'wrap', 'line wrap', 'markdown'],
   },
   {
     id: 'chat.inline-assistant-actions',
@@ -305,6 +319,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     descriptionKey: 'settings.openchamber.desktopNetwork.field.launchAtLoginDescription',
     keywords: ['desktop', 'startup', 'login'],
     isAvailable: (ctx) => ctx.isDesktopLocalOrigin,
+  },
+  {
+    id: 'sessions.desktop-minimize-to-tray',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.desktopNetwork.field.minimizeToTray',
+    descriptionKey: 'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription',
+    keywords: ['desktop', 'tray', 'system tray', 'minimize', 'close', 'background', 'windows'],
+    isAvailable: (ctx) => ctx.isDesktopLocalOrigin && ctx.isWindows,
   },
   {
     id: 'sessions.desktop-keep-awake',
@@ -423,7 +445,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'remote-instances',
     titleKey: 'settings.remoteInstances.clientAuth.title',
     descriptionKey: 'settings.remoteInstances.clientAuth.description',
-    keywords: ['pairing link', 'client token', 'connect desktop', 'remote access'],
+    keywords: ['pairing link', 'client token', 'connect desktop', 'remote access', 'relay', 'devices', 'connect from anywhere'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {

@@ -41,6 +41,20 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ isOpen, children, cl
   const openWidth = Math.min(RIGHT_SIDEBAR_MAX_WIDTH, Math.max(RIGHT_SIDEBAR_MIN_WIDTH, rightSidebarWidth || RIGHT_SIDEBAR_CONTENT_WIDTH));
   const appliedWidth = isOpen ? openWidth : 0;
 
+  React.useLayoutEffect(() => {
+    if (isResizing) {
+      return;
+    }
+
+    const sidebar = sidebarRef.current;
+    if (!sidebar) {
+      return;
+    }
+
+    sidebar.style.minWidth = '';
+    sidebar.style.maxWidth = '';
+  }, [isOpen, isResizing, openWidth]);
+
   const handlePointerDown = (event: React.PointerEvent) => {
     if (!isOpen) {
       return;

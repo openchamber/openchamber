@@ -181,6 +181,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.desktopKeepAwakeEnabled === 'boolean') {
       result.desktopKeepAwakeEnabled = candidate.desktopKeepAwakeEnabled;
     }
+    if (typeof candidate.desktopMinimizeToTrayEnabled === 'boolean') {
+      result.desktopMinimizeToTrayEnabled = candidate.desktopMinimizeToTrayEnabled;
+    }
     if (typeof candidate.desktopUiPassword === 'string') {
       result.desktopUiPassword = candidate.desktopUiPassword.trim();
     }
@@ -245,8 +248,11 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.showReasoningTraces === 'boolean') {
       result.showReasoningTraces = candidate.showReasoningTraces;
     }
-    if (typeof candidate.sessionAssistEnabled === 'boolean') {
-      result.sessionAssistEnabled = candidate.sessionAssistEnabled;
+    if (typeof candidate.sessionRecapEnabled === 'boolean') {
+      result.sessionRecapEnabled = candidate.sessionRecapEnabled;
+    }
+    if (typeof candidate.sessionSuggestionEnabled === 'boolean') {
+      result.sessionSuggestionEnabled = candidate.sessionSuggestionEnabled;
     }
     if (typeof candidate.collapsibleThinkingBlocks === 'boolean') {
       result.collapsibleThinkingBlocks = candidate.collapsibleThinkingBlocks;

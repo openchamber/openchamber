@@ -146,8 +146,15 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         webView.backgroundColor = .clear
         webView.scrollView.backgroundColor = .clear
         if #available(iOS 26.0, *) {
-            webView.scrollView.topEdgeEffect.isHidden = true
-            webView.scrollView.bottomEdgeEffect.isHidden = true
+            // KVC keeps this compiling with pre-26 SDKs, but the effect object is a
+            // UIScrollEdgeEffect — NOT a UIView — so it must be handled as a plain
+            // NSObject ("hidden" is the ObjC key behind isHidden). The previous
+            // `as? UIView` cast silently returned nil and left the system's dark
+            // edge band visible behind the status bar.
+            for key in ["topEdgeEffect", "bottomEdgeEffect"] {
+                guard webView.scrollView.responds(to: NSSelectorFromString(key)) else { continue }
+                (webView.scrollView.value(forKey: key) as? NSObject)?.setValue(true, forKey: "hidden")
+            }
         }
     }
 

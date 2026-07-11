@@ -72,6 +72,19 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
     };
   }, [open]);
 
+  // Synchronous close signal: this layout-effect cleanup runs inside the same
+  // React flush as the user click that closed the panel, so listeners (e.g.
+  // the keyboard-restore in ChatInput) can refocus an input while iOS still
+  // considers the gesture active — a deferred focus() would not raise the
+  // keyboard in an installed PWA.
+  React.useLayoutEffect(() => {
+    if (!open) return;
+    window.dispatchEvent(new Event('oc:mobile-overlay-opened'));
+    return () => {
+      window.dispatchEvent(new Event('oc:mobile-overlay-closed'));
+    };
+  }, [open]);
+
   React.useEffect(() => {
     if (!open) {
       return;
