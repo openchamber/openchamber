@@ -1,4 +1,4 @@
-import { patchSessionMetadata } from '@/sync/session-actions';
+import { abortCurrentOperation, patchSessionMetadata } from '@/sync/session-actions';
 import {
   SESSION_GOAL_OBJECTIVE_CHAR_LIMIT,
   type SessionGoalPayload,
@@ -87,6 +87,12 @@ export async function setSessionGoalStatus(
   directory: string | undefined,
   status: Extract<SessionGoalStatus, 'active' | 'paused' | 'complete'>,
 ): Promise<void> {
+  // Pausing a goal also stops the agent's current turn — same mental model
+  // as the stop button, expressed through goal control. A no-op when the
+  // session is already idle.
+  if (status === 'paused') {
+    void abortCurrentOperation(sessionId);
+  }
   await writeGoal(sessionId, directory, (currentGoal) => {
     if (!currentGoal) return null;
     return {
