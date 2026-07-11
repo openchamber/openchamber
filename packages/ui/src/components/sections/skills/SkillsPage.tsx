@@ -9,7 +9,12 @@ import { useSkillsStore, type SkillConfig, type SkillScope, type SupportingFile,
 import { useShallow } from 'zustand/react/shallow';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
-import { SettingsSection } from '@/components/sections/shared/SettingsSection';
+import {
+  SettingsSection,
+  SettingsFieldRow,
+  SettingsStackedField,
+  SETTINGS_SELECT_SIZE,
+} from '@/components/sections/shared/SettingsSection';
 import {
   Select,
   SelectContent,
@@ -524,66 +529,69 @@ const SkillsInstalledPage: React.FC = () => {
         >
 
             {isNewSkill && (
-              <div className="py-1.5">
-                <span className="typography-ui-label text-foreground">{t('settings.skills.page.field.skillNameLocation')}</span>
-                <span className="typography-meta text-muted-foreground ml-2">{t('settings.skills.page.field.skillNameHint')}</span>
-                <div className="flex items-center gap-2 mt-1.5">
-                  <Input
-                    value={draftName}
-                    onChange={(e) => setDraftName(e.target.value.toLowerCase().replace(/\s+/g, '-'))}
-                    placeholder={t('settings.skills.page.field.skillNamePlaceholder')}
-                    className="h-7 w-40 px-2"
-                  />
-                  <Select
-                    value={locationValueFrom(draftScope, draftSource)}
-                    onValueChange={(v) => {
-                      const next = locationPartsFrom(v as SkillLocationValue);
-                      setDraftScope(next.scope);
-                      setDraftSource(next.source === 'agents' ? 'agents' : 'opencode');
-                    }}
-                  >
-                    <SelectTrigger className="w-fit gap-1.5">
-                      {draftScope === 'user' ? (
-                        <Icon name="user-3" className="h-3.5 w-3.5" />
-                      ) : (
-                        <Icon name="folder" className="h-3.5 w-3.5" />
-                      )}
-                      {draftSource === 'agents' ? <Icon name="robot-2" className="h-3.5 w-3.5" /> : null}
-                      <span>{locationLabelText(locationValueFrom(draftScope, draftSource))}</span>
-                    </SelectTrigger>
-                    <SelectContent align="start">
-                      {SKILL_LOCATION_OPTIONS.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          <div className="flex flex-col gap-0.5">
-                            <div className="flex items-center gap-2">
-                              {option.scope === 'user' ? <Icon name="user-3" className="h-3.5 w-3.5" /> : <Icon name="folder" className="h-3.5 w-3.5" />}
-                              {option.source === 'agents' ? <Icon name="robot-2" className="h-3.5 w-3.5" /> : null}
-                              <span>{locationLabelText(option.value)}</span>
-                            </div>
-                            <span className="typography-micro text-muted-foreground ml-6">{locationDescriptionText(option.value)}</span>
+              <SettingsFieldRow
+                label={t('settings.skills.page.field.skillNameLocation')}
+                description={t('settings.skills.page.field.skillNameHint')}
+              >
+                <Input
+                  value={draftName}
+                  onChange={(e) => setDraftName(e.target.value.toLowerCase().replace(/\s+/g, '-'))}
+                  placeholder={t('settings.skills.page.field.skillNamePlaceholder')}
+                  className="h-7 w-40 px-2"
+                />
+                <Select
+                  value={locationValueFrom(draftScope, draftSource)}
+                  onValueChange={(v) => {
+                    const next = locationPartsFrom(v as SkillLocationValue);
+                    setDraftScope(next.scope);
+                    setDraftSource(next.source === 'agents' ? 'agents' : 'opencode');
+                  }}
+                >
+                  <SelectTrigger size={SETTINGS_SELECT_SIZE} className="w-fit gap-1.5">
+                    {draftScope === 'user' ? (
+                      <Icon name="user-3" className="h-3.5 w-3.5" />
+                    ) : (
+                      <Icon name="folder" className="h-3.5 w-3.5" />
+                    )}
+                    {draftSource === 'agents' ? <Icon name="robot-2" className="h-3.5 w-3.5" /> : null}
+                    <span>{locationLabelText(locationValueFrom(draftScope, draftSource))}</span>
+                  </SelectTrigger>
+                  <SelectContent align="start">
+                    {SKILL_LOCATION_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        <div className="flex flex-col gap-0.5">
+                          <div className="flex items-center gap-2">
+                            {option.scope === 'user' ? <Icon name="user-3" className="h-3.5 w-3.5" /> : <Icon name="folder" className="h-3.5 w-3.5" />}
+                            {option.source === 'agents' ? <Icon name="robot-2" className="h-3.5 w-3.5" /> : null}
+                            <span>{locationLabelText(option.value)}</span>
                           </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
+                          <span className="typography-micro text-muted-foreground ml-6">{locationDescriptionText(option.value)}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </SettingsFieldRow>
             )}
 
-            <div className="py-1.5">
-              <span className="typography-ui-label text-foreground">{t('settings.common.field.description')} <span className="text-[var(--status-error)]">*</span></span>
-              <span className="typography-meta text-muted-foreground ml-2">{t('settings.skills.page.field.descriptionHint')}</span>
-              <div className="mt-1.5">
-                <Textarea
-                  value={description}
-                  onChange={(e) => handleDescriptionChange(e.target.value)}
-                  placeholder={t('settings.skills.page.field.descriptionPlaceholder')}
-                  rows={2}
-                  className="w-full resize-none min-h-[60px] max-h-32 bg-transparent"
-                  disabled={isReadOnlySkill}
-                />
-              </div>
-            </div>
+            <SettingsStackedField
+              label={(
+                <>
+                  {t('settings.common.field.description')} <span className="text-[var(--status-error)]">*</span>
+                </>
+              )}
+              description={t('settings.skills.page.field.descriptionHint')}
+              controlClassName="w-full"
+            >
+              <Textarea
+                value={description}
+                onChange={(e) => handleDescriptionChange(e.target.value)}
+                placeholder={t('settings.skills.page.field.descriptionPlaceholder')}
+                rows={2}
+                className="w-full resize-none min-h-[60px] max-h-32 bg-transparent"
+                disabled={isReadOnlySkill}
+              />
+            </SettingsStackedField>
 
         </SettingsSection>
 
@@ -681,7 +689,7 @@ const SkillsInstalledPage: React.FC = () => {
             })()}
         </SettingsSection>
 
-        <div className="pb-8">
+        <SettingsSection>
           <Button
             onClick={handleSave}
             disabled={isReadOnlySkill || isSaving || !hasSkillChanges}
@@ -690,7 +698,7 @@ const SkillsInstalledPage: React.FC = () => {
           >
             {isSaving ? t('settings.common.actions.saving') : isNewSkill ? t('settings.skills.page.actions.createSkill') : t('settings.common.actions.saveChanges')}
           </Button>
-        </div>
+        </SettingsSection>
       </SettingsPageLayout>
 
 

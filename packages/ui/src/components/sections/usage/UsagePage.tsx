@@ -1,5 +1,4 @@
 import React from 'react';
-import { Checkbox } from '@/components/ui/checkbox';
 import { UsageCard } from './UsageCard';
 import { QUOTA_PROVIDERS } from '@/lib/quota';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
@@ -18,7 +17,10 @@ import { useI18n } from '@/lib/i18n';
 import { formatTimeForPreference } from '@/lib/timeFormat';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
-import { SettingsSection } from '@/components/sections/shared/SettingsSection';
+import {
+  SettingsSection,
+  SettingsCheckboxRow,
+} from '@/components/sections/shared/SettingsSection';
 
 const formatTime = (timestamp: number | null, timeFormatPreference: TimeFormatPreference) => {
   if (!timestamp) return '-';
@@ -154,7 +156,7 @@ export const UsagePage: React.FC = () => {
       title={(
         <div className="flex items-center gap-3 min-w-0">
           <ProviderLogo providerId={selectedProviderId} className="h-5 w-5 shrink-0" />
-          <h1 className="typography-ui-header font-semibold text-foreground truncate">
+          <h1 className="typography-settings-title text-foreground truncate">
             {t('settings.usage.page.header.providerUsage', { provider: providerName })}
           </h1>
         </div>
@@ -169,26 +171,12 @@ export const UsagePage: React.FC = () => {
       showSaveStatus
     >
       <SettingsSection divider={false} settingsItem="usage.header-menu">
-        <div
-          className="group flex cursor-pointer items-center gap-2 py-1.5"
-          role="button"
-          tabIndex={0}
-          aria-pressed={showInDropdown}
-          onClick={() => handleDropdownToggle(!showInDropdown)}
-          onKeyDown={(event) => {
-            if (event.key === ' ' || event.key === 'Enter') {
-              event.preventDefault();
-              handleDropdownToggle(!showInDropdown);
-            }
-          }}
-        >
-          <Checkbox
-            checked={showInDropdown}
-            onChange={handleDropdownToggle}
-            ariaLabel={t('settings.usage.page.options.showInHeaderAria')}
-          />
-          <div className="flex min-w-0 items-center gap-1.5">
-            <span className="typography-ui-label text-foreground">{t('settings.usage.page.options.showInHeader')}</span>
+        <SettingsCheckboxRow
+          checked={showInDropdown}
+          onChange={handleDropdownToggle}
+          label={t('settings.usage.page.options.showInHeader')}
+          ariaLabel={t('settings.usage.page.options.showInHeaderAria')}
+          labelAccessory={(
             <Tooltip>
               <TooltipTrigger asChild>
                 <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
@@ -197,34 +185,28 @@ export const UsagePage: React.FC = () => {
                 {t('settings.usage.page.options.showInHeaderTooltip')}
               </TooltipContent>
             </Tooltip>
-          </div>
-        </div>
+          )}
+        />
       </SettingsSection>
 
       {!selectedResult && (
-        <SettingsSection>
-          <p className="typography-ui-label text-foreground">{t('settings.usage.page.state.noData')}</p>
-        </SettingsSection>
+        <p className="typography-ui-label text-foreground pb-8">{t('settings.usage.page.state.noData')}</p>
       )}
 
       {error && (
-        <SettingsSection>
-          <div className="rounded-lg border border-[var(--status-error-border)] bg-[var(--status-error-background)] px-4 py-3">
-            <p className="typography-ui-label font-medium text-[var(--status-error)]">{t('settings.usage.page.state.refreshFailedTitle')}</p>
-            <p className="typography-meta text-[var(--status-error)]/80 mt-1">{error}</p>
-          </div>
-        </SettingsSection>
+        <div className="mb-8 rounded-lg border border-[var(--status-error-border)] bg-[var(--status-error-background)] px-4 py-3">
+          <p className="typography-ui-label font-medium text-[var(--status-error)]">{t('settings.usage.page.state.refreshFailedTitle')}</p>
+          <p className="typography-meta text-[var(--status-error)]/80 mt-1">{error}</p>
+        </div>
       )}
 
       {selectedResult && !selectedResult.configured && (
-        <SettingsSection>
-          <div className="rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-background)] px-4 py-3">
-            <p className="typography-ui-label font-medium text-[var(--status-warning)]">{t('settings.usage.page.state.providerNotConfiguredTitle')}</p>
-            <p className="typography-meta text-[var(--status-warning)]/80 mt-1">
-              {t('settings.usage.page.state.providerNotConfiguredDescription')}
-            </p>
-          </div>
-        </SettingsSection>
+        <div className="mb-8 rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-background)] px-4 py-3">
+          <p className="typography-ui-label font-medium text-[var(--status-warning)]">{t('settings.usage.page.state.providerNotConfiguredTitle')}</p>
+          <p className="typography-meta text-[var(--status-warning)]/80 mt-1">
+            {t('settings.usage.page.state.providerNotConfiguredDescription')}
+          </p>
+        </div>
       )}
 
       {usage?.windows && Object.keys(usage.windows).length > 0 && (
@@ -350,10 +332,10 @@ export const UsagePage: React.FC = () => {
 
       {selectedResult?.configured && usage && Object.keys(usage.windows ?? {}).length === 0 &&
         providerModels.length === 0 && (
-        <SettingsSection>
+        <div className="pb-8">
           <p className="typography-ui-label text-foreground">{t('settings.usage.page.state.noQuotaWindowsTitle')}</p>
           <p className="typography-meta text-muted-foreground mt-1">{t('settings.usage.page.state.noQuotaWindowsDescription')}</p>
-        </SettingsSection>
+        </div>
       )}
     </SettingsPageLayout>
   );

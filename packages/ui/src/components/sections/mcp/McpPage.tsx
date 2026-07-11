@@ -24,7 +24,14 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { cn } from '@/lib/utils';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
-import { SettingsSection } from '@/components/sections/shared/SettingsSection';
+import {
+  SettingsSection,
+  SettingsFieldRow,
+  SettingsCheckboxRow,
+  SettingsStackedField,
+  SettingsChipGroup,
+  SETTINGS_SELECT_SIZE,
+} from '@/components/sections/shared/SettingsSection';
 import { MCP_OAUTH_CALLBACK_PATH, parseMcpOAuthCallbackContext, parseMcpOAuthCallbackStateKey } from '@/components/sections/mcp/mcpOAuth';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
@@ -1328,7 +1335,7 @@ export const McpPage: React.FC = () => {
       <SettingsPageLayout
         title={isNewServer ? t('settings.mcp.page.header.newServer') : (
           <div className="flex items-center gap-2 min-w-0">
-            <h1 className="typography-ui-header font-semibold text-foreground truncate">{selectedMcpName}</h1>
+            <h1 className="typography-settings-title text-foreground truncate">{selectedMcpName}</h1>
             <StatusBadge status={effectiveRuntimeStatus?.status} enabled={enabled} getStatusLabel={getStatusLabel} variant="pill" />
           </div>
         )}
@@ -1392,7 +1399,7 @@ export const McpPage: React.FC = () => {
 
         {/* Runtime Status - Simplified for connected, expanded for errors */}
         {!isNewServer && shouldShowFullStatusCard(effectiveRuntimeStatus?.status, authUrl, needsAuthorization, isAuthPolling) && (
-          <div className="pb-8">
+          <SettingsSection divider={false}>
             <div className={cn('rounded-lg border p-3', statusCardClass(effectiveRuntimeStatus?.status))}>
               <div className="space-y-4">
                 <div className="min-w-0 space-y-1">
@@ -1482,7 +1489,7 @@ export const McpPage: React.FC = () => {
                 </p>
               )}
             </div>
-          </div>
+          </SettingsSection>
         )}
 
         <SettingsSection
@@ -1493,11 +1500,7 @@ export const McpPage: React.FC = () => {
         >
 
             {isNewServer && (
-              <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
-                <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-                  <span className="typography-ui-label text-foreground">{t('settings.mcp.page.server.name')}</span>
-                </div>
-                <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
+              <SettingsFieldRow label={t('settings.mcp.page.server.name')}>
                   <Input
                     value={draftName}
                     onChange={(e) => setDraftName(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, '-'))}
@@ -1506,7 +1509,7 @@ export const McpPage: React.FC = () => {
                     autoFocus
                   />
                   <Select value={draftScope} onValueChange={(value) => setDraftScope(value as McpScope)}>
-                    <SelectTrigger className="!h-7 !w-7 !min-w-0 !px-0 !py-0 justify-center [&>svg:last-child]:hidden" title={draftScope === 'user' ? t('settings.common.scope.global') : t('settings.common.scope.project')}>
+                    <SelectTrigger size={SETTINGS_SELECT_SIZE} className="!h-7 !w-7 !min-w-0 !px-0 !py-0 justify-center [&>svg:last-child]:hidden" title={draftScope === 'user' ? t('settings.common.scope.global') : t('settings.common.scope.project')}>
                       {draftScope === 'user' ? <Icon name="user-3" className="h-3.5 w-3.5" /> : <Icon name="folder" className="h-3.5 w-3.5" />}
                     </SelectTrigger>
                     <SelectContent align="end">
@@ -1524,8 +1527,7 @@ export const McpPage: React.FC = () => {
                       </SelectItem>
                     </SelectContent>
                   </Select>
-                </div>
-              </div>
+              </SettingsFieldRow>
             )}
 
             {/* Import JSON - prominent placement for new servers */}
@@ -1545,52 +1547,24 @@ export const McpPage: React.FC = () => {
               </div>
             )}
 
-            <div
-              className="group flex cursor-pointer items-center gap-2 py-1.5"
-              role="button"
-              tabIndex={0}
-              aria-pressed={enabled}
-              onClick={() => setEnabled(!enabled)}
-              onKeyDown={(event) => {
-                if (event.key === ' ' || event.key === 'Enter') {
-                  event.preventDefault();
-                  setEnabled(!enabled);
-                }
-              }}
-            >
-              <Checkbox
-                checked={enabled}
-                onChange={setEnabled}
-                ariaLabel={t('settings.mcp.page.server.enableAria')}
-              />
-              <span className="typography-ui-label text-foreground">{t('settings.mcp.page.server.enable')}</span>
-            </div>
+            <SettingsCheckboxRow
+              checked={enabled}
+              onChange={setEnabled}
+              label={t('settings.mcp.page.server.enable')}
+              ariaLabel={t('settings.mcp.page.server.enableAria')}
+            />
 
-            <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
-              <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-                <span className="typography-ui-label text-foreground">{t('settings.mcp.page.server.transportMode')}</span>
-                <div className="flex flex-wrap items-center gap-1">
-                  <Button
-                    variant="chip"
-                    size="xs"
-                    aria-pressed={mcpType === 'local'}
-                    onClick={() => setMcpType('local')}
-                    className="!font-normal"
-                  >
-                    {t('settings.mcp.page.transport.local')}
-                  </Button>
-                  <Button
-                    variant="chip"
-                    size="xs"
-                    aria-pressed={mcpType === 'remote'}
-                    onClick={() => setMcpType('remote')}
-                    className="!font-normal"
-                  >
-                    {t('settings.mcp.page.transport.remote')}
-                  </Button>
-                </div>
-              </div>
-            </div>
+            <SettingsStackedField label={t('settings.mcp.page.server.transportMode')}>
+              <SettingsChipGroup
+                aria-label={t('settings.mcp.page.server.transportMode')}
+                value={mcpType}
+                onChange={setMcpType}
+                options={[
+                  { value: 'local', label: t('settings.mcp.page.transport.local') },
+                  { value: 'remote', label: t('settings.mcp.page.transport.remote') },
+                ]}
+              />
+            </SettingsStackedField>
 
         </SettingsSection>
 

@@ -9,7 +9,12 @@ import { Icon } from '@/components/icon/Icon';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useI18n } from '@/lib/i18n';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
-import { SettingsSection } from '@/components/sections/shared/SettingsSection';
+import {
+  SettingsSection,
+  SettingsFieldRow,
+  SettingsStackedField,
+  SETTINGS_SELECT_SIZE,
+} from '@/components/sections/shared/SettingsSection';
 
 export const SnippetsPage: React.FC = () => {
   const { t } = useI18n();
@@ -123,30 +128,42 @@ export const SnippetsPage: React.FC = () => {
       description={selectedSnippet ? selectedSnippet.filePath : undefined}
       showSaveStatus={false}
     >
-      <SettingsSection divider={false} contentClassName="space-y-3">
-        <div>
-          {isNew ? (
-            <div className="mb-3 flex items-center gap-2">
-              <span className="typography-ui-label text-foreground">#</span>
-              <Input value={draftName} onChange={(e) => setDraftName(e.target.value)} placeholder={t('settings.snippets.page.field.namePlaceholder')} className="h-7 w-44 px-2" />
-              <Select value={draftScope} onValueChange={(value) => setDraftScope(value as SnippetScope)}>
-                <SelectTrigger className="w-fit min-w-[100px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent align="end">
-                  <SelectItem value="global">{t('settings.common.scope.global')}</SelectItem>
-                  <SelectItem value="project">{t('settings.common.scope.project')}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          ) : null}
-          <span className="typography-ui-label text-foreground">{t('settings.common.field.description')}</span>
-          <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder={t('settings.snippets.page.field.descriptionPlaceholder')} className="mt-1.5 h-7 w-full max-w-sm px-2" />
-        </div>
-        <div>
-          <span className="typography-ui-label text-foreground">{t('settings.snippets.page.field.aliases')}</span>
-          <Input value={aliases} onChange={(e) => setAliases(e.target.value)} placeholder={t('settings.snippets.page.field.aliasesPlaceholder')} className="mt-1.5 h-7 w-full max-w-sm px-2" />
-        </div>
+      <SettingsSection divider={false} contentClassName="space-y-0">
+        {isNew ? (
+          <SettingsFieldRow label="#">
+            <Input
+              value={draftName}
+              onChange={(e) => setDraftName(e.target.value)}
+              placeholder={t('settings.snippets.page.field.namePlaceholder')}
+              className="h-7 w-44 px-2"
+            />
+            <Select value={draftScope} onValueChange={(value) => setDraftScope(value as SnippetScope)}>
+              <SelectTrigger size={SETTINGS_SELECT_SIZE} className="w-fit min-w-[100px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="end">
+                <SelectItem value="global">{t('settings.common.scope.global')}</SelectItem>
+                <SelectItem value="project">{t('settings.common.scope.project')}</SelectItem>
+              </SelectContent>
+            </Select>
+          </SettingsFieldRow>
+        ) : null}
+        <SettingsStackedField label={t('settings.common.field.description')}>
+          <Input
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder={t('settings.snippets.page.field.descriptionPlaceholder')}
+            className="h-7 w-full max-w-sm px-2"
+          />
+        </SettingsStackedField>
+        <SettingsStackedField label={t('settings.snippets.page.field.aliases')}>
+          <Input
+            value={aliases}
+            onChange={(e) => setAliases(e.target.value)}
+            placeholder={t('settings.snippets.page.field.aliasesPlaceholder')}
+            className="h-7 w-full max-w-sm px-2"
+          />
+        </SettingsStackedField>
       </SettingsSection>
 
       <SettingsSection settingsItem="snippets.content">

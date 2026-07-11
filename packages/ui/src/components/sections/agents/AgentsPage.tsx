@@ -8,7 +8,6 @@ import { useAgentsStore, type AgentConfig, type AgentMutationResult, type AgentS
 import { useShallow } from 'zustand/react/shallow';
 import { useDirectorySync } from '@/sync/sync-context';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { useDeviceInfo } from '@/lib/device';
 import { opencodeClient } from '@/lib/opencode/client';
 import { cn } from '@/lib/utils';
 import { ModelSelector } from './ModelSelector';
@@ -17,7 +16,14 @@ import { useI18n } from '@/lib/i18n';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
-import { SettingsSection } from '@/components/sections/shared/SettingsSection';
+import {
+  SettingsSection,
+  SettingsFieldRow,
+  SettingsStackedField,
+  SettingsChipGroup,
+  SETTINGS_SELECT_SIZE,
+  SETTINGS_ICON_BUTTON_CLASS,
+} from '@/components/sections/shared/SettingsSection';
 import {
   Select,
   SelectContent,
@@ -217,7 +223,6 @@ const getVariantOptionsForModel = (
 };
 export const AgentsPage: React.FC = () => {
   const { t } = useI18n();
-  const { isMobile } = useDeviceInfo();
   const providers = useConfigStore((state) => state.providers) as AgentVariantProvider[];
   const {
     selectedAgentName,
@@ -688,60 +693,59 @@ export const AgentsPage: React.FC = () => {
         contentClassName="space-y-0"
       >
         {isNewAgent && (
-          <div data-settings-item="agents.name" className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
-            <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-              <span className="typography-ui-label text-foreground">{t('settings.agents.page.field.agentName')}</span>
+          <SettingsFieldRow
+            settingsItem="agents.name"
+            label={t('settings.agents.page.field.agentName')}
+          >
+            <div className="flex items-center">
+              <span className="typography-ui-label text-muted-foreground mr-1">@</span>
+              <Input
+                value={draftName}
+                onChange={(e) => setDraftName(e.target.value)}
+                placeholder={t('settings.agents.page.field.agentNamePlaceholder')}
+                className="h-7 w-40 px-2"
+              />
             </div>
-            <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
-              <div className="flex items-center">
-                <span className="typography-ui-label text-muted-foreground mr-1">@</span>
-                <Input
-                  value={draftName}
-                  onChange={(e) => setDraftName(e.target.value)}
-                  placeholder={t('settings.agents.page.field.agentNamePlaceholder')}
-                  className="h-7 w-40 px-2"
-                />
-              </div>
-              <Select value={draftScope} onValueChange={(v) => setDraftScope(v as AgentScope)}>
-                <SelectTrigger className="w-fit min-w-[100px]">
-                  <SelectValue placeholder={t('settings.agents.page.field.scopePlaceholder')} />
-                </SelectTrigger>
-                <SelectContent align="end">
-                  <SelectItem value="user">
-                    <div className="flex items-center gap-2">
-                      <Icon name="user-3" className="h-3.5 w-3.5" />
-                      <span>{t('settings.common.scope.global')}</span>
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="project">
-                    <div className="flex items-center gap-2">
-                      <Icon name="folder" className="h-3.5 w-3.5" />
-                      <span>{t('settings.common.scope.project')}</span>
-                    </div>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+            <Select value={draftScope} onValueChange={(v) => setDraftScope(v as AgentScope)}>
+              <SelectTrigger size={SETTINGS_SELECT_SIZE} className="w-fit min-w-[100px]">
+                <SelectValue placeholder={t('settings.agents.page.field.scopePlaceholder')} />
+              </SelectTrigger>
+              <SelectContent align="end">
+                <SelectItem value="user">
+                  <div className="flex items-center gap-2">
+                    <Icon name="user-3" className="h-3.5 w-3.5" />
+                    <span>{t('settings.common.scope.global')}</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="project">
+                  <div className="flex items-center gap-2">
+                    <Icon name="folder" className="h-3.5 w-3.5" />
+                    <span>{t('settings.common.scope.project')}</span>
+                  </div>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </SettingsFieldRow>
         )}
 
-        <div className="py-1.5">
-          <span className="typography-ui-label text-foreground">{t('settings.common.field.description')}</span>
-          <div className="mt-1.5">
-            <Textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder={t('settings.agents.page.field.descriptionPlaceholder')}
-              rows={2}
-              className="w-full resize-none min-h-[60px] bg-transparent"
-            />
-          </div>
-        </div>
+        <SettingsStackedField
+          label={t('settings.common.field.description')}
+          controlClassName="w-full"
+        >
+          <Textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder={t('settings.agents.page.field.descriptionPlaceholder')}
+            rows={2}
+            className="w-full resize-none min-h-[60px] bg-transparent"
+          />
+        </SettingsStackedField>
 
-        <div data-settings-item="agents.mode" className="pb-1.5 pt-0.5">
-          <div className="flex min-w-0 flex-col gap-1.5">
+        <SettingsStackedField
+          settingsItem="agents.mode"
+          label={(
             <div className="flex items-center gap-1.5">
-              <span className="typography-ui-label text-foreground">{t('settings.agents.page.field.mode')}</span>
+              <span>{t('settings.agents.page.field.mode')}</span>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
@@ -751,212 +755,192 @@ export const AgentsPage: React.FC = () => {
                 </TooltipContent>
               </Tooltip>
             </div>
-            <div className="flex flex-wrap items-center gap-1">
-            <Button
-              variant="chip"
-              size="xs"
-              aria-pressed={mode === 'primary'}
-              onClick={() => setMode('primary')}
-              className="!font-normal"
-            >
-              {t('settings.agents.page.mode.primary')}
-            </Button>
-            <Button
-              variant="chip"
-              size="xs"
-              aria-pressed={mode === 'subagent'}
-              onClick={() => setMode('subagent')}
-              className="!font-normal"
-            >
-              {t('settings.agents.page.mode.subagent')}
-            </Button>
-            <Button
-              variant="chip"
-              size="xs"
-              aria-pressed={mode === 'all'}
-              onClick={() => setMode('all')}
-              className="!font-normal"
-            >
-              {t('settings.agents.page.mode.all')}
-            </Button>
-            </div>
-          </div>
-        </div>
+          )}
+        >
+          <SettingsChipGroup
+            aria-label={t('settings.agents.page.field.mode')}
+            value={mode}
+            onChange={setMode}
+            options={[
+              { value: 'primary', label: t('settings.agents.page.mode.primary') },
+              { value: 'subagent', label: t('settings.agents.page.mode.subagent') },
+              { value: 'all', label: t('settings.agents.page.mode.all') },
+            ]}
+          />
+        </SettingsStackedField>
       </SettingsSection>
 
       <SettingsSection
         title={t('settings.agents.page.section.modelParameters')}
         contentClassName="space-y-0"
       >
+        <SettingsFieldRow
+          settingsItem="agents.model"
+          label={t('settings.agents.page.field.overrideModel')}
+        >
+          <ModelSelector
+            providerId={parseModelIdentifier(model)?.providerId ?? ''}
+            modelId={parseModelIdentifier(model)?.modelId ?? ''}
+            onChange={(providerId: string, modelId: string) => {
+              if (providerId && modelId) {
+                setModel(`${providerId}/${modelId}`);
+              } else {
+                setModel('');
+              }
+              setVariant('');
+            }}
+          />
+        </SettingsFieldRow>
 
-            <div data-settings-item="agents.model" className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
-              <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-                <span className="typography-ui-label text-foreground">{t('settings.agents.page.field.overrideModel')}</span>
-              </div>
-              <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
-                <ModelSelector
-                  providerId={parseModelIdentifier(model)?.providerId ?? ''}
-                  modelId={parseModelIdentifier(model)?.modelId ?? ''}
-                  onChange={(providerId: string, modelId: string) => {
-                    if (providerId && modelId) {
-                      setModel(`${providerId}/${modelId}`);
-                    } else {
-                      setModel('');
-                    }
-                    setVariant('');
-                  }}
-                />
-              </div>
+        <SettingsFieldRow
+          settingsItem="agents.variant"
+          label={(
+            <div className="flex items-center gap-1.5">
+              <span>{t('settings.agents.page.field.variant')}</span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent sideOffset={8} className="max-w-xs">
+                  {t('settings.agents.page.field.variantTooltip')}
+                </TooltipContent>
+              </Tooltip>
             </div>
+          )}
+          description={t('settings.agents.page.field.variantHint')}
+        >
+          {shouldUseVariantSelect ? (
+            <Select
+              value={selectedVariantValue}
+              onValueChange={(value) => setVariant(value === '__default' ? '' : value)}
+            >
+              <SelectTrigger size={SETTINGS_SELECT_SIZE} className="w-fit min-w-[10rem] max-w-full">
+                <SelectValue placeholder={t('settings.agents.page.field.variantPlaceholder')}>
+                  {(value) => value === '__default' ? t('chat.modelControls.default') : value}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__default">{t('chat.modelControls.default')}</SelectItem>
+                {variantOptions.map((variantOption) => (
+                  <SelectItem key={variantOption} value={variantOption}>{variantOption}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <>
+              <Input
+                value={variant}
+                onChange={(event) => setVariant(event.target.value)}
+                placeholder={t('settings.agents.page.field.variantPlaceholder')}
+                disabled={!model && !variant}
+                className="h-7 w-40"
+              />
+              {variant && (
+                <Button
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setVariant('')}
+                  className={SETTINGS_ICON_BUTTON_CLASS}
+                  aria-label={t('settings.common.actions.clear')}
+                  title={t('settings.common.actions.clear')}
+                >
+                  <Icon name="close" className="h-3.5 w-3.5" />
+                </Button>
+              )}
+            </>
+          )}
+        </SettingsFieldRow>
 
-            <div data-settings-item="agents.variant" className={cn("py-1.5", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
-              <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "sm:w-56 shrink-0")}>
-                <div className="flex items-center gap-1.5">
-                  <span className="typography-ui-label text-foreground">{t('settings.agents.page.field.variant')}</span>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-                    </TooltipTrigger>
-                    <TooltipContent sideOffset={8} className="max-w-xs">
-                      {t('settings.agents.page.field.variantTooltip')}
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-                <span className="typography-meta text-muted-foreground">{t('settings.agents.page.field.variantHint')}</span>
-              </div>
-              <div className={cn('flex items-center gap-2', isMobile ? 'w-full' : 'w-fit')}>
-                {shouldUseVariantSelect ? (
-                  <Select
-                    value={selectedVariantValue}
-                    onValueChange={(value) => setVariant(value === '__default' ? '' : value)}
-                  >
-                    <SelectTrigger className={cn('max-w-full', isMobile ? 'w-full' : 'w-fit min-w-[10rem]')}>
-                      <SelectValue placeholder={t('settings.agents.page.field.variantPlaceholder')}>
-                        {(value) => value === '__default' ? t('chat.modelControls.default') : value}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__default">{t('chat.modelControls.default')}</SelectItem>
-                      {variantOptions.map((variantOption) => (
-                        <SelectItem key={variantOption} value={variantOption}>{variantOption}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <>
-                    <Input
-                      value={variant}
-                      onChange={(event) => setVariant(event.target.value)}
-                      placeholder={t('settings.agents.page.field.variantPlaceholder')}
-                      disabled={!model && !variant}
-                      className={cn('h-7 w-40', isMobile && 'w-full')}
-                    />
-                    {variant && (
-                      <Button
-                        size="sm"
-                        type="button"
-                        variant="ghost"
-                        onClick={() => setVariant('')}
-                        className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
-                        aria-label={t('settings.common.actions.clear')}
-                        title={t('settings.common.actions.clear')}
-                      >
-                        <Icon name="close" className="h-3.5 w-3.5" />
-                      </Button>
-                    )}
-                  </>
-                )}
-              </div>
+        <SettingsFieldRow
+          settingsItem="agents.temperature"
+          label={(
+            <div className="flex items-center gap-1.5">
+              <span>{t('settings.agents.page.field.temperature')}</span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent sideOffset={8} className="max-w-xs">
+                  {t('settings.agents.page.field.temperatureTooltip')}
+                </TooltipContent>
+              </Tooltip>
             </div>
+          )}
+          description={t('settings.agents.page.field.temperatureRange')}
+        >
+          <NumberInput
+            value={temperature}
+            fallbackValue={0.7}
+            onValueChange={setTemperature}
+            onClear={() => setTemperature(undefined)}
+            min={0}
+            max={2}
+            step={0.1}
+            inputMode="decimal"
+            placeholder="—"
+            emptyLabel="—"
+            className="w-16"
+          />
+          {temperature !== undefined && (
+            <Button
+              size="sm"
+              type="button"
+              variant="ghost"
+              onClick={() => setTemperature(undefined)}
+              className={SETTINGS_ICON_BUTTON_CLASS}
+              aria-label={t('settings.agents.page.field.clearTemperatureAria')}
+              title={t('settings.common.actions.clear')}
+            >
+              <Icon name="close" className="h-3.5 w-3.5" />
+            </Button>
+          )}
+        </SettingsFieldRow>
 
-            <div data-settings-item="agents.temperature" className={cn("py-1.5", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
-              <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "sm:w-56 shrink-0")}>
-                <div className="flex items-center gap-1.5">
-                  <span className="typography-ui-label text-foreground">{t('settings.agents.page.field.temperature')}</span>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-                    </TooltipTrigger>
-                    <TooltipContent sideOffset={8} className="max-w-xs">
-                      {t('settings.agents.page.field.temperatureTooltip')}
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-                <span className="typography-meta text-muted-foreground">{t('settings.agents.page.field.temperatureRange')}</span>
-              </div>
-              <div className={cn("flex items-center gap-2", isMobile ? "w-full" : "w-fit")}>
-                <NumberInput
-                  value={temperature}
-                  fallbackValue={0.7}
-                  onValueChange={setTemperature}
-                  onClear={() => setTemperature(undefined)}
-                  min={0}
-                  max={2}
-                  step={0.1}
-                  inputMode="decimal"
-                  placeholder="—"
-                  emptyLabel="—"
-                  className="w-16"
-                />
-                {temperature !== undefined && (
-                  <Button size="sm"
-                    type="button"
-                    variant="ghost"
-                    onClick={() => setTemperature(undefined)}
-                    className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
-                    aria-label={t('settings.agents.page.field.clearTemperatureAria')}
-                    title={t('settings.common.actions.clear')}
-                  >
-                    <Icon name="close" className="h-3.5 w-3.5" />
-                  </Button>
-                )}
-              </div>
+        <SettingsFieldRow
+          settingsItem="agents.top-p"
+          label={(
+            <div className="flex items-center gap-1.5">
+              <span>{t('settings.agents.page.field.topP')}</span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent sideOffset={8} className="max-w-xs">
+                  {t('settings.agents.page.field.topPTooltip')}
+                </TooltipContent>
+              </Tooltip>
             </div>
-
-            <div data-settings-item="agents.top-p" className={cn("py-1.5", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
-              <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "sm:w-56 shrink-0")}>
-                <div className="flex items-center gap-1.5">
-                  <span className="typography-ui-label text-foreground">{t('settings.agents.page.field.topP')}</span>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-                    </TooltipTrigger>
-                    <TooltipContent sideOffset={8} className="max-w-xs">
-                      {t('settings.agents.page.field.topPTooltip')}
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-                <span className="typography-meta text-muted-foreground">{t('settings.agents.page.field.topPRange')}</span>
-              </div>
-              <div className={cn("flex items-center gap-2", isMobile ? "w-full" : "w-fit")}>
-                <NumberInput
-                  value={topP}
-                  fallbackValue={0.9}
-                  onValueChange={setTopP}
-                  onClear={() => setTopP(undefined)}
-                  min={0}
-                  max={1}
-                  step={0.1}
-                  inputMode="decimal"
-                  placeholder="—"
-                  emptyLabel="—"
-                  className="w-16"
-                />
-                {topP !== undefined && (
-                  <Button size="sm"
-                    type="button"
-                    variant="ghost"
-                    onClick={() => setTopP(undefined)}
-                    className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
-                    aria-label={t('settings.agents.page.field.clearTopPAria')}
-                    title={t('settings.common.actions.clear')}
-                  >
-                    <Icon name="close" className="h-3.5 w-3.5" />
-                  </Button>
-                )}
-              </div>
-            </div>
-
+          )}
+          description={t('settings.agents.page.field.topPRange')}
+        >
+          <NumberInput
+            value={topP}
+            fallbackValue={0.9}
+            onValueChange={setTopP}
+            onClear={() => setTopP(undefined)}
+            min={0}
+            max={1}
+            step={0.1}
+            inputMode="decimal"
+            placeholder="—"
+            emptyLabel="—"
+            className="w-16"
+          />
+          {topP !== undefined && (
+            <Button
+              size="sm"
+              type="button"
+              variant="ghost"
+              onClick={() => setTopP(undefined)}
+              className={SETTINGS_ICON_BUTTON_CLASS}
+              aria-label={t('settings.agents.page.field.clearTopPAria')}
+              title={t('settings.common.actions.clear')}
+            >
+              <Icon name="close" className="h-3.5 w-3.5" />
+            </Button>
+          )}
+        </SettingsFieldRow>
       </SettingsSection>
 
       <SettingsSection

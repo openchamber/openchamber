@@ -314,7 +314,7 @@ export const MagicPromptsPage: React.FC = () => {
     <SettingsPageLayout
       title={(
         <div className="flex items-center gap-2">
-          <h1 className="typography-ui-header font-semibold text-foreground">{tUnsafe(pageConfig.titleKey)}</h1>
+          <h1 className="typography-settings-title text-foreground">{tUnsafe(pageConfig.titleKey)}</h1>
           <Tooltip>
             <TooltipTrigger asChild>
               <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />

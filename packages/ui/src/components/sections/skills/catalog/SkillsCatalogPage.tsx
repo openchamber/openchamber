@@ -4,7 +4,11 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
-import { SettingsSection } from '@/components/sections/shared/SettingsSection';
+import {
+  SettingsSection,
+  SETTINGS_SELECT_SIZE,
+  SETTINGS_SELECT_TRIGGER_CLASS,
+} from '@/components/sections/shared/SettingsSection';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import {
   Dialog,
@@ -200,7 +204,7 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
                 value={selectedSourceId || ''}
                 onValueChange={(v) => setSelectedSource(v)}
               >
-                <SelectTrigger className="w-fit">
+                <SelectTrigger size={SETTINGS_SELECT_SIZE} className={cn(SETTINGS_SELECT_TRIGGER_CLASS, 'w-fit')}>
                   <SelectValue placeholder={t('settings.skills.catalog.page.field.selectSourcePlaceholder')}>
                     {selectedSource?.label}
                   </SelectValue>

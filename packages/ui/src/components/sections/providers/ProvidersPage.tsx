@@ -784,7 +784,7 @@ export const ProvidersPage: React.FC = () => {
       title={(
         <div className="flex items-center gap-3 min-w-0">
           <ProviderLogo providerId={selectedProvider.id} className="h-5 w-5 shrink-0" />
-          <h1 className="typography-ui-header font-semibold text-foreground truncate">
+          <h1 className="typography-settings-title text-foreground truncate">
             {selectedProvider.name || selectedProvider.id}
           </h1>
         </div>

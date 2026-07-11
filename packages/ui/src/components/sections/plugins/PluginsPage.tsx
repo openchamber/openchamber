@@ -198,7 +198,7 @@ export const PluginsPage: React.FC = () => {
       <SettingsPageLayout
         title={(
           <div className="flex items-center gap-2 min-w-0">
-            <h1 className="typography-ui-header font-semibold text-foreground truncate">
+            <h1 className="typography-settings-title text-foreground truncate">
               {t('settings.plugins.page.header.entry')}
             </h1>
             <ScopeBadge
@@ -318,7 +318,7 @@ export const PluginsPage: React.FC = () => {
       <SettingsPageLayout
         title={(
           <div className="flex items-center gap-2 min-w-0 flex-wrap">
-            <h1 className="typography-ui-header font-semibold text-foreground truncate">
+            <h1 className="typography-settings-title text-foreground truncate">
               {t('settings.plugins.page.header.file')}
             </h1>
             <ScopeBadge
