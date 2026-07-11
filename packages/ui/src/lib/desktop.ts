@@ -17,6 +17,8 @@ export type UpdateInfo = {
   currentVersion: string;
   body?: string;
   date?: string;
+  releaseUrl?: string;
+  downloadUrl?: string;
   nextSuggestedCheckInSec?: number;
   // Web-specific fields
   packageManager?: string;
@@ -52,6 +54,7 @@ export type DesktopSettings = {
   opencodeBinary?: string;
   desktopLanAccessEnabled?: boolean;
   desktopKeepAwakeEnabled?: boolean;
+  desktopMinimizeToTrayEnabled?: boolean;
   desktopUiPassword?: string;
   projects?: ProjectEntry[];
   activeProjectId?: string;
@@ -116,6 +119,9 @@ export type DesktopSettings = {
   smallModelUseDefault?: boolean;
   sessionRecapEnabled?: boolean;
   sessionSuggestionEnabled?: boolean;
+  sessionGoalEnabled?: boolean;
+  sessionGoalDefaultBudgetEnabled?: boolean;
+  sessionGoalDefaultBudget?: number;
   smallModelOverride?: string; // format: "provider/model"
   defaultGitIdentityId?: string; // ''/undefined = unset, 'global' or profile id
   openInAppId?: string;
@@ -134,6 +140,7 @@ export type DesktopSettings = {
   showOpenCodeUpdateNotifications?: boolean;
   openCodeUpdateToastDismissedVersion?: string;
   showToolFileIcons?: boolean;
+  codeBlockLineWrap?: boolean;
   showTurnChangedFiles?: boolean;
   showExpandedBashTools?: boolean;
   showExpandedEditTools?: boolean;
@@ -153,6 +160,7 @@ export type DesktopSettings = {
   showSplitAssistantMessageActions?: boolean;
   fontSize?: number;
   terminalFontSize?: number;
+  editorFontSize?: number;
   uiFont?: string;
   monoFont?: string;
   padding?: number;
@@ -246,6 +254,11 @@ type KeepAwakeStatus = {
   active: boolean;
 };
 
+type MinimizeToTrayStatus = {
+  supported: boolean;
+  enabled: boolean;
+};
+
 export const getDesktopLaunchAtLogin = async (): Promise<LaunchAtLoginStatus | null> => {
   if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
     return null;
@@ -276,6 +289,40 @@ export const setDesktopLaunchAtLogin = async (enabled: boolean): Promise<LaunchA
     return result;
   } catch (error) {
     console.warn('Failed to set launch at login status', error);
+    return null;
+  }
+};
+
+export const getDesktopMinimizeToTray = async (): Promise<MinimizeToTrayStatus | null> => {
+  if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
+    return null;
+  }
+
+  try {
+    const result = await invokeDesktop<MinimizeToTrayStatus>('desktop_get_minimize_to_tray');
+    if (!result || typeof result.supported !== 'boolean' || typeof result.enabled !== 'boolean') {
+      return null;
+    }
+    return result;
+  } catch (error) {
+    console.warn('Failed to get minimize to tray status', error);
+    return null;
+  }
+};
+
+export const setDesktopMinimizeToTray = async (enabled: boolean): Promise<MinimizeToTrayStatus | null> => {
+  if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
+    return null;
+  }
+
+  try {
+    const result = await invokeDesktop<MinimizeToTrayStatus>('desktop_set_minimize_to_tray', { enabled });
+    if (!result || typeof result.supported !== 'boolean' || typeof result.enabled !== 'boolean') {
+      return null;
+    }
+    return result;
+  } catch (error) {
+    console.warn('Failed to set minimize to tray status', error);
     return null;
   }
 };

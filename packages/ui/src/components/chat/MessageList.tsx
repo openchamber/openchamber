@@ -752,6 +752,7 @@ const TurnBlock = React.memo(({
                     activityOwnerMessageId,
                     isFirstAssistantInTurn: isFirstAssistant,
                     isLastAssistantInTurn: isLastAssistant,
+                    isLatestTurn: isLastTurn,
                     isWorking: isLastTurn && sessionIsWorking && (
                         chatRenderMode === 'sorted'
                             ? hasAnchoredActivitySegment
@@ -1192,12 +1193,17 @@ const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, 
     if (engine === 'tanstack') {
         const virtualItems = tanstackVirtualizer.getVirtualItems();
         const startOffset = virtualItems[0]?.start ?? 0;
-        // Rendered rows stay in normal flow inside a single translated wrapper
-        // (not per-row absolute positioning) so per-turn sticky user headers
-        // keep working against the scroll container.
+        // Rendered rows stay in normal flow inside a single offset wrapper (not
+        // per-row absolute positioning) so per-turn sticky user headers keep
+        // working against the scroll container. The offset MUST be padding, not
+        // transform: a transformed ancestor becomes the sticky containing block,
+        // so headers would stick to the wrapper's (arbitrary, overscan-dependent)
+        // top edge mid-list and float over the previous turn. Padding only
+        // changes when the virtual window shifts — not per scroll frame — so the
+        // layout cost is negligible.
         return (
             <div ref={sizeContainerRef} className="relative w-full" style={{ height: tanstackVirtualizer.getTotalSize() }}>
-                <div style={{ transform: `translateY(${startOffset}px)` }}>
+                <div style={{ paddingTop: `${startOffset}px` }}>
                     {virtualItems.map((item) => {
                         const entry = renderEntries[item.index];
                         if (!entry) return null;
@@ -1338,20 +1344,29 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 
 
     const baseDisplayMessages = React.useMemo(() => streamPerfMeasure('ui.message_list.base_display_ms', () => {
-        const seenIdsFromTail = new Set<string>();
+        const seenIds = new Set<string>();
+        const latestById = new Map<string, ChatMessageEntry>();
         const dedupedMessages: ChatMessageEntry[] = [];
-        for (let index = messages.length - 1; index >= 0; index -= 1) {
+        for (const message of messages) {
+            const messageId = message.info?.id;
+            if (typeof messageId === 'string') latestById.set(messageId, message);
+        }
+
+        // Preserve the first occurrence's chronological position, but use the last
+        // value because prepended history can overlap with newer live store data.
+        for (let index = 0; index < messages.length; index += 1) {
             const message = messages[index];
             const messageId = message.info?.id;
             if (typeof messageId === 'string') {
-                if (seenIdsFromTail.has(messageId)) {
+                if (seenIds.has(messageId)) {
                     continue;
                 }
-                seenIdsFromTail.add(messageId);
+                seenIds.add(messageId);
             }
-            dedupedMessages.push(getNormalizedMessageForDisplay(message));
+            dedupedMessages.push(getNormalizedMessageForDisplay(
+                typeof messageId === 'string' ? latestById.get(messageId) ?? message : message,
+            ));
         }
-        dedupedMessages.reverse();
 
         const output: ChatMessageEntry[] = [];
         const compactionCommandIds = new Set<string>();

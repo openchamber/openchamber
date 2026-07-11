@@ -280,6 +280,7 @@ export const areRelevantTurnGroupingContextsEqual = (
   if (left.turnId !== right.turnId) return false;
   if (left.isFirstAssistantInTurn !== right.isFirstAssistantInTurn) return false;
   if (left.isLastAssistantInTurn !== right.isLastAssistantInTurn) return false;
+  if (left.isLatestTurn !== right.isLatestTurn) return false;
   if (left.isWorking !== right.isWorking) return false;
   if (left.hasTools !== right.hasTools) return false;
   if (left.hasReasoning !== right.hasReasoning) return false;

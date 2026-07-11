@@ -451,6 +451,9 @@ function updateAgent(agentName, updates, workingDirectory) {
   const creatingNewMd = isBuiltinOverride;
 
   for (const [field, value] of Object.entries(updates)) {
+    // Skip undefined values — they would overwrite existing frontmatter fields with nothing
+    if (value === undefined) continue;
+
     if (field === 'prompt') {
       if (value === null) {
         if (mdExists || creatingNewMd) {

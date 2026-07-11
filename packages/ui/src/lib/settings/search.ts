@@ -22,6 +22,8 @@ interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
   isDesktopLocalOrigin: boolean;
   // macOS desktop shell — for controls that only render on darwin (e.g. dock badge).
   isMac: boolean;
+  // Windows desktop shell — for controls that only render on win32.
+  isWindows: boolean;
 }
 
 const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
@@ -122,6 +124,12 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['terminal', 'font', 'text size'],
   },
   {
+    id: 'appearance.editor-font-size',
+    page: 'appearance',
+    titleKey: 'settings.openchamber.visual.field.editorFontSize',
+    keywords: ['editor', 'font', 'text size', 'code'],
+  },
+  {
     id: 'appearance.spacing-density',
     page: 'appearance',
     titleKey: 'settings.openchamber.visual.field.spacingDensity',
@@ -186,6 +194,20 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['suggestion', 'assist', 'small model', 'follow up'],
   },
   {
+    id: 'chat.session-goal',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.sessionGoal',
+    keywords: ['goal', 'objective', 'auto continue', 'small model'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'chat.session-goal-budget',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.goal.budgetLabel',
+    keywords: ['goal', 'budget', 'tokens', 'limit'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'chat.reasoning-traces',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.showReasoningTraces',
@@ -208,6 +230,12 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.wideChatLayout',
     keywords: ['layout', 'wide', 'messages'],
+  },
+  {
+    id: 'chat.code-block-line-wrap',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.codeBlockLineWrap',
+    keywords: ['code', 'wrap', 'line wrap', 'markdown'],
   },
   {
     id: 'chat.inline-assistant-actions',
@@ -312,6 +340,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     descriptionKey: 'settings.openchamber.desktopNetwork.field.launchAtLoginDescription',
     keywords: ['desktop', 'startup', 'login'],
     isAvailable: (ctx) => ctx.isDesktopLocalOrigin,
+  },
+  {
+    id: 'sessions.desktop-minimize-to-tray',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.desktopNetwork.field.minimizeToTray',
+    descriptionKey: 'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription',
+    keywords: ['desktop', 'tray', 'system tray', 'minimize', 'close', 'background', 'windows'],
+    isAvailable: (ctx) => ctx.isDesktopLocalOrigin && ctx.isWindows,
   },
   {
     id: 'sessions.desktop-keep-awake',
@@ -430,7 +466,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'remote-instances',
     titleKey: 'settings.remoteInstances.clientAuth.title',
     descriptionKey: 'settings.remoteInstances.clientAuth.description',
-    keywords: ['pairing link', 'client token', 'connect desktop', 'remote access'],
+    keywords: ['pairing link', 'client token', 'connect desktop', 'remote access', 'relay', 'devices', 'connect from anywhere'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {

@@ -1,7 +1,14 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import type { WorktreeMetadata } from '@/types/worktree';
-import { dedupeSessionsById, getArchivedScopeKey, isSessionRelatedToProject, normalizePath, resolveArchivedFolderName } from '../utils';
+import {
+  collectKnownProjectDirectories,
+  dedupeSessionsById,
+  getArchivedScopeKey,
+  isSessionRelatedToProject,
+  normalizePath,
+  resolveArchivedFolderName,
+} from '../utils';
 
 type ProjectForArchivedFolders = {
   normalizedPath: string;
@@ -28,7 +35,9 @@ type Args = {
 
 const getArchivedSessionsForProject = (
   project: ProjectForArchivedFolders,
-  params: Pick<Args, 'sessions' | 'archivedSessions' | 'availableWorktreesByProject' | 'isVSCode'>,
+  params: Pick<Args, 'sessions' | 'archivedSessions' | 'availableWorktreesByProject' | 'isVSCode'> & {
+    knownProjectDirectories: Set<string>;
+  },
 ): Session[] => {
   const worktreesForProject = params.isVSCode ? [] : (params.availableWorktreesByProject.get(project.normalizedPath) ?? []);
   const validDirectories = new Set<string>([
@@ -39,7 +48,7 @@ const getArchivedSessionsForProject = (
   ]);
 
   const collect = (input: Session[]): Session[] => input.filter((session) =>
-    isSessionRelatedToProject(session, project.normalizedPath, validDirectories),
+    isSessionRelatedToProject(session, project.normalizedPath, validDirectories, params.knownProjectDirectories),
   );
 
   const archived = collect(params.archivedSessions);
@@ -51,7 +60,7 @@ const getArchivedSessionsForProject = (
     if (sessionDirectory) {
       return false;
     }
-    return isSessionRelatedToProject(session, project.normalizedPath, validDirectories);
+    return isSessionRelatedToProject(session, project.normalizedPath, validDirectories, params.knownProjectDirectories);
   });
 
   return dedupeSessionsById([...archived, ...unassignedLive]);
@@ -71,6 +80,11 @@ export const useArchivedAutoFolders = (args: Args): void => {
     cleanupSessions,
   } = args;
 
+  const knownProjectDirectories = React.useMemo(
+    () => collectKnownProjectDirectories(normalizedProjects, availableWorktreesByProject, isVSCode),
+    [normalizedProjects, availableWorktreesByProject, isVSCode],
+  );
+
   React.useEffect(() => {
     if (isSessionsLoading) {
       return;
@@ -83,6 +97,7 @@ export const useArchivedAutoFolders = (args: Args): void => {
         archivedSessions,
         availableWorktreesByProject,
         isVSCode,
+        knownProjectDirectories,
       });
       const sessionIds = new Set(projectArchivedSessions.map((session) => session.id));
 
@@ -110,6 +125,7 @@ export const useArchivedAutoFolders = (args: Args): void => {
     sessions,
     archivedSessions,
     availableWorktreesByProject,
+    knownProjectDirectories,
     isVSCode,
     isSessionsLoading,
     foldersMap,

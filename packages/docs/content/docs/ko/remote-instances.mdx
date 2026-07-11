@@ -24,19 +24,25 @@ OpenChamber가 연결 확인, 원격 설정, 서버 시작, 포트 포워딩 단
 
 SSH 및 UI 비밀번호를 저장할지, 매번 입력할지 결정합니다. 연결이 끊기면 OpenChamber가 어느 단계가 실패했는지 알려주므로 고칠 수 있습니다. [Remote access](/ko/troubleshooting/remote-access/)를 참고하세요.
 
-## 직접 연결 링크
+## 연결 링크
 
-원격 머신에서 OpenChamber가 이미 실행 중이면 그 머신에서 연결 링크를 만들고 **Settings → Remote Instances → Server links**에서 가져오세요:
+원격 머신에서 OpenChamber가 이미 실행 중이라면 데스크톱 앱을 연결하는 가장 쉬운 방법은 페어링 링크입니다. 원격 서버의 UI에서 **Settings → Remote Instances → 이 서버에 연결 → 기기 추가**를 열어 링크를 만들고, 데스크톱의 **Settings → Remote Instances → 다른 OpenChamber 서버 → 링크 가져오기**에서 가져오세요. 전체 흐름은 [기기 연결](/ko/connect-devices/)을 참고하세요.
+
+**어디서나**로 만든 링크에는 직접 주소와 [Private Relay](/ko/private-relay/) 경로가 모두 들어 있습니다. 데스크톱이 서버에 도달할 수 있으면(같은 네트워크) 직접 연결하고, 밖에 있으면 종단 간 암호화 릴레이로 대체합니다. 저장된 각 서버 옆의 상태에 어느 경로가 사용 중인지 표시됩니다.
+
+원격 머신의 터미널에서도 링크를 만들 수 있습니다:
 
 ```bash
 openchamber connect-url --port 3000 --server http://your-host:3000 --qr
 ```
 
-해당 포트에 서버가 없으면 `connect-url`이 먼저 서버를 시작합니다. Headless 서버에는 `--api-only`, 시작 시 LAN에 바인딩하려면 `--lan`, 브라우저 접근 보호에는 `--ui-password`, 저장된 연결 이름에는 `--name`을 사용하세요.
+해당 포트에 서버가 없으면 `connect-url`이 먼저 서버를 시작합니다. Headless 서버에는 `--api-only`, 시작 시 LAN에 바인딩하려면 `--lan`, 브라우저 접근 보호에는 `--ui-password`, 저장된 연결 이름에는 `--name`을 사용하세요. 로컬 네트워크 밖에서도 작동하는 링크가 필요하면 `--relay`를 추가하세요. 기기는 도달 가능할 때 직접 연결을 우선하고, 밖에서는 [Private Relay](/ko/private-relay/)로 대체합니다. 인스턴스가 릴레이를 알아서 올립니다.
 
-생성된 링크에는 OpenChamber 앱용 client token이 들어 있습니다. 이 token은 브라우저 UI 비밀번호와 별개이며, 취소하거나 삭제하기 전까지 서버 재시작 후에도 유지됩니다.
+생성된 링크에는 일회용 페어링 시크릿이 들어 있습니다. 한 번 가져오면 기기는 브라우저 UI 비밀번호와 별개인 고유 client token을 갖게 되며, 발급한 서버에서 해지하기 전까지 서버 재시작 후에도 유지됩니다.
 
 ## 관련 항목
 
+- [기기 연결](/ko/connect-devices/) — 페어링 링크, QR 코드, 기기 관리
+- [Private Relay](/ko/private-relay/) — "어디서나" 연결의 작동 방식
 - [OpenCode Server](/ko/opencode-server/) — 웹이나 VS Code에서 원격 서버에 연결하세요
 - [Remote access](/ko/troubleshooting/remote-access/) — 연결이 완료되지 않을 때
