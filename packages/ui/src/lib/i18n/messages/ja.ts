@@ -472,6 +472,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.export.dialog.confirm': 'エクスポート',
   'sessions.sidebar.session.status.active': 'セッションアクティブ',
   'sessions.sidebar.session.status.unread': '未読の更新',
+  'sessions.sidebar.session.status.unreadError': '未読のエラー更新',
   'sessions.sidebar.session.status.pinned': 'ピン留めされたセッション',
   'sessions.sidebar.session.status.permissionRequired': '権限が必要です',
   'sessions.sidebar.session.subsessions.collapse': 'サブセッションを折りたたむ',

@@ -315,6 +315,7 @@ export const dict = {
   'sessions.sidebar.session.export.dialog.confirm': 'Exporter',
   'sessions.sidebar.session.status.active': 'Session active',
   'sessions.sidebar.session.status.unread': 'Mises à jour non lues',
+  'sessions.sidebar.session.status.unreadError': 'Mises à jour d\'erreur non lues',
   'sessions.sidebar.session.status.pinned': 'Session épinglée',
   'sessions.sidebar.session.status.permissionRequired': 'Autorisation requise',
   'sessions.sidebar.session.subsessions.collapse': 'Réduire les sous-sessions',
