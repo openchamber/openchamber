@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 
 type ConfigResponse = { data: Record<string, unknown> };
+type SessionCreateResult = { data?: unknown; error?: unknown };
 
 (mock as unknown as { restore?: () => void }).restore?.();
 
 const configResolvers: Array<(response: ConfigResponse) => void> = [];
 let configCalls = 0;
+let sessionCreateResult: SessionCreateResult = { data: null };
+const sessionCreateCalls: Array<Record<string, unknown>> = [];
 const promptAsyncCalls: unknown[][] = [];
 const promptAsyncResults: Array<unknown> = [];
 
@@ -26,8 +29,12 @@ mock.module('@opencode-ai/sdk/v2', () => ({
         });
       }),
     },
-    session: {
-      promptAsync: promptAsyncMock,
+      session: {
+        create: mock((params: Record<string, unknown>) => {
+        sessionCreateCalls.push(params);
+        return Promise.resolve(sessionCreateResult);
+        }),
+        promptAsync: promptAsyncMock,
     },
   })),
 }));
@@ -87,6 +94,83 @@ describe('opencodeClient getConfig cache', () => {
     const cached = await opencodeClient.getConfig('/workspace/project');
     expect(cached).toEqual({ model: 'new/model' });
     expect(configCalls).toBe(2);
+  });
+});
+
+describe('opencodeClient createSession', () => {
+  beforeEach(() => {
+    sessionCreateCalls.length = 0;
+    sessionCreateResult = { data: null };
+  });
+
+  test('copies location.directory to directory when server returns V2 shape', async () => {
+    sessionCreateResult = {
+      data: {
+        id: 'session-1',
+        title: 'New session',
+        projectID: 'project-1',
+        version: '2',
+        location: { directory: '/workspace/project' },
+        time: { created: 1, updated: 1 },
+      },
+    };
+
+    const session = await opencodeClient.createSession({ title: 'New session' }, '/workspace/project');
+
+    expect(session.id).toBe('session-1');
+    expect(session.directory).toBe('/workspace/project');
+    expect(sessionCreateCalls.length).toBe(1);
+    expect(sessionCreateCalls[0].directory).toBe('/workspace/project');
+  });
+
+  test('preserves existing directory field when server returns legacy shape', async () => {
+    sessionCreateResult = {
+      data: {
+        id: 'session-2',
+        title: 'Legacy session',
+        projectID: 'project-2',
+        version: '2',
+        directory: '/legacy/project',
+        location: { directory: '/different/project' },
+        time: { created: 1, updated: 1 },
+      },
+    };
+
+    const session = await opencodeClient.createSession({ title: 'Legacy session' }, '/legacy/project');
+
+    expect(session.directory).toBe('/legacy/project');
+  });
+
+  test('falls back to request directory when server omits both fields', async () => {
+    sessionCreateResult = {
+      data: {
+        id: 'session-3',
+        title: 'No directory',
+        projectID: 'project-3',
+        version: '2',
+        time: { created: 1, updated: 1 },
+      },
+    };
+
+    const session = await opencodeClient.createSession({ title: 'No directory' }, '/workspace/project');
+
+    expect((session as { directory?: string }).directory).toBe('/workspace/project');
+  });
+
+  test('leaves directory unset when neither field is present and no request directory', async () => {
+    sessionCreateResult = {
+      data: {
+        id: 'session-4',
+        title: 'No directory',
+        projectID: 'project-4',
+        version: '2',
+        time: { created: 1, updated: 1 },
+      },
+    };
+
+    const session = await opencodeClient.createSession({ title: 'No directory' }, null);
+
+    expect((session as { directory?: string }).directory).toBe(undefined);
   });
 });
 

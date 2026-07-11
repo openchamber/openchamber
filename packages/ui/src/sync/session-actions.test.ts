@@ -10,8 +10,12 @@ let sessionRevertResult: { data?: unknown; error?: unknown; response?: { status?
 let questionReplyError: unknown | null = null
 let questionRejectError: unknown | null = null
 let sessionShareResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
+let sessionCreateResult: { data?: unknown; error?: unknown } = {}
+const sessionCreateCalls: Array<{ title?: string; directory?: string | null; parentID?: string | null; metadata?: Record<string, unknown> }> = []
 let sessionMessagesResult: { data?: unknown; error?: unknown; response?: { status?: number } } = { data: [] }
 const globalUpsertedSessions: unknown[] = []
+const currentSessionCalls: Array<{ sessionID: string; directory: string | null }> = []
+const openChamberCreatedSessions: string[] = []
 
 const mockScopedClient = {
   permission: {
@@ -93,6 +97,13 @@ mock.module("@/lib/opencode/client", () => ({
       return mockScopedClient
     },
     getDirectory: () => "/test/project",
+    createSession: mock((params: { title?: string; parentID?: string | null; metadata?: Record<string, unknown> }, directory?: string | null) => {
+      sessionCreateCalls.push({ title: params?.title, directory, parentID: params?.parentID ?? null, metadata: params?.metadata })
+      if (sessionCreateResult.error) {
+        return Promise.reject(sessionCreateResult.error)
+      }
+      return Promise.resolve(sessionCreateResult.data)
+    }),
     replyToPermission: mock((requestId: string, reply: string, options?: { directory?: string | null }) => {
       replyCalls.push({ method: "permission.reply", params: { requestID: requestId, reply, directory: options?.directory } })
       return Promise.resolve(true)
@@ -133,6 +144,12 @@ mock.module("./session-ui-store", () => ({
         if (sessionId === "session-a") return "/test/project"
         if (sessionId === "session-b") return "/other/project"
         return null
+      },
+      setCurrentSession: (sessionID: string, directory: string | null) => {
+        currentSessionCalls.push({ sessionID, directory })
+      },
+      markSessionAsOpenChamberCreated: (sessionID: string) => {
+        openChamberCreatedSessions.push(sessionID)
       },
     }),
   },
@@ -220,6 +237,46 @@ function createChildStores(entries: Array<[string, StoreApi<DirectoryStore>]>) {
     getChild: (dir: string) => new Map(entries).get(dir),
   } as unknown as import("./child-store").ChildStoreManager
 }
+
+describe("createSession directory routing", () => {
+  beforeEach(() => {
+    sessionCreateCalls.length = 0
+    sessionCreateResult = {}
+    currentSessionCalls.length = 0
+    openChamberCreatedSessions.length = 0
+    globalUpsertedSessions.length = 0
+    registeredSessionDirectories.length = 0
+  })
+
+  test("routes and upserts a session using its directory", async () => {
+    const { createSession } = await import("./session-actions")
+    sessionCreateResult = {
+      data: { id: "session-new", title: "New session", directory: "/workspace/project", time: { created: 1, updated: 1 } },
+    }
+
+    const result = await createSession("New session", "/workspace/project", null)
+
+    expect(result).not.toBeNull()
+    expect((result as SessionWithDirectory).directory).toBe("/workspace/project")
+    expect(sessionCreateCalls[0].directory).toBe("/workspace/project")
+    expect(currentSessionCalls).toEqual([{ sessionID: "session-new", directory: "/workspace/project" }])
+    expect(registeredSessionDirectories).toEqual([{ sessionID: "session-new", directory: "/workspace/project" }])
+    expect(openChamberCreatedSessions).toEqual(["session-new"])
+    expect(globalUpsertedSessions.length).toBe(1)
+    expect((globalUpsertedSessions[0] as SessionWithDirectory).directory).toBe("/workspace/project")
+  })
+
+  test("passes directoryOverride to the client when creating a session", async () => {
+    const { createSession } = await import("./session-actions")
+    sessionCreateResult = {
+      data: { id: "session-override", title: "Override", directory: "/server/project", time: { created: 1, updated: 1 } },
+    }
+
+    await createSession("Override", "/override/project", null)
+
+    expect(sessionCreateCalls[0].directory).toBe("/override/project")
+  })
+})
 
 describe("fetchMessagesForSession startup race", () => {
   test("does not reject before sync action refs are initialized", async () => {

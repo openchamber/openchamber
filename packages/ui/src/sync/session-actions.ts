@@ -426,11 +426,12 @@ export async function createSession(
   metadata?: Record<string, unknown>,
 ): Promise<Session | null> {
   try {
+    const requestedDirectory = directoryOverride ?? dir()
     const session = await opencodeClient.createSession({
       title,
       parentID: parentID ?? undefined,
       metadata,
-    }, directoryOverride ?? dir())
+    }, requestedDirectory)
 
     const sessionDirectory = (session as { directory?: string | null }).directory ?? null
     // Pre-populate routing index so SSE events arriving before session.created
