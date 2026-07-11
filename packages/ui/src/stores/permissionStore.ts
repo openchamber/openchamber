@@ -11,6 +11,7 @@ import { opencodeClient } from "@/lib/opencode/client";
 import { respondToPermission } from "@/sync/session-actions";
 import { useSessionUIStore } from "@/sync/session-ui-store";
 import { runtimeFetch } from "@/lib/runtime-fetch";
+import { useBackgroundAutoAcceptStore } from "./backgroundAutoAcceptStore";
 
 interface PermissionState {
     autoAccept: PermissionAutoAcceptMap;
@@ -224,6 +225,16 @@ export const usePermissionStore = create<PermissionStore>()(
                     }
 
                     const sessions = getAllSyncSessions();
+                    const backgroundEnabled = useBackgroundAutoAcceptStore.getState().enabled;
+                    if (backgroundEnabled === true) {
+                        const directory = useSessionUIStore.getState().getDirectoryForSession(sessionId)
+                            ?? opencodeClient.getDirectory()
+                            ?? undefined;
+                        const updated = await useBackgroundAutoAcceptStore
+                            .getState()
+                            .setSessionPolicy(sessionId, enabled, directory);
+                        if (!updated) throw new Error("Background auto-accept is disabled");
+                    }
 
                     set((state) => {
                         const autoAccept = { ...state.autoAccept };
@@ -243,6 +254,10 @@ export const usePermissionStore = create<PermissionStore>()(
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ sessionId: scopedSessionId, enabled }),
                         }).catch(() => { /* best-effort */ });
+                    }
+
+                    if (backgroundEnabled === true) {
+                        return;
                     }
 
                     if (!enabled) {

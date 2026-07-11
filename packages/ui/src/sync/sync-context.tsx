@@ -29,6 +29,7 @@ import { syncDebug } from "./debug"
 import { getReconnectCandidateSessionIds } from "./reconnect-recovery"
 import { opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
+import { useBackgroundAutoAcceptStore } from "@/stores/backgroundAutoAcceptStore"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { toast } from "@/components/ui"
@@ -1175,7 +1176,9 @@ export async function resyncBlockingRequestsForDirectory(
     }
 
     const permissionStore = usePermissionStore.getState()
-    const autoAcceptingSessionIds = Object.keys(grouped).filter((sessionId) => permissionStore.isSessionAutoAccepting(sessionId))
+    const autoAcceptingSessionIds = useBackgroundAutoAcceptStore.getState().enabled === false
+      ? Object.keys(grouped).filter((sessionId) => permissionStore.isSessionAutoAccepting(sessionId))
+      : []
 
     if (autoAcceptingSessionIds.length > 0) {
       const acceptedIdsBySession = new Map<string, Set<string>>()
@@ -1347,6 +1350,14 @@ function handleEvent(
 ) {
   const directory = resolveDirectoryFromRoutingIndex(routingIndex, rawDirectory, payload, childStores)
 
+  if ((payload as { type?: unknown }).type === "openchamber:background-auto-accept") {
+    const enabled = (payload as unknown as { properties?: { enabled?: unknown } }).properties?.enabled
+    if (typeof enabled === "boolean") {
+      useBackgroundAutoAcceptStore.getState().applyEnabled(enabled)
+    }
+    return
+  }
+
   if (handleUiNotificationEvent(payload, directory)) {
     return
   }
@@ -1428,7 +1439,10 @@ function handleEvent(
   if (payload.type === "permission.asked") {
     const permission = payload.properties as PermissionRequest
     const permissionStore = usePermissionStore.getState()
-    if (permissionStore.isSessionAutoAccepting(permission.sessionID)) {
+    if (
+      useBackgroundAutoAcceptStore.getState().enabled === false
+      && permissionStore.isSessionAutoAccepting(permission.sessionID)
+    ) {
       updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
       void sessionActions.respondToPermission(permission.sessionID, permission.id, "once").catch(() => undefined)
       return
@@ -1722,6 +1736,14 @@ export function SyncProvider(props: {
     }),
     [childStores, props.sdk, props.directory],
   )
+
+  useEffect(() => {
+    if (isVSCodeRuntime()) {
+      useBackgroundAutoAcceptStore.getState().applyEnabled(false)
+      return
+    }
+    void useBackgroundAutoAcceptStore.getState().hydrate().catch(() => undefined)
+  }, [props.sdk])
 
   const triggerDirectoryResync = useCallback((directory: string, reason: SessionMaterializationReason) => {
     const store = childStores.children.get(directory)

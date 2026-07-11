@@ -4,6 +4,7 @@ import { isDesktopShell, isWebRuntime } from '@/lib/desktop';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { useUIStore } from '@/stores/useUIStore';
 import type { NotificationPayload } from '@/lib/api/types';
+import { useBackgroundAutoAcceptStore } from '@/stores/backgroundAutoAcceptStore';
 
 const NOTIFICATION_STREAM_PATH = '/api/notifications/stream';
 
@@ -40,6 +41,15 @@ export const useWebNotificationStream = (options?: { enabled?: boolean }) => {
       try {
         data = JSON.parse(event.data) as unknown;
       } catch {
+        return;
+      }
+
+      const record = data && typeof data === 'object' ? data as Record<string, unknown> : null;
+      const properties = record?.properties && typeof record.properties === 'object'
+        ? record.properties as Record<string, unknown>
+        : null;
+      if (record?.type === 'openchamber:background-auto-accept' && typeof properties?.enabled === 'boolean') {
+        useBackgroundAutoAcceptStore.getState().applyEnabled(properties.enabled);
         return;
       }
 

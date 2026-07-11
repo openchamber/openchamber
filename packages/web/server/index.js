@@ -84,6 +84,7 @@ import { createNotificationTriggerRuntime } from './lib/notifications/runtime.js
 import { createPushRuntime } from './lib/notifications/push-runtime.js';
 import { createApnsRuntime } from './lib/notifications/apns-runtime.js';
 import { createNotificationTemplateRuntime } from './lib/notifications/template-runtime.js';
+import { createBackgroundAutoAcceptRuntime } from './lib/background-auto-accept/runtime.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
@@ -729,6 +730,14 @@ const globalMessageStreamHub = createGlobalMessageStreamHub({
   getOpenCodeAuthHeaders,
   upstreamStallTimeoutMs: getUpstreamStallTimeoutMs,
 });
+
+const backgroundAutoAcceptRuntime = createBackgroundAutoAcceptRuntime({
+  globalEventHub: globalMessageStreamHub,
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  broadcastGlobalUiEvent,
+});
+backgroundAutoAcceptRuntime.start();
 
 const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   waitForOpenCodePort: (...args) => waitForOpenCodePort(...args),
@@ -1427,6 +1436,7 @@ async function main(options = {}) {
     scheduledTasksRuntime,
     getOpenChamberEventClients: () => uiOpenChamberEventClients,
     writeSseEvent,
+    backgroundAutoAcceptRuntime,
   });
 
   const previewProxyRuntime = createPreviewProxyRuntime({

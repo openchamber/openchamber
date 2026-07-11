@@ -281,6 +281,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['delete', 'confirmation'],
   },
   {
+    id: 'sessions.background-auto-accept',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.defaults.backgroundAutoAccept.label',
+    descriptionKey: 'settings.openchamber.defaults.backgroundAutoAccept.description',
+    keywords: ['permission', 'approval', 'background', 'auto accept'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'sessions.small-model',
     page: 'sessions',
     titleKey: 'settings.openchamber.defaults.smallModel.title',

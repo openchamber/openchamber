@@ -3,14 +3,19 @@ import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { AgentSelector } from '@/components/sections/commands/AgentSelector';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import { toast } from '@/components/ui';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { usePermissionStore } from '@/stores/permissionStore';
+import { useBackgroundAutoAcceptStore } from '@/stores/backgroundAutoAcceptStore';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { opencodeClient } from '@/lib/opencode/client';
 
 const getDisplayModel = (
   storedModel: string | undefined
@@ -25,6 +30,7 @@ const getDisplayModel = (
 
 export const DefaultsSettings: React.FC = () => {
   const { t } = useI18n();
+  const { runtime } = useRuntimeAPIs();
   const setProvider = useConfigStore((state) => state.setProvider);
   const setModel = useConfigStore((state) => state.setModel);
   const setAgent = useConfigStore((state) => state.setAgent);
@@ -35,6 +41,10 @@ export const DefaultsSettings: React.FC = () => {
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
   const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
   const providers = useConfigStore((state) => state.providers);
+  const backgroundAutoAcceptEnabled = useBackgroundAutoAcceptStore((state) => state.enabled);
+  const backgroundAutoAcceptLoading = useBackgroundAutoAcceptStore((state) => state.loading);
+  const backgroundAutoAcceptSaving = useBackgroundAutoAcceptStore((state) => state.saving);
+  const setBackgroundAutoAcceptEnabled = useBackgroundAutoAcceptStore((state) => state.setEnabled);
 
   const [defaultModel, setDefaultModel] = React.useState<string | undefined>();
   const [defaultVariant, setDefaultVariant] = React.useState<string | undefined>();
@@ -45,6 +55,19 @@ export const DefaultsSettings: React.FC = () => {
   const [isLoading, setIsLoading] = React.useState(true);
 
   const parsedModel = React.useMemo(() => getDisplayModel(defaultModel), [defaultModel]);
+
+  const handleBackgroundAutoAcceptChange = React.useCallback(async (enabled: boolean) => {
+    try {
+      const directory = opencodeClient.getDirectory();
+      await setBackgroundAutoAcceptEnabled(
+        enabled,
+        { ...usePermissionStore.getState().autoAccept },
+        directory ? [directory] : [],
+      );
+    } catch {
+      toast.error(t('settings.mcp.page.toast.saveFailed'));
+    }
+  }, [setBackgroundAutoAcceptEnabled, t]);
 
   React.useEffect(() => {
     const loadSettings = async () => {
@@ -362,6 +385,26 @@ export const DefaultsSettings: React.FC = () => {
           <Checkbox checked={showDeletionDialog} onChange={setShowDeletionDialog} ariaLabel={t('settings.openchamber.defaults.field.showDeletionDialogAria')} />
           <span className="typography-ui-label text-foreground">{t('settings.openchamber.defaults.field.showDeletionDialog')}</span>
         </div>
+
+        {!runtime.isVSCode ? (
+          <div data-settings-item="sessions.background-auto-accept" className="py-1.5">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                checked={backgroundAutoAcceptEnabled === true}
+                disabled={backgroundAutoAcceptEnabled === null || backgroundAutoAcceptLoading || backgroundAutoAcceptSaving}
+                onChange={(enabled) => void handleBackgroundAutoAcceptChange(enabled)}
+                ariaLabel={t('settings.openchamber.defaults.backgroundAutoAccept.label')}
+              />
+              <span className="typography-ui-label text-foreground">{t('settings.openchamber.defaults.backgroundAutoAccept.label')}</span>
+            </div>
+            <p className="mt-1 pl-6 typography-meta text-muted-foreground">
+              {t('settings.openchamber.defaults.backgroundAutoAccept.description')}
+            </p>
+            <p className="mt-1 pl-6 typography-meta text-[var(--status-warning)]">
+              {t('settings.openchamber.defaults.backgroundAutoAccept.warning')}
+            </p>
+          </div>
+        ) : null}
 
       </section>
 
