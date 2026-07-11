@@ -6,14 +6,28 @@ import type { QuestionRequest } from "@/types/question"
 const replyCalls: Array<{ method: string; params: Record<string, unknown> }> = []
 const scopedClientDirectories: string[] = []
 const registeredSessionDirectories: Array<{ sessionID: string; directory: string }> = []
+const currentSessionSelections: string[] = []
 let sessionRevertResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
 let questionReplyError: unknown | null = null
 let questionRejectError: unknown | null = null
 let sessionShareResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
 let sessionMessagesResult: { data?: unknown; error?: unknown; response?: { status?: number } } = { data: [] }
 const globalUpsertedSessions: unknown[] = []
+let scopedSessionMessagesResult: { data?: unknown; error?: unknown; response?: { status?: number } } = { data: [] }
+let sessionMessageLookupResult: { data?: unknown; error?: unknown; response?: { status?: number } } = { data: null }
+let forkSessionResult: Record<string, unknown> = { id: 'forked-session', time: { created: 3 } }
 
 const mockScopedClient = {
+  session: {
+    messages: mock((params: Record<string, unknown>) => {
+      replyCalls.push({ method: "session.messages", params })
+      return Promise.resolve(scopedSessionMessagesResult)
+    }),
+    message: mock((params: Record<string, unknown>) => {
+      replyCalls.push({ method: "session.message", params })
+      return Promise.resolve(sessionMessageLookupResult)
+    }),
+  },
   permission: {
     reply: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "permission.reply", params })
@@ -93,6 +107,17 @@ mock.module("@/lib/opencode/client", () => ({
       return mockScopedClient
     },
     getDirectory: () => "/test/project",
+    getMessage: mock((sessionId: string, messageId: string, directory?: string | null) => {
+      replyCalls.push({ method: "session.message", params: { sessionID: sessionId, messageID: messageId, directory } })
+      if (sessionMessageLookupResult.error) {
+        return Promise.reject(sessionMessageLookupResult.error)
+      }
+      return Promise.resolve(sessionMessageLookupResult.data)
+    }),
+    forkSession: mock((sessionId: string, messageId: string, directory?: string | null) => {
+      replyCalls.push({ method: "session.fork", params: { sessionID: sessionId, messageID: messageId, directory } })
+      return Promise.resolve(forkSessionResult)
+    }),
     replyToPermission: mock((requestId: string, reply: string, options?: { directory?: string | null }) => {
       replyCalls.push({ method: "permission.reply", params: { requestID: requestId, reply, directory: options?.directory } })
       return Promise.resolve(true)
@@ -133,6 +158,9 @@ mock.module("./session-ui-store", () => ({
         if (sessionId === "session-a") return "/test/project"
         if (sessionId === "session-b") return "/other/project"
         return null
+      },
+      setCurrentSession: (sessionId: string) => {
+        currentSessionSelections.push(sessionId)
       },
     }),
   },
@@ -596,6 +624,8 @@ describe("revertToMessage passes session directory", () => {
     replyCalls.length = 0
     scopedClientDirectories.length = 0
     sessionRevertResult = {}
+    sessionMessageLookupResult = { data: null }
+    scopedSessionMessagesResult = { data: [] }
     Object.assign(inputState, {
       pendingInputText: "previous draft",
       pendingInputMode: "normal" as const,
@@ -655,6 +685,162 @@ describe("revertToMessage passes session directory", () => {
     expect(thrown).toBeInstanceOf(Error)
     expect((thrown as Error).message).toContain("session.revert failed (500)")
     expect((sessionStore.getState().session[0] as Session & { revert?: { messageID?: string } }).revert).toBe(undefined)
+    expect(inputState.pendingInputText).toBe("previous draft")
+  })
+
+  test("falls back to message lookup when the target part is missing from the store", async () => {
+    const session = { id: "session-a", time: { created: 1 } } as Session
+    const targetMessage = { id: "msg_2", sessionID: "session-a", role: "user", time: { created: 2 } } as Message
+    const fetchedRecord = {
+      info: targetMessage,
+      parts: [{ id: "prt_2", messageID: "msg_2", type: "text", text: "edit this" }],
+    }
+    const sessionStore = createStore({}, {
+      session: [session],
+      message: { "session-a": [targetMessage] },
+      part: {},
+    })
+    const childStores = createChildStores([
+      ["/test/project", sessionStore],
+      ["/current/project", createStore({})],
+    ])
+    sessionMessageLookupResult = { data: fetchedRecord }
+    sessionRevertResult = { data: { id: "session-a", time: { created: 1, updated: 2 }, revert: { messageID: "msg_2" } } }
+
+    const { setActionRefs, revertToMessage } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/current/project")
+
+    await revertToMessage("session-a", "msg_2")
+
+    expect(replyCalls.find((call) => call.method === "session.message")?.params).toEqual({
+      sessionID: "session-a",
+      messageID: "msg_2",
+      directory: "/test/project",
+    })
+    expect(inputState.pendingInputText).toBe("edit this")
+    expect(inputState.attachedFiles).toHaveLength(0)
+  })
+})
+
+describe("forkFromMessage message lookup fallback", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+    scopedClientDirectories.length = 0
+    currentSessionSelections.length = 0
+    sessionMessageLookupResult = { data: null }
+    forkSessionResult = { id: "forked-session", time: { created: 3 } }
+    Object.assign(inputState, {
+      pendingInputText: "previous draft",
+      pendingInputMode: "normal" as const,
+      attachedFiles: [],
+    })
+  })
+
+  test("uses lookup data when the fork target is missing from the store", async () => {
+    const session = { id: "session-a", time: { created: 1 } } as Session
+    const targetMessage = { id: "msg_2", sessionID: "session-a", role: "user", time: { created: 2 } } as Message
+    const fetchedRecord = {
+      info: targetMessage,
+      parts: [{ id: "prt_2", messageID: "msg_2", type: "text", text: "fork this" }],
+    }
+    const sessionStore = createStore({}, {
+      session: [session],
+      message: { "session-a": [targetMessage] },
+      part: {},
+    })
+    const childStores = createChildStores([["/test/project", sessionStore]])
+    sessionMessageLookupResult = { data: fetchedRecord }
+
+    const { setActionRefs, forkFromMessage } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    await forkFromMessage("session-a", "msg_2")
+
+    expect(replyCalls.find((call) => call.method === "session.message")?.params).toEqual({
+      sessionID: "session-a",
+      messageID: "msg_2",
+      directory: "/test/project",
+    })
+    expect(replyCalls.find((call) => call.method === "session.fork")?.params).toEqual({
+      sessionID: "session-a",
+      messageID: "msg_2",
+      directory: "/test/project",
+    })
+    expect(currentSessionSelections).toEqual(["forked-session"])
+    expect(inputState.pendingInputText).toBe("fork this")
+    expect(inputState.pendingInputMode).toBe("replace")
+  })
+})
+
+describe("message lookup fallback is best-effort", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+    scopedClientDirectories.length = 0
+    currentSessionSelections.length = 0
+    sessionMessageLookupResult = { error: new Error("lookup failed") }
+    sessionRevertResult = { data: { id: "session-a", time: { created: 1, updated: 2 }, revert: { messageID: "msg_2" } } }
+    forkSessionResult = { id: "forked-session", time: { created: 3 } }
+    Object.assign(inputState, {
+      pendingInputText: "previous draft",
+      pendingInputMode: "normal" as const,
+      attachedFiles: [],
+    })
+  })
+
+  test("does not block revert when message lookup fails", async () => {
+    const session = { id: "session-a", time: { created: 1 } } as Session
+    const targetMessage = { id: "msg_2", sessionID: "session-a", role: "user", time: { created: 2 } } as Message
+    const sessionStore = createStore({}, {
+      session: [session],
+      message: { "session-a": [targetMessage] },
+      part: {},
+    })
+    const childStores = createChildStores([
+      ["/test/project", sessionStore],
+      ["/current/project", createStore({})],
+    ])
+
+    const { setActionRefs, revertToMessage } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/current/project")
+
+    await revertToMessage("session-a", "msg_2")
+
+    expect(replyCalls.find((call) => call.method === "session.message")?.params).toEqual({
+      sessionID: "session-a",
+      messageID: "msg_2",
+      directory: "/test/project",
+    })
+    expect(replyCalls.find((call) => call.method === "session.revert")?.params.directory).toBe("/test/project")
+    expect((sessionStore.getState().session[0] as Session & { revert?: { messageID?: string } }).revert?.messageID).toBe("msg_2")
+    expect(inputState.pendingInputText).toBe("previous draft")
+  })
+
+  test("does not block fork when message lookup fails", async () => {
+    const session = { id: "session-a", time: { created: 1 } } as Session
+    const targetMessage = { id: "msg_2", sessionID: "session-a", role: "user", time: { created: 2 } } as Message
+    const sessionStore = createStore({}, {
+      session: [session],
+      message: { "session-a": [targetMessage] },
+      part: {},
+    })
+    const childStores = createChildStores([["/test/project", sessionStore]])
+
+    const { setActionRefs, forkFromMessage } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    await forkFromMessage("session-a", "msg_2")
+
+    expect(replyCalls.find((call) => call.method === "session.message")?.params).toEqual({
+      sessionID: "session-a",
+      messageID: "msg_2",
+      directory: "/test/project",
+    })
+    expect(replyCalls.find((call) => call.method === "session.fork")?.params).toEqual({
+      sessionID: "session-a",
+      messageID: "msg_2",
+      directory: "/test/project",
+    })
+    expect(currentSessionSelections).toEqual(["forked-session"])
     expect(inputState.pendingInputText).toBe("previous draft")
   })
 })

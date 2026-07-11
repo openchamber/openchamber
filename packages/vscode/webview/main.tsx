@@ -1565,7 +1565,7 @@ const fetchLastAssistantMessageText = async (sessionId: string, messageId?: stri
   if (!sessionId) return '';
 
   try {
-    const messages = await opencodeClient.getSessionMessages(sessionId, 5);
+    const messages = await opencodeClient.getSessionMessages(sessionId, { limit: 5, order: 'asc' });
     if (!Array.isArray(messages)) return '';
 
     let target = messageId

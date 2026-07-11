@@ -51,8 +51,10 @@ function formatSdkError(error: unknown): string {
 type SdkResult<T> = {
   data?: T;
   error?: unknown;
-  response?: { status?: number };
+  response?: { status?: number; headers?: { get?: (name: string) => string | null } };
 };
+
+type SessionRecord = { info: Message; parts: Part[] };
 
 function unwrapSdkData<T>(result: SdkResult<T>, operation: string): T {
   if (result.error) {
@@ -300,6 +302,31 @@ class OpencodeService {
     const scoped = createRuntimeOpencodeClient({ baseUrl: this.baseUrl, directory: normalized });
     this.scopedClients.set(key, scoped);
     return scoped;
+  }
+
+  private getSessionScopedClient(directory?: string | null): OpencodeClient {
+    const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
+    return requestDirectory ? this.getScopedApiClient(requestDirectory) : this.client;
+  }
+
+  private getSessionApi(directory?: string | null): {
+    messages: (params: {
+      sessionID: string;
+      limit?: number;
+      cursor?: string;
+      order?: "asc" | "desc";
+    }) => Promise<SdkResult<SessionRecord[]>>;
+    message: (params: { sessionID: string; messageID: string }) => Promise<SdkResult<SessionRecord | null>>;
+  } {
+    return this.getSessionScopedClient(directory).session as unknown as {
+      messages: (params: {
+        sessionID: string;
+        limit?: number;
+        cursor?: string;
+        order?: "asc" | "desc";
+      }) => Promise<SdkResult<SessionRecord[]>>;
+      message: (params: { sessionID: string; messageID: string }) => Promise<SdkResult<SessionRecord | null>>;
+    };
   }
 
   private normalizeCandidatePath(path?: string | null): string | null {
@@ -556,13 +583,56 @@ class OpencodeService {
     return unwrapSdkData(response, 'session.update');
   }
 
-  async getSessionMessages(id: string, limit?: number): Promise<{ info: Message; parts: Part[] }[]> {
-    const response = await this.client.session.messages({
-      sessionID: id,
-      ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
-      ...(typeof limit === 'number' ? { limit } : {}),
-    });
+  async getSessionMessages(id: string, limit?: number): Promise<SessionRecord[]>;
+  async getSessionMessages(
+    id: string,
+    options?: { limit?: number; cursor?: string; order?: "asc" | "desc" },
+  ): Promise<SessionRecord[]>;
+  async getSessionMessages(
+    id: string,
+    options?: number | { limit?: number; cursor?: string; order?: "asc" | "desc" },
+  ): Promise<SessionRecord[]> {
+    const requestOptions = typeof options === "number" ? { limit: options } : options ?? {};
+    return this.getSessionMessagesForDirectory(this.currentDirectory, id, requestOptions);
+  }
+
+  async getSessionMessagesForDirectory(
+    directory: string | null | undefined,
+    id: string,
+    options?: number | { limit?: number; cursor?: string; order?: "asc" | "desc" },
+  ): Promise<SessionRecord[]> {
+    const response = await this.getSessionMessagesResponseForDirectory(directory, id, options);
     return unwrapSdkData(response, 'session.messages');
+  }
+
+  async getSessionMessagesResponseForDirectory(
+    directory: string | null | undefined,
+    id: string,
+    options?: number | { limit?: number; cursor?: string; order?: "asc" | "desc" },
+  ): Promise<SdkResult<SessionRecord[]>> {
+    const requestOptions = typeof options === "number" ? { limit: options } : options ?? {};
+    return this.getSessionApi(directory).messages({
+      sessionID: id,
+      ...(typeof requestOptions.limit === 'number' ? { limit: requestOptions.limit } : {}),
+      ...(requestOptions.cursor ? { cursor: requestOptions.cursor } : {}),
+      ...(!requestOptions.cursor && requestOptions.order ? { order: requestOptions.order } : {}),
+    });
+  }
+
+  async getMessage(sessionID: string, messageID: string, directory?: string | null): Promise<SessionRecord | null> {
+    const response = await this.getSessionApi(directory).message({
+      sessionID,
+      messageID,
+    });
+
+    if (response.error) {
+      const status = response.response?.status;
+      const error = new Error(`session.message failed${status ? ` (${status})` : ''}: ${formatSdkError(response.error)}`) as Error & { status?: number };
+      if (status !== undefined) error.status = status;
+      throw error;
+    }
+
+    return (response.data as SessionRecord | null | undefined) ?? null;
   }
 
   async getSessionTodos(sessionId: string): Promise<Array<{ id: string; content: string; status: string; priority: string }>> {
