@@ -937,14 +937,9 @@ class OpencodeService {
     return tempMessageId;
   }
 
-  async abortSession(id: string): Promise<boolean> {
-    const response = await this.client.session.abort(
-      {
-        sessionID: id,
-        ...(this.currentDirectory ? { directory: this.currentDirectory } : {})
-      },
-      { throwOnError: true }
-    );
+  async abortSession(id: string, directory?: string | null): Promise<boolean> {
+    const client = directory ? this.getScopedSdkClient(directory) : this.client;
+    const response = await client.v2.session.interrupt({ sessionID: id }, { throwOnError: true });
     return Boolean(response.data);
   }
 

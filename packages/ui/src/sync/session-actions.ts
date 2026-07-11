@@ -845,7 +845,7 @@ function materializeConfirmedSendRecords(
 }
 
 // ---------------------------------------------------------------------------
-// Abort
+// Interrupt
 // ---------------------------------------------------------------------------
 
 export async function abortCurrentOperation(sessionId: string): Promise<void> {
@@ -856,9 +856,9 @@ export async function abortCurrentOperation(sessionId: string): Promise<void> {
   // worktree than the UI's current directory could never be aborted).
   const { directory } = dirStoreForSession(sessionId)
   try {
-    await sdk().session.abort({ sessionID: sessionId, directory })
+    await opencodeClient.abortSession(sessionId, directory)
   } catch (error) {
-    console.error("[session-actions] abort failed", error)
+    console.error("[session-actions] interrupt failed", error)
   }
 }
 
@@ -981,7 +981,7 @@ export async function rejectQuestion(
  *
  * NOTE: rejecting unblocks the agent's tool but does NOT end its turn. Callers
  * that need to send the next message right away (the chat send path) must also
- * abort the session so the OpenCode runner reaches `idle` — otherwise the new
+ * interrupt the session so the OpenCode runner reaches `idle` — otherwise the new
  * prompt arrives while the run is still active and is discarded by the runner's
  * `ensureRunning`.
  */
@@ -1045,13 +1045,13 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   const { store, directory } = dirStoreForSession(sessionId)
   const state = store.getState()
 
-  // Abort if busy before mutating session state
+  // Interrupt if busy before mutating session state
   const status = state.session_status[sessionId]
   if (status && status.type !== "idle") {
     try {
-      await sdk().session.abort({ sessionID: sessionId, directory })
+      await sdk().v2.session.interrupt({ sessionID: sessionId }, { throwOnError: true })
     } catch {
-      // ignore abort errors
+      // ignore interrupt errors
     }
   }
 
@@ -1177,11 +1177,11 @@ export async function unrevertSession(sessionId: string): Promise<void> {
   const state = store.getState()
   const previousMessageCount = state.message[sessionId]?.length ?? 0
 
-  // Abort if busy
+  // Interrupt if busy
   const status = state.session_status[sessionId]
   if (status && status.type !== "idle") {
     try {
-      await sdk().session.abort({ sessionID: sessionId, directory })
+      await sdk().v2.session.interrupt({ sessionID: sessionId }, { throwOnError: true })
     } catch {
       // ignore
     }
