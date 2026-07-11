@@ -8,7 +8,6 @@ import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import { createEventPipeline } from "./event-pipeline"
 import { isVSCodeRuntime } from "@/lib/desktop"
 import { isMobileSurfaceRuntime } from "@/lib/runtimeSurface"
-import { isCapacitorApp } from "@/lib/platform"
 import { reduceGlobalEvent, applyGlobalProject, applyDirectoryEvent, type SessionMaterializationReason } from "./event-reducer"
 import { useGlobalSyncStore } from "./global-sync-store"
 import { ChildStoreManager, type DirectoryStore } from "./child-store"
@@ -447,11 +446,6 @@ function toSessionStatus(status: Awaited<ReturnType<typeof opencodeClient.getSes
   return undefined
 }
 
-function isStreamHeartbeatEvent(payload: Event): boolean {
-  const type = (payload as { type?: unknown }).type
-  return type === "server.heartbeat" || type === "openchamber:heartbeat"
-}
-
 function getActiveSessionCandidateIds(directory: string, state: DirectoryStore): string[] {
   return getReconnectCandidateSessionIds(state, {
     directory,
@@ -499,15 +493,10 @@ export function applySessionStatusSnapshot(
       const incoming = toSessionStatus(snapshot[sessionId])
 
       if (incoming && incoming.type !== "idle") {
-        const isNewOrChanged = !haveEquivalentSyncSnapshots(current[sessionId], incoming)
-        // Authoritative mode (bootstrap/reconnect) treats the snapshot as truth,
-        // so any active entry confirms liveness. Monotonic mode only seeds freshness
-        // when the status meaningfully changes.
-        if (mode === "authoritative" || isNewOrChanged) {
-          freshSessionIds.add(sessionId)
-        }
+        const isChanged = !haveEquivalentSyncSnapshots(current[sessionId], incoming)
+        if (mode === "authoritative" || isChanged) freshSessionIds.add(sessionId)
         // Confirm or raise active status (catches a busy event the SSE missed).
-        if (isNewOrChanged) {
+        if (isChanged) {
           draft()[sessionId] = incoming
           changed = true
         }
@@ -528,24 +517,22 @@ export function applySessionStatusSnapshot(
     return next ? { session_status: next } : state
   })
 
-  for (const sessionId of freshSessionIds) {
-    onSessionFreshness?.(sessionId)
-  }
+  for (const sessionId of freshSessionIds) onSessionFreshness?.(sessionId)
 
   return changed
 }
+
 async function resyncDirectorySessionStatuses(
   directory: string,
   store: StoreApi<DirectoryStore>,
   candidateSessionIds: string[],
   mode: StatusSnapshotMode,
-  onSessionFreshness?: (sessionId: string) => void,
 ): Promise<DirectorySessionStatusSnapshot | null> {
   const nextStatuses = await opencodeClient.getSessionStatusForDirectory(directory)
   // null = fetch failed; preserve existing state. {} or populated = a snapshot
   // of active sessions — reconciled per `mode` (absence ≠ idle under monotonic).
   if (nextStatuses === null) return null
-  applySessionStatusSnapshot(store, nextStatuses, candidateSessionIds, mode, onSessionFreshness)
+  applySessionStatusSnapshot(store, nextStatuses, candidateSessionIds, mode)
   return nextStatuses
 }
 
@@ -572,14 +559,10 @@ export function getSessionWatchdogFreshnessAt(
 ): number | undefined {
   const perSession = freshnessBySessionByDirectory.get(directory)?.get(sessionId)
   if (perSession !== undefined) return perSession
-
-  // Only fall back to directory freshness when no session in the directory has been
-  // seeded yet; otherwise sibling activity would mask a stuck session.
-  const dirMap = freshnessBySessionByDirectory.get(directory)
-  if (!dirMap || dirMap.size === 0) {
-    return freshnessByDirectory.get(directory)
-  }
-  return undefined
+  const directorySessions = freshnessBySessionByDirectory.get(directory)
+  return !directorySessions || directorySessions.size === 0
+    ? freshnessByDirectory.get(directory)
+    : undefined
 }
 
 export function getSessionWatchdogStaleSessionId(
@@ -591,13 +574,13 @@ export function getSessionWatchdogStaleSessionId(
   staleEventMs = ACTIVE_SESSION_STALE_EVENT_MS,
 ): string | undefined {
   return candidateSessionIds.find((sessionId) => {
-    const lastActiveEventAt = getSessionWatchdogFreshnessAt(
+    const freshAt = getSessionWatchdogFreshnessAt(
       directory,
       sessionId,
       freshnessBySessionByDirectory,
       freshnessByDirectory,
     ) ?? 0
-    return now - lastActiveEventAt >= staleEventMs
+    return now - freshAt >= staleEventMs
   })
 }
 
@@ -607,18 +590,12 @@ export function getSessionWatchdogFreshnessLineage(
   lookupSession: (directory: string, sessionId: string) => Session | undefined,
 ): string[] {
   const lineage = new Set<string>()
-  let currentSessionId: string | undefined = sessionId
-
-  while (currentSessionId && !lineage.has(currentSessionId)) {
-    lineage.add(currentSessionId)
-
-    const currentSession = lookupSession(directory, currentSessionId)
-    const parentID = currentSession?.parentID ?? undefined
-    if (!parentID) break
-    currentSessionId = parentID
+  let current: string | undefined = sessionId
+  while (current && !lineage.has(current)) {
+    lineage.add(current)
+    current = lookupSession(directory, current)?.parentID ?? undefined
   }
-
-  return Array.from(lineage)
+  return [...lineage]
 }
 
 // Decide whether the event stream is genuinely stale and warrants a full
@@ -1324,19 +1301,12 @@ async function resyncDirectoryAfterReconnect(
   store: StoreApi<DirectoryStore>,
   routingIndex: EventRoutingIndex,
   reason: SessionMaterializationReason,
-  onSessionFreshness?: (directory: string, sessionId: string) => void,
 ) {
   const current = store.getState()
   const candidateSessionIds = getActiveSessionCandidateIds(directory, current)
   if (candidateSessionIds.length === 0) return
 
-  await resyncDirectorySessionStatuses(
-    directory,
-    store,
-    candidateSessionIds,
-    "authoritative",
-    (sessionId) => onSessionFreshness?.(directory, sessionId),
-  )
+  await resyncDirectorySessionStatuses(directory, store, candidateSessionIds, "authoritative")
 
   const scopedClient = opencodeClient.getScopedSdkClient(directory)
   await Promise.all(candidateSessionIds.map(async (sessionId) => {
@@ -1427,7 +1397,6 @@ function handleEvent(
   payload: Event,
   childStores: ChildStoreManager,
   routingIndex: EventRoutingIndex,
-  onSessionFreshness?: (directory: string, sessionId: string) => void,
 ) {
   const directory = resolveDirectoryFromRoutingIndex(routingIndex, rawDirectory, payload, childStores)
 
@@ -1672,15 +1641,11 @@ function handleEvent(
       break
   }
 
-    const reducerResult = applyDirectoryEvent(draft, payload, {
-      onSetSessionTodo: (sessionID, todos) => {
-        useTodosPersistStore.getState().setSessionTodos(sessionID, todos)
-      },
-      onSessionFreshness: onSessionFreshness
-        ? (sessionID) => onSessionFreshness(resolvedDirectory, sessionID)
-        : undefined,
-      onResolveSessionIDForMessageID: (messageID) => routingIndex.messageSessionById.get(messageID),
-    })
+  const reducerResult = applyDirectoryEvent(draft, payload, {
+    onSetSessionTodo: (sessionID, todos) => {
+      useTodosPersistStore.getState().setSessionTodos(sessionID, todos)
+    },
+  })
   const reducerChanged = typeof reducerResult === "boolean" ? reducerResult : reducerResult.changed
   const materializationResult = typeof reducerResult === "boolean" ? undefined : reducerResult.materialization
 
@@ -1779,12 +1744,13 @@ export function SyncProvider(props: {
   directory: string
   children: React.ReactNode
 }) {
-  const storedMessageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport)
-  // Capacitor apps are locked to SSE: native WebSocket streaming is unreliable there (on
-  // Android events only arrive once the run finishes), while SSE streams correctly. The Chat
-  // settings UI disables the other options on mobile, but force it here too so the effective
-  // transport can't drift. Remove this override (and the UI lock) to re-enable WS on mobile.
-  const messageStreamTransport: 'auto' | 'ws' | 'sse' = isCapacitorApp() ? 'sse' : storedMessageStreamTransport
+  // Capacitor apps were previously locked to SSE because Android WebSocket
+  // upgrades appeared broken. Root cause was server-side: the Android WebView
+  // origin (https://localhost, androidScheme 'https') was missing from the
+  // packaged-client origin allowlist, so every WS upgrade was rejected with
+  // 403. With the origin allowlisted, mobile uses the same transport
+  // selection as everywhere else ('auto' falls back to SSE on WS failure).
+  const messageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport)
   const childStoresRef = useRef<ChildStoreManager | null>(null)
   if (!childStoresRef.current) childStoresRef.current = new ChildStoreManager()
   const childStores = childStoresRef.current
@@ -1804,22 +1770,23 @@ export function SyncProvider(props: {
   const pipelineDisconnectedBeforeFirstConnectRef = useRef(false)
 
   const recordSessionWatchdogFreshness = useCallback((directory: string, sessionId: string) => {
-    const store = childStores.children.get(directory)
-    const lookupSession = (targetDirectory: string, targetSessionId: string) => (
-      store?.getState().session.find((session) => session.id === targetSessionId)
-      ?? getAllSyncSessions().find((session) => session.id === targetSessionId && (!session.directory || session.directory === targetDirectory))
-    )
+    if (!directory || directory === "global" || !sessionId) return
     const now = Date.now()
-    let sessionFreshnessByDirectory = lastActiveEventAtBySessionRef.current.get(directory)
-    if (!sessionFreshnessByDirectory) {
-      sessionFreshnessByDirectory = new Map<string, number>()
-      lastActiveEventAtBySessionRef.current.set(directory, sessionFreshnessByDirectory)
+    lastActiveEventAtByDirectoryRef.current.set(directory, now)
+    let sessions = lastActiveEventAtBySessionRef.current.get(directory)
+    if (!sessions) {
+      sessions = new Map()
+      lastActiveEventAtBySessionRef.current.set(directory, sessions)
     }
-    for (const targetSessionId of getSessionWatchdogFreshnessLineage(directory, sessionId, lookupSession)) {
-      sessionFreshnessByDirectory.set(targetSessionId, now)
+    const storeSessions = childStores.children.get(directory)?.getState().session ?? []
+    for (const target of getSessionWatchdogFreshnessLineage(
+      directory,
+      sessionId,
+      (_directory, targetId) => storeSessions.find((session) => session.id === targetId),
+    )) {
+      sessions.set(target, now)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- childStores is a stable singleton; the callback reads the live Map at call time
-  }, [])
+  }, [childStores])
 
   const system = useMemo<SyncSystem>(
     () => ({
@@ -1838,14 +1805,14 @@ export function SyncProvider(props: {
 
     lastFullResyncAtByDirectoryRef.current.set(directory, Date.now())
     resyncing.add(directory)
-    void resyncDirectoryAfterReconnect(directory, store, routingIndex, reason, recordSessionWatchdogFreshness)
+    void resyncDirectoryAfterReconnect(directory, store, routingIndex, reason)
       .catch(() => {
         // Transient failure — the watchdog, next SSE event, or reconnect will catch up.
       })
       .finally(() => {
         resyncing.delete(directory)
       })
-  }, [childStores, routingIndex, recordSessionWatchdogFreshness])
+  }, [childStores, routingIndex])
 
   // Configure child store manager
   useEffect(() => {
@@ -1871,7 +1838,6 @@ export function SyncProvider(props: {
                 ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
               }
             },
-            onSessionFreshness: recordSessionWatchdogFreshness,
             global: {
               config: globalState.config,
               projects: globalState.projects,
@@ -1958,7 +1924,7 @@ export function SyncProvider(props: {
       isBooting: (directory) => bootingDirs.has(directory),
       isLoadingSessions: () => false,
     })
-  }, [childStores, props.sdk, routingIndex, recordSessionWatchdogFreshness])
+  }, [childStores, props.sdk, routingIndex])
 
   // Bootstrap global state — set bootingRoot/bootedAt to suppress
   // redundant refresh events during startup
@@ -2005,8 +1971,11 @@ export function SyncProvider(props: {
         // heartbeats here caused issue #1656: the stale timer fired for any
         // quiet session, triggering redundant full resyncs every ~15s.
         lastStreamActivityAtRef.current = Date.now()
-        if (!isStreamHeartbeatEvent(payload)) {
+        const eventType = (payload as { type?: unknown }).type
+        if (eventType !== "server.heartbeat" && eventType !== "openchamber:heartbeat") {
           lastActiveEventAtByDirectoryRef.current.set(directory, Date.now())
+          const sessionID = getSessionIdFromPayload(payload)
+          if (sessionID) recordSessionWatchdogFreshness(directory, sessionID)
         }
         dispatchVSCodeRuntimeNotificationEvent(directory, payload)
         if (payload.type === "installation.update-available") {
@@ -2017,7 +1986,7 @@ export function SyncProvider(props: {
             dispatchOpenCodeUpdateAvailableUnlessBundled({ version })
           }
         }
-        handleEvent(directory, payload, childStores, routingIndex, recordSessionWatchdogFreshness)
+        handleEvent(directory, payload, childStores, routingIndex)
       },
       onReconnect: () => {
         useConfigStore.setState({
@@ -2131,13 +2100,7 @@ export function SyncProvider(props: {
       polling.add(directory)
       try {
         const before = store.getState()
-        const statuses = await resyncDirectorySessionStatuses(
-          directory,
-          store,
-          candidateSessionIds,
-          "monotonic",
-          (sessionId) => recordSessionWatchdogFreshness(directory, sessionId),
-        )
+        const statuses = await resyncDirectorySessionStatuses(directory, store, candidateSessionIds, "monotonic")
         if (!statuses) return
         const needsSnapshot = candidateSessionIds.some((sessionId) => (
           needsSnapshotAfterStatusPoll(before, sessionId, statuses[sessionId])
@@ -2168,20 +2131,6 @@ export function SyncProvider(props: {
               continue
             }
 
-            const sessionFreshnessByDirectory = lastActiveEventAtBySessionRef.current.get(directory)
-            if (sessionFreshnessByDirectory) {
-              const candidateSet = new Set(candidateSessionIds)
-              for (const staleSessionId of sessionFreshnessByDirectory.keys()) {
-                if (!candidateSet.has(staleSessionId)) {
-                  sessionFreshnessByDirectory.delete(staleSessionId)
-                }
-              }
-            }
-
-            if (!lastActiveEventAtByDirectoryRef.current.has(directory)) {
-              lastActiveEventAtByDirectoryRef.current.set(directory, now)
-            }
-
             const lastStatusPollAt = lastStatusPollAtByDirectoryRef.current.get(directory) ?? 0
             if (now - lastStatusPollAt >= ACTIVE_SESSION_STATUS_POLL_INTERVAL_MS) {
               lastStatusPollAtByDirectoryRef.current.set(directory, now)
@@ -2197,7 +2146,7 @@ export function SyncProvider(props: {
               now,
             )
             if (staleSessionId && now - lastFullResyncAt >= ACTIVE_SESSION_FULL_RESYNC_COOLDOWN_MS) {
-              pipelineReconnectRef.current?.("active_stream_stale")
+              pipelineReconnectRef.current?.("active_session_stale")
               triggerDirectoryResync(directory, "stale-status-resync")
             }
             if (shouldTriggerStaleResync(lastStreamActivityAtRef.current, lastFullResyncAt, now)) {

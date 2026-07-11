@@ -100,6 +100,17 @@ describe('settings helpers', () => {
     });
   });
 
+  it('accepts desktopMinimizeToTrayEnabled as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ desktopMinimizeToTrayEnabled: true })).toEqual({
+      desktopMinimizeToTrayEnabled: true,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ desktopMinimizeToTrayEnabled: false })).toEqual({
+      desktopMinimizeToTrayEnabled: false,
+    });
+  });
+
   it('accepts desktopUiPassword as a persisted shared setting', () => {
     const helpers = createTestHelpers();
 

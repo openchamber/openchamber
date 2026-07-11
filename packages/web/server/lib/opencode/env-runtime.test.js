@@ -111,6 +111,7 @@ const createRuntime = (settings, options = {}) => {
     normalizeDirectoryPath: (value) => value,
     readSettingsFromDiskMigrated: async () => settings,
     spawnSync: options.spawnSync,
+    homedir: options.homedir,
   });
 
   return { runtime, state };
@@ -149,7 +150,7 @@ describe('OpenCode env runtime', () => {
     expect(state.resolvedOpencodeBinarySource).toBe('settings');
   });
 
-  it('resolves bundled OpenCode CLI before PATH lookup', () => {
+  it('prefers a user-installed OpenCode from PATH over the bundled CLI', () => {
     const bundledDir = createTempDir('openchamber-bundled-opencode-');
     const bundledBinary = path.join(bundledDir, process.platform === 'win32' ? 'opencode.exe' : 'opencode');
     const pathDir = createTempDir('openchamber-path-opencode-');
@@ -165,8 +166,8 @@ describe('OpenCode env runtime', () => {
     delete process.env.OPENCODE_BINARY;
     const { runtime, state } = createRuntime({});
 
-    expect(runtime.resolveOpencodeCliPath()).toBe(bundledBinary);
-    expect(state.resolvedOpencodeBinarySource).toBe('bundled');
+    expect(runtime.resolveOpencodeCliPath()).toBe(pathBinary);
+    expect(state.resolvedOpencodeBinarySource).toBe('path');
   });
 
   it('keeps explicit OpenCode binary ahead of bundled CLI', () => {
@@ -188,7 +189,7 @@ describe('OpenCode env runtime', () => {
     expect(state.resolvedOpencodeBinarySource).toBe('env');
   });
 
-  it('resolves bundled OpenCode CLI from Electron resourcesPath', () => {
+  it('falls back to the bundled OpenCode CLI from Electron resourcesPath when nothing else is installed', () => {
     const resourcesPath = createTempDir('openchamber-resources-');
     const bundledDir = path.join(resourcesPath, 'opencode-cli');
     const bundledBinary = path.join(bundledDir, process.platform === 'win32' ? 'opencode.exe' : 'opencode');
@@ -204,7 +205,13 @@ describe('OpenCode env runtime', () => {
     process.env.PATH = createTempDir('openchamber-empty-path-');
     delete process.env.OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR;
     delete process.env.OPENCODE_BINARY;
-    const { runtime, state } = createRuntime({});
+    // The bundled CLI is the LAST resort now — hide the machine's own installs
+    // from the home-directory fallbacks and shell discovery.
+    const emptyHome = createTempDir('openchamber-empty-home-');
+    const { runtime, state } = createRuntime({}, {
+      spawnSync: () => ({ status: 1, stdout: '', stderr: '' }),
+      homedir: () => emptyHome,
+    });
 
     expect(runtime.resolveOpencodeCliPath()).toBe(bundledBinary);
     expect(state.resolvedOpencodeBinarySource).toBe('bundled');

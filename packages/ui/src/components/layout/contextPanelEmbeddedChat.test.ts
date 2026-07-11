@@ -54,6 +54,7 @@ describe('embedded session chat URL', () => {
 
     const url = new URL(src);
     expect(url.searchParams.get('ocPanel')).toBe('session-chat');
+    expect(url.searchParams.get('surface')).toBe('desktop');
     expect(url.searchParams.get('themeMode')).toBe('system');
     expect(url.searchParams.get('themeVariant')).toBe('dark');
     expect(url.searchParams.get('lightThemeId')).toBe('custom-light');
