@@ -12,6 +12,15 @@ Quando você não consegue alcançar o OpenChamber pelo seu celular ou outra má
 - abra `http://localhost:3000` no mesmo computador primeiro — se isso falhar, não é um problema remoto; veja [Conexão com o OpenCode](/pt-br/troubleshooting/opencode-connection/)
 - confirme que o servidor está em execução com `openchamber status`
 
+## O dispositivo pareado não conecta
+
+- o código QR / link de pareamento é de **uso único** — se já foi escaneado (ou expirou), crie um novo em **Adicionar um dispositivo**
+- se o dispositivo foi pareado com **Somente rede doméstica**, ele não consegue conectar de fora dessa rede — pareie-o de novo com **Em qualquer lugar**
+- para pareamentos **Em qualquer lugar**, verifique **Settings → Remote Instances → OpenChamber Relay** no servidor: deve dizer **Conectado**; se não, desative e reative o relay
+- se um dispositivo foi **revogado**, o token dele se perdeu de vez — pareie-o de novo com um novo código QR
+
+Veja [Conectar um Dispositivo](/pt-br/connect-devices/) e [Private Relay](/pt-br/private-relay/) para entender como essas conexões funcionam.
+
 ## O link do túnel não funciona
 
 - execute `openchamber tunnel status --all`
@@ -34,5 +43,5 @@ Se você colocou o OpenChamber atrás de um reverse proxy e ele carrega de forma
 
 ## Relacionado
 
-- [Túneis](/pt-br/tunnels/) · [Instâncias Remotas](/pt-br/remote-instances/) · [Reverse Proxy](/pt-br/reverse-proxy/)
+- [Conectar um Dispositivo](/pt-br/connect-devices/) · [Private Relay](/pt-br/private-relay/) · [Túneis](/pt-br/tunnels/) · [Instâncias Remotas](/pt-br/remote-instances/) · [Reverse Proxy](/pt-br/reverse-proxy/)
 - [Segurança](/pt-br/security/) — proteja a UI antes de expô-la

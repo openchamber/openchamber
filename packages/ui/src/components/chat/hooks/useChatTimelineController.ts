@@ -59,7 +59,17 @@ export interface UseChatTimelineControllerResult {
 }
 
 const TURN_MODEL_CACHE_MAX = 30
-const HISTORY_SCROLL_THRESHOLD = 200
+// Desktop load-older lead distance. Trigger well before the top: the fetch
+// then completes and the prepend lands ABOVE the viewport, where key-anchored
+// compensation is exact and invisible. A short lead (the old 200px) let the
+// user reach the estimated-height region near the absolute top mid-fetch,
+// where the post-insert restore is least precise and reads as a small jump.
+const HISTORY_SCROLL_THRESHOLD_MIN_PX = 1200
+const HISTORY_SCROLL_VIEWPORT_FACTOR = 1.5
+const resolveHistoryScrollThreshold = (clientHeight: number): number => Math.max(
+    HISTORY_SCROLL_THRESHOLD_MIN_PX,
+    clientHeight * HISTORY_SCROLL_VIEWPORT_FACTOR,
+)
 const VSCODE_TURN_MODEL_CACHE_MAX = 4
 const VSCODE_TURN_MODEL_CACHE_MAX_MESSAGES = 30
 const MOBILE_TURN_MODEL_CACHE_MAX = 4
@@ -692,7 +702,7 @@ export const useChatTimelineController = ({
         const container = scrollRef.current;
         if (!container) return;
         if (isPinnedRef.current) return;
-        if (container.scrollTop >= HISTORY_SCROLL_THRESHOLD) return;
+        if (container.scrollTop >= resolveHistoryScrollThreshold(container.clientHeight)) return;
         if (!historySignalsRef.current.canLoadEarlier) return;
         if (isLoadingOlderRef.current || pendingRevealWorkRef.current) return;
 

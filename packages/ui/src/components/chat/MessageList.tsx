@@ -50,7 +50,7 @@ const TANSTACK_MOBILE_OVERSCAN = 16;
 const resolveTanstackOverscan = (): number => (
     isMobileSurfaceRuntime() ? TANSTACK_MOBILE_OVERSCAN : TANSTACK_OVERSCAN
 );
-// Post-prepend anchor hold (upstream parity): measurements of freshly
+// Post-prepend anchor hold: measurements of freshly
 // prepended rows settle over multiple frames, so a single restore can be
 // invalidated by the next measurement pass. Re-assert the anchor until it
 // holds still for STABLE_FRAMES consecutive frames, giving up at MAX_FRAMES.
@@ -61,6 +61,8 @@ const ANCHOR_HOLD_MAX_FRAMES = 180;
 const TANSTACK_ESTIMATE_MIN_SAMPLES = 5;
 const TANSTACK_ESTIMATE_MIN = 120;
 const TANSTACK_ESTIMATE_MAX = 1200;
+// "At bottom" tolerance for resize-adjustment decisions.
+const TANSTACK_AT_END_THRESHOLD_PX = 80;
 
 // Quiet-window prepend on mobile: while a touch drag or momentum scroll is
 // active, iOS owns the scroll position and ANY geometry change above the
@@ -750,6 +752,7 @@ const TurnBlock = React.memo(({
                     activityOwnerMessageId,
                     isFirstAssistantInTurn: isFirstAssistant,
                     isLastAssistantInTurn: isLastAssistant,
+                    isLatestTurn: isLastTurn,
                     isWorking: isLastTurn && sessionIsWorking && (
                         chatRenderMode === 'sorted'
                             ? hasAnchoredActivitySegment
@@ -1098,7 +1101,7 @@ const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, 
         scrollToFn: (offset, options, instance) => {
             // Expose the new total height before core writes an anchor
             // correction so the browser does not clamp the offset to the old
-            // height (upstream parity).
+            // height.
             const sizeElement = sizeContainerRef.current;
             if (sizeElement) sizeElement.style.height = `${instance.getTotalSize()}px`;
             elementScroll(offset, options, instance);
@@ -1111,6 +1114,17 @@ const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, 
         initialOffset: () => Number.MAX_SAFE_INTEGER,
         initialMeasurementsCache: initialMeasurements,
     });
+    // Only compensate scroll for rows growing ABOVE the viewport (history
+    // remeasures, prepended pages). A row growing inside the viewport —
+    // expanding a tool call or thinking block — must grow DOWNWARD naturally;
+    // the end-anchored default made it expand upward. At the bottom,
+    // app-level auto-follow owns pinning, so skip there too instead of
+    // double-writing. (This is an instance field, not a constructor option.)
+    tanstackVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
+        if (instance.isAtEnd(TANSTACK_AT_END_THRESHOLD_PX)) return false;
+        const firstVisibleIndex = instance.range?.startIndex;
+        return firstVisibleIndex !== undefined && item.index < firstVisibleIndex;
+    };
 
     React.useEffect(() => {
         if (!isTanstack) return;
@@ -1179,12 +1193,17 @@ const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, 
     if (engine === 'tanstack') {
         const virtualItems = tanstackVirtualizer.getVirtualItems();
         const startOffset = virtualItems[0]?.start ?? 0;
-        // Rendered rows stay in normal flow inside a single translated wrapper
-        // (not per-row absolute positioning) so per-turn sticky user headers
-        // keep working against the scroll container.
+        // Rendered rows stay in normal flow inside a single offset wrapper (not
+        // per-row absolute positioning) so per-turn sticky user headers keep
+        // working against the scroll container. The offset MUST be padding, not
+        // transform: a transformed ancestor becomes the sticky containing block,
+        // so headers would stick to the wrapper's (arbitrary, overscan-dependent)
+        // top edge mid-list and float over the previous turn. Padding only
+        // changes when the virtual window shifts — not per scroll frame — so the
+        // layout cost is negligible.
         return (
             <div ref={sizeContainerRef} className="relative w-full" style={{ height: tanstackVirtualizer.getTotalSize() }}>
-                <div style={{ transform: `translateY(${startOffset}px)` }}>
+                <div style={{ paddingTop: `${startOffset}px` }}>
                     {virtualItems.map((item) => {
                         const entry = renderEntries[item.index];
                         if (!entry) return null;
