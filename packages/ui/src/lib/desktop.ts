@@ -38,6 +38,9 @@ export type SkillCatalogConfig = {
   gitIdentityId?: string;
 };
 
+export type DesktopWindowControlsPosition = 'auto' | 'left' | 'right';
+export type DesktopWindowControlsSide = 'left' | 'right';
+
 export type DesktopSettings = {
   themeId?: string;
   useSystemTheme?: boolean;
@@ -133,6 +136,7 @@ export type DesktopSettings = {
   pwaAppName?: string;
   pwaOrientation?: 'system' | 'portrait' | 'landscape';
   mobileKeyboardMode?: MobileKeyboardMode;
+  desktopWindowControlsPosition?: DesktopWindowControlsPosition;
   inputSpellcheckEnabled?: boolean;
   showOpenCodeUpdateNotifications?: boolean;
   openCodeUpdateToastDismissedVersion?: string;
@@ -231,11 +235,31 @@ export const getElectronPlatform = (): string | null => {
   return typeof platform === 'string' ? platform : null;
 };
 
+/** Width of the three in-app window control buttons (3 × w-11). */
+export const DESKTOP_WINDOW_CONTROLS_WIDTH_PX = 132;
+
 /** Windows and Linux use frameless windows with in-app minimize/maximize/close controls. */
 export const usesFramelessElectronChrome = (): boolean => {
   if (!isElectronShell()) return false;
   const platform = getElectronPlatform();
   return platform === 'win32' || platform === 'linux';
+};
+
+export const getDefaultDesktopWindowControlsSide = (platform: string | null = getElectronPlatform()): DesktopWindowControlsSide => {
+  if (platform === 'linux') {
+    return 'left';
+  }
+  return 'right';
+};
+
+export const resolveDesktopWindowControlsSide = (
+  preference: DesktopWindowControlsPosition | undefined,
+  platform: string | null = getElectronPlatform(),
+): DesktopWindowControlsSide => {
+  if (preference === 'left' || preference === 'right') {
+    return preference;
+  }
+  return getDefaultDesktopWindowControlsSide(platform);
 };
 
 export const hasDesktopInvoke = (): boolean => {

@@ -315,6 +315,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => ctx.isDesktopLocalOrigin,
   },
   {
+    id: 'sessions.desktop-window-controls-position',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.desktopNetwork.field.windowControlsPosition',
+    descriptionKey: 'settings.openchamber.desktopNetwork.field.windowControlsPositionDescription',
+    keywords: ['desktop', 'window', 'controls', 'minimize', 'maximize', 'close', 'titlebar', 'linux', 'windows'],
+    isAvailable: (ctx) => ctx.isDesktop && (ctx.isWindows || !ctx.isMac),
+  },
+  {
     id: 'sessions.desktop-minimize-to-tray',
     page: 'sessions',
     titleKey: 'settings.openchamber.desktopNetwork.field.minimizeToTray',

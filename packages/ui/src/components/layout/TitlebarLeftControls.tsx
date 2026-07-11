@@ -6,8 +6,10 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 import { useProjectActionsContext } from '@/hooks/useProjectActionsContext';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
+import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
-import { invokeDesktop, usesFramelessElectronChrome } from '@/lib/desktop';
+import { invokeDesktop } from '@/lib/desktop';
+import { useDesktopWindowControlsLayout } from '@/hooks/useDesktopWindowControlsLayout';
 
 const ICON_BUTTON_CLASS =
   'app-region-no-drag inline-flex h-8 w-8 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary hover:bg-interactive-hover transition-colors';
@@ -32,7 +34,7 @@ export const TitlebarLeftControls: React.FC = () => {
   const clusterRef = React.useRef<HTMLDivElement | null>(null);
 
   const toggleShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_sidebar', shortcutOverrides));
-  const usesFramelessChrome = React.useMemo(() => usesFramelessElectronChrome(), []);
+  const { usesFramelessChrome, side: windowControlsSide } = useDesktopWindowControlsLayout();
 
   const handleOpenWindowsAppMenu = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -83,6 +85,10 @@ export const TitlebarLeftControls: React.FC = () => {
       }}
     >
       <div ref={clusterRef} className="flex items-center gap-2">
+        {usesFramelessChrome && windowControlsSide === 'left' ? (
+          <WindowsWindowControls visible position="left" />
+        ) : null}
+
         {usesFramelessChrome ? (
           <Tooltip>
             <TooltipTrigger asChild>

@@ -31,6 +31,7 @@ import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useDesktopWindowControlsLayout } from '@/hooks/useDesktopWindowControlsLayout';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
 import { UpdateDialog } from '@/components/ui/UpdateDialog';
@@ -67,7 +68,7 @@ import { forceKillTerminal } from '@/lib/terminalApi';
 import { useTerminalStore } from '@/stores/useTerminalStore';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
-import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag, usesFramelessElectronChrome, type UpdateInfo } from '@/lib/desktop';
+import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag, type UpdateInfo } from '@/lib/desktop';
 import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
@@ -789,7 +790,7 @@ export const Header: React.FC<HeaderProps> = ({
     return /Macintosh|Mac OS X/.test(navigator.userAgent || '');
   }, []);
 
-  const usesFramelessChrome = React.useMemo(() => usesFramelessElectronChrome(), []);
+  const { usesFramelessChrome, side: windowControlsSide } = useDesktopWindowControlsLayout();
 
   const macosMajorVersion = React.useMemo(() => {
     if (typeof window === 'undefined') {
@@ -2212,7 +2213,7 @@ export const Header: React.FC<HeaderProps> = ({
             Icon={'picture-in-picture-2'}
           />
           {desktopSidebarActions}
-          <WindowsWindowControls visible={usesFramelessChrome} />
+          <WindowsWindowControls visible={usesFramelessChrome && windowControlsSide === 'right'} position="right" />
         </div>
       </div>
     </div>

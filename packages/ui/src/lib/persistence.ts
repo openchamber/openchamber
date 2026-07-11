@@ -531,6 +531,12 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
       store.setWeekStartPreference(settings.weekStartPreference);
     }
   }
+  if (typeof settings.desktopWindowControlsPosition === 'string'
+    && (settings.desktopWindowControlsPosition === 'auto' || settings.desktopWindowControlsPosition === 'left' || settings.desktopWindowControlsPosition === 'right')) {
+    if (settings.desktopWindowControlsPosition !== store.desktopWindowControlsPosition) {
+      store.setDesktopWindowControlsPosition(settings.desktopWindowControlsPosition);
+    }
+  }
   if (typeof settings.chatRenderMode === 'string'
     && (settings.chatRenderMode === 'sorted' || settings.chatRenderMode === 'live')) {
     if (settings.chatRenderMode !== store.chatRenderMode) {
@@ -1072,6 +1078,10 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.weekStartPreference === 'string'
     && (candidate.weekStartPreference === 'auto' || candidate.weekStartPreference === 'sunday' || candidate.weekStartPreference === 'monday')) {
     result.weekStartPreference = candidate.weekStartPreference;
+  }
+  if (typeof candidate.desktopWindowControlsPosition === 'string'
+    && (candidate.desktopWindowControlsPosition === 'auto' || candidate.desktopWindowControlsPosition === 'left' || candidate.desktopWindowControlsPosition === 'right')) {
+    result.desktopWindowControlsPosition = candidate.desktopWindowControlsPosition;
   }
   if (typeof candidate.chatRenderMode === 'string'
     && (candidate.chatRenderMode === 'sorted' || candidate.chatRenderMode === 'live')) {

@@ -14,7 +14,7 @@ import { DesktopNetworkSettings } from './DesktopNetworkSettings';
 import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useDeviceInfo } from '@/lib/device';
-import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, isWebRuntime, usesFramelessElectronChrome } from '@/lib/desktop';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import type { OpenChamberSection } from './types';
 
@@ -39,7 +39,7 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
     const showAbout = isMobile && isWebRuntime();
     const isVSCode = isVSCodeRuntime();
     void runtimeEndpointEpoch;
-    const showDesktopNetworkSettings = isDesktopShell() && isDesktopLocalOriginActive();
+    const showDesktopNetworkSettings = isDesktopShell() && (isDesktopLocalOriginActive() || usesFramelessElectronChrome());
 
     // If no section specified, show all (mobile/legacy behavior)
     if (!section) {
@@ -152,7 +152,7 @@ const SessionsSectionContent: React.FC = () => {
     const isVSCode = isVSCodeRuntime();
     const runtimeEndpointEpoch = useRuntimeEndpointEpoch();
     void runtimeEndpointEpoch;
-    const showDesktopNetworkSettings = isDesktopShell() && isDesktopLocalOriginActive();
+    const showDesktopNetworkSettings = isDesktopShell() && (isDesktopLocalOriginActive() || usesFramelessElectronChrome());
     return (
         <div className="space-y-6">
             <DefaultsSettings />
