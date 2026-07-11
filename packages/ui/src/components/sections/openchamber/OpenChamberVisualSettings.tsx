@@ -43,10 +43,10 @@ import {
     SettingsRadioOption,
     SettingsChipGroup,
     SETTINGS_SELECT_TRIGGER_CLASS,
-    SETTINGS_SELECT_ROW_TRIGGER_CLASS,
     SETTINGS_SELECT_SIZE,
     SETTINGS_ICON_BUTTON_CLASS,
     SETTINGS_CONTROL_CLUSTER_CLASS,
+    SETTINGS_CLUSTER_CONTROL_CLASS,
     SETTINGS_FIELDS_STACK_CLASS,
     SETTINGS_OPTION_STACK_CLASS,
 } from '@/components/sections/shared/SettingsSection';
@@ -595,9 +595,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('expandedTools')
         || (!isMobile && shouldShow('inputSpellcheck'));
     const showBehaviorDisplaySettings = shouldShow('chatRenderMode')
-        || shouldShow('messageTransport')
-        || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted')
-        || shouldShow('expandedTools');
+        || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted');
+    const showTransportSection = shouldShow('messageTransport');
     const showBehaviorMessageOptions = shouldShow('userMessageRendering')
         || shouldShow('mermaidRendering')
         || (shouldShow('diffLayout') && !isVSCode)
@@ -614,7 +613,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('showToolFileIcons')
         || shouldShow('showTurnChangedFiles')
         || (!isMobile && shouldShow('inputSpellcheck'))
-        || shouldShow('reasoning');
+        || shouldShow('reasoning')
+        || shouldShow('expandedTools');
     // First behavior section under the page header should not draw a top border on Chat-only;
     // when Appearance (or earlier sections) already rendered, keep the default divider.
     const behaviorSectionDivider = hasAppearanceSettings || hasLayoutSettings || hasNavigationSettings;
@@ -1050,7 +1050,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             void applyPwaOrientation(orientation);
                                         }}
                                     >
-                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.pwaInstallOrientationAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
+                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.pwaInstallOrientationAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_CLUSTER_CONTROL_CLASS}>
                                             <SelectValue placeholder={t('settings.openchamber.visual.field.selectOrientationPlaceholder')}>
                                                 {selectedPwaOrientationLabel}
                                             </SelectValue>
@@ -1096,7 +1096,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             void updateDesktopSettings({ mobileKeyboardMode: mode });
                                         }}
                                     >
-                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.mobileKeyboardModeAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
+                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.mobileKeyboardModeAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_CLUSTER_CONTROL_CLASS}>
                                             <SelectValue placeholder={t('settings.openchamber.visual.field.selectMobileKeyboardModePlaceholder')}>
                                                 {selectedMobileKeyboardModeLabel}
                                             </SelectValue>
@@ -1139,6 +1139,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     <SettingsStackedField
                                         label={t('settings.openchamber.visual.field.interfaceFont')}
                                         settingsItem="appearance.interface-font-size"
+                                        controlClassName="w-full"
                                     >
                                         <Select value={uiFont} onValueChange={(value) => setUiFont(value as UiFontOption)}>
                                             <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectInterfaceFontAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
@@ -1167,7 +1168,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 )}
 
                                 {shouldShow('terminalFontSize') && (
-                                    <SettingsStackedField label={t('settings.openchamber.visual.field.codeFont')}>
+                                    <SettingsStackedField
+                                        label={t('settings.openchamber.visual.field.codeFont')}
+                                        controlClassName="w-full"
+                                    >
                                         <Select value={monoFont} onValueChange={(value) => setMonoFont(value as MonoFontOption)}>
                                             <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectCodeFontAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                                 <SelectValue>{CODE_FONT_OPTIONS.find((option) => option.id === monoFont)?.label}</SelectValue>
@@ -1195,27 +1199,33 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 )}
 
                                 {shouldShow('fontSize') && !isMobile && (
-                                    <SettingsStackedField label={t('settings.openchamber.visual.field.interfaceFontSize')}>
-                                        <NumberInput
-                                            value={fontSize}
-                                            onValueChange={setFontSize}
-                                            min={50}
-                                            max={200}
-                                            step={5}
-                                            aria-label={t('settings.openchamber.visual.field.fontSizePercentageAria')}
-                                        />
-                                        <span className="typography-meta text-muted-foreground tabular-nums">%</span>
-                                        <Button size="sm"
-                                            type="button"
-                                            variant="ghost"
-                                            onClick={() => setFontSize(100)}
-                                            disabled={fontSize === 100}
-                                            className={SETTINGS_ICON_BUTTON_CLASS}
-                                            aria-label={t('settings.openchamber.visual.actions.resetFontSizeAria')}
-                                            title={t('settings.common.actions.reset')}
-                                        >
-                                            <Icon name="restart" className="h-3.5 w-3.5" />
-                                        </Button>
+                                    <SettingsStackedField
+                                        label={t('settings.openchamber.visual.field.interfaceFontSize')}
+                                        controlClassName="w-full"
+                                    >
+                                        <div className="flex w-full min-w-0 items-center gap-2">
+                                            <NumberInput
+                                                value={fontSize}
+                                                onValueChange={setFontSize}
+                                                min={50}
+                                                max={200}
+                                                step={5}
+                                                containerClassName="min-w-0 flex-1"
+                                                aria-label={t('settings.openchamber.visual.field.fontSizePercentageAria')}
+                                            />
+                                            <span className="typography-meta text-muted-foreground tabular-nums">%</span>
+                                            <Button size="sm"
+                                                type="button"
+                                                variant="ghost"
+                                                onClick={() => setFontSize(100)}
+                                                disabled={fontSize === 100}
+                                                className={SETTINGS_ICON_BUTTON_CLASS}
+                                                aria-label={t('settings.openchamber.visual.actions.resetFontSizeAria')}
+                                                title={t('settings.common.actions.reset')}
+                                            >
+                                                <Icon name="restart" className="h-3.5 w-3.5" />
+                                            </Button>
+                                        </div>
                                     </SettingsStackedField>
                                 )}
 
@@ -1223,27 +1233,31 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     <SettingsStackedField
                                         label={t('settings.openchamber.visual.field.terminalFontSize')}
                                         settingsItem="appearance.terminal-font-size"
+                                        controlClassName="w-full"
                                     >
-                                        <NumberInput
-                                            value={terminalFontSize}
-                                            onValueChange={setTerminalFontSize}
-                                            min={9}
-                                            max={52}
-                                            step={1}
-                                            className="w-16"
-                                        />
-                                        <span className="typography-meta text-muted-foreground tabular-nums">px</span>
-                                        <Button size="sm"
-                                            type="button"
-                                            variant="ghost"
-                                            onClick={() => setTerminalFontSize(13)}
-                                            disabled={terminalFontSize === 13}
-                                            className={SETTINGS_ICON_BUTTON_CLASS}
-                                            aria-label={t('settings.openchamber.visual.actions.resetTerminalFontSizeAria')}
-                                            title={t('settings.common.actions.reset')}
-                                        >
-                                            <Icon name="restart" className="h-3.5 w-3.5" />
-                                        </Button>
+                                        <div className="flex w-full min-w-0 items-center gap-2">
+                                            <NumberInput
+                                                value={terminalFontSize}
+                                                onValueChange={setTerminalFontSize}
+                                                min={9}
+                                                max={52}
+                                                step={1}
+                                                containerClassName="min-w-0 flex-1"
+                                                className="w-16"
+                                            />
+                                            <span className="typography-meta text-muted-foreground tabular-nums">px</span>
+                                            <Button size="sm"
+                                                type="button"
+                                                variant="ghost"
+                                                onClick={() => setTerminalFontSize(13)}
+                                                disabled={terminalFontSize === 13}
+                                                className={SETTINGS_ICON_BUTTON_CLASS}
+                                                aria-label={t('settings.openchamber.visual.actions.resetTerminalFontSizeAria')}
+                                                title={t('settings.common.actions.reset')}
+                                            >
+                                                <Icon name="restart" className="h-3.5 w-3.5" />
+                                            </Button>
+                                        </div>
                                     </SettingsStackedField>
                                 )}
                             </div>
@@ -1253,27 +1267,31 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     <SettingsStackedField
                                         label={t('settings.openchamber.visual.field.spacingDensity')}
                                         settingsItem="appearance.spacing-density"
+                                        controlClassName="w-full"
                                     >
-                                        <NumberInput
-                                            value={padding}
-                                            onValueChange={setPadding}
-                                            min={50}
-                                            max={200}
-                                            step={5}
-                                            className="w-16"
-                                        />
-                                        <span className="typography-meta text-muted-foreground tabular-nums">%</span>
-                                        <Button size="sm"
-                                            type="button"
-                                            variant="ghost"
-                                            onClick={() => setPadding(100)}
-                                            disabled={padding === 100}
-                                            className={SETTINGS_ICON_BUTTON_CLASS}
-                                            aria-label={t('settings.openchamber.visual.actions.resetSpacingAria')}
-                                            title={t('settings.common.actions.reset')}
-                                        >
-                                            <Icon name="restart" className="h-3.5 w-3.5" />
-                                        </Button>
+                                        <div className="flex w-full min-w-0 items-center gap-2">
+                                            <NumberInput
+                                                value={padding}
+                                                onValueChange={setPadding}
+                                                min={50}
+                                                max={200}
+                                                step={5}
+                                                containerClassName="min-w-0 flex-1"
+                                                className="w-16"
+                                            />
+                                            <span className="typography-meta text-muted-foreground tabular-nums">%</span>
+                                            <Button size="sm"
+                                                type="button"
+                                                variant="ghost"
+                                                onClick={() => setPadding(100)}
+                                                disabled={padding === 100}
+                                                className={SETTINGS_ICON_BUTTON_CLASS}
+                                                aria-label={t('settings.openchamber.visual.actions.resetSpacingAria')}
+                                                title={t('settings.common.actions.reset')}
+                                            >
+                                                <Icon name="restart" className="h-3.5 w-3.5" />
+                                            </Button>
+                                        </div>
                                     </SettingsStackedField>
                                 )}
 
@@ -1293,27 +1311,31 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             </span>
                                         )}
                                         settingsItem="appearance.input-bar-offset"
+                                        controlClassName="w-full"
                                     >
-                                        <NumberInput
-                                            value={inputBarOffset}
-                                            onValueChange={setInputBarOffset}
-                                            min={0}
-                                            max={100}
-                                            step={5}
-                                            className="w-16"
-                                        />
-                                        <span className="typography-meta text-muted-foreground tabular-nums">px</span>
-                                        <Button size="sm"
-                                            type="button"
-                                            variant="ghost"
-                                            onClick={() => setInputBarOffset(0)}
-                                            disabled={inputBarOffset === 0}
-                                            className={SETTINGS_ICON_BUTTON_CLASS}
-                                            aria-label={t('settings.openchamber.visual.actions.resetInputBarOffsetAria')}
-                                            title={t('settings.common.actions.reset')}
-                                        >
-                                            <Icon name="restart" className="h-3.5 w-3.5" />
-                                        </Button>
+                                        <div className="flex w-full min-w-0 items-center gap-2">
+                                            <NumberInput
+                                                value={inputBarOffset}
+                                                onValueChange={setInputBarOffset}
+                                                min={0}
+                                                max={100}
+                                                step={5}
+                                                containerClassName="min-w-0 flex-1"
+                                                className="w-16"
+                                            />
+                                            <span className="typography-meta text-muted-foreground tabular-nums">px</span>
+                                            <Button size="sm"
+                                                type="button"
+                                                variant="ghost"
+                                                onClick={() => setInputBarOffset(0)}
+                                                disabled={inputBarOffset === 0}
+                                                className={SETTINGS_ICON_BUTTON_CLASS}
+                                                aria-label={t('settings.openchamber.visual.actions.resetInputBarOffsetAria')}
+                                                title={t('settings.common.actions.reset')}
+                                            >
+                                                <Icon name="restart" className="h-3.5 w-3.5" />
+                                            </Button>
+                                        </div>
                                     </SettingsStackedField>
                                 )}
                             </div>
@@ -1469,32 +1491,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     </SettingsControlGroup>
                                 )}
 
-                                {shouldShow('messageTransport') && (
-                                    <SettingsControlGroup
-                                        title={t('settings.openchamber.visual.section.messageStreamTransport')}
-                                        settingsItem="chat.message-transport"
-                                        contentClassName="space-y-2"
-                                    >
-                                        <SettingsChipGroup
-                                            value={effectiveMessageStreamTransport}
-                                            options={MESSAGE_STREAM_TRANSPORT_OPTIONS.map((option) => ({
-                                                value: option.id,
-                                                label: tUnsafe(option.labelKey),
-                                            }))}
-                                            onChange={handleMessageStreamTransportChange}
-                                            aria-label={t('settings.openchamber.visual.section.messageStreamTransport')}
-                                        />
-                                        {(() => {
-                                            const option = MESSAGE_STREAM_TRANSPORT_OPTIONS.find((item) => item.id === effectiveMessageStreamTransport);
-                                            return option?.descriptionKey ? (
-                                                <span className="typography-meta text-muted-foreground">
-                                                    {tUnsafe(option.descriptionKey)}
-                                                </span>
-                                            ) : null;
-                                        })()}
-                                    </SettingsControlGroup>
-                                )}
-
                                 {shouldShow('activityRenderMode') && chatRenderMode === 'sorted' && (
                                     <SettingsControlGroup title={t('settings.openchamber.visual.section.activityDefault')}>
                                         <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.activityDefaultAria')}>
@@ -1510,30 +1506,40 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         </SettingsRadioGroup>
                                     </SettingsControlGroup>
                                 )}
+                            </SettingsSection>
+                        )}
 
-                                {shouldShow('expandedTools') && (
-                                    <SettingsControlGroup title={t('settings.openchamber.visual.section.showToolsOpenedByDefault')}>
-                                        <SettingsCheckboxRow
-                                            checked={showExpandedBashTools}
-                                            onChange={handleShowExpandedBashToolsChange}
-                                            label={t('settings.openchamber.visual.field.bash')}
-                                            ariaLabel={t('settings.openchamber.visual.field.showExpandedBashToolsAria')}
-                                        />
-                                        <SettingsCheckboxRow
-                                            checked={showExpandedEditTools}
-                                            onChange={handleShowExpandedEditToolsChange}
-                                            label={t('settings.openchamber.visual.field.editTools')}
-                                            ariaLabel={t('settings.openchamber.visual.field.showExpandedEditToolsAria')}
-                                        />
-                                    </SettingsControlGroup>
-                                )}
+                        {showTransportSection && (
+                            <SettingsSection
+                                title={t('settings.openchamber.visual.section.messageStreamTransport')}
+                                divider={showBehaviorDisplaySettings || behaviorSectionDivider}
+                                settingsItem="chat.message-transport"
+                                contentClassName="space-y-2"
+                            >
+                                <SettingsChipGroup
+                                    value={effectiveMessageStreamTransport}
+                                    options={MESSAGE_STREAM_TRANSPORT_OPTIONS.map((option) => ({
+                                        value: option.id,
+                                        label: tUnsafe(option.labelKey),
+                                    }))}
+                                    onChange={handleMessageStreamTransportChange}
+                                    aria-label={t('settings.openchamber.visual.section.messageStreamTransport')}
+                                />
+                                {(() => {
+                                    const option = MESSAGE_STREAM_TRANSPORT_OPTIONS.find((item) => item.id === effectiveMessageStreamTransport);
+                                    return option?.descriptionKey ? (
+                                        <span className="typography-meta text-muted-foreground">
+                                            {tUnsafe(option.descriptionKey)}
+                                        </span>
+                                    ) : null;
+                                })()}
                             </SettingsSection>
                         )}
 
                         {showBehaviorMessageOptions && (
                             <SettingsSection
                                 title={t('settings.openchamber.visual.section.chatMessageOptions')}
-                                divider={showBehaviorDisplaySettings || behaviorSectionDivider}
+                                divider={showBehaviorDisplaySettings || showTransportSection || behaviorSectionDivider}
                             >
                                 {/* Flat 2×2 grid so row headers share a baseline (not stacked columns). */}
                                 <SettingsTwoColumn className="lg:gap-y-6">
@@ -1610,9 +1616,28 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                         {showBehaviorFeatureCheckboxes && (
                             <SettingsSection
                                 title={t('settings.openchamber.visual.section.chatFeatures')}
-                                divider={showBehaviorDisplaySettings || showBehaviorMessageOptions || behaviorSectionDivider}
+                                divider={showBehaviorDisplaySettings || showTransportSection || showBehaviorMessageOptions || behaviorSectionDivider}
                                 contentClassName={SETTINGS_OPTION_STACK_CLASS}
                             >
+                                {shouldShow('expandedTools') && (
+                                    <SettingsControlGroup
+                                        title={t('settings.openchamber.visual.section.showToolsOpenedByDefault')}
+                                        className="pb-2"
+                                    >
+                                        <SettingsCheckboxRow
+                                            checked={showExpandedBashTools}
+                                            onChange={handleShowExpandedBashToolsChange}
+                                            label={t('settings.openchamber.visual.field.bash')}
+                                            ariaLabel={t('settings.openchamber.visual.field.showExpandedBashToolsAria')}
+                                        />
+                                        <SettingsCheckboxRow
+                                            checked={showExpandedEditTools}
+                                            onChange={handleShowExpandedEditToolsChange}
+                                            label={t('settings.openchamber.visual.field.editTools')}
+                                            ariaLabel={t('settings.openchamber.visual.field.showExpandedEditToolsAria')}
+                                        />
+                                    </SettingsControlGroup>
+                                )}
                                 {shouldShow('sessionAssist') && (
                                     <>
                                         <SettingsCheckboxRow

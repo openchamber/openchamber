@@ -7,6 +7,7 @@ import {
   SettingsFieldRow,
   SettingsCheckboxRow,
   SettingsInset,
+  SettingsGroupTitle,
   SETTINGS_CUSTOM_TRIGGER_CLASS,
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
   SETTINGS_SELECT_SIZE,
@@ -362,26 +363,28 @@ export const DefaultsSettings: React.FC = () => {
               ariaLabel={t('settings.openchamber.defaults.field.showDeletionDialogAria')}
             />
           </SettingsInset>
-        </div>
-      </SettingsSection>
 
-      <SettingsSection
-        title={t('settings.openchamber.defaults.smallModel.title')}
-        description={t('settings.openchamber.defaults.smallModel.description')}
-      >
-        <div className="space-y-0">
-          <SettingsCheckboxRow
-            settingsItem="sessions.small-model"
-            checked={smallModelUseDefault}
-            onChange={(checked) => {
-              void handleSmallModelUseDefaultChange(checked);
-            }}
-            label={t('settings.openchamber.defaults.smallModel.useDefault')}
-            ariaLabel={t('settings.openchamber.defaults.smallModel.useDefaultAria')}
-          />
+          <div className="space-y-3 pt-6">
+            <div>
+              <SettingsGroupTitle>
+                {t('settings.openchamber.defaults.smallModel.title')}
+              </SettingsGroupTitle>
+              <p className="typography-settings-description text-muted-foreground">
+                {t('settings.openchamber.defaults.smallModel.description')}
+              </p>
+            </div>
 
-          {!smallModelUseDefault ? (
-            <SettingsInset>
+            <SettingsCheckboxRow
+              settingsItem="sessions.small-model"
+              checked={smallModelUseDefault}
+              onChange={(checked) => {
+                void handleSmallModelUseDefaultChange(checked);
+              }}
+              label={t('settings.openchamber.defaults.smallModel.useDefault')}
+              ariaLabel={t('settings.openchamber.defaults.smallModel.useDefaultAria')}
+            />
+
+            {!smallModelUseDefault ? (
               <SettingsFieldRow label={t('settings.openchamber.defaults.smallModel.overrideModel')}>
                 <ModelSelector
                   providerId={parsedSmallModel.providerId}
@@ -391,8 +394,8 @@ export const DefaultsSettings: React.FC = () => {
                   className={SETTINGS_CUSTOM_TRIGGER_CLASS}
                 />
               </SettingsFieldRow>
-            </SettingsInset>
-          ) : null}
+            ) : null}
+          </div>
         </div>
       </SettingsSection>
     </>

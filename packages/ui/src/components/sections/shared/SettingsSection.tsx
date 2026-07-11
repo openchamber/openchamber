@@ -22,6 +22,9 @@ export const SETTINGS_CUSTOM_TRIGGER_CLASS =
 /** Shared width for stacked control clusters (select/input + reset). */
 export const SETTINGS_CONTROL_CLUSTER_CLASS = 'w-full max-w-[28rem]';
 
+/** Fill a control cluster the same way as a full-width select. */
+export const SETTINGS_CLUSTER_CONTROL_CLASS = 'min-w-0 flex-1';
+
 /** Vertical stack spacing for fields inside a column. */
 export const SETTINGS_FIELDS_STACK_CLASS = 'space-y-3';
 
@@ -266,7 +269,7 @@ interface SettingsInsetProps {
   settingsItem?: string;
 }
 
-/** Optional inset block under a section (top border + padding). */
+/** Optional inset block under a section (spacing only; section dividers own borders). */
 export const SettingsInset: React.FC<SettingsInsetProps> = ({
   children,
   className,
@@ -275,7 +278,7 @@ export const SettingsInset: React.FC<SettingsInsetProps> = ({
   return (
     <div
       data-settings-item={settingsItem}
-      className={cn('border-t border-border/60 pt-4', className)}
+      className={cn('pt-4', className)}
     >
       {children}
     </div>
