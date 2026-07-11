@@ -7,7 +7,7 @@ import { useI18n } from '@/lib/i18n';
 import { useProjectActionsContext } from '@/hooks/useProjectActionsContext';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
-import { invokeDesktop } from '@/lib/desktop';
+import { invokeDesktop, usesFramelessElectronChrome } from '@/lib/desktop';
 
 const ICON_BUTTON_CLASS =
   'app-region-no-drag inline-flex h-8 w-8 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary hover:bg-interactive-hover transition-colors';
@@ -32,12 +32,7 @@ export const TitlebarLeftControls: React.FC = () => {
   const clusterRef = React.useRef<HTMLDivElement | null>(null);
 
   const toggleShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_sidebar', shortcutOverrides));
-  const isWindowsElectronDesktop = React.useMemo(() => {
-    if (typeof window === 'undefined') {
-      return false;
-    }
-    return Boolean(window.__OPENCHAMBER_ELECTRON__) && window.__OPENCHAMBER_PLATFORM__ === 'win32';
-  }, []);
+  const usesFramelessChrome = React.useMemo(() => usesFramelessElectronChrome(), []);
 
   const handleOpenWindowsAppMenu = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -88,7 +83,7 @@ export const TitlebarLeftControls: React.FC = () => {
       }}
     >
       <div ref={clusterRef} className="flex items-center gap-2">
-        {isWindowsElectronDesktop ? (
+        {usesFramelessChrome ? (
           <Tooltip>
             <TooltipTrigger asChild>
               <button
