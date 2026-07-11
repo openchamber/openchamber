@@ -76,9 +76,7 @@ export function renderMobileApp(apis: RuntimeAPIs) {
   // Auth gating differs by shell: the native Capacitor app authenticates via
   // its own instance-connect flow (MobileConnectionWelcome asks for the
   // password per instance), while the plain mobile BROWSER against a
-  // --ui-password server must get the classic SessionAuthGate unlock page —
-  // dropping it (v1.13.9) left browsers on a dead "unable to reach server"
-  // screen with no way to enter the password.
+  // --ui-password server must keep the classic SessionAuthGate unlock page.
   const app = <MobileApp apis={resolvedApis} />;
 
   createRoot(rootElement).render(
