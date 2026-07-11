@@ -764,6 +764,59 @@ const FocusModeButton = React.memo(function FocusModeButton(props: FocusModeButt
     );
 });
 
+type CompactSessionButtonProps = {
+    footerIconButtonClass: string;
+    iconSizeClass: string;
+    currentSessionId: string | null;
+    onClick: () => void;
+};
+
+const CompactSessionButton = React.memo(function CompactSessionButton(props: CompactSessionButtonProps) {
+    const { t } = useI18n();
+    const {
+        footerIconButtonClass,
+        iconSizeClass,
+        currentSessionId,
+        onClick,
+    } = props;
+
+    if (!currentSessionId) {
+        return null;
+    }
+
+    const description = t('chat.commandAutocomplete.command.compactDescription');
+
+    return (
+        <Tooltip>
+            <TooltipTrigger asChild>
+                <button
+                    type="button"
+                    className={cn(
+                        footerIconButtonClass,
+                        'rounded-md text-foreground hover:bg-[var(--interactive-hover)]/40',
+                    )}
+                    onMouseDown={(event) => {
+                        event.preventDefault();
+                    }}
+                    onClick={onClick}
+                    aria-label={description}
+                    title={description}
+                >
+                    <Icon name="scissors" className={cn(iconSizeClass)} />
+                </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={8}>
+                {description}
+            </TooltipContent>
+        </Tooltip>
+    );
+}, (prev, next) => (
+    prev.footerIconButtonClass === next.footerIconButtonClass
+    && prev.iconSizeClass === next.iconSizeClass
+    && prev.currentSessionId === next.currentSessionId
+    && prev.onClick === next.onClick
+));
+
 type ComposerActionButtonsProps = {
     isMobile: boolean;
     footerIconButtonClass: string;
@@ -2074,13 +2127,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 return;
             }
             else if (commandName === 'compact' && currentSessionId) {
-                try {
-                    await sessionActions.waitForConnectionOrThrow();
-                    const compactDirectory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory || undefined;
-                    await opencodeClient.summarizeSession(currentSessionId, currentProviderId, currentModelId, compactDirectory);
-                } catch (error) {
-                    toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.compactFailed'));
-                }
+                await handleCompactSession();
                 return;
             }
             else if (commandName === 'summary' && currentSessionId) {
@@ -4554,6 +4601,24 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         t,
     ]);
 
+    const handleCompactSession = React.useCallback(async () => {
+        if (!currentSessionId) {
+            return;
+        }
+
+        try {
+            await sessionActions.waitForConnectionOrThrow();
+            const compactDirectory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory || undefined;
+            await opencodeClient.summarizeSession(currentSessionId, currentProviderId, currentModelId, compactDirectory);
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.compactFailed'));
+        }
+    }, [currentDirectory, currentModelId, currentProviderId, currentSessionId, t]);
+
+    const handleCompactButtonClick = React.useCallback(() => {
+        void handleCompactSession();
+    }, [handleCompactSession]);
+
     React.useEffect(() => {
         const pendingAbortBanner = Boolean(abortPromptSessionId) && abortPromptSessionId === currentSessionId;
         if (!prevWasAbortedRef.current && pendingAbortBanner && !showAbortStatus) {
@@ -5381,6 +5446,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         permissionAutoAcceptEnabled={permissionAutoAcceptEnabled}
                                         handlePermissionAutoAcceptToggle={handlePermissionAutoAcceptToggle}
                                         withTooltip
+                                    />
+                                    <CompactSessionButton
+                                        footerIconButtonClass={footerIconButtonClass}
+                                        iconSizeClass={iconSizeClass}
+                                        currentSessionId={currentSessionId}
+                                        onClick={handleCompactButtonClick}
                                     />
                                 </div>
                                 <div className={cn('flex items-center flex-1 justify-end', footerGapClass, 'md:gap-x-3')}>
