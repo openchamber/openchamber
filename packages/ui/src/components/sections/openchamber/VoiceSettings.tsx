@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/button';
 import { NumberInput } from '@/components/ui/number-input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
-import { SettingsSection, SettingsCheckboxRow, SettingsFieldRow, SETTINGS_SELECT_SIZE } from '@/components/sections/shared/SettingsSection';
+import { SettingsSection, SettingsCheckboxRow, SettingsFieldRow, SETTINGS_SELECT_SIZE, SETTINGS_FIELD_LABEL_CLASS } from '@/components/sections/shared/SettingsSection';
 import { browserVoiceService } from '@/lib/voice/browserVoiceService';
 import { cn } from '@/lib/utils';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -778,7 +778,7 @@ export const VoiceSettings: React.FC = () => {
                             <div className="pb-1.5 pt-0.5">
                                 <div className="flex min-w-0 flex-col gap-1.5">
                                     <div className="flex items-center gap-1.5">
-                                        <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.provider')}</span>
+                                        <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.voice.page.field.provider')}</span>
                                         <Tooltip>
                                             <TooltipTrigger asChild>
                                                 <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
@@ -850,7 +850,7 @@ export const VoiceSettings: React.FC = () => {
                             {/* OpenAI API Key */}
                             {voiceProvider === 'openai' && (
                                 <div className="py-1.5">
-                                    <span className={cn("typography-ui-label text-foreground", !isOpenAIAvailable && "text-[var(--status-error)]")}>
+                                    <span className={cn(SETTINGS_FIELD_LABEL_CLASS, !isOpenAIAvailable && "text-[var(--status-error)]")}>
                                         {t('settings.voice.page.field.apiKey')}
                                     </span>
                                     <span className={cn("typography-meta ml-2", !isOpenAIAvailable ? "text-[var(--status-error)]/80" : "text-muted-foreground")}>
@@ -885,7 +885,7 @@ export const VoiceSettings: React.FC = () => {
                             {voiceProvider === 'openai-compatible' && (
                                 <div className="py-1.5 space-y-2">
                                     <div>
-                                        <span className={cn("typography-ui-label text-foreground", !openaiCompatibleUrl.trim() && "text-[var(--status-error)]")}>
+                                        <span className={cn(SETTINGS_FIELD_LABEL_CLASS, !openaiCompatibleUrl.trim() && "text-[var(--status-error)]")}>
                                             {t('settings.voice.page.field.serverUrl')}
                                         </span>
                                         <span className="typography-meta ml-2 text-muted-foreground">
@@ -911,7 +911,7 @@ export const VoiceSettings: React.FC = () => {
                                         </div>
                                     </div>
                                     <div>
-                                        <span className="typography-ui-label text-foreground">API Key</span>
+                                        <span className={SETTINGS_FIELD_LABEL_CLASS}>API Key</span>
                                         <span className="typography-meta ml-2 text-muted-foreground">
                                             Optional
                                         </span>
@@ -935,7 +935,7 @@ export const VoiceSettings: React.FC = () => {
                                         </div>
                                     </div>
                                     <div>
-                                        <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.model')}</span>
+                                        <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.voice.page.field.model')}</span>
                                         <div className="relative mt-1.5 max-w-xs">
                                             <input
                                                 type="text"
@@ -947,7 +947,7 @@ export const VoiceSettings: React.FC = () => {
                                         </div>
                                     </div>
                                     <div>
-                                        <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.voice')}</span>
+                                        <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.voice.page.field.voice')}</span>
                                         <span className="typography-meta ml-2 text-muted-foreground">
                                             {t('settings.voice.page.field.voiceIdentifierHint')}
                                         </span>
@@ -1088,7 +1088,7 @@ export const VoiceSettings: React.FC = () => {
                             <div className="pb-1.5 pt-0.5">
                                 <div className="flex min-w-0 flex-col gap-1.5">
                                     <div className="flex items-center gap-1.5">
-                                        <span className="typography-ui-label text-foreground">
+                                        <span className={SETTINGS_FIELD_LABEL_CLASS}>
                                             {t('settings.voice.page.field.ttsInputMode')}
                                         </span>
                                     </div>
@@ -1144,7 +1144,7 @@ export const VoiceSettings: React.FC = () => {
                         <div className="pb-1.5 pt-0.5">
                             <div className="flex min-w-0 flex-col gap-1.5">
                                 <div className="flex items-center gap-1.5">
-                                    <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.provider')}</span>
+                                    <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.voice.page.field.provider')}</span>
                                     <Tooltip>
                                         <TooltipTrigger asChild>
                                             <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
@@ -1182,7 +1182,7 @@ export const VoiceSettings: React.FC = () => {
 
                         {sttProvider === 'local' && (
                             <div className="py-1.5">
-                                <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.model')}</span>
+                                <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.voice.page.field.model')}</span>
                                 <LocalModelPicker selectedModelId={sttLocalModel} onSelect={setSttLocalModel} />
                             </div>
                         )}
@@ -1190,7 +1190,7 @@ export const VoiceSettings: React.FC = () => {
                         {sttProvider === 'openai-compatible' && (
                             <div className="py-1.5 space-y-2">
                                 <div>
-                                    <span className={cn("typography-ui-label text-foreground", !sttServerUrl.trim() && "text-[var(--status-error)]")}>
+                                    <span className={cn(SETTINGS_FIELD_LABEL_CLASS, !sttServerUrl.trim() && "text-[var(--status-error)]")}>
                                         {t('settings.voice.page.field.serverUrl')}
                                     </span>
                                     <span className="typography-meta ml-2 text-muted-foreground">
@@ -1216,7 +1216,7 @@ export const VoiceSettings: React.FC = () => {
                                     </div>
                                 </div>
                                 <div>
-                                    <span className="typography-ui-label text-foreground">API Key</span>
+                                    <span className={SETTINGS_FIELD_LABEL_CLASS}>API Key</span>
                                     <span className="typography-meta ml-2 text-muted-foreground">
                                         Optional
                                     </span>
@@ -1240,7 +1240,7 @@ export const VoiceSettings: React.FC = () => {
                                     </div>
                                 </div>
                                 <div>
-                                    <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.model')}</span>
+                                    <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.voice.page.field.model')}</span>
                                     <div className="relative mt-1.5 max-w-xs">
                                         <input
                                             type="text"
@@ -1252,7 +1252,7 @@ export const VoiceSettings: React.FC = () => {
                                     </div>
                                 </div>
                                 <div>
-                                    <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.language')}</span>
+                                    <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.voice.page.field.language')}</span>
                                     <span className="typography-meta ml-2 text-muted-foreground">
                                         {t('settings.voice.page.field.sttLanguageHint')}
                                     </span>

@@ -30,7 +30,9 @@ import {
   SettingsCheckboxRow,
   SettingsStackedField,
   SettingsChipGroup,
+  SettingsGroupTitle,
   SETTINGS_SELECT_SIZE,
+  SETTINGS_FIELD_LABEL_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { MCP_OAUTH_CALLBACK_PATH, parseMcpOAuthCallbackContext, parseMcpOAuthCallbackStateKey } from '@/components/sections/mcp/mcpOAuth';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -1333,12 +1335,10 @@ export const McpPage: React.FC = () => {
   return (
     <>
       <SettingsPageLayout
-        title={isNewServer ? t('settings.mcp.page.header.newServer') : (
-          <div className="flex items-center gap-2 min-w-0">
-            <h1 className="typography-settings-title text-foreground truncate">{selectedMcpName}</h1>
-            <StatusBadge status={effectiveRuntimeStatus?.status} enabled={enabled} getStatusLabel={getStatusLabel} variant="pill" />
-          </div>
-        )}
+        title={isNewServer ? t('settings.mcp.page.header.newServer') : selectedMcpName}
+        titleAccessory={!isNewServer ? (
+          <StatusBadge status={effectiveRuntimeStatus?.status} enabled={enabled} getStatusLabel={getStatusLabel} variant="pill" />
+        ) : undefined}
         description={isNewServer
           ? t('settings.mcp.page.header.configureNewServer')
           : t('settings.mcp.page.header.transport', { type: mcpType === 'local' ? t('settings.mcp.page.transport.local') : t('settings.mcp.page.transport.remote') })}
@@ -1404,7 +1404,7 @@ export const McpPage: React.FC = () => {
               <div className="space-y-4">
                 <div className="min-w-0 space-y-1">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className="typography-ui-label text-foreground">{t('settings.mcp.page.status.runtimeStatus')}</span>
+                    <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.mcp.page.status.runtimeStatus')}</span>
                     <StatusBadge status={effectiveRuntimeStatus?.status} enabled={enabled} getStatusLabel={getStatusLabel} />
                   </div>
                   <p className="typography-meta text-muted-foreground">{runtimeDescription}</p>
@@ -1452,7 +1452,7 @@ export const McpPage: React.FC = () => {
                   <div className="rounded-md border border-[var(--interactive-border)] bg-[var(--surface-background)] px-3 py-3">
                     <div className="space-y-2">
                       <div>
-                        <div className="typography-ui-label text-foreground">{t('settings.mcp.page.auth.manualFallbackTitle')}</div>
+                        <SettingsGroupTitle as="div">{t('settings.mcp.page.auth.manualFallbackTitle')}</SettingsGroupTitle>
                         <p className="mt-1 typography-micro text-muted-foreground">
                           {t('settings.mcp.page.auth.manualFallbackDescription')}
                         </p>
@@ -1619,7 +1619,7 @@ export const McpPage: React.FC = () => {
                     <div className="space-y-2">
                       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-8">
                         <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-                          <span className="typography-ui-label text-foreground">{t('settings.mcp.page.advanced.timeoutMs')}</span>
+                          <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.mcp.page.advanced.timeoutMs')}</span>
                         </div>
                         <div className="flex items-center gap-2">
                           <Input
@@ -1641,12 +1641,12 @@ export const McpPage: React.FC = () => {
                     </div>
 
                     <div>
-                      <div className="mb-2 typography-ui-label text-foreground">
+                      <SettingsGroupTitle as="div" className="mb-2">
                         {t('settings.mcp.page.advanced.requestHeaders')}
                         {headerEntries.length > 0 && (
                           <span className="ml-1.5 typography-micro text-muted-foreground font-normal">({headerEntries.length})</span>
                         )}
-                      </div>
+                      </SettingsGroupTitle>
                       <EnvEditor
                         value={headerEntries}
                         onChange={setHeaderEntries}
@@ -1684,7 +1684,7 @@ export const McpPage: React.FC = () => {
                         }}
                       >
                         <Checkbox checked={oauthEnabled} onChange={setOauthEnabled} ariaLabel={t('settings.mcp.page.advanced.oauthAutoDetectionAria')} />
-                        <span className="typography-ui-label text-foreground">{t('settings.mcp.page.advanced.oauthAutoDetection')}</span>
+                        <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.mcp.page.advanced.oauthAutoDetection')}</span>
                       </div>
 
                       <div className="grid gap-3 sm:grid-cols-2">
@@ -1743,16 +1743,14 @@ export const McpPage: React.FC = () => {
         )}
 
         <SettingsSection
-          title={(
-            <>
-              {t('settings.mcp.page.env.title')}
-              {envEntries.length > 0 && (
-                <span className="ml-1.5 typography-micro text-muted-foreground font-normal">
-                  ({envEntries.length})
-                </span>
-              )}
-            </>
-          )}
+          title={t('settings.mcp.page.env.title')}
+          titleAccessory={
+            envEntries.length > 0 ? (
+              <span className="typography-micro text-muted-foreground font-normal">
+                ({envEntries.length})
+              </span>
+            ) : null
+          }
           settingsItem="mcp.environment"
         >
             {envEntries.length === 0 ? (
