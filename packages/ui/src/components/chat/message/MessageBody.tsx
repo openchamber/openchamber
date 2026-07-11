@@ -1740,7 +1740,7 @@ const AssistantMessageBody = React.memo(({
                 );
                 if (shouldShowStandaloneMessageActions && i === lastRenderableTextPartIndex) {
                     rendered.push(
-                        <div key={`message-actions-${messageId}`} className={INLINE_MESSAGE_ACTIONS_CLASS_NAME} data-message-actions="true">
+                        <div key={`message-actions-${messageId}`} className={cn(INLINE_MESSAGE_ACTIONS_CLASS_NAME, 'relative z-30')} data-message-actions="true">
                             <div className="flex items-center gap-1.5" data-message-action-group="true">
                                 {messageActionButtons}
                             </div>
@@ -2061,7 +2061,7 @@ const AssistantMessageBody = React.memo(({
                 </div>
                 <MessageFilesDisplay files={parts} onShowPopup={onShowPopup} />
                 {shouldRenderStandaloneActionsAfterContent && (
-                    <div className={INLINE_MESSAGE_ACTIONS_CLASS_NAME} data-message-actions="true">
+                    <div className={cn(INLINE_MESSAGE_ACTIONS_CLASS_NAME, 'relative z-30')} data-message-actions="true">
                         <div className="flex items-center gap-1.5" data-message-action-group="true">
                             {messageActionButtons}
                         </div>
@@ -2069,7 +2069,7 @@ const AssistantMessageBody = React.memo(({
                 )}
                 {shouldShowTurnFooter && (
                     <div
-                        className="mt-2 mb-1 flex flex-wrap items-center justify-start gap-1.5"
+                        className="mt-2 mb-1 flex flex-wrap items-center justify-start gap-1.5 relative z-30"
                         style={MESSAGE_FOOTER_CONTAINER_STYLE}
                     >
                         <div className="flex items-center gap-1.5" data-message-action-group="true">
