@@ -22,6 +22,8 @@ interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
   isDesktopLocalOrigin: boolean;
   // macOS desktop shell — for controls that only render on darwin (e.g. dock badge).
   isMac: boolean;
+  // Windows desktop shell — for controls that only render on win32.
+  isWindows: boolean;
 }
 
 const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
@@ -167,6 +169,18 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['streaming', 'sse', 'websocket'],
   },
   {
+    id: 'chat.session-recap',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.sessionRecap',
+    keywords: ['recap', 'assist', 'small model', 'summary'],
+  },
+  {
+    id: 'chat.session-suggestion',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.sessionSuggestion',
+    keywords: ['suggestion', 'assist', 'small model', 'follow up'],
+  },
+  {
     id: 'chat.reasoning-traces',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.showReasoningTraces',
@@ -189,6 +203,12 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.wideChatLayout',
     keywords: ['layout', 'wide', 'messages'],
+  },
+  {
+    id: 'chat.code-block-line-wrap',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.codeBlockLineWrap',
+    keywords: ['code', 'wrap', 'line wrap', 'markdown'],
   },
   {
     id: 'chat.inline-assistant-actions',
@@ -261,6 +281,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['delete', 'confirmation'],
   },
   {
+    id: 'sessions.small-model',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.defaults.smallModel.title',
+    descriptionKey: 'settings.openchamber.defaults.smallModel.description',
+    keywords: ['small model', 'utility', 'summary', 'recap', 'cheap', 'override'],
+  },
+  {
     id: 'sessions.auto-cleanup',
     page: 'sessions',
     titleKey: 'settings.openchamber.sessionRetention.field.enableAutoCleanup',
@@ -285,6 +312,22 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.desktopNetwork.field.launchAtLogin',
     descriptionKey: 'settings.openchamber.desktopNetwork.field.launchAtLoginDescription',
     keywords: ['desktop', 'startup', 'login'],
+    isAvailable: (ctx) => ctx.isDesktopLocalOrigin,
+  },
+  {
+    id: 'sessions.desktop-minimize-to-tray',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.desktopNetwork.field.minimizeToTray',
+    descriptionKey: 'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription',
+    keywords: ['desktop', 'tray', 'system tray', 'minimize', 'close', 'background', 'windows'],
+    isAvailable: (ctx) => ctx.isDesktopLocalOrigin && ctx.isWindows,
+  },
+  {
+    id: 'sessions.desktop-keep-awake',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.desktopNetwork.field.keepAwake',
+    descriptionKey: 'settings.openchamber.desktopNetwork.field.keepAwakeDescription',
+    keywords: ['desktop', 'sleep', 'awake', 'server', 'mobile', 'phone'],
     isAvailable: (ctx) => ctx.isDesktopLocalOrigin,
   },
   {
@@ -396,7 +439,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'remote-instances',
     titleKey: 'settings.remoteInstances.clientAuth.title',
     descriptionKey: 'settings.remoteInstances.clientAuth.description',
-    keywords: ['pairing link', 'client token', 'connect desktop', 'remote access'],
+    keywords: ['pairing link', 'client token', 'connect desktop', 'remote access', 'relay', 'devices', 'connect from anywhere'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
@@ -670,22 +713,16 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['keyboard', 'hotkeys', 'bindings'],
   },
   {
-    id: 'voice.voice-setup',
+    id: 'voice.playback',
     page: 'voice',
-    titleKey: 'settings.voice.page.section.voiceSetup',
-    keywords: ['tts', 'voice mode', 'provider', 'speech rate', 'speech pitch', 'speech volume', 'language'],
+    titleKey: 'settings.voice.page.section.playbackAndSummary',
+    keywords: ['tts', 'read aloud', 'voice', 'provider', 'speech rate', 'speech pitch', 'speech volume', 'tts input mode', 'markdown'],
   },
   {
     id: 'voice.speech-recognition',
     page: 'voice',
     titleKey: 'settings.voice.page.section.speechRecognition',
-    keywords: ['stt', 'transcribe', 'whisper', 'microphone', 'silence threshold'],
-  },
-  {
-    id: 'voice.playback',
-    page: 'voice',
-    titleKey: 'settings.voice.page.section.playbackAndSummary',
-    keywords: ['read aloud', 'tts input mode', 'summary', 'markdown'],
+    keywords: ['stt', 'dictation', 'voice input', 'transcribe', 'whisper', 'parakeet', 'microphone'],
   },
   {
     id: 'tunnel.provider',

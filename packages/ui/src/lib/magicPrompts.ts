@@ -70,7 +70,7 @@ const MAGIC_PROMPT_DEFINITIONS: readonly MagicPromptDefinition[] = [
     title: 'Commit Generation Visible Prompt',
     group: 'Git',
     description: 'Visible user message for commit message generation.',
-    template: 'You are generating a Conventional Commits subject line using session context and selected file paths.',
+    template: 'You are generating a Conventional Commits subject line from the diffs of the selected files.',
   },
   {
     id: 'git.commit.generate.instructions',

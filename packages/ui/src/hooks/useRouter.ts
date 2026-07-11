@@ -60,7 +60,8 @@ export function useRouter(): void {
         if (route.sessionId) {
           const currentSessionId = useSessionUIStore.getState().currentSessionId;
           if (route.sessionId !== currentSessionId) {
-            await setCurrentSession(route.sessionId);
+            const directoryHint = useSessionUIStore.getState().getDirectoryForSession(route.sessionId);
+            setCurrentSession(route.sessionId, directoryHint);
           }
         }
 
@@ -143,14 +144,23 @@ export function useRouter(): void {
     const initializeRoute = async () => {
       await applyRoute(route);
 
-      // After applying, update URL to normalized form (use replaceState)
+      // After applying, update URL to normalized form (use replaceState).
+      // Use the parsed route values instead of an immediate store snapshot so
+      // deep links do not briefly normalize `?session=...` back to `/` while
+      // the session's directory/message bootstrap is still catching up.
       if (!isVSCode) {
-        syncURLFromState({ replace: true });
+        updateBrowserURL({
+          ...getCurrentAppState(),
+          sessionId: route.sessionId ?? useSessionUIStore.getState().currentSessionId,
+          tab: route.tab ?? useUIStore.getState().activeMainTab,
+          settingsPath: route.settingsPath ?? useUIStore.getState().settingsPage,
+          diffFile: route.diffFile ?? useUIStore.getState().pendingDiffFile,
+        }, { replace: true, force: true });
       }
     };
 
     void initializeRoute();
-  }, [applyRoute, isVSCode, syncURLFromState]);
+  }, [applyRoute, getCurrentAppState, isVSCode]);
 
   // Subscribe to session changes
   React.useEffect(() => {

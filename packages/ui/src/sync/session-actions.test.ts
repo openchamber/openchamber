@@ -106,6 +106,10 @@ mock.module("@/lib/opencode/client", () => ({
       return mockScopedClient
     },
     getDirectory: () => "/test/project",
+    abortSession: mock((sessionId: string, directory?: string | null) => {
+      replyCalls.push({ method: "session.interrupt", params: { sessionID: sessionId, directory } })
+      return Promise.resolve(true)
+    }),
     replyToPermission: mock((requestId: string, reply: string, options?: { directory?: string | null }) => {
       replyCalls.push({ method: "permission.reply", params: { requestID: requestId, reply, directory: options?.directory } })
       return Promise.resolve(true)
@@ -369,7 +373,7 @@ describe("abortCurrentOperation uses interrupt", () => {
     expect(replyCalls).toEqual([
       {
         method: "session.interrupt",
-        params: { sessionID: "session-a" },
+        params: { sessionID: "session-a", directory: "/test/project" },
       },
     ])
   })
@@ -379,6 +383,7 @@ describe("optimisticSend target directory", () => {
   beforeEach(() => {
     replyCalls.length = 0
     scopedClientDirectories.length = 0
+    sessionMessagesResult = { data: [] }
   })
 
   test("passes the prompt directory to optimistic state during session switch races", async () => {
@@ -473,6 +478,95 @@ describe("optimisticSend target directory", () => {
     expect(optimisticRemove).not.toBeNull()
     expect((optimisticRemove as unknown as OptimisticRemoveCall).sessionID).toBe("session-race")
     expect(targetStore.getState().session_status["session-race"]?.type).toBe("idle")
+  })
+
+  test("confirms an ambiguous send failure with a recent message refetch", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    let optimisticRemove: OptimisticRemoveCall | null = null
+    let optimisticConfirm: OptimisticRemoveCall | null = null
+    let sentMessageID = ""
+
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(
+      () => {},
+      (input) => {
+        optimisticRemove = input
+      },
+      (input) => {
+        optimisticConfirm = input
+      },
+    )
+
+    await optimisticSend({
+      sessionId: "session-confirmed",
+      directory: "/target/project",
+      content: "hello",
+      providerID: "provider",
+      modelID: "model",
+      send: async (messageID) => {
+        sentMessageID = messageID
+        sessionMessagesResult = {
+          data: [{
+            info: { id: messageID, role: "user", sessionID: "session-confirmed", time: { created: 1 } } as Message,
+            parts: [{ id: "server-part", type: "text", text: "hello" } as Part],
+          }],
+        }
+        const error = new Error("Failed to send message (504): gateway timeout") as Error & { status?: number }
+        error.status = 504
+        throw error
+      },
+    })
+
+    expect(optimisticRemove).toBe(null)
+    expect((optimisticConfirm as OptimisticRemoveCall | null)?.messageID).toBe(sentMessageID)
+    expect(replyCalls.find((call) => call.method === "session.messages")?.params.limit).toBe(30)
+    expect(targetStore.getState().message["session-confirmed"]?.[0]?.id).toBe(sentMessageID)
+    expect(targetStore.getState().part[sentMessageID]?.[0]?.id).toBe("server-part")
+  })
+
+  test("rolls back an ambiguous send failure when recent messages do not contain the sent ID", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    let optimisticRemove: OptimisticRemoveCall | null = null
+    let optimisticConfirm: OptimisticRemoveCall | null = null
+
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(
+      () => {},
+      (input) => {
+        optimisticRemove = input
+      },
+      (input) => {
+        optimisticConfirm = input
+      },
+    )
+
+    let caught: unknown = null
+    try {
+      await optimisticSend({
+        sessionId: "session-missing",
+        directory: "/target/project",
+        content: "hello",
+        providerID: "provider",
+        modelID: "model",
+        send: async () => {
+          const error = new Error("Failed to send message (504): gateway timeout") as Error & { status?: number }
+          error.status = 504
+          throw error
+        },
+      })
+    } catch (error) {
+      caught = error
+    }
+
+    expect(caught).toBeInstanceOf(Error)
+    expect((optimisticRemove as OptimisticRemoveCall | null)?.sessionID).toBe("session-missing")
+    expect(optimisticConfirm).toBe(null)
+    expect(replyCalls.filter((call) => call.method === "session.messages").every((call) => call.params.limit === 30)).toBe(true)
+    expect(targetStore.getState().session_status["session-missing"]?.type).toBe("idle")
   })
 })
 

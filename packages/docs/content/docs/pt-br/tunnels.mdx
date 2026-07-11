@@ -5,7 +5,9 @@ description: Exponha o OpenChamber com segurança para acesso remoto e móvel.
 
 # Túneis
 
-Um túnel é um link público para o seu OpenChamber, para que você possa acessá-lo pelo celular ou de outra rede. Use `openchamber tunnel` para criar um para uma instância em execução.
+Um túnel é um link público para o seu OpenChamber, para que você possa acessá-lo de um navegador comum em outra rede. Use `openchamber tunnel` para criar um para uma instância em execução.
+
+> Conectar os **seus próprios dispositivos** (o app móvel, outro desktop) geralmente não precisa de túnel — [pareie-os](/pt-br/connect-devices/) e deixe o [Private Relay](/pt-br/private-relay/) criptografado de ponta a ponta cuidar do acesso fora de casa, sem nenhuma configuração.
 
 ## Pré-requisitos
 
@@ -111,6 +113,7 @@ openchamber tunnel stop --port 3000
 
 ## Relacionado
 
+- [Conectar um Dispositivo](/pt-br/connect-devices/) — pareie seus próprios dispositivos sem uma URL pública
 - [Segurança](/pt-br/security/) — proteja a interface antes de expô-la
 - [Túneis no desktop](/pt-br/desktop-tunnels/) — configuração de túnel no app desktop sem iniciar pelo CLI
 - [PWA e Acesso Móvel](/pt-br/mobile/) — acesse o OpenChamber pelo celular

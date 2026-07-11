@@ -328,6 +328,13 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     customizable: true,
   },
   {
+    id: 'toggle_dictation',
+    defaultCombo: 'mod+alt+v',
+    label: 'Voice input',
+    description: 'Start dictation; press again to confirm and insert the transcript',
+    customizable: true,
+  },
+  {
     id: 'abort_run',
     defaultCombo: 'escape',
     label: 'Abort active run',
