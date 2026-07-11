@@ -16,6 +16,15 @@ const sessionMessagesResponse: { data: SessionRecord[] } = {
 const sessionMessageResponse: { data: SessionRecord | null } = {
   data: { info: { id: 'msg-lookup', role: 'user' }, parts: [{ id: 'part-1', type: 'text', text: 'hello' }] },
 };
+const promptAsyncCalls: unknown[][] = [];
+const promptAsyncResults: Array<unknown> = [];
+
+const promptAsyncMock = mock(async (...args: unknown[]) => {
+  promptAsyncCalls.push(args);
+  const next = promptAsyncResults.shift();
+  if (next instanceof Error) throw next;
+  return next ?? { response: new Response(null, { status: 200 }) };
+});
 
 mock.module('@opencode-ai/sdk/v2', () => ({
   createOpencodeClient: mock((config: { baseUrl: string; directory?: string }) => {
@@ -30,6 +39,7 @@ mock.module('@opencode-ai/sdk/v2', () => ({
         }),
       },
       session: {
+        promptAsync: promptAsyncMock,
         messages: mock((params: Record<string, unknown>) => {
           sessionMessagesCalls.push({ clientIndex, params });
           return Promise.resolve(sessionMessagesResponse);
@@ -77,6 +87,8 @@ beforeEach(() => {
   sessionMessagesCalls.length = 0;
   sessionMessageCalls.length = 0;
   opencodeClient.setDirectory(undefined);
+  promptAsyncCalls.length = 0;
+  promptAsyncResults.length = 0;
 });
 
 describe('opencodeClient getConfig cache', () => {
@@ -137,5 +149,77 @@ describe('opencodeClient session message wrappers', () => {
       sessionID: 'session-a',
       messageID: 'msg-lookup',
     });
+  });
+});
+
+describe('opencodeClient prompt retry behavior', () => {
+  const sendPrompt = (providerID = 'anthropic') => opencodeClient.sendMessage({
+    id: 'ses_1',
+    providerID,
+    modelID: 'claude-sonnet',
+    text: 'hello',
+  });
+
+  test('does not retry 504 prompt responses because the POST may already be accepted', async () => {
+    promptAsyncResults.push({ response: new Response('gateway timeout', { status: 504 }) });
+
+    let error: unknown = null;
+    try {
+      await sendPrompt('anthropic-504');
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(promptAsyncCalls.length).toBe(1);
+    expect(error instanceof Error ? error.message : String(error)).toContain('Failed to send message (504)');
+  });
+
+  test('does not retry transport failures because the tunnel may have lost only the response', async () => {
+    promptAsyncResults.push(new TypeError('Failed to fetch'));
+
+    let error: unknown = null;
+    try {
+      await sendPrompt('anthropic-network');
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(promptAsyncCalls.length).toBe(1);
+    expect(error instanceof Error ? error.message : String(error)).toContain('Failed to fetch');
+  });
+
+  test('does not fabricate an HTTP 500 when the SDK swallows a transport failure into result.error', async () => {
+    // The SDK catches thrown fetch errors and returns { error, response: undefined }.
+    // That is a transport failure, not a server 500 — it must surface as a
+    // descriptive transport error, never as "Failed to send message (500): {}".
+    promptAsyncResults.push({ error: new TypeError('relay tunnel reset: plaintext frame on established channel'), response: undefined });
+
+    let error: unknown = null;
+    try {
+      await sendPrompt('anthropic-transport');
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(promptAsyncCalls.length).toBe(1);
+    const message = error instanceof Error ? error.message : String(error);
+    expect(message).not.toContain('Failed to send message (500)');
+    expect(message).toContain('transport failure');
+    expect(message).toContain('relay tunnel reset');
+    expect((error as Error & { status?: number }).status).toBe(undefined);
+  });
+
+  test('does not retry 503 prompt responses because proxy errors can be ambiguous too', async () => {
+    promptAsyncResults.push({ response: new Response('starting', { status: 503 }) });
+
+    let error: unknown = null;
+    try {
+      await sendPrompt('anthropic-503');
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(promptAsyncCalls.length).toBe(1);
+    expect(error instanceof Error ? error.message : String(error)).toContain('Failed to send message (503)');
   });
 });

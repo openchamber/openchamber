@@ -8,6 +8,8 @@
 
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
+import { openRuntimeWebSocket } from '@/lib/relay/runtime-socket';
+import { type RelayTunnelWebSocket } from '@/lib/relay/tunnel-client';
 
 export interface DictationStartOptions {
     provider?: 'local' | 'openai-compatible';
@@ -67,7 +69,7 @@ interface PendingFinish {
 }
 
 export class DictationClient {
-    private socket: WebSocket | null = null;
+    private socket: RelayTunnelWebSocket | null = null;
     private connectPromise: Promise<void> | null = null;
     private idleCloseTimer: ReturnType<typeof setTimeout> | null = null;
     private readonly pendingStarts = new Map<string, PendingStart>();
@@ -116,10 +118,10 @@ export class DictationClient {
 
         this.connectPromise = new Promise<void>((resolve, reject) => {
             let settled = false;
-            let socket: WebSocket;
+            let socket: RelayTunnelWebSocket;
             try {
                 const url = getRuntimeUrlResolver().websocket('/api/dictation/ws');
-                socket = new WebSocket(url);
+                socket = openRuntimeWebSocket(url);
             } catch (error) {
                 this.connectPromise = null;
                 reject(error instanceof Error ? error : new Error(String(error)));
@@ -163,20 +165,26 @@ export class DictationClient {
             };
 
             socket.onerror = () => {
-                if (!settled) {
+                // Prefer onclose, which follows with the real reason (e.g.
+                // "Unexpected server response: 403"). But if a socket ever errors
+                // without a prompt onclose, fail fast here rather than hanging for
+                // the full connect timeout. onclose still wins if it arrives first.
+                window.setTimeout(() => {
+                    if (settled) return;
                     settled = true;
                     clearTimeout(timeout);
                     this.connectPromise = null;
                     reject(new Error('Dictation connection failed'));
-                }
+                }, 250);
             };
 
-            socket.onclose = () => {
+            socket.onclose = (event) => {
                 if (!settled) {
                     settled = true;
                     clearTimeout(timeout);
                     this.connectPromise = null;
-                    reject(new Error('Dictation connection closed'));
+                    const detail = event?.reason ? `: ${event.reason}` : '';
+                    reject(new Error(`Dictation connection failed${detail}`));
                     return;
                 }
                 if (this.socket === socket) {

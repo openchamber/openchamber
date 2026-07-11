@@ -354,7 +354,16 @@ export function useSync() {
       setMetaFor(sessionID, { loading: true })
 
       try {
-        const limit = options?.cursor ? HISTORY_MESSAGE_PAGE_SIZE : m.limit
+        // A resync (no `before`) must fetch at least as many messages as we
+        // already have on screen. Live events append to the store WITHOUT growing
+        // m.limit, so reusing the stale m.limit here would under-fetch and make
+        // the server hand back a spurious "older" cursor — surfacing a phantom
+        // "load older" button for a session whose full history is already shown
+        // (e.g. after a reconnect resync following a few new messages).
+        const storeMessageCount = store.getState().message[sessionID]?.length ?? 0
+        const limit = options?.cursor
+          ? HISTORY_MESSAGE_PAGE_SIZE
+          : Math.max(m.limit, storeMessageCount)
         let page = await fetchMessages(sessionID, limit, options?.cursor)
 
         // Keep the initial page small for switch performance. Some sessions
@@ -616,6 +625,13 @@ export function useSync() {
     [clearOptimistic, getOptimisticStore],
   )
 
+  const optimisticConfirm = useCallback(
+    (input: { sessionID: string; directory?: string | null; messageID: string }) => {
+      clearOptimistic(input.sessionID, input.messageID, input.directory)
+    },
+    [clearOptimistic],
+  )
+
   return useMemo(
     () => ({
       ensureSessionRenderable: syncSession,
@@ -627,8 +643,9 @@ export function useSync() {
       optimistic: {
         add: optimisticAdd,
         remove: optimisticRemove,
+        confirm: optimisticConfirm,
       },
     }),
-    [syncSession, loadMore, hasMore, isLoading, isComplete, optimisticAdd, optimisticRemove],
+    [syncSession, loadMore, hasMore, isLoading, isComplete, optimisticAdd, optimisticRemove, optimisticConfirm],
   )
 }

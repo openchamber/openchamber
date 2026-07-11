@@ -173,6 +173,18 @@ function step(label, fn) {
   return result;
 }
 
+function printReleaseNextSteps(version) {
+  log.success(`Release v${version} prepared locally`);
+  log.info('Next steps:');
+  console.log(`  git add -A`);
+  console.log(`  git commit -m "release v${version}"`);
+  console.log(`  git tag v${version}`);
+  console.log(`  git push origin main --tags`);
+  console.log('');
+  console.log('This will trigger the GitHub Actions release workflow.');
+  console.log(`Make sure CHANGELOG.md contains a section like "## [${version}] - YYYY-MM-DD" before pushing.`);
+}
+
 function normalizeAction(action = '') {
   const normalized = action.toLowerCase();
   const aliases = {
@@ -274,6 +286,11 @@ function installedWebCli(directory) {
   return existsSync(cliPath) ? cliPath : '';
 }
 
+function installedGlobalWebCli() {
+  const bunInstall = process.env.BUN_INSTALL || path.join(os.homedir(), '.bun');
+  return installedWebCli(path.join(bunInstall, 'install', 'global'));
+}
+
 function stopInstalledInstance(directory, port) {
   const cliPath = installedWebCli(directory);
   if (!cliPath) return;
@@ -358,7 +375,11 @@ async function deployWeb(options, config) {
     run('bun', ['remove', '-g', 'openchamber'], { allowFail: true, label: 'remove openchamber' });
   });
   step('Installing package globally', () => run('bun', ['add', '-g', packageFile]));
-  step(`Starting global instance on ${GLOBAL_PORT}`, () => run('openchamber', ['--port', GLOBAL_PORT], { env: { OPENCHAMBER_UI_PASSWORD: process.env.OPENCHAMBER_PASSWORD || '', OPENCHAMBER_HOST: '0.0.0.0' } }));
+  step(`Starting global instance on ${GLOBAL_PORT}`, () => {
+    const cliPath = installedGlobalWebCli();
+    if (!cliPath) throw new Error('Global OpenChamber CLI was not installed by bun add -g');
+    run('node', [cliPath, '--port', GLOBAL_PORT], { env: { OPENCHAMBER_UI_PASSWORD: process.env.OPENCHAMBER_PASSWORD || '', OPENCHAMBER_HOST: '0.0.0.0' } });
+  });
 }
 
 async function deployRemoteWeb(options, config) {
@@ -575,7 +596,7 @@ async function createRelease(options) {
   if (!/^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$/.test(version)) throw new Error('Invalid version format. Use semver, e.g. 1.4.7 or 1.4.7-beta.1');
   step('Validating codebase', () => run('bun', ['run', 'release:prepare']));
   step(`Bumping version to ${version}`, () => run('node', ['scripts/bump-version.mjs', version]));
-  log.success(`Release v${version} prepared locally`);
+  printReleaseNextSteps(version);
 }
 
 async function chooseAction(config) {

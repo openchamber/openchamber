@@ -98,6 +98,7 @@ import {
     findAttachmentCitationRanges,
 } from './attachmentCitations';
 import { getFileMentionAutocompleteQuery, type FileMentionAutocompleteInputSource } from './fileMentionAutocompleteState';
+import { SessionSuggestionChip } from '@/components/chat/SessionSuggestionChip';
 import type { Part } from '@opencode-ai/sdk/v2/client';
 
 const MAX_VISIBLE_TEXTAREA_LINES = 8;
@@ -526,8 +527,6 @@ type ComposerAttachmentControlsProps = {
     isVSCode: boolean;
     footerIconButtonClass: string;
     iconSizeClass: string;
-    fileInputRef: React.RefObject<HTMLInputElement | null>;
-    handleLocalFileSelect: (event: React.ChangeEvent<HTMLInputElement>) => void | Promise<void>;
     handlePickLocalFiles: () => void;
     openIssuePicker: () => void;
     openPrPicker: () => void;
@@ -543,8 +542,6 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
         isVSCode,
         footerIconButtonClass,
         iconSizeClass,
-        fileInputRef,
-        handleLocalFileSelect,
         handlePickLocalFiles,
         openIssuePicker,
         openPrPicker,
@@ -553,21 +550,22 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
 
     return (
         <div className="flex items-center gap-x-1.5">
-            <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                className="hidden"
-                onChange={handleLocalFileSelect}
-                accept="*/*"
-            />
-
             <div className="relative inline-flex">
                 {props.onOpenMobileSheet ? (
                     <button
                         type="button"
                         className={footerIconButtonClass}
                         onClick={props.onOpenMobileSheet}
+                        // Same guard as PermissionAutoAcceptButton: keep the tap
+                        // from dismissing the keyboard. On Android's
+                        // resizes-content viewport the keyboard-close relayout
+                        // moves this button mid-tap and the click never lands.
+                        onMouseDown={(event) => event.preventDefault()}
+                        onPointerDownCapture={(event) => {
+                            if (event.pointerType === 'touch') {
+                                event.preventDefault();
+                            }
+                        }}
                         title={t('chat.chatInput.actions.addAttachment')}
                         aria-label={t('chat.chatInput.actions.addAttachment')}
                     >
@@ -1015,6 +1013,19 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     // so the chat compensates keyboard + composer height in a single motion.
     const [mobileComposerExpanded, setMobileComposerExpanded] = React.useState(false);
     const [mobileTextareaFocused, setMobileTextareaFocused] = React.useState(false);
+    // Mobile browser / installed PWA: tapping a composer control while the
+    // keyboard is up blurs the textarea first, and the keyboard-resize reflow
+    // moves the control out from under the finger BEFORE the browser
+    // synthesizes the click — the tap dismisses the keyboard but the control's
+    // onClick never fires. Defer the blur-driven state flip so the pinned
+    // composer holds still through the tap; a refocus cancels it. Capacitor
+    // keeps the immediate flip.
+    const mobileBlurTimerRef = React.useRef<number | null>(null);
+    React.useEffect(() => () => {
+        if (mobileBlurTimerRef.current !== null) {
+            window.clearTimeout(mobileBlurTimerRef.current);
+        }
+    }, []);
     const [mobileDictationActive, setMobileDictationActive] = React.useState(false);
     const [mobileAttachMenuOpen, setMobileAttachMenuOpen] = React.useState(false);
     const [mobileDraftPicker, setMobileDraftPicker] = React.useState<'project' | 'branch' | null>(null);
@@ -2805,6 +2816,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
     }, [agents, currentAgentName, currentSessionId, setAgent, saveSessionAgentSelection]);
 
+    // Height the dictation transcript needs (null when idle): the overlay sits
+    // absolutely over the composer, so the underlying textarea must grow for
+    // the composer to grow — feed this into the autosize below.
+    const dictationContentHeightRef = React.useRef<number | null>(null);
+    const [dictationContentHeight, setDictationContentHeight] = React.useState<number | null>(null);
+    const handleDictationContentHeightChange = React.useCallback((height: number | null) => {
+        setDictationContentHeight((prev) => (prev === height ? prev : height));
+    }, []);
+
     const adjustTextareaHeight = React.useCallback((options?: { allowShrink?: boolean }) => {
         const textarea = textareaRef.current;
         if (!textarea) {
@@ -2840,7 +2860,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         const targetLineHeight = Number.isNaN(lineHeight) ? fallbackLineHeight : lineHeight;
         const maxHeight = targetLineHeight * MAX_VISIBLE_TEXTAREA_LINES + paddingTotal;
         const scrollHeight = textarea.scrollHeight || textarea.offsetHeight;
-        const nextHeight = Math.min(scrollHeight, maxHeight);
+        const dictationHeight = dictationContentHeightRef.current ?? 0;
+        const nextHeight = Math.min(Math.max(scrollHeight, dictationHeight), maxHeight);
 
         textarea.style.height = `${nextHeight}px`;
         textarea.style.maxHeight = `${maxHeight}px`;
@@ -2861,6 +2882,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         previousMessageLengthRef.current = message.length;
         adjustTextareaHeight({ allowShrink });
     }, [adjustTextareaHeight, message, isMobile]);
+
+    React.useLayoutEffect(() => {
+        dictationContentHeightRef.current = dictationContentHeight;
+        // Growing transcript never shrinks mid-recording (matches typing);
+        // dictation ending (null) releases the height back to the message.
+        adjustTextareaHeight({ allowShrink: dictationContentHeight === null });
+    }, [adjustTextareaHeight, dictationContentHeight]);
 
     const updateAutocompleteState = React.useCallback((
         value: string,
@@ -4053,13 +4081,28 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         textareaRef.current?.focus({ preventScroll: isCapacitorApp() });
     }, []);
 
+    const applyAssistSuggestion = React.useCallback((text: string) => {
+        setMessage(text);
+        if (isMobile && !mobileComposerExpanded) {
+            expandMobileComposer('focus');
+        } else {
+            requestAnimationFrame(() => textareaRef.current?.focus());
+        }
+    }, [expandMobileComposer, isMobile, mobileComposerExpanded]);
+
+
     const handleMobileNewSession = React.useCallback(() => {
         if (newSessionDraftOpen) return;
         openNewSessionDraft(currentDirectory ? { directoryOverride: currentDirectory } : undefined);
     }, [newSessionDraftOpen, openNewSessionDraft, currentDirectory]);
 
     const openMobileAttachSheet = React.useCallback(() => {
+        // Same order as handleOpenMobilePanel: mark the sheet open BEFORE the
+        // blur so the collapse watcher sees an overlay when the keyboard-close
+        // lands. The trigger button blocks the tap's own focus transfer, so
+        // the keyboard must be dismissed explicitly here.
         setMobileAttachMenuOpen(true);
+        textareaRef.current?.blur();
     }, []);
 
     const mobileComposerExpandedRef = React.useRef(mobileComposerExpanded);
@@ -4120,6 +4163,74 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         || mobileAttachMenuOpen
         || issuePickerOpen
         || prPickerOpen;
+    // Installed PWA (standalone): a focus() from a bare timeout is outside the
+    // user gesture and iOS refuses to raise the keyboard for it (Safari
+    // in-browser is lenient). MobileOverlayPanel dispatches
+    // 'oc:mobile-overlay-closed' synchronously from the same React flush as
+    // the click that closed it — refocus right there, while the gesture is
+    // still live. Chained flows (attach menu → GitHub picker) set the skip ref
+    // so the keyboard doesn't flash open under the next overlay.
+    const mobilePickerDialogsOpenRef = React.useRef(false);
+    mobilePickerDialogsOpenRef.current = issuePickerOpen || prPickerOpen;
+    const skipNextOverlayCloseRestoreRef = React.useRef(false);
+    const openSheetCountRef = React.useRef(0);
+    const holdComposerFocusUntilRef = React.useRef(0);
+    React.useEffect(() => {
+        if (!isMobile || isCapacitorApp() || typeof window === 'undefined') return;
+        if (!window.matchMedia?.('(display-mode: standalone)')?.matches) return;
+        const handleOverlayOpened = () => {
+            openSheetCountRef.current += 1;
+        };
+        const handleOverlayClosed = () => {
+            // Counter instead of a DOM check: the close event fires from a
+            // layout-effect cleanup, when the closing sheet's portal nodes may
+            // still be attached — the DOM can't tell "this sheet going away"
+            // from "another sheet still up".
+            openSheetCountRef.current = Math.max(0, openSheetCountRef.current - 1);
+            if (skipNextOverlayCloseRestoreRef.current) {
+                skipNextOverlayCloseRestoreRef.current = false;
+                return;
+            }
+            if (!restoreKeyboardAfterOverlayRef.current) return;
+            if (mobilePickerDialogsOpenRef.current) return;
+            if (openSheetCountRef.current > 0) return;
+            restoreKeyboardAfterOverlayRef.current = false;
+            // iOS can still dismiss the freshly-raised keyboard when the tap
+            // that closed the overlay finishes over non-input content — hold
+            // focus through that window (see the onBlur guard).
+            holdComposerFocusUntilRef.current = Date.now() + 600;
+            textareaRef.current?.focus();
+            // The native focus lands mid-commit; React's delegated onFocus may
+            // not make it into this flush, leaving mobileComposerBusy false for
+            // a beat — enough for the pill-collapse timer to unmount the
+            // focused textarea and kill the rising keyboard. Set the state
+            // explicitly instead of relying on the synthetic event.
+            if (document.activeElement === textareaRef.current) {
+                setMobileTextareaFocused(true);
+            }
+            // iOS reveals a field above the keyboard only for user-initiated
+            // focus; a programmatic one leaves the composer parked behind it
+            // (the chat screen has no viewport pin of its own — the draft
+            // screen's pinned form ignores these no-op scrolls). Reveal once
+            // the keyboard has mostly risen, and again after it settles.
+            const reveal = () => {
+                const ta = textareaRef.current;
+                if (!ta || document.activeElement !== ta) return;
+                // Align the BOTTOM of the whole composer form with the visible
+                // bottom: 'nearest' on the textarea alone leaves the footer
+                // icon row parked behind the keyboard accessory bar.
+                (composerFormRef.current ?? ta).scrollIntoView({ block: 'end' });
+            };
+            window.setTimeout(reveal, 300);
+            window.setTimeout(reveal, 650);
+        };
+        window.addEventListener('oc:mobile-overlay-opened', handleOverlayOpened);
+        window.addEventListener('oc:mobile-overlay-closed', handleOverlayClosed);
+        return () => {
+            window.removeEventListener('oc:mobile-overlay-opened', handleOverlayOpened);
+            window.removeEventListener('oc:mobile-overlay-closed', handleOverlayClosed);
+        };
+    }, [isMobile]);
     React.useEffect(() => {
         if (!isMobile) return;
         if (mobileOverlayOpen) {
@@ -4157,6 +4268,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     React.useEffect(() => {
         if (!isMobile || !mobileComposerExpanded || mobileComposerBusy) return;
         const timer = window.setTimeout(() => {
+            // Authoritative DOM check: the React focus state can lag a
+            // programmatic refocus (overlay-close keyboard restore). Collapsing
+            // would unmount the focused textarea and kill the keyboard.
+            if (document.activeElement === textareaRef.current) return;
             mobileExpandIntentRef.current = null;
             setMobileComposerExpanded(false);
             setExpandedInput(false);
@@ -4178,6 +4293,19 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             root.classList.add('oc-browser-keyboard-open');
         } else {
             root.classList.remove('oc-browser-keyboard-open');
+            // Installed PWA (standalone): after the keyboard dismisses, WebKit
+            // can leave the layout viewport stuck smaller / panned (content
+            // shifted up with a dead strip at the bottom) until something
+            // forces it to recompute. A zero scroll after the keyboard's exit
+            // animation settles snaps it back; harmless when nothing is stuck.
+            if (window.matchMedia?.('(display-mode: standalone)')?.matches) {
+                window.setTimeout(() => {
+                    if (root.classList.contains('oc-browser-keyboard-open')) return;
+                    window.scrollTo(0, 0);
+                    document.body.scrollTop = 0;
+                    root.scrollTop = 0;
+                }, 350);
+            }
         }
         return () => root.classList.remove('oc-browser-keyboard-open');
     }, [isMobile, mobileTextareaFocused]);
@@ -4254,27 +4382,35 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!isMobile || !isMobileExpanded || isCapacitorApp()) return;
         const vv = window.visualViewport;
         const form = composerFormRef.current;
+        const textarea = textareaRef.current;
         if (!vv || !form) return;
         // The form is trapped inside lower stacking contexts (the composer
         // wrapper's z-10), so it cannot out-stack the app header with z-index
         // alone — hide the header for the duration via a root class instead.
         document.documentElement.classList.add('oc-browser-kb-fullscreen');
         const apply = () => {
+            const top = Math.max(0, Math.floor(vv.offsetTop));
+            // Same stale-visualViewport guard as the draft pin below: when the
+            // layout viewport is keyboard-resized (interactive-widget), its
+            // clientHeight is the authoritative above-keyboard height.
+            const layoutHeight = document.documentElement.clientHeight;
             form.style.position = 'fixed';
             form.style.left = '0';
             form.style.right = '0';
-            form.style.top = `${Math.max(0, Math.floor(vv.offsetTop))}px`;
-            form.style.height = `${Math.floor(vv.height)}px`;
+            form.style.top = `${top}px`;
+            form.style.height = `${Math.floor(Math.min(vv.height, layoutHeight - top))}px`;
             form.style.zIndex = '40';
             form.style.background = 'var(--background)';
         };
         apply();
         vv.addEventListener('resize', apply);
         vv.addEventListener('scroll', apply);
+        window.addEventListener('resize', apply);
         window.addEventListener('scroll', apply, true);
         return () => {
             vv.removeEventListener('resize', apply);
             vv.removeEventListener('scroll', apply);
+            window.removeEventListener('resize', apply);
             window.removeEventListener('scroll', apply, true);
             document.documentElement.classList.remove('oc-browser-kb-fullscreen');
             form.style.position = '';
@@ -4288,7 +4424,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             // session and won't re-reveal the (still focused) field on its own,
             // which left the composer parked behind the keyboard.
             requestAnimationFrame(() => {
-                const textarea = textareaRef.current;
                 if (textarea && document.activeElement === textarea) {
                     textarea.scrollIntoView({ block: 'nearest' });
                 }
@@ -4321,7 +4456,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         let lastTop = Number.NaN;
         let frame = 0;
         const track = () => {
-            const top = Math.max(0, Math.floor(vv.offsetTop + vv.height - form.offsetHeight));
+            // iOS standalone (PWA) can serve stale visualViewport metrics after
+            // the keyboard rises (full pre-keyboard height, intermittently),
+            // parking the form behind the keyboard. When interactive-widget
+            // resizes the layout viewport, documentElement.clientHeight is the
+            // true above-keyboard bottom — anchor to whichever is smaller. In
+            // pan-mode browsers clientHeight stays full height, so the min
+            // keeps the visual-viewport anchor there.
+            const layoutBottom = document.documentElement.clientHeight;
+            const vvBottom = vv.offsetTop + vv.height;
+            const top = Math.max(0, Math.floor(Math.min(vvBottom, layoutBottom) - form.offsetHeight));
             if (top !== lastTop) {
                 lastTop = top;
                 form.style.top = `${top}px`;
@@ -4744,6 +4888,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     )}
                 >
                 {isMobile && !mobileComposerExpanded ? (
+                    <div className="flex flex-col">
+                    <SessionSuggestionChip
+                        sessionId={currentSessionId}
+                        directory={currentSessionDirectoryForSync ?? currentDirectory}
+                        hidden={hasContent || newSessionDraftOpen}
+                        onApply={applyAssistSuggestion}
+                        className="mb-1.5"
+                    />
                     <div className="flex items-center gap-2">
                         <div
                             className="flex h-11 min-w-0 flex-1 items-center gap-x-0.5 rounded-full border border-border/80 pl-2 pr-1"
@@ -4757,8 +4909,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                 isVSCode={isVSCode}
                                 footerIconButtonClass={footerIconButtonClass}
                                 iconSizeClass={iconSizeClass}
-                                fileInputRef={fileInputRef}
-                                handleLocalFileSelect={handleLocalFileSelect}
                                 handlePickLocalFiles={handlePickLocalFiles}
                                 openIssuePicker={openIssuePicker}
                                 openPrPicker={openPrPicker}
@@ -4818,7 +4968,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             </button>
                         </div>
                     </div>
+                    </div>
                 ) : (
+                <>
+                <SessionSuggestionChip
+                    sessionId={currentSessionId}
+                    directory={currentSessionDirectoryForSync ?? currentDirectory}
+                    hidden={hasContent || newSessionDraftOpen}
+                    onApply={applyAssistSuggestion}
+                    className="mb-1.5"
+                />
                 <div
                     className={cn(
                         "flex flex-col relative overflow-visible",
@@ -5018,13 +5177,57 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                 }}
                                 onFocus={() => {
                                     if (!isMobile) return;
+                                    if (mobileBlurTimerRef.current !== null) {
+                                        window.clearTimeout(mobileBlurTimerRef.current);
+                                        mobileBlurTimerRef.current = null;
+                                    }
                                     mobileExpandIntentRef.current = null;
                                     setMobileTextareaFocused(true);
                                 }}
                                 onBlur={() => {
                                     if (!isMobile) return;
+                                    // Focus hold after an overlay-close restore:
+                                    // iOS may retract the rising keyboard as the
+                                    // closing tap settles — take the focus right
+                                    // back instead of accepting the blur.
+                                    if (Date.now() < holdComposerFocusUntilRef.current) {
+                                        const ta = textareaRef.current;
+                                        if (ta) {
+                                            ta.focus();
+                                            window.setTimeout(() => {
+                                                if (Date.now() < holdComposerFocusUntilRef.current
+                                                    && document.activeElement !== ta) {
+                                                    ta.focus();
+                                                }
+                                            }, 50);
+                                            return;
+                                        }
+                                    }
                                     lastMobileBlurAtRef.current = Date.now();
-                                    setMobileTextareaFocused(false);
+                                    // Mobile browsers and installed PWAs share the
+                                    // blur race: the keyboard-dismiss reflow moves
+                                    // composer buttons before the tap's synthesized
+                                    // click lands, so the click misses its target.
+                                    // Capacitor's WebView does not need the hold.
+                                    if (isCapacitorApp()) {
+                                        setMobileTextareaFocused(false);
+                                        return;
+                                    }
+                                    // See mobileBlurTimerRef: hold the pinned
+                                    // composer still until the tap's click has
+                                    // been delivered.
+                                    if (mobileBlurTimerRef.current !== null) {
+                                        window.clearTimeout(mobileBlurTimerRef.current);
+                                    }
+                                    // 120ms is enough to outlive the tap's
+                                    // synthesized click (which lands within a
+                                    // few ms of the blur) while keeping the
+                                    // padding's return visually tied to the
+                                    // keyboard dismissal.
+                                    mobileBlurTimerRef.current = window.setTimeout(() => {
+                                        mobileBlurTimerRef.current = null;
+                                        setMobileTextareaFocused(false);
+                                    }, 120);
                                 }}
                                 placeholder={currentSessionId || newSessionDraftOpen
                                     ? inputMode === 'shell'
@@ -5082,8 +5285,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                             isVSCode={isVSCode}
                                             footerIconButtonClass={footerIconButtonClass}
                                             iconSizeClass={iconSizeClass}
-                                            fileInputRef={fileInputRef}
-                                            handleLocalFileSelect={handleLocalFileSelect}
                                             handlePickLocalFiles={handlePickLocalFiles}
                                             openIssuePicker={openIssuePicker}
                                             openPrPicker={openPrPicker}
@@ -5147,8 +5348,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         isVSCode={isVSCode}
                                         footerIconButtonClass={footerIconButtonClass}
                                         iconSizeClass={iconSizeClass}
-                                        fileInputRef={fileInputRef}
-                                        handleLocalFileSelect={handleLocalFileSelect}
                                         handlePickLocalFiles={handlePickLocalFiles}
                                         openIssuePicker={openIssuePicker}
                                         openPrPicker={openPrPicker}
@@ -5180,6 +5379,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         sendIconSizeClass={sendIconSizeClass}
                                         onInsert={handleDictationInsert}
                                         onInsertAndSend={handleDictationInsertAndSend}
+                                        onContentHeightChange={handleDictationContentHeightChange}
                                     />
                                     <ComposerActionButtons
                                         isMobile={isMobile}
@@ -5202,6 +5402,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     </div>
 
                 </div>
+                </>
                 )}
                 {/* Wrapper-level dictation engine + overlay: stays mounted across
                     the pill ↔ composer swap so a recording started from the pill
@@ -5218,6 +5419,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         onInsert={handleDictationInsert}
                         onInsertAndSend={handleDictationInsertAndSend}
                         onActiveChange={handleMobileDictationActiveChange}
+                        onContentHeightChange={handleDictationContentHeightChange}
                         renderTrigger={false}
                         topAccessory={mobileComposerHandle}
                     />
@@ -5274,6 +5476,21 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             isMobile={isMobile}
         />
 
+        {/* Single always-mounted picker input. It must NOT live inside
+            ComposerAttachmentControls: that component mounts once per composer
+            variant (pill / expanded footer), so a shared ref got nulled when a
+            variant unmounted, and a variant swap while the OS file picker was
+            open detached the clicked input — its change event was silently
+            lost and the picked files never attached. */}
+        <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={handleLocalFileSelect}
+            accept="*/*"
+        />
+
         {/* Mobile attachment sheet: replaces the dropdown (which stole focus and
             dismissed the keyboard) and leaves room for more actions later. */}
         {isMobile ? (
@@ -5301,6 +5518,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         type="button"
                         className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-3 text-left typography-ui-label hover:bg-[var(--interactive-hover)]"
                         onClick={() => {
+                            // Hand-off to the picker: don't sync-restore the
+                            // keyboard under the overlay that opens next frame.
+                            skipNextOverlayCloseRestoreRef.current = true;
                             setMobileAttachMenuOpen(false);
                             requestAnimationFrame(openIssuePicker);
                         }}
@@ -5312,6 +5532,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         type="button"
                         className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-3 text-left typography-ui-label hover:bg-[var(--interactive-hover)]"
                         onClick={() => {
+                            skipNextOverlayCloseRestoreRef.current = true;
                             setMobileAttachMenuOpen(false);
                             requestAnimationFrame(openPrPicker);
                         }}

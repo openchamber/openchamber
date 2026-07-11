@@ -6,6 +6,7 @@ import { McpIcon } from '@/components/icons/McpIcon';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
 import { AboutSettings } from '@/components/sections/openchamber/AboutSettings';
 import { OpenCodeUpdateToast } from '@/components/update/OpenCodeUpdateToast';
+import { MobileAppUpdateToast } from '@/components/update/MobileAppUpdateToast';
 import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { Button } from '@/components/ui/button';
 import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
@@ -26,7 +27,9 @@ import { useUpdatePolling } from '@/hooks/useUpdatePolling';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { opencodeClient } from '@/lib/opencode/client';
 import type { ProjectEntry, RuntimeAPIs } from '@/lib/api/types';
+import { useOrientation } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
+import { isIPadApp } from '@/lib/platform';
 import { resolveProjectForDirectory, resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { clampPercent, formatQuotaResetLabel, formatQuotaValueLabel, formatWindowLabel, QUOTA_PROVIDERS, resolveUsageTone } from '@/lib/quota';
 import { getDisplayModelName } from '@/lib/quota/model-families';
@@ -57,9 +60,10 @@ import { MobileFilesSurface } from './MobileFilesSurface';
 import { MobileSessionsSheet } from './MobileSessionsSheet';
 import { MobileSurfaceShell } from './MobileSurfaceShell';
 import { DedicatedMobileAppProvider, type MobileAppActions } from './mobileAppContext';
-import { autoConnectLastInstance, isSameConnectionUrl, useMobileConnection } from './mobileConnections';
+import { autoConnectLastInstance, connectionDisplayUrl, isActiveRuntimeConnection, reprobeActiveConnection, useMobileConnection } from './mobileConnections';
+import { isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { isQrScanSupported, parseConnectionPayload, scanConnectionQr } from './mobileQrScan';
-import { resetAppForRuntimeEndpointChange } from './runtimeEndpointReset';
+import { reconnectAppForTransportSwitch, resetAppForRuntimeEndpointChange } from './runtimeEndpointReset';
 import { useAppFontEffects } from './useAppFontEffects';
 import { useFontsReady } from './useFontsReady';
 import { useDeepLinkHandlers, useDeepLinkSource } from './deepLinkNavigation';
@@ -84,6 +88,120 @@ const MOBILE_SETTINGS_PAGES = [
 type MobileAppProps = {
   apis: RuntimeAPIs;
 };
+
+const IPAD_LEFT_SIDEBAR_WIDTH = 320;
+const IPAD_RIGHT_SIDEBAR_WIDTH = 380;
+const IPAD_SIDEBAR_MIN_WIDTH = 280;
+const IPAD_SIDEBAR_MAX_WIDTH = 560;
+const IPAD_METADATA_POPOVER_WIDTH = 380;
+
+/** Drag-resize for the iPad sidebars: same live-width mechanics as the desktop
+    Sidebar (imperative styles during the drag, committed to state at the end),
+    but with a finger-sized grab strip instead of a 3px hover handle. */
+function useIpadSidebarResize(side: 'left' | 'right', storageKey: string, defaultWidth: number) {
+  const asideRef = React.useRef<HTMLElement | null>(null);
+  const [width, setWidth] = React.useState(() => {
+    if (typeof window === 'undefined') return defaultWidth;
+    const stored = Number.parseInt(window.localStorage.getItem(storageKey) ?? '', 10);
+    if (!Number.isFinite(stored)) return defaultWidth;
+    return Math.min(IPAD_SIDEBAR_MAX_WIDTH, Math.max(IPAD_SIDEBAR_MIN_WIDTH, stored));
+  });
+  const [isResizing, setIsResizing] = React.useState(false);
+  const startXRef = React.useRef(0);
+  const startWidthRef = React.useRef(width);
+  const liveWidthRef = React.useRef<number | null>(null);
+  const pointerIdRef = React.useRef<number | null>(null);
+
+  const clampWidth = React.useCallback((value: number) => (
+    Math.min(IPAD_SIDEBAR_MAX_WIDTH, Math.max(IPAD_SIDEBAR_MIN_WIDTH, Math.round(value)))
+  ), []);
+
+  const applyLiveWidth = React.useCallback((nextWidth: number) => {
+    const aside = asideRef.current;
+    if (!aside) return;
+    aside.style.width = `${nextWidth}px`;
+    aside.style.minWidth = `${nextWidth}px`;
+    aside.style.maxWidth = `${nextWidth}px`;
+    aside.style.setProperty('--oc-ipad-sidebar-width', `${nextWidth}px`);
+  }, []);
+
+  const handlePointerDown = React.useCallback((event: React.PointerEvent) => {
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // ignore
+    }
+    pointerIdRef.current = event.pointerId;
+    startXRef.current = event.clientX;
+    startWidthRef.current = width;
+    liveWidthRef.current = width;
+    setIsResizing(true);
+    event.preventDefault();
+  }, [width]);
+
+  const handlePointerMove = React.useCallback((event: React.PointerEvent) => {
+    if (pointerIdRef.current !== event.pointerId) return;
+    const delta = event.clientX - startXRef.current;
+    const next = clampWidth(startWidthRef.current + (side === 'left' ? delta : -delta));
+    if (liveWidthRef.current === next) return;
+    liveWidthRef.current = next;
+    applyLiveWidth(next);
+  }, [applyLiveWidth, clampWidth, side]);
+
+  const handlePointerEnd = React.useCallback((event: React.PointerEvent) => {
+    if (pointerIdRef.current !== event.pointerId) return;
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // ignore
+    }
+    const finalWidth = clampWidth(liveWidthRef.current ?? startWidthRef.current);
+    pointerIdRef.current = null;
+    liveWidthRef.current = null;
+    setIsResizing(false);
+    setWidth(finalWidth);
+    try {
+      window.localStorage.setItem(storageKey, String(finalWidth));
+    } catch {
+      // ignore
+    }
+  }, [clampWidth, storageKey]);
+
+  const handleProps = React.useMemo(() => ({
+    onPointerDown: handlePointerDown,
+    onPointerMove: handlePointerMove,
+    onPointerUp: handlePointerEnd,
+    onPointerCancel: handlePointerEnd,
+  }), [handlePointerDown, handlePointerEnd, handlePointerMove]);
+
+  return { asideRef, width, isResizing, handleProps };
+}
+
+const IpadSidebarResizeHandle: React.FC<{
+  side: 'left' | 'right';
+  isResizing: boolean;
+  ariaLabel: string;
+  handleProps: React.HTMLAttributes<HTMLDivElement>;
+}> = ({ side, isResizing, ariaLabel, handleProps }) => (
+  <div
+    className={cn(
+      'absolute inset-y-0 z-30 w-6 cursor-col-resize touch-none',
+      side === 'left' ? 'right-0' : 'left-0',
+    )}
+    role="separator"
+    aria-orientation="vertical"
+    aria-label={ariaLabel}
+    {...handleProps}
+  >
+    <div
+      className={cn(
+        'absolute inset-y-0 w-[3px] transition-colors',
+        side === 'left' ? 'right-0' : 'left-0',
+        isResizing && 'bg-[var(--interactive-border)]',
+      )}
+    />
+  </div>
+);
 
 const isCapacitorMobileApp = (): boolean => {
   if (typeof window === 'undefined') return false;
@@ -124,9 +242,10 @@ const useNativeMobileChrome = (): void => {
       const platform = (window as typeof window & { Capacitor?: { getPlatform?: () => string } }).Capacitor?.getPlatform?.();
       const applyStatusBar = async () => {
         if (platform === 'android') {
-          // Android doesn't feed env(safe-area-inset-top) to CSS, so overlaying the status bar
-          // makes content render under it. Inset the WebView below the bar instead and paint the
-          // bar with the resolved theme background (the splash colours the theme system persists).
+          // Inset the WebView below the bar and paint it with the resolved theme background
+          // (the splash colours the theme system persists). On Android 15+ edge-to-edge is
+          // enforced and both calls are no-ops — there the app pads itself via the
+          // Capacitor-injected --safe-area-inset-* CSS vars (see mobile.css, oc-platform-android).
           const isDark = document.documentElement.classList.contains('dark');
           const themeBg =
             (isDark ? localStorage.getItem('splashBgDark') : localStorage.getItem('splashBgLight')) ||
@@ -436,6 +555,20 @@ const useNativeMobileLifecycle = (onResume: () => void): void => {
       onResume();
     };
 
+    // Belt-and-suspenders resume detection. Capacitor's `appStateChange` is the
+    // primary signal, but on iOS it can be missed after a long suspend, so the
+    // webview's own `visibilitychange` is a second trigger — either one flips
+    // wasInactiveRef and fires onResume exactly once per background→foreground.
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        wasInactiveRef.current = true;
+        return;
+      }
+      resumeAfterInactive();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    cleanup.push(() => document.removeEventListener('visibilitychange', handleVisibility));
+
     void import('@capacitor/app').then(async ({ App }) => {
       if (disposed) return;
       const state = await App.addListener('appStateChange', ({ isActive }) => {
@@ -551,8 +684,12 @@ const MobileConnectionWelcome: React.FC<{ onConnected: () => void }> = ({ onConn
   const [connectionName, setConnectionName] = React.useState('');
   const [clientToken, setClientToken] = React.useState('');
   const [isScanning, setIsScanning] = React.useState(false);
-  const [advancedOpen, setAdvancedOpen] = React.useState(false);
   const qrScanSupported = React.useMemo(() => isQrScanSupported(), []);
+  // QR pairing is the primary flow; the manual URL form stays collapsed unless
+  // scanning is unavailable (web build) or the user asks for it.
+  const [manualOpen, setManualOpen] = React.useState(() => !isQrScanSupported());
+  // Which saved connection is being connected to, for the per-row spinner.
+  const [connectingId, setConnectingId] = React.useState<string | null>(null);
   const [password, setPassword] = React.useState('');
 
   const handleSubmit = React.useCallback((event: React.FormEvent) => {
@@ -561,20 +698,23 @@ const MobileConnectionWelcome: React.FC<{ onConnected: () => void }> = ({ onConn
   }, [clientToken, conn, connectionName, serverUrl]);
 
   // Accept a pasted pairing link (openchamber://connect?...) in the URL field and
-  // split it back into the server URL + token, revealing the token field when present.
+  // split it back into the server URL + token.
   const handleUrlChange = React.useCallback((value: string) => {
     if (/^openchamber:\/\//i.test(value.trim())) {
       const payload = parseConnectionPayload(value);
       if (payload) {
+        if ('pairing' in payload) {
+          void conn.redeemPairingConnection(payload.pairing);
+          return;
+        }
         setServerUrl(payload.url);
         if (payload.label) setConnectionName(payload.label);
         if (payload.clientToken) setClientToken(payload.clientToken);
-        if (payload.label || payload.clientToken) setAdvancedOpen(true);
         return;
       }
     }
     setServerUrl(value);
-  }, []);
+  }, [conn]);
 
   const handleScanQr = React.useCallback(async () => {
     if (isScanning || isBusy) return;
@@ -587,8 +727,10 @@ const MobileConnectionWelcome: React.FC<{ onConnected: () => void }> = ({ onConn
           setServerUrl(result.url);
           if (result.label) setConnectionName(result.label);
           if (result.clientToken) setClientToken(result.clientToken);
-          if (result.label || result.clientToken) setAdvancedOpen(true);
           await conn.connect({ url: result.url, clientToken: result.clientToken, label: result.label });
+          break;
+        case 'pairing':
+          await conn.redeemPairingConnection(result.pairing);
           break;
         case 'permission-denied':
           conn.setError(t('mobile.connect.scan.permissionDenied'));
@@ -622,7 +764,7 @@ const MobileConnectionWelcome: React.FC<{ onConnected: () => void }> = ({ onConn
   }, [conn]);
 
   return (
-    <main className="oc-keyboard-fill-screen flex min-h-dvh flex-col overflow-y-auto bg-background px-6 pb-[calc(env(safe-area-inset-bottom)+28px)] pt-[calc(env(safe-area-inset-top)+28px)] text-foreground">
+    <main className="oc-keyboard-fill-screen flex min-h-dvh flex-col overflow-y-auto bg-background px-6 pb-[calc(var(--safe-area-inset-bottom,env(safe-area-inset-bottom,0px))+28px)] pt-[calc(var(--safe-area-inset-top,env(safe-area-inset-top,0px))+28px)] text-foreground">
       <div className="m-auto flex w-full max-w-[360px] shrink-0 flex-col items-center gap-9 py-8">
         <div className="flex flex-col items-center gap-5 text-center">
           <OpenChamberLogo width={72} height={72} className="size-[72px]" />
@@ -637,7 +779,9 @@ const MobileConnectionWelcome: React.FC<{ onConnected: () => void }> = ({ onConn
               </span>
               <div className="min-w-0 text-left">
                 <p className="truncate typography-ui-label text-foreground">{pendingConnection.label}</p>
-                <p className="truncate typography-small text-muted-foreground">{pendingConnection.url}</p>
+                <p className="truncate typography-small text-muted-foreground">
+                  {pendingConnection.candidates.some((c) => c.kind === 'direct') ? connectionDisplayUrl(pendingConnection) : t('mobile.connect.relay.badge')}
+                </p>
               </div>
             </div>
             <input
@@ -665,117 +809,133 @@ const MobileConnectionWelcome: React.FC<{ onConnected: () => void }> = ({ onConn
             </Button>
           </form>
         ) : (
-          <div className="flex w-full flex-col gap-3">
-            <form className="flex w-full flex-col gap-3" onSubmit={handleSubmit}>
-              <input
-              value={connectionName}
-              onChange={(event) => setConnectionName(event.target.value)}
-              placeholder={t('mobile.instances.label.placeholder')}
-              aria-label={t('mobile.instances.label.label')}
-              autoComplete="off"
-              autoCapitalize="words"
-              autoCorrect="off"
-              spellCheck={false}
-              className="h-12 w-full rounded-[16px] border border-border/70 bg-surface-elevated px-4 text-center text-[16px] text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
-            />
-            <input
-              {...mobileInputKeyboardProps}
-              value={serverUrl}
-              onChange={(event) => handleUrlChange(event.target.value)}
-              placeholder={t('mobile.connect.url.placeholder')}
-              aria-label={t('mobile.connect.url.label')}
-              type="url"
-              inputMode="url"
-              autoCapitalize="none"
-              className="h-12 w-full rounded-[16px] border border-border/70 bg-surface-elevated px-4 text-center text-[16px] text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
-            />
+          <div className="flex w-full flex-col gap-6">
+            {/* Primary path: scan the pairing QR from "Add a device" on the server. */}
+            {qrScanSupported ? (
+              <div className="flex w-full flex-col gap-2">
+                <Button
+                  type="button"
+                  size="lg"
+                  className="h-12 w-full"
+                  onClick={() => void handleScanQr()}
+                  disabled={isScanning || isBusy}
+                >
+                  <Icon name="scan-2" className={cn('size-[18px]', isScanning && 'animate-pulse')} />
+                  {isBusy ? t('mobile.connect.connecting') : t('mobile.connect.scanQr')}
+                </Button>
+                <p className="px-2 text-center typography-small text-muted-foreground">
+                  {t('mobile.connect.welcome.scanHint')}
+                </p>
+              </div>
+            ) : null}
 
-              <div>
+            {error && !manualOpen ? <p className="px-1 text-center typography-small text-[var(--status-error)]">{error}</p> : null}
+
+            {connections.length > 0 ? (
+              <section className="flex w-full flex-col gap-2.5">
+                <h2 className="text-center typography-micro uppercase tracking-[0.14em] text-muted-foreground">
+                  {t('mobile.connect.saved.title')}
+                </h2>
+                <div className="overflow-hidden rounded-[18px] border border-border/70 bg-surface-elevated">
+                  {connections.map((connection) => {
+                    const isConnectingRow = connectingId === connection.id;
+                    return (
+                      <button
+                        key={connection.id}
+                        type="button"
+                        disabled={isBusy}
+                        className="flex min-h-14 w-full items-center gap-3 border-b border-border/60 px-3.5 py-2.5 text-left last:border-b-0 hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary disabled:opacity-70"
+                        onClick={() => {
+                          setConnectingId(connection.id);
+                          void conn.connect({ id: connection.id, candidates: connection.candidates, clientToken: connection.clientToken, label: connection.label })
+                            .finally(() => setConnectingId(null));
+                        }}
+                      >
+                        <span className="flex size-9 shrink-0 items-center justify-center rounded-[12px] bg-interactive-hover text-foreground">
+                          <Icon name="server" className="size-[18px]" />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate typography-ui-label text-foreground">{connection.label}</span>
+                          <span className={cn('block truncate typography-small', isConnectingRow ? 'text-foreground' : 'text-muted-foreground')}>
+                            {isConnectingRow
+                              ? t('mobile.connect.connecting')
+                              : connection.candidates.some((c) => c.kind === 'direct') ? connectionDisplayUrl(connection) : t('mobile.connect.relay.badge')}
+                          </span>
+                        </span>
+                        {isConnectingRow
+                          ? <Icon name="loader-4" className="size-5 animate-spin text-muted-foreground" />
+                          : <Icon name="arrow-right-s" className="size-5 text-muted-foreground" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            ) : null}
+
+            {/* Manual URL entry, collapsed by default — most people pair by QR. */}
+            <div className="flex w-full flex-col">
+              {qrScanSupported ? (
                 <button
                   type="button"
-                  onClick={() => setAdvancedOpen((value) => !value)}
-                  aria-expanded={advancedOpen}
+                  onClick={() => setManualOpen((value) => !value)}
+                  aria-expanded={manualOpen}
                   className="mx-auto flex items-center gap-1 rounded-full px-2 py-1 typography-small text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 >
-                  <span>{t('mobile.connect.advanced')}</span>
-                  <Icon name="arrow-down-s" className={cn('size-4 transition-transform duration-200', advancedOpen && 'rotate-180')} />
+                  <span>{t('mobile.connect.manual.toggle')}</span>
+                  <Icon name="arrow-down-s" className={cn('size-4 transition-transform duration-200', manualOpen && 'rotate-180')} />
                 </button>
-                <div
-                  className="grid transition-[grid-template-rows] duration-200 ease-out"
-                  style={{ gridTemplateRows: advancedOpen ? '1fr' : '0fr' }}
-                >
-                  <div className="min-h-0 overflow-hidden">
-                    <div className="space-y-1.5 pt-2 text-left">
-                      <label className="block space-y-1.5">
-                        <span className="block px-1 typography-ui-label text-foreground">{t('mobile.connect.token.label')}</span>
-                        <input
-                          {...mobileInputKeyboardProps}
-                          value={clientToken}
-                          onChange={(event) => setClientToken(event.target.value)}
-                          placeholder={t('mobile.connect.token.placeholder')}
-                          tabIndex={advancedOpen ? undefined : -1}
-                          autoCapitalize="none"
-                          className="h-12 w-full rounded-[16px] border border-border/70 bg-surface-elevated px-4 text-[16px] text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
-                        />
-                      </label>
-                      <p className="px-1 typography-micro text-muted-foreground">{t('mobile.connect.token.hint')}</p>
-                    </div>
-                  </div>
+              ) : null}
+              <div
+                className="grid transition-[grid-template-rows] duration-200 ease-out"
+                style={{ gridTemplateRows: manualOpen ? '1fr' : '0fr' }}
+              >
+                <div className="min-h-0 overflow-hidden">
+                  <form className="flex w-full flex-col gap-3 pt-3" onSubmit={handleSubmit}>
+                    <input
+                      {...mobileInputKeyboardProps}
+                      value={serverUrl}
+                      onChange={(event) => handleUrlChange(event.target.value)}
+                      placeholder={t('mobile.connect.url.placeholder')}
+                      aria-label={t('mobile.connect.url.label')}
+                      type="url"
+                      inputMode="url"
+                      autoCapitalize="none"
+                      tabIndex={manualOpen ? undefined : -1}
+                      className="h-12 w-full rounded-[16px] border border-border/70 bg-surface-elevated px-4 text-center text-[16px] text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
+                    />
+                    <input
+                      value={connectionName}
+                      onChange={(event) => setConnectionName(event.target.value)}
+                      placeholder={t('mobile.instances.label.placeholder')}
+                      aria-label={t('mobile.instances.label.label')}
+                      autoComplete="off"
+                      autoCapitalize="words"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      tabIndex={manualOpen ? undefined : -1}
+                      className="h-12 w-full rounded-[16px] border border-border/70 bg-surface-elevated px-4 text-center text-[16px] text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
+                    />
+                    <input
+                      {...mobileInputKeyboardProps}
+                      value={clientToken}
+                      onChange={(event) => setClientToken(event.target.value)}
+                      placeholder={t('mobile.connect.token.placeholder')}
+                      aria-label={t('mobile.connect.token.label')}
+                      tabIndex={manualOpen ? undefined : -1}
+                      autoCapitalize="none"
+                      className="h-12 w-full rounded-[16px] border border-border/70 bg-surface-elevated px-4 text-center text-[16px] text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
+                    />
+                    <p className="px-1 text-center typography-micro text-muted-foreground">{t('mobile.connect.token.hint')}</p>
+                    {error ? <p className="px-1 text-center typography-small text-[var(--status-error)]">{error}</p> : null}
+                    <Button type="submit" variant={qrScanSupported ? 'outline' : 'default'} size="lg" className="h-12 w-full" disabled={isBusy || isScanning || !serverUrl.trim()}>
+                      {isBusy ? t('mobile.connect.connecting') : t('mobile.connect.connectButton')}
+                    </Button>
+                  </form>
                 </div>
               </div>
-
-              {error ? <p className="px-1 text-center typography-small text-[var(--status-error)]">{error}</p> : null}
-
-              <Button type="submit" size="lg" className="mt-1 h-12 w-full" disabled={isBusy || isScanning || !serverUrl.trim()}>
-                {isBusy ? t('mobile.connect.connecting') : t('mobile.connect.connectButton')}
-              </Button>
-            </form>
-
-            <Button
-              type="button"
-              variant="ghost"
-              size="lg"
-              className="h-12 w-full"
-              onClick={() => void handleScanQr()}
-              disabled={!qrScanSupported || isScanning || isBusy}
-            >
-              <Icon name="scan-2" className={cn('size-[18px]', isScanning && 'animate-pulse')} />
-              {t('mobile.connect.scanQr')}
-            </Button>
-            {!qrScanSupported ? (
-              <p className="px-1 text-center typography-micro text-muted-foreground">
-                {t('mobile.connect.scan.unsupported')}
-              </p>
-            ) : null}
+            </div>
           </div>
         )}
-
-        {!pendingConnection && connections.length > 0 ? (
-          <section className="flex w-full flex-col gap-2.5">
-            <h2 className="text-center typography-micro uppercase tracking-[0.14em] text-muted-foreground">
-              {t('mobile.connect.saved.title')}
-            </h2>
-            <div className="overflow-hidden rounded-[18px] border border-border/70 bg-surface-elevated">
-              {connections.map((connection) => (
-                <button
-                  key={connection.id}
-                  type="button"
-                  className="flex min-h-14 w-full items-center gap-3 border-b border-border/60 px-3.5 py-2.5 text-left last:border-b-0 hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
-                  onClick={() => void conn.connect({ url: connection.url, clientToken: connection.clientToken, label: connection.label })}
-                >
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-[12px] bg-interactive-hover text-foreground">
-                    <Icon name="server" className="size-[18px]" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate typography-ui-label text-foreground">{connection.label}</span>
-                    <span className="block truncate typography-small text-muted-foreground">{connection.url}</span>
-                  </span>
-                  <Icon name="arrow-right-s" className="size-5 text-muted-foreground" />
-                </button>
-              ))}
-            </div>
-          </section>
-        ) : null}
       </div>
     </main>
   );
@@ -800,6 +960,11 @@ const MobileInstancesSurface: React.FC<{
   const [password, setPassword] = React.useState('');
   const [isScanning, setIsScanning] = React.useState(false);
   const qrScanSupported = React.useMemo(() => isQrScanSupported(), []);
+  // The manual add/edit form is hidden until asked for — the sheet leads with
+  // the list of instances (with live status), not a wall of inputs.
+  const [formOpen, setFormOpen] = React.useState(false);
+  // Which row is being connected to, for the per-row spinner.
+  const [connectingId, setConnectingId] = React.useState<string | null>(null);
 
   // Populate/clear the form imperatively (on edit tap / cancel / save) rather than via
   // an effect keyed on the derived connection object. With an effect, any churn of the
@@ -811,6 +976,7 @@ const MobileInstancesSurface: React.FC<{
     setLabel('');
     setClientToken('');
     setError(null);
+    setFormOpen(false);
   }, [setError]);
 
   const saveInstance = React.useCallback((event: React.FormEvent) => {
@@ -830,9 +996,14 @@ const MobileInstancesSurface: React.FC<{
       const result = await scanConnectionQr();
       switch (result.status) {
         case 'ok':
+          // Legacy token QR: prefill the manual form for review before saving.
           setUrl(result.url);
           if (result.label) setLabel(result.label);
           if (result.clientToken) setClientToken(result.clientToken);
+          setFormOpen(true);
+          break;
+        case 'pairing':
+          await conn.redeemPairingConnection(result.pairing);
           break;
         case 'permission-denied':
           setError(t('mobile.connect.scan.permissionDenied'));
@@ -853,7 +1024,7 @@ const MobileInstancesSurface: React.FC<{
     } finally {
       setIsScanning(false);
     }
-  }, [isScanning, setError, t]);
+  }, [conn, isScanning, setError, t]);
 
   const handlePasswordSubmit = React.useCallback((event: React.FormEvent) => {
     event.preventDefault();
@@ -874,12 +1045,16 @@ const MobileInstancesSurface: React.FC<{
   const confirmDelete = React.useCallback((id: string) => {
     setConfirmingDeleteId(null);
     if (editingId === id) resetForm();
+    // Removing the ACTIVE instance — or the LAST one — must drop the user back
+    // to the connect screen instead of leaving them in a stale, unbacked UI.
+    const wasLast = connections.length === 1;
     void removeConnection(id).then((removed) => {
-      if (removed && isSameConnectionUrl(removed.url, getRuntimeApiBaseUrl())) {
+      if (!removed) return;
+      if (wasLast || isActiveRuntimeConnection(removed)) {
         onActiveConnectionDeleted();
       }
     });
-  }, [editingId, onActiveConnectionDeleted, removeConnection, resetForm]);
+  }, [connections.length, editingId, onActiveConnectionDeleted, removeConnection, resetForm]);
 
   const inputClass = 'h-12 w-full rounded-[16px] border border-border/70 bg-surface-elevated px-4 text-[16px] text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20';
 
@@ -894,7 +1069,9 @@ const MobileInstancesSurface: React.FC<{
               </span>
               <div className="min-w-0">
                 <p className="truncate typography-ui-label text-foreground">{pendingConnection.label}</p>
-                <p className="truncate typography-small text-muted-foreground">{pendingConnection.url}</p>
+                <p className="truncate typography-small text-muted-foreground">
+                  {pendingConnection.candidates.some((c) => c.kind === 'direct') ? connectionDisplayUrl(pendingConnection) : t('mobile.connect.relay.badge')}
+                </p>
               </div>
             </div>
             <input
@@ -923,11 +1100,20 @@ const MobileInstancesSurface: React.FC<{
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <div className="flex-1 overflow-y-auto px-5 py-4">
-        <div className="space-y-7">
+        <div className="space-y-6">
           {connections.length > 0 ? (
             <div className="overflow-hidden rounded-[18px] border border-border/70 bg-surface-elevated">
               {connections.map((connection) => {
                 const confirming = confirmingDeleteId === connection.id;
+                const isActive = isActiveRuntimeConnection(connection);
+                const isConnectingRow = connectingId === connection.id;
+                // Status line: the active instance says HOW it is connected right
+                // now (direct vs relay); others show their address.
+                const statusText = isConnectingRow
+                  ? t('mobile.connect.connecting')
+                  : isActive
+                    ? (isRelayModeActive() ? t('mobile.instances.status.connectedRelay') : t('mobile.instances.status.connectedDirect'))
+                    : connection.candidates.some((c) => c.kind === 'direct') ? connectionDisplayUrl(connection) : t('mobile.connect.relay.badge');
                 return (
                   <div
                     key={connection.id}
@@ -939,16 +1125,30 @@ const MobileInstancesSurface: React.FC<{
                     <button
                       type="button"
                       className="flex min-w-0 flex-1 items-center gap-3 px-3.5 py-3 text-left transition-colors active:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary disabled:opacity-60"
-                      onClick={() => void connect({ url: connection.url, clientToken: connection.clientToken, label: connection.label })}
-                      disabled={isBusy || confirming}
+                      onClick={() => {
+                        if (isActive) return;
+                        setConnectingId(connection.id);
+                        void connect({ id: connection.id, candidates: connection.candidates, clientToken: connection.clientToken, label: connection.label })
+                          .finally(() => setConnectingId(null));
+                      }}
+                      disabled={(isBusy && !isConnectingRow) || confirming}
                     >
-                      <span className="flex size-9 shrink-0 items-center justify-center rounded-[12px] bg-interactive-hover text-foreground">
+                      <span className="relative flex size-9 shrink-0 items-center justify-center rounded-[12px] bg-interactive-hover text-foreground">
                         <Icon name="server" className="size-[18px]" />
+                        {isActive ? (
+                          <span className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full border-2 border-[var(--surface-elevated)] bg-[var(--status-success)]" aria-hidden />
+                        ) : null}
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate typography-ui-label text-foreground">{connection.label}</span>
-                        <span className="block truncate typography-small text-muted-foreground">{connection.url}</span>
+                        <span className={cn(
+                          'block truncate typography-small',
+                          isActive && !isConnectingRow ? 'text-[var(--status-success)]' : 'text-muted-foreground',
+                        )}>
+                          {statusText}
+                        </span>
                       </span>
+                      {isConnectingRow ? <Icon name="loader-4" className="size-5 shrink-0 animate-spin text-muted-foreground" /> : null}
                     </button>
                     <div className="flex items-center gap-0.5 pr-2">
                       {confirming ? (
@@ -962,14 +1162,14 @@ const MobileInstancesSurface: React.FC<{
                           <Icon name="delete-bin" className="size-[18px]" />
                           <span className="typography-ui-label">{t('mobile.instances.delete')}</span>
                         </button>
-                      ) : (
+                      ) : !connection.candidates.some((c) => c.kind === 'direct') ? null : (
                         <button
                           type="button"
                           aria-label={t('mobile.instances.edit')}
                           className="flex size-9 items-center justify-center rounded-full text-muted-foreground transition-colors active:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                           onClick={() => {
                             setEditingId(connection.id);
-                            setUrl(connection.url);
+                            setUrl(connectionDisplayUrl(connection));
                             setLabel(connection.label);
                             setClientToken(connection.clientToken || '');
                             setError(null);
@@ -1001,76 +1201,88 @@ const MobileInstancesSurface: React.FC<{
             </p>
           )}
 
-          <form className="space-y-3" onSubmit={saveInstance}>
-            <div className="flex h-8 items-center justify-between gap-3 px-1">
-              <h3 className="typography-ui-label text-foreground">
-                {editingConnection ? t('mobile.instances.editTitle') : t('mobile.instances.addTitle')}
-              </h3>
-              {editingConnection ? (
+          {/* Add actions: QR pairing is the primary path; the manual form stays
+              hidden until asked for (or until a row's edit button opens it). */}
+          {!formOpen && !editingConnection ? (
+            <div className="space-y-2">
+              {qrScanSupported ? (
+                <Button
+                  type="button"
+                  size="lg"
+                  className="h-12 w-full"
+                  onClick={() => void handleScanInstance()}
+                  disabled={isScanning}
+                >
+                  <Icon name="scan-2" className={cn('size-[18px]', isScanning && 'animate-pulse')} />
+                  {t('mobile.connect.scanQr')}
+                </Button>
+              ) : null}
+              <Button
+                type="button"
+                variant={qrScanSupported ? 'ghost' : 'outline'}
+                size="lg"
+                className="h-12 w-full"
+                onClick={() => { setError(null); setFormOpen(true); }}
+              >
+                <Icon name="add" className="size-[18px]" />
+                {t('mobile.instances.addManual')}
+              </Button>
+              {error ? <p className="px-1 text-center typography-small text-[var(--status-error)]">{error}</p> : null}
+            </div>
+          ) : (
+            <form className="space-y-3" onSubmit={saveInstance}>
+              <div className="flex h-8 items-center justify-between gap-3 px-1">
+                <h3 className="typography-ui-label text-foreground">
+                  {editingConnection ? t('mobile.instances.editTitle') : t('mobile.instances.addTitle')}
+                </h3>
                 <Button type="button" variant="ghost" size="xs" onClick={resetForm}>
                   {t('mobile.instances.cancelEdit')}
                 </Button>
-              ) : null}
-            </div>
-            <div>
-              <Button
-                type="button"
-                variant="outline"
-                size="lg"
-                className="h-12 w-full"
-                onClick={() => void handleScanInstance()}
-                disabled={!qrScanSupported || isScanning}
-              >
-                <Icon name="scan-2" className={cn('size-[18px]', isScanning && 'animate-pulse')} />
-                {t('mobile.connect.scanQr')}
+              </div>
+              <label className="block space-y-1.5">
+                <span className="block px-1 typography-ui-label text-foreground">{t('mobile.connect.url.label')}</span>
+                <input
+                  {...mobileInputKeyboardProps}
+                  value={url}
+                  onChange={(event) => setUrl(event.target.value)}
+                  placeholder={t('mobile.connect.url.placeholder')}
+                  type="url"
+                  inputMode="url"
+                  autoCapitalize="none"
+                  className={inputClass}
+                />
+              </label>
+              <label className="block space-y-1.5">
+                <span className="block px-1 typography-ui-label text-foreground">{t('mobile.instances.label.label')}</span>
+                <input
+                  value={label}
+                  onChange={(event) => setLabel(event.target.value)}
+                  placeholder={t('mobile.instances.label.placeholder')}
+                  autoComplete="off"
+                  autoCapitalize="words"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  className={inputClass}
+                />
+              </label>
+              <label className="block space-y-1.5">
+                <span className="block px-1 typography-ui-label text-foreground">{t('mobile.connect.token.label')}</span>
+                <input
+                  {...mobileInputKeyboardProps}
+                  value={clientToken}
+                  onChange={(event) => setClientToken(event.target.value)}
+                  placeholder={t('mobile.connect.token.placeholder')}
+                  autoCapitalize="none"
+                  className={inputClass}
+                />
+                <p className="px-1 typography-micro text-muted-foreground">{t('mobile.connect.token.hint')}</p>
+              </label>
+              {error ? <p className="px-1 typography-small text-[var(--status-error)]">{error}</p> : null}
+              <Button type="submit" size="lg" className="mt-1 h-12 w-full">
+                {editingConnection ? t('mobile.instances.saveEdit') : t('mobile.instances.saveNew')}
               </Button>
-              {!qrScanSupported ? (
-                <p className="px-1 pt-1.5 typography-micro text-muted-foreground">{t('mobile.connect.scan.unsupported')}</p>
-              ) : null}
-            </div>
-            <label className="block space-y-1.5">
-              <span className="block px-1 typography-ui-label text-foreground">{t('mobile.instances.label.label')}</span>
-              <input
-                value={label}
-                onChange={(event) => setLabel(event.target.value)}
-                placeholder={t('mobile.instances.label.placeholder')}
-                autoComplete="off"
-                autoCapitalize="words"
-                autoCorrect="off"
-                spellCheck={false}
-                className={inputClass}
-              />
-            </label>
-            <label className="block space-y-1.5">
-              <span className="block px-1 typography-ui-label text-foreground">{t('mobile.connect.url.label')}</span>
-              <input
-                {...mobileInputKeyboardProps}
-                value={url}
-                onChange={(event) => setUrl(event.target.value)}
-                placeholder={t('mobile.connect.url.placeholder')}
-                type="url"
-                inputMode="url"
-                autoCapitalize="none"
-                className={inputClass}
-              />
-            </label>
-            <label className="block space-y-1.5">
-              <span className="block px-1 typography-ui-label text-foreground">{t('mobile.connect.token.label')}</span>
-              <input
-                {...mobileInputKeyboardProps}
-                value={clientToken}
-                onChange={(event) => setClientToken(event.target.value)}
-                placeholder={t('mobile.connect.token.placeholder')}
-                autoCapitalize="none"
-                className={inputClass}
-              />
-              <p className="px-1 typography-micro text-muted-foreground">{t('mobile.connect.token.hint')}</p>
-            </label>
-            {error ? <p className="px-1 typography-small text-[var(--status-error)]">{error}</p> : null}
-            <Button type="submit" size="lg" className="mt-1 h-12 w-full">
-              {editingConnection ? t('mobile.instances.saveEdit') : t('mobile.instances.saveNew')}
-            </Button>
-          </form>
+            </form>
+          )}
         </div>
       </div>
     </div>
@@ -1177,6 +1389,43 @@ const SessionMetadataOverlay: React.FC<{
   const panelRef = React.useRef<HTMLDivElement>(null);
   const [shouldRender, setShouldRender] = React.useState(open);
   const [isExiting, setIsExiting] = React.useState(false);
+  // iPad: a phone-width sheet stretched across the whole chat column looks
+  // broken — render a popover anchored to the metadata button instead.
+  const isIPad = React.useMemo(() => isIPadApp(), []);
+  const wrapperRef = React.useRef<HTMLDivElement>(null);
+  const [ipadAnchorLeft, setIpadAnchorLeft] = React.useState<number | null>(null);
+
+  // The shell has transformed ancestors, so the fixed wrapper's containing
+  // block is the chat column, NOT the viewport. Anchor the popover in the
+  // wrapper's own coordinate space — viewport-based lefts would double-count
+  // the sidebar offset.
+  React.useLayoutEffect(() => {
+    if (!open || !isIPad || !shouldRender) return;
+    const compute = () => {
+      const anchorRect = anchorRef.current?.getBoundingClientRect();
+      const wrapperRect = wrapperRef.current?.getBoundingClientRect();
+      if (!anchorRect || !wrapperRect) {
+        setIpadAnchorLeft(null);
+        return;
+      }
+      const relativeLeft = anchorRect.left - wrapperRect.left;
+      const left = Math.min(
+        Math.max(relativeLeft, 8),
+        Math.max(8, wrapperRect.width - IPAD_METADATA_POPOVER_WIDTH - 8),
+      );
+      setIpadAnchorLeft(left);
+    };
+    compute();
+    // Re-anchor if the chat column shifts while the popover is open (sidebar
+    // toggle/resize, orientation change) — the header buttons move with it.
+    const wrapper = wrapperRef.current;
+    if (typeof ResizeObserver === 'undefined' || !wrapper) return;
+    const observer = new ResizeObserver(compute);
+    observer.observe(wrapper);
+    return () => observer.disconnect();
+  }, [anchorRef, isIPad, open, shouldRender]);
+
+  const ipadPopover = isIPad && ipadAnchorLeft !== null;
 
   React.useEffect(() => {
     if (open) {
@@ -1227,18 +1476,26 @@ const SessionMetadataOverlay: React.FC<{
   if (!shouldRender) return null;
 
   return (
-    <div className="fixed inset-x-0 bottom-0 top-[calc(var(--oc-safe-area-top,0px)+var(--oc-header-height,56px))] z-20 pointer-events-none">
+    <div ref={wrapperRef} className="fixed inset-x-0 bottom-0 top-[calc(var(--oc-safe-area-top,0px)+var(--oc-header-height,56px))] z-20 pointer-events-none">
       <div
         ref={panelRef}
         role="dialog"
         aria-label={t('mobile.header.openMetadataAria')}
         className={cn(
-          'mx-3 mt-2 overflow-y-auto overscroll-contain rounded-[20px] border border-border/40 bg-[var(--surface-elevated)] p-2 shadow-[0_12px_32px_rgb(0_0_0_/_0.2)] will-change-transform',
+          'overflow-y-auto overscroll-contain rounded-[20px] border border-border/40 bg-[var(--surface-elevated)] p-2 shadow-[0_12px_32px_rgb(0_0_0_/_0.2)] will-change-transform',
+          ipadPopover ? 'absolute origin-top-left' : 'mx-3 mt-2',
           isExiting ? 'pointer-events-none' : 'pointer-events-auto',
         )}
         style={{
           animation: `${isExiting ? 'session-metadata-out' : 'session-metadata-in'} ${isExiting ? 140 : 170}ms cubic-bezier(0.32, 0.72, 0, 1) forwards`,
           maxHeight: 'min(72dvh, calc(100dvh - var(--oc-safe-area-top, 0px) - var(--oc-header-height, 56px) - 1rem))',
+          ...(ipadPopover
+            ? {
+                top: 8,
+                left: ipadAnchorLeft ?? 8,
+                width: `min(${IPAD_METADATA_POPOVER_WIDTH}px, calc(100% - 16px))`,
+              }
+            : null),
         }}
       >
         <div className="space-y-1">
@@ -1360,7 +1617,10 @@ const MobileOverflowMenu: React.FC<{
   open: boolean;
   onClose: () => void;
   items: OverflowItem[];
-}> = ({ open, onClose, items }) => {
+  /** Extra viewport-right inset so the dropdown stays anchored to the
+      three-dots button when the iPad right sidebar shifts the header. */
+  rightOffset?: number;
+}> = ({ open, onClose, items, rightOffset = 0 }) => {
   const { t } = useI18n();
   React.useEffect(() => {
     if (!open) return;
@@ -1382,9 +1642,12 @@ const MobileOverflowMenu: React.FC<{
         onClick={onClose}
       />
       <div
-        className="absolute right-2 top-[calc(var(--oc-safe-area-top,0px)+56px+4px)] w-[min(220px,calc(100vw-1rem))] origin-top-right overflow-hidden rounded-2xl border border-border/40 bg-background shadow-[0_18px_60px_rgb(0_0_0_/_0.35)]"
+        className="absolute top-[calc(var(--oc-safe-area-top,0px)+56px+4px)] w-[min(220px,calc(100vw-1rem))] origin-top-right overflow-hidden rounded-2xl border border-border/40 bg-background shadow-[0_18px_60px_rgb(0_0_0_/_0.35)]"
         role="menu"
-        style={{ animation: 'mobile-menu-in 160ms cubic-bezier(0.32, 0.72, 0, 1)' }}
+        style={{
+          right: `${8 + rightOffset}px`,
+          animation: 'mobile-menu-in 160ms cubic-bezier(0.32, 0.72, 0, 1)',
+        }}
       >
         {items.map((item, index) => (
           <button
@@ -1653,10 +1916,19 @@ const MobileSessionMetadataButton = React.memo(function MobileSessionMetadataBut
   );
 });
 
+type MobileHeaderSurfaceShortcuts = {
+  activePanel: 'files' | 'changes' | null;
+  changesDirty: boolean;
+  onToggleFiles: () => void;
+  onToggleChanges: () => void;
+};
+
 const MobileHeader: React.FC<{
   onOpenSessions: () => void;
   onOpenMenu: () => void;
-}> = ({ onOpenSessions, onOpenMenu }) => {
+  /** iPad only: Files/Changes header shortcuts that toggle the right sidebar. */
+  surfaceShortcuts?: MobileHeaderSurfaceShortcuts;
+}> = ({ onOpenSessions, onOpenMenu, surfaceShortcuts }) => {
   const { t } = useI18n();
   const [metadataOpen, setMetadataOpen] = React.useState(false);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
@@ -1730,6 +2002,44 @@ const MobileHeader: React.FC<{
             secondaryLabel={secondaryLabel}
           />
 
+          {surfaceShortcuts ? (
+            <>
+              <button
+                type="button"
+                className={cn(
+                  'flex size-10 shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                  surfaceShortcuts.activePanel === 'files'
+                    ? 'bg-[var(--interactive-selection)] text-[var(--interactive-selectionForeground)]'
+                    : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground',
+                )}
+                aria-label={t('mobile.menu.files')}
+                aria-pressed={surfaceShortcuts.activePanel === 'files'}
+                onClick={surfaceShortcuts.onToggleFiles}
+                style={{ touchAction: 'manipulation' }}
+              >
+                <Icon name="file-text" className="size-5" />
+              </button>
+              <button
+                type="button"
+                className={cn(
+                  'relative flex size-10 shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                  surfaceShortcuts.activePanel === 'changes'
+                    ? 'bg-[var(--interactive-selection)] text-[var(--interactive-selectionForeground)]'
+                    : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground',
+                )}
+                aria-label={t('mobile.menu.changes')}
+                aria-pressed={surfaceShortcuts.activePanel === 'changes'}
+                onClick={surfaceShortcuts.onToggleChanges}
+                style={{ touchAction: 'manipulation' }}
+              >
+                <Icon name="git-branch" className="size-5" />
+                {surfaceShortcuts.changesDirty ? (
+                  <span className="absolute right-2 top-2 inline-flex size-2 rounded-full bg-primary" aria-hidden />
+                ) : null}
+              </button>
+            </>
+          ) : null}
+
           <button
             type="button"
             className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
@@ -1772,19 +2082,87 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   const gitStatus = useGitStatus(normalizePath(currentDirectory) || null);
   const dirtyChangeCount = gitStatus?.files?.length ?? 0;
 
+  // iPad (Capacitor): sessions live in a persistent full-height left sidebar
+  // and Changes/Files in a right sidebar, instead of phone sheets/surfaces.
+  const isIPad = React.useMemo(() => isIPadApp(), []);
+  const orientation = useOrientation();
+  const isPortrait = orientation === 'portrait';
+  const [ipadSidebarOpen, setIpadSidebarOpen] = React.useState(isIPad && !isPortrait);
+  const [ipadRightPanel, setIpadRightPanel] = React.useState<'files' | 'changes' | null>(null);
+
+  const toggleIpadSidebar = React.useCallback(() => {
+    const willOpen = !ipadSidebarOpen;
+    // Portrait doesn't fit both side panels next to a usable chat column:
+    // opening one closes the other (iPadOS behaves the same way).
+    if (willOpen && isPortrait) setIpadRightPanel(null);
+    setIpadSidebarOpen(willOpen);
+  }, [ipadSidebarOpen, isPortrait]);
+
+  const openFilesSurface = React.useCallback(() => {
+    if (isIPad) {
+      setPendingChangesDiff(null);
+      setIpadRightPanel('files');
+      if (isPortrait) setIpadSidebarOpen(false);
+      return;
+    }
+    setFilesOpen(true);
+  }, [isIPad, isPortrait]);
+
+  const openChangesSurface = React.useCallback((diff: { path: string; staged: boolean } | null = null) => {
+    setPendingChangesDiff(diff);
+    if (isIPad) {
+      setIpadRightPanel('changes');
+      if (isPortrait) setIpadSidebarOpen(false);
+      return;
+    }
+    setChangesOpen(true);
+  }, [isIPad, isPortrait]);
+
+  const closeIpadRightPanel = React.useCallback(() => {
+    setIpadRightPanel(null);
+    setPendingChangesDiff(null);
+  }, []);
+
+  const toggleIpadRightPanel = React.useCallback((panel: 'files' | 'changes') => {
+    if (ipadRightPanel === panel) {
+      closeIpadRightPanel();
+      return;
+    }
+    if (panel === 'files') openFilesSurface();
+    else openChangesSurface();
+  }, [closeIpadRightPanel, ipadRightPanel, openChangesSurface, openFilesSurface]);
+
+  // Keep the right panel's content mounted through the width-collapse
+  // animation; drop it once the panel is fully closed.
+  const lastIpadRightPanelRef = React.useRef<'files' | 'changes'>('changes');
+  if (ipadRightPanel) lastIpadRightPanelRef.current = ipadRightPanel;
+  const [ipadRightContentMounted, setIpadRightContentMounted] = React.useState(false);
+  React.useEffect(() => {
+    if (!isIPad) return;
+    if (ipadRightPanel) {
+      setIpadRightContentMounted(true);
+      return;
+    }
+    const id = window.setTimeout(() => setIpadRightContentMounted(false), 240);
+    return () => window.clearTimeout(id);
+  }, [ipadRightPanel, isIPad]);
+  const renderedIpadRightPanel = ipadRightPanel ?? lastIpadRightPanelRef.current;
+
+  const leftResize = useIpadSidebarResize('left', 'openchamber.ipad.leftSidebarWidth', IPAD_LEFT_SIDEBAR_WIDTH);
+  const rightResize = useIpadSidebarResize('right', 'openchamber.ipad.rightSidebarWidth', IPAD_RIGHT_SIDEBAR_WIDTH);
+
   const mobileActions = React.useMemo<MobileAppActions>(
     () => ({
       openChanges: ({ diffPath, staged } = {}) => {
-        setPendingChangesDiff(diffPath ? { path: diffPath, staged: staged === true } : null);
-        setChangesOpen(true);
+        openChangesSurface(diffPath ? { path: diffPath, staged: staged === true } : null);
       },
-      openFiles: () => setFilesOpen(true),
+      openFiles: () => openFilesSurface(),
       openSettings: () => {
         setSettingsInitialMobileStage('nav');
         setSettingsOpen(true);
       },
     }),
-    [],
+    [openChangesSurface, openFilesSurface],
   );
 
   const closeChanges = React.useCallback(() => {
@@ -1797,16 +2175,18 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   // new-session intents resolve directly against the store, so they aren't wired here.
   const deepLinkHandlers = React.useMemo(
     () => ({
-      openSessions: () => setSessionsSheetOpen(true),
+      openSessions: () => {
+        if (isIPad) setIpadSidebarOpen(true);
+        else setSessionsSheetOpen(true);
+      },
       openView: (target: 'files' | 'mcp' | 'instances' | 'update') => {
-        if (target === 'files') setFilesOpen(true);
+        if (target === 'files') openFilesSurface();
         else if (target === 'mcp') setMcpOpen(true);
         else if (target === 'instances') setInstancesOpen(true);
         else if (target === 'update') setUpdateOpen(true);
       },
       openChanges: ({ path, staged }: { path?: string; staged?: boolean } = {}) => {
-        setPendingChangesDiff(path ? { path, staged: staged === true } : null);
-        setChangesOpen(true);
+        openChangesSurface(path ? { path, staged: staged === true } : null);
       },
       openSettings: (section?: string) => {
         if (section) setSettingsPage(section as Parameters<typeof setSettingsPage>[0]);
@@ -1814,7 +2194,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
         setSettingsOpen(true);
       },
     }),
-    [setSettingsPage],
+    [isIPad, openChangesSurface, openFilesSurface, setSettingsPage],
   );
   useDeepLinkHandlers(deepLinkHandlers);
 
@@ -1937,27 +2317,31 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
 
   const overflowItems: OverflowItem[] = React.useMemo(
     () => {
-      const items: OverflowItem[] = [
-      {
-        key: 'files',
-        icon: 'file-text',
-        label: t('mobile.menu.files'),
-        onSelect: () => setFilesOpen(true),
-      },
-      {
-        key: 'changes',
-        icon: 'git-branch',
-        label: t('mobile.menu.changes'),
-        badge: dirtyChangeCount,
-        onSelect: () => setChangesOpen(true),
-      },
-      {
+      const items: OverflowItem[] = [];
+      // iPad exposes Files/Changes as header shortcuts instead of menu items.
+      if (!isIPad) {
+        items.push(
+          {
+            key: 'files',
+            icon: 'file-text',
+            label: t('mobile.menu.files'),
+            onSelect: () => openFilesSurface(),
+          },
+          {
+            key: 'changes',
+            icon: 'git-branch',
+            label: t('mobile.menu.changes'),
+            badge: dirtyChangeCount,
+            onSelect: () => openChangesSurface(),
+          },
+        );
+      }
+      items.push({
         key: 'mcp',
         iconNode: <McpIcon className="size-5 shrink-0 text-muted-foreground" />,
         label: t('mobile.menu.mcp'),
         onSelect: () => setMcpOpen(true),
-      },
-      ];
+      });
       if (showCapacitorOnlyFeatures) {
         items.push({
           key: 'instances',
@@ -1985,31 +2369,153 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
       });
       return items;
     },
-    [dirtyChangeCount, showCapacitorOnlyFeatures, showUpdateItem, t],
+    [dirtyChangeCount, isIPad, openChangesSurface, openFilesSurface, showCapacitorOnlyFeatures, showUpdateItem, t],
   );
 
   return (
     <DedicatedMobileAppProvider actions={mobileActions}>
       <div
-        className="oc-mobile-app-shell main-content-safe-area flex h-[100dvh] flex-col bg-background text-foreground"
+        className="oc-mobile-app-shell main-content-safe-area flex h-[100dvh] flex-row bg-background text-foreground"
         data-page-scroll-lock="true"
       >
-        <MobileHeader
-          onOpenSessions={() => setSessionsSheetOpen(true)}
-          onOpenMenu={() => setOverflowOpen(true)}
-        />
-        <main ref={chatMainRef} className="relative min-h-0 flex-1 overflow-hidden" data-page-scroll-lock="true">
-          <div ref={chatAnimRef} className="h-full w-full">
-            <ErrorBoundary>
-              <ChatView />
-            </ErrorBoundary>
-          </div>
-        </main>
+        {/* iPad: persistent full-height sessions sidebar; the chat column and
+            its header butt against it (iPadOS-style split layout). Always
+            mounted so open/close animates width, same as the desktop Sidebar. */}
+        {isIPad ? (
+          <aside
+            ref={leftResize.asideRef}
+            className={cn(
+              'relative flex h-full shrink-0 flex-col overflow-hidden border-r border-border/50 bg-sidebar will-change-[width] motion-reduce:transition-none',
+              !ipadSidebarOpen && 'border-r-0',
+            )}
+            style={{
+              width: ipadSidebarOpen ? leftResize.width : 0,
+              minWidth: ipadSidebarOpen ? leftResize.width : 0,
+              maxWidth: ipadSidebarOpen ? leftResize.width : 0,
+              ['--oc-ipad-sidebar-width' as string]: `${leftResize.width}px`,
+              overflowX: 'clip',
+              paddingTop: 'var(--oc-safe-area-top, 0px)',
+              transitionProperty: leftResize.isResizing ? 'none' : 'width, min-width, max-width',
+              transitionDuration: '200ms',
+              transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
+            }}
+            aria-hidden={!ipadSidebarOpen}
+            data-page-scroll-lock="true"
+          >
+            {ipadSidebarOpen ? (
+              <IpadSidebarResizeHandle
+                side="left"
+                isResizing={leftResize.isResizing}
+                ariaLabel={t('sidebar.resize.leftPanelAria')}
+                handleProps={leftResize.handleProps}
+              />
+            ) : null}
+            <div
+              className={cn(
+                'flex h-full shrink-0 flex-col transition-opacity duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
+                leftResize.isResizing && 'pointer-events-none',
+                !ipadSidebarOpen && 'pointer-events-none select-none opacity-0',
+              )}
+              style={{ width: 'var(--oc-ipad-sidebar-width)', overflowX: 'hidden' }}
+            >
+              <ErrorBoundary>
+                <MobileSessionsSheet
+                  open
+                  variant="sidebar"
+                  // The surface asks to close after picking a session/project or
+                  // creating a worktree; the persistent landscape sidebar stays
+                  // put, portrait gives the space back to the chat.
+                  onOpenChange={(value) => {
+                    if (!value && isPortrait) setIpadSidebarOpen(false);
+                  }}
+                />
+              </ErrorBoundary>
+            </div>
+          </aside>
+        ) : null}
+
+        <div className="flex h-full min-w-0 flex-1 flex-col" data-page-scroll-lock="true">
+          <MobileHeader
+            onOpenSessions={() => (isIPad ? toggleIpadSidebar() : setSessionsSheetOpen(true))}
+            onOpenMenu={() => setOverflowOpen(true)}
+            surfaceShortcuts={isIPad ? {
+              activePanel: ipadRightPanel,
+              changesDirty: dirtyChangeCount > 0,
+              onToggleFiles: () => toggleIpadRightPanel('files'),
+              onToggleChanges: () => toggleIpadRightPanel('changes'),
+            } : undefined}
+          />
+          <main ref={chatMainRef} className="relative min-h-0 flex-1 overflow-hidden" data-page-scroll-lock="true">
+            <div ref={chatAnimRef} className="h-full w-full">
+              <ErrorBoundary>
+                <ChatView />
+              </ErrorBoundary>
+            </div>
+          </main>
+        </div>
+
+        {/* iPad: Changes/Files live in a full-height right sidebar instead of
+            the phone's fullscreen surfaces. Width animates like the desktop
+            RightSidebar; content stays mounted through the collapse. */}
+        {isIPad ? (
+          <aside
+            ref={rightResize.asideRef}
+            className={cn(
+              'relative flex h-full shrink-0 flex-col overflow-hidden border-l border-border/50 bg-background will-change-[width] motion-reduce:transition-none',
+              !ipadRightPanel && 'border-l-0',
+            )}
+            style={{
+              width: ipadRightPanel ? rightResize.width : 0,
+              minWidth: ipadRightPanel ? rightResize.width : 0,
+              maxWidth: ipadRightPanel ? rightResize.width : 0,
+              ['--oc-ipad-sidebar-width' as string]: `${rightResize.width}px`,
+              overflowX: 'clip',
+              paddingTop: 'var(--oc-safe-area-top, 0px)',
+              transitionProperty: rightResize.isResizing ? 'none' : 'width, min-width, max-width',
+              transitionDuration: '200ms',
+              transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
+            }}
+            aria-hidden={!ipadRightPanel}
+            data-page-scroll-lock="true"
+          >
+            {ipadRightPanel ? (
+              <IpadSidebarResizeHandle
+                side="right"
+                isResizing={rightResize.isResizing}
+                ariaLabel={t('sidebar.resize.rightPanelAria')}
+                handleProps={rightResize.handleProps}
+              />
+            ) : null}
+            <div
+              className={cn(
+                'flex h-full shrink-0 flex-col transition-opacity duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
+                rightResize.isResizing && 'pointer-events-none',
+                !ipadRightPanel && 'pointer-events-none select-none opacity-0',
+              )}
+              style={{ width: 'var(--oc-ipad-sidebar-width)', overflowX: 'hidden' }}
+            >
+              {ipadRightContentMounted ? (
+                <ErrorBoundary>
+                  {renderedIpadRightPanel === 'files' ? (
+                    <MobileFilesSurface onClose={closeIpadRightPanel} />
+                  ) : (
+                    <MobileChangesSurface
+                      onClose={closeIpadRightPanel}
+                      initialDiffPath={pendingChangesDiff?.path ?? null}
+                      initialDiffStaged={pendingChangesDiff?.staged === true}
+                    />
+                  )}
+                </ErrorBoundary>
+              ) : null}
+            </div>
+          </aside>
+        ) : null}
 
         <MobileOverflowMenu
           open={overflowOpen}
           onClose={() => setOverflowOpen(false)}
           items={overflowItems}
+          rightOffset={isIPad && ipadRightPanel ? rightResize.width : 0}
         />
 
         {sessionsSheetOpen ? (
@@ -2182,24 +2688,108 @@ export function MobileApp({ apis }: MobileAppProps) {
   // splash so we don't flash the connect screen; 'done' means we either connected or
   // exhausted the attempt (then the connect screen shows).
   const [autoConnectPhase, setAutoConnectPhase] = React.useState<'pending' | 'attempting' | 'done'>('pending');
+  // Bumped to force a re-render (and thus a fresh `sdk` prop for SyncProvider)
+  // after a same-device transport swap — reconnects the sync layer in place with
+  // no remount. The value itself is unused; only the re-render matters.
+  const [, bumpTransportSwitch] = React.useReducer((count: number) => count + 1, 0);
   const isNativeMobileApp = React.useMemo(() => isCapacitorMobileApp(), []);
   const lastNativeResumeSyncEventAtRef = React.useRef(0);
+  const nativeResumeValidationSeqRef = React.useRef(0);
 
   const handleNativeResume = React.useCallback(() => {
-    if (!getRuntimeApiBaseUrl()) return;
+    const apiBaseUrl = getRuntimeApiBaseUrl();
+    const validationSeq = nativeResumeValidationSeqRef.current + 1;
+    nativeResumeValidationSeqRef.current = validationSeq;
+
+    if (!apiBaseUrl) {
+      // Already disconnected — e.g. a previous re-probe ran mid network flux
+      // (Android Wi-Fi switch with no cellular fallback) and found nothing
+      // reachable. When a resume/online signal arrives, silently retry the last
+      // saved instance instead of dead-ending on the connect screen until the
+      // user restarts the app. Success fires runtime-endpoint-changed, which
+      // re-bootstraps everything.
+      void autoConnectLastInstance();
+      return;
+    }
+
+    // Re-probe the active device's transports on resume: the network may have
+    // changed while the app slept, so hot-switch LAN⇄relay if a better transport
+    // is now reachable — no re-pairing. A 'switched' outcome already fired the
+    // runtime-endpoint-changed subscription (which re-bootstraps the app), so we
+    // only refresh in place when the transport is 'unchanged'.
+    const refreshInPlace = () => {
+      void initializeApp();
+      void refreshGitHubAuthStatus(apis.github, { force: true });
+      if (providersCount === 0) void loadProviders({ source: 'mobileApp:nativeResume' });
+      if (agentsCount === 0) void loadAgents({ source: 'mobileApp:nativeResume' });
+    };
+    const disconnect = () => {
+      switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: 'mobile-disconnected' });
+      setConnectionEpoch((value) => value + 1);
+    };
+
+    void reprobeActiveConnection().then((outcome) => {
+      if (nativeResumeValidationSeqRef.current !== validationSeq) return;
+      if (outcome === 'no-connection') {
+        disconnect();
+        return;
+      }
+      if (outcome === 'unreachable') {
+        // Right after a resume or Wi-Fi switch the network is often still
+        // settling (on Android without a SIM there is NO connectivity at all for
+        // a few seconds), so a single fast probe races the network coming up.
+        // Retry once after a grace period before tearing the connection down.
+        window.setTimeout(() => {
+          if (nativeResumeValidationSeqRef.current !== validationSeq) return;
+          void reprobeActiveConnection().then((retry) => {
+            if (nativeResumeValidationSeqRef.current !== validationSeq) return;
+            if (retry === 'switched') return;
+            if (retry === 'unchanged') {
+              refreshInPlace();
+              return;
+            }
+            disconnect();
+          });
+        }, 4000);
+        return;
+      }
+      if (outcome === 'switched') return;
+
+      refreshInPlace();
+    });
+
     const now = Date.now();
     if (now - lastNativeResumeSyncEventAtRef.current >= NATIVE_RESUME_SYNC_EVENT_THROTTLE_MS) {
       lastNativeResumeSyncEventAtRef.current = now;
       window.dispatchEvent(new Event('openchamber:system-resume'));
     }
-    void initializeApp();
-    void refreshGitHubAuthStatus(apis.github, { force: true });
-    if (providersCount === 0) void loadProviders({ source: 'mobileApp:nativeResume' });
-    if (agentsCount === 0) void loadAgents({ source: 'mobileApp:nativeResume' });
   }, [agentsCount, apis.github, initializeApp, loadAgents, loadProviders, providersCount, refreshGitHubAuthStatus]);
 
   useNativeMobileChrome();
   useNativeMobileLifecycle(handleNativeResume);
+
+  // Network-change re-probe. The resume hook only fires on background→foreground,
+  // but on Android switching Wi-Fi (quick-settings tile) does NOT background the
+  // app — no visibility/appState event ever fires, so the app would sit on a dead
+  // LAN transport instead of hot-switching to relay. The webview's `online` event
+  // fires on connectivity changes (new Wi-Fi, cellular back, airplane off), so
+  // run the same re-probe then. Debounced: the first seconds after `online` the
+  // route is often not usable yet, and rapid offline/online flaps must collapse
+  // into one probe. iOS also gets this (harmless — same seq-guarded operation the
+  // resume path runs; a concurrent duplicate supersedes via the seq ref).
+  React.useEffect(() => {
+    if (!isNativeMobileApp) return;
+    let timer: number | undefined;
+    const handleOnline = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => handleNativeResume(), 1500);
+    };
+    window.addEventListener('online', handleOnline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.clearTimeout(timer);
+    };
+  }, [isNativeMobileApp, handleNativeResume]);
 
   React.useEffect(() => {
     registerRuntimeAPIs(apis);
@@ -2212,6 +2802,23 @@ export function MobileApp({ apis }: MobileAppProps) {
   // stale. The SyncProvider is keyed by runtimeEndpointEpoch so it remounts too.
   React.useEffect(() => {
     return subscribeRuntimeEndpointChanged((detail) => {
+      // A LAN⇄relay swap for the SAME device keeps the runtime key stable. Treat
+      // that as a transport-only change: rebind the sync layer to the new
+      // transport but keep the user's session/connection state — no reconnecting
+      // screen, no bounce back to the draft. Only a real instance switch (key
+      // change) does the full reset.
+      const sameDevice = Boolean(detail.runtimeKey) && detail.runtimeKey === detail.previousRuntimeKey;
+      if (sameDevice) {
+        // Transport-only swap for the same device: rebind the SDK to the new
+        // transport and force a re-render so SyncProvider receives the new `sdk`
+        // prop. Its event-pipeline + bootstrap effects (keyed on `sdk`) then
+        // reconnect over the new transport WITHOUT remounting — so the message
+        // pagination refs, the open session, and the whole view are preserved.
+        // No key bump, no flash, no bounce to the draft.
+        reconnectAppForTransportSwitch();
+        bumpTransportSwitch();
+        return;
+      }
       resetAppForRuntimeEndpointChange(detail);
       setRuntimeEndpointEpoch((epoch) => epoch + 1);
       setConnectionEpoch((epoch) => epoch + 1);
@@ -2248,8 +2855,14 @@ export function MobileApp({ apis }: MobileAppProps) {
   }, [setIsMobile]);
 
   React.useEffect(() => {
+    // Never bootstrap without a runtime endpoint on native: with apiBaseUrl ''
+    // the resolver falls back to the webview's own origin, where Capacitor's
+    // static server answers every request with index.html — the bootstrap
+    // "succeeds" against a fake backend and flips isConnected back on, leaving
+    // the user in an empty shell after a disconnect.
+    if (isNativeMobileApp && !getRuntimeApiBaseUrl()) return;
     void initializeApp();
-  }, [connectionEpoch, initializeApp]);
+  }, [connectionEpoch, initializeApp, isNativeMobileApp]);
 
   React.useEffect(() => {
     if (!isConnected) return;
@@ -2392,10 +3005,16 @@ export function MobileApp({ apis }: MobileAppProps) {
     );
   }
 
-  if (!isConnected && !isReconnecting && isNativeMobileApp) {
+  // No runtime endpoint on native = explicitly disconnected (last instance
+  // deleted, revoked token, unreachable). The connect screen is the only valid
+  // UI then — regardless of what a stale isConnected flag claims (the store can
+  // be poisoned by a bootstrap that ran against the webview's own origin).
+  const hasRuntimeEndpoint = Boolean(getRuntimeApiBaseUrl());
+
+  if (isNativeMobileApp && (!hasRuntimeEndpoint || (!isConnected && !isReconnecting))) {
     // A runtime endpoint is already selected (first connect or switching instances):
     // show a loader while it re-bootstraps instead of flashing the onboarding screen.
-    if (getRuntimeApiBaseUrl()) {
+    if (hasRuntimeEndpoint) {
       return (
         <main className="flex min-h-dvh items-center justify-center bg-background px-6 text-center text-foreground">
           <div className="flex max-w-sm flex-col items-center gap-4">
@@ -2464,6 +3083,7 @@ export function MobileApp({ apis }: MobileAppProps) {
             <div className="h-full bg-background text-foreground">
               <SyncAppEffects embeddedBackgroundWorkEnabled={isInitialized} />
               <OpenCodeUpdateToast />
+              <MobileAppUpdateToast />
               <MobileShell onActiveConnectionDeleted={() => {
                 switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: 'mobile-disconnected' });
                 setConnectionEpoch((value) => value + 1);
