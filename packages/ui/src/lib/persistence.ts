@@ -597,6 +597,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.terminalFontSize === 'number' && Number.isFinite(settings.terminalFontSize) && settings.terminalFontSize !== store.terminalFontSize) {
     store.setTerminalFontSize(settings.terminalFontSize);
   }
+  if (typeof settings.editorFontSize === 'number' && Number.isFinite(settings.editorFontSize) && settings.editorFontSize !== store.editorFontSize) {
+    store.setEditorFontSize(settings.editorFontSize);
+  }
   if (isUiFontOption(settings.uiFont) && settings.uiFont !== store.uiFont) {
     store.setUiFont(settings.uiFont);
   }
@@ -749,6 +752,12 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.desktopLanAccessEnabled === 'boolean') {
     result.desktopLanAccessEnabled = candidate.desktopLanAccessEnabled;
+  }
+  if (typeof candidate.desktopKeepAwakeEnabled === 'boolean') {
+    result.desktopKeepAwakeEnabled = candidate.desktopKeepAwakeEnabled;
+  }
+  if (typeof candidate.desktopMinimizeToTrayEnabled === 'boolean') {
+    result.desktopMinimizeToTrayEnabled = candidate.desktopMinimizeToTrayEnabled;
   }
 
   const projects = sanitizeProjects(candidate.projects);
@@ -1110,6 +1119,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.terminalFontSize === 'number' && Number.isFinite(candidate.terminalFontSize)) {
     result.terminalFontSize = candidate.terminalFontSize;
+  }
+  if (typeof candidate.editorFontSize === 'number' && Number.isFinite(candidate.editorFontSize)) {
+    result.editorFontSize = candidate.editorFontSize;
   }
   if (isUiFontOption(candidate.uiFont)) {
     result.uiFont = candidate.uiFont;

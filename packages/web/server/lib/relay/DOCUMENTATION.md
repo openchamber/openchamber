@@ -19,7 +19,7 @@ Traffic is modeled as three stacked layers. The relay understands only Layer 1; 
 ## Entrypoints and structure
 
 Host side (`packages/web/server/lib/relay/`):
-- `service.js` — thin entrypoint: relay config (enabled flag + relay URL), the management routes (`GET/POST /api/openchamber/relay/{status,enable,disable,offer}`), and lifecycle wiring. Started from `packages/web/server/index.js` only when the user has explicitly enabled the relay. The relay endpoint defaults to the OpenChamber-hosted relay but can be pinned to a self-hosted relay via the `OPENCHAMBER_RELAY_URL` env var (must be `ws://`/`wss://`); when set it overrides the stored setting for the host connection, the pairing offer, and status, so paired clients inherit the endpoint automatically from the offer.
+- `service.js` — thin entrypoint: relay config (enabled flag + relay URL), the management routes (`GET/POST /api/openchamber/relay/{status,enable,disable}`), a `getPairingCandidate()` accessor (the relay transport candidate folded into pairing-v2 links when enabled, consumed by the pairing-session route in `core-routes.js`), and lifecycle wiring. Started from `packages/web/server/index.js` only when the user has explicitly enabled the relay. The relay endpoint defaults to the OpenChamber-hosted relay but can be pinned to a self-hosted relay via the `OPENCHAMBER_RELAY_URL` env var (must be `ws://`/`wss://`); when set it overrides the stored setting for the host connection, the pairing candidate, and status, so paired clients inherit the endpoint automatically.
 - `identity.js` — the host's stable identity: the long-lived signing keypair (shared with the push relay, defines the routing id) plus a long-lived encryption keypair (the E2EE trust anchor). Reused across restarts; never rotated implicitly.
 - `signing-key.js` — storage/derivation of the signing keypair and the routing id, shared with the notifications runtime.
 - `host-client.js` — the long-lived connection manager: one outbound control connection to the relay, a per-client data connection for each connected device, reconnect/backoff, and the E2EE responder handshake per connection.
@@ -32,7 +32,8 @@ Client side (`packages/ui/src/lib/relay/`):
 - `tunnel-codec.ts` — Layer 3 frame codec, fragmentation, and outbound frame batching.
 - `tunnel-client.ts` — the client tunnel: exposes a `fetch()`-compatible and a WebSocket-compatible surface backed by the encrypted tunnel.
 - `tunnel-payloads.ts`, `runtime-tunnel.ts`, `runtime-socket.ts` — payload helpers, the active-tunnel singleton, and the shared "open a runtime WebSocket the right way" helper.
-- `offer.ts` — the pairing payload builder/parser (secrets travel in URL fragments only).
+
+Relay is not a separate link format: it is one transport candidate inside the unified **pairing v2** payload (`packages/ui/src/lib/connectionPayload.ts`). A relay candidate is `{ type: 'relay', relayUrl, serverId, hostEncPubJwk }` — no embedded token; the client redeems the one-time pairing secret over the tunnel like any other candidate.
 
 ## What travels the tunnel
 
@@ -52,7 +53,7 @@ The host dispatcher restricts tunneled traffic to explicit path allowlists (one 
 
 ## End-to-end flow (overview)
 
-1. **Pairing.** The host builds an offer describing the relay endpoint, its routing id, and its encryption public key, rendered as a QR code / deep link. Secrets are carried in the URL fragment so they never reach any server. The client imports it and stores the connection.
+1. **Pairing.** The host issues a pairing-v2 link (QR / deep link) carrying a one-time secret and a list of transport candidates. When the relay is enabled, one candidate is the relay transport (its endpoint, routing id, and encryption public key — the E2EE trust anchor). The client redeems the secret over the first reachable candidate; over the relay candidate it opens the E2EE tunnel first, then redeems through it, and stores the connection.
 2. **Presence.** When the relay is enabled, the host opens one outbound control connection and waits.
 3. **Connect.** The client connects for a given routing id; the relay notifies the host over the control connection; the host opens a matching per-client data connection.
 4. **Handshake.** Over that connection pair, client and host run the E2EE handshake and derive a shared encrypted channel the relay cannot read.

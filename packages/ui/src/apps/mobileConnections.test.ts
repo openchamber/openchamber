@@ -40,7 +40,7 @@ const testRelay: MobileRelayConfig = {
 };
 
 describe('mobile connection storage', () => {
-  test('entries persisted before relay support normalize to direct mode on read', async () => {
+  test('entries persisted before candidates migrate to a single direct candidate', async () => {
     try {
       installTestWindow();
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify([
@@ -50,70 +50,86 @@ describe('mobile connection storage', () => {
 
       const connections = await loadMobileConnections();
       expect(connections).toHaveLength(2);
-      expect(connections.every((connection) => connection.mode === 'direct')).toBe(true);
-      expect(connections[0]?.relay).toBe(undefined);
-      expect(connections[0]?.clientToken).toBe('tok-a');
+      const home = connections.find((c) => c.id === 'a')!;
+      expect(home.candidates).toEqual([{ kind: 'direct', url: 'http://192.168.1.10:2606' }]);
+      expect(home.clientToken).toBe('tok-a');
     } finally {
       restoreGlobals();
     }
   });
 
-  test('relay connections round-trip mode and transport config', async () => {
+  test('a relay device round-trips its candidate + token', async () => {
     try {
       installTestWindow();
 
       await upsertMobileConnection({
         label: 'My Desktop',
-        url: 'openchamber://connect?v=1&mode=relay',
+        candidates: [{ kind: 'relay', relay: testRelay }],
         clientToken: 'oc_client_secret',
-        relay: testRelay,
       });
 
       const connections = await loadMobileConnections();
       expect(connections).toHaveLength(1);
       const saved = connections[0]!;
-      expect(saved.mode).toBe('relay');
-      expect(saved.relay).toEqual(testRelay);
+      expect(saved.candidates).toEqual([{ kind: 'relay', relay: testRelay }]);
       // Web surface: token stays inline like direct connections.
       expect(saved.clientToken).toBe('oc_client_secret');
 
-      // Persisted metadata carries only the three transport fields — no grant.
+      // Persisted metadata carries only the three transport fields — no grant/token.
       const raw = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || '[]') as Array<Record<string, unknown>>;
-      expect(raw[0]?.mode).toBe('relay');
-      expect(Object.keys(raw[0]?.relay as object).sort()).toEqual(['hostEncPubJwk', 'relayUrl', 'serverId']);
+      const rawCandidate = (raw[0]?.candidates as Array<Record<string, unknown>>)[0];
+      expect(rawCandidate.kind).toBe('relay');
+      expect(Object.keys(rawCandidate.relay as object).sort()).toEqual(['hostEncPubJwk', 'relayUrl', 'serverId']);
     } finally {
       restoreGlobals();
     }
   });
 
-  test('relay entries with malformed transport config are dropped, direct entries survive', async () => {
+  test('a multi-transport device persists all candidates in order (LAN then relay)', async () => {
+    try {
+      installTestWindow();
+      await upsertMobileConnection({
+        label: 'Both',
+        candidates: [{ kind: 'direct', url: 'http://192.168.1.5:2606' }, { kind: 'relay', relay: testRelay }],
+        clientToken: 'tok',
+      });
+
+      const connections = await loadMobileConnections();
+      expect(connections[0]?.candidates.map((c) => c.kind)).toEqual(['direct', 'relay']);
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  test('a legacy relay entry with malformed transport config is dropped, direct entries survive', async () => {
     try {
       installTestWindow();
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify([
-        { id: 'bad', label: 'Broken', url: 'openchamber://connect', lastUsedAt: 20, mode: 'relay', relay: { relayUrl: 'wss://relay.example' } },
+        { id: 'bad', label: 'Broken', lastUsedAt: 20, mode: 'relay', relay: { relayUrl: 'wss://relay.example' } },
         { id: 'ok', label: 'Home', url: 'http://192.168.1.10:2606', lastUsedAt: 10 },
       ]));
 
       const connections = await loadMobileConnections();
       expect(connections).toHaveLength(1);
       expect(connections[0]?.id).toBe('ok');
-      expect(connections[0]?.mode).toBe('direct');
+      expect(connections[0]?.candidates[0]?.kind).toBe('direct');
     } finally {
       restoreGlobals();
     }
   });
 
-  test('relay and direct connections dedupe independently', async () => {
+  test('relay and direct devices dedupe independently by candidate identity', async () => {
     try {
       installTestWindow();
-      await upsertMobileConnection({ label: 'Direct', url: 'http://host.example' });
-      await upsertMobileConnection({ label: 'Relay', url: 'openchamber://connect?v=1&mode=relay', relay: testRelay });
-      await upsertMobileConnection({ label: 'Relay renamed', url: 'openchamber://connect?v=1&mode=relay', relay: testRelay });
+      await upsertMobileConnection({ label: 'Direct', candidates: [{ kind: 'direct', url: 'http://host.example' }] });
+      await upsertMobileConnection({ label: 'Relay', candidates: [{ kind: 'relay', relay: testRelay }] });
+      await upsertMobileConnection({ label: 'Relay renamed', candidates: [{ kind: 'relay', relay: testRelay }] });
 
       const connections = await loadMobileConnections();
       expect(connections).toHaveLength(2);
-      expect(connections.filter((connection) => connection.mode === 'relay')).toHaveLength(1);
-      expect(connections.find((connection) => connection.mode === 'relay')?.label).toBe('Relay renamed');
+      const relayEntries = connections.filter((c) => c.candidates.some((x) => x.kind === 'relay'));
+      expect(relayEntries).toHaveLength(1);
+      expect(relayEntries[0]?.label).toBe('Relay renamed');
     } finally {
       restoreGlobals();
     }

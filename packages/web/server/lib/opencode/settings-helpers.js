@@ -181,6 +181,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.desktopKeepAwakeEnabled === 'boolean') {
       result.desktopKeepAwakeEnabled = candidate.desktopKeepAwakeEnabled;
     }
+    if (typeof candidate.desktopMinimizeToTrayEnabled === 'boolean') {
+      result.desktopMinimizeToTrayEnabled = candidate.desktopMinimizeToTrayEnabled;
+    }
     if (typeof candidate.desktopUiPassword === 'string') {
       result.desktopUiPassword = candidate.desktopUiPassword.trim();
     }

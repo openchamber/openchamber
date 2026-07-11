@@ -34,7 +34,7 @@ import { resolveProjectForDirectory, resolveProjectForSessionDirectory } from '@
 import { clampPercent, formatQuotaResetLabel, formatQuotaValueLabel, formatWindowLabel, QUOTA_PROVIDERS, resolveUsageTone } from '@/lib/quota';
 import { getDisplayModelName } from '@/lib/quota/model-families';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { cn } from '@/lib/utils';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -60,9 +60,10 @@ import { MobileFilesSurface } from './MobileFilesSurface';
 import { MobileSessionsSheet } from './MobileSessionsSheet';
 import { MobileSurfaceShell } from './MobileSurfaceShell';
 import { DedicatedMobileAppProvider, type MobileAppActions } from './mobileAppContext';
-import { autoConnectLastInstance, isSameConnectionUrl, relayConnectionRuntimeKey, useMobileConnection, validateActiveRuntimeSession } from './mobileConnections';
+import { autoConnectLastInstance, connectionDisplayUrl, isActiveRuntimeConnection, reprobeActiveConnection, useMobileConnection } from './mobileConnections';
+import { isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { isQrScanSupported, parseConnectionPayload, scanConnectionQr } from './mobileQrScan';
-import { resetAppForRuntimeEndpointChange } from './runtimeEndpointReset';
+import { reconnectAppForTransportSwitch, resetAppForRuntimeEndpointChange } from './runtimeEndpointReset';
 import { useAppFontEffects } from './useAppFontEffects';
 import { useFontsReady } from './useFontsReady';
 import { useDeepLinkHandlers, useDeepLinkSource } from './deepLinkNavigation';
@@ -241,9 +242,10 @@ const useNativeMobileChrome = (): void => {
       const platform = (window as typeof window & { Capacitor?: { getPlatform?: () => string } }).Capacitor?.getPlatform?.();
       const applyStatusBar = async () => {
         if (platform === 'android') {
-          // Android doesn't feed env(safe-area-inset-top) to CSS, so overlaying the status bar
-          // makes content render under it. Inset the WebView below the bar instead and paint the
-          // bar with the resolved theme background (the splash colours the theme system persists).
+          // Inset the WebView below the bar and paint it with the resolved theme background
+          // (the splash colours the theme system persists). On Android 15+ edge-to-edge is
+          // enforced and both calls are no-ops — there the app pads itself via the
+          // Capacitor-injected --safe-area-inset-* CSS vars (see mobile.css, oc-platform-android).
           const isDark = document.documentElement.classList.contains('dark');
           const themeBg =
             (isDark ? localStorage.getItem('splashBgDark') : localStorage.getItem('splashBgLight')) ||
@@ -553,6 +555,20 @@ const useNativeMobileLifecycle = (onResume: () => void): void => {
       onResume();
     };
 
+    // Belt-and-suspenders resume detection. Capacitor's `appStateChange` is the
+    // primary signal, but on iOS it can be missed after a long suspend, so the
+    // webview's own `visibilitychange` is a second trigger — either one flips
+    // wasInactiveRef and fires onResume exactly once per background→foreground.
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        wasInactiveRef.current = true;
+        return;
+      }
+      resumeAfterInactive();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    cleanup.push(() => document.removeEventListener('visibilitychange', handleVisibility));
+
     void import('@capacitor/app').then(async ({ App }) => {
       if (disposed) return;
       const state = await App.addListener('appStateChange', ({ isActive }) => {
@@ -633,12 +649,6 @@ const mobileInputKeyboardProps = {
 
 const NATIVE_RESUME_SYNC_EVENT_THROTTLE_MS = 1_000;
 
-const getRuntimeClientToken = (): string => {
-  if (typeof window === 'undefined') return '';
-  const token = (window as typeof window & { __OPENCHAMBER_CLIENT_TOKEN__?: string }).__OPENCHAMBER_CLIENT_TOKEN__;
-  return typeof token === 'string' ? token.trim() : '';
-};
-
 const getProjectLabel = (path: string): string => {
   const normalized = normalizePath(path);
   if (!normalized) return '';
@@ -674,8 +684,12 @@ const MobileConnectionWelcome: React.FC<{ onConnected: () => void }> = ({ onConn
   const [connectionName, setConnectionName] = React.useState('');
   const [clientToken, setClientToken] = React.useState('');
   const [isScanning, setIsScanning] = React.useState(false);
-  const [advancedOpen, setAdvancedOpen] = React.useState(false);
   const qrScanSupported = React.useMemo(() => isQrScanSupported(), []);
+  // QR pairing is the primary flow; the manual URL form stays collapsed unless
+  // scanning is unavailable (web build) or the user asks for it.
+  const [manualOpen, setManualOpen] = React.useState(() => !isQrScanSupported());
+  // Which saved connection is being connected to, for the per-row spinner.
+  const [connectingId, setConnectingId] = React.useState<string | null>(null);
   const [password, setPassword] = React.useState('');
 
   const handleSubmit = React.useCallback((event: React.FormEvent) => {
@@ -684,20 +698,23 @@ const MobileConnectionWelcome: React.FC<{ onConnected: () => void }> = ({ onConn
   }, [clientToken, conn, connectionName, serverUrl]);
 
   // Accept a pasted pairing link (openchamber://connect?...) in the URL field and
-  // split it back into the server URL + token, revealing the token field when present.
+  // split it back into the server URL + token.
   const handleUrlChange = React.useCallback((value: string) => {
     if (/^openchamber:\/\//i.test(value.trim())) {
       const payload = parseConnectionPayload(value);
       if (payload) {
+        if ('pairing' in payload) {
+          void conn.redeemPairingConnection(payload.pairing);
+          return;
+        }
         setServerUrl(payload.url);
         if (payload.label) setConnectionName(payload.label);
         if (payload.clientToken) setClientToken(payload.clientToken);
-        if (payload.label || payload.clientToken) setAdvancedOpen(true);
         return;
       }
     }
     setServerUrl(value);
-  }, []);
+  }, [conn]);
 
   const handleScanQr = React.useCallback(async () => {
     if (isScanning || isBusy) return;
@@ -710,8 +727,10 @@ const MobileConnectionWelcome: React.FC<{ onConnected: () => void }> = ({ onConn
           setServerUrl(result.url);
           if (result.label) setConnectionName(result.label);
           if (result.clientToken) setClientToken(result.clientToken);
-          if (result.label || result.clientToken) setAdvancedOpen(true);
           await conn.connect({ url: result.url, clientToken: result.clientToken, label: result.label });
+          break;
+        case 'pairing':
+          await conn.redeemPairingConnection(result.pairing);
           break;
         case 'permission-denied':
           conn.setError(t('mobile.connect.scan.permissionDenied'));
@@ -745,7 +764,7 @@ const MobileConnectionWelcome: React.FC<{ onConnected: () => void }> = ({ onConn
   }, [conn]);
 
   return (
-    <main className="oc-keyboard-fill-screen flex min-h-dvh flex-col overflow-y-auto bg-background px-6 pb-[calc(env(safe-area-inset-bottom)+28px)] pt-[calc(env(safe-area-inset-top)+28px)] text-foreground">
+    <main className="oc-keyboard-fill-screen flex min-h-dvh flex-col overflow-y-auto bg-background px-6 pb-[calc(var(--safe-area-inset-bottom,env(safe-area-inset-bottom,0px))+28px)] pt-[calc(var(--safe-area-inset-top,env(safe-area-inset-top,0px))+28px)] text-foreground">
       <div className="m-auto flex w-full max-w-[360px] shrink-0 flex-col items-center gap-9 py-8">
         <div className="flex flex-col items-center gap-5 text-center">
           <OpenChamberLogo width={72} height={72} className="size-[72px]" />
@@ -761,7 +780,7 @@ const MobileConnectionWelcome: React.FC<{ onConnected: () => void }> = ({ onConn
               <div className="min-w-0 text-left">
                 <p className="truncate typography-ui-label text-foreground">{pendingConnection.label}</p>
                 <p className="truncate typography-small text-muted-foreground">
-                  {pendingConnection.relay ? t('mobile.connect.relay.badge') : pendingConnection.url}
+                  {pendingConnection.candidates.some((c) => c.kind === 'direct') ? connectionDisplayUrl(pendingConnection) : t('mobile.connect.relay.badge')}
                 </p>
               </div>
             </div>
@@ -790,119 +809,133 @@ const MobileConnectionWelcome: React.FC<{ onConnected: () => void }> = ({ onConn
             </Button>
           </form>
         ) : (
-          <div className="flex w-full flex-col gap-3">
-            <form className="flex w-full flex-col gap-3" onSubmit={handleSubmit}>
-              <input
-              value={connectionName}
-              onChange={(event) => setConnectionName(event.target.value)}
-              placeholder={t('mobile.instances.label.placeholder')}
-              aria-label={t('mobile.instances.label.label')}
-              autoComplete="off"
-              autoCapitalize="words"
-              autoCorrect="off"
-              spellCheck={false}
-              className="h-12 w-full rounded-[16px] border border-border/70 bg-surface-elevated px-4 text-center text-[16px] text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
-            />
-            <input
-              {...mobileInputKeyboardProps}
-              value={serverUrl}
-              onChange={(event) => handleUrlChange(event.target.value)}
-              placeholder={t('mobile.connect.url.placeholder')}
-              aria-label={t('mobile.connect.url.label')}
-              type="url"
-              inputMode="url"
-              autoCapitalize="none"
-              className="h-12 w-full rounded-[16px] border border-border/70 bg-surface-elevated px-4 text-center text-[16px] text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
-            />
+          <div className="flex w-full flex-col gap-6">
+            {/* Primary path: scan the pairing QR from "Add a device" on the server. */}
+            {qrScanSupported ? (
+              <div className="flex w-full flex-col gap-2">
+                <Button
+                  type="button"
+                  size="lg"
+                  className="h-12 w-full"
+                  onClick={() => void handleScanQr()}
+                  disabled={isScanning || isBusy}
+                >
+                  <Icon name="scan-2" className={cn('size-[18px]', isScanning && 'animate-pulse')} />
+                  {isBusy ? t('mobile.connect.connecting') : t('mobile.connect.scanQr')}
+                </Button>
+                <p className="px-2 text-center typography-small text-muted-foreground">
+                  {t('mobile.connect.welcome.scanHint')}
+                </p>
+              </div>
+            ) : null}
 
-              <div>
+            {error && !manualOpen ? <p className="px-1 text-center typography-small text-[var(--status-error)]">{error}</p> : null}
+
+            {connections.length > 0 ? (
+              <section className="flex w-full flex-col gap-2.5">
+                <h2 className="text-center typography-micro uppercase tracking-[0.14em] text-muted-foreground">
+                  {t('mobile.connect.saved.title')}
+                </h2>
+                <div className="overflow-hidden rounded-[18px] border border-border/70 bg-surface-elevated">
+                  {connections.map((connection) => {
+                    const isConnectingRow = connectingId === connection.id;
+                    return (
+                      <button
+                        key={connection.id}
+                        type="button"
+                        disabled={isBusy}
+                        className="flex min-h-14 w-full items-center gap-3 border-b border-border/60 px-3.5 py-2.5 text-left last:border-b-0 hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary disabled:opacity-70"
+                        onClick={() => {
+                          setConnectingId(connection.id);
+                          void conn.connect({ id: connection.id, candidates: connection.candidates, clientToken: connection.clientToken, label: connection.label })
+                            .finally(() => setConnectingId(null));
+                        }}
+                      >
+                        <span className="flex size-9 shrink-0 items-center justify-center rounded-[12px] bg-interactive-hover text-foreground">
+                          <Icon name="server" className="size-[18px]" />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate typography-ui-label text-foreground">{connection.label}</span>
+                          <span className={cn('block truncate typography-small', isConnectingRow ? 'text-foreground' : 'text-muted-foreground')}>
+                            {isConnectingRow
+                              ? t('mobile.connect.connecting')
+                              : connection.candidates.some((c) => c.kind === 'direct') ? connectionDisplayUrl(connection) : t('mobile.connect.relay.badge')}
+                          </span>
+                        </span>
+                        {isConnectingRow
+                          ? <Icon name="loader-4" className="size-5 animate-spin text-muted-foreground" />
+                          : <Icon name="arrow-right-s" className="size-5 text-muted-foreground" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            ) : null}
+
+            {/* Manual URL entry, collapsed by default — most people pair by QR. */}
+            <div className="flex w-full flex-col">
+              {qrScanSupported ? (
                 <button
                   type="button"
-                  onClick={() => setAdvancedOpen((value) => !value)}
-                  aria-expanded={advancedOpen}
+                  onClick={() => setManualOpen((value) => !value)}
+                  aria-expanded={manualOpen}
                   className="mx-auto flex items-center gap-1 rounded-full px-2 py-1 typography-small text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 >
-                  <span>{t('mobile.connect.advanced')}</span>
-                  <Icon name="arrow-down-s" className={cn('size-4 transition-transform duration-200', advancedOpen && 'rotate-180')} />
+                  <span>{t('mobile.connect.manual.toggle')}</span>
+                  <Icon name="arrow-down-s" className={cn('size-4 transition-transform duration-200', manualOpen && 'rotate-180')} />
                 </button>
-                <div
-                  className="grid transition-[grid-template-rows] duration-200 ease-out"
-                  style={{ gridTemplateRows: advancedOpen ? '1fr' : '0fr' }}
-                >
-                  <div className="min-h-0 overflow-hidden">
-                    <div className="space-y-1.5 pt-2 text-left">
-                      <label className="block space-y-1.5">
-                        <span className="block px-1 typography-ui-label text-foreground">{t('mobile.connect.token.label')}</span>
-                        <input
-                          {...mobileInputKeyboardProps}
-                          value={clientToken}
-                          onChange={(event) => setClientToken(event.target.value)}
-                          placeholder={t('mobile.connect.token.placeholder')}
-                          tabIndex={advancedOpen ? undefined : -1}
-                          autoCapitalize="none"
-                          className="h-12 w-full rounded-[16px] border border-border/70 bg-surface-elevated px-4 text-[16px] text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
-                        />
-                      </label>
-                      <p className="px-1 typography-micro text-muted-foreground">{t('mobile.connect.token.hint')}</p>
-                    </div>
-                  </div>
+              ) : null}
+              <div
+                className="grid transition-[grid-template-rows] duration-200 ease-out"
+                style={{ gridTemplateRows: manualOpen ? '1fr' : '0fr' }}
+              >
+                <div className="min-h-0 overflow-hidden">
+                  <form className="flex w-full flex-col gap-3 pt-3" onSubmit={handleSubmit}>
+                    <input
+                      {...mobileInputKeyboardProps}
+                      value={serverUrl}
+                      onChange={(event) => handleUrlChange(event.target.value)}
+                      placeholder={t('mobile.connect.url.placeholder')}
+                      aria-label={t('mobile.connect.url.label')}
+                      type="url"
+                      inputMode="url"
+                      autoCapitalize="none"
+                      tabIndex={manualOpen ? undefined : -1}
+                      className="h-12 w-full rounded-[16px] border border-border/70 bg-surface-elevated px-4 text-center text-[16px] text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
+                    />
+                    <input
+                      value={connectionName}
+                      onChange={(event) => setConnectionName(event.target.value)}
+                      placeholder={t('mobile.instances.label.placeholder')}
+                      aria-label={t('mobile.instances.label.label')}
+                      autoComplete="off"
+                      autoCapitalize="words"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      tabIndex={manualOpen ? undefined : -1}
+                      className="h-12 w-full rounded-[16px] border border-border/70 bg-surface-elevated px-4 text-center text-[16px] text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
+                    />
+                    <input
+                      {...mobileInputKeyboardProps}
+                      value={clientToken}
+                      onChange={(event) => setClientToken(event.target.value)}
+                      placeholder={t('mobile.connect.token.placeholder')}
+                      aria-label={t('mobile.connect.token.label')}
+                      tabIndex={manualOpen ? undefined : -1}
+                      autoCapitalize="none"
+                      className="h-12 w-full rounded-[16px] border border-border/70 bg-surface-elevated px-4 text-center text-[16px] text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
+                    />
+                    <p className="px-1 text-center typography-micro text-muted-foreground">{t('mobile.connect.token.hint')}</p>
+                    {error ? <p className="px-1 text-center typography-small text-[var(--status-error)]">{error}</p> : null}
+                    <Button type="submit" variant={qrScanSupported ? 'outline' : 'default'} size="lg" className="h-12 w-full" disabled={isBusy || isScanning || !serverUrl.trim()}>
+                      {isBusy ? t('mobile.connect.connecting') : t('mobile.connect.connectButton')}
+                    </Button>
+                  </form>
                 </div>
               </div>
-
-              {error ? <p className="px-1 text-center typography-small text-[var(--status-error)]">{error}</p> : null}
-
-              <Button type="submit" size="lg" className="mt-1 h-12 w-full" disabled={isBusy || isScanning || !serverUrl.trim()}>
-                {isBusy ? t('mobile.connect.connecting') : t('mobile.connect.connectButton')}
-              </Button>
-            </form>
-
-            <Button
-              type="button"
-              variant="ghost"
-              size="lg"
-              className="h-12 w-full"
-              onClick={() => void handleScanQr()}
-              disabled={!qrScanSupported || isScanning || isBusy}
-            >
-              <Icon name="scan-2" className={cn('size-[18px]', isScanning && 'animate-pulse')} />
-              {t('mobile.connect.scanQr')}
-            </Button>
-            {!qrScanSupported ? (
-              <p className="px-1 text-center typography-micro text-muted-foreground">
-                {t('mobile.connect.scan.unsupported')}
-              </p>
-            ) : null}
+            </div>
           </div>
         )}
-
-        {!pendingConnection && connections.length > 0 ? (
-          <section className="flex w-full flex-col gap-2.5">
-            <h2 className="text-center typography-micro uppercase tracking-[0.14em] text-muted-foreground">
-              {t('mobile.connect.saved.title')}
-            </h2>
-            <div className="overflow-hidden rounded-[18px] border border-border/70 bg-surface-elevated">
-              {connections.map((connection) => (
-                <button
-                  key={connection.id}
-                  type="button"
-                  className="flex min-h-14 w-full items-center gap-3 border-b border-border/60 px-3.5 py-2.5 text-left last:border-b-0 hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
-                  onClick={() => void conn.connect({ url: connection.url, clientToken: connection.clientToken, label: connection.label, relay: connection.relay })}
-                >
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-[12px] bg-interactive-hover text-foreground">
-                    <Icon name="server" className="size-[18px]" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate typography-ui-label text-foreground">{connection.label}</span>
-                    <span className="block truncate typography-small text-muted-foreground">
-                      {connection.mode === 'relay' ? t('mobile.connect.relay.badge') : connection.url}
-                    </span>
-                  </span>
-                  <Icon name="arrow-right-s" className="size-5 text-muted-foreground" />
-                </button>
-              ))}
-            </div>
-          </section>
-        ) : null}
       </div>
     </main>
   );
@@ -927,6 +960,11 @@ const MobileInstancesSurface: React.FC<{
   const [password, setPassword] = React.useState('');
   const [isScanning, setIsScanning] = React.useState(false);
   const qrScanSupported = React.useMemo(() => isQrScanSupported(), []);
+  // The manual add/edit form is hidden until asked for — the sheet leads with
+  // the list of instances (with live status), not a wall of inputs.
+  const [formOpen, setFormOpen] = React.useState(false);
+  // Which row is being connected to, for the per-row spinner.
+  const [connectingId, setConnectingId] = React.useState<string | null>(null);
 
   // Populate/clear the form imperatively (on edit tap / cancel / save) rather than via
   // an effect keyed on the derived connection object. With an effect, any churn of the
@@ -938,6 +976,7 @@ const MobileInstancesSurface: React.FC<{
     setLabel('');
     setClientToken('');
     setError(null);
+    setFormOpen(false);
   }, [setError]);
 
   const saveInstance = React.useCallback((event: React.FormEvent) => {
@@ -957,9 +996,14 @@ const MobileInstancesSurface: React.FC<{
       const result = await scanConnectionQr();
       switch (result.status) {
         case 'ok':
+          // Legacy token QR: prefill the manual form for review before saving.
           setUrl(result.url);
           if (result.label) setLabel(result.label);
           if (result.clientToken) setClientToken(result.clientToken);
+          setFormOpen(true);
+          break;
+        case 'pairing':
+          await conn.redeemPairingConnection(result.pairing);
           break;
         case 'permission-denied':
           setError(t('mobile.connect.scan.permissionDenied'));
@@ -980,7 +1024,7 @@ const MobileInstancesSurface: React.FC<{
     } finally {
       setIsScanning(false);
     }
-  }, [isScanning, setError, t]);
+  }, [conn, isScanning, setError, t]);
 
   const handlePasswordSubmit = React.useCallback((event: React.FormEvent) => {
     event.preventDefault();
@@ -1001,17 +1045,16 @@ const MobileInstancesSurface: React.FC<{
   const confirmDelete = React.useCallback((id: string) => {
     setConfirmingDeleteId(null);
     if (editingId === id) resetForm();
+    // Removing the ACTIVE instance — or the LAST one — must drop the user back
+    // to the connect screen instead of leaving them in a stale, unbacked UI.
+    const wasLast = connections.length === 1;
     void removeConnection(id).then((removed) => {
       if (!removed) return;
-      // Relay entries have no reachable URL — the runtime key is their identity.
-      const isActive = removed.relay
-        ? getRuntimeKey() === relayConnectionRuntimeKey(removed.relay)
-        : isSameConnectionUrl(removed.url, getRuntimeApiBaseUrl());
-      if (isActive) {
+      if (wasLast || isActiveRuntimeConnection(removed)) {
         onActiveConnectionDeleted();
       }
     });
-  }, [editingId, onActiveConnectionDeleted, removeConnection, resetForm]);
+  }, [connections.length, editingId, onActiveConnectionDeleted, removeConnection, resetForm]);
 
   const inputClass = 'h-12 w-full rounded-[16px] border border-border/70 bg-surface-elevated px-4 text-[16px] text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20';
 
@@ -1027,7 +1070,7 @@ const MobileInstancesSurface: React.FC<{
               <div className="min-w-0">
                 <p className="truncate typography-ui-label text-foreground">{pendingConnection.label}</p>
                 <p className="truncate typography-small text-muted-foreground">
-                  {pendingConnection.relay ? t('mobile.connect.relay.badge') : pendingConnection.url}
+                  {pendingConnection.candidates.some((c) => c.kind === 'direct') ? connectionDisplayUrl(pendingConnection) : t('mobile.connect.relay.badge')}
                 </p>
               </div>
             </div>
@@ -1057,11 +1100,20 @@ const MobileInstancesSurface: React.FC<{
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <div className="flex-1 overflow-y-auto px-5 py-4">
-        <div className="space-y-7">
+        <div className="space-y-6">
           {connections.length > 0 ? (
             <div className="overflow-hidden rounded-[18px] border border-border/70 bg-surface-elevated">
               {connections.map((connection) => {
                 const confirming = confirmingDeleteId === connection.id;
+                const isActive = isActiveRuntimeConnection(connection);
+                const isConnectingRow = connectingId === connection.id;
+                // Status line: the active instance says HOW it is connected right
+                // now (direct vs relay); others show their address.
+                const statusText = isConnectingRow
+                  ? t('mobile.connect.connecting')
+                  : isActive
+                    ? (isRelayModeActive() ? t('mobile.instances.status.connectedRelay') : t('mobile.instances.status.connectedDirect'))
+                    : connection.candidates.some((c) => c.kind === 'direct') ? connectionDisplayUrl(connection) : t('mobile.connect.relay.badge');
                 return (
                   <div
                     key={connection.id}
@@ -1073,18 +1125,30 @@ const MobileInstancesSurface: React.FC<{
                     <button
                       type="button"
                       className="flex min-w-0 flex-1 items-center gap-3 px-3.5 py-3 text-left transition-colors active:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary disabled:opacity-60"
-                      onClick={() => void connect({ url: connection.url, clientToken: connection.clientToken, label: connection.label, relay: connection.relay })}
-                      disabled={isBusy || confirming}
+                      onClick={() => {
+                        if (isActive) return;
+                        setConnectingId(connection.id);
+                        void connect({ id: connection.id, candidates: connection.candidates, clientToken: connection.clientToken, label: connection.label })
+                          .finally(() => setConnectingId(null));
+                      }}
+                      disabled={(isBusy && !isConnectingRow) || confirming}
                     >
-                      <span className="flex size-9 shrink-0 items-center justify-center rounded-[12px] bg-interactive-hover text-foreground">
+                      <span className="relative flex size-9 shrink-0 items-center justify-center rounded-[12px] bg-interactive-hover text-foreground">
                         <Icon name="server" className="size-[18px]" />
+                        {isActive ? (
+                          <span className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full border-2 border-[var(--surface-elevated)] bg-[var(--status-success)]" aria-hidden />
+                        ) : null}
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate typography-ui-label text-foreground">{connection.label}</span>
-                        <span className="block truncate typography-small text-muted-foreground">
-                          {connection.mode === 'relay' ? t('mobile.connect.relay.badge') : connection.url}
+                        <span className={cn(
+                          'block truncate typography-small',
+                          isActive && !isConnectingRow ? 'text-[var(--status-success)]' : 'text-muted-foreground',
+                        )}>
+                          {statusText}
                         </span>
                       </span>
+                      {isConnectingRow ? <Icon name="loader-4" className="size-5 shrink-0 animate-spin text-muted-foreground" /> : null}
                     </button>
                     <div className="flex items-center gap-0.5 pr-2">
                       {confirming ? (
@@ -1098,14 +1162,14 @@ const MobileInstancesSurface: React.FC<{
                           <Icon name="delete-bin" className="size-[18px]" />
                           <span className="typography-ui-label">{t('mobile.instances.delete')}</span>
                         </button>
-                      ) : connection.mode === 'relay' ? null : (
+                      ) : !connection.candidates.some((c) => c.kind === 'direct') ? null : (
                         <button
                           type="button"
                           aria-label={t('mobile.instances.edit')}
                           className="flex size-9 items-center justify-center rounded-full text-muted-foreground transition-colors active:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                           onClick={() => {
                             setEditingId(connection.id);
-                            setUrl(connection.url);
+                            setUrl(connectionDisplayUrl(connection));
                             setLabel(connection.label);
                             setClientToken(connection.clientToken || '');
                             setError(null);
@@ -1137,76 +1201,88 @@ const MobileInstancesSurface: React.FC<{
             </p>
           )}
 
-          <form className="space-y-3" onSubmit={saveInstance}>
-            <div className="flex h-8 items-center justify-between gap-3 px-1">
-              <h3 className="typography-ui-label text-foreground">
-                {editingConnection ? t('mobile.instances.editTitle') : t('mobile.instances.addTitle')}
-              </h3>
-              {editingConnection ? (
+          {/* Add actions: QR pairing is the primary path; the manual form stays
+              hidden until asked for (or until a row's edit button opens it). */}
+          {!formOpen && !editingConnection ? (
+            <div className="space-y-2">
+              {qrScanSupported ? (
+                <Button
+                  type="button"
+                  size="lg"
+                  className="h-12 w-full"
+                  onClick={() => void handleScanInstance()}
+                  disabled={isScanning}
+                >
+                  <Icon name="scan-2" className={cn('size-[18px]', isScanning && 'animate-pulse')} />
+                  {t('mobile.connect.scanQr')}
+                </Button>
+              ) : null}
+              <Button
+                type="button"
+                variant={qrScanSupported ? 'ghost' : 'outline'}
+                size="lg"
+                className="h-12 w-full"
+                onClick={() => { setError(null); setFormOpen(true); }}
+              >
+                <Icon name="add" className="size-[18px]" />
+                {t('mobile.instances.addManual')}
+              </Button>
+              {error ? <p className="px-1 text-center typography-small text-[var(--status-error)]">{error}</p> : null}
+            </div>
+          ) : (
+            <form className="space-y-3" onSubmit={saveInstance}>
+              <div className="flex h-8 items-center justify-between gap-3 px-1">
+                <h3 className="typography-ui-label text-foreground">
+                  {editingConnection ? t('mobile.instances.editTitle') : t('mobile.instances.addTitle')}
+                </h3>
                 <Button type="button" variant="ghost" size="xs" onClick={resetForm}>
                   {t('mobile.instances.cancelEdit')}
                 </Button>
-              ) : null}
-            </div>
-            <div>
-              <Button
-                type="button"
-                variant="outline"
-                size="lg"
-                className="h-12 w-full"
-                onClick={() => void handleScanInstance()}
-                disabled={!qrScanSupported || isScanning}
-              >
-                <Icon name="scan-2" className={cn('size-[18px]', isScanning && 'animate-pulse')} />
-                {t('mobile.connect.scanQr')}
+              </div>
+              <label className="block space-y-1.5">
+                <span className="block px-1 typography-ui-label text-foreground">{t('mobile.connect.url.label')}</span>
+                <input
+                  {...mobileInputKeyboardProps}
+                  value={url}
+                  onChange={(event) => setUrl(event.target.value)}
+                  placeholder={t('mobile.connect.url.placeholder')}
+                  type="url"
+                  inputMode="url"
+                  autoCapitalize="none"
+                  className={inputClass}
+                />
+              </label>
+              <label className="block space-y-1.5">
+                <span className="block px-1 typography-ui-label text-foreground">{t('mobile.instances.label.label')}</span>
+                <input
+                  value={label}
+                  onChange={(event) => setLabel(event.target.value)}
+                  placeholder={t('mobile.instances.label.placeholder')}
+                  autoComplete="off"
+                  autoCapitalize="words"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  className={inputClass}
+                />
+              </label>
+              <label className="block space-y-1.5">
+                <span className="block px-1 typography-ui-label text-foreground">{t('mobile.connect.token.label')}</span>
+                <input
+                  {...mobileInputKeyboardProps}
+                  value={clientToken}
+                  onChange={(event) => setClientToken(event.target.value)}
+                  placeholder={t('mobile.connect.token.placeholder')}
+                  autoCapitalize="none"
+                  className={inputClass}
+                />
+                <p className="px-1 typography-micro text-muted-foreground">{t('mobile.connect.token.hint')}</p>
+              </label>
+              {error ? <p className="px-1 typography-small text-[var(--status-error)]">{error}</p> : null}
+              <Button type="submit" size="lg" className="mt-1 h-12 w-full">
+                {editingConnection ? t('mobile.instances.saveEdit') : t('mobile.instances.saveNew')}
               </Button>
-              {!qrScanSupported ? (
-                <p className="px-1 pt-1.5 typography-micro text-muted-foreground">{t('mobile.connect.scan.unsupported')}</p>
-              ) : null}
-            </div>
-            <label className="block space-y-1.5">
-              <span className="block px-1 typography-ui-label text-foreground">{t('mobile.instances.label.label')}</span>
-              <input
-                value={label}
-                onChange={(event) => setLabel(event.target.value)}
-                placeholder={t('mobile.instances.label.placeholder')}
-                autoComplete="off"
-                autoCapitalize="words"
-                autoCorrect="off"
-                spellCheck={false}
-                className={inputClass}
-              />
-            </label>
-            <label className="block space-y-1.5">
-              <span className="block px-1 typography-ui-label text-foreground">{t('mobile.connect.url.label')}</span>
-              <input
-                {...mobileInputKeyboardProps}
-                value={url}
-                onChange={(event) => setUrl(event.target.value)}
-                placeholder={t('mobile.connect.url.placeholder')}
-                type="url"
-                inputMode="url"
-                autoCapitalize="none"
-                className={inputClass}
-              />
-            </label>
-            <label className="block space-y-1.5">
-              <span className="block px-1 typography-ui-label text-foreground">{t('mobile.connect.token.label')}</span>
-              <input
-                {...mobileInputKeyboardProps}
-                value={clientToken}
-                onChange={(event) => setClientToken(event.target.value)}
-                placeholder={t('mobile.connect.token.placeholder')}
-                autoCapitalize="none"
-                className={inputClass}
-              />
-              <p className="px-1 typography-micro text-muted-foreground">{t('mobile.connect.token.hint')}</p>
-            </label>
-            {error ? <p className="px-1 typography-small text-[var(--status-error)]">{error}</p> : null}
-            <Button type="submit" size="lg" className="mt-1 h-12 w-full">
-              {editingConnection ? t('mobile.instances.saveEdit') : t('mobile.instances.saveNew')}
-            </Button>
-          </form>
+            </form>
+          )}
         </div>
       </div>
     </div>
@@ -2612,28 +2688,74 @@ export function MobileApp({ apis }: MobileAppProps) {
   // splash so we don't flash the connect screen; 'done' means we either connected or
   // exhausted the attempt (then the connect screen shows).
   const [autoConnectPhase, setAutoConnectPhase] = React.useState<'pending' | 'attempting' | 'done'>('pending');
+  // Bumped to force a re-render (and thus a fresh `sdk` prop for SyncProvider)
+  // after a same-device transport swap — reconnects the sync layer in place with
+  // no remount. The value itself is unused; only the re-render matters.
+  const [, bumpTransportSwitch] = React.useReducer((count: number) => count + 1, 0);
   const isNativeMobileApp = React.useMemo(() => isCapacitorMobileApp(), []);
   const lastNativeResumeSyncEventAtRef = React.useRef(0);
   const nativeResumeValidationSeqRef = React.useRef(0);
 
   const handleNativeResume = React.useCallback(() => {
     const apiBaseUrl = getRuntimeApiBaseUrl();
-    if (!apiBaseUrl) return;
     const validationSeq = nativeResumeValidationSeqRef.current + 1;
     nativeResumeValidationSeqRef.current = validationSeq;
 
-    void validateActiveRuntimeSession({ url: apiBaseUrl, clientToken: getRuntimeClientToken() }).then((isValid) => {
-      if (nativeResumeValidationSeqRef.current !== validationSeq) return;
-      if (!isValid) {
-        switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: 'mobile-disconnected' });
-        setConnectionEpoch((value) => value + 1);
-        return;
-      }
+    if (!apiBaseUrl) {
+      // Already disconnected — e.g. a previous re-probe ran mid network flux
+      // (Android Wi-Fi switch with no cellular fallback) and found nothing
+      // reachable. When a resume/online signal arrives, silently retry the last
+      // saved instance instead of dead-ending on the connect screen until the
+      // user restarts the app. Success fires runtime-endpoint-changed, which
+      // re-bootstraps everything.
+      void autoConnectLastInstance();
+      return;
+    }
 
+    // Re-probe the active device's transports on resume: the network may have
+    // changed while the app slept, so hot-switch LAN⇄relay if a better transport
+    // is now reachable — no re-pairing. A 'switched' outcome already fired the
+    // runtime-endpoint-changed subscription (which re-bootstraps the app), so we
+    // only refresh in place when the transport is 'unchanged'.
+    const refreshInPlace = () => {
       void initializeApp();
       void refreshGitHubAuthStatus(apis.github, { force: true });
       if (providersCount === 0) void loadProviders({ source: 'mobileApp:nativeResume' });
       if (agentsCount === 0) void loadAgents({ source: 'mobileApp:nativeResume' });
+    };
+    const disconnect = () => {
+      switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: 'mobile-disconnected' });
+      setConnectionEpoch((value) => value + 1);
+    };
+
+    void reprobeActiveConnection().then((outcome) => {
+      if (nativeResumeValidationSeqRef.current !== validationSeq) return;
+      if (outcome === 'no-connection') {
+        disconnect();
+        return;
+      }
+      if (outcome === 'unreachable') {
+        // Right after a resume or Wi-Fi switch the network is often still
+        // settling (on Android without a SIM there is NO connectivity at all for
+        // a few seconds), so a single fast probe races the network coming up.
+        // Retry once after a grace period before tearing the connection down.
+        window.setTimeout(() => {
+          if (nativeResumeValidationSeqRef.current !== validationSeq) return;
+          void reprobeActiveConnection().then((retry) => {
+            if (nativeResumeValidationSeqRef.current !== validationSeq) return;
+            if (retry === 'switched') return;
+            if (retry === 'unchanged') {
+              refreshInPlace();
+              return;
+            }
+            disconnect();
+          });
+        }, 4000);
+        return;
+      }
+      if (outcome === 'switched') return;
+
+      refreshInPlace();
     });
 
     const now = Date.now();
@@ -2646,6 +2768,29 @@ export function MobileApp({ apis }: MobileAppProps) {
   useNativeMobileChrome();
   useNativeMobileLifecycle(handleNativeResume);
 
+  // Network-change re-probe. The resume hook only fires on background→foreground,
+  // but on Android switching Wi-Fi (quick-settings tile) does NOT background the
+  // app — no visibility/appState event ever fires, so the app would sit on a dead
+  // LAN transport instead of hot-switching to relay. The webview's `online` event
+  // fires on connectivity changes (new Wi-Fi, cellular back, airplane off), so
+  // run the same re-probe then. Debounced: the first seconds after `online` the
+  // route is often not usable yet, and rapid offline/online flaps must collapse
+  // into one probe. iOS also gets this (harmless — same seq-guarded operation the
+  // resume path runs; a concurrent duplicate supersedes via the seq ref).
+  React.useEffect(() => {
+    if (!isNativeMobileApp) return;
+    let timer: number | undefined;
+    const handleOnline = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => handleNativeResume(), 1500);
+    };
+    window.addEventListener('online', handleOnline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.clearTimeout(timer);
+    };
+  }, [isNativeMobileApp, handleNativeResume]);
+
   React.useEffect(() => {
     registerRuntimeAPIs(apis);
     return () => registerRuntimeAPIs(null);
@@ -2657,6 +2802,23 @@ export function MobileApp({ apis }: MobileAppProps) {
   // stale. The SyncProvider is keyed by runtimeEndpointEpoch so it remounts too.
   React.useEffect(() => {
     return subscribeRuntimeEndpointChanged((detail) => {
+      // A LAN⇄relay swap for the SAME device keeps the runtime key stable. Treat
+      // that as a transport-only change: rebind the sync layer to the new
+      // transport but keep the user's session/connection state — no reconnecting
+      // screen, no bounce back to the draft. Only a real instance switch (key
+      // change) does the full reset.
+      const sameDevice = Boolean(detail.runtimeKey) && detail.runtimeKey === detail.previousRuntimeKey;
+      if (sameDevice) {
+        // Transport-only swap for the same device: rebind the SDK to the new
+        // transport and force a re-render so SyncProvider receives the new `sdk`
+        // prop. Its event-pipeline + bootstrap effects (keyed on `sdk`) then
+        // reconnect over the new transport WITHOUT remounting — so the message
+        // pagination refs, the open session, and the whole view are preserved.
+        // No key bump, no flash, no bounce to the draft.
+        reconnectAppForTransportSwitch();
+        bumpTransportSwitch();
+        return;
+      }
       resetAppForRuntimeEndpointChange(detail);
       setRuntimeEndpointEpoch((epoch) => epoch + 1);
       setConnectionEpoch((epoch) => epoch + 1);
@@ -2693,8 +2855,14 @@ export function MobileApp({ apis }: MobileAppProps) {
   }, [setIsMobile]);
 
   React.useEffect(() => {
+    // Never bootstrap without a runtime endpoint on native: with apiBaseUrl ''
+    // the resolver falls back to the webview's own origin, where Capacitor's
+    // static server answers every request with index.html — the bootstrap
+    // "succeeds" against a fake backend and flips isConnected back on, leaving
+    // the user in an empty shell after a disconnect.
+    if (isNativeMobileApp && !getRuntimeApiBaseUrl()) return;
     void initializeApp();
-  }, [connectionEpoch, initializeApp]);
+  }, [connectionEpoch, initializeApp, isNativeMobileApp]);
 
   React.useEffect(() => {
     if (!isConnected) return;
@@ -2837,10 +3005,16 @@ export function MobileApp({ apis }: MobileAppProps) {
     );
   }
 
-  if (!isConnected && !isReconnecting && isNativeMobileApp) {
+  // No runtime endpoint on native = explicitly disconnected (last instance
+  // deleted, revoked token, unreachable). The connect screen is the only valid
+  // UI then — regardless of what a stale isConnected flag claims (the store can
+  // be poisoned by a bootstrap that ran against the webview's own origin).
+  const hasRuntimeEndpoint = Boolean(getRuntimeApiBaseUrl());
+
+  if (isNativeMobileApp && (!hasRuntimeEndpoint || (!isConnected && !isReconnecting))) {
     // A runtime endpoint is already selected (first connect or switching instances):
     // show a loader while it re-bootstraps instead of flashing the onboarding screen.
-    if (getRuntimeApiBaseUrl()) {
+    if (hasRuntimeEndpoint) {
       return (
         <main className="flex min-h-dvh items-center justify-center bg-background px-6 text-center text-foreground">
           <div className="flex max-w-sm flex-col items-center gap-4">

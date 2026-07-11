@@ -195,6 +195,7 @@ export type NewSessionDraftState = {
   open: boolean
   selectedProjectId?: string | null
   directoryOverride: string | null
+  permissionAutoAcceptEnabled?: boolean
   pendingWorktreeRequestId?: string | null
   bootstrapPendingDirectory?: string | null
   preserveDirectoryOverride?: boolean
@@ -251,6 +252,7 @@ export type SessionUIState = {
   closeNewSessionDraft: () => void
   setNewSessionDraftTarget: (target: { projectId?: string | null; selectedProjectId?: string | null; directoryOverride?: string | null }, options?: { force?: boolean }) => void
   setDraftPreserveDirectoryOverride: (value: boolean) => void
+  setDraftPermissionAutoAcceptEnabled: (enabled: boolean) => void
   acknowledgeSessionAbort: (sessionId: string) => void
   clearAbortPrompt: () => void
   armAbortPrompt: (durationMs?: number) => number | null
@@ -446,6 +448,7 @@ export async function materializeOpenDraftSession(selection: {
   const store = useSessionUIStore.getState()
   const draft = store.newSessionDraft
   if (!draft?.open) return null
+  const draftPermissionAutoAcceptEnabled = draft.permissionAutoAcceptEnabled === true
 
   const trimmedAgent = typeof selection.agent === "string" && selection.agent.trim().length > 0
     ? selection.agent.trim()
@@ -483,6 +486,15 @@ export async function materializeOpenDraftSession(selection: {
     useSelectionStore.getState().saveSessionAgentSelection(created.id, effectiveDraftAgent)
     useSelectionStore.getState().saveAgentModelForSession(created.id, effectiveDraftAgent, selection.providerID, selection.modelID)
     useSelectionStore.getState().saveAgentModelVariantForSession(created.id, effectiveDraftAgent, selection.providerID, selection.modelID, selection.variant)
+  }
+
+  if (draftPermissionAutoAcceptEnabled) {
+    try {
+      const { usePermissionStore } = await import("@/stores/permissionStore")
+      await usePermissionStore.getState().setSessionAutoAccept(created.id, true)
+    } catch (error) {
+      console.warn("Failed to apply draft permission auto-accept to new session:", error)
+    }
   }
 
   store.initializeNewOpenChamberSession(created.id, configState.agents ?? [])
@@ -732,6 +744,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       open: true,
       selectedProjectId: selectedProject?.id ?? null,
       directoryOverride: directory,
+      permissionAutoAcceptEnabled: options?.permissionAutoAcceptEnabled === true,
       pendingWorktreeRequestId: options?.pendingWorktreeRequestId ?? null,
       bootstrapPendingDirectory: normalizePath(options?.bootstrapPendingDirectory ?? null),
       preserveDirectoryOverride: options?.preserveDirectoryOverride === true,
@@ -769,7 +782,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // (a fresh draft must start from defaults, not inherit the previous session's selection).
     const configDirectory = normalizePath(selectedProject?.path ?? null) ?? directory
     void activateConfigForDirectory(configDirectory).then(() => {
-      useConfigStore.getState().applyDefaultModelAgentSelection()
+      useConfigStore.getState().applyDefaultModelAgentSelection({
+        projectDefaultModel: selectedProject?.defaultModel,
+      })
     })
 
     if (directory && directory !== useDirectoryStore.getState().currentDirectory) {
@@ -823,6 +838,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     set((s) => {
       if (!s.newSessionDraft?.open) return s
       return { newSessionDraft: { ...s.newSessionDraft, preserveDirectoryOverride: value } }
+    }),
+
+  setDraftPermissionAutoAcceptEnabled: (enabled) =>
+    set((s) => {
+      if (!s.newSessionDraft?.open) return s
+      return { newSessionDraft: { ...s.newSessionDraft, permissionAutoAcceptEnabled: enabled } }
     }),
 
   acknowledgeSessionAbort: (sessionId) =>

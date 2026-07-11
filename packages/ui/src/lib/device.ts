@@ -35,6 +35,11 @@ const DEFAULT_DEVICE_INFO: DeviceInfo = {
   hasTouchOnlyPointer: false,
 };
 
+const hasDesktopSurfaceOverride = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  return new URLSearchParams(window.location.search).get('surface') === 'desktop';
+};
+
 const getNavigatorDeviceHints = (maxTouchPoints: number) => {
   if (typeof navigator === 'undefined') {
     return { isExplicitTablet: false };
@@ -103,8 +108,8 @@ export function getDeviceInfo(): DeviceInfo {
   const prefersCoarsePointer = pointerQuery?.matches ?? false;
   const noHover = hoverQuery?.matches ?? false;
   const maxTouchPoints = typeof navigator !== 'undefined' ? navigator.maxTouchPoints ?? 0 : 0;
-  // VS Code is a desktop surface — don't misdetect a narrow panel as mobile (#1261)
-  const isDesktopShellRuntime = isDesktopShell() || isVSCodeRuntime();
+  // Desktop panels are desktop surfaces even when their viewport is narrow.
+  const isDesktopShellRuntime = isDesktopShell() || isVSCodeRuntime() || hasDesktopSurfaceOverride();
   const { isExplicitTablet } = getNavigatorDeviceHints(maxTouchPoints);
 
   const hasTouchInput = prefersCoarsePointer || noHover || maxTouchPoints > 0;
