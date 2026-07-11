@@ -29,6 +29,9 @@ import {
 } from "@/lib/sessionReviewMetadata"
 
 const MESSAGE_REFETCH_LIMIT = 100
+const SEND_CONFIRMATION_REFETCH_LIMIT = 30
+const SEND_CONFIRMATION_REFETCH_ATTEMPTS = 2
+const SEND_CONFIRMATION_REFETCH_RETRY_MS = 150
 const MESSAGE_REFETCH_SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const UNREVERT_REFETCH_ATTEMPTS = 3
 const UNREVERT_REFETCH_RETRY_MS = 150
@@ -53,9 +56,11 @@ let _childStores: ChildStoreManager | null = null
 let _getDirectory: () => string = () => ""
 type OptimisticAddInput = { sessionID: string; directory?: string | null; message: Message; parts: Part[] }
 type OptimisticRemoveInput = { sessionID: string; directory?: string | null; messageID: string }
+type OptimisticConfirmInput = OptimisticRemoveInput
 
 let _optimisticAdd: ((input: OptimisticAddInput) => void) | null = null
 let _optimisticRemove: ((input: OptimisticRemoveInput) => void) | null = null
+let _optimisticConfirm: ((input: OptimisticConfirmInput) => void) | null = null
 
 // Status-snapshot reconciliation function injected by SyncProvider so this
 // module does not need to import from `sync-context` (which already imports
@@ -138,9 +143,11 @@ export function setActionRefs(
 export function setOptimisticRefs(
   add: (input: OptimisticAddInput) => void,
   remove: (input: OptimisticRemoveInput) => void,
+  confirm?: (input: OptimisticConfirmInput) => void,
 ) {
   _optimisticAdd = add
   _optimisticRemove = remove
+  _optimisticConfirm = confirm ?? null
 }
 
 function sdk() {
@@ -225,6 +232,36 @@ function connectionLostError(): Error {
       ? ""
       : " (never connected)"
   return new Error(`Connection lost${suffix}. Please wait for reconnection.`)
+}
+
+function getErrorStatus(error: unknown): number | null {
+  if (!error || typeof error !== "object") return null
+  const direct = (error as { status?: unknown }).status
+  if (typeof direct === "number") return direct
+  const response = (error as { response?: { status?: unknown } }).response
+  return typeof response?.status === "number" ? response.status : null
+}
+
+function isAmbiguousSendFailure(error: unknown): boolean {
+  const status = getErrorStatus(error)
+  if (status === 503 || status === 504 || status === 408) return true
+  if (error instanceof TypeError) return true
+  if (error instanceof DOMException && (error.name === "AbortError" || error.name === "TimeoutError")) return true
+
+  const message = error instanceof Error
+    ? error.message.toLowerCase()
+    : typeof error === "string"
+      ? error.toLowerCase()
+      : ""
+
+  return message.includes("timeout")
+    || message.includes("timed out")
+    || message.includes("failed to fetch")
+    || message.includes("networkerror")
+    || message.includes("network error")
+    || message.includes("gateway timeout")
+    || message.includes("econnreset")
+    || message.includes("socket hang up")
 }
 
 // Wait briefly for the pipeline to re-establish connection before failing a
@@ -760,6 +797,20 @@ export async function optimisticSend(input: {
   try {
     await input.send(messageID)
   } catch (error) {
+    const acceptedRecords = isAmbiguousSendFailure(error)
+      ? await fetchRecentSendConfirmationRecords(input.sessionId, messageID, targetDirectory)
+      : null
+
+    if (acceptedRecords) {
+      materializeConfirmedSendRecords(store, input.sessionId, messageID, acceptedRecords)
+      _optimisticConfirm?.({
+        sessionID: input.sessionId,
+        directory: targetDirectory,
+        messageID,
+      })
+      return
+    }
+
     // Rollback via optimistic infrastructure
     _optimisticRemove({
       sessionID: input.sessionId,
@@ -864,6 +915,60 @@ async function runOptimisticStatusWatchdog(
 // other `__test*` exports today; the prefix is a hard "do not import from
 // feature code" signal. (#2072)
 export const __testRunOptimisticStatusWatchdog = runOptimisticStatusWatchdog
+
+async function fetchRecentSendConfirmationRecords(
+  sessionId: string,
+  messageID: string,
+  directory?: string | null,
+): Promise<Array<{ info: Message; parts?: Part[] }> | null> {
+  for (let attempt = 0; attempt < SEND_CONFIRMATION_REFETCH_ATTEMPTS; attempt += 1) {
+    if (attempt > 0) await wait(SEND_CONFIRMATION_REFETCH_RETRY_MS)
+    try {
+      const result = await sdk().session.messages({
+        sessionID: sessionId,
+        directory: directory ?? undefined,
+        limit: SEND_CONFIRMATION_REFETCH_LIMIT,
+      })
+      const records = (assertSdkSuccess(result, "session.messages") ?? [])
+        .filter((record: { info?: { id?: string } }) => !!record?.info?.id) as Array<{ info: Message; parts?: Part[] }>
+      if (records.some((record) => record.info.id === messageID)) {
+        return records
+      }
+    } catch {
+      // Confirmation is best-effort; if it fails, keep the original send error path.
+    }
+  }
+  return null
+}
+
+function materializeConfirmedSendRecords(
+  store: DirectoryStoreApi,
+  sessionId: string,
+  messageID: string,
+  records: Array<{ info: Message; parts?: Part[] }>,
+): void {
+  store.setState((state) => {
+    const currentMessages = state.message[sessionId]
+    const message = { ...state.message }
+    const part = { ...state.part }
+    if (currentMessages) {
+      const nextMessages = currentMessages.filter((message) => message.id !== messageID)
+      message[sessionId] = nextMessages
+    }
+    delete part[messageID]
+
+    const materialized = materializeSessionSnapshots(
+      { ...state, message, part },
+      sessionId,
+      records.map((record) => ({
+        info: stripMessageDiffSnapshots(record.info),
+        parts: record.parts ?? [],
+      })),
+      { skipPartTypes: MESSAGE_REFETCH_SKIP_PARTS },
+    )
+    return { message: materialized.message, part: materialized.part }
+  })
+}
 
 // ---------------------------------------------------------------------------
 // Abort

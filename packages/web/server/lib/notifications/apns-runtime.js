@@ -9,6 +9,11 @@
 // Wired into the same trigger fanout as web push (see runtime.js); the relay carries only
 // generic, model-based text (no session content) — see APNS.md.
 
+import {
+  getOrCreateRelaySigningKeypair,
+  signRelayMessage as signRelayMessageShared,
+} from '../relay/signing-key.js';
+
 const APNS_TOKENS_VERSION = 1;
 const APNS_HOST_PRODUCTION = 'https://api.push.apple.com';
 const APNS_HOST_SANDBOX = 'https://api.sandbox.push.apple.com';
@@ -51,27 +56,15 @@ export const createApnsRuntime = (deps) => {
   // device token alone can't be used to push. Zero-config: the keypair generates on first use.
   // ---------------------------------------------------------------------------
 
+  // Key access lives in lib/relay/signing-key.js now (shared with the private
+  // relay identity — same keypair, same storage, same serverId derivation).
   const getOrCreateRelayKeypair = async () => {
     if (cachedRelayKey) return cachedRelayKey;
-    const settings = await readSettingsFromDiskMigrated();
-    const existing = settings?.relaySigningKey;
-    if (existing && existing.privateJwk && existing.publicJwk) {
-      cachedRelayKey = {
-        privateKey: crypto.createPrivateKey({ key: existing.privateJwk, format: 'jwk' }),
-        publicJwk: existing.publicJwk,
-      };
-      return cachedRelayKey;
-    }
-    const { privateKey, publicKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
-    const privateJwk = privateKey.export({ format: 'jwk' });
-    const publicJwk = publicKey.export({ format: 'jwk' });
-    await writeSettingsToDisk({ ...settings, relaySigningKey: { privateJwk, publicJwk } });
-    cachedRelayKey = { privateKey, publicJwk };
+    cachedRelayKey = await getOrCreateRelaySigningKeypair({ crypto, readSettingsFromDiskMigrated, writeSettingsToDisk });
     return cachedRelayKey;
   };
 
-  const signRelayMessage = (privateKey, message) =>
-    crypto.sign('SHA256', Buffer.from(message), { key: privateKey, dsaEncoding: 'ieee-p1363' }).toString('base64url');
+  const signRelayMessage = (privateKey, message) => signRelayMessageShared({ crypto }, privateKey, message);
 
   // Trim to the 4 fields the relay's schema accepts (and that feed the serverId hash).
   const relayPublicJwk = (publicJwk) => ({
