@@ -42,6 +42,7 @@ import { MobileSessionStatusBar, MobileSessionPanelTrigger } from './MobileSessi
 import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
+import { handleSendError, saveSendRecovery, clearSendRecovery } from '@/lib/chat/sendErrorHandler';
 // useMessageStore removed — messages now come from sync system
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isIMECompositionEvent } from '@/lib/ime';
@@ -2311,6 +2312,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             if (linkedPr) {
                 setLinkedPr(null);
             }
+            // Successful send — drop any previous recovery slot from a failed send.
+            clearSendRecovery();
         }).catch((error: unknown) => {
             const rawMessage =
                 error instanceof Error
@@ -2318,41 +2321,35 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     : typeof error === 'string'
                         ? error
                         : String(error ?? '');
-            const normalized = rawMessage.toLowerCase();
 
             console.error('Message send failed:', rawMessage || error);
 
-            const isSoftNetworkError =
-                normalized.includes('timeout') ||
-                normalized.includes('timed out') ||
-                normalized.includes('may still be processing') ||
-                normalized.includes('being processed') ||
-                normalized.includes('failed to fetch') ||
-                normalized.includes('networkerror') ||
-                normalized.includes('network error') ||
-                normalized.includes('gateway timeout') ||
-                normalized === 'failed to send message';
-
-            if (normalized.includes('payload too large') || normalized.includes('413') || normalized.includes('entity too large')) {
-                toast.error(t('chat.chatInput.toast.attachmentsTooLarge'));
-                if (allAttachments.length > 0) {
-                    useInputStore.getState().setAttachedFiles(allAttachments);
-                }
-                return;
-            }
-
-            if (isSoftNetworkError) {
-                if (allAttachments.length > 0) {
-                    useInputStore.getState().setAttachedFiles(allAttachments);
-                    toast.error(t('chat.chatInput.toast.sendAttachmentsFailed'));
-                }
-                return;
-            }
-
-            if (allAttachments.length > 0) {
-                useInputStore.getState().setAttachedFiles(allAttachments);
-            }
-            toast.error(rawMessage || t('chat.chatInput.toast.messageSendFailed'));
+            // Route every send error through the shared handler so soft network
+            // errors ALWAYS surface a toast (previously swallowed when no
+            // attachments — the user's text vanished with no notification and
+            // the message kept processing server-side, leaving the session
+            // stuck on busy with no visible cause). See issue #2072.
+            handleSendError({
+                rawMessage,
+                text: primaryText,
+                attachments: allAttachments,
+                source: 'send',
+                toast: {
+                    error: (message, options) =>
+                        toast.error(message, options),
+                },
+                // useI18n's `t` is typed against the literal key list; the
+                // shared handler accepts an open `(key: string) => string`
+                // signature. Widen at the boundary rather than at the call.
+                t: t as unknown as (key: string) => string,
+                saveRecovery: (text, attachments) =>
+                    saveSendRecovery(text, attachments),
+                onRestoreAttachments: () => {
+                    if (allAttachments.length > 0) {
+                        useInputStore.getState().setAttachedFiles(allAttachments);
+                    }
+                },
+            });
         });
 
         if (!isMobile) {

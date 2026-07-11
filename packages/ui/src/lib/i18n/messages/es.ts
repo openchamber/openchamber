@@ -1889,6 +1889,11 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.toast.attachmentsTooLarge": "Los adjuntos son demasiado grandes para enviar. Intenta reducir la cantidad o el tamaño de las imágenes.",
   "chat.chatInput.toast.sendAttachmentsFailed": "No se pudieron enviar los adjuntos. Intenta con menos archivos o imágenes más pequeñas.",
   "chat.chatInput.toast.messageSendFailed": "El mensaje no se pudo enviar. Los adjuntos se restauraron.",
+  "chat.sendError.mayStillProcessing": "El mensaje podría seguir procesándose en el servidor.",
+  "chat.sendError.mayStillProcessingDescription": "Si aparecen respuestas nuevas, el mensaje se envió. Usa STOP para cancelar; todavía no lo reenvíes.",
+  "chat.sendError.queuedFailed": "No se pudo enviar el mensaje en cola.",
+  "chat.sendError.queuedFailedDescription": "El mensaje se eliminó de la cola. Intenta reenviarlo directamente.",
+
   "chat.chatInput.toast.clipboardAttachFailed": "No se pudo adjuntar la imagen desde el portapapeles",
   "chat.chatInput.toast.addedFileMentions": "Se añadieron {count} mención(es) de archivo",
   "chat.chatInput.toast.attachFileFailed": "No se pudo adjuntar el archivo",
