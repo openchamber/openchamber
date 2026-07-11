@@ -235,9 +235,20 @@ export const DefaultsSettings: React.FC = () => {
       try {
         const response = await runtimeFetch('/api/small-model', { method: 'GET', headers: { Accept: 'application/json' } });
         if (!response.ok) return;
-        const payload = await response.json().catch(() => null) as { authenticatedProviders?: unknown } | null;
-        if (!cancelled && Array.isArray(payload?.authenticatedProviders)) {
-          setSmallModelProviders(payload.authenticatedProviders.filter((id): id is string => typeof id === 'string'));
+        const payload = await response.json().catch(() => null) as { availableProviders?: unknown; authenticatedProviders?: unknown } | null;
+        if (cancelled) return;
+        // Prefer the union (auth + no-auth providers like OpenCode zen) so the
+        // picker shows zen/free models as well as authenticated ones. Fall back
+        // to authenticatedProviders for older servers that don't ship the
+        // union, and finally to undefined (picker shows everything).
+        let raw: unknown = null;
+        if (Array.isArray(payload?.availableProviders)) {
+          raw = payload.availableProviders;
+        } else if (Array.isArray(payload?.authenticatedProviders)) {
+          raw = payload.authenticatedProviders;
+        }
+        if (raw) {
+          setSmallModelProviders((raw as unknown[]).filter((id): id is string => typeof id === 'string'));
         }
       } catch {
         // leave undefined — picker falls back to showing all providers

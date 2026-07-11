@@ -130,7 +130,9 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
 /**
  * Provider ids with a usable OpenCode login — the set the small model can
  * actually call. Used by the settings override picker to hide providers that
- * would only ever fail (e.g. opencode free models without a token).
+ * would only ever fail. Providers that ship without auth (see
+ * `NO_AUTH_PROVIDER_IDS`) are tracked separately and exposed via
+ * `listNoAuthProviders` / `listSelectableProviders`.
  */
 export function listAuthenticatedProviders() {
   try {
@@ -147,6 +149,42 @@ export function listAuthenticatedProviders() {
   } catch {
     return [];
   }
+}
+
+// OpenCode providers that ship without requiring an auth entry. The `opencode`
+// provider (zen / `big-pickle`, `*-free` models) is served by OpenCode's own
+// infra and works without a token, so the settings override picker can offer
+// it without an auth.json entry. Keep this list narrow: paid providers that
+// just happen to lack a key on this machine are NOT no-auth — they are
+// authenticated providers with a missing credential, which is a different
+// state we must not silently elide.
+const NO_AUTH_PROVIDER_IDS = ['opencode'];
+
+/**
+ * Provider ids that work without any auth entry. Exposed as a sibling to
+ * `listAuthenticatedProviders` so callers can distinguish "no auth needed"
+ * from "no usable credential".
+ */
+export function listNoAuthProviders() {
+  return [...NO_AUTH_PROVIDER_IDS];
+}
+
+/**
+ * Deduplicated union of authenticated providers and no-auth providers —
+ * the set of provider ids the small-model override picker can offer to the
+ * user. A user-selected `opencode/<model>` is honored by the resolver at the
+ * `source: 'settings'` step (which never checks auth) but cannot be used as
+ * a fallback when no explicit override is set. Returned as
+ * `availableProviders` by `GET /api/small-model`; the no-auth subset is
+ * surfaced separately as `noAuthProviders` so callers can render the picker
+ * with distinction.
+ */
+export function listSelectableProviders() {
+  const ids = new Set([
+    ...listNoAuthProviders(),
+    ...listAuthenticatedProviders(),
+  ]);
+  return Array.from(ids);
 }
 
 /**
