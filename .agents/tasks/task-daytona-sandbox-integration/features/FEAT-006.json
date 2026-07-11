@@ -2,7 +2,7 @@
   "id": "FEAT-006",
   "type": "fix",
   "description": "Address v2 review feedback: update stale DOCUMENTATION.md (remove ws-bridge references), normalize GET /status route to return 'running' instead of internal 'active', and cache per-request proxy middleware allocation.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Update DOCUMENTATION.md to remove all references to ws-bridge.js, the bridge property, and ws-bridge usage examples. Update the architecture diagram and service exports to reflect current reality.",
     "Fix GET /api/daytona/sandbox/:sessionId/status to map entry.status 'active' to 'running' in the response, consistent with the POST create route.",
@@ -23,5 +23,5 @@
     "bun run lint"
   ],
   "blocked_reason": null,
-  "findings": null
+  "findings": "All 3 v2 review issues addressed. DOCUMENTATION.md rewritten to remove all ws-bridge.js references and reflect current architecture (SSE/HTTP/WS proxy in proxy.js). GET /status and GET /sandboxes now map internal 'active' to 'running' via normalizeStatus() helper. Proxy middleware caching implemented using a Map keyed by target URL. All 679 tests pass (40 in daytona module), lint clean, type-check clean across all packages."
 }
