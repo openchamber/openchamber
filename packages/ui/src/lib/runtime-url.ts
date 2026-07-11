@@ -1,4 +1,4 @@
-import { getRuntimeUrlAuthTokenSync } from '@/lib/runtime-auth';
+import { getLocalRuntimeUrlAuthTokenSync, getRuntimeExtraHeadersSync, getRuntimeUrlAuthTokenSync } from '@/lib/runtime-auth';
 
 type QueryValue = string | number | boolean | null | undefined;
 
@@ -38,6 +38,14 @@ const readInjectedApiBaseUrl = (): string => {
   const injected = (window as typeof window & { __OPENCHAMBER_API_BASE_URL__?: string }).__OPENCHAMBER_API_BASE_URL__;
   return normalizeBaseUrl(injected);
 };
+
+const readInjectedLocalOrigin = (): string => {
+  if (typeof window === 'undefined') return '';
+  const injected = (window as typeof window & { __OPENCHAMBER_LOCAL_ORIGIN__?: string }).__OPENCHAMBER_LOCAL_ORIGIN__;
+  return normalizeBaseUrl(injected);
+};
+
+const hasRuntimeExtraHeaders = (): boolean => Object.keys(getRuntimeExtraHeadersSync()).length > 0;
 
 const currentHref = (config: RuntimeUrlConfig): string => {
   const configured = config.currentHref?.();
@@ -110,6 +118,25 @@ const toWebSocketUrl = (candidate: string, config: RuntimeUrlConfig): string => 
   return url.toString();
 };
 
+const toRealtimeProxyUrl = (kind: 'sse' | 'ws', targetUrl: string, config: RuntimeUrlConfig): string | null => {
+  if (!hasRuntimeExtraHeaders()) return null;
+  const localOrigin = readInjectedLocalOrigin();
+  if (!localOrigin) return null;
+  try {
+    const proxy = new URL(`/api/openchamber/realtime-proxy/${kind === 'sse' ? 'sse' : 'ws'}`, `${localOrigin}/`);
+    proxy.searchParams.set('url', targetUrl);
+    const localToken = getLocalRuntimeUrlAuthTokenSync(localOrigin);
+    if (localToken) proxy.searchParams.set('oc_url_token', localToken);
+    if (kind === 'ws') {
+      proxy.protocol = proxy.protocol === 'https:' ? 'wss:' : 'ws:';
+      return toWebSocketUrl(proxy.toString(), config);
+    }
+    return proxy.toString();
+  } catch {
+    return null;
+  }
+};
+
 export const createRuntimeUrlResolver = (config: RuntimeUrlConfig = {}): RuntimeUrlResolver => {
   const configuredApiBaseUrl = normalizeBaseUrl(config.apiBaseUrl);
   const configuredRealtimeBaseUrl = normalizeBaseUrl(config.realtimeBaseUrl);
@@ -131,8 +158,14 @@ export const createRuntimeUrlResolver = (config: RuntimeUrlConfig = {}): Runtime
       allowOutsideWorkspace: options?.allowOutsideWorkspace === true ? true : undefined,
       outsideFileGrant: options?.outsideFileGrant,
     }),
-    sse: (path, query) => withUrlAuth(realtime(path, query)),
-    websocket: (path, query) => toWebSocketUrl(withUrlAuth(realtime(path, query)), config),
+    sse: (path, query) => {
+      const target = withUrlAuth(realtime(path, query));
+      return toRealtimeProxyUrl('sse', target, config) || target;
+    },
+    websocket: (path, query) => {
+      const target = toWebSocketUrl(withUrlAuth(realtime(path, query)), config);
+      return toRealtimeProxyUrl('ws', target, config) || target;
+    },
   };
 };
 

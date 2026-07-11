@@ -1,0 +1,68 @@
+---
+title: Conectar un dispositivo
+description: Vincula tu teléfono, escritorio u otro navegador con tu servidor de OpenChamber usando un código QR de un solo uso.
+---
+
+# Conectar un dispositivo
+
+Vincula otro dispositivo —la app móvil, la app de escritorio o un navegador en otra máquina— con tu servidor de OpenChamber escaneando un código QR de un solo uso. Es la forma recomendada de conectar dispositivos: no hay puertos que abrir ni direcciones que escribir.
+
+## Vincula un dispositivo
+
+1. En la máquina donde se ejecuta OpenChamber, abre **Settings → Remote Instances → Conectarse a este servidor** y pulsa **Añadir un dispositivo**.
+2. Dale un nombre al dispositivo (p. ej. *Mi iPhone*) para reconocerlo más adelante.
+3. Elige dónde usarás el dispositivo:
+   - **Solo este equipo** — para aplicaciones en esta misma máquina
+   - **Solo red doméstica** — se conecta directamente por tu Wi-Fi; no funciona fuera de esta red
+   - **En cualquier lugar** — funciona en casa y fuera; fuera de casa el tráfico pasa por el [Private Relay](/es/private-relay/), un túnel cifrado de extremo a extremo sin configuración
+4. Pulsa **Crear código QR**.
+5. En el otro dispositivo, escanea el código:
+   - **app móvil** — toca **Escanear código QR** en la pantalla de conexión (o en la lista de instancias)
+   - **app de escritorio** — copia el enlace de conexión y pégalo en **Settings → Remote Instances → Otros servidores de OpenChamber → Importar enlace**
+
+El diálogo se cierra solo en cuanto el dispositivo se conecta, y el dispositivo aparece en la lista con su estado en vivo. Eso es todo: ya están vinculados.
+
+## Por qué la vinculación es segura
+
+- **El código QR es de un solo uso.** Deja de funcionar en el momento en que un dispositivo lo canjea, y caduca por sí solo si nunca se usa.
+- **Cada dispositivo recibe su propio token.** Escanear un código nunca expone tu contraseña de UI, y el token de un dispositivo no puede usarse para suplantar a otro.
+- **Tú mantienes el control.** Cada dispositivo vinculado aparece en la lista con su nombre, plataforma y estado de conexión; puedes revocar cualquiera en cualquier momento.
+- **El tráfico fuera de casa está cifrado de extremo a extremo.** Con **En cualquier lugar**, el tráfico fuera de tu red viaja por el [Private Relay](/es/private-relay/), que no puede leer lo que pasa por él.
+
+## Gestiona los dispositivos vinculados
+
+**Settings → Remote Instances → Conectarse a este servidor** lista todos los dispositivos que pueden alcanzar este servidor, con un punto verde cuando están en línea y si están conectados por la red local o por el relay.
+
+- **Revocar** corta el acceso de un dispositivo de inmediato. Vuelve a vincularlo con un nuevo código QR si cambias de opinión.
+- **Borrar revocados** limpia la lista.
+
+El mismo dispositivo físico mantiene una sola entrada aunque vuelva a iniciar sesión más tarde: no acumularás duplicados.
+
+## Conecta desde la línea de comandos
+
+Si el servidor funciona en modo headless (sin UI abierta), crea un enlace de conexión desde una terminal en esa máquina.
+
+Para un dispositivo en la misma red:
+
+```bash
+openchamber connect-url --port 3000 --qr
+```
+
+Para un dispositivo que debe conectarse desde **cualquier lugar** —el equivalente a elegir **En cualquier lugar** en el diálogo—:
+
+```bash
+openchamber connect-url --relay --qr
+```
+
+Un enlace `--relay` lleva ambas rutas, igual que el diálogo: el dispositivo se conecta directamente por tu red local cuando puede alcanzar el servidor, y recurre al [Private Relay](/es/private-relay/) cuando está fuera. El relay arranca por sí solo: una instancia en marcha recoge el enlace en menos de un minuto, y una detenida lo hace en su próximo arranque.
+
+> La ruta directa solo funciona si el servidor realmente escucha en tu red. De forma predeterminada, OpenChamber solo escucha en la propia máquina; inícialo con `--lan` para que sea accesible por Wi-Fi. El comando te avisa (`[LAN_UNREACHABLE]`) cuando la ruta directa del enlace no será utilizable desde otros dispositivos; un enlace `--relay` sigue funcionando en ese caso, solo que siempre a través del relay.
+
+El enlace y el código QR impresos funcionan exactamente igual que los del diálogo de ajustes: de un solo uso, con caducidad y revocables.
+
+## Relacionado
+
+- [Private Relay](/es/private-relay/) — cómo funcionan las conexiones «En cualquier lugar» y qué puede ver el relay y qué no
+- [Apps móviles](/es/mobile/) — instala la app de iOS o Android
+- [Instancias remotas](/es/remote-instances/) — conecta la app de escritorio a servidores por SSH o con enlaces
+- [Acceso remoto](/es/troubleshooting/remote-access/) — cuando un dispositivo no se conecta

@@ -230,10 +230,11 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
                                 "[&_[data-component='markdown-code']]:bg-transparent",
                                 "[&_[data-component='markdown-code']>*:first-child]:hidden",
                                 "[&_[data-component='markdown-code']>div]:inline",
-                                "[&_[data-component='markdown-code']>div]:p-0",
-                                "[&_[data-component='markdown-code']_pre]:inline",
-                                "[&_[data-component='markdown-code']_code]:inline",
-                            ]
+                                 "[&_[data-component='markdown-code']>div]:p-0",
+                                 "[&_[data-component='markdown-code']_pre]:inline",
+                                 "[&_[data-component='markdown-code']_code]:inline",
+                                 "[&_[data-md-code-line-numbers]]:hidden",
+                             ]
                         )}
                         disableLinkSafety
                         enableFileReferences={false}

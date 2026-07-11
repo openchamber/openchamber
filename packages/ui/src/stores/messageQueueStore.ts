@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import { devtools, persist, createJSONStorage } from 'zustand/middleware';
-import { getSafeStorage } from './utils/safeStorage';
+import { devtools, persist } from 'zustand/middleware';
+import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import type { AttachedFile } from './types/sessionTypes';
 import { updateDesktopSettings } from '@/lib/persistence';
 
@@ -201,7 +201,7 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
             {
                 name: 'message-queue-store',
                 version: 1,
-                storage: createJSONStorage(() => getSafeStorage()),
+                storage: createDeferredSafeJSONStorage(),
                 partialize: (state) => ({
                     queuedMessages: state.queuedMessages,
                     followUpBehavior: state.followUpBehavior,

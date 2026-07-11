@@ -25,7 +25,7 @@ import { useDirectoryStore } from "@/stores/useDirectoryStore"
 import { useSessionFoldersStore } from "@/stores/useSessionFoldersStore"
 import { useCommandsStore } from "@/stores/useCommandsStore"
 import { useSkillsStore } from "@/stores/useSkillsStore"
-import { getSafeStorage } from "@/stores/utils/safeStorage"
+import { getDeferredSafeStorage } from "@/stores/utils/safeStorage"
 import { markPendingUserSendAnimation } from "@/lib/userSendAnimation"
 import { flattenAssistantTextParts } from "@/lib/messages/messageText"
 import { composeForkSessionMessage } from "@/lib/messages/executionMeta"
@@ -190,7 +190,6 @@ function notifyMessageSent(sessionId: string): void {
 
 export type { SyntheticContextPart } from "./input-store"
 export type { SessionMemoryState } from "./viewport-store"
-export type { VoiceStatus, VoiceMode } from "./voice-store"
 
 export type NewSessionDraftState = {
   open: boolean
@@ -327,7 +326,7 @@ const resolveDirectoryKey = (session: Session): string | null => {
     ?? normalizePath(sessionRecord.project?.worktree ?? null)
 }
 
-const safeStorage = getSafeStorage()
+const safeStorage = getDeferredSafeStorage()
 const DRAFT_TARGET_STORAGE_KEY = "oc.chatInput.lastDraftTarget"
 
 type PersistedDraftTarget = { projectId: string | null; directory: string | null }
@@ -515,7 +514,7 @@ const WORKTREE_MAP_STORAGE_KEY = 'oc.worktreeMap'
 
 const loadPersistedWorktreeMap = (): Map<string, WorktreeMetadata[]> => {
   try {
-    const raw = getSafeStorage().getItem(WORKTREE_MAP_STORAGE_KEY)
+    const raw = getDeferredSafeStorage().getItem(WORKTREE_MAP_STORAGE_KEY)
     if (!raw) return new Map()
     const entries = JSON.parse(raw) as Array<[string, WorktreeMetadata[]]>
     if (!Array.isArray(entries)) return new Map()
@@ -529,7 +528,7 @@ const loadPersistedWorktreeMap = (): Map<string, WorktreeMetadata[]> => {
 
 const persistWorktreeMap = (map: Map<string, WorktreeMetadata[]>): void => {
   try {
-    getSafeStorage().setItem(WORKTREE_MAP_STORAGE_KEY, JSON.stringify([...map.entries()]))
+    getDeferredSafeStorage().setItem(WORKTREE_MAP_STORAGE_KEY, JSON.stringify([...map.entries()]))
   } catch {
     // quota / serialization error — ignore; discovery still refreshes at runtime
   }
@@ -770,7 +769,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // (a fresh draft must start from defaults, not inherit the previous session's selection).
     const configDirectory = normalizePath(selectedProject?.path ?? null) ?? directory
     void activateConfigForDirectory(configDirectory).then(() => {
-      useConfigStore.getState().applyDefaultModelAgentSelection()
+      useConfigStore.getState().applyDefaultModelAgentSelection({
+        projectDefaultModel: selectedProject?.defaultModel,
+      })
     })
 
     if (directory && directory !== useDirectoryStore.getState().currentDirectory) {
