@@ -181,6 +181,7 @@ type AssistantMessageSessionExecution = {
   agent: string
   instructions: string
   createWorktree?: boolean
+  runAsGoal?: boolean
 }
 
 function notifyMessageSent(sessionId: string): void {
@@ -1476,6 +1477,13 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       })
       useDirectoryStore.getState().setDirectory(createdWorktree.path, { showOverlay: false })
     }
+
+    // "Run as goal" rides the same arm mechanism as the composer target
+    // button: sendMessage consumes the flag, stamps the goal (objective =
+    // the composed fork message) and attaches the goal-mode intro part.
+    // Set explicitly either way so a stray armed flag cannot leak into a
+    // non-goal fork.
+    useSessionGoalArmStore.getState().setArmed(execution.runAsGoal === true)
 
     await get().sendMessage(
       composeForkSessionMessage(execution.instructions, assistantPlanText),
