@@ -145,6 +145,16 @@ const extractSessionStatus = (payload) => {
   return { sessionId, type, directory };
 };
 
+// A user abort lands as an assistant message carrying MessageAbortedError.
+const extractAbortedAssistant = (payload) => {
+  if (!payload || payload.type !== 'message.updated') return null;
+  const info = payload.properties?.info;
+  if (!info || typeof info !== 'object' || info.role !== 'assistant') return null;
+  if (info.error?.name !== 'MessageAbortedError') return null;
+  if (typeof info.sessionID !== 'string' || !info.sessionID) return null;
+  return { sessionId: info.sessionID };
+};
+
 const extractSessionUpdate = (payload) => {
   if (!payload || payload.type !== 'session.updated') return null;
   const info = payload.properties?.info;
@@ -464,8 +474,28 @@ export const createSessionGoalRuntime = ({
 
     // --- Terminal conditions, cheapest first ---
 
+    // A user abort means "stop working" — pause the goal instead of blocking
+    // it (this is the tick-side safety net; the event path in processPayload
+    // usually pauses immediately). The exception is a goal the user just
+    // resumed over an aborted tail: that is an explicit "keep going", so it
+    // falls through to the continuation below (skipping the audit — an
+    // aborted reply is not evidence of anything).
+    const abortedTail = lastAssistantInfo.error?.name === 'MessageAbortedError';
+    if (abortedTail && goal.statusReason !== 'resumed') {
+      await writeGoal(sessionId, directory, goal.id, () => ({
+        status: 'paused',
+        statusReason: 'paused after abort',
+        tokensUsed,
+        tokensBaseline,
+        tokensCommitted,
+        lastAccountedMessageID,
+      }));
+      console.log(`[session-goal] ${sessionId} paused after user abort`);
+      return;
+    }
+
     // Turn error → blocked (prevents runaway auto-continuation into failures).
-    if (lastAssistantInfo.error && typeof lastAssistantInfo.error === 'object') {
+    if (!abortedTail && lastAssistantInfo.error && typeof lastAssistantInfo.error === 'object') {
       const reason = typeof lastAssistantInfo.error.name === 'string' && lastAssistantInfo.error.name
         ? lastAssistantInfo.error.name
         : 'assistant turn failed';
@@ -501,7 +531,7 @@ export const createSessionGoalRuntime = ({
     let audit = null;
     let blockedStreak = 0;
     let auditFailStreak = goal.auditFailStreak;
-    if (lastAssistantInfo.summary === true) {
+    if (lastAssistantInfo.summary === true || abortedTail) {
       blockedStreak = goal.blockedStreak;
     } else {
       audit = await runAudit({ goal, assistantText, directory, lastAssistantInfo });
@@ -590,8 +620,40 @@ export const createSessionGoalRuntime = ({
     timers.set(sessionId, { timer, armedAt: Date.now() });
   };
 
+  // Immediate event path for a user abort: pause the active goal right away,
+  // BEFORE any idle tick could send a continuation over the user's explicit
+  // "stop". Messages the user sends afterwards leave the paused goal alone;
+  // Resume re-arms the loop (and kicks off immediately on an idle session).
+  const pauseAfterAbort = async (sessionId, directory) => {
+    const session = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory })
+      .catch(() => null);
+    const goal = parseGoalMetadata(session);
+    if (!goal || goal.status !== 'active') return;
+    await writeGoal(sessionId, directory, goal.id, () => ({
+      status: 'paused',
+      statusReason: 'paused after abort',
+    }));
+    console.log(`[session-goal] ${sessionId} paused after user abort`);
+  };
+
   const processPayload = (payload, directoryHint = '') => {
     if (stopped) return;
+
+    const aborted = extractAbortedAssistant(payload);
+    if (aborted) {
+      clearTimer(aborted.sessionId);
+      if (!inflight.has(aborted.sessionId)) {
+        inflight.add(aborted.sessionId);
+        pauseAfterAbort(aborted.sessionId, directoryHint)
+          .catch((error) => {
+            console.warn('[session-goal] pause after abort failed:', error?.message || error);
+          })
+          .finally(() => {
+            inflight.delete(aborted.sessionId);
+          });
+      }
+      return;
+    }
 
     const status = extractSessionStatus(payload);
     if (status) {

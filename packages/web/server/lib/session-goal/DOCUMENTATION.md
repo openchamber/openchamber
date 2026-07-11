@@ -60,6 +60,12 @@ session and drops the write when the stored goal id no longer matches.
      compaction itself) and the next segment starts with a zero baseline.
      `tokensUsed = tokensCommitted + current segment`, kept monotonic so
      unflagged context shrinks never move the budget backwards;
+   - a user abort pauses the goal instead of blocking it: the event path in
+     `processPayload` pauses immediately on the MessageAbortedError message
+     (before any tick could send a continuation over the user's explicit
+     stop), with a tick-side safety net. Messages sent while paused leave
+     the goal alone; Resume re-arms the loop, and resuming over an aborted
+     tail skips the audit and goes straight to a continuation nudge;
    - terminal checks, cheapest first: assistant turn error → `blocked`;
      `tokensUsed >= tokenBudget` → `budgetLimited`;
      `turnsUsed >= MAX_AUTO_TURNS` (20) → `blocked`;
