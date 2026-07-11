@@ -5,7 +5,9 @@ description: リモートおよびモバイルアクセス向けに OpenChamber 
 
 # トンネル
 
-トンネルは OpenChamber への公開リンクです。スマートフォンや別ネットワークからアクセスできます。実行中のインスタンスに対して作成するには `openchamber tunnel` を使います。
+トンネルは OpenChamber への公開リンクです。別ネットワークの普通のブラウザからアクセスできます。実行中のインスタンスに対して作成するには `openchamber tunnel` を使います。
+
+> **自分のデバイス**（モバイルアプリ、別のデスクトップ）の接続には、通常トンネルは不要です。代わりに [ペアリング](/connect-devices/) して、エンドツーエンド暗号化の [Private Relay](/private-relay/) にセットアップ不要で外出先アクセスを任せましょう。
 
 ## 前提条件
 
@@ -111,7 +113,8 @@ openchamber tunnel stop --port 3000
 
 ## 関連
 
+- [デバイスを接続する](/connect-devices/) — 公開 URL なしで自分のデバイスをペアリングする
 - [セキュリティ](/security/) — 公開する前に UI を保護する
 - [デスクトップトンネル](/desktop-tunnels/) — CLI 起動なしでデスクトップアプリからトンネルを設定する
-- [PWA とモバイル](/mobile/) — スマートフォンから OpenChamber にアクセスする
+- [モバイルアプリと PWA](/mobile/) — スマートフォンから OpenChamber にアクセスする
 - [トラブルシューティング](/troubleshooting/) — トンネルリンクが動かない場合
