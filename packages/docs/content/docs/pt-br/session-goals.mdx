@@ -1,0 +1,56 @@
+---
+title: Objetivos de sessão
+description: Transforme um prompt em um objetivo no qual o agente trabalha automaticamente.
+---
+
+# Objetivos de sessão
+
+Um objetivo transforma um único prompt em uma linha de chegada. Em vez de cutucar o agente com "continua" após cada resposta, você define o objetivo uma vez — e o OpenChamber mantém a sessão trabalhando em direção a ele automaticamente, verificando o progresso com um auditor independente após cada turno. Continua rodando mesmo enquanto você está ausente.
+
+## Iniciar um objetivo
+
+1. Pressione o botão de alvo no compositor. Ele acende — o modo objetivo está armado.
+2. Escreva seu prompt e envie. Essa mensagem se torna o objetivo.
+
+Funciona igualmente em uma sessão existente e em um rascunho de sessão nova: arme o alvo, escreva a primeira mensagem, envie — a nova sessão começa com o objetivo já ativo.
+
+## Escreva um objetivo autocontido
+
+O auditor de progresso vê apenas o seu objetivo e a última resposta do agente — não o histórico do chat. Então formule a mensagem-objetivo de forma que alguém sem o contexto da conversa entenda como é o estado final.
+
+- Bom: "Adicione testes para o módulo de exportação e faça toda a suíte de testes passar."
+- Nem tanto: "Conserta isso" ou "Continua com aquela ideia."
+
+Para pequenos ajustes contextuais você não precisa de um objetivo — envie uma mensagem normal.
+
+## Como funciona
+
+Quando o agente para e a sessão fica quieta por um momento, o OpenChamber:
+
+1. Pede a um modelo pequeno e barato que audite o último turno contra o objetivo: continuar, pronto ou travado?
+2. Se o veredicto for "continuar", envia um prompt de continuação e o agente retoma o trabalho.
+3. Se o objetivo foi alcançado de forma verificável, o objetivo é concluído e você recebe uma notificação.
+4. Se o agente está realmente travado (precisa da sua participação), o objetivo para como bloqueado — mas só depois que o auditor disser isso três vezes seguidas, então um tropeço pontual nunca encerra o objetivo.
+
+Há também freios de segurança: um orçamento de tokens opcional, um teto de continuações automáticas e parada em erros de turno. Se o contexto da sessão for compactado no meio do trabalho, o objetivo simplesmente continua — bater na janela de contexto é prova de que o trabalho não tinha terminado.
+
+## Acompanhar e gerenciar
+
+- A faixa acima do compositor mostra a última nota de progresso, o status e o uso de tokens. Clique nela para editar o objetivo, pausar/retomar, marcar como concluído ou remover.
+- O botão de alvo fica aceso enquanto o objetivo roda (azul), fica verde ao concluir e vermelho quando bloqueado ou sem orçamento. Pressioná-lo com um objetivo rodando pergunta se quer cancelar.
+- Na barra lateral de sessões, um pequeno alvo aparece ao lado da data da sessão, colorido pelo estado do objetivo.
+
+## Orçamento de tokens
+
+Em **Configurações → Chat → Objetivo** você pode definir um orçamento de tokens padrão para novos objetivos. Quando um objetivo atinge o orçamento, ele para como "orçamento atingido" em vez de gastar mais — você pode aumentar o orçamento e retomar pela faixa do objetivo.
+
+## Tenha em mente
+
+- O loop do objetivo roda no servidor do OpenChamber, não na aba do navegador. Feche a aba, bloqueie o celular — o agente continua trabalhando, e você recebe uma notificação quando o objetivo se resolve. O servidor (app desktop ou processo `openchamber`) precisa continuar rodando.
+- Objetivos usam o provedor e o modelo da sua própria sessão, incluindo as chamadas do auditor — nada sai para provedores que você já não use.
+- Um objetivo por sessão de cada vez.
+
+## Relacionado
+
+- [Tarefas agendadas](/scheduled-tasks/) — rodar um prompt em um cronograma em vez de rumo a uma linha de chegada
+- [Notificações](/notifications/) — como você fica sabendo de um objetivo concluído

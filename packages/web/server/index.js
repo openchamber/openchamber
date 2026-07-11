@@ -73,6 +73,7 @@ import { createBootstrapRuntime } from './lib/opencode/bootstrap-runtime.js';
 import { createSessionRuntime } from './lib/opencode/session-runtime.js';
 import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
 import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
+import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
 import { createTunnelWiringRuntime } from './lib/opencode/tunnel-wiring-runtime.js';
@@ -724,6 +725,31 @@ const sessionAssistRuntime = createSessionAssistRuntime({
   getSmallModelService: async () => import('./lib/small-model/index.js'),
 });
 
+const sessionGoalRuntime = createSessionGoalRuntime({
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  getSmallModelService: async () => import('./lib/small-model/index.js'),
+  emitGoalNotification: ({ sessionId, directory, status, goal }) => {
+    const title = status === 'complete'
+      ? 'Goal complete'
+      : (status === 'budgetLimited' ? 'Goal reached its token budget' : 'Goal blocked');
+    const detail = goal?.statusReason && goal.statusReason !== 'verified by audit' && goal.statusReason !== 'reported by agent'
+      ? goal.statusReason
+      : (goal?.note || '');
+    const objective = typeof goal?.objective === 'string' ? goal.objective.slice(0, 140) : '';
+    const notificationPayload = {
+      title,
+      body: [objective, detail].filter(Boolean).join(' — ').slice(0, 240),
+      tag: `goal-${sessionId}`,
+      kind: 'goal',
+      sessionId,
+      directory,
+    };
+    const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
+    broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
+  },
+});
+
 const globalMessageStreamHub = createGlobalMessageStreamHub({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
@@ -754,6 +780,7 @@ globalMessageStreamHub.subscribeEvent((event) => {
     ? event.directory
     : '';
   sessionAssistRuntime.processPayload(payload, directory);
+  sessionGoalRuntime.processPayload(payload, directory);
 });
 
 const processForwardedEventPayload = (payload, emitSyntheticEvent) => {
@@ -1070,6 +1097,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   syncToHmrState,
   openCodeWatcherRuntime,
   sessionAssistRuntime,
+  sessionGoalRuntime,
   sessionRuntime,
   getHealthCheckInterval: () => healthCheckInterval,
   clearHealthCheckInterval: (value) => clearInterval(value),

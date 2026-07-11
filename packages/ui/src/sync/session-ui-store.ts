@@ -57,6 +57,10 @@ import {
   fetchMessagesForSession,
 } from "./session-actions"
 import { useInputStore, type SyntheticContextPart } from "./input-store"
+import { useSessionGoalArmStore } from "@/stores/useSessionGoalArmStore"
+import { setSessionGoal } from "@/lib/sessionGoalActions"
+import { wrapSystemReminder } from "@/lib/systemReminder"
+import { useUIStore } from "@/stores/useUIStore"
 import { useSelectionStore } from "./selection-store"
 import { getViewportSessionMemory, useViewportStore, viewportSessionKey } from "./viewport-store"
 import { useSessionWorktreeStore } from "./session-worktree-store"
@@ -1004,6 +1008,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   // sendMessage — calls SDK, reads domain data from sync
   // ---------------------------------------------------------------------------
+  // Armed goal (composer target button): the sent prompt becomes the goal
+  // objective; budget comes from the global default setting. Fire-and-forget —
+  // a failed metadata patch must not fail the send.
   sendMessage: async (
     content: string,
     providerID: string,
@@ -1026,6 +1033,34 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     const draft = get().newSessionDraft
     const trimmedAgent = typeof agent === "string" && agent.trim().length > 0 ? agent.trim() : undefined
+
+    const goalArmed = inputMode !== "shell" && content.trim().length > 0
+      ? useSessionGoalArmStore.getState().consume()
+      : false
+    if (goalArmed) {
+      // Teach the agent the goal protocol from turn one — without this it
+      // only learns about goal mode from the first server continuation.
+      const uiState = useUIStore.getState()
+      const budgetLine = uiState.sessionGoalDefaultBudgetEnabled
+        ? ` A token budget of ${uiState.sessionGoalDefaultBudget} tokens applies to this goal.`
+        : ""
+      const goalIntro = wrapSystemReminder(
+        "Goal mode is active for this session. The user message above defines the goal objective. "
+        + "Work toward it across turns; whenever you stop before the objective is verifiably complete, the system will automatically prompt you to continue. "
+        + "Progress is evaluated independently after each turn, so end every turn with a clear, factual statement of what is done, what was verified, and what remains."
+        + budgetLine,
+      )
+      additionalParts = [...(additionalParts ?? []), { text: goalIntro, synthetic: true }]
+    }
+    const applyArmedGoal = (goalSessionId: string, goalDirectory: string | null | undefined) => {
+      if (!goalArmed) return
+      const uiState = useUIStore.getState()
+      const tokenBudget = uiState.sessionGoalDefaultBudgetEnabled ? uiState.sessionGoalDefaultBudget : null
+      void setSessionGoal(goalSessionId, goalDirectory ?? undefined, { objective: content, tokenBudget }, null)
+        .catch((error) => {
+          console.warn("[session-ui-store] failed to set goal from armed send", error)
+        })
+    }
 
     // ---- New session from draft ----
     if (!options?.sessionId && draft?.open) {
@@ -1075,6 +1110,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           })),
         })),
       })
+      applyArmedGoal(createdDraftSession.sessionId, createdDraftSession.directory)
       return
     }
 
@@ -1154,6 +1190,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         })),
       })),
     })
+    if (targetSessionId) {
+      applyArmedGoal(targetSessionId, currentSessionDirectory)
+    }
   },
 
   // ---------------------------------------------------------------------------

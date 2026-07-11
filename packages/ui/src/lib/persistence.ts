@@ -429,6 +429,15 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.sessionSuggestionEnabled === 'boolean' && settings.sessionSuggestionEnabled !== store.sessionSuggestionEnabled) {
     store.setSessionSuggestionEnabled(settings.sessionSuggestionEnabled);
   }
+  if (typeof settings.sessionGoalEnabled === 'boolean' && settings.sessionGoalEnabled !== store.sessionGoalEnabled) {
+    store.setSessionGoalEnabled(settings.sessionGoalEnabled);
+  }
+  if (typeof settings.sessionGoalDefaultBudgetEnabled === 'boolean' && settings.sessionGoalDefaultBudgetEnabled !== store.sessionGoalDefaultBudgetEnabled) {
+    store.setSessionGoalDefaultBudgetEnabled(settings.sessionGoalDefaultBudgetEnabled);
+  }
+  if (typeof settings.sessionGoalDefaultBudget === 'number' && Number.isFinite(settings.sessionGoalDefaultBudget) && settings.sessionGoalDefaultBudget !== store.sessionGoalDefaultBudget) {
+    store.setSessionGoalDefaultBudget(settings.sessionGoalDefaultBudget);
+  }
   if (typeof settings.collapsibleThinkingBlocks === 'boolean' && settings.collapsibleThinkingBlocks !== store.collapsibleThinkingBlocks) {
     store.setCollapsibleThinkingBlocks(settings.collapsibleThinkingBlocks);
   }
@@ -788,6 +797,15 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.sessionSuggestionEnabled === 'boolean') {
     result.sessionSuggestionEnabled = candidate.sessionSuggestionEnabled;
+  }
+  if (typeof candidate.sessionGoalEnabled === 'boolean') {
+    result.sessionGoalEnabled = candidate.sessionGoalEnabled;
+  }
+  if (typeof candidate.sessionGoalDefaultBudgetEnabled === 'boolean') {
+    result.sessionGoalDefaultBudgetEnabled = candidate.sessionGoalDefaultBudgetEnabled;
+  }
+  if (typeof candidate.sessionGoalDefaultBudget === 'number' && Number.isFinite(candidate.sessionGoalDefaultBudget) && candidate.sessionGoalDefaultBudget > 0) {
+    result.sessionGoalDefaultBudget = Math.floor(candidate.sessionGoalDefaultBudget);
   }
   if (typeof candidate.collapsibleThinkingBlocks === 'boolean') {
     result.collapsibleThinkingBlocks = candidate.collapsibleThinkingBlocks;

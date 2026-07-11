@@ -1,0 +1,56 @@
+---
+title: Objectifs de session
+description: Transformez un prompt en objectif vers lequel l'agent travaille automatiquement.
+---
+
+# Objectifs de session
+
+Un objectif transforme un seul prompt en ligne d'arrivée. Au lieu de relancer l'agent avec « continue » après chaque réponse, vous définissez l'objectif une fois — et OpenChamber fait travailler la session vers lui automatiquement, en vérifiant la progression avec un auditeur indépendant après chaque tour. Le travail continue même en votre absence.
+
+## Démarrer un objectif
+
+1. Appuyez sur le bouton cible du composeur. Il s'allume — le mode objectif est armé.
+2. Écrivez votre prompt et envoyez-le. Ce message devient l'objectif.
+
+Cela fonctionne aussi bien dans une session existante que dans un brouillon de nouvelle session : armez la cible, écrivez le premier message, envoyez — la nouvelle session démarre avec l'objectif déjà actif.
+
+## Rédigez un objectif autonome
+
+L'auditeur de progression ne voit que votre objectif et la dernière réponse de l'agent — pas l'historique du chat. Formulez donc le message-objectif de sorte qu'une personne sans le contexte de la conversation comprenne à quoi ressemble l'état final.
+
+- Bien : « Ajoute des tests pour le module d'export et fais passer toute la suite de tests. »
+- Moins bien : « Corrige ça » ou « Continue sur cette idée. »
+
+Pour de petits ajustements contextuels, pas besoin d'objectif — envoyez un message normal.
+
+## Comment ça marche
+
+Quand l'agent s'arrête et que la session reste calme un instant, OpenChamber :
+
+1. Demande à un petit modèle économique d'auditer le dernier tour par rapport à l'objectif : continuer, terminé ou bloqué ?
+2. Si le verdict est « continuer », il envoie un prompt de continuation et l'agent reprend le travail.
+3. Si l'objectif est atteint de manière vérifiable, l'objectif se termine et vous recevez une notification.
+4. Si l'agent est réellement bloqué (il a besoin de vous), l'objectif s'arrête comme bloqué — mais seulement après que l'auditeur l'a dit trois fois de suite ; un accroc ponctuel ne termine jamais l'objectif.
+
+Il y a aussi des garde-fous : un budget de tokens optionnel, un plafond de continuations automatiques et un arrêt en cas d'erreur de tour. Si le contexte de la session est compacté en plein travail, l'objectif continue simplement — heurter la fenêtre de contexte prouve que le travail n'était pas fini.
+
+## Suivre et gérer
+
+- La bande au-dessus du composeur affiche la dernière note de progression, le statut et l'usage de tokens. Cliquez dessus pour modifier l'objectif, mettre en pause/reprendre, marquer comme terminé ou supprimer.
+- Le bouton cible reste allumé tant que l'objectif tourne (bleu), passe au vert à la fin et au rouge s'il est bloqué ou à court de budget. Appuyer pendant qu'un objectif tourne demande s'il faut l'annuler.
+- Dans la barre latérale des sessions, une petite cible apparaît à côté de la date de la session, colorée selon l'état de l'objectif.
+
+## Budget de tokens
+
+Dans **Paramètres → Chat → Objectif**, vous pouvez définir un budget de tokens par défaut pour les nouveaux objectifs. Quand un objectif atteint son budget, il s'arrête en « budget atteint » au lieu de dépenser plus — vous pouvez augmenter le budget et reprendre depuis la bande de l'objectif.
+
+## À garder en tête
+
+- La boucle d'objectif tourne dans le serveur OpenChamber, pas dans votre onglet de navigateur. Fermez l'onglet, verrouillez le téléphone — l'agent continue, et vous recevez une notification quand l'objectif se termine. Le serveur (app de bureau ou processus `openchamber`) doit rester lancé.
+- Les objectifs utilisent le fournisseur et le modèle de votre propre session, y compris pour les appels de l'auditeur — rien ne part vers des fournisseurs que vous n'utilisez pas déjà.
+- Un objectif par session à la fois.
+
+## Voir aussi
+
+- [Tâches planifiées](/scheduled-tasks/) — exécuter un prompt selon un horaire plutôt que vers une ligne d'arrivée
+- [Notifications](/notifications/) — comment vous êtes prévenu d'un objectif terminé

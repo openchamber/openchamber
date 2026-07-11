@@ -119,6 +119,9 @@ export type DesktopSettings = {
   smallModelUseDefault?: boolean;
   sessionRecapEnabled?: boolean;
   sessionSuggestionEnabled?: boolean;
+  sessionGoalEnabled?: boolean;
+  sessionGoalDefaultBudgetEnabled?: boolean;
+  sessionGoalDefaultBudget?: number;
   smallModelOverride?: string; // format: "provider/model"
   defaultGitIdentityId?: string; // ''/undefined = unset, 'global' or profile id
   openInAppId?: string;
