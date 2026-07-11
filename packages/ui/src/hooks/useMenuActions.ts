@@ -86,6 +86,14 @@ type DesktopBridgeGlobal = {
   ) => Promise<() => void>;
 };
 
+type MenuActionEventSource = 'bridge' | 'dom';
+
+export const resolveMenuActionEventSource = (
+  desktop: DesktopBridgeGlobal | null | undefined,
+): MenuActionEventSource => (
+  typeof desktop?.listen === 'function' ? 'bridge' : 'dom'
+);
+
 type MenuAction =
   | 'about'
   | 'settings'
@@ -137,6 +145,10 @@ export const useMenuActions = (
   const checkForUpdates = useUpdateStore((state) => state.checkForUpdates);
   const { setThemeMode } = useThemeSystem();
   const checkUpdatesInFlightRef = React.useRef(false);
+  const desktopBridge = typeof window === 'undefined'
+    ? null
+    : (window as unknown as { __OPENCHAMBER_DESKTOP__?: DesktopBridgeGlobal }).__OPENCHAMBER_DESKTOP__;
+  const menuActionEventSource = resolveMenuActionEventSource(desktopBridge);
 
   const handleCheckForUpdates = React.useCallback(() => {
     if (checkUpdatesInFlightRef.current) {
@@ -359,6 +371,14 @@ export const useMenuActions = (
   );
 
   React.useEffect(() => {
+    // Electron preload fans a native event out to both bridge listeners and a
+    // DOM CustomEvent. Subscribe to exactly one source; listening to both runs
+    // a macOS menu accelerator twice (and the main-process DOM fallback can
+    // make that three times), which may wrap back to the original session.
+    if (menuActionEventSource !== 'dom') {
+      return;
+    }
+
     const handleMenuAction = (event: Event) => {
       const action = (event as CustomEvent<MenuAction>).detail;
       if (!action) return;
@@ -375,12 +395,11 @@ export const useMenuActions = (
       window.removeEventListener(MENU_ACTION_EVENT, handleMenuAction);
       window.removeEventListener(CHECK_FOR_UPDATES_EVENT, handleCheckForUpdatesEvent);
     };
-  }, [handleAction, handleCheckForUpdates]);
+  }, [handleAction, handleCheckForUpdates, menuActionEventSource]);
 
   React.useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const desktop = (window as unknown as { __OPENCHAMBER_DESKTOP__?: DesktopBridgeGlobal }).__OPENCHAMBER_DESKTOP__;
-    const listen = desktop?.listen;
+    if (menuActionEventSource !== 'bridge') return;
+    const listen = desktopBridge?.listen;
     if (typeof listen !== 'function') return;
 
     let unlistenMenu: null | (() => void | Promise<void>) = null;
@@ -398,9 +417,7 @@ export const useMenuActions = (
         // ignore
       });
 
-    listen('openchamber:check-for-updates', () => {
-      window.dispatchEvent(new Event(CHECK_FOR_UPDATES_EVENT));
-    })
+    listen('openchamber:check-for-updates', handleCheckForUpdates)
       .then((fn) => {
         unlistenUpdate = fn;
       })
@@ -425,5 +442,5 @@ export const useMenuActions = (
       };
       void cleanup();
     };
-  }, [handleAction]);
+  }, [desktopBridge, handleAction, handleCheckForUpdates, menuActionEventSource]);
 };

@@ -213,7 +213,7 @@ describe('session-navigation', () => {
     })?.sessionId).toBe('recent-a');
   });
 
-  test('cycles within the published project-tree order when focus came from a project row', () => {
+  test('cycles only within the focused project visible order', () => {
     publishSessionNavigationSnapshot({
       recent: [
         makeNavigationTarget('recent', 'project-c', 'p2'),
@@ -222,6 +222,7 @@ describe('session-navigation', () => {
       project: [
         makeNavigationTarget('project', 'project-a', 'p1'),
         makeNavigationTarget('project', 'project-b', 'p1'),
+        makeNavigationTarget('project', 'project-d', 'p1'),
         makeNavigationTarget('project', 'project-c', 'p2'),
       ],
     });
@@ -232,12 +233,12 @@ describe('session-navigation', () => {
       projectId: 'p1',
     };
 
-    expect(resolveAdjacentNavigationTarget(1, 'project-b', projectFocus)?.sessionId).toBe('project-c');
+    expect(resolveAdjacentNavigationTarget(1, 'project-b', projectFocus)?.sessionId).toBe('project-d');
     expect(resolveAdjacentNavigationTarget(-1, 'project-b', projectFocus)?.sessionId).toBe('project-a');
     expect(resolveAdjacentNavigationTarget(-1, 'project-a', {
       ...projectFocus,
       sessionId: 'project-a',
-    })?.sessionId).toBe('project-c');
+    })?.sessionId).toBe('project-d');
   });
 
   test('updates focus scope before committing a scoped navigation target', () => {
@@ -267,11 +268,12 @@ describe('session-navigation', () => {
     });
   });
 
-  test('falls back from an unavailable Recent sequence to the published project order', () => {
+  test('falls back from an unavailable Recent sequence only within its project', () => {
     publishSessionNavigationSnapshot({
       recent: [],
       project: [
         makeNavigationTarget('project', 'project-a', 'p1'),
+        makeNavigationTarget('project', 'project-a-next', 'p1'),
         makeNavigationTarget('project', 'project-b', 'p2'),
       ],
     });
@@ -283,11 +285,33 @@ describe('session-navigation', () => {
     });
 
     expect(target?.scope).toBe('project');
-    expect(target?.sessionId).toBe('project-b');
+    expect(target?.sessionId).toBe('project-a-next');
+    expect(target?.projectId).toBe('p1');
+  });
+
+  test('anchors a Recent-to-project fallback at the matching project occurrence', () => {
+    publishSessionNavigationSnapshot({
+      recent: [],
+      project: [
+        makeNavigationTarget('project', 'shared-session', 'p1'),
+        makeNavigationTarget('project', 'p1-next', 'p1'),
+        makeNavigationTarget('project', 'shared-session', 'p2'),
+        makeNavigationTarget('project', 'p2-next', 'p2'),
+      ],
+    });
+
+    const target = resolveAdjacentNavigationTarget(1, 'shared-session', {
+      scope: 'recent',
+      sessionId: 'shared-session',
+      projectId: 'p2',
+    });
+
+    expect(target?.scope).toBe('project');
+    expect(target?.sessionId).toBe('p2-next');
     expect(target?.projectId).toBe('p2');
   });
 
-  test('uses the legacy project fallback when no sidebar snapshot is published', () => {
+  test('does not use hidden or cross-project fallbacks without a visible sidebar snapshot', () => {
     useProjectsStore.setState({
       projects: [
         { id: 'p1', path: '/workspace/project', label: 'project' },
@@ -312,9 +336,20 @@ describe('session-navigation', () => {
       projectId: 'p1',
     });
 
-    expect(target?.scope).toBe('project');
-    expect(target?.sessionId).toBe('root-a');
-    expect(target?.projectId).toBe('p1');
+    expect(target).toBeNull();
+  });
+
+  test('does not leave the focused project when it has no visible targets', () => {
+    publishSessionNavigationSnapshot({
+      recent: [],
+      project: [makeNavigationTarget('project', 'visible-in-p2', 'p2')],
+    });
+
+    expect(resolveAdjacentNavigationTarget(1, 'hidden-in-p1', {
+      scope: 'project',
+      sessionId: 'hidden-in-p1',
+      projectId: 'p1',
+    })).toBeNull();
   });
 
   test('falls back to sync sessions when global store is empty', () => {

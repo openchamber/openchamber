@@ -562,6 +562,7 @@ interface UIStore {
   isSettingsDialogOpen: boolean;
   isNewWorktreeDialogOpen: boolean;
   isModelSelectorOpen: boolean;
+  isAgentSelectorOpen: boolean;
   sidebarSection: SidebarSection;
 
   // Settings IA (new shell)
@@ -719,6 +720,7 @@ interface UIStore {
   setSettingsDialogOpen: (open: boolean) => void;
   setNewWorktreeDialogOpen: (open: boolean) => void;
   setModelSelectorOpen: (open: boolean) => void;
+  setAgentSelectorOpen: (open: boolean) => void;
   applyTheme: () => void;
   setSidebarSection: (section: SidebarSection) => void;
   setSettingsPage: (slug: string) => void;
@@ -866,6 +868,7 @@ export const useUIStore = create<UIStore>()(
         isSettingsDialogOpen: false,
         isNewWorktreeDialogOpen: false,
         isModelSelectorOpen: false,
+        isAgentSelectorOpen: false,
         sidebarSection: 'sessions',
         settingsPage: 'home',
         settingsHasOpenedOnce: false,
@@ -1568,7 +1571,17 @@ export const useUIStore = create<UIStore>()(
         },
 
         setModelSelectorOpen: (open) => {
-          set({ isModelSelectorOpen: open });
+          // Opening the model picker closes the agent picker so only one stays open.
+          set(open
+            ? { isModelSelectorOpen: true, isAgentSelectorOpen: false }
+            : { isModelSelectorOpen: false });
+        },
+
+        setAgentSelectorOpen: (open) => {
+          // Opening the agent picker closes the model picker so only one stays open.
+          set(open
+            ? { isAgentSelectorOpen: true, isModelSelectorOpen: false }
+            : { isAgentSelectorOpen: false });
         },
 
         setSidebarSection: (section) => {

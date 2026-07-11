@@ -2,7 +2,13 @@ import { describe, expect, test } from 'bun:test';
 import type { Session } from '@opencode-ai/sdk/v2';
 
 import type { SessionGroup, SessionNode } from './types';
-import { buildProjectNavigationTargets } from './sessionNavigationModel';
+import {
+  buildProjectNavigationTargets,
+  filterVisibleProjectNavigationTargets,
+  getDefaultProjectGroupVisibleCount,
+  resolveProjectVirtualSessionIndex,
+} from './sessionNavigationModel';
+import type { SessionNavigationTarget } from '@/sync/session-navigation';
 
 const node = (id: string, updated: number, directory = '/project'): SessionNode => ({
   session: {
@@ -79,5 +85,113 @@ describe('buildProjectNavigationTargets', () => {
     });
 
     expect(targets.map((target) => target.sessionId)).toEqual(['parent']);
+  });
+
+  test('resolves a validated group-virtualizer index without clamping an unavailable target', () => {
+    const first = node('first', 100);
+    const second = node('second', 200);
+    const target = node('target', 300);
+
+    expect(resolveProjectVirtualSessionIndex(
+      [first, second, target],
+      'target',
+      2,
+    )).toBe(2);
+    expect(resolveProjectVirtualSessionIndex(
+      [first, second],
+      'target',
+      2,
+    )).toBeNull();
+    expect(resolveProjectVirtualSessionIndex(
+      [target, first, second],
+      'target',
+      2,
+    )).toBe(0);
+    expect(resolveProjectVirtualSessionIndex(
+      [first, second, target],
+      'target',
+      undefined,
+    )).toBeNull();
+  });
+
+  test('keeps only logically visible rows and ignores sessions behind Show more', () => {
+    const target = (
+      sessionId: string,
+      projectId: string,
+      groupKey: string,
+      options: Partial<SessionNavigationTarget> = {},
+    ): SessionNavigationTarget => ({
+      scope: 'project',
+      sessionId,
+      projectId,
+      directory: `/${projectId}`,
+      groupKey,
+      ...options,
+    });
+    const targets = [
+      target('visible-a', 'project-a', 'project-a:root', { visibleIndex: 0 }),
+      target('visible-b', 'project-a', 'project-a:root', { visibleIndex: 1 }),
+      target('behind-more', 'project-a', 'project-a:root', { visibleIndex: 2 }),
+      target('collapsed-group', 'project-a', 'project-a:worktree'),
+      target('collapsed-folder', 'project-a', 'project-a:root', { folderAncestorIds: ['folder-a'] }),
+      target('collapsed-project', 'project-b', 'project-b:root', { visibleIndex: 0 }),
+    ];
+
+    const visible = filterVisibleProjectNavigationTargets({
+      targets,
+      collapsedProjectIds: new Set(['project-b']),
+      collapsedGroupKeys: new Set(['project-a:worktree']),
+      collapsedFolderIds: new Set(['folder-a']),
+      visibleSessionCountByGroup: new Map(),
+      defaultVisibleSessionCount: 2,
+      hasSessionSearchQuery: false,
+    });
+
+    expect(visible.map((item) => item.sessionId)).toEqual(['visible-a', 'visible-b']);
+  });
+
+  test('uses the revealed batch size and search expansion rules', () => {
+    const targets: SessionNavigationTarget[] = [
+      {
+        scope: 'project',
+        sessionId: 'revealed-by-more',
+        projectId: 'project-a',
+        directory: '/project-a',
+        groupKey: 'project-a:root',
+        visibleIndex: 6,
+      },
+      {
+        scope: 'project',
+        sessionId: 'revealed-by-search',
+        projectId: 'project-a',
+        directory: '/project-a',
+        groupKey: 'project-a:collapsed',
+        folderAncestorIds: ['folder-a'],
+        visibleIndex: 20,
+      },
+    ];
+
+    expect(filterVisibleProjectNavigationTargets({
+      targets,
+      collapsedProjectIds: new Set(),
+      collapsedGroupKeys: new Set(['project-a:collapsed']),
+      collapsedFolderIds: new Set(['folder-a']),
+      visibleSessionCountByGroup: new Map([['project-a:root', 7]]),
+      defaultVisibleSessionCount: 5,
+      hasSessionSearchQuery: false,
+    }).map((item) => item.sessionId)).toEqual(['revealed-by-more']);
+
+    expect(filterVisibleProjectNavigationTargets({
+      targets,
+      collapsedProjectIds: new Set(),
+      collapsedGroupKeys: new Set(['project-a:collapsed']),
+      collapsedFolderIds: new Set(['folder-a']),
+      visibleSessionCountByGroup: new Map(),
+      defaultVisibleSessionCount: 5,
+      hasSessionSearchQuery: true,
+    }).map((item) => item.sessionId)).toEqual(['revealed-by-more', 'revealed-by-search']);
+
+    expect(getDefaultProjectGroupVisibleCount(false)).toBe(5);
+    expect(getDefaultProjectGroupVisibleCount(true)).toBe(10);
   });
 });

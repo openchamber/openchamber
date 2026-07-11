@@ -23,6 +23,13 @@ export const CODEX_FOLDER_SVG =
 export const CODEX_FOLDER_PLUS_SVG =
   `${CODEX_FOLDER_SVG}<path d="M12 11v6" /><path d="M9 14h6" />`
 
+/**
+ * Remixicon `PushpinFill` — classic diagonal thumbtack. Lucide's upright `pin`
+ * reads poorly as a sidebar pinned marker at 12px.
+ */
+export const REMIX_PUSHPIN_FILL_SVG =
+  `<path d="M22.3126 10.1753L20.8984 11.5895L20.1913 10.8824L15.9486 15.125L15.2415 18.6606L13.8273 20.0748L9.58466 15.8321L4.63492 20.7819L3.2207 19.3677L8.17045 14.4179L3.92781 10.1753L5.34202 8.76107L8.87756 8.05396L13.1202 3.81132L12.4131 3.10422L13.8273 1.69L22.3126 10.1753Z" fill="currentColor" />`
+
 /** @type {Record<string, IconMapEntry>} */
 export const ICON_NAME_MAP = {
   "add": { lucide: "plus", fill: false },
@@ -202,7 +209,8 @@ export const ICON_NAME_MAP = {
   "pulse": { lucide: "activity", fill: false },
   "pushpin": { lucide: "pin", fill: false },
   "pushpin-2": { lucide: "pin", fill: false },
-  "pushpin-2-fill": { lucide: "pin", fill: true },
+  // Remix solid thumbtack — clearer pinned marker than Lucide's upright pin.
+  "pushpin-2-fill": { custom: REMIX_PUSHPIN_FILL_SVG },
   "question": { lucide: "circle-help", fill: false },
   "record-circle": { lucide: "circle-dot", fill: false },
   "refresh": { lucide: "refresh-cw", fill: false },

@@ -207,27 +207,42 @@ export const formatProjectLabel = (label: string): string => {
 export const SIDEBAR_MUTED_HINT_CLASS =
   'box-border w-full px-2 py-1.5 text-left typography-micro text-muted-foreground/70 select-none';
 
-/** Codex-style active chip: neutral wash from foreground — never theme/primary tint. */
+/** Codex-style active chip: deeper neutral wash — never theme/primary tint. */
 export const SIDEBAR_ROW_ACTIVE_CLASS =
-  'bg-[color-mix(in_srgb,var(--surface-foreground)_10%,transparent)]';
+  'bg-[color-mix(in_srgb,var(--surface-foreground)_11%,transparent)]';
 
-/** Codex-style hover wash: clearer than idle so the row reads as clickable. */
+/** Codex-style hover wash: lighter than active so idle→hover→active read as steps. */
 export const SIDEBAR_ROW_HOVER_CLASS =
-  'hover:bg-[color-mix(in_srgb,var(--surface-foreground)_10%,transparent)]';
+  'hover:bg-[color-mix(in_srgb,var(--surface-foreground)_8%,transparent)]';
 
 /** Base horizontal padding inside a sidebar row chip (matches `px-2`). */
 export const SIDEBAR_ROW_BASE_PAD_PX = 8;
 
 /**
- * One nest step = folder icon column (`h-4 w-4` + `gap-1.5`).
- * Child session text lines up under the parent folder *name*; the extra left
- * padding stays *inside* the hover chip so the wash stays full-width (预留).
+ * Project/folder body indent = icon column (`h-4 w-4` + `gap-1.5`).
+ * Depth-1 session text shares one vertical line under the parent folder *name*.
  */
-export const SIDEBAR_NEST_INDENT_PX = 16 + 6;
+export const SIDEBAR_ICON_COL_PX = 16 + 6;
 
-/** Left padding for a nested sidebar row — indent content, keep chip edge flush. */
-export const getSidebarRowPaddingLeft = (depth: number): number =>
-  SIDEBAR_ROW_BASE_PAD_PX + Math.max(0, depth) * SIDEBAR_NEST_INDENT_PX;
+/**
+ * Extra nest for subagent / deeper folder children ≈ one UI-label font size.
+ * Applied on top of the icon-column step so sub-rows stay modest.
+ */
+export const SIDEBAR_SUBAGENT_INDENT_PX = 14;
+
+/**
+ * Left padding inside a sidebar row chip (hover wash stays full-width).
+ * depth 0: base only (folder/project header content)
+ * depth 1: under parent name (icon column)
+ * depth 2+: +one font-size per extra level (subagent)
+ */
+export const getSidebarRowPaddingLeft = (depth: number): number => {
+  const level = Math.max(0, depth);
+  if (level === 0) return SIDEBAR_ROW_BASE_PAD_PX;
+  return SIDEBAR_ROW_BASE_PAD_PX
+    + SIDEBAR_ICON_COL_PX
+    + (level - 1) * SIDEBAR_SUBAGENT_INDENT_PX;
+};
 
 export const renderHighlightedText = (text: string, query: string): React.ReactNode => {
   if (!query) {

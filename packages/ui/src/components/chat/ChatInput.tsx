@@ -6,6 +6,7 @@ import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 // sessionStore removed — currentSessionId comes from useSessionUIStore
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { useLeaderKeyStore } from '@/stores/useLeaderKeyStore';
 import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -32,6 +33,7 @@ import { SkillAutocomplete, type SkillAutocompleteHandle } from './SkillAutocomp
 import { SnippetAutocomplete, type SnippetAutocompleteHandle } from './SnippetAutocomplete';
 import { cn, formatDirectoryName, isMacOS } from '@/lib/utils';
 import { ModelControls } from './ModelControls';
+import { LeaderKeyHint } from './LeaderKeyHint';
 import { parseAgentMentions } from '@/lib/messages/agentMentions';
 import { StatusRow } from './StatusRow';
 import { PendingChangesBar } from './PendingChangesBar';
@@ -55,7 +57,7 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { SELECTOR_CHIP_HOVER_CLASS } from '@/components/chat/message/parts/toolRowChrome';
+import { COMPOSER_ICON_HOVER_CLASS, SELECTOR_CHIP_HOVER_CLASS } from '@/components/chat/message/parts/toolRowChrome';
 import { Input } from '@/components/ui/input';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -516,6 +518,10 @@ const RevertedMessageDock: React.FC<RevertedMessageDockProps> = React.memo(({ se
 
 RevertedMessageDock.displayName = 'RevertedMessageDock';
 
+// Future expansion: set true to restore the + attachment menu (desktop dropdown
+// and mobile bottom sheet) for actions beyond direct file attach.
+const ATTACHMENT_EXPANSION_MENU_ENABLED = false;
+
 type ComposerAttachmentControlsProps = {
     isVSCode: boolean;
     footerIconButtonClass: string;
@@ -527,6 +533,7 @@ type ComposerAttachmentControlsProps = {
     onMenuOpenChange?: (open: boolean) => void;
     /** Mobile: open the attachment bottom sheet instead of the dropdown menu. */
     onOpenMobileSheet?: () => void;
+    withTooltip?: boolean;
 };
 
 const ComposerAttachmentControls = React.memo(function ComposerAttachmentControls(props: ComposerAttachmentControlsProps) {
@@ -539,81 +546,106 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
         openIssuePicker,
         openPrPicker,
         onOpenSettings,
+        withTooltip = false,
     } = props;
+
+    const isMobileAttach = Boolean(props.onOpenMobileSheet);
+    const attachLabel = t('chat.chatInput.actions.attachFiles');
+
+    const attachButton = (
+        <button
+            type="button"
+            className={footerIconButtonClass}
+            onClick={handlePickLocalFiles}
+            // Same guard as PermissionAutoAcceptButton: keep the tap
+            // from dismissing the keyboard. On Android's
+            // resizes-content viewport the keyboard-close relayout
+            // moves this button mid-tap and the click never lands.
+            onMouseDown={isMobileAttach ? (event) => event.preventDefault() : undefined}
+            onPointerDownCapture={isMobileAttach ? (event) => {
+                if (event.pointerType === 'touch') {
+                    event.preventDefault();
+                }
+            } : undefined}
+            title={attachLabel}
+            aria-label={attachLabel}
+        >
+            <Icon name="attachment-2" className={cn(iconSizeClass, 'text-current')} />
+        </button>
+    );
 
     return (
         <div className="flex items-center gap-x-1.5">
             <div className="relative inline-flex">
-                {props.onOpenMobileSheet ? (
-                    <button
-                        type="button"
-                        className={footerIconButtonClass}
-                        onClick={props.onOpenMobileSheet}
-                        // Same guard as PermissionAutoAcceptButton: keep the tap
-                        // from dismissing the keyboard. On Android's
-                        // resizes-content viewport the keyboard-close relayout
-                        // moves this button mid-tap and the click never lands.
-                        onMouseDown={(event) => event.preventDefault()}
-                        onPointerDownCapture={(event) => {
-                            if (event.pointerType === 'touch') {
-                                event.preventDefault();
-                            }
-                        }}
-                        title={t('chat.chatInput.actions.addAttachment')}
-                        aria-label={t('chat.chatInput.actions.addAttachment')}
-                    >
-                        <Icon name="add-circle" className={cn(iconSizeClass, 'text-current')} />
-                    </button>
-                ) : isVSCode ? (
-                    <button
-                        type="button"
-                        className={footerIconButtonClass}
-                        onClick={handlePickLocalFiles}
-                        title={t('chat.chatInput.actions.attachFiles')}
-                        aria-label={t('chat.chatInput.actions.attachFiles')}
-                    >
-                        <Icon name="attachment-2" className={cn(iconSizeClass, 'text-current')} />
-                    </button>
-                ) : (
-                    <DropdownMenu onOpenChange={props.onMenuOpenChange}>
-                        <DropdownMenuTrigger asChild>
-                            <button
-                                type="button"
-                                className={footerIconButtonClass}
-                                title={t('chat.chatInput.actions.addAttachment')}
-                                aria-label={t('chat.chatInput.actions.addAttachment')}
-                            >
-                                <Icon name="add-circle" className={cn(iconSizeClass, 'text-current')} />
-                            </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="start">
-                            <DropdownMenuItem
-                                onSelect={() => {
-                                    requestAnimationFrame(handlePickLocalFiles);
-                                }}
-                            >
-                                <Icon name="attachment-2"/>
-                                {t('chat.chatInput.actions.attachFiles')}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                                onSelect={() => {
-                                    requestAnimationFrame(openIssuePicker);
-                                }}
-                            >
-                                <Icon name="github"/>
-                                {t('chat.chatInput.actions.linkGithubIssue')}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                                onSelect={() => {
-                                    requestAnimationFrame(openPrPicker);
-                                }}
-                            >
-                                <Icon name="git-pull-request"/>
-                                {t('chat.chatInput.actions.linkGithubPr')}
-                            </DropdownMenuItem>
-                        </DropdownMenuContent>
-                    </DropdownMenu>
-                )}
+                {withTooltip ? (
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            {attachButton}
+                        </TooltipTrigger>
+                        <TooltipContent side="top" sideOffset={8}>
+                            {attachLabel}
+                        </TooltipContent>
+                    </Tooltip>
+                ) : attachButton}
+
+                {ATTACHMENT_EXPANSION_MENU_ENABLED ? (
+                    props.onOpenMobileSheet ? (
+                        <button
+                            type="button"
+                            className={footerIconButtonClass}
+                            onClick={props.onOpenMobileSheet}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onPointerDownCapture={(event) => {
+                                if (event.pointerType === 'touch') {
+                                    event.preventDefault();
+                                }
+                            }}
+                            title={t('chat.chatInput.actions.addAttachment')}
+                            aria-label={t('chat.chatInput.actions.addAttachment')}
+                        >
+                            <Icon name="add-circle" className={cn(iconSizeClass, 'text-current')} />
+                        </button>
+                    ) : isVSCode ? null : (
+                        <DropdownMenu onOpenChange={props.onMenuOpenChange}>
+                            <DropdownMenuTrigger asChild>
+                                <button
+                                    type="button"
+                                    className={footerIconButtonClass}
+                                    title={t('chat.chatInput.actions.addAttachment')}
+                                    aria-label={t('chat.chatInput.actions.addAttachment')}
+                                >
+                                    <Icon name="add-circle" className={cn(iconSizeClass, 'text-current')} />
+                                </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="start">
+                                <DropdownMenuItem
+                                    onSelect={() => {
+                                        requestAnimationFrame(handlePickLocalFiles);
+                                    }}
+                                >
+                                    <Icon name="attachment-2"/>
+                                    {t('chat.chatInput.actions.attachFiles')}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                    onSelect={() => {
+                                        requestAnimationFrame(openIssuePicker);
+                                    }}
+                                >
+                                    <Icon name="github"/>
+                                    {t('chat.chatInput.actions.linkGithubIssue')}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                    onSelect={() => {
+                                        requestAnimationFrame(openPrPicker);
+                                    }}
+                                >
+                                    <Icon name="git-pull-request"/>
+                                    {t('chat.chatInput.actions.linkGithubPr')}
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    )
+                ) : null}
             </div>
 
             {onOpenSettings ? (
@@ -636,6 +668,7 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
     && prev.onOpenSettings === next.onOpenSettings
     && prev.onMenuOpenChange === next.onMenuOpenChange
     && prev.onOpenMobileSheet === next.onOpenMobileSheet
+    && prev.withTooltip === next.withTooltip
 ));
 
 type PermissionAutoAcceptButtonProps = {
@@ -671,7 +704,6 @@ const PermissionAutoAcceptButton = React.memo(function PermissionAutoAcceptButto
             onClick={handlePermissionAutoAcceptToggle}
             className={cn(
                 footerIconButtonClass,
-                'rounded-md hover:bg-transparent',
                 !permissionScopeSessionId && 'opacity-30',
             )}
             onMouseDown={(event) => {
@@ -729,10 +761,7 @@ const FocusModeButton = React.memo(function FocusModeButton(props: FocusModeButt
                     type="button"
                     className={cn(
                         footerIconButtonClass,
-                        'rounded-md',
-                        isExpandedInput
-                            ? 'text-primary'
-                            : 'text-foreground hover:bg-[var(--interactive-hover)]/40'
+                        isExpandedInput && 'text-primary',
                     )}
                     onMouseDown={(event) => {
                         event.preventDefault();
@@ -1110,6 +1139,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const getVisibleAgents = useConfigStore((state) => state.getVisibleAgents);
     const agents = getVisibleAgents();
     const isMobile = useUIStore((state) => state.isMobile);
+    const isLeaderKeyPending = useLeaderKeyStore((state) => state.pending);
     const setImagePreviewOpen = useUIStore((state) => state.setImagePreviewOpen);
     const inputBarOffset = useUIStore((state) => state.inputBarOffset);
     const persistChatDraft = useUIStore((state) => state.persistChatDraft);
@@ -1133,6 +1163,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const [showAbortStatus, setShowAbortStatus] = React.useState(false);
     const setSessionAutoAccept = usePermissionStore((state) => state.setSessionAutoAccept);
     const composerHighlightRef = React.useRef<HTMLDivElement | null>(null);
+    const [agentPortalContainer, setAgentPortalContainer] = React.useState<HTMLDivElement | null>(null);
+    const [desktopComposerFocused, setDesktopComposerFocused] = React.useState(false);
+    const isAgentSelectorOpen = useUIStore((state) => state.isAgentSelectorOpen);
+    const isModelSelectorOpen = useUIStore((state) => state.isModelSelectorOpen);
     const [isNarrowComposer, setIsNarrowComposer] = React.useState(false);
     const [attachmentPreview, setAttachmentPreview] = React.useState<ToolPopupContent>({
         open: false,
@@ -4488,7 +4522,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const stopIconSizeClass = isMobile ? 'h-6 w-6' : (isVSCode ? 'h-4 w-4' : 'h-5 w-5');
     const iconSizeClass = isMobile ? 'h-[18px] w-[18px]' : (isVSCode ? 'h-4 w-4' : 'h-[18px] w-[18px]');
 
-    const iconButtonBaseClass = 'flex cursor-pointer items-center justify-center text-foreground transition-none outline-none focus:outline-none flex-shrink-0 disabled:cursor-not-allowed';
+    const iconButtonBaseClass = cn(
+        'flex cursor-pointer items-center justify-center text-foreground transition-none outline-none focus:outline-none flex-shrink-0 disabled:cursor-not-allowed',
+        COMPOSER_ICON_HOVER_CLASS,
+    );
     const footerIconButtonClass = cn(iconButtonBaseClass, buttonSizeClass);
     const permissionScopeSessionId = currentSessionId ?? currentManagementSessionId;
     const permissionAutoAcceptEnabled = usePermissionStore((state) => {
@@ -4763,7 +4800,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                 <SelectTrigger
                                     size="sm"
                                     className={cn(
-                                        'h-6 min-w-0 w-fit max-w-[42vw] sm:max-w-[18rem] border-transparent bg-transparent px-1.5',
+                                        'h-auto min-h-6 min-w-0 w-fit max-w-[42vw] sm:max-w-[18rem] border-transparent bg-transparent px-2.5 py-1',
                                         SELECTOR_CHIP_HOVER_CLASS,
                                     )}
                                 >
@@ -4798,7 +4835,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             <button
                                 type="button"
                                 className={cn(
-                                    'inline-flex h-6 cursor-pointer items-center gap-1.5 rounded-lg px-1.5 typography-micro font-medium text-foreground/80',
+                                    'inline-flex h-auto min-h-6 cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1 typography-micro font-medium text-foreground/80',
                                     SELECTOR_CHIP_HOVER_CLASS,
                                 )}
                                 onClick={() => sessionEvents.requestDirectoryDialog()}
@@ -4816,7 +4853,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                 <SelectTrigger
                                     size="sm"
                                     className={cn(
-                                        'h-6 min-w-0 w-fit max-w-[48vw] sm:max-w-[20rem] border-transparent bg-transparent px-1.5',
+                                        'h-auto min-h-6 min-w-0 w-fit max-w-[48vw] sm:max-w-[20rem] border-transparent bg-transparent px-2.5 py-1',
                                         SELECTOR_CHIP_HOVER_CLASS,
                                     )}
                                 >
@@ -4868,7 +4905,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             <button
                                 type="button"
                                 className={cn(
-                                    'inline-flex h-6 min-w-0 max-w-[42vw] flex-shrink cursor-pointer items-center gap-1 rounded-lg px-1.5 typography-micro font-medium text-foreground/80',
+                                    'inline-flex h-auto min-h-6 min-w-0 max-w-[42vw] flex-shrink cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1 typography-micro font-medium text-foreground/80',
                                     SELECTOR_CHIP_HOVER_CLASS,
                                 )}
                                 onClick={() => setMobileDraftPicker('project')}
@@ -4880,7 +4917,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             <button
                                 type="button"
                                 className={cn(
-                                    'inline-flex h-6 cursor-pointer items-center gap-1.5 rounded-lg px-1.5 typography-micro font-medium text-foreground/80',
+                                    'inline-flex h-auto min-h-6 cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1 typography-micro font-medium text-foreground/80',
                                     SELECTOR_CHIP_HOVER_CLASS,
                                 )}
                                 onClick={() => sessionEvents.requestDirectoryDialog()}
@@ -4893,7 +4930,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             <button
                                 type="button"
                                 className={cn(
-                                    'inline-flex h-6 min-w-0 max-w-[48vw] flex-shrink cursor-pointer items-center gap-1 rounded-lg px-1.5 typography-micro font-medium text-foreground/80',
+                                    'inline-flex h-auto min-h-6 min-w-0 max-w-[48vw] flex-shrink cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1 typography-micro font-medium text-foreground/80',
                                     SELECTOR_CHIP_HOVER_CLASS,
                                 )}
                                 onClick={() => setMobileDraftPicker('branch')}
@@ -4999,7 +5036,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         inputMode === 'shell'
                             ? 'focus-within:ring-[var(--status-info)]'
                             : 'focus-within:ring-primary/50',
-                        isDragging && "ring-2 ring-primary ring-offset-2"
+                        isDragging && "ring-2 ring-primary ring-offset-2",
+                        // Ctrl+X leader pending: subtle selection ring while waiting for M/A/N/C.
+                        isLeaderKeyPending && "ring-1 ring-[var(--interactive-selection)] border-[var(--interactive-selection)]"
                     )}
                     style={{
                         borderRadius: chatInputRadius,
@@ -5013,6 +5052,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     onDrop={handleDrop}
                     onDragEnd={handleDragEnd}
                 >
+                    <LeaderKeyHint />
                     {isDragging && (
                         <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/90 rounded-xl">
                             <div className="text-center">
@@ -5118,12 +5158,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         {mobileComposerHandle}
                         {isMobile ? (
                             <div className="scrollbar-none relative z-10 flex items-center gap-x-2 overflow-x-auto px-3 pb-0.5 pt-1.5">
-                                <MemoMobileModelButton onOpenModel={() => handleOpenMobilePanel('model')} className="flex-shrink-0" />
                                 <MemoMobileAgentButton
                                     onOpenAgentPanel={handleOpenAgentPanel}
                                     onCycleAgent={handleCycleAgent}
                                     className="flex-shrink-0"
                                 />
+                                <MemoMobileModelButton onOpenModel={() => handleOpenMobilePanel('model')} className="flex-shrink-0" />
                             </div>
                         ) : null}
                         <div className="flex items-center gap-1 px-3 pt-1 flex-wrap relative z-10">
@@ -5188,7 +5228,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                     updateAutocompleteOverlayPosition();
                                 }}
                                 onFocus={() => {
-                                    if (!isMobile) return;
+                                    if (!isMobile) {
+                                        setDesktopComposerFocused(true);
+                                        return;
+                                    }
                                     if (mobileBlurTimerRef.current !== null) {
                                         window.clearTimeout(mobileBlurTimerRef.current);
                                         mobileBlurTimerRef.current = null;
@@ -5197,7 +5240,26 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                     setMobileTextareaFocused(true);
                                 }}
                                 onBlur={() => {
-                                    if (!isMobile) return;
+                                    if (!isMobile) {
+                                        // Keep left-icon emphasis while focus moves into the footer
+                                        // (agent menu / attachment) so the bar doesn't flash muted.
+                                        window.setTimeout(() => {
+                                            const active = document.activeElement;
+                                            if (!(active instanceof Element)) {
+                                                setDesktopComposerFocused(false);
+                                                return;
+                                            }
+                                            if (
+                                                active.closest('[data-chat-input="true"]')
+                                                || active.closest('[data-chat-input-footer="true"]')
+                                                || active.closest('[data-slot="dropdown-menu-content"]')
+                                            ) {
+                                                return;
+                                            }
+                                            setDesktopComposerFocused(false);
+                                        }, 0);
+                                        return;
+                                    }
                                     // Focus hold after an overlay-close restore:
                                     // iOS may retract the rising keyboard as the
                                     // closing tap settles — take the focus right
@@ -5288,7 +5350,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         {isMobile ? (
                             <>
                                 <div className="flex w-full items-center justify-between gap-x-1.5">
-                                    <div className="composer-mobile-actions flex items-center gap-x-2 pl-1">
+                                    <div className={cn(
+                                        'composer-mobile-actions flex items-center gap-x-2 pl-1 transition-opacity duration-200',
+                                        (mobileTextareaFocused || isAgentSelectorOpen)
+                                            ? 'opacity-100'
+                                            : 'opacity-45',
+                                    )}>
                                         <MobileSessionPanelTrigger
                                             footerIconButtonClass={footerIconButtonClass}
                                             iconSizeClass={iconSizeClass}
@@ -5333,7 +5400,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             </>
                         ) : (
                             <>
-                                <div className={cn("flex items-center flex-shrink-0", footerGapClass)}>
+                                <div
+                                    className={cn(
+                                        'flex items-center flex-shrink-0 transition-opacity duration-200',
+                                        footerGapClass,
+                                        // Idle: quieter than the model/send cluster; focus/hover restores full weight.
+                                        (desktopComposerFocused || isAgentSelectorOpen)
+                                            ? 'opacity-100'
+                                            : 'opacity-45 hover:opacity-100 focus-within:opacity-100',
+                                    )}
+                                >
                                     <ComposerAttachmentControls
                                         isVSCode={isVSCode}
                                         footerIconButtonClass={footerIconButtonClass}
@@ -5342,6 +5418,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         openIssuePicker={openIssuePicker}
                                         openPrPicker={openPrPicker}
                                         onOpenSettings={onOpenSettings}
+                                        withTooltip
                                     />
                                     <FocusModeButton
                                         footerIconButtonClass={footerIconButtonClass}
@@ -5357,9 +5434,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         handlePermissionAutoAcceptToggle={handlePermissionAutoAcceptToggle}
                                         withTooltip
                                     />
+                                    <div ref={setAgentPortalContainer} className="flex items-center" />
                                 </div>
                                 <div className={cn('flex items-center flex-1 justify-end', footerGapClass, 'md:gap-x-3')}>
-                                    <MemoModelControls className={cn('flex-1 min-w-0 justify-end')} />
+                                    <MemoModelControls
+                                        className={cn('flex-1 min-w-0 justify-end')}
+                                        relocateAgent
+                                        agentPortalContainer={agentPortalContainer}
+                                    />
                                     <MemoComposerDictation
                                         radius={chatInputRadius}
                                         isMobile={isMobile}
@@ -5482,9 +5564,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             accept="*/*"
         />
 
-        {/* Mobile attachment sheet: replaces the dropdown (which stole focus and
-            dismissed the keyboard) and leaves room for more actions later. */}
-        {isMobile ? (
+        {/* Mobile attachment sheet: kept for ATTACHMENT_EXPANSION_MENU_ENABLED.
+            Replaces the dropdown (which stole focus and dismissed the keyboard)
+            and leaves room for more actions later. */}
+        {ATTACHMENT_EXPANSION_MENU_ENABLED && isMobile ? (
             <MobileOverlayPanel
                 open={mobileAttachMenuOpen}
                 title={t('chat.chatInput.actions.addAttachment')}

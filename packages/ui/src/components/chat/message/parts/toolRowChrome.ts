@@ -15,8 +15,19 @@ export const TOOL_ROW_CHIP_HOVER_CLASS =
 export const TOOL_ROW_INTERACTIVE_CHROME_CLASS = `${TOOL_ROW_CHIP_CLASS} ${TOOL_ROW_CHIP_HOVER_CLASS}`;
 
 /**
- * Hover wash for draft project/branch selectors (and similar chrome outside tool rows).
- * Same neutral mix as sidebar / tool-row chips.
+ * Hover wash for draft project/branch selectors and composer footer controls.
+ * Same neutral mix as sidebar / tool-row chips. Open state uses the stronger active wash.
+ * Important modifiers beat SelectTrigger's default `hover:bg-interactive-hover`.
  */
 export const SELECTOR_CHIP_HOVER_CLASS =
-  'hover:bg-[color-mix(in_srgb,var(--surface-foreground)_6%,transparent)] data-[popup-open]:bg-[color-mix(in_srgb,var(--surface-foreground)_10%,transparent)]';
+  'hover:!bg-[color-mix(in_srgb,var(--surface-foreground)_6%,transparent)] data-[popup-open]:!bg-[color-mix(in_srgb,var(--surface-foreground)_10%,transparent)] data-[state=open]:!bg-[color-mix(in_srgb,var(--surface-foreground)_10%,transparent)]';
+
+/**
+ * Composer text triggers (model / agent / variant).
+ * Padding hugs the icon+label: wider X, tight Y — do not pair with a tall fixed `h-*`.
+ */
+export const COMPOSER_TRIGGER_CHROME_CLASS =
+  `inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 ${SELECTOR_CHIP_HOVER_CLASS}`;
+
+/** Rounded hover wash for square composer icon buttons (+ / focus / shield / send). */
+export const COMPOSER_ICON_HOVER_CLASS = `rounded-md ${SELECTOR_CHIP_HOVER_CLASS}`;

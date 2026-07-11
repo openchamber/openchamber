@@ -19,6 +19,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { getCurrentIntlLocale } from '@/lib/i18n';
 import { mergeModelMetadataWithLiveModel } from '@/lib/modelMetadata';
 import { getModelDisplayName as getSharedModelDisplayName } from '@/lib/modelDisplay';
+import { matchesModelSearch } from '@/lib/search/modelSearch';
 import { cn } from '@/lib/utils';
 import { useModelPickerSectionsStore } from '@/stores/useModelPickerSectionsStore';
 import type { ModelMetadata } from '@/types';
@@ -442,9 +443,10 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   }, [hiddenModels]);
 
   const matchesQuery = React.useCallback((modelName: string, providerName: string) => {
-    const query = searchQuery.trim().toLowerCase();
+    const query = searchQuery.trim();
     if (!query) return true;
-    return modelName.toLowerCase().includes(query) || providerName.toLowerCase().includes(query);
+    // Separator-tolerant: "GLM 5.2" should still hit "GLM-5.2".
+    return matchesModelSearch(modelName, query) || matchesModelSearch(providerName, query);
   }, [searchQuery]);
 
   const filteredFavorites = React.useMemo(() => favoriteModels.filter(({ model, providerID, modelID }) => {

@@ -4,7 +4,10 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { getAgentDisplayName } from './mobileControlsUtils';
+import { AgentCycleLabel } from '@/components/chat/AgentCycleLabel';
+import { useAgentCycleLabelReveal } from '@/components/chat/useAgentCycleLabelReveal';
 import { getAgentColor } from '@/lib/agentColors';
+import { COMPOSER_ICON_HOVER_CLASS } from '@/components/chat/message/parts/toolRowChrome';
 
 interface MobileAgentButtonProps {
     onCycleAgent: () => void;
@@ -26,6 +29,7 @@ export const MobileAgentButton: React.FC<MobileAgentButtonProps> = ({ onCycleAge
     const agents = getVisibleAgents();
     const uiAgentName = currentSessionId ? (sessionAgentName || currentAgentName) : currentAgentName;
     const agentLabel = getAgentDisplayName(agents, uiAgentName);
+    const showAgentCycleLabel = useAgentCycleLabelReveal(uiAgentName);
     const agentColor = getAgentColor(uiAgentName);
 
     const longPressTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -79,24 +83,21 @@ export const MobileAgentButton: React.FC<MobileAgentButtonProps> = ({ onCycleAge
             onContextMenu={(e) => e.preventDefault()}
             onMouseDown={(e) => e.preventDefault()}
             className={cn(
-                'inline-flex min-w-0 items-stretch select-none',
-                'rounded-lg',
-                'typography-micro font-medium',
-                'focus:outline-none hover:bg-[var(--interactive-hover)]',
-                'touch-none',
+                'inline-flex flex-shrink-0 items-center select-none focus:outline-none touch-none',
+                COMPOSER_ICON_HOVER_CLASS,
                 className
             )}
-            style={{
-                height: '26px',
-                maxHeight: '26px',
-                minHeight: '26px',
-                color: `var(${agentColor.var})`,
-            }}
             title={agentLabel}
+            aria-label={agentLabel}
         >
-            <span className="flex h-full w-full min-w-0 items-center">
-                <span className="truncate">{agentLabel}</span>
-            </span>
+            <AgentCycleLabel
+                name={uiAgentName}
+                label={agentLabel}
+                revealed={showAgentCycleLabel}
+                avatarSize={16}
+                slotClassName="h-6 w-6"
+                colorVar={agentColor.var}
+            />
         </button>
     );
 };

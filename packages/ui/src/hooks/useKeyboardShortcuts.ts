@@ -3,6 +3,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
 import { useUIStore } from '@/stores/useUIStore';
+import { LEADER_KEY_TIMEOUT_MS, useLeaderKeyStore } from '@/stores/useLeaderKeyStore';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useAssistantStatus } from '@/hooks/useAssistantStatus';
 import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
@@ -17,6 +18,10 @@ import { getCycledPrimaryAgentName } from '@/components/chat/mobileControlsUtils
 import { navigateAdjacentSession } from '@/sync/session-navigation';
 import { resetWebviewZoom, zoomWebviewIn, zoomWebviewOut } from '@/lib/webviewZoom';
 import { resolveEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { opencodeClient } from '@/lib/opencode/client';
+import { toast } from '@/components/ui';
+import { useI18n } from '@/lib/i18n';
+import { activateSidebarNumberedSession } from '@/sync/sidebar-numbered-navigation';
 
 // Close the active context-panel tab when open; otherwise close the desktop window.
 // Returns true when the shortcut was consumed (caller should preventDefault).
@@ -44,6 +49,7 @@ const handleCloseContextPanelTabOrWindow = (): boolean => {
 };
 
 export const useKeyboardShortcuts = () => {
+  const { t } = useI18n();
   const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
   const armAbortPrompt = useSessionUIStore((s) => s.armAbortPrompt);
   const clearAbortPrompt = useSessionUIStore((s) => s.clearAbortPrompt);
@@ -62,6 +68,7 @@ export const useKeyboardShortcuts = () => {
   const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
   const setSettingsDialogOpen = useUIStore((s) => s.setSettingsDialogOpen);
   const setModelSelectorOpen = useUIStore((s) => s.setModelSelectorOpen);
+  const setAgentSelectorOpen = useUIStore((s) => s.setAgentSelectorOpen);
   const setTimelineDialogOpen = useUIStore((s) => s.setTimelineDialogOpen);
   const toggleExpandedInput = useUIStore((s) => s.toggleExpandedInput);
   const shortcutOverrides = useUIStore((s) => s.shortcutOverrides);
@@ -71,6 +78,7 @@ export const useKeyboardShortcuts = () => {
   const { working } = useAssistantStatus();
   const abortPrimedUntilRef = React.useRef<number | null>(null);
   const abortPrimedTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const leaderTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const themeModeRef = React.useRef(themeMode);
 
   React.useEffect(() => {
@@ -85,6 +93,31 @@ export const useKeyboardShortcuts = () => {
     abortPrimedUntilRef.current = null;
     clearAbortPrompt();
   }, [clearAbortPrompt]);
+
+  // Clear the Ctrl+X leader chord window and its expiry timer.
+  const clearLeaderKey = React.useCallback(() => {
+    if (leaderTimeoutRef.current) {
+      clearTimeout(leaderTimeoutRef.current);
+      leaderTimeoutRef.current = null;
+    }
+    useLeaderKeyStore.getState().clear();
+  }, []);
+
+  // Arm the Ctrl+X leader chord window (OpenCode-compatible timeout).
+  const armLeaderKey = React.useCallback(() => {
+    if (leaderTimeoutRef.current) {
+      clearTimeout(leaderTimeoutRef.current);
+      leaderTimeoutRef.current = null;
+    }
+    const expiresAt = useLeaderKeyStore.getState().arm(LEADER_KEY_TIMEOUT_MS);
+    leaderTimeoutRef.current = setTimeout(() => {
+      const { expiresAt: currentExpiresAt } = useLeaderKeyStore.getState();
+      if (currentExpiresAt && Date.now() >= currentExpiresAt) {
+        useLeaderKeyStore.getState().clear();
+      }
+      leaderTimeoutRef.current = null;
+    }, Math.max(0, expiresAt - Date.now()));
+  }, []);
 
   React.useEffect(() => {
     const combo = (actionId: string) => getEffectiveShortcutCombo(actionId, shortcutOverrides);
@@ -119,6 +152,147 @@ export const useKeyboardShortcuts = () => {
         '[data-slot="dropdown-menu-content"], [data-slot="select-content"], [role="listbox"], [role="menu"], [data-radix-popper-content-wrapper]'
       );
       return Array.from(openDropdowns).some((element) => element.getClientRects().length > 0);
+    };
+
+    // True when a modal/overlay should suppress leader chords (same gate as model selector).
+    const hasBlockingOverlay = () => {
+      const {
+        isSettingsDialogOpen,
+        isCommandPaletteOpen,
+        isHelpDialogOpen,
+        isSessionSwitcherOpen,
+        isAboutDialogOpen,
+      } = useUIStore.getState();
+      return isSettingsDialogOpen || isCommandPaletteOpen || isHelpDialogOpen || isSessionSwitcherOpen || isAboutDialogOpen;
+    };
+
+    // Compact the current session via the same path as `/compact`.
+    const runLeaderCompact = async () => {
+      const sessionId = useSessionUIStore.getState().currentSessionId;
+      if (!sessionId) {
+        return;
+      }
+
+      try {
+        await sessionActions.waitForConnectionOrThrow();
+        const { currentProviderId, currentModelId } = useConfigStore.getState();
+        const compactDirectory =
+          useSessionUIStore.getState().getDirectoryForSession(sessionId)
+          || useDirectoryStore.getState().currentDirectory
+          || undefined;
+        await opencodeClient.summarizeSession(sessionId, currentProviderId, currentModelId, compactDirectory);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.compactFailed'));
+      }
+    };
+
+    // Capture-phase leader chord handler so Ctrl+X / follow-up keys work inside the chat input
+    // without inserting characters or triggering Cut.
+    const handleLeaderKeyCapture = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.isComposing || e.repeat) {
+        return;
+      }
+
+      if (isTerminalEventTarget(e.target)) {
+        return;
+      }
+
+      const leaderPending = useLeaderKeyStore.getState().pending;
+      const leaderCombo = combo('leader_key');
+
+      if (leaderPending) {
+        // Pressing the leader again re-arms the chord window.
+        if (leaderCombo && eventMatchesShortcut(e, leaderCombo)) {
+          e.preventDefault();
+          e.stopPropagation();
+          armLeaderKey();
+          return;
+        }
+
+        const key = e.key.toLowerCase();
+
+        if (key === 'escape') {
+          e.preventDefault();
+          e.stopPropagation();
+          clearLeaderKey();
+          return;
+        }
+
+        // Ignore bare modifier presses while waiting for the follow-up key.
+        if (e.key === 'Control' || e.key === 'Shift' || e.key === 'Alt' || e.key === 'Meta') {
+          return;
+        }
+
+        // Any other modified chord cancels instead of typing into the input.
+        if (e.metaKey || e.ctrlKey || e.altKey) {
+          clearLeaderKey();
+          return;
+        }
+
+        const {
+          activeMainTab,
+          isModelSelectorOpen,
+          isAgentSelectorOpen,
+        } = useUIStore.getState();
+        const canRunChatChord = activeMainTab === 'chat' && !hasBlockingOverlay();
+
+        if (key === 'm' && canRunChatChord) {
+          e.preventDefault();
+          e.stopPropagation();
+          clearLeaderKey();
+          setModelSelectorOpen(!isModelSelectorOpen);
+          return;
+        }
+
+        if (key === 'a' && canRunChatChord) {
+          e.preventDefault();
+          e.stopPropagation();
+          clearLeaderKey();
+          setAgentSelectorOpen(!isAgentSelectorOpen);
+          return;
+        }
+
+        if (key === 'n' && canRunChatChord) {
+          e.preventDefault();
+          e.stopPropagation();
+          clearLeaderKey();
+          setActiveMainTab('chat');
+          setSessionSwitcherOpen(false);
+          openNewSessionDraft();
+          return;
+        }
+
+        if (key === 'c' && canRunChatChord) {
+          e.preventDefault();
+          e.stopPropagation();
+          clearLeaderKey();
+          void runLeaderCompact();
+          return;
+        }
+
+        // Unknown follow-up: consume the key so it does not land in the input, then exit.
+        e.preventDefault();
+        e.stopPropagation();
+        clearLeaderKey();
+        return;
+      }
+
+      if (!leaderCombo || !eventMatchesShortcut(e, leaderCombo)) {
+        return;
+      }
+
+      if (hasBlockingOverlay()) {
+        return;
+      }
+
+      const { activeMainTab } = useUIStore.getState();
+      if (activeMainTab !== 'chat') {
+        return;
+      }
+
+      e.preventDefault();
+      e.stopPropagation();
+      armLeaderKey();
     };
 
     const handleTerminalShortcutCapture = (e: KeyboardEvent) => {
@@ -423,6 +597,16 @@ export const useKeyboardShortcuts = () => {
         return;
       }
 
+      for (let slotNumber = 1; slotNumber <= 9; slotNumber += 1) {
+        if (!eventMatchesShortcut(e, combo(`switch_tab_${slotNumber}`))) {
+          continue;
+        }
+        if (activateSidebarNumberedSession(slotNumber)) {
+          e.preventDefault();
+        }
+        return;
+      }
+
       if (eventMatchesShortcut(e, combo('toggle_terminal'))) {
         const { isMobile } = useUIStore.getState();
         if (isMobile) {
@@ -675,10 +859,12 @@ export const useKeyboardShortcuts = () => {
       }
     };
 
+    window.addEventListener('keydown', handleLeaderKeyCapture, true);
     window.addEventListener('keydown', handleTerminalShortcutCapture, true);
     window.addEventListener('keydown', handleKeyDown);
 
     return () => {
+      window.removeEventListener('keydown', handleLeaderKeyCapture, true);
       window.removeEventListener('keydown', handleTerminalShortcutCapture, true);
       window.removeEventListener('keydown', handleKeyDown);
     };
@@ -698,22 +884,27 @@ export const useKeyboardShortcuts = () => {
     setActiveMainTab,
     setSettingsDialogOpen,
     setModelSelectorOpen,
+    setAgentSelectorOpen,
     setTimelineDialogOpen,
     toggleExpandedInput,
     setThemeMode,
     working,
     armAbortPrompt,
     resetAbortPriming,
+    armLeaderKey,
+    clearLeaderKey,
     currentSessionId,
     currentDirectory,
     activeProject?.id,
     activeProject?.path,
     shortcutOverrides,
+    t,
   ]);
 
   React.useEffect(() => {
     return () => {
       resetAbortPriming();
+      clearLeaderKey();
     };
-  }, [resetAbortPriming]);
+  }, [resetAbortPriming, clearLeaderKey]);
 };

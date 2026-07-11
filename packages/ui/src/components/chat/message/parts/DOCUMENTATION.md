@@ -33,8 +33,8 @@ Use this doc when you ask an agent to change tool/header/description behavior.
   - Shared Codex-style rounded chip classes for interactive tool / reasoning headers.
   - Hover-only wash matches sidebar session-row hover (`surface-foreground` color-mix); idle rows stay flush.
   - Tight `py-0.5` + `my-0.5` keeps the wash compact while preserving inter-row spacing.
-  - Also exports `SELECTOR_CHIP_HOVER_CLASS` for draft project/branch selectors in `ChatInput`.
-  - Used by `ToolPart.tsx`, `ReasoningPart.tsx`, `ProgressiveGroup.tsx`, and `ChatInput.tsx`.
+  - Also exports composer chrome (`SELECTOR_CHIP_HOVER_CLASS`, `COMPOSER_TRIGGER_CHROME_CLASS`, `COMPOSER_ICON_HOVER_CLASS`) for draft project/branch selectors and input footer controls.
+  - Used by `ToolPart.tsx`, `ReasoningPart.tsx`, `ProgressiveGroup.tsx`, `ChatInput.tsx`, and `ModelControls.tsx`.
 
 - `toolRenderUtils.ts`
   - Core classification helpers:

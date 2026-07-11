@@ -45,7 +45,9 @@ export function SidebarSectionHeader({
           <span className={titleClassName}>{title}</span>
         </button>
       ) : (
-        <span className={cn('min-w-0 flex-1', titleClassName)}>{title}</span>
+        <span className={cn('flex min-w-0 flex-1 items-center gap-1', titleClassName)}>
+          {title}
+        </span>
       )}
       {accessory ? (
         // -mr-2：equalizer 图标在 24px 命中区内居中，负 margin 把字形右缘拉齐下方 "1h"/"3h"

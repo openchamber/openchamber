@@ -5,12 +5,18 @@
 - `SessionSidebar.tsx` now acts mainly as orchestration; core logic moved to focused hooks/components.
 - Sidebar is now a single multi-project tree: `recent` top section, then projects, then worktrees/archived groups, then sessions.
 - Project rows retain the persisted project-registry order while session and worktree data hydrates. Session activity never reorders the structural project tree; the Recent section represents recency instead.
-- The Projects section header shows a localized session-sync status while global sessions and initial worktree discovery are still loading.
+- The Projects section header shows a localized session-sync status while the global-session store is in its explicit idle/loading states. Worktree discovery is intentionally excluded because it can be long-running and no longer affects project ordering.
+- An idle global-session store always triggers a refresh, including after a runtime endpoint reset; the status therefore cannot remain idle after the sidebar's one-time mount effect has already run.
 - `NavRail` is no longer part of sidebar/navigation flow.
 - Project headers now own root sessions directly; there is no separate rendered `project root` subgroup.
-- Active/hover rows use Codex-style inset neutral chips (`SIDEBAR_ROW_*`); nested rows indent via
-  padding *inside* the chip so hover/active wash stays full-width (reserved left gutter). Nest
-  step equals the folder icon column (`16 + 6`) so child text lines up under the parent folder name.
+- Active/hover rows use Codex-style inset neutral chips (`SIDEBAR_ROW_*`); hover is a lighter wash
+  (`8%`) and active/selected is slightly deeper (`11%`) so the two states read apart. Nested rows indent via
+  padding *inside* the chip so hover/active wash stays full-width (reserved left gutter). Depth 1
+  uses the folder icon column (`16 + 6`) so all project sessions share one vertical line under the
+  parent folder *name*. Deeper levels (subagent) add ~one UI-label font size (`14px`) each.
+  Subsession expand chevrons align to the folder-icon column and stay hidden until row hover
+  (unless always-show-actions). Recent rows stay flat: no pin glyph, no subsession chevron, and
+  no nested children — that tree chrome belongs only under Projects.
 - Session rows are single-line (no inline timestamp); details (title, relative time, folder/project,
   branch) open in an immediate floating hover card (`delayDuration={0}`, top-left aligned).
 - Compact relative times use `common.relative.*Compact` i18n keys.
@@ -19,7 +25,8 @@
 - Archived groups are collapsed by default and support bulk deletion at group/folder level.
 - Session rows support compact inline dates in minimal mode and simplified metadata in default mode.
 - Session-row visual selection is published through a narrow row-only Focus store before authoritative navigation. Focus includes the render scope (`recent` or `project`) plus session/project identity, so duplicate representations never both receive the Active background or satisfy the wrong paint barrier.
-- Previous/next-session navigation consumes ordered snapshots published from the rendered sidebar model. A Recent-origin focus cycles Recent items; a project-origin focus cycles the project tree. Project/group/folder ancestors and hidden row batches are expanded synchronously when a shortcut targets an unmounted row.
+- Previous/next-session navigation consumes ordered snapshots published from the rendered sidebar model. A Recent-origin focus cycles Recent items; a project-origin focus cycles only the logically visible rows inside its current expanded project. Rows hidden by project/group/folder collapse or the group's Show more boundary are excluded, and shortcuts never cross into another project as a fallback.
+- Global Mod+1…9 navigation numbers the first nine logically visible session rows from top to bottom across Recent and the expanded project tree. Container headers never consume a number; duplicate Recent/Project representations remain distinct Focus rows. Holding the platform primary modifier for 500ms reveals compact shortcut chips only on those rows, while releasing it, window blur, or page hide clears the hints immediately.
 - Every session navigation announces a monotonic intent revision. A later sidebar, keyboard, deep-link, or switcher intent invalidates an older pending sidebar commit, including ABA sequences such as A -> B -> A.
 - Chat LRU visibility follows the authoritative selection synchronously: cache hits reveal the retained Activity immediately, while misses show an explicit skeleton. A newly rendered Activity enters the bounded LRU only after its DOM commit, so interrupted keyboard switches cannot evict a reusable view.
 - New extractions in latest pass reduced local effect/callback bulk further:
@@ -47,7 +54,8 @@
 - `ConfirmDialogs.tsx`: Shared confirm dialog wrappers for session delete and folder delete flows.
 - `sortableItems.tsx`: DnD sortable wrappers for project and group ordering plus project-row action affordances.
 - `sessionFolderDnd.tsx`: Folder/session DnD scope and wrappers for dropping/moving sessions into folders.
-- `sessionNavigationModel.ts`: Flattens the rendered project/group/folder model into the exact ordered shortcut targets, including ancestor reveal metadata.
+- `sessionNavigationModel.ts`: Flattens the rendered project/group/folder model into ordered shortcut targets, then filters them against project/group/folder collapse and Show more state so project-scoped shortcuts use only logically visible rows.
+- `sidebar-numbered-navigation.ts` (sync): Publishes the global first-nine visible session target order consumed by Mod+1…9, with revision-safe responsive remount cleanup.
 
 ### Hooks
 
@@ -69,4 +77,5 @@
 
 - `types.ts`: Shared sidebar types (`SessionNode`, `SessionGroup`, summary/search metadata).
 - `activitySections.ts`: Persisted top-section storage/helpers for the current `recent` session list.
+- `sessionFocusReconciliation.ts`: Repairs the explicit Recent/Project focus identity after sidebar metadata or visibility changes without changing the authoritative current session.
 - `utils.tsx`: Shared sidebar utilities (path normalization, sorting, dedupe, archived scope keys, project relation checks, text highlight, labels, compact/default date formatting, nest-indent padding helpers).

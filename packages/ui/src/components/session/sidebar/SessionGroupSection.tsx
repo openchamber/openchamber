@@ -22,7 +22,7 @@ import { SessionFolderItem } from '../SessionFolderItem';
 import { DroppableFolderWrapper, SessionFolderDndScope } from './sessionFolderDnd';
 import type { SortableDragHandleProps } from './sortableItems';
 import type { GroupSearchData, SessionGroup, SessionNode } from './types';
-import { compareSessionsByPinnedAndTime, isBranchDifferentFromLabel, normalizePath, renderHighlightedText, SIDEBAR_MUTED_HINT_CLASS } from './utils';
+import { compareSessionsByPinnedAndTime, getSidebarRowPaddingLeft, isBranchDifferentFromLabel, normalizePath, renderHighlightedText, SIDEBAR_MUTED_HINT_CLASS } from './utils';
 import {
   collectSubtreeContainingId,
   computeNodeStructureKey,
@@ -36,6 +36,10 @@ import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { openExternalUrl } from '@/lib/url';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
+import {
+  getDefaultProjectGroupVisibleCount,
+  resolveProjectVirtualSessionIndex,
+} from './sessionNavigationModel';
 
 type DeleteFolderConfirm = {
   scopeKey: string;
@@ -93,6 +97,8 @@ type Props = {
   expandedParents: Set<string>;
   sessionOrderIndex: Map<string, number>;
   currentSessionId: string | null;
+  shortcutTargetSessionId?: string | null;
+  shortcutTargetVisibleIndex?: number | null;
   editingId: string | null;
   editTitle: string;
   openSidebarMenuKey: string | null;
@@ -309,6 +315,8 @@ const areGroupPropsEqual = (prev: Props, next: Props): boolean => {
     && prev.onToggleCollapsedGroup === next.onToggleCollapsedGroup
     && prev.dragHandleProps === next.dragHandleProps
     && prev.scrollContainerRef === next.scrollContainerRef
+    && prev.shortcutTargetSessionId === next.shortcutTargetSessionId
+    && prev.shortcutTargetVisibleIndex === next.shortcutTargetVisibleIndex
   );
 };
 
@@ -353,6 +361,8 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
     expandedParents,
     sessionOrderIndex,
     currentSessionId,
+    shortcutTargetSessionId = null,
+    shortcutTargetVisibleIndex = null,
     editingId,
     openSidebarMenuKey,
     prVisualStateByDirectoryBranch,
@@ -379,7 +389,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
   // VS Code always uses the expanded layout (see SessionNodeItem).
   const isMinimalMode = displayMode === 'minimal' && !isVSCodeRuntime();
   const isCollapsed = hasSessionSearchQuery ? false : collapsedGroups.has(groupKey);
-  const maxVisible = hideDirectoryControls ? 10 : 5;
+  const maxVisible = getDefaultProjectGroupVisibleCount(hideDirectoryControls);
   const nonArchivedVisibleCount = Math.max(maxVisible, visibleSessionCount ?? maxVisible);
   const groupMatchesSearch = hasSessionSearchQuery ? searchData?.groupMatches === true : false;
   const shouldFilterGroupContents = hasSessionSearchQuery;
@@ -681,6 +691,33 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
     scrollMargin: archivedScrollMargin,
     getItemKey: (index) => visibleSessions[index]?.session.id ?? index,
   });
+  const shortcutVirtualIndex = resolveProjectVirtualSessionIndex(
+    visibleSessions,
+    shortcutTargetSessionId,
+    shortcutTargetVisibleIndex,
+  );
+
+  React.useLayoutEffect(() => {
+    if (!virtualizerReady || !shortcutTargetSessionId || shortcutVirtualIndex === null) {
+      return;
+    }
+    // A mounted SessionNodeItem owns the final scrollIntoView + focus commit.
+    // Only move the virtual window when that row does not exist in the DOM yet.
+    if (sessionVirtualizer.getVirtualItems().some((item) => item.index === shortcutVirtualIndex)) {
+      return;
+    }
+
+    sessionVirtualizer.scrollToIndex(shortcutVirtualIndex, {
+      align: 'auto',
+      behavior: 'auto',
+    });
+  }, [
+    archivedScrollMargin,
+    sessionVirtualizer,
+    shortcutTargetSessionId,
+    shortcutVirtualIndex,
+    virtualizerReady,
+  ]);
 
   // Hooks below MUST stay above the search-empty early-return so they
   // fire in the same order every render — rules-of-hooks.
@@ -923,7 +960,10 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
     );
   };
 
-  const renderFolderItems = () => rootFolders.map(({ folder, nodes }) => renderOneFolderItem(folder, nodes, 0));
+  // Nest one icon-column under the project/group header so all session titles
+  // share one vertical line under the folder *name*. Subagents add +1 (font-size).
+  const contentDepth = 1;
+  const renderFolderItems = () => rootFolders.map(({ folder, nodes }) => renderOneFolderItem(folder, nodes, contentDepth));
   const hasWorktreeDeleteAction = Boolean(!group.isMain && group.worktree);
   const groupHeaderRightPadding = alwaysShowActions
     ? (hasWorktreeDeleteAction ? 'pr-14' : 'pr-7')
@@ -952,7 +992,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
             // re-renders synchronously before paint. Rendering the plain rows
             // meanwhile keeps the container's height real so the scroller
             // never collapses/clamps during the flip.
-            visibleSessions.map((node) => renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true, groupSessionSecondaryMeta, 'project', {
+            visibleSessions.map((node) => renderSessionNode(node, contentDepth, group.directory, projectId, group.isArchivedBucket === true, groupSessionSecondaryMeta, 'project', {
               subtreeContainsActive,
               subtreeContainsEditing,
               menuOpenSessionId,
@@ -991,7 +1031,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
                     transform: `translateY(${item.start - archivedScrollMargin}px)`,
                   }}
                 >
-                  {renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true, groupSessionSecondaryMeta, 'project', {
+                  {renderSessionNode(node, contentDepth, group.directory, projectId, group.isArchivedBucket === true, groupSessionSecondaryMeta, 'project', {
                     subtreeContainsActive,
                     subtreeContainsEditing,
                     menuOpenSessionId,
@@ -1005,7 +1045,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
           )}
         </div>
       ) : (
-        visibleSessions.map((node) => renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true, groupSessionSecondaryMeta, 'project', {
+        visibleSessions.map((node) => renderSessionNode(node, contentDepth, group.directory, projectId, group.isArchivedBucket === true, groupSessionSecondaryMeta, 'project', {
           subtreeContainsActive,
           subtreeContainsEditing,
           menuOpenSessionId,
@@ -1014,7 +1054,10 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
         }))
       )}
       {totalSessions === 0 && allFoldersForGroup.length === 0 ? (
-        <div className={SIDEBAR_MUTED_HINT_CLASS}>
+        <div
+          className={SIDEBAR_MUTED_HINT_CLASS}
+          style={{ paddingLeft: getSidebarRowPaddingLeft(contentDepth) }}
+        >
           {group.isArchivedBucket
             ? t('sessions.sidebar.group.empty.noArchivedSessions')
             : t('sessions.sidebar.group.empty.noSessionsInWorkspace')}
@@ -1025,6 +1068,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
           type="button"
           onClick={() => showMoreGroupSessions(groupKey, visibleSessions.length)}
           className={cn(SIDEBAR_MUTED_HINT_CLASS, 'hover:text-foreground hover:underline')}
+          style={{ paddingLeft: getSidebarRowPaddingLeft(contentDepth) }}
         >
           {t('sessions.sidebar.group.showMore')}
         </button>
@@ -1034,6 +1078,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
           type="button"
           onClick={() => resetGroupSessionLimit(groupKey)}
           className={cn(SIDEBAR_MUTED_HINT_CLASS, 'hover:text-foreground hover:underline')}
+          style={{ paddingLeft: getSidebarRowPaddingLeft(contentDepth) }}
         >
           {t('sessions.sidebar.group.showFewer')}
         </button>
@@ -1041,7 +1086,8 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
     </SessionFolderDndScope>
   );
 
-  // Codex-style: expanded body aligns with the group header — no extra indent.
+  // Codex-style: body content nests one step under the header icon column;
+  // row chips stay full-width (indent is padding inside each chip).
   const groupBodyPaddingClass = compactBodyPadding ? 'pb-2' : 'pb-3';
 
   if (hideGroupLabel) {

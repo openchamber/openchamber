@@ -135,6 +135,31 @@ export const HelpDialog: React.FC = () => {
       ],
     },
     {
+      categoryKey: "helpDialog.section.leaderChords",
+      items: [
+        {
+          keys: 'Ctrl+X → M',
+          descriptionKey: "helpDialog.item.leaderOpenModel",
+          icon: "ai-generate-2",
+        },
+        {
+          keys: 'Ctrl+X → A',
+          descriptionKey: "helpDialog.item.leaderOpenAgent",
+          icon: "ai-agent",
+        },
+        {
+          keys: 'Ctrl+X → N',
+          descriptionKey: "helpDialog.item.leaderNewSession",
+          icon: "add",
+        },
+        {
+          keys: 'Ctrl+X → C',
+          descriptionKey: "helpDialog.item.leaderCompact",
+          icon: "scissors",
+        },
+      ],
+    },
+    {
       categoryKey: "helpDialog.section.panels",
       items: [
         {
@@ -222,7 +247,7 @@ export const HelpDialog: React.FC = () => {
         },
         {
           keys: [`${mod} + 1...9`],
-          descriptionKey: "helpDialog.item.switchProject",
+          descriptionKey: "helpDialog.item.switchSession",
           icon: "layout-left",
         },
         {

@@ -48,6 +48,8 @@ type Props = {
   batchSize?: number;
   /** Right-side chrome on the section title row (e.g. display-mode equalizer). */
   headerAccessory?: React.ReactNode;
+  /** Publishes the exact root-session rows currently revealed by collapse/Show more state. */
+  onVisibleSessionIdsChange?: (sessionIds: readonly string[]) => void;
 };
 
 type RenderExtras = SessionNodeRenderExtras;
@@ -64,6 +66,7 @@ export function SidebarActivitySections({
   initialVisibleCount = MAX_VISIBLE_RECENT_SESSIONS,
   batchSize = MAX_VISIBLE_RECENT_SESSIONS,
   headerAccessory,
+  onVisibleSessionIdsChange,
 }: Props): React.ReactNode {
   const { t } = useI18n();
   const [collapsed, setCollapsed] = React.useState<Set<string>>(new Set());
@@ -72,6 +75,18 @@ export function SidebarActivitySections({
     state.focus?.scope === 'recent' ? state.focus.sessionId : null
   ));
   const flatVariant = variant === 'flat';
+
+  const visibleSessionIds = React.useMemo(() => visibleSectionsForShortcutPublishing({
+    sections,
+    collapsed,
+    visibleCountBySection,
+    initialVisibleCount,
+    flatVariant,
+  }), [collapsed, flatVariant, initialVisibleCount, sections, visibleCountBySection]);
+
+  React.useLayoutEffect(() => {
+    onVisibleSessionIdsChange?.(visibleSessionIds);
+  }, [onVisibleSessionIdsChange, visibleSessionIds]);
 
   React.useLayoutEffect(() => {
     if (!recentFocusSessionId) {
@@ -262,4 +277,29 @@ export function SidebarActivitySections({
       })}
     </div>
   );
+}
+
+function visibleSectionsForShortcutPublishing({
+  sections,
+  collapsed,
+  visibleCountBySection,
+  initialVisibleCount,
+  flatVariant,
+}: {
+  sections: ActivitySection[];
+  collapsed: Set<string>;
+  visibleCountBySection: Map<string, number>;
+  initialVisibleCount: number;
+  flatVariant: boolean;
+}): string[] {
+  const ids: string[] = [];
+  sections.forEach((section) => {
+    if (!flatVariant && collapsed.has(section.key)) return;
+    const visibleLimit = Math.max(
+      initialVisibleCount,
+      visibleCountBySection.get(section.key) ?? initialVisibleCount,
+    );
+    section.items.slice(0, visibleLimit).forEach((item) => ids.push(item.node.session.id));
+  });
+  return ids;
 }

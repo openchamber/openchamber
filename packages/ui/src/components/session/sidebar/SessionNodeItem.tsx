@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { dropdownMenuItemClass, dropdownMenuPopupClass, dropdownMenuSeparatorClass, dropdownMenuSubTriggerClass } from '@/components/ui/dropdown-menu.styles';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { cn } from '@/lib/utils';
+import { cn, isMacOS } from '@/lib/utils';
 import { canUseElectronDesktopIPC, invokeDesktop, isVSCodeRuntime } from '@/lib/desktop';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
@@ -34,6 +34,7 @@ import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import { useI18n } from '@/lib/i18n';
 import { useShiftKeyHeld } from '@/hooks/useShiftKeyHeld';
+import { useDelayedModKeyHeld } from '@/hooks/useDelayedModKeyHeld';
 import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { parseMultiRunSessionTitle } from '@/lib/multirun/title';
@@ -149,6 +150,8 @@ type Props = {
    * to `useSession` only when this map returns undefined.
    */
   liveSessionById: Map<string, Session>;
+  /** Global Mod+1…9 slot for this exact visible Focus row. */
+  shortcutNumber?: number | null;
 };
 
 type QuickSessionActionProps = {
@@ -213,6 +216,29 @@ const QuickSessionAction = React.memo(function QuickSessionAction({
   );
 });
 
+const SessionShortcutHint = React.memo(function SessionShortcutHint({
+  number,
+}: {
+  number: number;
+}): React.ReactNode {
+  const visible = useDelayedModKeyHeld();
+  if (!visible) return null;
+
+  return (
+    <kbd
+      data-sidebar-shortcut-number={number}
+      className="pointer-events-none relative z-20 inline-flex h-6 min-w-0 shrink-0 select-none items-center justify-center rounded-full bg-[var(--surface-subtle)] px-2.5 font-normal leading-none text-muted-foreground"
+      style={{
+        fontFamily: 'inherit',
+        fontSize: 'var(--text-ui-label)',
+      }}
+      aria-hidden="true"
+    >
+      {isMacOS() ? `⌘${number}` : `Ctrl+${number}`}
+    </kbd>
+  );
+});
+
 function SessionNodeItemComponent(props: Props): React.ReactNode {
   const { t } = useI18n();
   const {
@@ -260,6 +286,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     menuOpenSessionId,
     childRenderExtrasFor,
     liveSessionById,
+    shortcutNumber = null,
   } = props;
   const hasSecondaryProjectLabel = Boolean(secondaryMeta?.projectLabel);
   const hasSecondaryBranchLabel = Boolean(secondaryMeta?.branchLabel);
@@ -395,8 +422,8 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const isSessionMenuOpen = isMenuOpen || isContextMenuOpen;
   const isMultiRunLikeSession = React.useMemo(() => parseMultiRunSessionTitle(resolvedSession.title) !== null, [resolvedSession.title]);
   const [fusionDialogOpen, setFusionDialogOpen] = React.useState(false);
-  const metadataSubsessionChevron = isVSCode && renderContext === 'recent' && !isMinimalMode;
-  const inlineSubsessionChevron = isVSCode && renderContext === 'recent' && isMinimalMode;
+  // Recent is a flat recency list — no pin/chevron/tree chrome (those live in Projects).
+  const isRecentContext = renderContext === 'recent';
 
   const descendantCount = React.useMemo(() => collectNodeDescendantIds(node).length, [collectNodeDescendantIds, node]);
 
@@ -573,7 +600,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           {!isMinimalMode ? (
             <div className="flex items-center justify-between gap-3 text-muted-foreground/60 min-w-0 overflow-hidden leading-tight" style={{ fontSize: 'calc(var(--text-ui-label) * 0.85)' }}>
               <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
-                {hasChildren ? <span className="inline-flex items-center justify-center flex-shrink-0">{isExpanded ? <Icon name="arrow-down-s" className="h-3 w-3" /> : <Icon name="arrow-right-s" className="h-3 w-3" />}</span> : null}
+                {hasChildren && !isRecentContext ? <span className="inline-flex items-center justify-center flex-shrink-0">{isExpanded ? <Icon name="arrow-down-s" className="h-3 w-3" /> : <Icon name="arrow-right-s" className="h-3 w-3" />}</span> : null}
                 <span className="flex-shrink-0">{sessionUpdatedLabel}</span>
                 {hasSecondaryProjectLabel ? <span className="truncate">{secondaryMeta?.projectLabel}</span> : null}
                 {hasSecondaryBranchLabel ? <span className="inline-flex min-w-0 items-center gap-0.5"><Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" /><span className="truncate">{secondaryMeta?.branchLabel}</span></span> : null}
@@ -605,29 +632,35 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           title={t('sessions.sidebar.session.status.unread')}
         />
       );
-  const hideLeadingIndicatorOnHover = !alwaysShowActions && hasChildren && (showStatusMarker || isPinnedSession);
-  const showPinnedMarker = isPinnedSession && !showStatusMarker;
+  // Recent: no pin glyph and no chevron swap-on-hover (tree chrome stays in Projects).
+  const hideLeadingIndicatorOnHover = !isRecentContext && !alwaysShowActions && hasChildren && (showStatusMarker || isPinnedSession);
+  const showPinnedMarker = !isRecentContext && isPinnedSession && !showStatusMarker;
   const pinnedMarkerContent = (
     <Icon
-      name="pushpin"
-      className="h-3 w-3 flex-shrink-0 text-primary"
+      name="pushpin-2-fill"
+      className="h-3 w-3 flex-shrink-0 text-foreground/50"
       aria-label={t('sessions.sidebar.session.status.pinned')}
     />
   );
   const leadingIndicators = showStatusMarker || showPinnedMarker ? (
     <span
       className={cn(
-        'pointer-events-none absolute left-0.5 inline-flex h-3.5 w-3.5 items-center justify-center transition-opacity',
+        'pointer-events-none absolute inline-flex h-3.5 w-3.5 items-center justify-center transition-opacity',
         isMinimalMode ? 'top-1/2 -translate-y-1/2' : 'top-[14.5px] -translate-y-1/2',
         hideLeadingIndicatorOnHover ? 'opacity-100 group-hover:opacity-0 group-focus-within:opacity-0' : '',
       )}
+      // Icon/chevron column = parent depth (aligns with folder glyphs above).
+      style={{ left: getSidebarRowPaddingLeft(Math.max(0, depth - 1)) }}
     >
       {showStatusMarker ? statusMarkerContent : null}
       {showPinnedMarker ? pinnedMarkerContent : null}
     </span>
   ) : null;
-  const hideChevronUntilHover = hasChildren && !alwaysShowActions && (showStatusMarker || isPinnedSession);
-  const subsessionChevron = hasChildren ? (
+  // Subsession chevron: align with the folder-icon column; idle hidden, hover only
+  // (touch / alwaysShowActions keeps it visible). Omitted entirely in Recent.
+  const hideChevronUntilHover = hasChildren && !alwaysShowActions;
+  const subsessionChevronLeft = getSidebarRowPaddingLeft(Math.max(0, depth - 1));
+  const subsessionChevron = !isRecentContext && hasChildren ? (
     <span
       role="button"
       tabIndex={0}
@@ -642,15 +675,15 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           toggleParent(expansionKey);
         }
       }}
-      style={{ minWidth: 14, minHeight: 14 }}
+      style={{
+        minWidth: 14,
+        minHeight: 14,
+        left: subsessionChevronLeft,
+      }}
       className={cn(
-        'inline-flex h-3.5 w-3.5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
-        metadataSubsessionChevron
-          ? 'absolute left-1.5 bottom-1'
-          : inlineSubsessionChevron
-          ? 'relative mr-0.5 shrink-0'
-          : cn('absolute left-0.5', isMinimalMode ? 'top-1/2 -translate-y-1/2' : 'top-[14.5px] -translate-y-1/2'),
-        !metadataSubsessionChevron && !inlineSubsessionChevron && hideChevronUntilHover
+        'absolute inline-flex h-3.5 w-3.5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
+        isMinimalMode ? 'top-1/2 -translate-y-1/2' : 'top-[14.5px] -translate-y-1/2',
+        hideChevronUntilHover
           ? 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto'
           : '',
       )}
@@ -1012,22 +1045,26 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                 data-session-focus-key={rowFocusKey}
                 data-session-project-id={projectId ?? ''}
                 data-session-archived={archivedBucket ? '1' : '0'}
+                data-session-depth={depth}
                 onClick={handleRowBackgroundClick}
                 className={cn(
-                  // Nest indent is padding *inside* the chip so hover/active wash
-                  // stays full-width (reserved left gutter), matching folder rows.
+                  // Full-width chip; nest indent lives on the inner content row
+                  // so ContextMenu render-prop merges cannot drop paddingLeft.
                   'group relative my-0.5 flex cursor-pointer items-center rounded-lg py-1.5 pr-2',
                   // Codex-style: inset neutral chip — never theme/primary tint.
                   isActive && !isRowSelected && SIDEBAR_ROW_ACTIVE_CLASS,
                   isRowSelected && SIDEBAR_ROW_ACTIVE_CLASS,
                   !isActive && !isRowSelected && SIDEBAR_ROW_HOVER_CLASS,
                 )}
-                style={{ paddingLeft: getSidebarRowPaddingLeft(depth) }}
               />
             }
           >
           {leadingIndicators}
           {subsessionChevron}
+          <div
+            className="flex min-w-0 flex-1 items-center"
+            style={{ paddingLeft: getSidebarRowPaddingLeft(depth) }}
+          >
           <div className="flex min-w-0 flex-1 items-center">
               <Tooltip delayDuration={0}>
                 <TooltipTrigger asChild>
@@ -1058,6 +1095,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                           <span className="leading-none">{pendingPermissionCount}</span>
                         </span>
                       ) : null}
+                      {shortcutNumber ? <SessionShortcutHint number={shortcutNumber} /> : null}
                     </div>
                   </button>
                 </TooltipTrigger>
@@ -1097,6 +1135,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                 </TooltipContent>
                 ) : null}
               </Tooltip>
+          </div>
           </div>
 
           {streamingIndicator && !mobileVariant ? (
@@ -1176,7 +1215,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           {contextMenuContent}
         </ContextMenu.Root>
       </DraggableSessionRow>
-      {hasChildren && isExpanded
+      {!isRecentContext && hasChildren && isExpanded
         ? node.children.map((child): React.ReactNode => {
           const childRenderExtras: SessionNodeChildRenderExtras = childRenderExtrasFor
             ? childRenderExtrasFor(child)
@@ -1349,6 +1388,7 @@ const areSessionNodeItemPropsEqual = (prev: Props, next: Props): boolean => {
   if ((prev.renderContext ?? 'project') !== (next.renderContext ?? 'project')) return false;
   if (prev.mobileVariant !== next.mobileVariant) return false;
   if (prev.alwaysShowActions !== next.alwaysShowActions) return false;
+  if (prev.shortcutNumber !== next.shortcutNumber) return false;
   if (prev.hasSessionSearchQuery !== next.hasSessionSearchQuery) return false;
   if (prev.normalizedSessionSearchQuery !== next.normalizedSessionSearchQuery) return false;
   if (prev.notifyOnSubtasks !== next.notifyOnSubtasks) return false;

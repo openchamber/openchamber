@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import type { EditPermissionMode } from '@/stores/types/sessionTypes';
 import type { ModelMetadata } from '@/types';
 import {
@@ -25,7 +26,12 @@ import { useDeviceInfo } from '@/lib/device';
 import { mergeModelMetadataWithLiveModel } from '@/lib/modelMetadata';
 import { getModelDisplayName as getSharedModelDisplayName } from '@/lib/modelDisplay';
 import { getEditModeColors } from '@/lib/permissions/editModeColors';
+import { matchesModelSearch } from '@/lib/search/modelSearch';
 import { cn, fuzzyMatch } from '@/lib/utils';
+import { AgentAvatar } from '@/components/chat/AgentAvatar';
+import { AgentCycleLabel } from '@/components/chat/AgentCycleLabel';
+import { useAgentCycleLabelReveal } from '@/components/chat/useAgentCycleLabelReveal';
+import { COMPOSER_ICON_HOVER_CLASS, COMPOSER_TRIGGER_CHROME_CLASS } from '@/components/chat/message/parts/toolRowChrome';
 import { useContextStore } from '@/stores/contextStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -284,12 +290,20 @@ interface ModelControlsProps {
     className?: string;
     mobilePanel?: MobileControlsPanel;
     onMobilePanelChange?: (panel: MobileControlsPanel) => void;
+    /**
+     * When true, the desktop agent trigger is not rendered in the model cluster.
+     * Pass a mount node via `agentPortalContainer` to place it in the left icon bar.
+     */
+    relocateAgent?: boolean;
+    agentPortalContainer?: HTMLElement | null;
 }
 
 export const ModelControls: React.FC<ModelControlsProps> = ({
     className,
     mobilePanel,
     onMobilePanelChange,
+    relocateAgent = false,
+    agentPortalContainer = null,
 }) => {
     const { t } = useI18n();
     const { isReady, isUnavailable } = useOpenCodeReadiness();
@@ -375,6 +389,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const addRecentEffort = useUIStore((state) => state.addRecentEffort);
     const isModelSelectorOpen = useUIStore((state) => state.isModelSelectorOpen);
     const setModelSelectorOpen = useUIStore((state) => state.setModelSelectorOpen);
+    const isAgentSelectorOpen = useUIStore((state) => state.isAgentSelectorOpen);
+    const setAgentSelectorOpen = useUIStore((state) => state.setAgentSelectorOpen);
     const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
     const setSettingsPage = useUIStore((state) => state.setSettingsPage);
     const hiddenModels = useUIStore((state) => state.hiddenModels);
@@ -383,8 +399,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         getEffectiveShortcutCombo('cycle_agent', cycleAgentShortcutOverride ? { cycle_agent: cycleAgentShortcutOverride } : undefined)
     ), [cycleAgentShortcutOverride]);
 
-    // Separate state for agent selector to avoid conflict with model selector
-    const [isAgentSelectorOpen, setIsAgentSelectorOpen] = React.useState(false);
+    // Agent selector open state lives in useUIStore so Ctrl+X → A (and other
+    // global shortcuts) can open it the same way Ctrl+Shift+M opens models.
     const { favoriteModelsList, recentModelsList } = useModelLists();
 
     const { isMobile: deviceIsMobile } = useDeviceInfo();
@@ -535,10 +551,14 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     }, [agents, getCurrentAgent, uiAgentName]);
 
     const sizeVariant: 'mobile' | 'vscode' | 'default' = isMobile ? 'mobile' : isVSCodeRuntime ? 'vscode' : 'default';
-    const buttonHeight = sizeVariant === 'mobile' ? 'h-9' : sizeVariant === 'vscode' ? 'h-6' : 'h-8';
     const controlIconSize = sizeVariant === 'mobile' ? 'size-5' : sizeVariant === 'vscode' ? 'size-4' : 'size-4';
     const controlTextSize = isCompact ? 'typography-micro' : 'typography-meta';
     const inlineGapClass = sizeVariant === 'mobile' ? 'gap-x-1' : sizeVariant === 'vscode' ? 'gap-x-2' : 'gap-x-3';
+    // Icon-only agent trigger: same square hit-target as composer + / focus / shield buttons.
+    // Icon-only agent trigger: same square hit-target as composer + / focus / shield buttons.
+    const agentIconButtonClass = sizeVariant === 'mobile' ? 'h-8 w-8' : sizeVariant === 'vscode' ? 'h-5 w-5' : 'h-6 w-6';
+    const agentAvatarSize = sizeVariant === 'mobile' ? 18 : sizeVariant === 'vscode' ? 14 : 16;
+    const showAgentCycleLabel = useAgentCycleLabelReveal(uiAgentName);
 
     const currentProvider = getCurrentProvider();
     const models = Array.isArray(currentProvider?.models) ? currentProvider.models : [];
@@ -559,39 +579,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         }
         return result;
     }, [providers, hiddenModels]);
-
-    const normalizeModelSearchValue = React.useCallback((value: string) => {
-        const lower = value.toLowerCase().trim();
-        const compact = lower.replace(/[^a-z0-9]/g, '');
-        const tokens = lower.split(/[^a-z0-9]+/).filter(Boolean);
-        return { lower, compact, tokens };
-    }, []);
-
-    const matchesModelSearch = React.useCallback((candidate: string, query: string) => {
-        const normalizedQuery = normalizeModelSearchValue(query);
-        if (!normalizedQuery.lower) {
-            return true;
-        }
-
-        const normalizedCandidate = normalizeModelSearchValue(candidate);
-        if (normalizedCandidate.lower.includes(normalizedQuery.lower)) {
-            return true;
-        }
-
-        if (normalizedQuery.compact.length >= 2 && normalizedCandidate.compact.includes(normalizedQuery.compact)) {
-            return true;
-        }
-
-        if (normalizedQuery.tokens.length === 0) {
-            return false;
-        }
-
-        return normalizedQuery.tokens.every((queryToken) =>
-            normalizedCandidate.tokens.some((candidateToken) =>
-                candidateToken.startsWith(queryToken) || candidateToken.includes(queryToken)
-            )
-        );
-    }, [normalizeModelSearchValue]);
 
     const currentModelForMetadata = currentModelId
         ? models.find((model: ProviderModel) => model.id === currentModelId)
@@ -2061,7 +2048,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 onClick={() => handleAgentChange(agent.name)}
                             >
                                 <div className="flex items-center gap-2">
-                                    <div className={cn('size-2.5 rounded-full flex-shrink-0', agentColor.class)} />
+                                    <AgentAvatar name={agent.name} size={18} />
                                     <span
                                         className="typography-ui-label font-semibold"
                                         style={isSelected ? { color: `var(${agentColor.var})` } : undefined}
@@ -2073,7 +2060,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                     )}
                                 </div>
                                 {agent.description && (
-                                    <span className="typography-meta text-muted-foreground pl-4.5">
+                                    <span className="typography-micro text-muted-foreground min-w-0 max-w-full pl-[1.625rem] break-words">
                                         {agent.description}
                                     </span>
                                 )}
@@ -2290,8 +2277,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             <DropdownMenuTrigger asChild>
                                 <div
                                     className={cn(
-                                        'model-controls__model-trigger flex items-center gap-1.5 cursor-pointer hover:bg-transparent hover:opacity-70 min-w-0',
-                                        buttonHeight
+                                        'model-controls__model-trigger cursor-pointer min-w-0',
+                                        COMPOSER_TRIGGER_CHROME_CLASS,
                                     )}
                                 >
                                     {!isReady ? (
@@ -2410,9 +2397,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         onTouchCancel={isReady ? handleLongPressEnd : undefined}
                         disabled={!isReady}
                         className={cn(
-                            'model-controls__model-trigger flex items-center gap-1.5 min-w-0 focus:outline-none',
-                            isReady ? 'cursor-pointer hover:bg-transparent hover:opacity-70' : 'opacity-60 cursor-not-allowed',
-                            buttonHeight
+                            'model-controls__model-trigger min-w-0 focus:outline-none',
+                            isReady ? cn('cursor-pointer', COMPOSER_TRIGGER_CHROME_CLASS) : 'opacity-60 cursor-not-allowed',
                         )}
                     >
                         {!isReady ? (
@@ -2595,9 +2581,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     type="button"
                     onClick={() => setActiveMobilePanel('variant')}
                     className={cn(
-                        'model-controls__variant-trigger flex items-center gap-1.5 transition-opacity min-w-0 focus:outline-none',
-                        buttonHeight,
-                        'cursor-pointer hover:bg-transparent hover:opacity-70',
+                        'model-controls__variant-trigger transition-opacity min-w-0 focus:outline-none',
+                        'cursor-pointer',
+                        COMPOSER_TRIGGER_CHROME_CLASS,
                     )}
                 >
                     <Icon name="brain-ai-3" className={cn(controlIconSize, 'flex-shrink-0', colorClass)} />
@@ -2621,8 +2607,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         <DropdownMenuTrigger asChild>
                             <div
                                 className={cn(
-                                    'model-controls__variant-trigger flex items-center gap-1.5 transition-colors cursor-pointer hover:bg-transparent hover:opacity-70 min-w-0',
-                                    buttonHeight,
+                                    'model-controls__variant-trigger transition-colors cursor-pointer min-w-0',
+                                    COMPOSER_TRIGGER_CHROME_CLASS,
                                 )}
                             >
                                 <Icon name="brain-ai-3" className={cn(controlIconSize, 'flex-shrink-0', colorClass)} />
@@ -2675,62 +2661,46 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     };
 
     const renderAgentSelector = () => {
+        const agentDisplayName = getAgentDisplayName();
+        const agentTriggerColor = uiAgentName ? getAgentColor(uiAgentName) : null;
+
         if (!isCompact) {
             return (
                 <div className="flex items-center gap-2 min-w-0">
                     <Tooltip delayDuration={600}>
-                        <DropdownMenu open={isReady && isAgentSelectorOpen} onOpenChange={isReady ? setIsAgentSelectorOpen : undefined}>
+                        <DropdownMenu open={isReady && isAgentSelectorOpen} onOpenChange={isReady ? setAgentSelectorOpen : undefined}>
                             <TooltipTrigger asChild>
                                 <DropdownMenuTrigger asChild>
-                                    <div className={cn(
-                                        'flex items-center gap-1.5 transition-colors cursor-pointer hover:bg-transparent hover:opacity-70 min-w-0',
-                                        buttonHeight
-                                    )}>
+                                    <div
+                                        className={cn(
+                                            // Stable chrome: width grows only from the label grid (no chip↔square swap).
+                                            'inline-flex cursor-pointer items-center flex-shrink-0 min-w-0',
+                                            COMPOSER_ICON_HOVER_CLASS,
+                                        )}
+                                    >
                                         {!isReady ? (
-                                            <>
+                                            <span className={cn('inline-flex items-center justify-center', agentIconButtonClass)}>
                                                 <Icon name="loader-4"
                                                     className={cn(
                                                         controlIconSize,
                                                         'flex-shrink-0 animate-spin text-muted-foreground'
                                                     )}
                                                 />
-                                                <span
-                                                    className={cn(
-                                                        'model-controls__agent-label',
-                                                        controlTextSize,
-                                                        'font-medium min-w-0 truncate text-muted-foreground'
-                                                    )}
-                                                >
-                                                    {readinessLabel}
-                                                </span>
-                                            </>
+                                            </span>
                                         ) : (
-                                            <>
-                                                <Icon name="ai-agent"
-                                                    className={cn(
-                                                        controlIconSize,
-                                                        'flex-shrink-0',
-                                                        uiAgentName ? '' : 'text-muted-foreground'
-                                                    )}
-                                                    style={uiAgentName ? { color: `var(${getAgentColor(uiAgentName).var})` } : undefined}
-                                                />
-                                                <span
-                                                    className={cn(
-                                                        'model-controls__agent-label',
-                                                        controlTextSize,
-                                                        'font-medium min-w-0 truncate',
-                                                        isDesktop ? 'max-w-[220px]' : undefined
-                                                    )}
-                                                    style={uiAgentName ? { color: `var(${getAgentColor(uiAgentName).var})` } : undefined}
-                                                >
-                                                    {getAgentDisplayName()}
-                                                </span>
-                                            </>
+                                            <AgentCycleLabel
+                                                name={uiAgentName}
+                                                label={agentDisplayName}
+                                                revealed={showAgentCycleLabel}
+                                                avatarSize={agentAvatarSize}
+                                                slotClassName={agentIconButtonClass}
+                                                colorVar={agentTriggerColor?.var}
+                                            />
                                         )}
                                     </div>
                                 </DropdownMenuTrigger>
                             </TooltipTrigger>
-                            <DropdownMenuContent align="end" alignOffset={-40} className="w-[min(280px,calc(100vw-2rem))] p-0 flex flex-col">
+                            <DropdownMenuContent align={relocateAgent ? 'start' : 'end'} alignOffset={relocateAgent ? 0 : -40} className="w-[min(280px,calc(100vw-2rem))] p-0 flex flex-col">
                                 <div className="p-2 border-b border-border/40">
                                     <div className="relative">
                                         <Icon name="search" className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
@@ -2773,16 +2743,13 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                                     className="typography-meta"
                                                     onSelect={() => handleAgentChange(agent.name)}
                                                 >
-                                                    <div className="flex flex-col gap-0.5">
+                                                    <div className="flex w-full min-w-0 flex-col gap-0.5">
                                                         <div className="flex items-center gap-1.5">
-                                                            <div className={cn(
-                                                                'h-1 w-1 rounded-full agent-dot',
-                                                                getAgentColor(agent.name).class
-                                                            )} />
+                                                            <AgentAvatar name={agent.name} size={14} />
                                                             <span className="font-medium">{capitalizeAgentName(agent.name)}</span>
                                                         </div>
                                                         {agent.description && (
-                                                            <span className="typography-meta text-muted-foreground max-w-[200px] ml-2.5 break-words">
+                                                            <span className="typography-micro text-muted-foreground min-w-0 max-w-full ml-5 break-words">
                                                                 {agent.description}
                                                             </span>
                                                         )}
@@ -2809,51 +2776,29 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 onTouchCancel={isReady ? handleLongPressEnd : undefined}
                 disabled={!isReady}
                 className={cn(
-                    'model-controls__agent-trigger flex items-center gap-1.5 transition-colors min-w-0 focus:outline-none',
-                    buttonHeight,
-                    isReady ? 'cursor-pointer hover:bg-transparent hover:opacity-70' : 'opacity-60 cursor-not-allowed',
+                    'model-controls__agent-trigger inline-flex items-center flex-shrink-0 min-w-0 focus:outline-none',
+                    COMPOSER_ICON_HOVER_CLASS,
+                    isReady ? 'cursor-pointer' : 'opacity-60 cursor-not-allowed',
                 )}
             >
                 {!isReady ? (
-                    <>
+                    <span className={cn('inline-flex items-center justify-center', agentIconButtonClass)}>
                         <Icon name="loader-4"
                             className={cn(
                                 controlIconSize,
                                 'flex-shrink-0 animate-spin text-muted-foreground'
                             )}
                         />
-                        <span
-                            className={cn(
-                                'model-controls__agent-label',
-                                controlTextSize,
-                                'font-medium truncate min-w-0 text-muted-foreground'
-                            )}
-                        >
-                            {readinessLabel}
-                        </span>
-                    </>
+                    </span>
                 ) : (
-                    <>
-                        <Icon name="ai-agent"
-                            className={cn(
-                                controlIconSize,
-                                'flex-shrink-0',
-                                uiAgentName ? '' : 'text-muted-foreground'
-                            )}
-                            style={uiAgentName ? { color: `var(${getAgentColor(uiAgentName).var})` } : undefined}
-                        />
-                        <span
-                            className={cn(
-                                'model-controls__agent-label',
-                                controlTextSize,
-                                'font-medium truncate min-w-0',
-                                isMobile && 'max-w-[60px]'
-                            )}
-                            style={uiAgentName ? { color: `var(${getAgentColor(uiAgentName).var})` } : undefined}
-                        >
-                            {getAgentDisplayName()}
-                        </span>
-                    </>
+                    <AgentCycleLabel
+                        name={uiAgentName}
+                        label={agentDisplayName}
+                        revealed={showAgentCycleLabel}
+                        avatarSize={agentAvatarSize}
+                        slotClassName={agentIconButtonClass}
+                        colorVar={agentTriggerColor?.var}
+                    />
                 )}
             </button>
         );
@@ -2867,8 +2812,13 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         className,
     );
 
+    const relocateDesktopAgent = Boolean(relocateAgent && !isCompact);
+    const shouldPortalAgent = Boolean(relocateDesktopAgent && agentPortalContainer);
+    const agentSelector = renderAgentSelector();
+
     return (
         <>
+            {shouldPortalAgent ? createPortal(agentSelector, agentPortalContainer!) : null}
             <div className={inlineClassName}>
                 <div
                     className={cn(
@@ -2877,9 +2827,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         isMobile && 'overflow-hidden'
                     )}
                 >
+                    {relocateDesktopAgent ? null : agentSelector}
                     {renderVariantSelector()}
                     {renderModelSelector()}
-                    {renderAgentSelector()}
                 </div>
             </div>
 

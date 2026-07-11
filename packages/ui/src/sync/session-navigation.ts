@@ -226,22 +226,6 @@ const getNavigationSessionUniverse = (): Session[] => {
   return syncAll.length > 0 ? syncAll : getSyncSessions();
 };
 
-const resolveFallbackProjectId = (session: Session): string | null => {
-  let bestMatch: { id: string; pathLength: number } | null = null;
-
-  for (const project of useProjectsStore.getState().projects) {
-    const projectRoot = normalizePath(project.path);
-    if (!projectRoot || !isSessionRelatedToProject(session, projectRoot)) {
-      continue;
-    }
-    if (!bestMatch || projectRoot.length > bestMatch.pathLength) {
-      bestMatch = { id: project.id, pathLength: projectRoot.length };
-    }
-  }
-
-  return bestMatch?.id ?? null;
-};
-
 const findCurrentNavigationTargetIndex = (
   targets: readonly SessionNavigationTarget[],
   rootSessionId: string | null,
@@ -251,7 +235,11 @@ const findCurrentNavigationTargetIndex = (
     return -1;
   }
 
-  if (focus?.scope === 'project' && focus.projectId) {
+  // A Recent target also carries its owning project. When Recent becomes
+  // unavailable and navigation falls back to the Project ring, keep that
+  // project identity so duplicate occurrences of the same session anchor at
+  // the row the user actually came from rather than the first matching ID.
+  if (focus?.projectId) {
     const projectMatch = targets.findIndex((target) => (
       target.sessionId === rootSessionId && target.projectId === focus.projectId
     ));
@@ -261,6 +249,22 @@ const findCurrentNavigationTargetIndex = (
   }
 
   return targets.findIndex((target) => target.sessionId === rootSessionId);
+};
+
+const getProjectNavigationTargetsForFocus = (
+  targets: readonly SessionNavigationTarget[],
+  rootSessionId: string | null,
+  focus: SessionFocusIdentity | null,
+): readonly SessionNavigationTarget[] => {
+  const projectId = focus?.projectId
+    ?? (rootSessionId
+      ? targets.find((target) => target.sessionId === rootSessionId)?.projectId ?? null
+      : null);
+  if (!projectId) {
+    return [];
+  }
+
+  return targets.filter((target) => target.projectId === projectId);
 };
 
 const cycleNavigationTargets = (
@@ -284,9 +288,9 @@ const cycleNavigationTargets = (
 
 /**
  * Resolve the next target from the focus surface the user last interacted with.
- * Recent focus stays within the published Recent rows; project focus stays in
- * the published project-tree rows. If the requested surface is unavailable,
- * project rows and finally the legacy store-derived project order are used.
+ * Recent focus stays within the published Recent rows. Project focus cycles
+ * only the logically visible rows in its current expanded project. Hidden
+ * rows and other projects are never used as shortcut fallbacks.
  */
 export const resolveAdjacentNavigationTarget = (
   direction: -1 | 1,
@@ -299,42 +303,36 @@ export const resolveAdjacentNavigationTarget = (
   const requestedScope = currentFocus?.scope ?? 'project';
   const snapshot = getSessionNavigationSnapshot();
 
-  if (snapshot) {
-    const scopedTargets = snapshot[requestedScope];
-    const scopedTarget = cycleNavigationTargets(
-      scopedTargets,
+  if (!snapshot) {
+    return null;
+  }
+
+  const projectTargets = getProjectNavigationTargetsForFocus(
+    snapshot.project,
+    rootSessionId,
+    currentFocus,
+  );
+  const scopedTargets = requestedScope === 'recent' ? snapshot.recent : projectTargets;
+  const scopedTarget = cycleNavigationTargets(
+    scopedTargets,
+    direction,
+    rootSessionId,
+    currentFocus,
+  );
+  if (scopedTarget) {
+    return scopedTarget;
+  }
+
+  if (requestedScope === 'recent') {
+    return cycleNavigationTargets(
+      projectTargets,
       direction,
       rootSessionId,
       currentFocus,
     );
-    if (scopedTarget) {
-      return scopedTarget;
-    }
-
-    if (requestedScope === 'recent') {
-      const projectTarget = cycleNavigationTargets(
-        snapshot.project,
-        direction,
-        rootSessionId,
-        currentFocus,
-      );
-      if (projectTarget) {
-        return projectTarget;
-      }
-    }
   }
 
-  const fallbackSession = resolveAdjacentRootSession(direction, currentSessionId);
-  if (!fallbackSession) {
-    return null;
-  }
-
-  return {
-    scope: 'project',
-    sessionId: fallbackSession.id,
-    projectId: resolveFallbackProjectId(fallbackSession),
-    directory: resolveAdjacentRootSessionDirectory(fallbackSession),
-  };
+  return null;
 };
 
 /**

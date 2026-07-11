@@ -20,6 +20,16 @@ type BuildProjectNavigationTargetsArgs = {
   sessionOrderIndex: Map<string, number>;
 };
 
+type FilterVisibleProjectNavigationTargetsArgs = {
+  targets: readonly SessionNavigationTarget[];
+  collapsedProjectIds: ReadonlySet<string>;
+  collapsedGroupKeys: ReadonlySet<string>;
+  collapsedFolderIds: ReadonlySet<string>;
+  visibleSessionCountByGroup: ReadonlyMap<string, number>;
+  defaultVisibleSessionCount: number;
+  hasSessionSearchQuery: boolean;
+};
+
 const isSubtaskSession = (session: Session): boolean => {
   return Boolean((session as Session & { parentID?: string | null }).parentID);
 };
@@ -27,6 +37,79 @@ const isSubtaskSession = (session: Session): boolean => {
 const resolveNodeDirectory = (node: SessionNode, group: SessionGroup): string | null => {
   return normalizePath(resolveGlobalSessionDirectory(node.session))
     ?? normalizePath(group.directory ?? null);
+};
+
+export const getDefaultProjectGroupVisibleCount = (hideDirectoryControls: boolean): number => (
+  hideDirectoryControls ? 10 : 5
+);
+
+/**
+ * Keep only project rows that are logically rendered by the sidebar. This is
+ * intentionally based on React state rather than DOM measurement: rows hidden
+ * behind project/group/folder collapse or the group's Show more boundary are
+ * not keyboard targets, while virtualized rows inside the revealed slice are.
+ */
+export const filterVisibleProjectNavigationTargets = ({
+  targets,
+  collapsedProjectIds,
+  collapsedGroupKeys,
+  collapsedFolderIds,
+  visibleSessionCountByGroup,
+  defaultVisibleSessionCount,
+  hasSessionSearchQuery,
+}: FilterVisibleProjectNavigationTargetsArgs): SessionNavigationTarget[] => (
+  targets.filter((target) => {
+    if (!target.projectId || collapsedProjectIds.has(target.projectId)) {
+      return false;
+    }
+
+    if (hasSessionSearchQuery) {
+      return true;
+    }
+
+    if (target.groupKey && collapsedGroupKeys.has(target.groupKey)) {
+      return false;
+    }
+
+    if (target.folderAncestorIds?.some((folderId) => collapsedFolderIds.has(folderId))) {
+      return false;
+    }
+
+    if (target.groupKey && target.visibleIndex !== undefined) {
+      const visibleCount = Math.max(
+        defaultVisibleSessionCount,
+        visibleSessionCountByGroup.get(target.groupKey) ?? defaultVisibleSessionCount,
+      );
+      if (target.visibleIndex >= visibleCount) {
+        return false;
+      }
+    }
+
+    return true;
+  })
+);
+
+export const resolveProjectVirtualSessionIndex = (
+  visibleNodes: readonly SessionNode[],
+  targetSessionId: string | null,
+  targetVisibleIndex: number | null | undefined,
+): number | null => {
+  if (
+    !targetSessionId
+    || targetVisibleIndex === null
+    || targetVisibleIndex === undefined
+    || !Number.isInteger(targetVisibleIndex)
+    || targetVisibleIndex < 0
+  ) {
+    return null;
+  }
+
+  if (visibleNodes[targetVisibleIndex]?.session.id === targetSessionId) {
+    return targetVisibleIndex;
+  }
+
+  const resolvedIndex = visibleNodes.findIndex((node) => node.session.id === targetSessionId);
+  return resolvedIndex >= 0 ? resolvedIndex : null;
 };
 
 /**
