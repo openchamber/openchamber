@@ -7,10 +7,13 @@ import {
   type SplitNode,
   type TabGroupLeaf,
 } from "../../components/layout/tiling/splitTree"
-import { getSafeStorage } from "../utils/safeStorage"
 import { useUIStore } from "../useUIStore"
 
 const DIR = "/layout/project"
+
+// Seeds go through the store's own persist storage so the deferred layer sees them
+// in pendingWrites, which rehydrate reads before the backing store.
+const persistStorage = () => useUIStore.persist.getOptions().storage
 
 const panel = () => {
   const state = useUIStore.getState().contextPanelByDirectory[DIR]
@@ -47,15 +50,15 @@ const openSplitPanel = () => {
 }
 
 const rehydrate = async (entry: Record<string, unknown>) => {
-  getSafeStorage().setItem("ui-store", JSON.stringify({
+  persistStorage()?.setItem("ui-store", {
     state: { contextPanelByDirectory: { [DIR]: entry } },
     version: 9,
-  }))
+  } as Parameters<NonNullable<ReturnType<typeof persistStorage>>["setItem"]>[1])
   await useUIStore.persist.rehydrate()
 }
 
 beforeEach(() => {
-  getSafeStorage().removeItem("ui-store")
+  persistStorage()?.removeItem("ui-store")
   useUIStore.setState({ contextPanelByDirectory: {} })
 })
 

@@ -1,6 +1,6 @@
 import React from 'react';
 import { isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
-import { isInstalledPWARuntime } from '@/lib/pwa';
+import { getPWADisplayMode } from '@/lib/pwa';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 
 export type TilingRuntime = 'web' | 'desktop';
@@ -52,7 +52,7 @@ const addMediaQueryListener = (query: MediaQueryList, listener: () => void): (()
 export const useTilingCapability = (): boolean => {
   const [signals, setSignals] = React.useState<TilingSignals>(() => readSignals());
   const isMobile = isMobileSurfaceRuntime();
-  const isPWA = isInstalledPWARuntime();
+  const isPWA = getPWADisplayMode() !== 'browser';
   const isVSCode = isVSCodeRuntime();
   const runtime: TilingRuntime = isWebRuntime() ? 'web' : 'desktop';
 

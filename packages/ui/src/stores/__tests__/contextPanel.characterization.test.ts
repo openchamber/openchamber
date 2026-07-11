@@ -75,14 +75,14 @@ describe("ContextPanel characterization (single-active-tab baseline)", () => {
       expect(state.activeTabId).toBe("diff")
     })
 
-    test("an explicit dedupeKey overrides mode-only keying (diff:staged)", () => {
+    test("re-opening a diff for the same path reuses its tab (path-keyed)", () => {
       const store = useUIStore.getState()
       store.openContextPanelTab(DIR, { mode: "diff", targetPath: "src/a.ts" })
       store.openContextPanelTab(DIR, { mode: "diff", targetPath: "src/a.ts", dedupeKey: "staged" })
 
       const state = panel()
-      expect(state.tabs.map((t) => t.id)).toEqual(["diff", "diff:staged"])
-      expect(state.activeTabId).toBe("diff:staged")
+      expect(state.tabs.map((t) => t.id)).toEqual(["diff"])
+      expect(state.activeTabId).toBe("diff")
     })
 
     test("distinct tabs accumulate and the newest becomes active", () => {

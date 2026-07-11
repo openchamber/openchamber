@@ -13,13 +13,14 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
-import { useUIStore, type ContextPanelMode, type PendingDiffScope } from '@/stores/useUIStore';
+import { useUIStore, type ContextPanelMode, type ContextPanelTab, type PendingDiffScope } from '@/stores/useUIStore';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
 import { markSessionViewed } from '@/sync/notification-store';
 import { setExternallyViewedSession, useDirectoryStore } from '@/sync/sync-context';
 import { ContextPanelContent } from './ContextSidebarTab';
+import { EmbeddedSessionFrames } from './EmbeddedSessionFrames';
 import { toast } from '@/components/ui';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
@@ -2051,6 +2052,121 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dir
           </div>
         ) : null}
       </div>
+    </div>
+  );
+};
+
+type ContextTileBodyProps = {
+  tabs: ContextPanelTab[];
+  activeTab: ContextPanelTab | null;
+  directoryKey: string;
+  effectiveDirectory: string;
+  visibleTileIds?: ReadonlySet<string>;
+  className?: string;
+  renderChatFrames?: boolean;
+};
+
+// Shared tile renderer (ContextPanel legacy path + tiled TabGroupRegion). Mirrors
+// ContextPanel's own render body so a tiled region shows the same content; chat
+// frames are hosted at the TiledPanel level, so tiled regions pass renderChatFrames=false.
+export const ContextTileBody: React.FC<ContextTileBodyProps> = ({
+  tabs,
+  activeTab,
+  directoryKey,
+  effectiveDirectory,
+  visibleTileIds,
+  className,
+  renderChatFrames = true,
+}) => {
+  const { t } = useI18n();
+  const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
+  const openContextPreview = useUIStore((state) => state.openContextPreview);
+  const setSelectedFilePath = useFilesViewTabsStore((state) => state.setSelectedPath);
+  const activeChatTabID = activeTab?.mode === 'chat' ? activeTab.id : null;
+
+  React.useEffect(() => {
+    if (!directoryKey || !activeTab) {
+      return;
+    }
+    if (activeTab.mode === 'file' && activeTab.targetPath) {
+      setSelectedFilePath(directoryKey, activeTab.targetPath);
+    }
+  }, [activeTab, directoryKey, setSelectedFilePath]);
+
+  const handleDiffScopeChange = React.useCallback((nextScope: PendingDiffScope) => {
+    if (!directoryKey || activeTab?.mode !== 'diff') {
+      return;
+    }
+    openContextPanelTab(directoryKey, {
+      mode: 'diff',
+      targetPath: activeTab.targetPath,
+      stagedDiff: nextScope === 'staged',
+      diffScope: nextScope,
+    });
+  }, [activeTab, directoryKey, openContextPanelTab]);
+
+  const browserTabs = React.useMemo(() => tabs.filter((tab) => tab.mode === 'browser'), [tabs]);
+  const diffTabs = React.useMemo(() => tabs.filter((tab) => tab.mode === 'diff'), [tabs]);
+  const BrowserPane = isElectronBrowserRuntime() ? DesktopBrowserPane : IframeBrowserPane;
+  const hasFileTabs = React.useMemo(() => tabs.some((tab) => tab.mode === 'file'), [tabs]);
+  const isFileTabActive = activeTab?.mode === 'file';
+
+  const activeNonChatContent = activeTab?.mode === 'context'
+    ? <ContextPanelContent />
+    : activeTab?.mode === 'plan'
+        ? <PlanView targetPath={activeTab.targetPath} />
+        : activeTab?.mode === 'preview'
+            ? <PreviewPane rawUrl={activeTab.targetPath ?? ''} onNavigate={(url) => openContextPreview(effectiveDirectory, url)} />
+            : (
+              <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+                <Icon name="global" className="h-12 w-12 text-muted-foreground/50" />
+                <div className="typography-ui-header text-foreground">{t('contextPanel.preview.title')}</div>
+                <div className="max-w-sm typography-micro text-muted-foreground">{t('contextPanel.preview.description')}</div>
+              </div>
+            );
+
+  return (
+    <div className={cn('relative min-h-0 flex-1 overflow-hidden', className)}>
+      {hasFileTabs ? (
+        <div className={cn('absolute inset-0', isFileTabActive ? 'block' : 'hidden')}>
+          <FilesView mode="editor-only" />
+        </div>
+      ) : null}
+      {renderChatFrames ? (
+        <EmbeddedSessionFrames
+          mode="contained"
+          tabs={tabs}
+          activeTabID={activeChatTabID}
+          directoryKey={directoryKey}
+          visibleTileIds={visibleTileIds}
+        />
+      ) : null}
+      {browserTabs.map((tab) => (
+        <div
+          key={tab.id}
+          className={cn('absolute inset-0', activeTab?.id !== tab.id && 'hidden')}
+        >
+          <BrowserPane initialUrl={tab.targetPath ?? ''} directory={directoryKey} tabID={tab.id} />
+        </div>
+      ))}
+      {diffTabs.map((tab) => (
+        <div
+          key={tab.id}
+          className={cn('absolute inset-0', activeTab?.id !== tab.id && 'hidden')}
+        >
+          <DiffView
+            hideStackedFileSidebar
+            stackedDefaultCollapsedAll
+            pinSelectedFileHeaderToTopOnNavigate
+            showOpenInEditorAction
+            diffScope={tab.diffScope ?? (tab.stagedDiff ? 'staged' : 'working')}
+            onDiffScopeChange={handleDiffScopeChange}
+            targetFilePath={tab.targetPath}
+            flushContent
+          />
+        </div>
+      ))}
+      {activeTab?.mode !== 'chat' && !isFileTabActive && activeTab?.mode !== 'browser' && activeTab?.mode !== 'diff' ? activeNonChatContent : null}
     </div>
   );
 };
