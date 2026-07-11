@@ -121,9 +121,7 @@ export const GitPage: React.FC = () => {
         title={t('settings.page.git.title')}
         showSaveStatus
       >
-        <SettingsSection divider={false} settingsItem="git.github-account">
-          <GitHubSettings />
-        </SettingsSection>
+        <GitHubSettings />
 
         <SettingsSection
           title={t('settings.gitIdentities.page.section.title')}

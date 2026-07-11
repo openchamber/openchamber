@@ -3,7 +3,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
-import { SettingsSection } from '@/components/sections/shared/SettingsSection';
+import {
+  SettingsSection,
+  SettingsFieldRow,
+} from '@/components/sections/shared/SettingsSection';
 import { useUIStore } from '@/stores/useUIStore';
 import { cn } from '@/lib/utils';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -218,11 +221,11 @@ export const KeyboardShortcutsSettings: React.FC = () => {
           const hasDraft = typeof draft === 'string' && normalizeCombo(draft) !== normalizeCombo(effective);
 
           return (
-            <div key={action.id} className={cn("flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8", index > 0 && "border-t border-[var(--surface-subtle)]")}>
-              <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-                <span className="typography-ui-label text-foreground">{actionLabel(action.id, action.label)}</span>
-              </div>
-              <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
+            <div key={action.id} className={cn(index > 0 && "border-t border-border/40")}>
+              <SettingsFieldRow
+                label={actionLabel(action.id, action.label)}
+                alignEnd={false}
+              >
                 <Input
                   readOnly
                   value={capturingActionId === action.id ? t('settings.openchamber.keyboardShortcuts.field.pressKeys') : formatShortcutForDisplay(displayCombo)}
@@ -279,7 +282,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
                 <Button type="button" size="xs" className="!font-normal" variant="ghost" onClick={() => resetOne(action.id)}>
                   {t('settings.common.actions.reset')}
                 </Button>
-              </div>
+              </SettingsFieldRow>
             </div>
           );
         })}

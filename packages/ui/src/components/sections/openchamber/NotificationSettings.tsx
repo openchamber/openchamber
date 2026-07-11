@@ -1,15 +1,18 @@
 import React from 'react';
 import { useUIStore } from '@/stores/useUIStore';
 import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
-import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from '@/components/ui';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
 import { getClientPlatform } from '@/lib/platform';
 import { useI18n } from '@/lib/i18n';
-import { SettingsSection } from '@/components/sections/shared/SettingsSection';
+import {
+  SettingsSection,
+  SettingsTwoColumn,
+  SettingsCheckboxRow,
+  SETTINGS_OPTION_STACK_CLASS,
+} from '@/components/sections/shared/SettingsSection';
 
 const DEFAULT_NOTIFICATION_TEMPLATES = {
   completion: {
@@ -455,57 +458,27 @@ export const NotificationSettings: React.FC = () => {
           title={t('settings.notifications.page.delivery.title')}
           divider={false}
         >
-          <div className="space-y-0.5">
-            <div
-              className="group flex cursor-pointer items-center gap-2 py-1.5"
-              role="button"
-              tabIndex={0}
-              aria-pressed={nativeNotificationsEnabled && canShowNotifications}
-              onClick={() => {
-                void handleToggleChange(!(nativeNotificationsEnabled && canShowNotifications));
+          <div className={SETTINGS_OPTION_STACK_CLASS}>
+            <SettingsCheckboxRow
+              checked={nativeNotificationsEnabled && canShowNotifications}
+              onChange={(checked) => {
+                void handleToggleChange(checked);
               }}
-              onKeyDown={(event) => {
-                if (event.key === ' ' || event.key === 'Enter') {
-                  event.preventDefault();
-                  void handleToggleChange(!(nativeNotificationsEnabled && canShowNotifications));
-                }
-              }}
-            >
-              <Checkbox
-                checked={nativeNotificationsEnabled && canShowNotifications}
-                onChange={(checked) => {
-                  void handleToggleChange(checked);
-                }}
-                ariaLabel={t('settings.notifications.page.delivery.enableAria')}
-              />
-              <span className="typography-ui-label text-foreground">{t('settings.notifications.page.delivery.enableLabel')}</span>
-            </div>
+              label={t('settings.notifications.page.delivery.enableLabel')}
+              ariaLabel={t('settings.notifications.page.delivery.enableAria')}
+            />
 
             {/* The native Capacitor app never notifies while focused (hard rule) and uses
                 generic, non-customizable text, so the "notify while focused" toggle and the
                 test button are hidden there. */}
             {nativeNotificationsEnabled && canShowNotifications && !isNativeApp && (
               <>
-                <div
-                  className="group flex cursor-pointer items-center gap-2 py-1.5"
-                  role="button"
-                  tabIndex={0}
-                  aria-pressed={notificationMode === 'always'}
-                  onClick={() => setNotificationMode(notificationMode === 'always' ? 'hidden-only' : 'always')}
-                  onKeyDown={(event) => {
-                    if (event.key === ' ' || event.key === 'Enter') {
-                      event.preventDefault();
-                      setNotificationMode(notificationMode === 'always' ? 'hidden-only' : 'always');
-                    }
-                  }}
-                >
-                  <Checkbox
-                    checked={notificationMode === 'always'}
-                    onChange={(checked) => setNotificationMode(checked ? 'always' : 'hidden-only')}
-                    ariaLabel={t('settings.notifications.page.delivery.focusedAria')}
-                  />
-                  <span className="typography-ui-label text-foreground">{t('settings.notifications.page.delivery.focusedLabel')}</span>
-                </div>
+                <SettingsCheckboxRow
+                  checked={notificationMode === 'always'}
+                  onChange={(checked) => setNotificationMode(checked ? 'always' : 'hidden-only')}
+                  label={t('settings.notifications.page.delivery.focusedLabel')}
+                  ariaLabel={t('settings.notifications.page.delivery.focusedAria')}
+                />
 
                 <div className="py-2">
                   <Button
@@ -553,74 +526,34 @@ export const NotificationSettings: React.FC = () => {
               settingsItem="notifications.events"
               title={t('settings.notifications.page.events.title')}
             >
-              <div className="space-y-0.5">
-                <div
-                  className="group flex cursor-pointer items-center gap-2 py-1.5"
-                  role="button"
-                  tabIndex={0}
-                  aria-pressed={notifyOnCompletion}
-                  onClick={() => setNotifyOnCompletion(!notifyOnCompletion)}
-                  onKeyDown={(event) => {
-                    if (event.key === ' ' || event.key === 'Enter') {
-                      event.preventDefault();
-                      setNotifyOnCompletion(!notifyOnCompletion);
-                    }
-                  }}
-                >
-                  <Checkbox checked={notifyOnCompletion} onChange={setNotifyOnCompletion} ariaLabel={t('settings.notifications.page.events.completionAria')} />
-                  <span className="typography-ui-label text-foreground">{t('settings.notifications.page.events.completionLabel')}</span>
-                </div>
+              <div className={SETTINGS_OPTION_STACK_CLASS}>
+                <SettingsCheckboxRow
+                  checked={notifyOnCompletion}
+                  onChange={setNotifyOnCompletion}
+                  label={t('settings.notifications.page.events.completionLabel')}
+                  ariaLabel={t('settings.notifications.page.events.completionAria')}
+                />
 
-                <div
-                  className="group flex cursor-pointer items-center gap-2 py-1.5"
-                  role="button"
-                  tabIndex={0}
-                  aria-pressed={notifyOnSubtasks}
-                  onClick={() => setNotifyOnSubtasks(!notifyOnSubtasks)}
-                  onKeyDown={(event) => {
-                    if (event.key === ' ' || event.key === 'Enter') {
-                      event.preventDefault();
-                      setNotifyOnSubtasks(!notifyOnSubtasks);
-                    }
-                  }}
-                >
-                  <Checkbox checked={notifyOnSubtasks} onChange={setNotifyOnSubtasks} ariaLabel={t('settings.notifications.page.events.subtaskAria')} />
-                  <span className="typography-ui-label text-foreground">{t('settings.notifications.page.events.subtaskLabel')}</span>
-                </div>
+                <SettingsCheckboxRow
+                  checked={notifyOnSubtasks}
+                  onChange={setNotifyOnSubtasks}
+                  label={t('settings.notifications.page.events.subtaskLabel')}
+                  ariaLabel={t('settings.notifications.page.events.subtaskAria')}
+                />
 
-                <div
-                  className="group flex cursor-pointer items-center gap-2 py-1.5"
-                  role="button"
-                  tabIndex={0}
-                  aria-pressed={notifyOnError}
-                  onClick={() => setNotifyOnError(!notifyOnError)}
-                  onKeyDown={(event) => {
-                    if (event.key === ' ' || event.key === 'Enter') {
-                      event.preventDefault();
-                      setNotifyOnError(!notifyOnError);
-                    }
-                  }}
-                >
-                  <Checkbox checked={notifyOnError} onChange={setNotifyOnError} ariaLabel={t('settings.notifications.page.events.errorAria')} />
-                  <span className="typography-ui-label text-foreground">{t('settings.notifications.page.events.errorLabel')}</span>
-                </div>
+                <SettingsCheckboxRow
+                  checked={notifyOnError}
+                  onChange={setNotifyOnError}
+                  label={t('settings.notifications.page.events.errorLabel')}
+                  ariaLabel={t('settings.notifications.page.events.errorAria')}
+                />
 
-                <div
-                  className="group flex cursor-pointer items-center gap-2 py-1.5"
-                  role="button"
-                  tabIndex={0}
-                  aria-pressed={notifyOnQuestion}
-                  onClick={() => setNotifyOnQuestion(!notifyOnQuestion)}
-                  onKeyDown={(event) => {
-                    if (event.key === ' ' || event.key === 'Enter') {
-                      event.preventDefault();
-                      setNotifyOnQuestion(!notifyOnQuestion);
-                    }
-                  }}
-                >
-                  <Checkbox checked={notifyOnQuestion} onChange={setNotifyOnQuestion} ariaLabel={t('settings.notifications.page.events.questionAria')} />
-                  <span className="typography-ui-label text-foreground">{t('settings.notifications.page.events.questionLabel')}</span>
-                </div>
+                <SettingsCheckboxRow
+                  checked={notifyOnQuestion}
+                  onChange={setNotifyOnQuestion}
+                  label={t('settings.notifications.page.events.questionLabel')}
+                  ariaLabel={t('settings.notifications.page.events.questionAria')}
+                />
               </div>
             </SettingsSection>
 
@@ -640,7 +573,7 @@ export const NotificationSettings: React.FC = () => {
                 </>
               )}
             >
-              <div className="grid grid-cols-1 gap-2 md:grid-cols-2 md:gap-3">
+              <SettingsTwoColumn className="gap-2 md:grid-cols-2 md:gap-3 lg:gap-3">
                 {(['completion', 'subtask', 'error', 'question'] as const).map((event: NotificationTemplateEvent) => (
                   <section key={event} className="p-2">
                     <span className="typography-ui-label text-foreground font-normal capitalize block">
@@ -668,7 +601,7 @@ export const NotificationSettings: React.FC = () => {
                     </div>
                   </section>
                 ))}
-              </div>
+              </SettingsTwoColumn>
             </SettingsSection>
             )}
 
@@ -680,35 +613,29 @@ export const NotificationSettings: React.FC = () => {
             settingsItem="notifications.push"
             title={t('settings.notifications.page.push.title')}
           >
-            <div className="flex items-start gap-2 py-1.5">
-              <Checkbox
-                checked={pushSupported ? pushSubscribed : false}
-                disabled={!pushSupported || pushBusy}
-                onChange={(checked: boolean) => {
-                  if (checked) {
-                    void handleEnableBackgroundNotifications();
-                  } else {
-                    void handleDisableBackgroundNotifications();
-                  }
-                }}
-                ariaLabel={t('settings.notifications.page.push.enableAria')}
-              />
-              <div className="flex min-w-0 flex-col">
-                <span className={cn("typography-ui-label", !pushSupported ? "text-muted-foreground" : "text-foreground")}>
-                  {t('settings.notifications.page.push.enableLabel')}
-                </span>
-                <span className="typography-meta text-muted-foreground">
-                  {!pushSupported
-                    ? t('settings.notifications.page.push.unsupportedHint')
-                    : t('settings.notifications.page.push.supportedHint')}
-                </span>
-              </div>
-              {pushBusy && (
-                <div className="pt-0.5 text-muted-foreground">
-                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-current animate-busy-pulse" aria-label={t('settings.notifications.page.push.loadingAria')} />
-                </div>
-              )}
-            </div>
+            <SettingsCheckboxRow
+              checked={pushSupported ? pushSubscribed : false}
+              disabled={!pushSupported || pushBusy}
+              onChange={(checked) => {
+                if (checked) {
+                  void handleEnableBackgroundNotifications();
+                } else {
+                  void handleDisableBackgroundNotifications();
+                }
+              }}
+              label={t('settings.notifications.page.push.enableLabel')}
+              description={
+                !pushSupported
+                  ? t('settings.notifications.page.push.unsupportedHint')
+                  : t('settings.notifications.page.push.supportedHint')
+              }
+              ariaLabel={t('settings.notifications.page.push.enableAria')}
+              labelAccessory={
+                pushBusy ? (
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-current text-muted-foreground animate-busy-pulse" aria-label={t('settings.notifications.page.push.loadingAria')} />
+                ) : null
+              }
+            />
           </SettingsSection>
         )}
     </>

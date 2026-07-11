@@ -18,7 +18,11 @@ import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
-import { SettingsSection } from '@/components/sections/shared/SettingsSection';
+import {
+  SettingsSection,
+  SettingsFieldRow,
+  SETTINGS_SELECT_SIZE,
+} from '@/components/sections/shared/SettingsSection';
 
 export const CommandsPage: React.FC = () => {
   const { t } = useI18n();
@@ -201,41 +205,39 @@ export const CommandsPage: React.FC = () => {
         contentClassName="space-y-0"
       >
         {isNewCommand && (
-          <div data-settings-item="commands.name" className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
-            <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-              <span className="typography-ui-label text-foreground">{t('settings.commands.page.field.commandName')}</span>
+          <SettingsFieldRow
+            settingsItem="commands.name"
+            label={t('settings.commands.page.field.commandName')}
+          >
+            <div className="flex items-center">
+              <span className="typography-ui-label text-muted-foreground mr-1">/</span>
+              <Input
+                value={draftName}
+                onChange={(e) => setDraftName(e.target.value)}
+                placeholder={t('settings.commands.page.field.commandNamePlaceholder')}
+                className="h-7 w-40 px-2"
+              />
             </div>
-            <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
-              <div className="flex items-center">
-                <span className="typography-ui-label text-muted-foreground mr-1">/</span>
-                <Input
-                  value={draftName}
-                  onChange={(e) => setDraftName(e.target.value)}
-                  placeholder={t('settings.commands.page.field.commandNamePlaceholder')}
-                  className="h-7 w-40 px-2"
-                />
-              </div>
-              <Select value={draftScope} onValueChange={(v) => setDraftScope(v as CommandScope)}>
-                <SelectTrigger className="w-fit min-w-[100px]">
-                  <SelectValue placeholder={t('settings.agents.page.field.scopePlaceholder')} />
-                </SelectTrigger>
-                <SelectContent align="end">
-                  <SelectItem value="user">
-                    <div className="flex items-center gap-2">
-                      <Icon name="user-3" className="h-3.5 w-3.5" />
-                      <span>{t('settings.common.scope.global')}</span>
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="project">
-                    <div className="flex items-center gap-2">
-                      <Icon name="folder" className="h-3.5 w-3.5" />
-                      <span>{t('settings.common.scope.project')}</span>
-                    </div>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+            <Select value={draftScope} onValueChange={(v) => setDraftScope(v as CommandScope)}>
+              <SelectTrigger size={SETTINGS_SELECT_SIZE} className="w-fit min-w-[100px]">
+                <SelectValue placeholder={t('settings.agents.page.field.scopePlaceholder')} />
+              </SelectTrigger>
+              <SelectContent align="end">
+                <SelectItem value="user">
+                  <div className="flex items-center gap-2">
+                    <Icon name="user-3" className="h-3.5 w-3.5" />
+                    <span>{t('settings.common.scope.global')}</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="project">
+                  <div className="flex items-center gap-2">
+                    <Icon name="folder" className="h-3.5 w-3.5" />
+                    <span>{t('settings.common.scope.project')}</span>
+                  </div>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </SettingsFieldRow>
         )}
 
         <div className="py-1.5">
@@ -256,36 +258,32 @@ export const CommandsPage: React.FC = () => {
         title={t('settings.commands.page.section.executionContext')}
         contentClassName="space-y-0"
       >
-        <div data-settings-item="commands.agent" className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
-          <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-            <span className="typography-ui-label text-foreground">{t('settings.commands.page.field.overrideAgent')}</span>
-          </div>
-          <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
-            <AgentSelector
-              agentName={agent}
-              onChange={(agentName: string) => setAgent(agentName)}
-            />
-          </div>
-        </div>
+        <SettingsFieldRow
+          settingsItem="commands.agent"
+          label={t('settings.commands.page.field.overrideAgent')}
+        >
+          <AgentSelector
+            agentName={agent}
+            onChange={(agentName: string) => setAgent(agentName)}
+          />
+        </SettingsFieldRow>
 
-        <div data-settings-item="commands.model" className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
-          <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-            <span className="typography-ui-label text-foreground">{t('settings.agents.page.field.overrideModel')}</span>
-          </div>
-          <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
-            <ModelSelector
-              providerId={parseModelIdentifier(model)?.providerId ?? ''}
-              modelId={parseModelIdentifier(model)?.modelId ?? ''}
-              onChange={(providerId: string, modelId: string) => {
-                if (providerId && modelId) {
-                  setModel(`${providerId}/${modelId}`);
-                } else {
-                  setModel('');
-                }
-              }}
-            />
-          </div>
-        </div>
+        <SettingsFieldRow
+          settingsItem="commands.model"
+          label={t('settings.agents.page.field.overrideModel')}
+        >
+          <ModelSelector
+            providerId={parseModelIdentifier(model)?.providerId ?? ''}
+            modelId={parseModelIdentifier(model)?.modelId ?? ''}
+            onChange={(providerId: string, modelId: string) => {
+              if (providerId && modelId) {
+                setModel(`${providerId}/${modelId}`);
+              } else {
+                setModel('');
+              }
+            }}
+          />
+        </SettingsFieldRow>
       </SettingsSection>
 
       <SettingsSection

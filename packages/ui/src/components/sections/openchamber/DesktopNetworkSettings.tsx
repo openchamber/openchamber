@@ -1,7 +1,6 @@
 import * as React from 'react';
 
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import {
   getDesktopLanAddress,
@@ -16,7 +15,11 @@ import {
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
-import { SettingsSection } from '@/components/sections/shared/SettingsSection';
+import {
+  SettingsSection,
+  SettingsCheckboxRow,
+  SettingsStackedField,
+} from '@/components/sections/shared/SettingsSection';
 
 export const DesktopNetworkSettings: React.FC = () => {
   const { t } = useI18n();
@@ -175,10 +178,6 @@ export const DesktopNetworkSettings: React.FC = () => {
   const lanBlockedByMissingPassword = savedValue && !lanAccessActive && lanAccessBlockedReason === 'missing-password';
   const saveDisabled = isLoading || isSaving || !isDirty || lanRequiresPassword;
 
-  const handleToggle = React.useCallback(() => {
-    setDraftValue((current) => !current);
-  }, []);
-
   const handlePasswordChange = React.useCallback((value: string) => {
     setDraftPassword(value);
     if (!value.trim()) {
@@ -280,67 +279,45 @@ export const DesktopNetworkSettings: React.FC = () => {
     <SettingsSection title={t('settings.openchamber.desktopNetwork.title')}>
       <div className="space-y-2">
         {launchAtLoginSupported ? (
-          <div
-            data-settings-item="sessions.desktop-launch-at-login"
-            className="group flex cursor-pointer items-start gap-2 py-1.5"
-            role="button"
-            tabIndex={0}
-            onClick={handleLaunchAtLoginToggle}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                handleLaunchAtLoginToggle();
-              }
+          <SettingsCheckboxRow
+            settingsItem="sessions.desktop-launch-at-login"
+            checked={launchAtLoginEnabled}
+            onChange={(checked) => {
+              if (checked === launchAtLoginEnabled) return;
+              void handleLaunchAtLoginToggle();
             }}
-          >
-            <Checkbox
-              checked={launchAtLoginEnabled}
-              onChange={handleLaunchAtLoginToggle}
-              ariaLabel={t('settings.openchamber.desktopNetwork.field.launchAtLoginAria')}
-              disabled={isSavingLaunchAtLogin}
-            />
-            <div className="min-w-0 flex-1">
-              <div className="typography-ui-label text-foreground">{t('settings.openchamber.desktopNetwork.field.launchAtLogin')}</div>
-              <div className="typography-micro text-muted-foreground/70">
-                {t('settings.openchamber.desktopNetwork.field.launchAtLoginDescription')}
-              </div>
-            </div>
-          </div>
+            disabled={isSavingLaunchAtLogin}
+            label={t('settings.openchamber.desktopNetwork.field.launchAtLogin')}
+            description={t('settings.openchamber.desktopNetwork.field.launchAtLoginDescription')}
+            ariaLabel={t('settings.openchamber.desktopNetwork.field.launchAtLoginAria')}
+          />
         ) : null}
 
         {keepAwakeSupported ? (
-          <div
-            data-settings-item="sessions.desktop-keep-awake"
-            className="group flex cursor-pointer items-start gap-2 py-1.5"
-            role="button"
-            tabIndex={0}
-            onClick={handleKeepAwakeToggle}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                handleKeepAwakeToggle();
-              }
+          <SettingsCheckboxRow
+            settingsItem="sessions.desktop-keep-awake"
+            checked={keepAwakeEnabled}
+            onChange={(checked) => {
+              if (checked === keepAwakeEnabled) return;
+              void handleKeepAwakeToggle();
             }}
-          >
-            <Checkbox
-              checked={keepAwakeEnabled}
-              onChange={handleKeepAwakeToggle}
-              ariaLabel={t('settings.openchamber.desktopNetwork.field.keepAwakeAria')}
-              disabled={isSavingKeepAwake}
-            />
-            <div className="min-w-0 flex-1">
-              <div className="typography-ui-label text-foreground">{t('settings.openchamber.desktopNetwork.field.keepAwake')}</div>
-              <div className="typography-micro text-muted-foreground/70">
-                {t('settings.openchamber.desktopNetwork.field.keepAwakeDescription')}
-              </div>
-            </div>
-          </div>
+            disabled={isSavingKeepAwake}
+            label={t('settings.openchamber.desktopNetwork.field.keepAwake')}
+            description={t('settings.openchamber.desktopNetwork.field.keepAwakeDescription')}
+            ariaLabel={t('settings.openchamber.desktopNetwork.field.keepAwakeAria')}
+          />
         ) : null}
 
-        <div data-settings-item="sessions.desktop-ui-password" className="space-y-1 py-1.5">
-          <label className="typography-ui-label text-foreground" htmlFor="desktop-ui-password">
-            {t('settings.openchamber.desktopPassword.field.password')}
-          </label>
+        <SettingsStackedField
+          settingsItem="sessions.desktop-ui-password"
+          label={(
+            <label htmlFor="desktop-ui-password">
+              {t('settings.openchamber.desktopPassword.field.password')}
+            </label>
+          )}
+          description={t('settings.openchamber.desktopPassword.field.passwordDescription')}
+          controlClassName="flex-col items-stretch"
+        >
           <Input
             id="desktop-ui-password"
             type="password"
@@ -352,45 +329,29 @@ export const DesktopNetworkSettings: React.FC = () => {
             required={draftValue}
             aria-invalid={lanRequiresPassword}
           />
-          <div className="typography-micro text-muted-foreground/70">
-            {t('settings.openchamber.desktopPassword.field.passwordDescription')}
-          </div>
-        </div>
+        </SettingsStackedField>
 
-        <div
-          data-settings-item="sessions.desktop-lan-access"
-          className="group flex cursor-pointer items-start gap-2 py-1.5"
-          role="button"
-          tabIndex={0}
-          onClick={handleToggle}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' || event.key === ' ') {
-              event.preventDefault();
-              handleToggle();
-            }
-          }}
-        >
-          <Checkbox
-            checked={draftValue}
-            onChange={handleToggle}
-            ariaLabel={t('settings.openchamber.desktopNetwork.field.allowLanAccessAria')}
-            disabled={isLoading || isSaving}
-          />
-          <div className="min-w-0 flex-1">
-            <div className="typography-ui-label text-foreground">{t('settings.openchamber.desktopNetwork.field.allowLanAccess')}</div>
-            <div className="typography-micro text-muted-foreground/70">
-              {t('settings.openchamber.desktopNetwork.field.allowLanAccessDescription')}
-            </div>
-            <div className="typography-micro text-[var(--status-warning)]/85">
-              {t('settings.openchamber.desktopNetwork.field.warning')}
-            </div>
-            {lanRequiresPassword || lanBlockedByMissingPassword ? (
-              <div className="typography-micro text-[var(--status-warning)]/85">
-                {t('settings.openchamber.desktopNetwork.field.passwordRequiredWarning')}
-              </div>
-            ) : null}
-          </div>
-        </div>
+        <SettingsCheckboxRow
+          settingsItem="sessions.desktop-lan-access"
+          checked={draftValue}
+          onChange={setDraftValue}
+          disabled={isLoading || isSaving}
+          label={t('settings.openchamber.desktopNetwork.field.allowLanAccess')}
+          description={(
+            <>
+              <span className="block">{t('settings.openchamber.desktopNetwork.field.allowLanAccessDescription')}</span>
+              <span className="block text-[var(--status-warning)]/85">
+                {t('settings.openchamber.desktopNetwork.field.warning')}
+              </span>
+              {lanRequiresPassword || lanBlockedByMissingPassword ? (
+                <span className="block text-[var(--status-warning)]/85">
+                  {t('settings.openchamber.desktopNetwork.field.passwordRequiredWarning')}
+                </span>
+              ) : null}
+            </>
+          )}
+          ariaLabel={t('settings.openchamber.desktopNetwork.field.allowLanAccessAria')}
+        />
 
         {error ? (
           <div className="typography-micro text-[var(--status-error)]">{error}</div>

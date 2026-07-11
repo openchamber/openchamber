@@ -4,7 +4,6 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Checkbox } from '@/components/ui/checkbox';
 import {
   Select,
   SelectContent,
@@ -22,7 +21,12 @@ import {
 import type { DesktopSettings } from '@/lib/desktop';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
-import { SettingsSection, SETTINGS_SELECT_TRIGGER_CLASS, SETTINGS_SELECT_SIZE } from '@/components/sections/shared/SettingsSection';
+import {
+  SettingsSection,
+  SettingsCheckboxRow,
+  SETTINGS_SELECT_TRIGGER_CLASS,
+  SETTINGS_SELECT_SIZE,
+} from '@/components/sections/shared/SettingsSection';
 
 const AGENTS_MD_PATH = '~/.config/opencode/AGENTS.md';
 
@@ -298,15 +302,13 @@ export const BehaviorPage: React.FC = () => {
         settingsItem="behavior.response-style"
         contentClassName="space-y-3"
       >
-        <label className="flex items-center gap-2 typography-ui-label text-foreground">
-          <Checkbox
-            checked={responseStyleEnabled}
-            onChange={setResponseStyleEnabled}
-            disabled={isLoading}
-            ariaLabel={t('settings.behavior.page.responseStyle.enableAria')}
-          />
-          {t('settings.behavior.page.responseStyle.enable')}
-        </label>
+        <SettingsCheckboxRow
+          checked={responseStyleEnabled}
+          onChange={setResponseStyleEnabled}
+          disabled={isLoading}
+          label={t('settings.behavior.page.responseStyle.enable')}
+          ariaLabel={t('settings.behavior.page.responseStyle.enableAria')}
+        />
 
         <Select<ResponseStyleValue>
           value={responseStylePreset}

@@ -275,6 +275,7 @@ export const GitHubSettings: React.FC = () => {
       <SettingsSection
         title={t('settings.github.page.oauth.title')}
         divider={false}
+        settingsItem="git.github-account"
         titleAccessory={(
           <Tooltip>
             <TooltipTrigger asChild>

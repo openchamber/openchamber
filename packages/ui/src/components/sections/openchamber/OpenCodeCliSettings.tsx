@@ -1,10 +1,13 @@
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
-import { SettingsSection } from '@/components/sections/shared/SettingsSection';
+import {
+  SettingsSection,
+  SettingsFieldRow,
+  SettingsCheckboxRow,
+} from '@/components/sections/shared/SettingsSection';
 import { isDesktopShell, requestFileAccess } from '@/lib/desktop';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
@@ -114,32 +117,32 @@ export const OpenCodeCliSettings: React.FC = () => {
       )}
     >
       <div className="space-y-0.5">
-        <div data-settings-item="sessions.opencode-binary" className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-3">
-          <div className="flex min-w-0 flex-col shrink-0">
-            <span className="typography-ui-label text-foreground">{t('settings.openchamber.opencodeCli.field.binaryPath')}</span>
-          </div>
-          <div className="flex min-w-0 items-center gap-2 sm:w-[20rem]">
-            <Input
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              placeholder={t('settings.openchamber.opencodeCli.field.binaryPathPlaceholder')}
-              disabled={isLoading || isSaving}
-              className="h-7 min-w-0 flex-1 font-mono text-xs"
-            />
-            <Button
-              type="button"
-              variant="outline"
-              size="xs"
-              onClick={handleBrowse}
-              disabled={isLoading || isSaving || !isDesktopShell()}
-              className="h-7 w-7 p-0"
-              aria-label={t('settings.openchamber.opencodeCli.actions.browseAria')}
-              title={t('settings.openchamber.opencodeCli.actions.browse')}
-            >
-              <Icon name="folder" className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
+        <SettingsFieldRow
+          settingsItem="sessions.opencode-binary"
+          label={t('settings.openchamber.opencodeCli.field.binaryPath')}
+          alignEnd={false}
+          controlClassName="sm:w-[20rem]"
+        >
+          <Input
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder={t('settings.openchamber.opencodeCli.field.binaryPathPlaceholder')}
+            disabled={isLoading || isSaving}
+            className="h-7 min-w-0 flex-1 font-mono text-xs"
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            onClick={handleBrowse}
+            disabled={isLoading || isSaving || !isDesktopShell()}
+            className="h-7 w-7 p-0"
+            aria-label={t('settings.openchamber.opencodeCli.actions.browseAria')}
+            title={t('settings.openchamber.opencodeCli.actions.browse')}
+          >
+            <Icon name="folder" className="h-4 w-4" />
+          </Button>
+        </SettingsFieldRow>
 
         <div className="py-1.5">
           <div className="typography-micro text-muted-foreground/70">
@@ -154,16 +157,13 @@ export const OpenCodeCliSettings: React.FC = () => {
           </div>
         </div>
 
-        <label data-settings-item="sessions.opencode-update-notifications" className="flex cursor-pointer items-center gap-2 py-1.5">
-          <Checkbox
-            checked={showOpenCodeUpdateNotifications}
-            onChange={handleShowUpdateNotificationsChange}
-            ariaLabel={t('settings.openchamber.opencodeCli.field.showUpdateNotificationsAria')}
-          />
-          <span className="typography-ui-label text-foreground">
-            {t('settings.openchamber.opencodeCli.field.showUpdateNotifications')}
-          </span>
-        </label>
+        <SettingsCheckboxRow
+          settingsItem="sessions.opencode-update-notifications"
+          checked={showOpenCodeUpdateNotifications}
+          onChange={handleShowUpdateNotificationsChange}
+          label={t('settings.openchamber.opencodeCli.field.showUpdateNotifications')}
+          ariaLabel={t('settings.openchamber.opencodeCli.field.showUpdateNotificationsAria')}
+        />
 
         <div className="flex justify-start py-1.5">
           <Button

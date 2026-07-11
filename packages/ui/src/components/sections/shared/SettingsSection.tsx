@@ -1,15 +1,22 @@
 import React from 'react';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Radio } from '@/components/ui/radio';
 import { cn } from '@/lib/utils';
 
 /** Settings select trigger: kit-aligned width (pair with size="settings" for 36px height). */
 export const SETTINGS_SELECT_TRIGGER_CLASS = 'w-full min-w-40 sm:w-56';
 export const SETTINGS_SELECT_SIZE = 'settings' as const;
 
-/** Minimum width for settings controls (160px). */
-export const SETTINGS_CONTROL_MIN_CLASS = 'min-w-40';
+/** Compact reset / icon action next to a settings control. */
+export const SETTINGS_ICON_BUTTON_CLASS =
+  'h-7 w-7 px-0 text-muted-foreground hover:text-foreground';
 
-/** Standard label column width for legacy row-aligned fields. */
-export const SETTINGS_LABEL_COL_CLASS = 'w-full min-w-0 flex-1 basis-0 sm:pr-6';
+/** Vertical stack spacing for fields inside a column. */
+export const SETTINGS_FIELDS_STACK_CLASS = 'space-y-3';
+
+/** Compact checkbox / radio list stack. */
+export const SETTINGS_OPTION_STACK_CLASS = 'space-y-0.5';
 
 interface SettingsSectionProps {
   /** Section title. Strings render as the shared h2 style. */
@@ -99,7 +106,59 @@ export const SettingsTwoColumn: React.FC<SettingsTwoColumnProps> = ({
   );
 };
 
-interface SettingsFieldRowProps {
+interface SettingsGroupTitleProps {
+  children: React.ReactNode;
+  className?: string;
+  as?: 'h2' | 'h3' | 'div';
+}
+
+/** In-section control-group heading (one step under SettingsSection title). */
+export const SettingsGroupTitle: React.FC<SettingsGroupTitleProps> = ({
+  children,
+  className,
+  as: Tag = 'h3',
+}) => {
+  return (
+    <Tag className={cn('typography-ui-header font-medium text-foreground', className)}>
+      {children}
+    </Tag>
+  );
+};
+
+interface SettingsControlGroupProps {
+  title?: React.ReactNode;
+  description?: React.ReactNode;
+  children: React.ReactNode;
+  className?: string;
+  contentClassName?: string;
+  settingsItem?: string;
+}
+
+/** Labeled control cluster inside a section (radios, chips, stacked fields). */
+export const SettingsControlGroup: React.FC<SettingsControlGroupProps> = ({
+  title,
+  description,
+  children,
+  className,
+  contentClassName,
+  settingsItem,
+}) => {
+  return (
+    <div data-settings-item={settingsItem} className={cn('space-y-1.5', className)}>
+      {title != null || description != null ? (
+        <div className="space-y-0.5">
+          {title != null ? <SettingsGroupTitle>{title}</SettingsGroupTitle> : null}
+          {description != null ? (
+            <p className="typography-meta text-muted-foreground">{description}</p>
+          ) : null}
+        </div>
+      ) : null}
+      <div className={cn(contentClassName)}>{children}</div>
+    </div>
+  );
+};
+
+interface SettingsStackedFieldProps {
   label: React.ReactNode;
   description?: React.ReactNode;
   children: React.ReactNode;
@@ -108,10 +167,8 @@ interface SettingsFieldRowProps {
   controlClassName?: string;
 }
 
-/**
- * Form row: label + description on the left (flex-grow), control on the right.
- */
-export const SettingsFieldRow: React.FC<SettingsFieldRowProps> = ({
+/** Label (+ optional description) above a control — for two-column cells. */
+export const SettingsStackedField: React.FC<SettingsStackedFieldProps> = ({
   label,
   description,
   children,
@@ -120,22 +177,60 @@ export const SettingsFieldRow: React.FC<SettingsFieldRowProps> = ({
   controlClassName,
 }) => {
   return (
+    <div data-settings-item={settingsItem} className={cn('space-y-1.5', className)}>
+      <div className="space-y-0.5">
+        <div className="typography-ui-label text-foreground">{label}</div>
+        {description != null ? (
+          <p className="typography-meta text-muted-foreground">{description}</p>
+        ) : null}
+      </div>
+      <div className={cn('flex min-w-0 items-center gap-2', controlClassName)}>{children}</div>
+    </div>
+  );
+};
+
+interface SettingsFieldRowProps {
+  label: React.ReactNode;
+  description?: React.ReactNode;
+  children: React.ReactNode;
+  settingsItem?: string;
+  className?: string;
+  controlClassName?: string;
+  /** Align control to the trailing edge on desktop. @default true */
+  alignEnd?: boolean;
+}
+
+/**
+ * Side-by-side form row: fixed label column + control cluster.
+ * Use inside full-width sections or single columns.
+ */
+export const SettingsFieldRow: React.FC<SettingsFieldRowProps> = ({
+  label,
+  description,
+  children,
+  settingsItem,
+  className,
+  controlClassName,
+  alignEnd = true,
+}) => {
+  return (
     <div
       data-settings-item={settingsItem}
       className={cn(
-        'flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-6',
+        'flex flex-col gap-2 py-0.5 sm:flex-row sm:items-center sm:gap-8',
         className,
       )}
     >
-      <div className="min-w-0 flex-1 basis-0 sm:pr-6">
-        <div className="typography-ui-label font-medium text-foreground">{label}</div>
+      <div className="min-w-0 sm:w-56 sm:shrink-0">
+        <div className="typography-ui-label text-foreground">{label}</div>
         {description != null ? (
-          <p className="typography-settings-description mt-1 text-muted-foreground">{description}</p>
+          <p className="typography-meta mt-0.5 text-muted-foreground">{description}</p>
         ) : null}
       </div>
       <div
         className={cn(
-          'flex shrink-0 items-center justify-start sm:min-w-40 sm:justify-end',
+          'flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-none',
+          alignEnd && 'sm:justify-end',
           controlClassName,
         )}
       >
@@ -144,3 +239,225 @@ export const SettingsFieldRow: React.FC<SettingsFieldRowProps> = ({
     </div>
   );
 };
+
+interface SettingsInsetProps {
+  children: React.ReactNode;
+  className?: string;
+  settingsItem?: string;
+}
+
+/** Optional inset block under a section (top border + padding). */
+export const SettingsInset: React.FC<SettingsInsetProps> = ({
+  children,
+  className,
+  settingsItem,
+}) => {
+  return (
+    <div
+      data-settings-item={settingsItem}
+      className={cn('border-t border-border/40 pt-4', className)}
+    >
+      {children}
+    </div>
+  );
+};
+
+interface SettingsCheckboxRowProps {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  label: React.ReactNode;
+  description?: React.ReactNode;
+  disabled?: boolean;
+  ariaLabel?: string;
+  settingsItem?: string;
+  className?: string;
+  labelAccessory?: React.ReactNode;
+}
+
+/** Shared checkbox setting row with keyboard support. */
+export const SettingsCheckboxRow: React.FC<SettingsCheckboxRowProps> = ({
+  checked,
+  onChange,
+  label,
+  description,
+  disabled = false,
+  ariaLabel,
+  settingsItem,
+  className,
+  labelAccessory,
+}) => {
+  const toggle = () => {
+    if (!disabled) onChange(!checked);
+  };
+
+  const hasDescription = description != null;
+
+  return (
+    <div
+      data-settings-item={settingsItem}
+      className={cn(
+        'group flex cursor-pointer gap-2 py-0.5',
+        hasDescription ? 'items-start' : 'items-center',
+        disabled && 'cursor-not-allowed opacity-60',
+        className,
+      )}
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      aria-pressed={checked}
+      aria-disabled={disabled || undefined}
+      onClick={toggle}
+      onKeyDown={(event) => {
+        if (event.key === ' ' || event.key === 'Enter') {
+          event.preventDefault();
+          toggle();
+        }
+      }}
+    >
+      <Checkbox
+        checked={checked}
+        onChange={onChange}
+        disabled={disabled}
+        ariaLabel={ariaLabel}
+      />
+      <div className="flex min-w-0 flex-col">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="typography-ui-label text-foreground">{label}</span>
+          {labelAccessory}
+        </div>
+        {hasDescription ? (
+          <span className="typography-meta text-muted-foreground">{description}</span>
+        ) : null}
+      </div>
+    </div>
+  );
+};
+
+interface SettingsRadioOptionProps {
+  selected: boolean;
+  onSelect: () => void;
+  label: React.ReactNode;
+  description?: React.ReactNode;
+  ariaLabel?: string;
+  disabled?: boolean;
+  className?: string;
+}
+
+/** Single radio option row used inside SettingsRadioGroup. */
+export const SettingsRadioOption: React.FC<SettingsRadioOptionProps> = ({
+  selected,
+  onSelect,
+  label,
+  description,
+  ariaLabel,
+  disabled = false,
+  className,
+}) => {
+  return (
+    <div
+      className={cn(
+        'flex cursor-pointer items-start gap-2 py-0.5',
+        disabled && 'cursor-not-allowed opacity-60',
+        className,
+      )}
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      aria-pressed={selected}
+      aria-disabled={disabled || undefined}
+      onClick={() => {
+        if (!disabled) onSelect();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === ' ' || event.key === 'Enter') {
+          event.preventDefault();
+          if (!disabled) onSelect();
+        }
+      }}
+    >
+      <Radio
+        checked={selected}
+        onChange={onSelect}
+        disabled={disabled}
+        ariaLabel={ariaLabel}
+        className={description != null ? 'mt-0.5' : undefined}
+      />
+      <div className="flex min-w-0 flex-col">
+        <span
+          className={cn(
+            'typography-ui-label font-normal',
+            selected ? 'text-foreground' : 'text-foreground/50',
+          )}
+        >
+          {label}
+        </span>
+        {description != null ? (
+          <span className="typography-meta text-muted-foreground">{description}</span>
+        ) : null}
+      </div>
+    </div>
+  );
+};
+
+interface SettingsRadioGroupProps {
+  'aria-label': string;
+  children: React.ReactNode;
+  className?: string;
+}
+
+/** Accessible radio group wrapper with compact vertical spacing. */
+export const SettingsRadioGroup: React.FC<SettingsRadioGroupProps> = ({
+  'aria-label': ariaLabel,
+  children,
+  className,
+}) => {
+  return (
+    <div role="radiogroup" aria-label={ariaLabel} className={cn(SETTINGS_OPTION_STACK_CLASS, className)}>
+      {children}
+    </div>
+  );
+};
+
+interface SettingsChipOption<T extends string> {
+  value: T;
+  label: React.ReactNode;
+  disabled?: boolean;
+}
+
+interface SettingsChipGroupProps<T extends string> {
+  value: T;
+  options: Array<SettingsChipOption<T>>;
+  onChange: (value: T) => void;
+  className?: string;
+  'aria-label'?: string;
+}
+
+/** Compact chip / segmented enum picker. */
+export function SettingsChipGroup<T extends string>({
+  value,
+  options,
+  onChange,
+  className,
+  'aria-label': ariaLabel,
+}: SettingsChipGroupProps<T>) {
+  return (
+    <div
+      role="group"
+      aria-label={ariaLabel}
+      className={cn('flex flex-wrap items-center gap-1', className)}
+    >
+      {options.map((option) => (
+        <Button
+          key={option.value}
+          type="button"
+          variant="chip"
+          size="xs"
+          disabled={option.disabled}
+          aria-pressed={value === option.value}
+          className="!font-normal"
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </Button>
+      ))}
+    </div>
+  );
+}
