@@ -55,8 +55,8 @@ Post and verify in explicit sub-steps:
 1. **Finalize the body once.** Do not iterate by posting multiple comments.
 2. **Post it.** `gh issue comment "$NUMBER" --body-file -` (pipe via stdin, preferred) or `gh issue comment "$NUMBER" --body "..."`.
 3. **Capture the result.** Note the comment URL returned by `gh`.
-4. **Verify by reading comments back only.** Run `gh issue view "$NUMBER" --json comments` and confirm your new comment appears. Do not verify by posting another comment; do not rely on stdout alone.
-5. **Handle failure.** If the post failed or the comment is missing, retry the `gh issue comment` command once. If it still fails, report the failure rather than posting a duplicate.
+4. **Verify by reading comments back only.** Run `gh issue view "$NUMBER" --json comments` and confirm a comment by you with the exact body appears. If it is initially missing, wait briefly and read comments again up to two more times. Do not verify by posting another comment; do not rely on stdout alone.
+5. **Handle failure without duplicates.** If `gh` returned a comment URL, or the post result is ambiguous, never post again; report an unverified result if the comment remains missing. Retry `gh issue comment` once only when GitHub definitively rejected the first request and the read-back confirms no exact matching comment exists. If the retry fails or cannot be verified, report the failure rather than posting again.
 
 ## Constraints
 

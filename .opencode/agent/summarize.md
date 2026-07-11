@@ -56,7 +56,7 @@ Post and verify the summary in explicit sub-steps:
 4. **Verify by reading comments back only.**
    - PR: `gh pr view "$NUMBER" --json comments`
    - Issue: `gh issue view "$NUMBER" --json comments`
-   Confirm your new comment appears. Do not verify by posting another comment; do not rely on stdout alone.
-5. **Handle failure.** If the post failed or the comment is missing, retry the `gh ... comment` command once. If it still fails, report the failure rather than posting a duplicate.
+   Confirm a comment by you with the exact body appears. If it is initially missing, wait briefly and read comments again up to two more times. Do not verify by posting another comment; do not rely on stdout alone.
+5. **Handle failure without duplicates.** If `gh` returned a comment URL, or the post result is ambiguous, never post again; report an unverified result if the comment remains missing. Retry the `gh ... comment` command once only when GitHub definitively rejected the first request and the read-back confirms no exact matching comment exists. If the retry fails or cannot be verified, report the failure rather than posting again.
 
 Keep the comment factual and compact. Never post test, probe, placeholder, or debugging comments.
