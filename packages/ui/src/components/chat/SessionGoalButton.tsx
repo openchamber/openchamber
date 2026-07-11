@@ -12,6 +12,7 @@ import { toast } from '@/components/ui';
 import { useSessionGoal } from '@/hooks/useSessionGoal';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { clearSessionGoal } from '@/lib/sessionGoalActions';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
@@ -44,7 +45,10 @@ export const SessionGoalButton: React.FC<SessionGoalButtonProps> = React.memo(({
   const [confirmOpen, setConfirmOpen] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
 
-  if (!enabled || (!sessionId && !draftOpen)) {
+  // The goal loop runs in the web server; the VS Code extension only renders
+  // goal state. Arming a goal there would create one nothing drives, so the
+  // entry point is hidden entirely.
+  if (isVSCodeRuntime() || !enabled || (!sessionId && !draftOpen)) {
     return null;
   }
 
