@@ -608,6 +608,7 @@ interface UIStore {
   diffWrapLines: boolean;
   gitChangesViewMode: 'flat' | 'tree';
   isTimelineDialogOpen: boolean;
+  isPromptNavigatorPanelOpen: boolean;
   isImagePreviewOpen: boolean;
   nativeNotificationsEnabled: boolean;
   notificationMode: 'always' | 'hidden-only';
@@ -650,6 +651,7 @@ interface UIStore {
   userMessageRenderingMode: UserMessageRenderingMode;
   collapsibleUserMessages: boolean;
   stickyUserHeader: boolean;
+  promptNavigatorEnabled: boolean;
   expandedEditorToolbar: boolean;
   showSplitAssistantMessageActions: boolean;
   isMobileSessionStatusBarCollapsed: boolean;
@@ -771,6 +773,8 @@ interface UIStore {
   setGitChangesViewMode: (mode: 'flat' | 'tree') => void;
   setMultiRunLauncherOpen: (open: boolean) => void;
   setTimelineDialogOpen: (open: boolean) => void;
+  setPromptNavigatorPanelOpen: (open: boolean) => void;
+  togglePromptNavigatorPanel: () => void;
   setImagePreviewOpen: (open: boolean) => void;
   setNativeNotificationsEnabled: (value: boolean) => void;
   setNotificationMode: (mode: 'always' | 'hidden-only') => void;
@@ -800,6 +804,7 @@ interface UIStore {
   setUserMessageRenderingMode: (value: UserMessageRenderingMode) => void;
   setCollapsibleUserMessages: (value: boolean) => void;
   setStickyUserHeader: (value: boolean) => void;
+  setPromptNavigatorEnabled: (value: boolean) => void;
   setExpandedEditorToolbar: (value: boolean) => void;
   setShowSplitAssistantMessageActions: (value: boolean) => void;
   setIsMobileSessionStatusBarCollapsed: (value: boolean) => void;
@@ -904,6 +909,7 @@ export const useUIStore = create<UIStore>()(
         diffWrapLines: false,
         gitChangesViewMode: 'flat',
         isTimelineDialogOpen: false,
+        isPromptNavigatorPanelOpen: false,
         isImagePreviewOpen: false,
         nativeNotificationsEnabled: false,
         notificationMode: 'hidden-only',
@@ -943,6 +949,7 @@ export const useUIStore = create<UIStore>()(
         userMessageRenderingMode: 'markdown',
         collapsibleUserMessages: true,
         stickyUserHeader: false,
+        promptNavigatorEnabled: true,
         expandedEditorToolbar: false,
         showSplitAssistantMessageActions: false,
         isMobileSessionStatusBarCollapsed: false,
@@ -2009,6 +2016,14 @@ export const useUIStore = create<UIStore>()(
           set({ isTimelineDialogOpen: open });
         },
 
+        setPromptNavigatorPanelOpen: (open) => {
+          set({ isPromptNavigatorPanelOpen: open });
+        },
+
+        togglePromptNavigatorPanel: () => {
+          set((state) => ({ isPromptNavigatorPanelOpen: !state.isPromptNavigatorPanelOpen }));
+        },
+
         setImagePreviewOpen: (open) => {
           set({ isImagePreviewOpen: open });
         },
@@ -2087,6 +2102,9 @@ export const useUIStore = create<UIStore>()(
         },
         setStickyUserHeader: (value) => {
           set({ stickyUserHeader: value });
+        },
+        setPromptNavigatorEnabled: (value) => {
+          set({ promptNavigatorEnabled: value });
         },
         setExpandedEditorToolbar: (value: boolean) => {
           set({ expandedEditorToolbar: value });
@@ -2331,6 +2349,7 @@ export const useUIStore = create<UIStore>()(
           userMessageRenderingMode: state.userMessageRenderingMode,
           collapsibleUserMessages: state.collapsibleUserMessages,
           stickyUserHeader: state.stickyUserHeader,
+          promptNavigatorEnabled: state.promptNavigatorEnabled,
           expandedEditorToolbar: state.expandedEditorToolbar,
           showSplitAssistantMessageActions: state.showSplitAssistantMessageActions,
           isMobileSessionStatusBarCollapsed: state.isMobileSessionStatusBarCollapsed,
