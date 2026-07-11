@@ -1919,6 +1919,11 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.toast.attachmentsTooLarge': '添付ファイルが大きすぎて送信できません。画像の数またはサイズを減らしてください。',
   'chat.chatInput.toast.sendAttachmentsFailed': '添付ファイルの送信に失敗しました。ファイルを減らすかサイズを小さくしてください。',
   'chat.chatInput.toast.messageSendFailed': 'メッセージの送信に失敗しました。添付ファイルは復元されました。',
+  'chat.sendError.mayStillProcessing': 'Message may still be processing on the server.',
+  'chat.sendError.mayStillProcessingDescription': 'If new responses appear, the message went through. Use STOP to cancel; do not resend yet.',
+  'chat.sendError.queuedFailed': 'Queued message failed to send.',
+  'chat.sendError.queuedFailedDescription': 'The message was removed from the queue. Try resending it directly.',
+
   'chat.chatInput.toast.clipboardAttachFailed': 'クリップボードからの画像添付に失敗しました',
   'chat.chatInput.toast.addedFileMentions': '{count}件のファイルメンションを追加しました',
   'chat.chatInput.toast.attachFileFailed': 'ファイルの添付に失敗しました',

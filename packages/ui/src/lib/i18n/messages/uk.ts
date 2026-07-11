@@ -1889,6 +1889,11 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.toast.attachmentsTooLarge": "Вкладені файли завеликі для надсилання. Спробуйте зменшити кількість або розмір зображень.",
   "chat.chatInput.toast.sendAttachmentsFailed": "Не вдалося надіслати вкладення. Спробуйте зменшити кількість файлів або зображень.",
   "chat.chatInput.toast.messageSendFailed": "Не вдалося надіслати повідомлення. Вкладення відновлено.",
+  "chat.sendError.mayStillProcessing": "Повідомлення може досі оброблятися на сервері.",
+  "chat.sendError.mayStillProcessingDescription": "Якщо з'являться нові відповіді — повідомлення дійшло. Натисніть STOP, щоб скасувати; поки не надсилайте повторно.",
+  "chat.sendError.queuedFailed": "Не вдалося надіслати повідомлення з черги.",
+  "chat.sendError.queuedFailedDescription": "Повідомлення прибрано з черги. Спробуйте надіслати його напряму.",
+
   "chat.chatInput.toast.clipboardAttachFailed": "Не вдалося вкласти зображення з буфера обміну",
   "chat.chatInput.toast.addedFileMentions": "Додано згадки файлів {count}",
   "chat.chatInput.toast.attachFileFailed": "Не вдалося прикріпити файл",

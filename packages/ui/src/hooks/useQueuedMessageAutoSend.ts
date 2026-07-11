@@ -8,6 +8,9 @@ import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { parseAgentMentions } from '@/lib/messages/agentMentions';
 import { getSyncSessionStatus } from '@/sync/sync-refs';
 import { useDirectorySync } from '@/sync/sync-context';
+import { toast } from '@/components/ui';
+import { handleSendError } from '@/lib/chat/sendErrorHandler';
+import { useI18n } from '@/lib/i18n';
 
 type SessionStatusType = 'idle' | 'busy' | 'retry';
 
@@ -120,6 +123,7 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
   const queuedMessages = useMessageQueueStore((state) => state.queuedMessages);
   const autoReviewRuns = useAutoReviewStore((state) => state.runsByOriginalSessionID);
   const sessionStatusRecord = useDirectorySync((state) => state.session_status);
+  const { t } = useI18n();
 
   const inFlightSessionsRef = React.useRef<Set<string>>(new Set());
   const previousStatusRef = React.useRef<Map<string, SessionStatusType>>(new Map());
@@ -175,7 +179,30 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
         });
         useMessageQueueStore.getState().removeFromQueue(sessionId, payload.queuedMessageId);
       } catch (error) {
+        const rawMessage =
+          error instanceof Error
+            ? error.message
+            : typeof error === 'string'
+              ? error
+              : String(error ?? '');
         console.warn('[queue] queued auto-send failed:', error);
+        // Surface the failure to the user via the shared handler — previously
+        // this only logged and silently stranded the queued message (issue
+        // #2072). Toast message + description are localized via `t`.
+        handleSendError({
+          rawMessage,
+          text: payload.primaryText,
+          attachments: payload.primaryAttachments,
+          source: 'queuedAutoSend',
+          toast: {
+            error: (message, options) =>
+              toast.error(message, options),
+          },
+          // useI18n's `t` is typed against the literal key list; the handler
+          // accepts an open `(key: string) => string` signature so the
+          // intentional widening is safer at the boundary than at every call.
+          t: t as unknown as (key: string) => string,
+        });
       } finally {
         inFlightSessionsRef.current.delete(sessionId);
       }
@@ -212,5 +239,5 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
     });
 
     previousStatusRef.current = nextStatusMap;
-  }, [enabled, queuedMessages, sessionStatusRecord, autoReviewRuns]);
+  }, [enabled, queuedMessages, sessionStatusRecord, autoReviewRuns, t]);
 }
