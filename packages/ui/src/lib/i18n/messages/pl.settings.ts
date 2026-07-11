@@ -733,6 +733,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.open_model_selector.label': 'Otwórz wybór modelu',
   'settings.openchamber.keyboardShortcuts.action.cycle_favorite_model_forward.label': 'Przełącz ulubiony model w przód',
   'settings.openchamber.keyboardShortcuts.action.cycle_right_sidebar_tab.label': 'Przełącz zakładkę prawego paska bocznego',
+  'settings.openchamber.keyboardShortcuts.action.close_context_panel_tab.label': 'Zamknij kartę panelu kontekstu',
   'settings.openchamber.keyboardShortcuts.action.cycle_services_tab.label': 'Przełącz zakładkę usług',
   'settings.openchamber.keyboardShortcuts.action.cycle_theme.label': 'Przełącz motyw',
   'settings.openchamber.keyboardShortcuts.action.zoom_in.label': 'Powiększ',

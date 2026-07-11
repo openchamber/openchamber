@@ -989,6 +989,7 @@ export const settingsDict = {
   "settings.openchamber.keyboardShortcuts.action.open_right_sidebar_git.label": "Відкрити вкладку Git правої бічної панелі",
   "settings.openchamber.keyboardShortcuts.action.open_right_sidebar_files.label": "Відкрити вкладку «Файли» правої бічної панелі",
   "settings.openchamber.keyboardShortcuts.action.cycle_right_sidebar_tab.label": "Перемкнути вкладку правої бічної панелі",
+  "settings.openchamber.keyboardShortcuts.action.close_context_panel_tab.label": "Закрити вкладку панелі контексту",
   "settings.openchamber.keyboardShortcuts.action.previous_session.label": "Попередня сесія",
   "settings.openchamber.keyboardShortcuts.action.next_session.label": "Наступна сесія",
   "settings.openchamber.keyboardShortcuts.action.new_chat.label": "Нова сесія",

@@ -5,7 +5,7 @@ import { MarkdownRenderer, SimpleMarkdownRenderer } from './MarkdownRenderer';
 import { MarkdownHydrationProvider } from './markdown/MarkdownHydrationProvider';
 
 describe('deferred Markdown rendering', () => {
-    test('renders escaped text without mounting the rich renderer', () => {
+    test('shows a skeleton while keeping raw source visually hidden', () => {
         const markup = renderToStaticMarkup(
             <MarkdownHydrationProvider enabled={false}>
                 <MarkdownRenderer
@@ -17,6 +17,9 @@ describe('deferred Markdown rendering', () => {
         );
 
         expect(markup).toContain('data-markdown-hydration="deferred"');
+        expect(markup).toContain('data-markdown-placeholder="skeleton"');
+        expect(markup).toContain('data-markdown-size-spacer="true"');
+        expect(markup).toContain('class="invisible block whitespace-pre-wrap"');
         expect(markup).toContain('&lt;script&gt;alert(&quot;no&quot;)&lt;/script&gt;');
         expect(markup).not.toContain('data-markdown-content');
     });
@@ -29,6 +32,20 @@ describe('deferred Markdown rendering', () => {
         );
 
         expect(markup).toContain('data-markdown-hydration="deferred"');
+        expect(markup).toContain('data-markdown-placeholder="skeleton"');
         expect(markup).toContain('**deferred**');
+    });
+
+    test('caps animated skeleton structure for very large Markdown', () => {
+        const content = Array.from({ length: 40 }, (_, index) => `line ${index}`).join('\n');
+        const markup = renderToStaticMarkup(
+            <MarkdownHydrationProvider enabled={false}>
+                <MarkdownRenderer content={content} messageId="message-large" isAnimated={false} />
+            </MarkdownHydrationProvider>,
+        );
+
+        expect(markup.match(/data-slot="skeleton"/g)?.length).toBe(5);
+        expect(markup).not.toContain('motion-safe:animate-pulse');
+        expect(markup.match(/animate-none/g)?.length).toBe(5);
     });
 });

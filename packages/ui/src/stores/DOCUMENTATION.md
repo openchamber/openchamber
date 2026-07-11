@@ -47,8 +47,15 @@ Examples:
 - `useProjectsStore.ts`
 - `useGlobalSessionsStore.ts`
 - `useSessionFoldersStore.ts`
+- `useSessionFocusStore.ts`
 
 These stores coordinate persistent project/session metadata across multiple views.
+
+`useSessionFocusStore.ts` is intentionally transient and narrow. It records the
+exact sidebar attention identity (`recent` or `project`, session, and project)
+separately from the authoritative current session. Shortcut navigation and row
+Active styling must read this identity instead of inferring origin from duplicate
+session data.
 
 ## Git / PR Stores
 

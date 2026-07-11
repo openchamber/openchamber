@@ -51,13 +51,16 @@ import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useShallow } from 'zustand/react/shallow';
 import { markSessionSwitchContentCommitted } from '@/lib/sessionSwitchPerf';
+import { scheduleAfterPaintTask } from '@/lib/afterPaintTaskQueue';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import {
-    applyLatestSessionViewRenderIntent,
-    createSessionViewKey,
+    applySessionViewSelectionIntent,
+    commitMaterializedSessionView,
     createSessionViewRenderIntent,
+    materializeSessionViewRenderIntent,
+    recordSessionViewEstimate,
     reconcileSessionViewCache,
-    updateSessionViewEstimate,
+    resolveActiveSessionViewKey,
     type SessionViewCacheLimits,
     type SessionViewRenderState,
     type SessionViewSelection,
@@ -1063,6 +1066,29 @@ const ChatContainerContent: React.FC<ChatContainerContentProps> = ({
 const MemoizedChatContainerContent = React.memo(ChatContainerContent);
 MemoizedChatContainerContent.displayName = 'MemoizedChatContainerContent';
 
+const SessionViewLoadingPlaceholder: React.FC = () => (
+    <div
+        className="flex h-full flex-col bg-background"
+        data-session-view-loading="true"
+        aria-hidden="true"
+    >
+        <div className="mt-auto w-full pb-5 motion-safe:animate-pulse">
+            <div className="chat-message-column space-y-6 px-4">
+                <div className="space-y-2">
+                    <Skeleton className="h-4 w-4/5 animate-none rounded-md" />
+                    <Skeleton className="h-4 w-2/3 animate-none rounded-md" />
+                    <Skeleton className="h-4 w-1/2 animate-none rounded-md" />
+                </div>
+                <div className="space-y-2">
+                    <Skeleton className="h-4 w-5/6 animate-none rounded-md" />
+                    <Skeleton className="h-4 w-3/5 animate-none rounded-md" />
+                </div>
+                <Skeleton className="h-24 w-full animate-none rounded-xl" />
+            </div>
+        </div>
+    </div>
+);
+
 const RuntimeScopedChatContainer: React.FC<ChatContainerProps & { runtimeKey: string }> = ({ runtimeKey, ...props }) => {
     const chatSurfaceMode = useChatSurfaceMode();
     const selectedSession = useSessionUIStore(
@@ -1090,7 +1116,8 @@ const RuntimeScopedChatContainer: React.FC<ChatContainerProps & { runtimeKey: st
         ? CONSTRAINED_SESSION_VIEW_CACHE_LIMITS
         : DESKTOP_SESSION_VIEW_CACHE_LIMITS;
     const [sessionViewRenderState, setSessionViewRenderState] = React.useState<SessionViewRenderState>(() => ({
-        renderedSelection: selectedSessionView,
+        activeIntent: selectionIntent,
+        cacheNeedsTrim: false,
         cachedSessionViews: selectedSessionView
             ? reconcileSessionViewCache(
                 [],
@@ -1099,59 +1126,104 @@ const RuntimeScopedChatContainer: React.FC<ChatContainerProps & { runtimeKey: st
                 DEFAULT_SESSION_VIEW_ESTIMATED_BYTES,
             )
             : [],
+        pendingSessionView: null,
     }));
-    const { cachedSessionViews, renderedSelection } = sessionViewRenderState;
-    const renderedSelectionKey = renderedSelection ? createSessionViewKey(renderedSelection) : null;
+    const committedSelectionIntentRef = React.useRef(selectionIntent);
+    const committedSelectionKeyRef = React.useRef(selectionKey);
+    const { cacheNeedsTrim, cachedSessionViews, pendingSessionView } = sessionViewRenderState;
+    const pendingRenderEntry = pendingSessionView?.intent === selectionIntent
+        ? pendingSessionView.entry
+        : null;
     const renderedSessionViews = React.useMemo(
-        () => [...cachedSessionViews].sort((left, right) => left.key.localeCompare(right.key)),
-        [cachedSessionViews],
+        () => {
+            const next = [...cachedSessionViews];
+            if (
+                pendingRenderEntry
+                && !next.some((entry) => entry.key === pendingRenderEntry.key)
+            ) {
+                next.push(pendingRenderEntry);
+            }
+            return next.sort((left, right) => left.key.localeCompare(right.key));
+        },
+        [cachedSessionViews, pendingRenderEntry],
     );
-    const isSwitchingSession = renderedSelectionKey !== selectionKey;
-    const activeSessionViewKey = isSwitchingSession ? null : renderedSelectionKey;
-    const activeSessionViewKeyRef = React.useRef(activeSessionViewKey);
-    activeSessionViewKeyRef.current = activeSessionViewKey;
-    const latestSelectionIntentRef = React.useRef(selectionIntent);
-    latestSelectionIntentRef.current = selectionIntent;
+    const activeSessionViewKey = resolveActiveSessionViewKey(renderedSessionViews, selectionKey);
+    const isMaterializingSessionView = Boolean(selectionKey && !activeSessionViewKey);
+
+    React.useLayoutEffect(() => {
+        committedSelectionIntentRef.current = selectionIntent;
+        committedSelectionKeyRef.current = selectionKey;
+        setSessionViewRenderState((current) => applySessionViewSelectionIntent(
+            current,
+            selectionIntent,
+            cacheLimits,
+        ));
+    }, [cacheLimits, cacheNeedsTrim, selectionIntent, selectionKey]);
+
+    const pendingSessionViewIntent = pendingSessionView?.intent ?? null;
+    React.useLayoutEffect(() => {
+        if (!pendingSessionViewIntent) {
+            return;
+        }
+        setSessionViewRenderState((current) => commitMaterializedSessionView(
+            current,
+            pendingSessionViewIntent,
+            cacheLimits,
+        ));
+    }, [cacheLimits, pendingSessionViewIntent]);
 
     React.useEffect(() => {
-        if (!isSwitchingSession) {
+        if (!selectionIntent.selection || activeSessionViewKey) {
             return;
         }
         const scheduledIntent = selectionIntent;
-        let cancelled = false;
-        React.startTransition(() => {
-            setSessionViewRenderState((current) => cancelled
-                ? current
-                : applyLatestSessionViewRenderIntent(
+        const scheduledSelectionKey = selectionKey;
+        return scheduleAfterPaintTask(() => {
+            if (
+                committedSelectionIntentRef.current !== scheduledIntent
+                || committedSelectionKeyRef.current !== scheduledSelectionKey
+            ) {
+                return;
+            }
+            setSessionViewRenderState((current) => {
+                if (committedSelectionKeyRef.current !== scheduledSelectionKey) {
+                    return current;
+                }
+                return materializeSessionViewRenderIntent(
                     current,
                     scheduledIntent,
-                    latestSelectionIntentRef.current,
-                    cacheLimits,
+                    committedSelectionIntentRef.current,
                     DEFAULT_SESSION_VIEW_ESTIMATED_BYTES,
-                ));
-        });
-        return () => {
-            cancelled = true;
-        };
-    }, [cacheLimits, isSwitchingSession, selectionIntent]);
+                );
+            });
+        }, { priority: 'user-blocking' });
+    }, [activeSessionViewKey, cacheLimits, selectionIntent, selectionKey]);
 
     const handleSessionViewEstimateChange = React.useCallback((key: string, estimatedBytes: number) => {
+        const scheduledIntent = committedSelectionIntentRef.current;
+        const scheduledSelectionKey = committedSelectionKeyRef.current;
         setSessionViewRenderState((current) => {
-            const cachedViews = updateSessionViewEstimate(
+            if (
+                committedSelectionIntentRef.current !== scheduledIntent
+                || committedSelectionKeyRef.current !== scheduledSelectionKey
+                || current.activeIntent !== scheduledIntent
+            ) {
+                return current;
+            }
+            const cachedViews = recordSessionViewEstimate(
                 current.cachedSessionViews,
                 key,
                 estimatedBytes,
-                activeSessionViewKeyRef.current ?? key,
-                cacheLimits,
             );
             return cachedViews === current.cachedSessionViews
                 ? current
-                : { ...current, cachedSessionViews: cachedViews };
+                : { ...current, cacheNeedsTrim: true, cachedSessionViews: cachedViews };
         });
-    }, [cacheLimits]);
+    }, []);
 
     return (
-        <div className="h-full bg-background" aria-busy={isSwitchingSession || undefined}>
+        <div className="h-full bg-background" aria-busy={isMaterializingSessionView || undefined}>
+            {isMaterializingSessionView ? <SessionViewLoadingPlaceholder key={selectionKey} /> : null}
             {renderedSessionViews.map((view) => (
                 <React.Activity
                     key={view.key}
@@ -1167,7 +1239,7 @@ const RuntimeScopedChatContainer: React.FC<ChatContainerProps & { runtimeKey: st
                     />
                 </React.Activity>
             ))}
-            {!isSwitchingSession && !renderedSelection ? (
+            {!selectionKey ? (
                 <MemoizedChatContainerContent
                     {...props}
                     sessionId={null}

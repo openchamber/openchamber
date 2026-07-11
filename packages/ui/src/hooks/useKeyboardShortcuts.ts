@@ -14,8 +14,34 @@ import { readEmbeddedThemeSearchParams } from '@/contexts/theme-embedded-bootstr
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { getCycledPrimaryAgentName } from '@/components/chat/mobileControlsUtils';
-import { resolveAdjacentRootSession, resolveAdjacentRootSessionDirectory } from '@/sync/session-navigation';
+import { navigateAdjacentSession } from '@/sync/session-navigation';
 import { resetWebviewZoom, zoomWebviewIn, zoomWebviewOut } from '@/lib/webviewZoom';
+import { resolveEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+
+// Close the active context-panel tab when open; otherwise close the desktop window.
+// Returns true when the shortcut was consumed (caller should preventDefault).
+const handleCloseContextPanelTabOrWindow = (): boolean => {
+  const { isMobile, closeActiveContextPanelTab } = useUIStore.getState();
+  if (isMobile) {
+    return false;
+  }
+
+  const directory = resolveEffectiveDirectory();
+  if (directory && closeActiveContextPanelTab(directory)) {
+    return true;
+  }
+
+  // Desktop: fall through to closing the OS window when no panel tab remains.
+  // Web: leave the event alone so the browser can keep its own Cmd/Ctrl+W.
+  if (canUseElectronDesktopIPC()) {
+    void invokeDesktop('desktop_close_current_window').catch((error) => {
+      console.warn('[keyboard-shortcuts] failed to close current window', error);
+    });
+    return true;
+  }
+
+  return false;
+};
 
 export const useKeyboardShortcuts = () => {
   const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
@@ -135,6 +161,16 @@ export const useKeyboardShortcuts = () => {
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Cmd/Ctrl+W must run even when the terminal is focused: otherwise disabling
+      // Electron's native Close accelerator would leave the shortcut dead in the PTY.
+      if (eventMatchesShortcut(e, combo('close_context_panel_tab'))) {
+        if (handleCloseContextPanelTabOrWindow()) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        return;
+      }
+
       if (isTerminalEventTarget(e.target)) {
         return;
       }
@@ -361,19 +397,17 @@ export const useKeyboardShortcuts = () => {
       }
 
       const navigateSession = (direction: -1 | 1) => {
-        const nextSession = resolveAdjacentRootSession(
+        return navigateAdjacentSession(
           direction,
           useSessionUIStore.getState().currentSessionId,
-        );
-        if (!nextSession) {
-          return;
-        }
-
-        setActiveMainTab('chat');
-        setSessionSwitcherOpen(false);
-        useSessionUIStore.getState().setCurrentSession(
-          nextSession.id,
-          resolveAdjacentRootSessionDirectory(nextSession),
+          (target) => {
+            setActiveMainTab('chat');
+            setSessionSwitcherOpen(false);
+            useSessionUIStore.getState().setCurrentSession(
+              target.sessionId,
+              target.directory,
+            );
+          },
         );
       };
 

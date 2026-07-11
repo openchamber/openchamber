@@ -901,6 +901,7 @@
   'settings.openchamber.keyboardShortcuts.action.open_right_sidebar_git.label': '開啟右側邊欄 Git 分頁',
   'settings.openchamber.keyboardShortcuts.action.open_right_sidebar_files.label': '開啟右側邊欄 Files 分頁',
   'settings.openchamber.keyboardShortcuts.action.cycle_right_sidebar_tab.label': '輪換右側邊欄分頁',
+  'settings.openchamber.keyboardShortcuts.action.close_context_panel_tab.label': '關閉上下文面板分頁',
   'settings.openchamber.keyboardShortcuts.action.previous_session.label': '上一個工作階段',
   'settings.openchamber.keyboardShortcuts.action.next_session.label': '下一個工作階段',
   'settings.openchamber.keyboardShortcuts.action.new_chat.label': '新建工作階段',

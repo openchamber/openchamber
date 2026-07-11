@@ -10,6 +10,7 @@ import {
 import type { SessionNodeRenderExtras } from './sessionNodeItemUtils';
 import { SidebarSectionHeader } from './SidebarSectionHeader';
 import { SIDEBAR_MUTED_HINT_CLASS } from './utils';
+import { useSessionFocusStore } from '@/stores/useSessionFocusStore';
 
 type ActivityItem = {
   node: SessionNode;
@@ -67,7 +68,46 @@ export function SidebarActivitySections({
   const { t } = useI18n();
   const [collapsed, setCollapsed] = React.useState<Set<string>>(new Set());
   const [visibleCountBySection, setVisibleCountBySection] = React.useState<Map<string, number>>(new Map());
+  const recentFocusSessionId = useSessionFocusStore((state) => (
+    state.focus?.scope === 'recent' ? state.focus.sessionId : null
+  ));
   const flatVariant = variant === 'flat';
+
+  React.useLayoutEffect(() => {
+    if (!recentFocusSessionId) {
+      return;
+    }
+    const section = sections.find((candidate) => (
+      candidate.items.some((item) => item.node.session.id === recentFocusSessionId)
+    ));
+    if (!section) {
+      return;
+    }
+    const targetIndex = section.items.findIndex((item) => item.node.session.id === recentFocusSessionId);
+    if (targetIndex < 0) {
+      return;
+    }
+
+    setCollapsed((prev) => {
+      if (!prev.has(section.key)) {
+        return prev;
+      }
+      const next = new Set(prev);
+      next.delete(section.key);
+      return next;
+    });
+
+    const requiredCount = targetIndex + 1;
+    setVisibleCountBySection((prev) => {
+      const currentCount = Math.max(initialVisibleCount, prev.get(section.key) ?? initialVisibleCount);
+      if (currentCount >= requiredCount) {
+        return prev;
+      }
+      const next = new Map(prev);
+      next.set(section.key, requiredCount);
+      return next;
+    });
+  }, [initialVisibleCount, recentFocusSessionId, sections]);
 
   const resetSectionLimit = React.useCallback((key: string) => {
     setVisibleCountBySection((prev) => {
@@ -153,15 +193,19 @@ export function SidebarActivitySections({
         const remainingCount = section.items.length - visibleItems.length;
         const canShowFewer = !flatVariant && section.items.length > initialVisibleCount && remainingCount === 0;
         const getRenderExtras = buildRenderExtras(visibleItems.map((item) => item.node));
-        const renderItem = (item: ActivityItem) => renderSessionNode(
-          item.node,
-          0,
-          item.groupDirectory,
-          item.projectId,
-          false,
-          item.secondaryMeta,
-          'recent',
-          getRenderExtras(item.node),
+        const renderItem = (item: ActivityItem) => (
+          <React.Fragment key={`${item.projectId ?? ''}:${item.node.session.id}`}>
+            {renderSessionNode(
+              item.node,
+              0,
+              item.groupDirectory,
+              item.projectId,
+              false,
+              item.secondaryMeta,
+              'recent',
+              getRenderExtras(item.node),
+            )}
+          </React.Fragment>
         );
 
         if (flatVariant) {

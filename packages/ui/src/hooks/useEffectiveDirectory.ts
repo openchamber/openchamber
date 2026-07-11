@@ -5,6 +5,51 @@ import { useSessionDirectory } from '@/sync/sync-context';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 
 /**
+ * Resolve the effective working directory for tabs (Git, Diff, Files, Terminal).
+ *
+ * Priority order:
+ * 1. Worktree metadata path (for worktree sessions)
+ * 2. Session directory (for active sessions)
+ * 3. Draft session directoryOverride (when creating a new session)
+ * 4. Fallback directory from DirectoryStore
+ *
+ * Imperative twin of useEffectiveDirectory — for keyboard/menu handlers that
+ * cannot subscribe via hooks.
+ */
+export const resolveEffectiveDirectory = (): string | undefined => {
+    const sessionUI = useSessionUIStore.getState();
+    const currentSessionId = sessionUI.currentSessionId;
+    const newSessionDraft = sessionUI.newSessionDraft;
+    const worktreeMap = sessionUI.worktreeMetadata;
+    const fallbackDirectory = useDirectoryStore.getState().currentDirectory;
+
+    // If we have an active session, use its directory
+    if (currentSessionId) {
+        const worktreeAttachment = useSessionWorktreeStore.getState().getAttachment(currentSessionId);
+        const attachmentDirectory = getAttachedSessionDirectory(worktreeAttachment);
+        if (attachmentDirectory) {
+            return attachmentDirectory;
+        }
+        const worktreeMetadata = worktreeMap.get(currentSessionId);
+        if (worktreeMetadata?.path) {
+            return worktreeMetadata.path;
+        }
+        const currentSessionDirectory = sessionUI.getDirectoryForSession(currentSessionId);
+        if (currentSessionDirectory) {
+            return currentSessionDirectory;
+        }
+    }
+
+    // If a draft session is open, use its directoryOverride
+    if (newSessionDraft?.open && (newSessionDraft.bootstrapPendingDirectory || newSessionDraft.directoryOverride)) {
+        return (newSessionDraft.bootstrapPendingDirectory || newSessionDraft.directoryOverride) ?? undefined;
+    }
+
+    // Fall back to the global directory
+    return fallbackDirectory ?? undefined;
+};
+
+/**
  * Hook that resolves the effective working directory for tabs (Git, Diff, Files, Terminal).
  *
  * Priority order:

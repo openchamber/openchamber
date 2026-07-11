@@ -162,6 +162,12 @@ export const HelpDialog: React.FC = () => {
           keys: '',
         },
         {
+          id: 'close_context_panel_tab',
+          descriptionKey: 'helpDialog.item.closeContextPanelTab',
+          icon: "close",
+          keys: '',
+        },
+        {
           id: 'toggle_terminal',
           descriptionKey: 'helpDialog.item.toggleTerminal',
           icon: "window",

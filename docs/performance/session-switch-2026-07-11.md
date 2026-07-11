@@ -78,9 +78,11 @@ The trace showed four causal groups:
   history. Completed latest turns use the same virtualizer as older turns.
 - Initial history overscan starts at 2 and grows by 2 in the shared frame-budget
   queue instead of mounting 8 desktop / 16 mobile overscan turns at once.
-- Completed Markdown first paints a safe text fallback, then parses and commits
-  rich Markdown block by block after its turn enters the hydration window. Work
-  is cancelled when the row/session unmounts.
+- Completed Markdown first paints a bounded skeleton over an invisible text-size
+  spacer. Once its turn enters the hydration window, the rich target parses and
+  commits while still invisible, then replaces the skeleton atomically. Raw
+  Markdown source is never painted. Work is cancelled when the row/session
+  unmounts.
 - Markdown hydration is scroll-driven rather than equal to virtual-list overscan:
   the newest turn is enabled first, visible turns follow from bottom to top, and
   upward scrolling preloads only the nearest three mounted turns above the
@@ -103,9 +105,18 @@ The trace showed four causal groups:
   overscan and historical tool releases remain background work. Their React
   state updates run inside transitions, so a new synchronous session authority
   update can interrupt and discard the in-progress Fiber tree.
-- Session-view selection and LRU promotion commit in one transition state update.
-  The updater validates an intent object, not only a session key, so stale work
-  also fails for A -> B -> A.
+- Authoritative session visibility is never deferred by a transition. A cached
+  Activity becomes visible from the synchronous selection key; a cache miss
+  immediately replaces the old view with a lightweight bottom-aligned skeleton.
+  Materializing the new Activity runs after that paint in the cancellable
+  user-blocking queue, above visible/background Markdown work.
+- Selection intent and cache materialization are separate pure state updates.
+  The materializer validates an intent object, not only a session key, so stale
+  work also fails for A -> B -> A without reading mutable render-time refs.
+- A cache-miss Activity is staged outside the bounded LRU while Fiber renders
+  it. It is admitted to the LRU only from the post-DOM-commit layout effect.
+  If a newer shortcut interrupts that render, the newer selection clears the
+  staged entry, so React lane rebasing cannot let an uncommitted B evict A.
 - Cached `ChatContainerContent` trees are memoized and receive a stable estimate
   callback. Switching the active key therefore does not create prop-update work
   in every hidden Activity.
@@ -148,10 +159,13 @@ The trace showed four causal groups:
   oldest inactive view is removed when either limit is exceeded.
 - View weight is bucketed from message count and capped at 16 MiB per view. The
   coarse buckets avoid publishing cache-state updates on every streaming token or
-  message-part delta.
-- A unique latest-intent identity is checked by the atomic transition updater,
-  preventing interrupted A → B → A or A → B → C work from changing visibility
-  or polluting/evicting the LRU later.
+  message-part delta. Estimate updates record weight first, then a committed
+  layout pass trims against the latest selected key; a replayed old estimate
+  cannot evict the current view.
+- A unique active-intent identity is stored synchronously before background
+  materialization. Interrupted A → B → A or A → B → C work therefore cannot
+  change visibility or pollute/evict the LRU later. Cache-hit visibility does
+  not wait for passive effects or the transition scheduler.
 - Runtime manifests now require React/React DOM 19.2, the first stable release that
   exposes `Activity`; this avoids relying on the lockfile accidentally supplying a
   newer runtime than the declared minimum.
@@ -192,6 +206,13 @@ the final A session in the URL, two hidden cached Activity views, 14 deferred
 Markdown blocks, 28.2 ms highlight latency, and 187.0 ms content latency. No
 intermediate session regained authority.
 
+A later keyboard regression check used real `Mod+Shift+]` events. Before the
+visibility fix, eight no-wait presses could leave the new title committed with
+an empty chat main while the low-priority view transition caught up. After the
+fix, ten no-wait presses ended with matching non-empty content, and all twelve
+20 ms interval samples contained either the selected cached view or its explicit
+loading placeholder; no old/blank view represented the new title.
+
 ## Acceptance gates
 
 | Gate (development mode) | Result |
@@ -201,8 +222,8 @@ intermediate session regained authority.
 | Content commit p95 < 350 ms | Pass: 312.1 ms |
 | Rapid switch keeps only latest authority commit | Pass: unit test |
 | Direct navigation invalidates an older pending sidebar commit | Pass: unit test |
-| Delayed content transition cannot restore an intermediate session | Pass: 80 ms B → A interactive race check |
-| A → B → A stale transition cannot enter/evict the LRU | Pass: identity-token unit test |
+| Delayed content materialization cannot restore an intermediate session | Pass: rapid shortcut interactive race check |
+| A → B → A stale materialization cannot enter/evict the LRU | Pass: identity-token unit test |
 | Visible work overtakes background backlog; cancellation leaves no tombstones | Pass: queue tests |
 | Cancelled Shiki work cannot publish; visible jobs overtake history | Pass: worker queue tests |
 | Historical rich work is cancellable and frame-budgeted | Pass: unit tests + interactive run |

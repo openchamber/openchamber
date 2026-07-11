@@ -18,6 +18,7 @@ import { formatProjectLabel, SIDEBAR_MUTED_HINT_CLASS } from './utils';
 import { useI18n } from '@/lib/i18n';
 import type { MainTab } from '@/stores/useUIStore';
 import { SidebarSectionHeader } from './SidebarSectionHeader';
+import { Icon } from '@/components/icon/Icon';
 
 type ProjectSection = {
   project: {
@@ -76,6 +77,7 @@ type Props = {
   openSidebarMenuKey: string | null;
   setOpenSidebarMenuKey: (key: string | null) => void;
   isInlineEditing: boolean;
+  isProjectSessionsSyncing: boolean;
 };
 
 export function SidebarProjectsList(props: Props): React.ReactNode {
@@ -190,6 +192,16 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
             <SidebarSectionHeader
               title={t('sessions.sidebar.projectsTitle')}
               isFirst={!props.topContent}
+              accessory={props.isProjectSessionsSyncing ? (
+                <div
+                  className="flex items-center gap-1 pr-2 typography-micro text-muted-foreground/70"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <Icon name="loader-4" className="size-3 animate-spin" />
+                  <span>{t('sessions.sidebar.projectsSyncing')}</span>
+                </div>
+              ) : null}
             />
           ) : null}
           <DndContext

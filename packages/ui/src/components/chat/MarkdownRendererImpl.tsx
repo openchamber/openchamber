@@ -21,6 +21,7 @@ import { ensureOutsideFileGrantForDesktop } from '@/lib/outsideFileGrants';
 import { getDirectoryForFilePath, isFilePathWithinDirectory, toAbsoluteFilePath } from '@/lib/path-utils';
 import { renderMarkdownBlocks, renderMarkdownSync } from './markdown/markdownCore';
 import { ensureMarkdownShikiTheme, getMarkdownSyntaxVars } from './markdown/markdownTheme';
+import { MarkdownLoadingPlaceholder } from './markdown/MarkdownLoadingSkeleton';
 import {
   attachMarkdownInteractions,
   applyMarkdownCodeBlockWrapState,
@@ -907,6 +908,7 @@ const useMorphdomMarkdown = ({
   cacheKey,
   syntaxVars,
   ctx,
+  onRichContentReady,
 }: {
   containerRef: React.RefObject<HTMLDivElement | null>;
   text: string;
@@ -914,6 +916,7 @@ const useMorphdomMarkdown = ({
   cacheKey: string;
   syntaxVars: Record<string, string>;
   ctx: DecorateContext;
+  onRichContentReady?: (target: HTMLElement) => void;
 }) => {
   React.useEffect(() => {
     ensureMarkdownShikiTheme();
@@ -935,33 +938,20 @@ const useMorphdomMarkdown = ({
     mermaidViewerRef.current.refresh();
   }, [containerRef]);
 
-  // Synchronous first paint: while rich hydration is queued, show a safe text
-  // fallback immediately so there is no blank frame on initial mount. Completed
-  // history deliberately avoids markdown parsing/sanitizing on this path. The
-  // MessageList hydration window releases completed rows from newest to oldest,
-  // then this shared frame-budget queue performs the rich upgrade. Only runs
-  // when the target is empty — subsequent updates keep the prior rich DOM
-  // until the next async render morphs in (no flash). Mirrors OpenCode's
-  // `initialValue: fallback(text)` resource pattern.
+  // Streaming content needs formatted structure immediately. Completed history
+  // stays behind the React-owned skeleton until the async rich DOM is fully
+  // committed; never expose raw Markdown source between those two states.
   React.useLayoutEffect(() => {
     const container = containerRef.current;
     const target = container?.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
     if (!target) return;
-    if (text && target.childNodes.length === 0) {
+    if (streaming && text && target.childNodes.length === 0) {
       const block = document.createElement('div');
       block.setAttribute('data-md-block', '');
       // `display:contents` keeps margin-collapsing/spacing identical to a flat
       // HTML body — the wrapper exists only for per-block reconciliation.
       block.style.display = 'contents';
-      if (streaming) {
-        block.innerHTML = renderMarkdownSync(text);
-      } else {
-        const fallback = document.createElement('span');
-        fallback.setAttribute('data-md-fallback', '');
-        fallback.style.whiteSpace = 'pre-wrap';
-        fallback.textContent = text;
-        block.appendChild(fallback);
-      }
+      block.innerHTML = renderMarkdownSync(text);
       target.appendChild(block);
     }
   }, [containerRef, streaming, text]);
@@ -979,6 +969,23 @@ const useMorphdomMarkdown = ({
     const renderAbortController = new AbortController();
     let cancelQueuedRender = () => {};
     let cancelQueuedCommit = () => {};
+
+    const commitPlainTextFailureFallback = () => {
+      if (!active || streaming || renderAbortController.signal.aborted) {
+        return;
+      }
+      target.replaceChildren();
+      const block = document.createElement('div');
+      block.setAttribute('data-md-block', '');
+      block.setAttribute('data-md-render-fallback', 'text');
+      block.style.display = 'contents';
+      const fallback = document.createElement('span');
+      fallback.style.whiteSpace = 'pre-wrap';
+      fallback.textContent = text;
+      block.appendChild(fallback);
+      target.appendChild(block);
+      onRichContentReady?.(target);
+    };
 
     const commitBlocks = (blocks: Awaited<ReturnType<typeof renderMarkdownBlocks>>) => {
       if (!active) {
@@ -1031,6 +1038,15 @@ const useMorphdomMarkdown = ({
       if (!ctx.deferCodeLineNumberSync) {
         scheduleMarkdownCodeLineNumberSync(target);
       }
+      onRichContentReady?.(target);
+    };
+
+    const commitBlocksSafely = (blocks: Awaited<ReturnType<typeof renderMarkdownBlocks>>) => {
+      try {
+        commitBlocks(blocks);
+      } catch {
+        commitPlainTextFailureFallback();
+      }
     };
 
     const renderBlocks = () => {
@@ -1039,14 +1055,14 @@ const useMorphdomMarkdown = ({
           return;
         }
         if (streaming) {
-          commitBlocks(blocks);
+          commitBlocksSafely(blocks);
           return;
         }
         cancelQueuedCommit = scheduleAfterPaintTask(
-          () => commitBlocks(blocks),
+          () => commitBlocksSafely(blocks),
           { priority: 'visible' },
         );
-      });
+      }).catch(commitPlainTextFailureFallback);
     };
 
     if (streaming) {
@@ -1061,7 +1077,7 @@ const useMorphdomMarkdown = ({
       cancelQueuedRender();
       cancelQueuedCommit();
     };
-  }, [containerRef, text, streaming, cacheKey, ctx, refreshMermaidViewers]);
+  }, [containerRef, text, streaming, cacheKey, ctx, onRichContentReady, refreshMermaidViewers]);
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -1114,6 +1130,33 @@ const markdownContentClassName = (variant: MarkdownVariant): string =>
       ? 'markdown-content markdown-reasoning'
       : 'markdown-content leading-relaxed';
 
+const useRichMarkdownReveal = (
+  containerRef: React.RefObject<HTMLDivElement | null>,
+  initiallyReady: boolean,
+): [boolean, (target: HTMLElement) => void] => {
+  const [richReady, setRichReady] = React.useState(initiallyReady);
+  const revealedRef = React.useRef(initiallyReady);
+
+  const reveal = React.useCallback((target: HTMLElement) => {
+    if (revealedRef.current) return;
+    revealedRef.current = true;
+    const container = containerRef.current;
+    const bounds = target.getBoundingClientRect();
+    const height = Math.ceil(Math.max(bounds.height, target.scrollHeight));
+    if (container && height > 0) {
+      container.style.minHeight = `${height}px`;
+    }
+    setRichReady(true);
+  }, [containerRef]);
+
+  React.useLayoutEffect(() => {
+    if (!richReady) return;
+    containerRef.current?.style.removeProperty('min-height');
+  }, [containerRef, richReady]);
+
+  return [richReady, reveal];
+};
+
 const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   content,
   part,
@@ -1140,6 +1183,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
 
   const live = isStreaming && !disableStreamAnimation;
   const pacedText = usePacedText(content, live);
+  const [richReady, revealRichContent] = useRichMarkdownReveal(containerRef, live);
 
   useMermaidInlineInteractions({
     containerRef,
@@ -1160,11 +1204,35 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   const ctx = useDecorateContext(currentTheme, live, effectiveDirectory ? handlePreviewLoopback : undefined, DEFAULT_MERMAID_CONTROLS);
   const cacheKey = `markdown-${part?.id ? `part-${part.id}` : `message-${messageId}`}`;
 
-  useMorphdomMarkdown({ containerRef, text: pacedText, streaming: live, cacheKey, syntaxVars, ctx });
+  useMorphdomMarkdown({
+    containerRef,
+    text: pacedText,
+    streaming: live,
+    cacheKey,
+    syntaxVars,
+    ctx,
+    onRichContentReady: revealRichContent,
+  });
 
   const markdownContent = (
-    <div className={cn('break-words w-full min-w-0', className)} ref={containerRef}>
-      <div className={markdownContentClassName(variant)} data-markdown-content />
+    <div
+      aria-busy={!richReady || undefined}
+      className={cn('relative break-words w-full min-w-0', className)}
+      ref={containerRef}
+    >
+      {!richReady && (
+        <div className={markdownContentClassName(variant)}>
+          <MarkdownLoadingPlaceholder content={pacedText} />
+        </div>
+      )}
+      <div
+        aria-hidden={!richReady || undefined}
+        className={cn(
+          markdownContentClassName(variant),
+          !richReady && 'pointer-events-none absolute inset-x-0 top-0 invisible',
+        )}
+        data-markdown-content
+      />
     </div>
   );
 
@@ -1217,6 +1285,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
   const { editor, runtime } = useRuntimeAPIs();
   const currentTheme = useCurrentMermaidTheme();
   const containerRef = React.useRef<HTMLDivElement>(null);
+  const [richReady, revealRichContent] = useRichMarkdownReveal(containerRef, false);
   const effectiveDirectory = useEffectiveDirectory() ?? '';
 
   const renderedContent = React.useMemo(
@@ -1250,11 +1319,28 @@ const SimpleMarkdownRendererImpl: React.FC<{
     cacheKey: `simple:${variant}`,
     syntaxVars,
     ctx,
+    onRichContentReady: revealRichContent,
   });
 
   return (
-    <div className={cn('break-words w-full min-w-0', className)} ref={containerRef}>
-      <div className={markdownContentClassName(variant)} data-markdown-content />
+    <div
+      aria-busy={!richReady || undefined}
+      className={cn('relative break-words w-full min-w-0', className)}
+      ref={containerRef}
+    >
+      {!richReady && (
+        <div className={markdownContentClassName(variant)}>
+          <MarkdownLoadingPlaceholder content={renderedContent} />
+        </div>
+      )}
+      <div
+        aria-hidden={!richReady || undefined}
+        className={cn(
+          markdownContentClassName(variant),
+          !richReady && 'pointer-events-none absolute inset-x-0 top-0 invisible',
+        )}
+        data-markdown-content
+      />
     </div>
   );
 };

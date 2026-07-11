@@ -4,6 +4,7 @@ import type { SessionFolder } from '@/stores/useSessionFoldersStore';
 import { useI18n } from '@/lib/i18n';
 import { Icon } from "@/components/icon/Icon";
 import type { SessionNodeChildRenderExtras, SessionNodeRenderExtras } from './sidebar/sessionNodeItemUtils';
+import { getSidebarRowPaddingLeft, SIDEBAR_ROW_HOVER_CLASS } from './sidebar/utils';
 
 interface SessionFolderItemProps<TSessionNode> {
   folder: SessionFolder;
@@ -54,6 +55,11 @@ interface SessionFolderItemProps<TSessionNode> {
   hideActions?: boolean;
   /** Whether folder belongs to archived section */
   archivedBucket?: boolean;
+  /**
+   * Hover-card context for sessions inside this folder (folder name + branch).
+   * Shown in the floating detail card — not inline on the row.
+   */
+  sessionSecondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null } | null;
 }
 
 const SessionFolderItemBase = <TSessionNode,>({
@@ -82,6 +88,7 @@ const SessionFolderItemBase = <TSessionNode,>({
   depth = 0,
   hideActions = false,
   archivedBucket = false,
+  sessionSecondaryMeta = null,
 }: SessionFolderItemProps<TSessionNode>) => {
   const { t } = useI18n();
   const [localRenaming, setLocalRenaming] = React.useState(false);
@@ -145,6 +152,8 @@ const SessionFolderItemBase = <TSessionNode,>({
   }, [isRenaming]);
 
   const folderIconName = 'folder-open';
+  // Folder header + nested sessions share one chip edge; depth only pads content.
+  const folderPadLeft = getSidebarRowPaddingLeft(depth);
 
   return (
     <div className={cn('oc-folder')}>
@@ -152,10 +161,12 @@ const SessionFolderItemBase = <TSessionNode,>({
       <div
         ref={droppableRef}
         className={cn(
-          'group/folder relative flex items-center justify-between gap-1.5 py-1 min-w-0 rounded-md',
+          'group/folder relative my-0.5 flex items-center justify-between gap-1.5 py-1.5 pr-2 min-w-0 rounded-lg',
           'cursor-pointer',
+          SIDEBAR_ROW_HOVER_CLASS,
           isDropTarget && 'bg-primary/10 ring-1 ring-inset ring-primary/30',
         )}
+        style={{ paddingLeft: folderPadLeft }}
         onClick={renaming ? undefined : onToggle}
         role={renaming ? undefined : 'button'}
         tabIndex={renaming ? undefined : 0}
@@ -174,7 +185,7 @@ const SessionFolderItemBase = <TSessionNode,>({
           : t('sessions.sidebar.folderItem.collapseAria', { folderName: folder.name })}
       >
         <div className={cn(
-          'min-w-0 flex items-center gap-1.5 pl-1.5 flex-1 transition-[padding]',
+          'min-w-0 flex items-center gap-1.5 flex-1 transition-[padding]',
           archivedBucket
             ? (alwaysShowActions ? 'pr-7' : 'group-hover/folder:pr-7 group-focus-within/folder:pr-7')
             : '',
@@ -324,7 +335,8 @@ const SessionFolderItemBase = <TSessionNode,>({
         ) : null}
       </div>
 
-      {/* Folder body — Codex-style: no extra indent under the header */}
+      {/* Folder body — child rows indent via padding inside their own chips
+          so hover/active wash stays full-width (reserved left gutter). */}
       {!isCollapsed ? (
         <div className="pb-1">
           {/* Sub-folders first */}
@@ -332,10 +344,24 @@ const SessionFolderItemBase = <TSessionNode,>({
           {/* Then sessions */}
           {sessions.length > 0 ? (
             sessions.map((node) =>
-              renderSessionNode(node, 0, groupDirectory ?? null, projectId ?? null, archivedBucket, undefined, 'project', getRenderExtras?.(node)),
+              renderSessionNode(
+                node,
+                // One step under the folder so text lines up with the folder name
+                // (icon column reserved on the left; hover chip stays full-width).
+                depth + 1,
+                groupDirectory ?? null,
+                projectId ?? null,
+                archivedBucket,
+                sessionSecondaryMeta,
+                'project',
+                getRenderExtras?.(node),
+              ),
             )
           ) : !subFolderItems ? (
-            <div className="py-1 pl-1.5 text-left typography-micro text-muted-foreground/70">
+            <div
+              className="py-1.5 pr-2 text-left typography-micro text-muted-foreground/70"
+              style={{ paddingLeft: getSidebarRowPaddingLeft(depth + 1) }}
+            >
               {t('sessions.sidebar.folderItem.emptyFolder')}
             </div>
           ) : null}

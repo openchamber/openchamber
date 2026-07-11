@@ -989,6 +989,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.open_right_sidebar_git.label': '打开右侧边栏 Git 标签',
   'settings.openchamber.keyboardShortcuts.action.open_right_sidebar_files.label': '打开右侧边栏 Files 标签',
   'settings.openchamber.keyboardShortcuts.action.cycle_right_sidebar_tab.label': '轮换右侧边栏标签',
+  'settings.openchamber.keyboardShortcuts.action.close_context_panel_tab.label': '关闭上下文面板标签',
   'settings.openchamber.keyboardShortcuts.action.previous_session.label': '上一个会话',
   'settings.openchamber.keyboardShortcuts.action.next_session.label': '下一个会话',
   'settings.openchamber.keyboardShortcuts.action.new_chat.label': '新建会话',

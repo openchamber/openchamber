@@ -55,6 +55,7 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { SELECTOR_CHIP_HOVER_CLASS } from '@/components/chat/message/parts/toolRowChrome';
 import { Input } from '@/components/ui/input';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -4761,7 +4762,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             >
                                 <SelectTrigger
                                     size="sm"
-                                    className="h-7 min-w-0 w-fit max-w-[42vw] sm:max-w-[18rem] border-transparent bg-transparent px-1.5 hover:bg-transparent data-[popup-open]:bg-transparent"
+                                    className={cn(
+                                        'h-6 min-w-0 w-fit max-w-[42vw] sm:max-w-[18rem] border-transparent bg-transparent px-1.5',
+                                        SELECTOR_CHIP_HOVER_CLASS,
+                                    )}
                                 >
                                     <SelectValue>
                                         {renderProjectLabelWithIcon(selectedDraftProject)}
@@ -4793,7 +4797,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         ) : (
                             <button
                                 type="button"
-                                className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-lg px-1.5 typography-micro font-medium text-foreground/80 hover:bg-[var(--interactive-hover)]"
+                                className={cn(
+                                    'inline-flex h-6 cursor-pointer items-center gap-1.5 rounded-lg px-1.5 typography-micro font-medium text-foreground/80',
+                                    SELECTOR_CHIP_HOVER_CLASS,
+                                )}
                                 onClick={() => sessionEvents.requestDirectoryDialog()}
                             >
                                 <Icon name="folder-add" className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -4808,7 +4815,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             >
                                 <SelectTrigger
                                     size="sm"
-                                    className="h-7 min-w-0 w-fit max-w-[48vw] sm:max-w-[20rem] border-transparent bg-transparent px-1.5 hover:bg-transparent data-[popup-open]:bg-transparent"
+                                    className={cn(
+                                        'h-6 min-w-0 w-fit max-w-[48vw] sm:max-w-[20rem] border-transparent bg-transparent px-1.5',
+                                        SELECTOR_CHIP_HOVER_CLASS,
+                                    )}
                                 >
                                     <SelectValue>
                                         {selectedDraftBranchLabel ?? t('chat.chatInput.branch')}
@@ -4857,7 +4867,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         {selectedDraftProject ? (
                             <button
                                 type="button"
-                                className="inline-flex h-7 min-w-0 max-w-[42vw] flex-shrink cursor-pointer items-center gap-1 rounded-lg px-1.5 typography-micro font-medium text-foreground/80 hover:bg-[var(--interactive-hover)]"
+                                className={cn(
+                                    'inline-flex h-6 min-w-0 max-w-[42vw] flex-shrink cursor-pointer items-center gap-1 rounded-lg px-1.5 typography-micro font-medium text-foreground/80',
+                                    SELECTOR_CHIP_HOVER_CLASS,
+                                )}
                                 onClick={() => setMobileDraftPicker('project')}
                             >
                                 {renderProjectLabelWithIcon(selectedDraftProject)}
@@ -4866,7 +4879,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         ) : (
                             <button
                                 type="button"
-                                className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-lg px-1.5 typography-micro font-medium text-foreground/80 hover:bg-[var(--interactive-hover)]"
+                                className={cn(
+                                    'inline-flex h-6 cursor-pointer items-center gap-1.5 rounded-lg px-1.5 typography-micro font-medium text-foreground/80',
+                                    SELECTOR_CHIP_HOVER_CLASS,
+                                )}
                                 onClick={() => sessionEvents.requestDirectoryDialog()}
                             >
                                 <Icon name="folder-add" className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -4876,7 +4892,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         {selectedDraftProject && shouldShowDraftBranchSelector ? (
                             <button
                                 type="button"
-                                className="inline-flex h-7 min-w-0 max-w-[48vw] flex-shrink cursor-pointer items-center gap-1 rounded-lg px-1.5 typography-micro font-medium text-foreground/80 hover:bg-[var(--interactive-hover)]"
+                                className={cn(
+                                    'inline-flex h-6 min-w-0 max-w-[48vw] flex-shrink cursor-pointer items-center gap-1 rounded-lg px-1.5 typography-micro font-medium text-foreground/80',
+                                    SELECTOR_CHIP_HOVER_CLASS,
+                                )}
                                 onClick={() => setMobileDraftPicker('branch')}
                             >
                                 <span className="truncate">{selectedDraftBranchLabel ?? t('chat.chatInput.branch')}</span>

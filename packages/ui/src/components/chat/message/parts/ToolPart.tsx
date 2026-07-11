@@ -26,6 +26,7 @@ import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import type { MessageRecord } from '@/lib/messageCompletion';
 
+import { TOOL_ROW_CHIP_CLASS, TOOL_ROW_INTERACTIVE_CHROME_CLASS } from './toolRowChrome';
 import {
     formatEditOutput,
     detectLanguageFromOutput,
@@ -2559,7 +2560,8 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             {}
             <div
                 className={cn(
-                'group/tool flex gap-1.5 pr-2 pl-px py-1.5 rounded-xl cursor-pointer',
+                'group/tool flex gap-1.5 cursor-pointer',
+                TOOL_ROW_INTERACTIVE_CHROME_CLASS,
                 isMultiFileApplyPatch ? 'flex-wrap items-start' : 'items-center'
             )}
                 onClick={handleMainClick}
@@ -2761,7 +2763,7 @@ class ToolPartErrorBoundary extends React.Component<{
 
         const message = this.state.error?.message;
         return (
-            <div className="flex items-center gap-1.5 pr-2 pl-px py-1.5 rounded-xl min-w-0">
+            <div className={cn('flex items-center gap-1.5 min-w-0', TOOL_ROW_CHIP_CLASS)}>
                 <div className="h-3.5 w-3.5 flex-shrink-0" style={TOOL_ERROR_ICON_STYLE}>
                     {getToolIcon(this.props.toolName)}
                 </div>
@@ -2801,7 +2803,7 @@ const ToolPart: React.FC<ToolPartProps> = (props) => {
 
     if (!isHydrated) {
         return (
-            <div className="flex min-w-0 items-center gap-2 py-1.5 pl-px pr-2">
+            <div className={cn('flex min-w-0 items-center gap-2', TOOL_ROW_CHIP_CLASS)}>
                 <span className="h-3.5 w-3.5 shrink-0 rounded bg-muted/50" aria-hidden="true" />
                 <span className={cn(TOOL_ROW_TITLE_CLASS, 'shrink-0 text-muted-foreground')}>
                     {displayName}

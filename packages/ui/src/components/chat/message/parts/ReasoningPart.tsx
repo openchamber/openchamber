@@ -11,6 +11,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { MarkdownRenderer } from '../../MarkdownRenderer';
 import { useStreamingTextThrottle } from '../../hooks/useStreamingTextThrottle';
 import type { StreamPhase } from '../types';
+import { TOOL_ROW_INTERACTIVE_CHROME_CLASS } from './toolRowChrome';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
@@ -315,7 +316,8 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                 aria-controls={contentId}
                 aria-label={toggleAriaLabel}
                 className={cn(
-                    'group/tool flex gap-1.5 pr-2 pl-px py-1.5 rounded-xl cursor-pointer items-center',
+                    'group/tool flex gap-1.5 cursor-pointer items-center',
+                    TOOL_ROW_INTERACTIVE_CHROME_CLASS,
                 )}
                 onClick={handleToggle}
                 onKeyDown={handleKeyDown}

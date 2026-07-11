@@ -25,6 +25,7 @@ import JustificationBlock from './JustificationBlock';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { getExternalFaviconUrl } from '@/lib/url';
 import { getDirectoryForFilePath, getRelativeFilePath, isFilePathWithinDirectory, normalizeFilePath, toAbsoluteFilePath } from '@/lib/path-utils';
+import { TOOL_ROW_INTERACTIVE_CHROME_CLASS } from './toolRowChrome';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
@@ -676,7 +677,8 @@ const StaticToolRowInner: React.FC<{
     return (
         <div
             className={cn(
-                'flex w-full items-center gap-x-1.5 pr-2 pl-px py-1.5 rounded-xl min-w-0'
+                'flex w-full items-center gap-x-1.5 min-w-0',
+                TOOL_ROW_INTERACTIVE_CHROME_CLASS,
             )}
         >
             <div className="inline-flex h-5 items-center flex-shrink-0" style={{ color: 'var(--tools-icon)' }}>
@@ -965,7 +967,10 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
             <div className="mt-1 mb-2">
                 <button
                     type="button"
-                    className="group/tool flex w-full flex-wrap items-center gap-x-2 gap-y-0.5 pr-2 pl-px py-1.5 rounded-xl text-left"
+                    className={cn(
+                        'group/tool flex w-full flex-wrap items-center gap-x-2 gap-y-0.5 text-left',
+                        TOOL_ROW_INTERACTIVE_CHROME_CLASS,
+                    )}
                     onClick={onToggle}
                 >
                     <span className="inline-flex h-5 items-center flex-shrink-0" style={{ color: 'var(--tools-icon)' }}>

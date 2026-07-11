@@ -216,6 +216,13 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     customizable: true,
   },
   {
+    id: 'close_context_panel_tab',
+    defaultCombo: 'mod+w',
+    label: 'Close context panel tab',
+    description: 'Close the active context panel tab (closes the panel when empty)',
+    customizable: true,
+  },
+  {
     id: 'previous_session',
     defaultCombo: 'mod+shift+[',
     label: 'Previous session',

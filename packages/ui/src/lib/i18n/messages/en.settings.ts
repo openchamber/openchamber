@@ -1022,6 +1022,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.open_right_sidebar_git.label': 'Open right sidebar Git tab',
   'settings.openchamber.keyboardShortcuts.action.open_right_sidebar_files.label': 'Open right sidebar Files tab',
   'settings.openchamber.keyboardShortcuts.action.cycle_right_sidebar_tab.label': 'Cycle right sidebar tab',
+  'settings.openchamber.keyboardShortcuts.action.close_context_panel_tab.label': 'Close context panel tab',
   'settings.openchamber.keyboardShortcuts.action.previous_session.label': 'Previous session',
   'settings.openchamber.keyboardShortcuts.action.next_session.label': 'Next session',
   'settings.openchamber.keyboardShortcuts.action.new_chat.label': 'New session',

@@ -243,7 +243,8 @@ const getTabIcon = (tab: { mode: ContextPanelMode; targetPath: string | null }):
   }
 
   if (tab.mode === 'context') {
-    return <Icon name="donut-chart-fill" className="h-3.5 w-3.5" />;
+    // Match right-sidebar context tab: list glyph, not filled pie (usage meter).
+    return <Icon name="file-list-2" className="h-3.5 w-3.5" />;
   }
 
   if (tab.mode === 'chat') {

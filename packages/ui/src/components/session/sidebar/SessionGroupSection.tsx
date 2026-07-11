@@ -737,6 +737,14 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
     return result;
   }, [allFoldersForGroup, collectGroupSessions, group.isArchivedBucket]);
 
+  const groupSessionSecondaryMeta = React.useMemo(
+    () => ({
+      projectLabel: !group.isMain ? group.label : null,
+      branchLabel: group.branch && group.branch !== 'HEAD' ? group.branch : null,
+    }),
+    [group.branch, group.isMain, group.label],
+  );
+
   if (hasSessionSearchQuery && !groupMatchesSearch && rootFolders.length === 0 && ungroupedSessions.length === 0) {
     return null;
   }
@@ -905,6 +913,10 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
             } : undefined}
             hideActions={false}
             archivedBucket={group.isArchivedBucket === true}
+            sessionSecondaryMeta={{
+              projectLabel: folder.name,
+              branchLabel: group.branch && group.branch !== 'HEAD' ? group.branch : null,
+            }}
           />
         )}
       </DroppableFolderWrapper>
@@ -940,7 +952,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
             // re-renders synchronously before paint. Rendering the plain rows
             // meanwhile keeps the container's height real so the scroller
             // never collapses/clamps during the flip.
-            visibleSessions.map((node) => renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true, undefined, 'project', {
+            visibleSessions.map((node) => renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true, groupSessionSecondaryMeta, 'project', {
               subtreeContainsActive,
               subtreeContainsEditing,
               menuOpenSessionId,
@@ -979,7 +991,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
                     transform: `translateY(${item.start - archivedScrollMargin}px)`,
                   }}
                 >
-                  {renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true, undefined, 'project', {
+                  {renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true, groupSessionSecondaryMeta, 'project', {
                     subtreeContainsActive,
                     subtreeContainsEditing,
                     menuOpenSessionId,
@@ -993,7 +1005,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
           )}
         </div>
       ) : (
-        visibleSessions.map((node) => renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true, undefined, 'project', {
+        visibleSessions.map((node) => renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true, groupSessionSecondaryMeta, 'project', {
           subtreeContainsActive,
           subtreeContainsEditing,
           menuOpenSessionId,

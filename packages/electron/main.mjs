@@ -4331,7 +4331,9 @@ const buildMacMenu = () => {
         { type: 'separator' },
         { label: 'Add Workspace', click: () => dispatchAction('change-workspace') },
         { type: 'separator' },
-        { role: 'close' },
+        // registerAccelerator:false → renderer owns Cmd/Ctrl+W so an open
+        // context-panel tab closes first (VS Code-style) instead of the window.
+        { label: 'Close', accelerator: 'Cmd+W', registerAccelerator: false, click: () => dispatchAction('close-tab-or-window') },
       ],
     },
     {
@@ -4387,7 +4389,8 @@ const buildMacMenu = () => {
         { role: 'minimize' },
         { role: 'zoom' },
         { type: 'separator' },
-        { role: 'close' },
+        // Same Close path as File menu — avoid a second native Cmd+W accelerator.
+        { label: 'Close Window', accelerator: 'Cmd+W', registerAccelerator: false, click: () => dispatchAction('close-tab-or-window') },
       ],
     },
     {
@@ -4509,7 +4512,8 @@ const buildAutoHiddenMenu = () => {
         { role: 'minimize' },
         { role: 'togglefullscreen' },
         { type: 'separator' },
-        { role: 'close' },
+        // registerAccelerator:false → renderer owns Ctrl+W (close tab, then window).
+        { label: 'Close', accelerator: 'Ctrl+W', registerAccelerator: false, click: () => dispatchAction('close-tab-or-window') },
       ],
     },
     {

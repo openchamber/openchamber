@@ -2,10 +2,15 @@ import { describe, expect, test, beforeEach } from 'bun:test';
 import type { Session } from '@opencode-ai/sdk/v2';
 
 import {
+  clearSessionNavigationSnapshot,
   getNavigableRootSessions,
   isSubtaskSession,
+  navigateAdjacentSession,
+  publishSessionNavigationSnapshot,
+  resolveAdjacentNavigationTarget,
   resolveAdjacentRootSession,
   resolveRootSessionId,
+  type SessionNavigationTarget,
 } from './session-navigation';
 import { setSyncRefs } from './sync-refs';
 import { ChildStoreManager } from './child-store';
@@ -13,6 +18,7 @@ import { INITIAL_STATE } from './types';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useSessionFocusStore } from '@/stores/useSessionFocusStore';
 
 const makeSession = (
   id: string,
@@ -47,8 +53,21 @@ const bootstrapSessions = (sessions: Session[], directory = '/workspace/project'
   setSyncRefs({} as never, childStores, directory);
 };
 
+const makeNavigationTarget = (
+  scope: 'recent' | 'project',
+  sessionId: string,
+  projectId: string | null,
+): SessionNavigationTarget => ({
+  scope,
+  sessionId,
+  projectId,
+  directory: projectId ? `/workspace/${projectId}` : null,
+});
+
 describe('session-navigation', () => {
   beforeEach(() => {
+    clearSessionNavigationSnapshot();
+    useSessionFocusStore.getState().setFocus(null);
     useSessionPinnedStore.setState({ ids: new Set() });
     useGlobalSessionsStore.setState({
       activeSessions: [],
@@ -164,6 +183,138 @@ describe('session-navigation', () => {
 
     expect(resolveAdjacentRootSession(1, 'root-a')?.id).toBe('root-b');
     expect(resolveAdjacentRootSession(-1, 'root-b')?.id).toBe('root-a');
+  });
+
+  test('cycles within the published Recent order when focus came from Recent', () => {
+    publishSessionNavigationSnapshot({
+      recent: [
+        makeNavigationTarget('recent', 'recent-a', 'p1'),
+        makeNavigationTarget('recent', 'recent-b', 'p2'),
+        makeNavigationTarget('recent', 'recent-c', 'p1'),
+      ],
+      project: [
+        makeNavigationTarget('project', 'project-a', 'p1'),
+        makeNavigationTarget('project', 'project-b', 'p2'),
+      ],
+    });
+
+    const recentFocus = {
+      scope: 'recent' as const,
+      sessionId: 'recent-b',
+      projectId: 'p2',
+    };
+
+    expect(resolveAdjacentNavigationTarget(1, 'recent-b', recentFocus)?.sessionId).toBe('recent-c');
+    expect(resolveAdjacentNavigationTarget(-1, 'recent-b', recentFocus)?.sessionId).toBe('recent-a');
+    expect(resolveAdjacentNavigationTarget(1, 'recent-c', {
+      ...recentFocus,
+      sessionId: 'recent-c',
+      projectId: 'p1',
+    })?.sessionId).toBe('recent-a');
+  });
+
+  test('cycles within the published project-tree order when focus came from a project row', () => {
+    publishSessionNavigationSnapshot({
+      recent: [
+        makeNavigationTarget('recent', 'project-c', 'p2'),
+        makeNavigationTarget('recent', 'project-a', 'p1'),
+      ],
+      project: [
+        makeNavigationTarget('project', 'project-a', 'p1'),
+        makeNavigationTarget('project', 'project-b', 'p1'),
+        makeNavigationTarget('project', 'project-c', 'p2'),
+      ],
+    });
+
+    const projectFocus = {
+      scope: 'project' as const,
+      sessionId: 'project-b',
+      projectId: 'p1',
+    };
+
+    expect(resolveAdjacentNavigationTarget(1, 'project-b', projectFocus)?.sessionId).toBe('project-c');
+    expect(resolveAdjacentNavigationTarget(-1, 'project-b', projectFocus)?.sessionId).toBe('project-a');
+    expect(resolveAdjacentNavigationTarget(-1, 'project-a', {
+      ...projectFocus,
+      sessionId: 'project-a',
+    })?.sessionId).toBe('project-c');
+  });
+
+  test('updates focus scope before committing a scoped navigation target', () => {
+    publishSessionNavigationSnapshot({
+      recent: [
+        makeNavigationTarget('recent', 'recent-a', 'p1'),
+        makeNavigationTarget('recent', 'recent-b', 'p2'),
+      ],
+      project: [makeNavigationTarget('project', 'project-a', 'p1')],
+    });
+    useSessionFocusStore.getState().setFocus({
+      scope: 'recent',
+      sessionId: 'recent-a',
+      projectId: 'p1',
+    });
+
+    let focusAtCommit = null as ReturnType<typeof useSessionFocusStore.getState>['focus'];
+    const committedTarget = navigateAdjacentSession(1, 'recent-a', () => {
+      focusAtCommit = useSessionFocusStore.getState().focus;
+    });
+
+    expect(committedTarget?.sessionId).toBe('recent-b');
+    expect(focusAtCommit).toEqual({
+      scope: 'recent',
+      sessionId: 'recent-b',
+      projectId: 'p2',
+    });
+  });
+
+  test('falls back from an unavailable Recent sequence to the published project order', () => {
+    publishSessionNavigationSnapshot({
+      recent: [],
+      project: [
+        makeNavigationTarget('project', 'project-a', 'p1'),
+        makeNavigationTarget('project', 'project-b', 'p2'),
+      ],
+    });
+
+    const target = resolveAdjacentNavigationTarget(1, 'project-a', {
+      scope: 'recent',
+      sessionId: 'project-a',
+      projectId: 'p1',
+    });
+
+    expect(target?.scope).toBe('project');
+    expect(target?.sessionId).toBe('project-b');
+    expect(target?.projectId).toBe('p2');
+  });
+
+  test('uses the legacy project fallback when no sidebar snapshot is published', () => {
+    useProjectsStore.setState({
+      projects: [
+        { id: 'p1', path: '/workspace/project', label: 'project' },
+      ] as never,
+      activeProjectId: 'p1',
+    });
+    useGlobalSessionsStore.setState({
+      activeSessions: [
+        makeSession('root-a', { updated: 100, directory: '/workspace/project' }),
+        makeSession('root-b', { updated: 200, directory: '/workspace/project' }),
+      ],
+      archivedSessions: [],
+      sessionsByDirectory: new Map(),
+      reviewTransferBySessionId: new Map(),
+      hasLoaded: true,
+      status: 'ready',
+    });
+
+    const target = resolveAdjacentNavigationTarget(1, 'root-b', {
+      scope: 'recent',
+      sessionId: 'root-b',
+      projectId: 'p1',
+    });
+
+    expect(target?.scope).toBe('project');
+    expect(target?.sessionId).toBe('root-a');
+    expect(target?.projectId).toBe('p1');
   });
 
   test('falls back to sync sessions when global store is empty', () => {

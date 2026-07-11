@@ -680,6 +680,9 @@ interface UIStore {
   setActiveContextPanelTab: (directory: string, tabID: string) => void;
   reorderContextPanelTabs: (directory: string, activeTabID: string, overTabID: string) => void;
   closeContextPanelTab: (directory: string, tabID: string) => void;
+  // Close the active context-panel tab for a directory (Cmd/Ctrl+W).
+  // Returns true when a tab was closed. Closing the last tab also sets isOpen=false.
+  closeActiveContextPanelTab: (directory: string) => boolean;
   closeContextPanel: (directory: string) => void;
   toggleContextPanelExpanded: (directory: string) => void;
   setContextPanelWidth: (directory: string, width: number) => void;
@@ -1261,6 +1264,28 @@ export const useUIStore = create<UIStore>()(
 
             return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
           });
+        },
+
+        // Close the active context-panel tab for a directory (Cmd/Ctrl+W).
+        // Returns true when a tab was closed. Closing the last tab also sets isOpen=false.
+        closeActiveContextPanelTab: (directory) => {
+          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          if (!normalizedDirectory) {
+            return false;
+          }
+
+          const prev = get().contextPanelByDirectory[normalizedDirectory];
+          if (!prev?.isOpen || prev.tabs.length === 0) {
+            return false;
+          }
+
+          const activeTabId = resolveActiveContextPanelTabID(prev.tabs, prev.activeTabId);
+          if (!activeTabId) {
+            return false;
+          }
+
+          get().closeContextPanelTab(normalizedDirectory, activeTabId);
+          return true;
         },
 
         closeContextPanel: (directory) => {

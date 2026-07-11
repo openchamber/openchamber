@@ -28,7 +28,7 @@ import { DraggableSessionRow } from './sessionFolderDnd';
 import { nodeContainsSessionId } from './sessionNodeItemUtils';
 import type { SessionNodeChildRenderExtras, SessionNodeRenderExtras } from './sessionNodeItemUtils';
 import type { SessionNode } from './types';
-import { formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText, SIDEBAR_ROW_ACTIVE_CLASS, SIDEBAR_ROW_HOVER_CLASS } from './utils';
+import { formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText, SIDEBAR_ROW_ACTIVE_CLASS, SIDEBAR_ROW_HOVER_CLASS, getSidebarRowPaddingLeft } from './utils';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
@@ -41,6 +41,11 @@ import { MultiRunFusionDialog } from '@/components/multirun/MultiRunFusionDialog
 import { FusionIcon } from '@/components/icons/FusionIcon';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { notifySidebarVisualSelectionCommitted, useSidebarVisualSelectionStore } from './sidebarVisualSelection';
+import {
+  getSessionFocusKey,
+  isSessionFocusEqual,
+  type SessionFocusIdentity,
+} from '@/stores/useSessionFocusStore';
 
 type Folder = { id: string; name: string; sessionIds: string[] };
 
@@ -68,7 +73,12 @@ type Props = {
   handleSaveEdit: (titleOverride?: string) => void;
   handleCancelEdit: () => void;
   toggleParent: (expansionKey: string) => void;
-  handleSessionSelect: (sessionId: string, sessionDirectory: string | null, projectId?: string | null) => void;
+  handleSessionSelect: (
+    sessionId: string,
+    sessionDirectory: string | null,
+    projectId?: string | null,
+    renderContext?: 'project' | 'recent',
+  ) => void;
   handleSessionDoubleClick: (sessionId: string, sessionTitle: string) => void;
   togglePinnedSession: (sessionId: string) => void;
   handleShareSession: (session: Session) => void;
@@ -176,15 +186,15 @@ const QuickSessionAction = React.memo(function QuickSessionAction({
   };
 
   return (
-    <Tooltip>
+    <Tooltip delayDuration={0}>
       <TooltipTrigger asChild>
         <button
           type="button"
           className={cn(
             'inline-flex items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
             shiftHeld
-              ? 'text-destructive hover:text-destructive'
-              : 'text-muted-foreground hover:text-foreground',
+              ? 'text-destructive hover:text-destructive hover:bg-[color-mix(in_srgb,var(--status-error)_12%,transparent)]'
+              : 'text-muted-foreground hover:text-foreground hover:bg-[color-mix(in_srgb,var(--surface-foreground)_8%,transparent)]',
             buttonSizeClass,
           )}
           aria-label={label}
@@ -265,31 +275,28 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const revealOnHoverClass = isVSCode
     ? 'group-hover:opacity-100 group-hover:pointer-events-auto'
     : 'group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto';
-  const hideOnHoverClass = isVSCode
-    ? 'group-hover:opacity-0'
-    : 'group-hover:opacity-0 group-focus-within:opacity-0';
   const showOpenInEditorAction = isVSCode;
   const showQuickArchiveAction = !archivedBucket && !mobileVariant;
+  // Match typography-ui-label (~14px) so action icons align with the title text.
+  const actionButtonSizeClass = 'h-5 w-5';
+  const actionIconSizeClass = 'h-3.5 w-3.5';
+  const hoverActionCount = (showQuickArchiveAction ? 1 : 0)
+    + (showOpenInEditorAction ? 1 : 0)
+    + 1; // overflow menu
+  const hoverActionPadClass = hoverActionCount >= 3
+    ? 'group-hover:pr-18 group-focus-within:pr-18'
+    : hoverActionCount >= 2
+      ? 'group-hover:pr-12 group-focus-within:pr-12'
+      : 'group-hover:pr-7 group-focus-within:pr-7';
   const revealPaddingClass = isMinimalMode
     ? (isVSCode
-        // VS Code minimal rows reveal up to three actions on hover
-        // (open-in-editor + quick-archive + menu, each h-4). The date sits in the
-        // row flow, so the title must shrink enough to clear the actions or they
-        // overlap the timestamp. Open-in-editor is always present in VS Code.
-        ? (showQuickArchiveAction && showOpenInEditorAction
-            ? 'group-hover:pr-18'
-            : showQuickArchiveAction || showOpenInEditorAction
-              ? 'group-hover:pr-14'
-              : 'group-hover:pr-8')
-        : 'group-hover:pr-2 group-focus-within:pr-2')
-    : (isVSCode
-        ? (showQuickArchiveAction && showOpenInEditorAction
-            ? 'group-hover:pr-18'
-            : showQuickArchiveAction || showOpenInEditorAction
-              ? 'group-hover:pr-12'
-              : 'group-hover:pr-5')
-        : (showQuickArchiveAction ? 'group-hover:pr-12 group-focus-within:pr-12' : 'group-hover:pr-5 group-focus-within:pr-5'));
-  const alwaysActionPaddingClass = showQuickArchiveAction ? 'pr-13' : 'pr-7';
+        // VS Code minimal rows reveal actions on hover. Open-in-editor is always
+        // present in VS Code.
+        ? hoverActionPadClass
+        // Time lives in the hover card now — reserve space for archive + menu.
+        : hoverActionPadClass)
+    : hoverActionPadClass;
+  const alwaysActionPaddingClass = hoverActionCount >= 2 ? 'pr-12' : 'pr-8';
   const suppressNextSelectRef = React.useRef(false);
   const [isTouchPressed, setIsTouchPressed] = React.useState(false);
   const editingIdRef = React.useRef(editingId);
@@ -353,12 +360,22 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   );
   const sessionStatus = useGlobalSessionStatus(session.id);
   const sessionPermissions = useSessionPermissions(session.id, sessionDirectory ?? undefined);
-  const isActive = useSidebarVisualSelectionStore((state) => state.sessionId === session.id);
+  const rowFocus = React.useMemo<SessionFocusIdentity>(() => ({
+    scope: renderContext,
+    sessionId: session.id,
+    projectId: projectId ?? null,
+  }), [projectId, renderContext, session.id]);
+  const rowFocusKey = React.useMemo(() => getSessionFocusKey(rowFocus) ?? '', [rowFocus]);
+  const rowElementRef = React.useRef<HTMLDivElement | null>(null);
+  const isActive = useSidebarVisualSelectionStore(
+    React.useCallback((state) => isSessionFocusEqual(state.focus, rowFocus), [rowFocus]),
+  );
   React.useLayoutEffect(() => {
     if (isActive) {
-      notifySidebarVisualSelectionCommitted(session.id);
+      rowElementRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      notifySidebarVisualSelectionCommitted(rowFocus);
     }
-  }, [isActive, session.id]);
+  }, [isActive, rowFocus]);
   const sessionTitle = resolvedSession.title || t('sessions.sidebar.session.untitled');
   const hasChildren = node.children.length > 0;
   const isPinnedSession = pinnedSessionIds.has(session.id);
@@ -749,7 +766,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       toggleRowSelected(session.id, sessionDirectory ?? null, collectNodeDescendantIds(node));
       return;
     }
-    handleSessionSelect(session.id, sessionDirectory, projectId);
+    handleSessionSelect(session.id, sessionDirectory, projectId, renderContext);
   };
 
   // The selection/active highlight is an inset rounded chip (Codex-style).
@@ -988,60 +1005,53 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           <ContextMenu.Trigger
             render={
               <div
+                ref={rowElementRef}
                 data-session-row={session.id}
                 data-session-scope={sessionDirectory ?? ''}
+                data-session-focus-scope={renderContext}
+                data-session-focus-key={rowFocusKey}
+                data-session-project-id={projectId ?? ''}
                 data-session-archived={archivedBucket ? '1' : '0'}
                 onClick={handleRowBackgroundClick}
                 className={cn(
-                  'group relative my-0.5 flex cursor-pointer items-center rounded-lg px-2 py-1.5',
+                  // Nest indent is padding *inside* the chip so hover/active wash
+                  // stays full-width (reserved left gutter), matching folder rows.
+                  'group relative my-0.5 flex cursor-pointer items-center rounded-lg py-1.5 pr-2',
                   // Codex-style: inset neutral chip — never theme/primary tint.
                   isActive && !isRowSelected && SIDEBAR_ROW_ACTIVE_CLASS,
                   isRowSelected && SIDEBAR_ROW_ACTIVE_CLASS,
                   !isActive && !isRowSelected && SIDEBAR_ROW_HOVER_CLASS,
                 )}
+                style={{ paddingLeft: getSidebarRowPaddingLeft(depth) }}
               />
             }
           >
           {leadingIndicators}
           {subsessionChevron}
           <div className="flex min-w-0 flex-1 items-center">
-            {isMinimalMode ? (
-              <Tooltip>
+              <Tooltip delayDuration={0}>
                 <TooltipTrigger asChild>
                   <button
                     type="button"
- 	                    onPointerDown={handleRowPointerDown}
- 	                    onPointerUp={handleRowPointerEnd}
- 	                    onPointerCancel={handleRowPointerEnd}
- 	                    onMouseDown={handleRowMouseDown}
- 	                    onClick={(event) => handleRowSelect(event)}
+                    onPointerDown={handleRowPointerDown}
+                    onPointerUp={handleRowPointerEnd}
+                    onPointerCancel={handleRowPointerEnd}
+                    onMouseDown={handleRowMouseDown}
+                    onClick={(event) => handleRowSelect(event)}
                     onDoubleClick={(e) => {
                       e.stopPropagation();
                       handleSessionDoubleClick(session.id, sessionTitle);
                     }}
                     className={cn(
-	                      'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none transition-[padding]',
-	                      isTouchPressed && 'bg-[color-mix(in_srgb,var(--surface-foreground)_8%,transparent)]',
+                      'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none transition-[padding]',
+                      isTouchPressed && 'bg-[color-mix(in_srgb,var(--surface-foreground)_8%,transparent)]',
                       alwaysShowActions
                         ? (isVSCode ? revealPaddingClass : alwaysActionPaddingClass)
                         : revealPaddingClass,
                     )}
                   >
-                    <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isMinimalMode ? 'gap-1' : 'gap-1')}>
+                    <div className="flex w-full items-center min-w-0 flex-1 gap-1 overflow-hidden">
                       <div className="block min-w-0 flex-1 truncate typography-ui-label font-normal text-foreground">{renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}</div>
-                      {alwaysShowActions ? <span className="ml-2 flex-shrink-0 text-[0.72rem] text-muted-foreground/75">{sessionCompactUpdatedLabel}</span> : null}
-                      {!alwaysShowActions ? (
-                        <div className="relative ml-1 flex h-4 min-w-4 flex-shrink-0 items-center justify-end">
-                          <span className={cn(
-                            'whitespace-nowrap text-right text-[0.72rem] text-muted-foreground/75 transition-opacity duration-150',
-                            isSessionMenuOpen
-                              ? 'opacity-0'
-                              : hideOnHoverClass,
-                          )}>
-                            {sessionCompactUpdatedLabel}
-                          </span>
-                        </div>
-                      ) : null}
                       {pendingPermissionCount > 0 ? (
                         <span className="inline-flex items-center gap-1 rounded bg-destructive/10 px-1 py-0.5 text-[0.7rem] text-destructive flex-shrink-0" title={t('sessions.sidebar.session.status.permissionRequired')} aria-label={t('sessions.sidebar.session.status.permissionRequired')}>
                           <Icon name="shield" className="h-3 w-3" />
@@ -1052,66 +1062,41 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                   </button>
                 </TooltipTrigger>
                 {/* VS Code already shows project context via workspace headers, so
-                    the per-row metadata tooltip is redundant noise there. */}
+                    the per-row metadata card is redundant noise there.
+                    Elsewhere: floating detail card (not inline) — title, time,
+                    folder/project, branch. Top-left aligned to the row. */}
                 {!isVSCode ? (
-                <TooltipContent side="right" sideOffset={8} className="max-w-xs text-left">
-                  <div className="flex flex-col gap-1 text-left text-xs">
-                    <div className={cn('flex items-center gap-3 text-left text-muted-foreground', secondaryMeta?.projectLabel ? 'justify-between' : 'justify-start')}>
-                      {secondaryMeta?.projectLabel ? <div className="min-w-0 truncate">{secondaryMeta.projectLabel}</div> : null}
-                      <div className="flex-shrink-0">{sessionUpdatedLabel}</div>
+                <TooltipContent
+                  side="right"
+                  align="start"
+                  sideOffset={8}
+                  className="w-64 max-w-[min(16rem,calc(100vw-2rem))] px-3 py-2.5 text-left shadow-md"
+                >
+                  <div className="flex flex-col gap-1.5 text-left">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 truncate typography-ui-label font-medium text-foreground">
+                        {sessionTitle}
+                      </div>
+                      <div className="flex-shrink-0 typography-meta text-muted-foreground">
+                        {sessionCompactUpdatedLabel}
+                      </div>
                     </div>
-                    {secondaryMeta?.branchLabel ? (
-                      <div className="flex items-center gap-3 text-left text-muted-foreground justify-start">
-                        <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
-                          <span className="inline-flex min-w-0 items-center gap-0.5"><Icon name="git-branch" className="h-3 w-3 flex-shrink-0" /><span className="truncate">{secondaryMeta.branchLabel}</span></span>
-                        </div>
+                    {hasSecondaryProjectLabel ? (
+                      <div className="flex min-w-0 items-center gap-1.5 typography-meta text-muted-foreground">
+                        <Icon name="folder-open" className="h-3.5 w-3.5 flex-shrink-0" />
+                        <span className="truncate">{secondaryMeta?.projectLabel}</span>
+                      </div>
+                    ) : null}
+                    {hasSecondaryBranchLabel ? (
+                      <div className="flex min-w-0 items-center gap-1.5 typography-meta text-muted-foreground">
+                        <Icon name="git-branch" className="h-3.5 w-3.5 flex-shrink-0" />
+                        <span className="truncate">{secondaryMeta?.branchLabel}</span>
                       </div>
                     ) : null}
                   </div>
                 </TooltipContent>
                 ) : null}
               </Tooltip>
-            ) : (
-              <button
-                type="button"
-	                onPointerDown={handleRowPointerDown}
-	                onPointerUp={handleRowPointerEnd}
-	                onPointerCancel={handleRowPointerEnd}
-	                onMouseDown={handleRowMouseDown}
-	                onClick={(event) => handleRowSelect(event)}
-                onDoubleClick={(e) => {
-                  e.stopPropagation();
-                  handleSessionDoubleClick(session.id, sessionTitle);
-                }}
-                className={cn(
-	                  'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none transition-[padding]',
-	                  isTouchPressed && 'bg-[color-mix(in_srgb,var(--surface-foreground)_8%,transparent)]',
-                  alwaysShowActions
-                    ? (isVSCode ? revealPaddingClass : alwaysActionPaddingClass)
-                    : revealPaddingClass
-                )}
-              >
-                <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isMinimalMode ? 'gap-1' : 'gap-1')}>
-                    <div className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal text-foreground')}>{renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}</div>
-                    {pendingPermissionCount > 0 ? (
-                      <span className="inline-flex items-center gap-1 rounded bg-destructive/10 px-1 py-0.5 text-[0.7rem] text-destructive flex-shrink-0" title={t('sessions.sidebar.session.status.permissionRequired')} aria-label={t('sessions.sidebar.session.status.permissionRequired')}>
-                        <Icon name="shield" className="h-3 w-3" />
-                        <span className="leading-none">{pendingPermissionCount}</span>
-                      </span>
-                    ) : null}
-                  </div>
- 
-                {!isMinimalMode ? (
-                  <div className="flex items-center justify-between gap-3 text-muted-foreground/60 min-w-0 overflow-hidden leading-tight" style={{ fontSize: 'calc(var(--text-ui-label) * 0.85)' }}>
-                    <div className={cn('flex min-w-0 items-center gap-1.5 overflow-hidden')}>
-                      <span className="flex-shrink-0">{sessionUpdatedLabel}</span>
-                      {hasSecondaryProjectLabel ? <span className="truncate">{secondaryMeta?.projectLabel}</span> : null}
-                      {hasSecondaryBranchLabel ? <span className="inline-flex min-w-0 items-center gap-0.5"><Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" /><span className="truncate">{secondaryMeta?.branchLabel}</span></span> : null}
-                    </div>
-                  </div>
-                ) : null}
-              </button>
-            )}
           </div>
 
           {streamingIndicator && !mobileVariant ? (
@@ -1121,19 +1106,20 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           ) : null}
 
           <div className={cn(
-            'absolute right-0 top-1/2 z-10 flex -translate-y-1/2 items-center gap-0.5 transition-opacity',
+            'absolute right-1 top-1/2 z-10 flex -translate-y-1/2 items-center gap-1 transition-opacity',
             isSessionMenuOpen
               ? 'opacity-100'
               : (alwaysShowActions && !isVSCode)
                 ? 'opacity-100'
                 : cn('opacity-0', revealOnHoverClass),
           )}>
+            {/* No fade veil — title button reserves pr on hover so icons own their space. */}
             {showQuickArchiveAction ? (
               <QuickSessionAction
                 archiveLabel={t('sessions.sidebar.bulkActions.archive')}
                 deleteLabel={t('sessions.sidebar.bulkActions.delete')}
-                buttonSizeClass={isMinimalMode && !alwaysShowActions ? 'h-4 w-4' : 'h-6 w-6'}
-                iconSizeClass={isMinimalMode && !alwaysShowActions ? 'h-2.5 w-2.5' : 'h-3.5 w-3.5'}
+                buttonSizeClass={actionButtonSizeClass}
+                iconSizeClass={actionIconSizeClass}
                 onPointerDown={handleQuickArchivePointerDown}
                 onMouseDown={handleQuickArchiveMouseDown}
                 onArchive={handleQuickArchiveClick}
@@ -1141,13 +1127,13 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
               />
             ) : null}
             {showOpenInEditorAction ? (
-              <Tooltip>
+              <Tooltip delayDuration={0}>
                 <TooltipTrigger asChild>
                   <button
                     type="button"
                     className={cn(
-                      'inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
-                      isMinimalMode && !alwaysShowActions ? 'h-4 w-4' : 'h-6 w-6',
+                      'inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-[color-mix(in_srgb,var(--surface-foreground)_8%,transparent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
+                      actionButtonSizeClass,
                     )}
                     aria-label={t('sessions.sidebar.session.actions.openInEditor')}
                     onPointerDown={handleOpenInEditorPointerDown}
@@ -1155,7 +1141,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                     onClick={handleOpenInEditorClick}
                     onKeyDown={(event) => event.stopPropagation()}
                   >
-                    <Icon name="external-link" className={cn(isMinimalMode && !alwaysShowActions ? 'h-2.5 w-2.5' : 'h-3.5 w-3.5')} />
+                    <Icon name="external-link" className={actionIconSizeClass} />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="left" sideOffset={8}>
@@ -1168,12 +1154,11 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                 <button
                   type="button"
                   className={cn(
-                    'inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
-                    isMinimalMode && !alwaysShowActions
-                      ? (isSessionMenuOpen
-                          ? 'h-4 w-4 opacity-100'
-                          : cn('h-4 w-4 opacity-0', revealOnHoverClass))
-                      : 'h-6 w-6 opacity-100',
+                    'inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-[color-mix(in_srgb,var(--surface-foreground)_8%,transparent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
+                    actionButtonSizeClass,
+                    isMinimalMode && !alwaysShowActions && !isSessionMenuOpen
+                      ? cn('opacity-0', revealOnHoverClass)
+                      : 'opacity-100',
                   )}
                   aria-label={t('sessions.sidebar.session.menu.label')}
                   onPointerDown={handleMenuTriggerPointerDown}
@@ -1181,7 +1166,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                   onClick={handleMenuTriggerClick}
                   onKeyDown={(event) => event.stopPropagation()}
                 >
-                   <Icon name="more-2" className={cn(isMinimalMode && !alwaysShowActions ? 'h-2.5 w-2.5' : 'h-3.5 w-3.5')} />
+                   <Icon name="more-2" className={actionIconSizeClass} />
                 </button>
               </DropdownMenuTrigger>
               {sessionMenuContent}

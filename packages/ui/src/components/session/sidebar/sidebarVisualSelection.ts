@@ -1,4 +1,3 @@
-import { create } from 'zustand';
 import { flushSync } from 'react-dom';
 
 import { beginSessionSwitchMeasure, markSessionSwitchHighlightPainted } from '@/lib/sessionSwitchPerf';
@@ -8,11 +7,16 @@ import {
     subscribeSessionSwitchIntent,
     type SessionSwitchIntent,
 } from '@/lib/sessionSwitchIntent';
+import {
+    createDefaultProjectSessionFocus,
+    isSessionFocusEqual,
+    useSessionFocusStore,
+    type SessionFocusIdentity,
+} from '@/stores/useSessionFocusStore';
 
-type SidebarVisualSelectionState = {
-    sessionId: string | null;
-    setSessionId: (sessionId: string | null) => void;
-};
+export { useSessionFocusStore as useSidebarVisualSelectionStore } from '@/stores/useSessionFocusStore';
+
+type SidebarVisualSelectionTarget = SessionFocusIdentity | string;
 
 type PendingSelection = {
     commit: () => void;
@@ -21,17 +25,21 @@ type PendingSelection = {
     intent: SessionSwitchIntent;
     paintFrame: number | null;
     scheduled: boolean;
-    sessionId: string;
+    focus: SessionFocusIdentity;
 };
 
-export const useSidebarVisualSelectionStore = create<SidebarVisualSelectionState>()((set) => ({
-    sessionId: null,
-    setSessionId: (sessionId) => set((state) => (
-        state.sessionId === sessionId ? state : { sessionId }
-    )),
-}));
-
 let pendingSelection: PendingSelection | null = null;
+let announcingRequestedSelection = false;
+
+const resolveSessionFocus = (
+    target: SidebarVisualSelectionTarget | null,
+    currentFocus: SessionFocusIdentity | null = useSessionFocusStore.getState().focus,
+): SessionFocusIdentity | null => {
+    if (target === null) return null;
+    if (typeof target !== 'string') return target;
+    if (currentFocus?.sessionId === target) return currentFocus;
+    return createDefaultProjectSessionFocus(target);
+};
 
 const cancelFrames = (pending: PendingSelection): void => {
     if (typeof window === 'undefined') {
@@ -56,32 +64,44 @@ export const cancelPendingSidebarVisualSelection = (): void => {
     pendingSelection = null;
 };
 
-export const requestSidebarVisualSelection = (sessionId: string, commit: () => void): void => {
+export const requestSidebarVisualSelection = (
+    target: SidebarVisualSelectionTarget,
+    commit: () => void,
+): void => {
     cancelPendingSidebarVisualSelection();
     beginSessionSwitchMeasure(true);
-    const intent = announceSessionSwitchIntent(sessionId);
+    const focus = resolveSessionFocus(target);
+    if (!focus) return;
+    announcingRequestedSelection = true;
+    let intent: SessionSwitchIntent;
+    try {
+        intent = announceSessionSwitchIntent(focus.sessionId);
+    } finally {
+        announcingRequestedSelection = false;
+    }
     pendingSelection = {
         commit,
         commitFrame: null,
         fallbackTimer: null,
+        focus,
         intent,
         paintFrame: null,
         scheduled: false,
-        sessionId,
     };
     flushSync(() => {
-        useSidebarVisualSelectionStore.getState().setSessionId(sessionId);
+        useSessionFocusStore.getState().setFocus(focus);
     });
     if (typeof window !== 'undefined') {
         pendingSelection.fallbackTimer = window.setTimeout(() => {
-            notifySidebarVisualSelectionCommitted(sessionId);
+            notifySidebarVisualSelectionCommitted(focus);
         }, 150);
     }
 };
 
-export const notifySidebarVisualSelectionCommitted = (sessionId: string): void => {
+export const notifySidebarVisualSelectionCommitted = (target: SidebarVisualSelectionTarget): void => {
     const pending = pendingSelection;
-    if (!pending || pending.sessionId !== sessionId || pending.scheduled) {
+    const focus = resolveSessionFocus(target);
+    if (!pending || !isSessionFocusEqual(pending.focus, focus) || pending.scheduled) {
         return;
     }
     pending.scheduled = true;
@@ -115,18 +135,27 @@ export const notifySidebarVisualSelectionCommitted = (sessionId: string): void =
     });
 };
 
-export const syncSidebarVisualSelection = (sessionId: string | null): void => {
+export const syncSidebarVisualSelection = (
+    target: SidebarVisualSelectionTarget | null,
+): void => {
     if (pendingSelection) {
         return;
     }
-    useSidebarVisualSelectionStore.getState().setSessionId(sessionId);
+    const state = useSessionFocusStore.getState();
+    state.setFocus(resolveSessionFocus(target, state.focus));
 };
 
 subscribeSessionSwitchIntent((intent) => {
-    const pending = pendingSelection;
-    if (!pending || pending.intent === intent) {
+    if (announcingRequestedSelection) {
         return;
     }
-    cancelPendingSidebarVisualSelection();
-    useSidebarVisualSelectionStore.getState().setSessionId(intent.sessionId);
+    const pending = pendingSelection;
+    if (pending?.intent === intent) {
+        return;
+    }
+    if (pending) {
+        cancelPendingSidebarVisualSelection();
+    }
+    const state = useSessionFocusStore.getState();
+    state.setFocus(resolveSessionFocus(intent.sessionId, state.focus));
 });

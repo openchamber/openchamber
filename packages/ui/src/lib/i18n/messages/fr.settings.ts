@@ -917,6 +917,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.open_right_sidebar_git.label': 'Ouvrir l\'onglet Git de la barre latérale droite',
   'settings.openchamber.keyboardShortcuts.action.open_right_sidebar_files.label': 'Ouvrir l\'onglet Fichiers de la barre latérale droite',
   'settings.openchamber.keyboardShortcuts.action.cycle_right_sidebar_tab.label': 'Faire défiler l\'onglet de la barre latérale droite',
+  'settings.openchamber.keyboardShortcuts.action.close_context_panel_tab.label': 'Fermer l\'onglet du panneau de contexte',
   'settings.openchamber.keyboardShortcuts.action.previous_session.label': 'Session précédente',
   'settings.openchamber.keyboardShortcuts.action.next_session.label': 'Session suivante',
   'settings.openchamber.keyboardShortcuts.action.new_chat.label': 'Nouvelle session',

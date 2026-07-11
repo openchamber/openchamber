@@ -989,6 +989,7 @@ export const settingsDict = {
   "settings.openchamber.keyboardShortcuts.action.open_right_sidebar_git.label": "Abrir aba de Git em barra lateral direita",
   "settings.openchamber.keyboardShortcuts.action.open_right_sidebar_files.label": "Abrir aba de Arquivos em barra lateral direita",
   "settings.openchamber.keyboardShortcuts.action.cycle_right_sidebar_tab.label": "Alternar aba da barra lateral direita",
+  "settings.openchamber.keyboardShortcuts.action.close_context_panel_tab.label": "Fechar aba do painel de contexto",
   "settings.openchamber.keyboardShortcuts.action.previous_session.label": "Sessão anterior",
   "settings.openchamber.keyboardShortcuts.action.next_session.label": "Próxima sessão",
   "settings.openchamber.keyboardShortcuts.action.new_chat.label": "Nova sessão",

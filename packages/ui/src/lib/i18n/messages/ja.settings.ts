@@ -1022,6 +1022,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.open_right_sidebar_git.label': '右サイドバー Git タブを開く',
   'settings.openchamber.keyboardShortcuts.action.open_right_sidebar_files.label': '右サイドバー ファイルタブを開く',
   'settings.openchamber.keyboardShortcuts.action.cycle_right_sidebar_tab.label': '右サイドバータブを順に切替',
+  'settings.openchamber.keyboardShortcuts.action.close_context_panel_tab.label': 'コンテキストパネルのタブを閉じる',
   'settings.openchamber.keyboardShortcuts.action.previous_session.label': '前の Session',
   'settings.openchamber.keyboardShortcuts.action.next_session.label': '次の Session',
   'settings.openchamber.keyboardShortcuts.action.new_chat.label': '新しい Session',

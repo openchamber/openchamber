@@ -1,7 +1,7 @@
 import React from 'react';
 import { toast } from '@/components/ui';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { resolveAdjacentRootSession, resolveAdjacentRootSessionDirectory } from '@/sync/session-navigation';
+import { navigateAdjacentSession } from '@/sync/session-navigation';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -11,6 +11,28 @@ import { sessionEvents } from '@/lib/sessionEvents';
 import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { showOpenCodeStatus } from '@/lib/openCodeStatus';
 import { resetWebviewZoom, zoomWebviewIn, zoomWebviewOut } from '@/lib/webviewZoom';
+import { canUseElectronDesktopIPC, invokeDesktop } from '@/lib/desktop';
+import { resolveEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+
+// Close the active context-panel tab when open; otherwise close the desktop window.
+// Shared by File/Window menu "Close" and the Cmd/Ctrl+W shortcut path.
+const handleCloseContextPanelTabOrWindow = (): void => {
+  const { isMobile, closeActiveContextPanelTab } = useUIStore.getState();
+  if (isMobile) {
+    return;
+  }
+
+  const directory = resolveEffectiveDirectory();
+  if (directory && closeActiveContextPanelTab(directory)) {
+    return;
+  }
+
+  if (canUseElectronDesktopIPC()) {
+    void invokeDesktop('desktop_close_current_window').catch((error) => {
+      console.warn('[menu-actions] failed to close current window', error);
+    });
+  }
+};
 
 const getActiveElementSelectedText = (): string => {
   if (typeof document === 'undefined') {
@@ -72,6 +94,7 @@ type MenuAction =
   | 'new-session'
   | 'new-worktree-session'
   | 'change-workspace'
+  | 'close-tab-or-window'
   | 'toggle-right-sidebar'
   | 'open-right-sidebar-git'
   | 'open-right-sidebar-files'
@@ -145,17 +168,17 @@ export const useMenuActions = (
   }, []);
 
   const navigateSession = React.useCallback((direction: -1 | 1) => {
-    const nextSession = resolveAdjacentRootSession(
+    navigateAdjacentSession(
       direction,
       useSessionUIStore.getState().currentSessionId,
-    );
-    if (!nextSession) return;
-
-    setActiveMainTab('chat');
-    setSessionSwitcherOpen(false);
-    useSessionUIStore.getState().setCurrentSession(
-      nextSession.id,
-      resolveAdjacentRootSessionDirectory(nextSession),
+      (target) => {
+        setActiveMainTab('chat');
+        setSessionSwitcherOpen(false);
+        useSessionUIStore.getState().setCurrentSession(
+          target.sessionId,
+          target.directory,
+        );
+      },
     );
   }, [setActiveMainTab, setSessionSwitcherOpen]);
 
@@ -207,6 +230,10 @@ export const useMenuActions = (
 
         case 'change-workspace':
           handleChangeWorkspace();
+          break;
+
+        case 'close-tab-or-window':
+          handleCloseContextPanelTabOrWindow();
           break;
 
         case 'toggle-right-sidebar':

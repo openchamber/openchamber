@@ -29,6 +29,13 @@ Use this doc when you ask an agent to change tool/header/description behavior.
   - Shared icon mapping for tool names (`getToolIcon`).
   - Used by both `ProgressiveGroup.tsx` and `ToolPart.tsx`.
 
+- `toolRowChrome.ts`
+  - Shared Codex-style rounded chip classes for interactive tool / reasoning headers.
+  - Hover-only wash matches sidebar session-row hover (`surface-foreground` color-mix); idle rows stay flush.
+  - Tight `py-0.5` + `my-0.5` keeps the wash compact while preserving inter-row spacing.
+  - Also exports `SELECTOR_CHIP_HOVER_CLASS` for draft project/branch selectors in `ChatInput`.
+  - Used by `ToolPart.tsx`, `ReasoningPart.tsx`, `ProgressiveGroup.tsx`, and `ChatInput.tsx`.
+
 - `toolRenderUtils.ts`
   - Core classification helpers:
     - `isExpandableTool`
@@ -51,7 +58,8 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 - Virtualized history uses a `MarkdownHydrationProvider` per stable turn entry. The newest visible turns are released first, from bottom to top; upward scrolling additionally preloads only the nearest three mounted turns above the viewport.
 - Historical Markdown/tool hydration state updates run in React transitions. Hiding the owning `Activity` cancels queued frame work and aborts the Markdown pipeline before subsequent blocks can parse or commit.
 - Shiki worker requests carry an `AbortSignal` plus `visible`/`background` priority. Cancelled hidden-session jobs are removed before they start, while current visible work overtakes queued historical highlighting. A Shiki call already executing is the single non-preemptible worker unit; its cancelled result is discarded.
-- Historical Markdown that has not been released renders escaped `white-space: pre-wrap` text. It does not mount the lazy rich renderer, run marked/DOMPurify/decoration, or attach Markdown interactions yet.
+- Historical Markdown that has not been released renders a bounded skeleton over an invisible `white-space: pre-wrap` size spacer. Raw Markdown syntax is never visually exposed, while the spacer preserves approximately the same pre-hydration row height. It does not mount the lazy rich renderer, run marked/DOMPurify/decoration, or attach Markdown interactions yet.
+- After a row is released, the rich morphdom target remains invisible behind the same skeleton until every Markdown block has committed. The reveal swaps skeleton and rich DOM in one React commit; the target subtree remains exclusively imperative-owned.
 - Hydration state is keyed by stable turn/message entry keys rather than virtual indexes, so prepending older pages does not shift the wrong rows into the hydrated set. Streaming-tail Markdown remains immediate.
 - Thinking/Justification duration is hidden in `sorted` mode (handled in `ReasoningPart.tsx` + `JustificationBlock.tsx`).
 
@@ -87,7 +95,7 @@ Why: only navigation tools use the compact static path; all other tools need obs
 ## Quick map of files in this folder
 
 - Text: `AssistantTextPart.tsx`, `UserTextPart.tsx`
-- Tools: `ToolPart.tsx`, `ProgressiveGroup.tsx`, `toolPresentation.tsx`, `toolRenderUtils.ts`, `ToolRevealOnMount.tsx`
+- Tools: `ToolPart.tsx`, `ProgressiveGroup.tsx`, `toolPresentation.tsx`, `toolRowChrome.ts`, `toolRenderUtils.ts`, `ToolRevealOnMount.tsx`
 - Reasoning/justification: `ReasoningPart.tsx`, `JustificationBlock.tsx`
 - Status/placeholders: `WorkingPlaceholder.tsx`, `SessionActiveSpinner.tsx`, `MigratingPart.tsx`, `BusyDots.tsx`
 - Utility renderers: `VirtualizedCodeBlock.tsx`, `MinDurationShineText.tsx`

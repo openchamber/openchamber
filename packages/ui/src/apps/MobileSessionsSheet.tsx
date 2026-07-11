@@ -24,7 +24,6 @@ import type { WorktreeMetadata } from '@/types/worktree';
 
 import { MobileProjectEditSurface } from './MobileProjectEditSurface';
 import { MobileSurfaceShell } from './MobileSurfaceShell';
-import { sortProjectsByRecentSessionActivity } from '@/components/session/sidebar/utils';
 
 type MobileSessionsSheetProps = {
   open: boolean;
@@ -547,25 +546,8 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       }
     }
 
-    return sortProjectsByRecentSessionActivity(
-      nodes.map((node) => ({
-        node,
-        normalizedPath: node.project.path,
-        label: node.project.label,
-        lastOpenedAt: projects.find((entry) => entry.id === node.project.id)?.lastOpenedAt,
-        addedAt: projects.find((entry) => entry.id === node.project.id)?.addedAt,
-      })),
-      (entry) => {
-        let max = 0;
-        for (const bucket of entry.node.buckets) {
-          for (const session of bucket.sessions) {
-            max = Math.max(max, getSessionTimestamp(session));
-          }
-        }
-        return max;
-      },
-    ).map((entry) => entry.node);
-  }, [activeProjectId, projects, projectsMeta, sessions]);
+    return nodes;
+  }, [activeProjectId, projectsMeta, sessions]);
 
   const normalizedDirectory = normalizePath(currentDirectory);
 

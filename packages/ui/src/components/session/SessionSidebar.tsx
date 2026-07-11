@@ -60,6 +60,7 @@ import {
 import { BulkActionBar } from './sidebar/BulkActionBar';
 import { useSidebarBulkActions } from './sidebar/hooks/useSidebarBulkActions';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { useSessionFocusStore, type SessionFocusScope } from '@/stores/useSessionFocusStore';
 import { type SessionGroup, type SessionNode } from './sidebar/types';
 import {
   deriveRecentSessions,
@@ -67,11 +68,8 @@ import {
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import {
   compareSessionsByPinnedAndTime,
-  dedupeSessionsById,
   formatProjectLabel,
-  getLatestSessionUpdatedAtForProject,
   normalizePath,
-  sortProjectsByRecentSessionActivity,
 } from './sidebar/utils';
 import {
   mergeLiveSessionWithGlobalSession,
@@ -89,6 +87,11 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { announceSessionSwitchIntent } from '@/lib/sessionSwitchIntent';
+import {
+  publishSessionNavigationSnapshot,
+  type SessionNavigationTarget,
+} from '@/sync/session-navigation';
+import { buildProjectNavigationTargets } from './sidebar/sessionNavigationModel';
 
 const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
@@ -324,9 +327,11 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const liveSessions = useAllLiveSessions();
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
   const hasLoadedGlobalSessions = useGlobalSessionsStore((state) => state.hasLoaded);
+  const globalSessionsStatus = useGlobalSessionsStore((state) => state.status);
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const archivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const sessionFocus = useSessionFocusStore((state) => state.focus);
   const newSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
   const updateSessionTitle = useSessionUIStore((state) => state.updateSessionTitle);
@@ -416,6 +421,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       .join('|'),
     [projects],
   );
+  const [isDiscoveringProjectWorktrees, setIsDiscoveringProjectWorktrees] = React.useState(false);
 
   const initialGlobalSessionsRefreshStartedRef = React.useRef(false);
   React.useEffect(() => {
@@ -487,12 +493,21 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       return;
     }
     discoveredProjectsRef.current = projectWorktreeDiscoveryKey;
-    void discoverWorktrees();
+    if (isVSCode) {
+      setIsDiscoveringProjectWorktrees(false);
+      return;
+    }
+    setIsDiscoveringProjectWorktrees(true);
+    void discoverWorktrees().finally(() => {
+      if (!cancelled) {
+        setIsDiscoveringProjectWorktrees(false);
+      }
+    });
 
     return () => {
       cancelled = true;
     };
-  }, [projectWorktreeDiscoveryKey]);
+  }, [isVSCode, projectWorktreeDiscoveryKey]);
 
   React.useEffect(() => {
     let refreshTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -729,23 +744,25 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     sessionId: string,
     sessionDirectory: string | null,
     projectId?: string | null,
+    renderContext: SessionFocusScope = 'project',
   ) => {
+    const focus = {
+      sessionId,
+      scope: renderContext,
+      projectId: projectId ?? null,
+    } as const;
     if (sessionId === currentSessionId) {
       announceSessionSwitchIntent(sessionId);
-      syncSidebarVisualSelection(sessionId);
+      syncSidebarVisualSelection(focus);
       commitSessionSelect(sessionId, sessionDirectory, projectId);
       return;
     }
 
     requestSidebarVisualSelection(
-      sessionId,
+      focus,
       () => commitSessionSelect(sessionId, sessionDirectory, projectId),
     );
   }, [commitSessionSelect, currentSessionId]);
-
-  React.useLayoutEffect(() => {
-    syncSidebarVisualSelection(currentSessionId);
-  }, [currentSessionId]);
 
   React.useEffect(() => () => {
     cancelPendingSidebarVisualSelection();
@@ -914,6 +931,24 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     });
   }, [isVSCode, resetProjectSessionLimits, safeStorage, scheduleCollapsedProjectsPersist]);
 
+  const ensureProjectExpanded = React.useCallback((projectId: string) => {
+    ignoreIntersectionUntil.current = Date.now() + 150;
+    setCollapsedProjects((prev) => {
+      if (!prev.has(projectId)) {
+        return prev;
+      }
+      const next = new Set(prev);
+      next.delete(projectId);
+      try {
+        safeStorage.setItem(PROJECT_COLLAPSE_STORAGE_KEY, JSON.stringify(Array.from(next)));
+      } catch { /* ignored */ }
+      if (!isVSCode) {
+        scheduleCollapsedProjectsPersist(next);
+      }
+      return next;
+    });
+  }, [isVSCode, safeStorage, scheduleCollapsedProjectsPersist]);
+
   const normalizedProjects = React.useMemo(() => {
     return projects
       .map((project) => ({
@@ -1008,24 +1043,13 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     normalizedProjects,
   });
 
-  const normalizedProjectsForSidebar = React.useMemo(() => {
-    if (isVSCode) {
-      return normalizedProjects;
-    }
-
-    const combinedSessions = dedupeSessionsById([...sessions, ...archivedSessions]);
-    return sortProjectsByRecentSessionActivity(
-      normalizedProjects,
-      (project) => {
-        const worktrees = availableWorktreesByProject.get(project.normalizedPath) ?? [];
-        return getLatestSessionUpdatedAtForProject(
-          project.normalizedPath,
-          combinedSessions,
-          worktrees.map((meta) => meta.path),
-        );
-      },
-    );
-  }, [archivedSessions, availableWorktreesByProject, isVSCode, normalizedProjects, sessions]);
+  // Project rows are structural navigation. Keep their persisted registry order
+  // stable while sessions and worktrees hydrate instead of re-sorting the DOM
+  // whenever another slice of session activity arrives.
+  const normalizedProjectsForSidebar = normalizedProjects;
+  const isProjectSessionsSyncing = globalSessionsStatus === 'idle'
+    || globalSessionsStatus === 'loading'
+    || isDiscoveringProjectWorktrees;
 
   useArchivedAutoFolders({
     normalizedProjects,
@@ -1158,6 +1182,33 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     return meta;
   }, [projectSections, homeDirectory]);
 
+  // External navigation surfaces do not carry a sidebar origin. Keep their
+  // deterministic fallback in project scope, while preserving an explicit
+  // Recent/Project focus when the current session already matches it.
+  React.useLayoutEffect(() => {
+    if (!currentSessionId) {
+      syncSidebarVisualSelection(null);
+      return;
+    }
+
+    const currentFocus = useSessionFocusStore.getState().focus;
+    if (currentFocus?.sessionId === currentSessionId) {
+      if (currentFocus.scope === 'project' && !currentFocus.projectId) {
+        syncSidebarVisualSelection({
+          ...currentFocus,
+          projectId: sessionSidebarMetaById.get(currentSessionId)?.projectId ?? null,
+        });
+      }
+      return;
+    }
+
+    syncSidebarVisualSelection({
+      scope: 'project',
+      sessionId: currentSessionId,
+      projectId: sessionSidebarMetaById.get(currentSessionId)?.projectId ?? null,
+    });
+  }, [currentSessionId, sessionSidebarMetaById]);
+
   const showRecentSection = useSessionDisplayStore((state) => state.showRecentSection);
   const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
 
@@ -1243,6 +1294,114 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         groups: section.groups.filter((group) => !group.isArchivedBucket),
       }));
   }, [sectionsForRender, showArchivedSessions]);
+
+  const navigationProjectSections = React.useMemo(() => {
+    const sourceSections = hasSessionSearchQuery
+      ? sectionsForSidebarRender.map((section) => ({
+          ...section,
+          groups: section.groups.map((group) => ({
+            ...group,
+            sessions: groupSearchDataByGroup.get(group)?.filteredNodes ?? [],
+          })),
+        }))
+      : sectionsForSidebarRender;
+    if (!showOnlyMainWorkspace) {
+      return sourceSections;
+    }
+    const activeSection = sourceSections.find((section) => section.project.id === activeProjectId)
+      ?? sourceSections[0];
+    if (!activeSection) {
+      return [];
+    }
+    const primaryGroup = activeSection.groups.find((candidate) => candidate.isMain && candidate.sessions.length > 0)
+      ?? activeSection.groups.find((candidate) => candidate.sessions.length > 0)
+      ?? activeSection.groups.find((candidate) => candidate.isMain)
+      ?? activeSection.groups[0];
+    return primaryGroup ? [{ ...activeSection, groups: [primaryGroup] }] : [];
+  }, [activeProjectId, groupSearchDataByGroup, hasSessionSearchQuery, sectionsForSidebarRender, showOnlyMainWorkspace]);
+
+  const projectNavigationTargets = React.useMemo(() => buildProjectNavigationTargets({
+    sections: navigationProjectSections,
+    foldersMap,
+    getOrderedGroups,
+    pinnedSessionIds,
+    sessionOrderIndex,
+  }), [foldersMap, getOrderedGroups, navigationProjectSections, pinnedSessionIds, sessionOrderIndex]);
+
+  const recentNavigationTargets = React.useMemo<SessionNavigationTarget[]>(() => {
+    if (hasSessionSearchQuery || isVSCode || !showRecentSection) {
+      return [];
+    }
+    return activeNowSessions.map((session, visibleIndex) => {
+      const meta = sessionSidebarMetaById.get(session.id);
+      return {
+        scope: 'recent',
+        sessionId: session.id,
+        projectId: meta?.projectId ?? null,
+        directory: normalizePath(resolveGlobalSessionDirectory(session))
+          ?? meta?.groupDirectory
+          ?? null,
+        visibleIndex,
+      };
+    });
+  }, [activeNowSessions, hasSessionSearchQuery, isVSCode, sessionSidebarMetaById, showRecentSection]);
+
+  React.useLayoutEffect(() => publishSessionNavigationSnapshot({
+    recent: recentNavigationTargets,
+    project: projectNavigationTargets,
+  }), [projectNavigationTargets, recentNavigationTargets]);
+
+  const focusedProjectTarget = React.useMemo(() => {
+    if (!sessionFocus || sessionFocus.scope !== 'project') {
+      return null;
+    }
+    return projectNavigationTargets.find((target) => (
+      target.sessionId === sessionFocus.sessionId
+      && target.projectId === sessionFocus.projectId
+    )) ?? null;
+  }, [projectNavigationTargets, sessionFocus]);
+
+  // Shortcut navigation can target rows whose project/group/folder is not
+  // mounted yet. Reveal the full ancestor chain synchronously, before paint,
+  // so the precise Project row can satisfy the visual-selection barrier.
+  React.useLayoutEffect(() => {
+    if (!focusedProjectTarget?.projectId) {
+      return;
+    }
+
+    ensureProjectExpanded(focusedProjectTarget.projectId);
+
+    if (focusedProjectTarget.groupKey) {
+      setCollapsedGroups((prev) => {
+        if (!prev.has(focusedProjectTarget.groupKey!)) {
+          return prev;
+        }
+        const next = new Set(prev);
+        next.delete(focusedProjectTarget.groupKey!);
+        return next;
+      });
+    }
+
+    focusedProjectTarget.folderAncestorIds?.forEach((folderId) => {
+      const folderState = useSessionFoldersStore.getState();
+      if (folderState.collapsedFolderIds.has(folderId)) {
+        folderState.toggleFolderCollapse(folderId);
+      }
+    });
+
+    if (focusedProjectTarget.groupKey && focusedProjectTarget.visibleIndex !== undefined) {
+      const requiredCount = focusedProjectTarget.visibleIndex + 1;
+      setVisibleSessionCountByGroup((prev) => {
+        const currentCount = prev.get(focusedProjectTarget.groupKey!) ?? 0;
+        if (currentCount >= requiredCount) {
+          return prev;
+        }
+        const next = new Map(prev);
+        next.set(focusedProjectTarget.groupKey!, requiredCount);
+        return next;
+      });
+    }
+  }, [ensureProjectExpanded, focusedProjectTarget]);
 
   const prLookupKeys = React.useMemo(() => {
     const keys = new Set<string>();
@@ -1655,6 +1814,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         openSidebarMenuKey={openSidebarMenuKey}
         setOpenSidebarMenuKey={setOpenSidebarMenuKey}
         isInlineEditing={isInlineEditing}
+        isProjectSessionsSyncing={isProjectSessionsSyncing}
       />
 
       {selectionModeEnabled && hasSelection ? (

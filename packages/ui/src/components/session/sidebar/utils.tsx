@@ -60,10 +60,10 @@ export const formatSessionCompactDateLabel = (updatedMs: number): string => {
   const year = 365 * day;
 
   if (diff < hour) {
-    return `${Math.max(1, Math.floor(diff / minute))}m`;
+    return t('common.relative.minutesAgoCompact', { count: Math.max(1, Math.floor(diff / minute)) });
   }
   if (diff < day) {
-    return `${Math.floor(diff / hour)}h`;
+    return t('common.relative.hoursAgoCompact', { count: Math.floor(diff / hour) });
   }
   if (diff < week) {
     return t('common.relative.daysAgoCompact', { count: Math.floor(diff / day) });
@@ -72,7 +72,7 @@ export const formatSessionCompactDateLabel = (updatedMs: number): string => {
     return t('common.relative.weeksAgoCompact', { count: Math.floor(diff / week) });
   }
   if (diff < year) {
-    return `${Math.floor(diff / month)}mo`;
+    return t('common.relative.monthsAgoCompact', { count: Math.floor(diff / month) });
   }
   return t('common.relative.yearsAgoCompact', { count: Math.floor(diff / year) });
 };
@@ -124,79 +124,8 @@ const getSessionCreatedAt = (session: Session): number => {
   return toFiniteNumber(session.time?.created) ?? 0;
 };
 
-export const getSessionUpdatedAt = (session: Session): number => {
+const getSessionUpdatedAt = (session: Session): number => {
   return toFiniteNumber(session.time?.updated) ?? toFiniteNumber(session.time?.created) ?? 0;
-};
-
-type ProjectRecencySortable = {
-  normalizedPath: string;
-  label?: string;
-  path?: string;
-  lastOpenedAt?: number;
-  addedAt?: number;
-};
-
-export const getLatestSessionUpdatedAtForProject = (
-  projectRoot: string,
-  sessions: Session[],
-  worktreePaths: string[] = [],
-): number => {
-  const root = normalizePath(projectRoot);
-  if (!root) {
-    return 0;
-  }
-
-  const validDirectories = new Set<string>([root]);
-  worktreePaths.forEach((path) => {
-    const normalized = normalizePath(path);
-    if (normalized) {
-      validDirectories.add(normalized);
-    }
-  });
-
-  let max = 0;
-  sessions.forEach((session) => {
-    if (!isSessionRelatedToProject(session, root, validDirectories)) {
-      return;
-    }
-    const updated = getSessionUpdatedAt(session);
-    if (updated > max) {
-      max = updated;
-    }
-  });
-  return max;
-};
-
-const getProjectRecencyScore = (
-  project: ProjectRecencySortable,
-  latestSessionUpdatedAt: number,
-): number => {
-  if (latestSessionUpdatedAt > 0) {
-    return latestSessionUpdatedAt;
-  }
-  return project.lastOpenedAt ?? project.addedAt ?? 0;
-};
-
-export const compareProjectsByRecentSessionActivity = <T extends ProjectRecencySortable>(
-  a: T,
-  b: T,
-  getLatestUpdatedAt: (project: T) => number,
-): number => {
-  const aScore = getProjectRecencyScore(a, getLatestUpdatedAt(a));
-  const bScore = getProjectRecencyScore(b, getLatestUpdatedAt(b));
-  if (bScore !== aScore) {
-    return bScore - aScore;
-  }
-  const aLabel = a.label || a.path || a.normalizedPath;
-  const bLabel = b.label || b.path || b.normalizedPath;
-  return aLabel.localeCompare(bLabel);
-};
-
-export const sortProjectsByRecentSessionActivity = <T extends ProjectRecencySortable>(
-  projects: T[],
-  getLatestUpdatedAt: (project: T) => number,
-): T[] => {
-  return [...projects].sort((a, b) => compareProjectsByRecentSessionActivity(a, b, getLatestUpdatedAt));
 };
 
 export const compareSessionsByPinnedAndTime = (
@@ -282,9 +211,23 @@ export const SIDEBAR_MUTED_HINT_CLASS =
 export const SIDEBAR_ROW_ACTIVE_CLASS =
   'bg-[color-mix(in_srgb,var(--surface-foreground)_10%,transparent)]';
 
-/** Codex-style hover wash: lighter than active, still neutral. */
+/** Codex-style hover wash: clearer than idle so the row reads as clickable. */
 export const SIDEBAR_ROW_HOVER_CLASS =
-  'hover:bg-[color-mix(in_srgb,var(--surface-foreground)_6%,transparent)]';
+  'hover:bg-[color-mix(in_srgb,var(--surface-foreground)_10%,transparent)]';
+
+/** Base horizontal padding inside a sidebar row chip (matches `px-2`). */
+export const SIDEBAR_ROW_BASE_PAD_PX = 8;
+
+/**
+ * One nest step = folder icon column (`h-4 w-4` + `gap-1.5`).
+ * Child session text lines up under the parent folder *name*; the extra left
+ * padding stays *inside* the hover chip so the wash stays full-width (预留).
+ */
+export const SIDEBAR_NEST_INDENT_PX = 16 + 6;
+
+/** Left padding for a nested sidebar row — indent content, keep chip edge flush. */
+export const getSidebarRowPaddingLeft = (depth: number): number =>
+  SIDEBAR_ROW_BASE_PAD_PX + Math.max(0, depth) * SIDEBAR_NEST_INDENT_PX;
 
 export const renderHighlightedText = (text: string, query: string): React.ReactNode => {
   if (!query) {

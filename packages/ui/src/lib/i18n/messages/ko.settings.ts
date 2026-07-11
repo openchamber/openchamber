@@ -989,6 +989,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.open_right_sidebar_git.label': '오른쪽 사이드바 Git 탭 열기',
   'settings.openchamber.keyboardShortcuts.action.open_right_sidebar_files.label': '오른쪽 사이드바 Files 탭 열기',
   'settings.openchamber.keyboardShortcuts.action.cycle_right_sidebar_tab.label': '오른쪽 사이드바 탭 순환',
+  'settings.openchamber.keyboardShortcuts.action.close_context_panel_tab.label': '컨텍스트 패널 탭 닫기',
   'settings.openchamber.keyboardShortcuts.action.previous_session.label': '이전 세션',
   'settings.openchamber.keyboardShortcuts.action.next_session.label': '다음 세션',
   'settings.openchamber.keyboardShortcuts.action.new_chat.label': '새 세션',

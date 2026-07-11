@@ -1,10 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
-    applyLatestSessionViewRenderIntent,
+    applySessionViewSelectionIntent,
+    commitMaterializedSessionView,
     createSessionViewKey,
     createSessionViewRenderIntent,
+    materializeSessionViewRenderIntent,
+    recordSessionViewEstimate,
     reconcileSessionViewCache,
+    resolveActiveSessionViewKey,
     updateSessionViewEstimate,
     type SessionViewCacheEntry,
     type SessionViewCacheLimits,
@@ -87,44 +91,158 @@ describe('sessionViewCache', () => {
         expect(unchanged).toBe(entries);
     });
 
-    test('stale transition intents cannot become visible or pollute the LRU', () => {
+    test('stale materialization intents cannot become visible or pollute the LRU', () => {
         const cacheLimits = limits(2, 64);
         const a = selection('a', '/repo');
         const bIntent = createSessionViewRenderIntent(selection('b', '/repo'));
         const cIntent = createSessionViewRenderIntent(selection('c', '/repo'));
         const initial: SessionViewRenderState = {
-            renderedSelection: a,
+            activeIntent: createSessionViewRenderIntent(a),
+            cacheNeedsTrim: false,
             cachedSessionViews: reconcileSessionViewCache([], a, cacheLimits, 8),
+            pendingSessionView: null,
         };
 
-        const staleB = applyLatestSessionViewRenderIntent(initial, bIntent, cIntent, cacheLimits, 8);
-        expect(staleB).toBe(initial);
+        const selectedB = applySessionViewSelectionIntent(initial, bIntent, cacheLimits);
+        const stagedB = materializeSessionViewRenderIntent(selectedB, bIntent, bIntent, 8);
+        const selectedC = applySessionViewSelectionIntent(stagedB, cIntent, cacheLimits);
+        expect(selectedC.activeIntent).toBe(cIntent);
+        expect(selectedC.pendingSessionView).toBeNull();
+        expect(resolveActiveSessionViewKey(selectedC.cachedSessionViews, cIntent.key)).toBeNull();
 
-        const committedC = applyLatestSessionViewRenderIntent(initial, cIntent, cIntent, cacheLimits, 8);
-        expect(committedC.renderedSelection?.sessionId).toBe('c');
+        const staleB = materializeSessionViewRenderIntent(selectedC, bIntent, cIntent, 8);
+        expect(staleB).toBe(selectedC);
+        expect(commitMaterializedSessionView(selectedC, bIntent, cacheLimits)).toBe(selectedC);
+
+        const stagedC = materializeSessionViewRenderIntent(selectedC, cIntent, cIntent, 8);
+        expect(stagedC.cachedSessionViews.map((entry) => entry.sessionId)).toEqual(['a']);
+        expect(stagedC.pendingSessionView?.entry.sessionId).toBe('c');
+
+        const committedC = commitMaterializedSessionView(stagedC, cIntent, cacheLimits);
+        expect(committedC.activeIntent).toBe(cIntent);
+        expect(committedC.pendingSessionView).toBeNull();
         expect(committedC.cachedSessionViews.map((entry) => entry.sessionId)).toEqual(['a', 'c']);
+        expect(resolveActiveSessionViewKey(committedC.cachedSessionViews, cIntent.key)).toBe(cIntent.key);
 
-        const lateB = applyLatestSessionViewRenderIntent(committedC, bIntent, cIntent, cacheLimits, 8);
+        const lateB = materializeSessionViewRenderIntent(committedC, bIntent, cIntent, 8);
         expect(lateB).toBe(committedC);
         expect(lateB.cachedSessionViews.map((entry) => entry.sessionId)).toEqual(['a', 'c']);
     });
 
     test('intent identity rejects a stale A after A -> B -> A', () => {
-        const cacheLimits = limits(2, 64);
         const a = selection('a', '/repo');
         const firstAIntent = createSessionViewRenderIntent(a);
         const secondAIntent = createSessionViewRenderIntent(a);
         const current: SessionViewRenderState = {
-            renderedSelection: selection('b', '/repo'),
+            activeIntent: secondAIntent,
+            cacheNeedsTrim: false,
             cachedSessionViews: [],
+            pendingSessionView: null,
         };
 
-        expect(applyLatestSessionViewRenderIntent(
+        expect(materializeSessionViewRenderIntent(
             current,
             firstAIntent,
             secondAIntent,
-            cacheLimits,
             8,
         )).toBe(current);
+    });
+
+    test('latest intent rejects a stale updater rebased over its historical matching state', () => {
+        const aIntent = createSessionViewRenderIntent(selection('a', '/repo'));
+        const bIntent = createSessionViewRenderIntent(selection('b', '/repo'));
+        const historicalBState: SessionViewRenderState = {
+            activeIntent: bIntent,
+            cacheNeedsTrim: false,
+            cachedSessionViews: [],
+            pendingSessionView: null,
+        };
+
+        expect(materializeSessionViewRenderIntent(
+            historicalBState,
+            bIntent,
+            aIntent,
+            8,
+        )).toBe(historicalBState);
+    });
+
+    test('a cache hit becomes active immediately and promotes the existing view', () => {
+        const cacheLimits = limits(4, 64);
+        const a = selection('a', '/repo');
+        const b = selection('b', '/repo');
+        const bIntent = createSessionViewRenderIntent(b);
+        const initial: SessionViewRenderState = {
+            activeIntent: createSessionViewRenderIntent(a),
+            cacheNeedsTrim: false,
+            cachedSessionViews: reconcileSessionViewCache(
+                reconcileSessionViewCache([], b, cacheLimits, 8),
+                a,
+                cacheLimits,
+                8,
+            ),
+            pendingSessionView: null,
+        };
+
+        const selectedB = applySessionViewSelectionIntent(initial, bIntent, cacheLimits);
+
+        expect(selectedB.cachedSessionViews.map((entry) => entry.sessionId)).toEqual(['a', 'b']);
+        expect(resolveActiveSessionViewKey(selectedB.cachedSessionViews, bIntent.key)).toBe(bIntent.key);
+    });
+
+    test('estimate replay trims against the latest selected view', () => {
+        const cacheLimits = limits(4, 16);
+        const a = selection('a', '/repo');
+        const b = selection('b', '/repo');
+        const aIntent = createSessionViewRenderIntent(a);
+        const cachedSessionViews = reconcileSessionViewCache(
+            reconcileSessionViewCache([], a, cacheLimits, 4),
+            b,
+            cacheLimits,
+            4,
+        );
+        const bKey = createSessionViewKey(b);
+        const recorded = recordSessionViewEstimate(cachedSessionViews, bKey, 20);
+        const replayedEstimate: SessionViewRenderState = {
+            activeIntent: aIntent,
+            cacheNeedsTrim: true,
+            cachedSessionViews: recorded,
+            pendingSessionView: null,
+        };
+
+        const trimmed = applySessionViewSelectionIntent(replayedEstimate, aIntent, cacheLimits);
+
+        expect(trimmed.cacheNeedsTrim).toBe(false);
+        expect(trimmed.cachedSessionViews.map((entry) => entry.sessionId)).toEqual(['a']);
+    });
+
+    test('reapplies tighter cache limits when the active intent is unchanged', () => {
+        const wideLimits = limits(4, 64);
+        const tightLimits = limits(2, 64);
+        const a = selection('a', '/repo');
+        const b = selection('b', '/repo');
+        const c = selection('c', '/repo');
+        const cIntent = createSessionViewRenderIntent(c);
+        const initial: SessionViewRenderState = {
+            activeIntent: cIntent,
+            cacheNeedsTrim: false,
+            cachedSessionViews: reconcileSessionViewCache(
+                reconcileSessionViewCache(
+                    reconcileSessionViewCache([], a, wideLimits, 8),
+                    b,
+                    wideLimits,
+                    8,
+                ),
+                c,
+                wideLimits,
+                8,
+            ),
+            pendingSessionView: null,
+        };
+
+        const constrained = applySessionViewSelectionIntent(initial, cIntent, tightLimits);
+
+        expect(constrained).not.toBe(initial);
+        expect(constrained.activeIntent).toBe(cIntent);
+        expect(constrained.cachedSessionViews.map((entry) => entry.sessionId)).toEqual(['b', 'c']);
     });
 });
