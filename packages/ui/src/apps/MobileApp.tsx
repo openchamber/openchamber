@@ -30,7 +30,7 @@ import type { ProjectEntry, RuntimeAPIs } from '@/lib/api/types';
 import { useOrientation } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { isIPadApp } from '@/lib/platform';
-import { resolveProjectForDirectory, resolveProjectForSessionDirectory } from '@/lib/projectResolution';
+import { normalizeProjectPath, resolveProjectForDirectory, resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { clampPercent, formatQuotaResetLabel, formatQuotaValueLabel, formatWindowLabel, QUOTA_PROVIDERS, resolveUsageTone } from '@/lib/quota';
 import { getDisplayModelName } from '@/lib/quota/model-families';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -48,6 +48,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
 import type { QuotaProviderId, UsageWindow } from '@/types';
+import type { WorktreeMetadata } from '@/types/worktree';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useSelectionStore } from '@/sync/selection-store';
@@ -2677,6 +2678,7 @@ export function MobileApp({ apis }: MobileAppProps) {
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const error = useSessionUIStore((state) => state.error);
   const clearError = useSessionUIStore((state) => state.clearError);
+  const worktreeDiscoveryEpoch = useSessionUIStore((state) => state.worktreeDiscoveryEpoch);
   const setIsMobile = useUIStore((state) => state.setIsMobile);
   const refreshGitHubAuthStatus = useGitHubAuthStore((state) => state.refreshStatus);
   const setPlanModeEnabled = useFeatureFlagsStore((state) => state.setPlanModeEnabled);
@@ -2895,33 +2897,58 @@ export function MobileApp({ apis }: MobileAppProps) {
     let cancelled = false;
 
     const run = async () => {
-      const worktreesByProject = new Map(useSessionUIStore.getState().availableWorktreesByProject);
+      const worktreesByProject = new Map<string, WorktreeMetadata[]>();
+      // Track confirmed non-Git repos so we can prune their stale entries.
+      const nonGitProjectPaths = new Set<string>();
 
       await Promise.all(
         projects.map(async (project) => {
-          const projectPath = project.path.replace(/\\/g, '/').replace(/\/+$/, '');
+          const projectPath = normalizeProjectPath(project.path);
           if (!projectPath) return;
           try {
             const cachedIsGitRepo = useGitStore.getState().directories.get(projectPath)?.isGitRepo;
             const isGitRepo =
               cachedIsGitRepo ?? (await import('@/lib/gitApi').then((m) => m.checkIsGitRepository(projectPath)));
-            if (!isGitRepo) return;
+            if (!isGitRepo) {
+              nonGitProjectPaths.add(projectPath);
+              return;
+            }
             const worktrees = await listProjectWorktrees({ id: project.id, path: projectPath });
             if (cancelled) return;
+            // Always add the project, even with an empty worktree list.
+            // Skipping would wipe persisted data when the store is overwritten.
             worktreesByProject.set(projectPath, worktrees);
           } catch {
-            // Worktree discovery is best-effort per project: a failed probe keeps
-            // that project's previously known (persisted) worktrees instead of
-            // wiping the whole map.
+            // Worktree discovery is best-effort; draft selector falls back to the project root.
+            // The merge below preserves existing data for projects where discovery failed.
           }
         }),
       );
 
       if (cancelled) return;
-      const allWorktrees = Array.from(worktreesByProject.values()).flat();
+
+      // Merge with existing store data to preserve worktrees for projects
+      // where discovery failed. Prune stale entries for removed projects
+      // and projects confirmed as non-Git repos.
+      const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
+      const currentProjectPaths = new Set(
+        projects
+          .map((p) => normalizeProjectPath(p.path))
+          .filter((p): p is string => Boolean(p)),
+      );
+      const mergedByProject = new Map<string, WorktreeMetadata[]>();
+      for (const [projectPath, worktrees] of worktreesByProject) {
+        mergedByProject.set(projectPath, worktrees);
+      }
+      for (const [projectPath, worktrees] of currentByProject) {
+        if (!mergedByProject.has(projectPath) && currentProjectPaths.has(projectPath) && !nonGitProjectPaths.has(projectPath)) {
+          mergedByProject.set(projectPath, worktrees);
+        }
+      }
+
       useSessionUIStore.setState({
-        availableWorktrees: allWorktrees,
-        availableWorktreesByProject: worktreesByProject,
+        availableWorktrees: [...mergedByProject.values()].flat(),
+        availableWorktreesByProject: mergedByProject,
       });
     };
 
@@ -2930,7 +2957,7 @@ export function MobileApp({ apis }: MobileAppProps) {
     return () => {
       cancelled = true;
     };
-  }, [isConnected, projects]);
+  }, [isConnected, projects, worktreeDiscoveryEpoch]);
 
   React.useEffect(() => {
     let cancelled = false;

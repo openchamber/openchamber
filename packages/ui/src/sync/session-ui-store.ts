@@ -32,7 +32,7 @@ import { composeForkSessionMessage } from "@/lib/messages/executionMeta"
 import { waitForPendingDraftWorktreeRequest } from "@/lib/worktrees/pendingDraftWorktree"
 import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap"
 import { getWorktreeSetupWaitEnabled } from "@/lib/openchamberConfig"
-import { resolveProjectForSessionDirectory } from "@/lib/projectResolution"
+import { normalizeProjectPath, resolveProjectForSessionDirectory } from "@/lib/projectResolution"
 import {
   getSyncSessions,
   getAllSyncSessions,
@@ -243,6 +243,10 @@ export type SessionUIState = {
   pendingChangesBarDismissed: Map<string, string>
   dismissPendingChangesBar: (sessionId: string, signature: string | null) => void
 
+  // Worktree discovery epoch — incremented on create/attach/remove to trigger re-discovery
+  worktreeDiscoveryEpoch: number
+  triggerWorktreeRediscovery: () => void
+
   // Actions — UI state management
   setCurrentSession: (id: string | null, directoryHint?: string | null) => void
   prepareForRuntimeSwitch: (apiBaseUrl?: string | null) => void
@@ -308,14 +312,7 @@ export type SessionUIState = {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const normalizePath = (value?: string | null): string | null => {
-  if (typeof value !== "string") return null
-  const trimmed = value.trim()
-  if (!trimmed) return null
-  const replaced = trimmed.replace(/\\/g, "/")
-  if (replaced === "/") return "/"
-  return replaced.length > 1 ? replaced.replace(/\/+$/, "") : replaced
-}
+const normalizePath = normalizeProjectPath
 
 const resolveDirectoryKey = (session: Session): string | null => {
   const sessionRecord = session as Session & {
@@ -559,6 +556,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   lastLoadedDirectory: null,
   sessionPlanAvailable: new Map(),
   pendingChangesBarDismissed: new Map(),
+  worktreeDiscoveryEpoch: 0,
+  triggerWorktreeRediscovery: () => set((state) => ({ worktreeDiscoveryEpoch: state.worktreeDiscoveryEpoch + 1 })),
 
   // ---------------------------------------------------------------------------
   // setCurrentSession

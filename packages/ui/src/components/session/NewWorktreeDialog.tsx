@@ -31,7 +31,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { validateWorktreeCreate, createWorktree } from '@/lib/worktrees/worktreeManager';
+import { validateWorktreeCreate, createWorktree, listProjectWorktrees, invalidateWorktreeList, attachWorktreeToStore } from '@/lib/worktrees/worktreeManager';
 import { withWorktreeUpstreamDefaults } from '@/lib/worktrees/worktreeCreate';
 import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
 import { getWorktreeSetupCommands, getWorktreeSetupWaitEnabled } from '@/lib/openchamberConfig';
@@ -54,6 +54,7 @@ import type {
   GitHubPullRequestSummary,
 } from '@/lib/api/types';
 import type { ProjectRef } from '@/lib/worktrees/worktreeManager';
+import type { WorktreeMetadata } from '@/types/worktree';
 import { useI18n } from '@/lib/i18n';
 
 type Mode = 'new-branch' | 'existing-branch';
@@ -715,6 +716,13 @@ export function NewWorktreeDialog({
               return;
             }
 
+            // For existing-branch mode, branch_in_use means the worktree
+            // already exists on disk — we'll attach it instead of creating.
+            // Don't treat it as a validation error.
+            if (error.code === 'branch_in_use' && mode === 'existing-branch') {
+              return;
+            }
+
             if (error.code.startsWith('branch_')) {
               branchError = branchError ?? error.message;
             }
@@ -852,7 +860,41 @@ export function NewWorktreeDialog({
       
       const resolvedArgs = await withWorktreeUpstreamDefaults(projectDirectory, args);
 
-      const metadata = await createWorktree(projectRef, resolvedArgs);
+      // For existing-branch mode, check if the branch already has a worktree
+      // before trying to create one. If it does, attach the existing worktree
+      // to the store instead of creating a duplicate.
+      let metadata: WorktreeMetadata;
+      if (mode === 'existing-branch') {
+        invalidateWorktreeList(projectDirectory);
+        const existingWorktrees = await listProjectWorktrees(projectRef);
+        // The user may have selected a remote ref like remotes/fork/sdk-v1.17.12-pagination.
+        // normalizedBranch strips remotes/ → fork/sdk-v1.17.12-pagination, but the actual
+        // local branch is sdk-v1.17.12-pagination. Try both the normalized value and the
+        // local branch name derived from the remote ref.
+        const localBranchFromRemote = branchName.startsWith('remotes/')
+          ? branchName.split('/').slice(2).join('/')
+          : null;
+        // readProjectWorktrees strips the refs/heads/ prefix, so wt.branch
+        // never contains it. Compare against the bare branch name only.
+        const matched = existingWorktrees.find(
+          (wt) =>
+            wt.branch === normalizedBranch ||
+            (localBranchFromRemote && wt.branch === localBranchFromRemote),
+        );
+        if (matched) {
+          // Attach existing worktree to the store using shared helper
+          // to keep this path consistent with createWorktree's store update.
+          attachWorktreeToStore(projectDirectory, matched);
+          // Trigger sidebar re-discovery so any other worktrees created
+          // externally (e.g., by OpenCode) also appear.
+          useSessionUIStore.getState().triggerWorktreeRediscovery();
+          metadata = matched;
+        } else {
+          metadata = await createWorktree(projectRef, resolvedArgs);
+        }
+      } else {
+        metadata = await createWorktree(projectRef, resolvedArgs);
+      }
 
       let createdSessionId: string | null = null;
 
