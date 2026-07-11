@@ -2730,5 +2730,8 @@ export const dict: Record<I18nKey, string> = {
   'onboarding.localSetup.status.autoContinue': '検出され次第自動的に続行します。',
   'updateDialog.changelog.title': '新機能',
   'quota.window.premiumInteractions': 'プレミアムインタラクション',
+  'settings.openchamber.visual.field.stripSlashOnSubmitAria': '送信時に先頭のスラッシュを削除し、スラッシュコマンドが展開されないようにする',
+  'settings.openchamber.visual.field.stripSlashOnSubmit': '送信時にスラッシュを削除',
+  'settings.openchamber.visual.field.stripSlashOnSubmitDescription': '有効にすると、スラッシュコマンドまたはスキルを送信するときに先頭のスラッシュを削除し、通常のメッセージとしてテキストを送信します。コマンドやスキルは実行されず、会話には入力した内容が表示されます。',
 
 };

@@ -498,6 +498,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.inputSpellcheckEnabled === 'boolean' && settings.inputSpellcheckEnabled !== store.inputSpellcheckEnabled) {
     store.setInputSpellcheckEnabled(settings.inputSpellcheckEnabled);
   }
+  if (typeof settings.stripSlashOnSubmit === 'boolean' && settings.stripSlashOnSubmit !== store.stripSlashOnSubmit) {
+    store.setStripSlashOnSubmit(settings.stripSlashOnSubmit);
+  }
   if (
     typeof settings.showOpenCodeUpdateNotifications === 'boolean'
     && settings.showOpenCodeUpdateNotifications !== store.showOpenCodeUpdateNotifications
@@ -1043,6 +1046,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
 
   if (typeof candidate.inputSpellcheckEnabled === 'boolean') {
     result.inputSpellcheckEnabled = candidate.inputSpellcheckEnabled;
+  }
+  if (typeof candidate.stripSlashOnSubmit === 'boolean') {
+    result.stripSlashOnSubmit = candidate.stripSlashOnSubmit;
   }
   if (typeof candidate.showOpenCodeUpdateNotifications === 'boolean') {
     result.showOpenCodeUpdateNotifications = candidate.showOpenCodeUpdateNotifications;

@@ -257,6 +257,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isMobile,
   },
   {
+    id: 'chat.strip-slash-on-submit',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.stripSlashOnSubmit',
+    descriptionKey: 'settings.openchamber.visual.field.stripSlashOnSubmitDescription',
+    keywords: ['slash', 'command', 'skill', 'expand', 'submit'],
+  },
+  {
     id: 'sessions.default-model',
     page: 'sessions',
     titleKey: 'settings.openchamber.defaults.field.defaultModel',
