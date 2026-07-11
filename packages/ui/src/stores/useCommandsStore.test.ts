@@ -6,7 +6,8 @@ let listCommandsWithDetailsCalls = 0;
 let listCommandsWithDetailsImpl: () => Promise<unknown[]> = async () => [];
 let withDirectoryImpl: (_directory: string | null, callback: () => Promise<unknown>) => Promise<unknown> = async (_directory, callback) => callback();
 let getDirectoryImpl: () => string = () => '/fallback/project';
-let runtimeFetchImpl: () => Promise<Response> = async () => new Response(JSON.stringify({ scope: 'project' }), {
+let runtimeFetchCalls: Array<{ input: string; init?: RequestInit }> = [];
+let runtimeFetchImpl: (input: string, init?: RequestInit) => Promise<Response> = async () => new Response(JSON.stringify({ commands: {} }), {
   headers: { 'Content-Type': 'application/json' },
 });
 
@@ -17,7 +18,10 @@ const listCommandsWithDetailsMock = async () => {
 
 const withDirectoryMock = async (directory: string | null, callback: () => Promise<unknown>) => withDirectoryImpl(directory, callback);
 const getDirectoryMock = () => getDirectoryImpl();
-const runtimeFetchMock = async () => runtimeFetchImpl();
+const runtimeFetchMock = async (input: string, init?: RequestInit) => {
+  runtimeFetchCalls.push({ input, init });
+  return runtimeFetchImpl(input, init);
+};
 
 mock.module('@/lib/opencode/client', () => ({
   opencodeClient: {
@@ -59,7 +63,8 @@ describe('useCommandsStore', () => {
     listCommandsWithDetailsImpl = async () => [];
     withDirectoryImpl = async (_directory, callback) => callback();
     getDirectoryImpl = () => '/fallback/project';
-    runtimeFetchImpl = async () => new Response(JSON.stringify({ scope: 'project' }), {
+    runtimeFetchCalls = [];
+    runtimeFetchImpl = async () => new Response(JSON.stringify({ commands: {} }), {
       headers: { 'Content-Type': 'application/json' },
     });
 
@@ -89,5 +94,28 @@ describe('useCommandsStore', () => {
     expect(listCommandsWithDetailsCalls).toBe(3);
     expect(useCommandsStore.getState().commands).toEqual(previousCommands);
     expect(useCommandsStore.getState().isLoading).toBe(false);
+  });
+
+  test('loads scope metadata for many commands with one batched runtime request', async () => {
+    listCommandsWithDetailsImpl = async () => Array.from({ length: 80 }, (_, index) => ({
+      name: `command-${index}`,
+      description: `Command ${index}`,
+      source: 'command',
+    }));
+    runtimeFetchImpl = async (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as { names: string[] };
+      return new Response(JSON.stringify({
+        commands: Object.fromEntries(body.names.map((name) => [name, { scope: 'project', isBuiltIn: false }])),
+      }), { headers: { 'Content-Type': 'application/json' } });
+    };
+
+    const result = await useCommandsStore.getState().loadCommands();
+
+    expect(result).toBe(true);
+    expect(runtimeFetchCalls).toHaveLength(1);
+    expect(runtimeFetchCalls[0]?.input).toBe('/api/config/commands/metadata');
+    expect(runtimeFetchCalls[0]?.init?.method).toBe('POST');
+    expect(useCommandsStore.getState().commands).toHaveLength(80);
+    expect(useCommandsStore.getState().commands.every((command) => command.scope === 'project')).toBe(true);
   });
 });

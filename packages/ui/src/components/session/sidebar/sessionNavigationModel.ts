@@ -39,9 +39,10 @@ const resolveNodeDirectory = (node: SessionNode, group: SessionGroup): string | 
     ?? normalizePath(group.directory ?? null);
 };
 
-export const getDefaultProjectGroupVisibleCount = (hideDirectoryControls: boolean): number => (
-  hideDirectoryControls ? 10 : 5
-);
+// Cold start caches one bounded 20-session root page per project, while the
+// sidebar keeps the initial project slice compact. Already-cached rows and
+// further remote pages remain user-driven through "Show more sessions".
+export const getDefaultProjectGroupVisibleCount = (): number => 5;
 
 /**
  * Keep only project rows that are logically rendered by the sidebar. This is

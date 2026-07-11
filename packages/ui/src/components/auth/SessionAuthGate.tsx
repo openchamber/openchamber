@@ -7,13 +7,15 @@ import { toast } from '@/components/ui';
 import { invokeDesktop, isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { syncDesktopSettings, initializeAppearancePreferences } from '@/lib/persistence';
 import { applyPersistedDirectoryPreferences } from '@/lib/directoryPersistence';
+import { ensureSettingsHydrated } from '@/lib/settingsStartup';
+import { createRuntimeEndpointTransitionCoalescer } from '@/lib/runtime-endpoint-transition';
 import { DesktopHostSwitcherInline } from '@/components/desktop/DesktopHostSwitcher';
 import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeExtraHeadersSync } from '@/lib/runtime-auth';
-import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, getRuntimeKey, isRuntimeEndpointIdentityChange, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { desktopHostsGet, desktopHostsSet, getDesktopHostApiUrl, normalizeHostUrl } from '@/lib/desktopHosts';
 import { resolveStatusCheckFailureState, type GateState } from './sessionAuthGateState';
 import {
@@ -446,7 +448,10 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
       return;
     }
 
-    return subscribeRuntimeEndpointChanged(() => {
+    const transitions = createRuntimeEndpointTransitionCoalescer((detail: Parameters<typeof isRuntimeEndpointIdentityChange>[0]) => {
+      if (!isRuntimeEndpointIdentityChange(detail)) {
+        return;
+      }
       setPassword('');
       setErrorMessage('');
       setRetryAfter(undefined);
@@ -454,6 +459,11 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
       setState('pending');
       void checkStatus();
     });
+    const unsubscribe = subscribeRuntimeEndpointChanged((detail) => transitions.schedule(detail));
+    return () => {
+      unsubscribe();
+      transitions.cancel();
+    };
   }, [checkStatus, skipAuth]);
 
   React.useEffect(() => {
@@ -475,11 +485,15 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
     }
     if (state === 'authenticated' && !hasResyncedRef.current) {
       hasResyncedRef.current = true;
-      void (async () => {
-        await syncDesktopSettings();
-        await initializeAppearancePreferences();
-        await applyPersistedDirectoryPreferences();
-      })();
+      void ensureSettingsHydrated({
+        runtimeKey: getRuntimeKey(),
+        initializeAppearance: initializeAppearancePreferences,
+        syncSettings: syncDesktopSettings,
+        applyDirectory: applyPersistedDirectoryPreferences,
+        onError: (stage, error) => {
+          console.error(`[SessionAuthGate] ${stage} settings hydration failed:`, error);
+        },
+      });
     }
   }, [skipAuth, state]);
 

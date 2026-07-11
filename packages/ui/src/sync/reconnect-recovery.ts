@@ -19,6 +19,15 @@ type ReconnectCandidateOptions = {
   viewedSession?: ViewedSessionMaterializationTarget | null
 }
 
+export function getReconnectMaterializationSessionIds(
+  candidateSessionIds: string[],
+  options?: ReconnectCandidateOptions,
+): string[] {
+  const viewed = options?.viewedSession
+  if (!viewed?.sessionId || viewed.directory !== options?.directory) return []
+  return candidateSessionIds.includes(viewed.sessionId) ? [viewed.sessionId] : []
+}
+
 export function getReconnectCandidateSessionIds(state: ReconnectMaterializationState, options?: ReconnectCandidateOptions) {
   const ids = new Set<string>()
 

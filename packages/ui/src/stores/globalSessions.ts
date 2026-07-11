@@ -79,12 +79,16 @@ export async function listGlobalSessionPages(
         directory?: string;
         archived: boolean;
         roots?: boolean;
+        /** Include only sessions updated at or after this timestamp. */
+        start?: number;
         cursor?: number;
         pageSize: number;
         /** Stop after collecting this many sessions. Omit for a full paginated load. */
         maxItems?: number;
         /** Per-page request budget. The proxy's generic timeout is intentionally much longer. */
         timeoutMs?: number;
+        /** Bounded retry budget for this page. Directory cold-start loads use two attempts. */
+        retryAttempts?: number;
         signal?: AbortSignal;
         onPage?: (sessions: GlobalSessionRecord[]) => void;
     },
@@ -110,6 +114,7 @@ export async function listGlobalSessionPages(
                 ...(options.directory ? { directory: options.directory } : {}),
                 archived: options.archived,
                 ...(options.roots !== undefined ? { roots: options.roots } : {}),
+                ...(options.start !== undefined ? { start: options.start } : {}),
                 limit: requestLimit,
                 ...(cursor !== undefined ? { cursor } : {}),
             }, requestSignal ? { signal: requestSignal } : undefined);
@@ -120,7 +125,7 @@ export async function listGlobalSessionPages(
                 payload: unwrapSessionList(result, "experimental.session.list")
                     .map((session) => stripSessionListDetails(session) as GlobalSessionRecord),
             };
-        }, { attempts: 3, delay: 500 });
+        }, { attempts: options.retryAttempts ?? 3, delay: 500 });
         if (payload.length === 0) break;
 
         let appended = 0;

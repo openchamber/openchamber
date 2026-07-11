@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { createDirectoryQueryCanonicalizer, normalizeForwardedDirectoryHeaders } from './proxy.js';
+import {
+  createDirectoryQueryCanonicalizer,
+  isInteractiveSessionRequest,
+  normalizeForwardedDirectoryHeaders,
+} from './proxy.js';
 
 describe('createDirectoryQueryCanonicalizer', () => {
   it('canonicalizes directory query params and preserves other params', async () => {
@@ -91,5 +95,18 @@ describe('normalizeForwardedDirectoryHeaders', () => {
     expect(headers).toEqual({
       'x-opencode-directory': '/Users/example/project%20literal',
     });
+  });
+});
+
+describe('isInteractiveSessionRequest', () => {
+  it('prioritizes selected-session detail and message reads', () => {
+    expect(isInteractiveSessionRequest('GET', '/api/session/ses_1')).toBe(true);
+    expect(isInteractiveSessionRequest('GET', '/api/session/ses_1/message?limit=30')).toBe(true);
+    expect(isInteractiveSessionRequest('GET', '/api/session/ses_1/children')).toBe(true);
+  });
+
+  it('prioritizes session mutations but not background session lists', () => {
+    expect(isInteractiveSessionRequest('GET', '/api/session?roots=true&limit=20')).toBe(false);
+    expect(isInteractiveSessionRequest('POST', '/api/session/ses_1/message')).toBe(true);
   });
 });

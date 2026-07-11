@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.15.2] - 2026-07-11
+
+- **Session startup performance:** Electron restores each project's latest session summaries from its own SQLite index, then refreshes OpenCode incrementally instead of rebuilding the full sidebar on every launch.
+- **Foreground responsiveness:** session-index work now runs as a single server-owned background job. Conversation content, children, and message mutations preempt it, so selecting a session no longer waits behind project-wide refreshes.
+- **Startup experience:** a first run shows deterministic global loading progress; cached starts show the prior sidebar immediately and apply SQLite updates through a low-priority long poll.
+- **Request reduction:** project lists are capped to the newest 20 root sessions, history uses cursor-driven "Show more" pagination, and session children load only when a user expands a parent session.
+- **Reliability:** runtime-transition bursts, readiness races, stale async writes, repeated tray/sidebar refreshes, and duplicate session/message loads were consolidated or cancelled safely.
+- **Session and chat rendering:** removed neighbor-session/history prefetch work that was not user initiated, tightened directory-level request deduplication, and preserved existing snapshots on transient failures.
+
 ## [1.15.1] - 2026-07-11
 
 - **Desktop releases:** GitHub Releases and update metadata now publish from `yee94/openchamber`.

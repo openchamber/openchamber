@@ -49,7 +49,7 @@ import { resolveFallbackTaskSessionId } from './resolveFallbackTaskSessionId';
 import { readTaskTagSessionIdFromOutput } from './taskSessionIdParser';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { useI18n } from '@/lib/i18n';
-import { getDiffPatchEntries, getPatchText, type DiffPatchEntry } from './toolDiffUtils';
+import { getDiffPatchEntries, getPatchText } from './toolDiffUtils';
 import { useDeferredToolHydration } from './deferredToolHydrationContext';
 import { scheduleAfterPaintTask } from '@/lib/afterPaintTaskQueue';
 import { DualLimitLru } from '@/lib/dualLimitLru';

@@ -11,6 +11,7 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
+import { Kbd } from '@/components/ui/kbd';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { ModelLogo } from '@/components/ui/ModelLogo';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
@@ -1228,6 +1229,17 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
         return null;
     }, [cycleAgentShortcut]);
+
+    const handleAgentCycleShortcut = React.useCallback((event: React.KeyboardEvent) => {
+        const cycleAgentDirection = getCycleAgentDirectionFromEvent(event);
+        if (!cycleAgentDirection) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        handleCycleAgentFromModelPicker(cycleAgentDirection);
+    }, [getCycleAgentDirectionFromEvent, handleCycleAgentFromModelPicker]);
 
     const handleProviderAndModelChange = (
         providerId: string,
@@ -2700,7 +2712,12 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                     </div>
                                 </DropdownMenuTrigger>
                             </TooltipTrigger>
-                            <DropdownMenuContent align={relocateAgent ? 'start' : 'end'} alignOffset={relocateAgent ? 0 : -40} className="w-[min(280px,calc(100vw-2rem))] p-0 flex flex-col">
+                            <DropdownMenuContent
+                                align={relocateAgent ? 'start' : 'end'}
+                                alignOffset={relocateAgent ? 0 : -40}
+                                className="w-[min(280px,calc(100vw-2rem))] p-0 flex flex-col"
+                                onKeyDownCapture={handleAgentCycleShortcut}
+                            >
                                 <div className="p-2 border-b border-border/40">
                                     <div className="relative">
                                         <Icon name="search" className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
@@ -2759,6 +2776,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                         )}
                                     </div>
                                 </ScrollableOverlay>
+                                <div className="flex items-center gap-1.5 border-t border-border/40 px-2 py-1.5 typography-micro text-muted-foreground">
+                                    <Kbd className="h-4 min-w-4 rounded-[3px] px-1 text-[10px] font-medium tracking-tight shadow-none">Tab</Kbd>
+                                    <span>{t('chat.modelControls.keyboardHintSwitchAgentLabel')}</span>
+                                </div>
                             </DropdownMenuContent>
                         </DropdownMenu>
                         {renderAgentTooltipContent()}

@@ -201,7 +201,7 @@ export const createServerUtilsRuntime = (dependencies) => {
   const fetchProvidersSnapshot = () => fetchArraySnapshot('/provider', 'providers snapshot');
   const fetchModelsSnapshot = () => fetchArraySnapshot('/model', 'models snapshot');
 
-  const setupProxy = (app) => {
+  const setupProxy = (app, options = {}) => {
     registerOpenCodeProxy(app, {
       fs,
       os,
@@ -213,6 +213,7 @@ export const createServerUtilsRuntime = (dependencies) => {
       buildOpenCodeUrl,
       ensureOpenCodeApiPrefix,
       getUiNotificationClients,
+      onInteractiveSessionRequest: options.onInteractiveSessionRequest,
     });
   };
 

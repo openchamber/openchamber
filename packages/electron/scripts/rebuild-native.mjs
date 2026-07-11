@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import path from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import fsp from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -13,6 +13,7 @@ const __dirname = path.dirname(__filename);
 const electronDir = path.resolve(__dirname, '..');
 const repoRoot = path.resolve(electronDir, '..', '..');
 const require = createRequire(import.meta.url);
+const webRequire = createRequire(path.join(repoRoot, 'packages', 'web', 'package.json'));
 
 const electronPkg = require('electron/package.json');
 const electronVersion = electronPkg.version;
@@ -129,6 +130,46 @@ const ensureWindowsNodeAddonApiForNodePty = async (rebuildRootPath) => {
   };
 };
 
+const resolveElectronNodeGyp = () => {
+  const bunStore = path.join(repoRoot, 'node_modules', '.bun');
+  const entry = readdirSync(bunStore, { withFileTypes: true })
+    .find((candidate) => candidate.isDirectory() && candidate.name.startsWith('@electron+node-gyp@'));
+  if (!entry) {
+    throw new Error('Unable to locate Electron node-gyp in Bun workspace dependencies.');
+  }
+  const nodeGypPath = path.join(bunStore, entry.name, 'node_modules', '@electron', 'node-gyp', 'bin', 'node-gyp.js');
+  if (!existsSync(nodeGypPath)) {
+    throw new Error(`Electron node-gyp executable is missing: ${nodeGypPath}`);
+  }
+  return nodeGypPath;
+};
+
+const rebuildBetterSqliteForElectron = () => {
+  // @electron/rebuild cannot follow Bun's workspace symlink into the web
+  // package, so it reports success while leaving better-sqlite3 on the host
+  // Node ABI. Build this one dependency directly against Electron headers.
+  const packageDir = path.dirname(webRequire.resolve('better-sqlite3/package.json'));
+  const nodeGypPath = resolveElectronNodeGyp();
+  execFileSync(process.execPath, [
+    nodeGypPath,
+    'rebuild',
+    '--release',
+    `--target=${electronVersion}`,
+    `--arch=${process.env.ELECTRON_BUILDER_ARCH || process.arch}`,
+    '--dist-url=https://electronjs.org/headers',
+  ], {
+    cwd: packageDir,
+    env: {
+      ...process.env,
+      npm_config_runtime: 'electron',
+      npm_config_target: electronVersion,
+      npm_config_arch: process.env.ELECTRON_BUILDER_ARCH || process.arch,
+      npm_config_disturl: 'https://electronjs.org/headers',
+    },
+    stdio: 'inherit',
+  });
+};
+
 console.log(`[electron] rebuilding native modules against Electron ${electronVersion}...`);
 
 // Rebuild against the hoisted root node_modules (bun workspace layout).
@@ -145,6 +186,7 @@ try {
     arch: process.env.ELECTRON_BUILDER_ARCH || process.arch,
     onlyModules: ['better-sqlite3', 'node-pty', 'bun-pty'],
   });
+  rebuildBetterSqliteForElectron();
 } finally {
   try {
     await cleanupNodeAddonApi();

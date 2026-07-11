@@ -1,8 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { OpencodeClient, Session } from '@opencode-ai/sdk/v2';
 
-import { resolveGlobalSessionDirectory, mergeLiveSessionWithGlobalSession, useGlobalSessionsStore } from './useGlobalSessionsStore';
+import {
+  mergeLiveSessionWithGlobalSession,
+  refreshStartupGlobalSessionsForDirectories,
+  resolveGlobalSessionDirectory,
+  useGlobalSessionsStore,
+} from './useGlobalSessionsStore';
 import { opencodeClient } from '@/lib/opencode/client';
+import { resetOpenCodeReadiness } from '@/lib/runtime-readiness';
 
 type SessionExtra = Partial<Session> & {
   directory?: string | null;
@@ -19,8 +25,13 @@ const buildSession = (shareUrl: string, extra: SessionExtra = {}): Session => ({
 
 describe('useGlobalSessionsStore', () => {
   let restoreGetSdkClient: (() => void) | null = null;
+  let restoreCheckHealth: (() => void) | null = null;
 
   beforeEach(() => {
+    resetOpenCodeReadiness();
+    const originalCheckHealth = opencodeClient.checkHealth;
+    opencodeClient.checkHealth = async () => true;
+    restoreCheckHealth = () => { opencodeClient.checkHealth = originalCheckHealth; };
     useGlobalSessionsStore.setState({
       activeSessions: [],
       archivedSessions: [],
@@ -31,15 +42,260 @@ describe('useGlobalSessionsStore', () => {
       archivedLoadedDirectories: new Set(),
       archivedLoadingDirectories: new Set(),
       activePaginationByDirectory: new Map(),
+      cachedDirectories: new Set(),
+      hasHydratedSessionIndex: false,
+      hasCachedSessionIndex: false,
+      sessionIndexSyncByDirectory: new Map(),
       hasLoadedFullCatalog: false,
       hasLoaded: false,
       status: 'idle',
+      startupSyncProgress: { active: false, phase: 'idle', completed: 0, total: 0 },
     });
   });
 
   afterEach(() => {
     restoreGetSdkClient?.();
     restoreGetSdkClient = null;
+    restoreCheckHealth?.();
+    restoreCheckHealth = null;
+    resetOpenCodeReadiness();
+  });
+
+  test('gates concurrent directory refreshes behind one runtime readiness probe', async () => {
+    let healthCalls = 0;
+    let releaseHealth: (ready: boolean) => void = () => undefined;
+    opencodeClient.checkHealth = () => {
+      healthCalls += 1;
+      return new Promise<boolean>((resolve) => { releaseHealth = resolve; });
+    };
+    const listCalls: Array<Record<string, unknown>> = [];
+    const list = async (input: Record<string, unknown>) => {
+      listCalls.push(input);
+      return { data: [], error: undefined, response: new Response(null, { status: 200 }) };
+    };
+    const sdk = { experimental: { session: { list } } } as unknown as OpencodeClient;
+    const originalGetSdkClient = opencodeClient.getSdkClient;
+    opencodeClient.getSdkClient = () => sdk;
+    restoreGetSdkClient = () => { opencodeClient.getSdkClient = originalGetSdkClient; };
+
+    const refresh = useGlobalSessionsStore.getState().refreshSessionsForDirectories(['/repo/a', '/repo/b']);
+    await Promise.resolve();
+
+    expect(healthCalls).toBe(1);
+    expect(listCalls).toHaveLength(0);
+    releaseHealth(true);
+    await refresh;
+    expect(listCalls).toHaveLength(2);
+  });
+
+  test('starts no more than seven cold directory summaries at once', async () => {
+    type ListResult = { data: Session[]; error: undefined; response: Response };
+    const resolvers: Array<(value: ListResult) => void> = [];
+    const listCalls: Array<Record<string, unknown>> = [];
+    const list = (input: Record<string, unknown>) => new Promise<ListResult>((resolve) => {
+      listCalls.push(input);
+      resolvers.push(resolve);
+    });
+    const sdk = { experimental: { session: { list } } } as unknown as OpencodeClient;
+    const originalGetSdkClient = opencodeClient.getSdkClient;
+    opencodeClient.getSdkClient = () => sdk;
+    restoreGetSdkClient = () => { opencodeClient.getSdkClient = originalGetSdkClient; };
+
+    const refresh = useGlobalSessionsStore.getState().refreshSessionsForDirectories(
+      Array.from({ length: 8 }, (_, index) => `/repo/${index}`),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(listCalls).toHaveLength(7);
+    resolvers.splice(0).forEach((resolve) => resolve({ data: [], error: undefined, response: new Response(null, { status: 200 }) }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(listCalls).toHaveLength(8);
+    resolvers.splice(0).forEach((resolve) => resolve({ data: [], error: undefined, response: new Response(null, { status: 200 }) }));
+    await refresh;
+  });
+
+  test('reports blocking cold-start progress as each project directory settles', async () => {
+    type ListResult = { data: Session[]; error: undefined; response: Response };
+    const resolvers: Array<(value: ListResult) => void> = [];
+    const list = () => new Promise<ListResult>((resolve) => {
+      resolvers.push(resolve);
+    });
+    const sdk = { experimental: { session: { list } } } as unknown as OpencodeClient;
+    const originalGetSdkClient = opencodeClient.getSdkClient;
+    opencodeClient.getSdkClient = () => sdk;
+    restoreGetSdkClient = () => { opencodeClient.getSdkClient = originalGetSdkClient; };
+
+    const refresh = refreshStartupGlobalSessionsForDirectories([
+      '/repo/a',
+      '/repo/b',
+      '/repo/c',
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(useGlobalSessionsStore.getState().startupSyncProgress).toEqual({
+      active: true,
+      phase: 'syncing',
+      completed: 0,
+      total: 3,
+    });
+
+    resolvers[0]?.({ data: [], error: undefined, response: new Response(null, { status: 200 }) });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(useGlobalSessionsStore.getState().startupSyncProgress.completed).toBe(1);
+
+    resolvers.slice(1).forEach((resolve) => resolve({
+      data: [],
+      error: undefined,
+      response: new Response(null, { status: 200 }),
+    }));
+    await refresh;
+
+    expect(useGlobalSessionsStore.getState().startupSyncProgress).toEqual({
+      active: false,
+      phase: 'idle',
+      completed: 3,
+      total: 3,
+    });
+  });
+
+  test('keeps a first run blocked until its initial root-session refresh settles', async () => {
+    type ListResult = { data: Session[]; error: undefined; response: Response };
+    let resolveList: (value: ListResult) => void = () => undefined;
+    const list = () => new Promise<ListResult>((resolve) => { resolveList = resolve; });
+    const sdk = { experimental: { session: { list } } } as unknown as OpencodeClient;
+    const originalGetSdkClient = opencodeClient.getSdkClient;
+    opencodeClient.getSdkClient = () => sdk;
+    restoreGetSdkClient = () => { opencodeClient.getSdkClient = originalGetSdkClient; };
+
+    let finished = false;
+    const startup = useGlobalSessionsStore.getState().startSessionIndexStartup(['/repo/first-run'])
+      .then(() => { finished = true; });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(finished).toBe(false);
+    expect(useGlobalSessionsStore.getState().startupSyncProgress.phase).toBe('syncing');
+
+    resolveList({ data: [], error: undefined, response: new Response(null, { status: 200 }) });
+    await startup;
+    expect(finished).toBe(true);
+  });
+
+  test('retries failed first-run directories after adaptive concurrency drops', async () => {
+    let calls = 0;
+    const list = async () => {
+      calls += 1;
+      if (calls <= 2) {
+        return {
+          data: undefined,
+          error: { message: 'service unavailable' },
+          response: new Response(null, { status: 503 }),
+        };
+      }
+      return {
+        data: [buildSession('https://share.example/retry', { directory: '/repo/retry' })],
+        error: undefined,
+        response: new Response(null, { status: 200 }),
+      };
+    };
+    const sdk = { experimental: { session: { list } } } as unknown as OpencodeClient;
+    const originalGetSdkClient = opencodeClient.getSdkClient;
+    opencodeClient.getSdkClient = () => sdk;
+    restoreGetSdkClient = () => { opencodeClient.getSdkClient = originalGetSdkClient; };
+
+    await useGlobalSessionsStore.getState().startSessionIndexStartup(['/repo/retry']);
+
+    expect(calls).toBe(3);
+    expect(useGlobalSessionsStore.getState().loadedDirectories.has('/repo/retry')).toBe(true);
+    expect(useGlobalSessionsStore.getState().sessionsByDirectory.get('/repo/retry')).toHaveLength(1);
+  });
+
+  test('releases startup after the local restore while OpenCode validation continues in background', async () => {
+    type ListResult = { data: Session[]; error: undefined; response: Response };
+    let resolveList: (value: ListResult) => void = () => undefined;
+    const list = () => new Promise<ListResult>((resolve) => { resolveList = resolve; });
+    const sdk = { experimental: { session: { list } } } as unknown as OpencodeClient;
+    const originalGetSdkClient = opencodeClient.getSdkClient;
+    opencodeClient.getSdkClient = () => sdk;
+    restoreGetSdkClient = () => { opencodeClient.getSdkClient = originalGetSdkClient; };
+    useGlobalSessionsStore.setState({
+      cachedDirectories: new Set(['/repo/cached']),
+      hasCachedSessionIndex: true,
+    });
+
+    let finished = false;
+    await useGlobalSessionsStore.getState().startSessionIndexStartup(['/repo/cached'])
+      .then(() => { finished = true; });
+
+    expect(finished).toBe(true);
+    expect(useGlobalSessionsStore.getState().startupSyncProgress.active).toBe(true);
+    expect(useGlobalSessionsStore.getState().startupSyncProgress.phase).toBe('syncing');
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    resolveList({ data: [], error: undefined, response: new Response(null, { status: 200 }) });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+  test('uses the Electron server job without issuing browser-side OpenCode session lists', async () => {
+    const originalWindow = globalThis.window;
+    const originalFetch = globalThis.fetch;
+    const originalGetSdkClient = opencodeClient.getSdkClient;
+    let sdkListCalls = 0;
+    const requests: string[] = [];
+    const cached = buildSession('https://share.example/server-cache', { directory: '/repo/server' });
+    const snapshot = {
+      revision: 1,
+      sync: {
+        active: false,
+        completed: 1,
+        total: 1,
+        pendingDirectories: [],
+        completedDirectories: ['/repo/server'],
+        failedDirectories: [],
+      },
+      directories: [{
+        directory: '/repo/server',
+        cursor: 2,
+        hasMore: false,
+        lastSyncedAt: 1000,
+        lastFullSyncedAt: 1000,
+        lastAccessedAt: 1000,
+        sessions: [cached],
+      }],
+    };
+    try {
+      Object.defineProperty(globalThis, 'window', {
+        configurable: true,
+        value: { location: { origin: 'http://localhost', href: 'http://localhost/' } },
+      });
+      globalThis.fetch = async (input) => {
+        const url = input instanceof Request ? input.url : String(input);
+        requests.push(new URL(url, 'http://localhost').pathname);
+        const isSnapshot = requests.length === 1;
+        return new Response(JSON.stringify(isSnapshot ? { available: true, ...snapshot } : snapshot), {
+          status: isSnapshot ? 200 : 202,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      };
+      opencodeClient.getSdkClient = () => ({
+        experimental: { session: { list: async () => {
+          sdkListCalls += 1;
+          return { data: [], error: undefined, response: new Response(null, { status: 200 }) };
+        } } },
+      } as unknown as OpencodeClient);
+
+      await useGlobalSessionsStore.getState().startSessionIndexStartup(['/repo/server']);
+
+      expect(sdkListCalls).toBe(0);
+      expect(requests).toEqual([
+        '/api/openchamber/session-index',
+        '/api/openchamber/session-index/sync',
+      ]);
+      expect(useGlobalSessionsStore.getState().sessionsByDirectory.get('/repo/server')).toEqual([cached]);
+    } finally {
+      opencodeClient.getSdkClient = originalGetSdkClient;
+      Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow });
+      globalThis.fetch = originalFetch;
+    }
   });
 
   test('coalesces overlapping active refreshes by directory and keeps a cached snapshot visible', async () => {
@@ -66,6 +322,7 @@ describe('useGlobalSessionsStore', () => {
 
     const first = useGlobalSessionsStore.getState().refreshSessionsForDirectories(['/repo/app']);
     const second = useGlobalSessionsStore.getState().refreshSessionsForDirectories(['/repo/app']);
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(calls.length).toBe(1);
     expect(calls[0]).toEqual({ directory: '/repo/app', archived: false, roots: true, limit: 20 });
@@ -83,6 +340,67 @@ describe('useGlobalSessionsStore', () => {
     expect(calls.length).toBe(1);
     expect(useGlobalSessionsStore.getState().activeSessions[0]?.title).toBe('Fresh session');
     expect(useGlobalSessionsStore.getState().refreshingDirectories.has('/repo/app')).toBe(false);
+  });
+
+  test('merges an incremental start-window response without erasing cached sessions', async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    const list = async (input: Record<string, unknown>) => {
+      calls.push(input);
+      return { data: [], error: undefined, response: new Response(null, { status: 200 }) };
+    };
+    const sdk = { experimental: { session: { list } } } as unknown as OpencodeClient;
+    const originalGetSdkClient = opencodeClient.getSdkClient;
+    opencodeClient.getSdkClient = () => sdk;
+    restoreGetSdkClient = () => { opencodeClient.getSdkClient = originalGetSdkClient; };
+    const cached = buildSession('https://share.example/cached', { directory: '/repo/incremental' });
+    useGlobalSessionsStore.setState({
+      activeSessions: [cached],
+      sessionsByDirectory: new Map([['/repo/incremental', [cached]]]),
+    });
+
+    await useGlobalSessionsStore.getState().refreshSessionsForDirectories(
+      ['/repo/incremental'],
+      undefined,
+      { persist: false, incrementalStart: 1234 },
+    );
+
+    expect(calls[0]).toEqual({
+      directory: '/repo/incremental',
+      archived: false,
+      roots: true,
+      start: 1234,
+      limit: 20,
+    });
+    expect(useGlobalSessionsStore.getState().sessionsByDirectory.get('/repo/incremental')).toEqual([cached]);
+  });
+
+  test('does not advance startup progress for a cached directory whose incremental refresh failed', async () => {
+    const list = async () => ({
+      data: undefined,
+      error: { message: 'bad request' },
+      response: new Response(null, { status: 400 }),
+    });
+    const sdk = { experimental: { session: { list } } } as unknown as OpencodeClient;
+    const originalGetSdkClient = opencodeClient.getSdkClient;
+    opencodeClient.getSdkClient = () => sdk;
+    restoreGetSdkClient = () => { opencodeClient.getSdkClient = originalGetSdkClient; };
+    const cached = buildSession('https://share.example/cached-failure', { directory: '/repo/cached-failure' });
+    useGlobalSessionsStore.setState({
+      activeSessions: [cached],
+      sessionsByDirectory: new Map([['/repo/cached-failure', [cached]]]),
+      loadedDirectories: new Set(['/repo/cached-failure']),
+      hasLoaded: true,
+      status: 'ready',
+    });
+
+    await refreshStartupGlobalSessionsForDirectories(
+      ['/repo/cached-failure'],
+      [cached],
+      { incrementalStartByDirectory: new Map([['/repo/cached-failure', 1234]]) },
+    );
+
+    expect(useGlobalSessionsStore.getState().startupSyncProgress.completed).toBe(0);
+    expect(useGlobalSessionsStore.getState().sessionsByDirectory.get('/repo/cached-failure')).toEqual([cached]);
   });
 
   test('loads archived sessions through the independent lazy path', async () => {
@@ -193,6 +511,7 @@ describe('useGlobalSessionsStore', () => {
     restoreGetSdkClient = () => { opencodeClient.getSdkClient = originalGetSdkClient; };
 
     const refresh = useGlobalSessionsStore.getState().refreshSessionsForDirectories(['/repo/app']);
+    await new Promise((resolve) => setTimeout(resolve, 0));
     useGlobalSessionsStore.getState().resetForRuntimeSwitch();
     await refresh;
 

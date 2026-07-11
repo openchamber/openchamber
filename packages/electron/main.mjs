@@ -186,6 +186,7 @@ const state = {
   serverHandle: null,
   sidecarUrl: null,
   localOrigin: null,
+  localUiOrigin: null,
   apiBaseUrl: null,
   clientToken: null,
   requestHeaders: {},
@@ -1400,6 +1401,7 @@ const spawnLocalServer = async () => {
       apiBaseUrl: state.apiBaseUrl || '',
       requestHeaders: sanitizeRuntimeRequestHeaders(state.requestHeaders || {}),
     }),
+    sessionIndexDbPath: path.join(app.getPath('userData'), 'session-index.sqlite'),
   });
 
   const port = handle.getPort();
@@ -2223,6 +2225,23 @@ const openDevToolsForMenuTarget = () => {
   target.webContents.toggleDevTools();
 };
 
+const copyFromMenuTarget = () => {
+  const target = getMenuTargetWindow();
+  if (!target || target.isDestroyed()) return;
+
+  const contents = target.webContents;
+  if (contents.isDevToolsFocused()) {
+    const devToolsContents = contents.devToolsWebContents;
+    if (devToolsContents && !devToolsContents.isDestroyed()) {
+      devToolsContents.copy();
+    }
+    return;
+  }
+
+  contents.copy();
+  dispatchMenuAction('copy');
+};
+
 const relaunchFromMenu = () => {
   prepareForQuit();
   app.relaunch();
@@ -2463,6 +2482,12 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
       if (state.localOrigin) {
         try {
           if (new URL(state.localOrigin).origin === url.origin) return true;
+        } catch {
+        }
+      }
+      if (state.localUiOrigin) {
+        try {
+          if (new URL(state.localUiOrigin).origin === url.origin) return true;
         } catch {
         }
       }
@@ -2844,6 +2869,8 @@ const resolveInitialUrl = async () => {
     : isDev && await waitForHealth(hmrUiUrl, 8_000, 100)
     ? hmrUiUrl
     : localUrl;
+
+  state.localUiOrigin = new URL(localUiUrl).origin;
 
   state.sidecarUrl = localUrl;
   const localAvailable = Boolean(localUrl);
@@ -4320,10 +4347,6 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
 
 const buildMacMenu = () => {
   const dispatchAction = (action) => dispatchMenuAction(action);
-  const handleCopyAction = () => {
-    BrowserWindow.getFocusedWindow()?.webContents.copy();
-    dispatchAction('copy');
-  };
 
   return Menu.buildFromTemplate([
     {
@@ -4373,7 +4396,7 @@ const buildMacMenu = () => {
         { role: 'redo' },
         { type: 'separator' },
         { role: 'cut' },
-        { label: 'Copy', accelerator: 'Cmd+C', click: () => handleCopyAction() },
+        { label: 'Copy', accelerator: 'Cmd+C', click: () => copyFromMenuTarget() },
         { role: 'paste' },
         { role: 'selectAll' },
       ],
@@ -4443,10 +4466,6 @@ const buildMacMenu = () => {
 
 const buildAutoHiddenMenu = () => {
   const dispatchAction = (action) => dispatchMenuAction(action);
-  const handleCopyAction = () => {
-    BrowserWindow.getFocusedWindow()?.webContents.copy();
-    dispatchAction('copy');
-  };
 
   return Menu.buildFromTemplate([
     {
@@ -4486,7 +4505,7 @@ const buildAutoHiddenMenu = () => {
         { role: 'redo' },
         { type: 'separator' },
         { role: 'cut' },
-        { label: 'Copy', accelerator: 'Ctrl+C', click: () => handleCopyAction() },
+        { label: 'Copy', accelerator: 'Ctrl+C', click: () => copyFromMenuTarget() },
         { role: 'paste' },
         { role: 'selectAll' },
       ],
@@ -4615,6 +4634,13 @@ const isLocalSender = (webContents) => {
     if (state.localOrigin) {
       try {
         const allowed = new URL(state.localOrigin);
+        if (allowed.origin === url.origin) return true;
+      } catch {
+      }
+    }
+    if (state.localUiOrigin) {
+      try {
+        const allowed = new URL(state.localUiOrigin);
         if (allowed.origin === url.origin) return true;
       } catch {
       }

@@ -57,6 +57,8 @@ export const createBootstrapRuntime = (dependencies) => {
       fetchFreeZenModels,
       getCachedZenModels,
       setAutoAcceptSession,
+      sessionIndexService,
+      sessionIndexSyncRuntime,
     } = options;
 
     const uiAuthController = createUiAuth({
@@ -140,6 +142,8 @@ export const createBootstrapRuntime = (dependencies) => {
       readSettingsFromDiskMigrated,
       fetchFreeZenModels,
       getCachedZenModels,
+      sessionIndexService,
+      sessionIndexSyncRuntime,
     });
 
     return {

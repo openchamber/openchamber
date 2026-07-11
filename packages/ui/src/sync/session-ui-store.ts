@@ -17,7 +17,7 @@ import type { Session, Part, Message, TextPart } from "@opencode-ai/sdk/v2/clien
 import type { AttachedFile, SessionContextUsage, SessionWorktreeAttachment } from "@/stores/types/sessionTypes"
 import type { WorktreeMetadata } from "@/types/worktree"
 import { opencodeClient } from "@/lib/opencode/client"
-import { runtimeFetch } from "@/lib/runtime-fetch"
+import { runtimeFetch, setRuntimeInteractiveSessionRequestId } from "@/lib/runtime-fetch"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useProjectsStore } from "@/stores/useProjectsStore"
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from "@/stores/useGlobalSessionsStore"
@@ -583,6 +583,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   setCurrentSession: (id, directoryHint?: string | null) => {
     announceSessionSwitchIntent(id)
+    setRuntimeInteractiveSessionRequestId(id)
     const previousSessionId = get().currentSessionId
     if (previousSessionId !== id) {
       beginSessionSwitchMeasure()
@@ -688,6 +689,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const key = runtimeMemoryKey(apiBaseUrl)
     const memory = runtimeSessionMemory.get(key)
     const restoredSessionId = memory?.sessionId ?? activeSessionByRuntime.get(key) ?? null
+    setRuntimeInteractiveSessionRequestId(restoredSessionId)
     const restoredDraft = memory?.draft ? cloneDraft(memory.draft) : { ...DEFAULT_DRAFT }
     const restoredDirectory = memory?.directory ?? null
     if (restoredDirectory) {
@@ -796,6 +798,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       currentSessionDirectory: null,
       error: null,
     })
+    setRuntimeInteractiveSessionRequestId(null)
 
     writeRuntimeSessionMemory(runtimeMemoryKey(), { sessionId: null, directory, draft: nextDraft })
     // Clear composer attachments when opening a new session draft.

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import { registerAuthAndAccessRoutes, registerCommonRequestMiddleware, registerServerStatusRoutes } from './core-routes.js';
+import { registerSessionIndexRoutes } from '../session-index/routes.js';
 
 describe('core-routes', () => {
   afterEach(() => {
@@ -124,6 +125,37 @@ describe('core-routes', () => {
       .expect(200);
 
     expect(response.body).toEqual({ body: { content: 'Snippet body' } });
+  });
+
+  it('should parse JSON bodies for Electron session-index writes', async () => {
+    const app = express();
+    const replaceDirectory = vi.fn();
+    registerCommonRequestMiddleware(app, { express });
+    registerSessionIndexRoutes(app, {
+      sessionIndexService: {
+        replaceDirectory,
+        snapshot: () => ({ directories: [] }),
+        upsert: () => true,
+        remove: () => false,
+      },
+    });
+
+    await request(app)
+      .put('/api/openchamber/session-index/directory')
+      .send({
+        directory: '/repo',
+        sessions: [{ id: 'ses_1', title: 'Cached', time: { created: 1, updated: 2 } }],
+        cursor: null,
+        hasMore: false,
+      })
+      .expect(204);
+
+    expect(replaceDirectory).toHaveBeenCalledWith({
+      directory: '/repo',
+      sessions: [{ id: 'ses_1', title: 'Cached', time: { created: 1, updated: 2 } }],
+      cursor: null,
+      hasMore: false,
+    });
   });
 
   it('should require API auth before probing loopback preview URLs', async () => {

@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 
-import { parseFileReference, type ParsedFileReference } from './fileReferenceParser';
+import {
+    isLikelyFileReferencePath,
+    parseFileReference,
+    type ParsedFileReference,
+} from './fileReferenceParser';
 
 const parse = (value: string): ParsedFileReference | null => parseFileReference(value);
 
@@ -94,5 +98,20 @@ describe('parseFileReference', () => {
     test('range form takes precedence over line-only when suffix matches digits-dash-digits', () => {
         const result = parse('src/foo.ts:42-58');
         expect(result).toEqual({ path: 'src/foo.ts', line: 42, endLine: 58 });
+    });
+});
+
+describe('isLikelyFileReferencePath', () => {
+    test('rejects decimal measurements and timestamp-like numeric tokens', () => {
+        expect(isLikelyFileReferencePath('00.731')).toBe(false);
+        expect(isLikelyFileReferencePath('56.312')).toBe(false);
+        expect(isLikelyFileReferencePath('2026.07')).toBe(false);
+    });
+
+    test('keeps extension-bearing source paths and known extensionless files', () => {
+        expect(isLikelyFileReferencePath('src/consumer.ts')).toBe(true);
+        expect(isLikelyFileReferencePath('.omo/notepads/run/learnings.md')).toBe(true);
+        expect(isLikelyFileReferencePath('Dockerfile')).toBe(true);
+        expect(isLikelyFileReferencePath('.gitignore')).toBe(true);
     });
 });

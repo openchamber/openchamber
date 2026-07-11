@@ -95,9 +95,11 @@ export const clearRuntimeAuthCredentialProvider = (): void => {
 
 export const setRuntimeBearerToken = (token: string | null | undefined): void => {
   const normalized = normalizeBearerToken(token);
+  const unchanged = normalized === getRuntimeBearerTokenSync();
   runtimeBearerToken = normalized;
-  resetRuntimeAuthGeneration();
   credentialProvider = () => normalized ? { type: 'bearer', token: normalized } : null;
+  if (unchanged) return;
+  resetRuntimeAuthGeneration();
 };
 
 export const setRuntimeExtraHeaders = (headers: Record<string, string> | null | undefined): void => {

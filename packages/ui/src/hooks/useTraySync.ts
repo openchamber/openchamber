@@ -18,6 +18,8 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGitStore } from '@/stores/useGitStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { useConfigStore } from '@/stores/useConfigStore';
+import { refreshTrayStatusTargets } from './tray-status-refresh';
 import { resolveProjectForSessionDirectory, normalizeProjectPath } from '@/lib/projectResolution';
 import type { ProjectEntry } from '@/lib/api/types';
 import type { WorktreeMetadata } from '@/types/worktree';
@@ -34,7 +36,7 @@ import type { QuestionRequest } from '@/types/question';
 
 const TRAY_ACTION_EVENT = 'openchamber:tray-action';
 // Event-driven updates do the real work; this is just a slow safety net.
-const POLL_INTERVAL_MS = 5000;
+const POLL_INTERVAL_MS = 30000;
 const FLUSH_DEBOUNCE_MS = 120;
 const MAX_SESSIONS = 20;
 
@@ -439,15 +441,41 @@ export const useTraySync = (): void => {
     // global event stream (captured by the sync dispatcher); this poll covers
     // sessions already busy before this window opened and any missed events.
     // Cheap: ~ms per directory, bounded by the tray's visible session count.
-    const refreshGlobalStatus = async () => {
+    let statusRefreshPromise: Promise<void> | null = null;
+    let lastStatusTargetSignature = '';
+    const statusTargetSignature = (targets: ReadonlyMap<string, readonly string[]>) =>
+      [...targets.entries()]
+        .map(([directory, sessionIds]) => `${directory}:${sessionIds.join(',')}`)
+        .join('|');
+    const isOpenCodeReady = () => {
+      const config = useConfigStore.getState();
+      return config.isConnected && config.connectionPhase === 'connected';
+    };
+    const refreshGlobalStatus = () => {
+      if (statusRefreshPromise) return statusRefreshPromise;
       const targets = collectStatusPollDirectories();
-      await Promise.all([...targets.entries()].map(async ([directory, sessionIds]) => {
+      lastStatusTargetSignature = statusTargetSignature(targets);
+      statusRefreshPromise = refreshTrayStatusTargets({
+        targets,
+        isReady: isOpenCodeReady,
+        concurrency: 2,
+        isDisposed: () => disposed,
         // null = fetch failed → keep that directory's current entries;
         // {} = authoritative "everything here is idle".
-        const raw = await opencodeClient.getSessionStatusForDirectory(directory).catch(() => null);
-        if (disposed || raw === null) return;
-        applyGlobalSessionStatusSnapshot(directory, raw, sessionIds);
-      }));
+        fetchStatus: (directory) => opencodeClient
+          .getSessionStatusForDirectory(directory)
+          .catch(() => null),
+        applySnapshot: (directory, raw, sessionIds) => {
+          applyGlobalSessionStatusSnapshot(directory, raw, [...sessionIds]);
+        },
+      }).finally(() => {
+        statusRefreshPromise = null;
+        const nextTargets = collectStatusPollDirectories();
+        if (!disposed && isOpenCodeReady() && statusTargetSignature(nextTargets) !== lastStatusTargetSignature) {
+          void refreshGlobalStatus();
+        }
+      });
+      return statusRefreshPromise;
     };
 
     // Coalesce bursts (e.g. token-by-token streaming updates a store rapidly)
@@ -503,7 +531,12 @@ export const useTraySync = (): void => {
     const unsubscribeNotif = useNotificationStore.subscribe(() => scheduleFlush());
     // The global store drives the session list. It updates instantly via SSE
     // for the active directory; subscribe so those land in the tray at once.
-    const unsubscribeGlobal = useGlobalSessionsStore.subscribe(() => scheduleFlush());
+    const unsubscribeGlobal = useGlobalSessionsStore.subscribe(() => {
+      scheduleFlush();
+      if (!isOpenCodeReady()) return;
+      const nextTargetSignature = statusTargetSignature(collectStatusPollDirectories());
+      if (nextTargetSignature !== lastStatusTargetSignature) void refreshGlobalStatus();
+    });
     // Project labels and discovered worktrees feed the "project · branch"
     // subtitle; refresh the tray when they change (deduped, so cheap).
     const unsubscribeProjects = useProjectsStore.subscribe(() => scheduleFlush());
@@ -515,10 +548,20 @@ export const useTraySync = (): void => {
     // Cross-project status map: fed live by the sync dispatcher from the global
     // event stream, and seeded/reconciled by the poll below.
     const unsubscribeGlobalStatus = useGlobalSessionStatusStore.subscribe(() => scheduleFlush());
+    // The status stream is the primary source. Once the runtime reports a real
+    // connection, run one bounded reconciliation for sessions that were busy
+    // before this window subscribed. Never poll while OpenCode is warming up.
+    let wasOpenCodeReady = isOpenCodeReady();
+    const unsubscribeConfig = useConfigStore.subscribe(() => {
+      const ready = isOpenCodeReady();
+      if (ready && !wasOpenCodeReady) void refreshGlobalStatus();
+      wasOpenCodeReady = ready;
+    });
 
-    // Global busy/retry status: fetch now and poll, so unsynced sessions don't
-    // sit looking idle. Synced directories stay instant via their SSE stores.
-    void refreshGlobalStatus();
+    // Global busy/retry status is event-driven. If the event connection was
+    // already ready before this hook mounted, reconcile once; thereafter this
+    // slow interval is only a missed-event safety net.
+    if (wasOpenCodeReady) void refreshGlobalStatus();
     const globalStatusInterval = window.setInterval(() => { void refreshGlobalStatus(); }, POLL_INTERVAL_MS);
 
     // Usage: push to the tray whenever the quota store changes, and do one
@@ -557,6 +600,7 @@ export const useTraySync = (): void => {
       unsubscribeGit();
       unsubscribeUI();
       unsubscribeGlobalStatus();
+      unsubscribeConfig();
       unsubscribeQuota();
       unsubscribeRegistry?.();
       for (const unsub of storeUnsubs.values()) unsub();

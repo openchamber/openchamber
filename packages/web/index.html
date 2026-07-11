@@ -514,13 +514,50 @@
         opacity: 0;
         pointer-events: none;
       }
+      #initial-loading .splash-content {
+        display: flex;
+        width: min(280px, calc(100vw - 48px));
+        flex-direction: column;
+        align-items: center;
+        gap: 20px;
+      }
+      #initial-loading .splash-session-progress {
+        width: 100%;
+        color: var(--splash-stroke);
+      }
+      #initial-loading .splash-session-progress[hidden] {
+        display: none;
+      }
+      #initial-loading .splash-session-progress-track {
+        height: 4px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: var(--splash-face-fill);
+      }
+      #initial-loading .splash-session-progress-fill {
+        height: 100%;
+        width: 0%;
+        border-radius: inherit;
+        background: var(--splash-stroke);
+        transition: width 180ms ease-out;
+      }
+      #initial-loading .splash-session-progress-text {
+        margin-top: 10px;
+        min-height: 16px;
+        text-align: center;
+        font-size: 12px;
+        line-height: 16px;
+        color: var(--splash-stroke);
+        opacity: 0.72;
+      }
     </style>
   </head>
   <body class="h-full bg-background text-foreground">
-    <div id="root" class="h-full">
-      <!-- Loading fallback while React initializes -->
-      <div id="initial-loading">
-        <div style="display: flex; align-items: center; justify-content: center;">
+    <!-- Keep the startup layer outside #root. React replaces every child of
+         its root on first commit, which previously removed this layer before
+         the session coordinator could update its progress. -->
+    <div id="initial-loading">
+        <div class="splash-content">
           <svg width="120" height="120" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="OpenChamber loading icon">
             <!-- Isometric cube: edge=48, centerY=50 -->
             <!-- Points: top(50,2), left(8.432,26), right(91.568,26), center(50,50), bottomLeft(8.432,74), bottomRight(91.568,74), bottom(50,98) -->
@@ -576,9 +613,22 @@
               <path d="M-8 -4 L8 -4 L8 12 L-8 12 Z" fill="var(--splash-logo-fill)" fill-opacity="0.4"/>
             </g>
           </svg>
+          <div id="startup-session-progress" class="splash-session-progress" hidden>
+            <div
+              id="startup-session-progress-track"
+              class="splash-session-progress-track"
+              role="progressbar"
+              aria-valuemin="0"
+              aria-valuenow="0"
+              aria-valuemax="1"
+            >
+              <div id="startup-session-progress-fill" class="splash-session-progress-fill"></div>
+            </div>
+            <div id="startup-session-progress-text" class="splash-session-progress-text" aria-live="polite"></div>
+          </div>
         </div>
-      </div>
     </div>
+    <div id="root" class="h-full"></div>
 
     <script>
       // Fallback: hide loading screen after 10 seconds if React fails to load.

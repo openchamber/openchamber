@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { Message, Part, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type { Session } from "@opencode-ai/sdk/v2"
-import { getReconnectCandidateSessionIds } from "./reconnect-recovery"
+import { getReconnectCandidateSessionIds, getReconnectMaterializationSessionIds } from "./reconnect-recovery"
 
 function createSession(id: string, overrides: Partial<Session> = {}): Session {
   return {
@@ -86,5 +86,21 @@ describe("getReconnectCandidateSessionIds", () => {
       directory: "/repo-a",
       viewedSession: { directory: "/repo-b", sessionId: "active" },
     }).sort()).not.toContain("active")
+  })
+})
+
+describe("getReconnectMaterializationSessionIds", () => {
+  test("materializes only the currently viewed candidate after reconnect", () => {
+    expect(getReconnectMaterializationSessionIds(["busy-a", "viewed", "busy-b"], {
+      directory: "/repo",
+      viewedSession: { directory: "/repo", sessionId: "viewed" },
+    })).toEqual(["viewed"])
+  })
+
+  test("does not fetch session detail for background candidates", () => {
+    expect(getReconnectMaterializationSessionIds(["busy-a", "busy-b"], {
+      directory: "/repo",
+      viewedSession: null,
+    })).toEqual([])
   })
 })

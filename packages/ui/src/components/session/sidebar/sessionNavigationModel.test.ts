@@ -191,7 +191,6 @@ describe('buildProjectNavigationTargets', () => {
       hasSessionSearchQuery: true,
     }).map((item) => item.sessionId)).toEqual(['revealed-by-more', 'revealed-by-search']);
 
-    expect(getDefaultProjectGroupVisibleCount(false)).toBe(5);
-    expect(getDefaultProjectGroupVisibleCount(true)).toBe(10);
+    expect(getDefaultProjectGroupVisibleCount()).toBe(5);
   });
 });

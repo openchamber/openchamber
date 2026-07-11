@@ -210,7 +210,7 @@ This module provides OpenCode server integration utilities for the web server ru
 ## Public exports (config-entity-routes.js)
 - `registerConfigEntityRoutes(app, dependencies)`: registers configuration entity routes:
   - Agents: `/api/config/agents/:name` and `/api/config/agents/:name/config`
-  - Commands: `/api/config/commands/:name`
+  - Commands: batched metadata via `POST /api/config/commands/metadata`, plus CRUD at `/api/config/commands/:name`
   - MCP servers: `/api/config/mcp` and `/api/config/mcp/:name`
   - Snippets: `/api/config/snippets`, `/api/config/snippets/:name`, and `/api/config/snippets/expand`
 
@@ -352,6 +352,13 @@ This module provides OpenCode server integration utilities for the web server ru
   - Forwards unwrapped global event payloads into notification/session side effects.
 
 ## Storage and configuration
+- Electron can inject an OpenChamber-owned session-index SQLite path into
+  `startWebUiServer`. The session-index routes are registered before the generic
+  OpenCode proxy, persist only bounded session summaries, and return 501 when
+  the Electron index is unavailable. A server-owned sequential sync runtime
+  updates the index and exposes revision-based long polling; interactive session
+  requests preempt its current list request. The renderer must not fan out cold
+  start session lists. This code never reads or writes OpenCode's own SQLite.
 - Provider auth: `~/.local/share/opencode/auth.json`.
 - User config: `~/.config/opencode/opencode.json`.
 - Project config: `<workingDirectory>/.opencode/opencode.json` or `opencode.json`.

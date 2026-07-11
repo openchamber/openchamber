@@ -26,8 +26,14 @@ These are the most performance-sensitive.
 - `useGitStore.ts`
 - `useGitHubPrStatusStore.ts`
 - `useFilesViewTabsStore.ts`
+- `useCommandsStore.ts`
 
 These stores act like centralized keyed caches. UI should consume narrow slices from them instead of re-fetching the same data in multiple places.
+
+`useCommandsStore` loads the official command catalog through the OpenCode SDK,
+then resolves OpenChamber-owned scope metadata with one batched runtime request.
+Never restore the per-command metadata `Promise.all` path: large command catalogs
+otherwise create an N+1 preflight/request storm during cold startup.
 
 ### UI state stores
 
@@ -62,6 +68,24 @@ retention catalog. Sidebar active/archived loads are directory-keyed, capped, an
 deduplicated; `hasLoadedFullCatalog` is the only success signal for retention work.
 Initial loading and background refreshing are separate sets so an in-flight refresh
 never hides an existing session snapshot.
+
+Electron cache refresh uses two timestamps per directory. Recent restarts query
+the Electron Web Server, which performs `session.list(start=lastSyncedAt)` and
+merges changed summaries into SQLite;
+`lastFullSyncedAt` enforces a periodic full newest-page reconciliation so
+offline deletes/archives cannot remain indefinitely.
+
+Directory session loads also wait on the runtime-keyed OpenCode readiness
+coordinator. Concurrent directories share one health-probe chain, so a cold
+OpenCode process is not hit by parallel `session.list` calls. A runtime reset
+invalidates both the directory requests and the matching readiness generation.
+
+On Electron, `useGlobalSessionsStore` is also the UI owner for the SQLite
+session-index startup state. The root coordinator restores summaries first and
+then starts one server-owned background job. A low-priority long poll applies
+new SQLite revisions and updates `startupSyncProgress`; it must not issue
+per-directory OpenCode requests from the renderer. Do not add a second
+session-summary cache to browser storage or a sidebar-local startup refresh.
 
 ## Git / PR Stores
 

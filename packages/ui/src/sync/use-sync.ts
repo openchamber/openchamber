@@ -21,14 +21,18 @@ import {
 } from "./session-prefetch-cache"
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
 import { sessionLoadDebug } from "./session-load-debug"
+import { loadSessionMessagePage } from "./session-message-loader"
+import { getRuntimeKey } from "@/lib/runtime-switch"
+import { sessionSyncCoordinator } from "./session-sync-coordinator"
+import { loadSessionChildrenOnDemand, mergeSessionChildren } from "./session-children"
+import { opencodeClient } from "@/lib/opencode/client"
+import { waitForSessionStartupBarrier } from "@/lib/session-startup-barrier"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
-const INITIAL_MESSAGE_PAGE_SIZE = 50
+const INITIAL_MESSAGE_PAGE_SIZE = 30
 const VSCODE_INITIAL_MESSAGE_PAGE_SIZE = 30
 const MOBILE_INITIAL_MESSAGE_PAGE_SIZE = 30
 const HISTORY_MESSAGE_PAGE_SIZE = 100
-const INITIAL_PAGE_EXPANSION_LIMITS = [100, 150] as const
-const VSCODE_INITIAL_PAGE_EXPANSION_LIMITS = [50, 80, 120] as const
 const MAX_SEEN_DIRS = 30
 const VSCODE_SESSION_CACHE_LIMIT = 4
 const MOBILE_SESSION_CACHE_LIMIT = 4
@@ -37,16 +41,6 @@ const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 // Shared across useSync() instances so cache eviction is based on app-level
 // session recency, not whichever component happened to call sync first.
 const seenByDirectory = new Map<string, Set<string>>()
-
-// Shared across useSync() hook instances. Chat, model controls, and sidebar can
-// all request the same session during startup; coalesce them into one HTTP load.
-const syncSessionInflightByKey = new Map<string, Promise<void>>()
-
-// Per-session generation counter. When a newer syncSession request starts for
-// the same session, older in-flight requests become stale and must not write
-// to the store. This prevents rapid session switches (e.g. 1→2→3 in the
-// sidebar) from having each completed fetch fight for focus.
-const syncSessionGenerationByKey = new Map<string, number>()
 
 type SyncMeta = {
   limit: number
@@ -85,7 +79,6 @@ function assertSdkSuccess<T>(result: SdkResult<T>, operation: string): void {
 }
 
 const isConstrainedSessionRuntime = () => isVSCodeRuntime() || isMobileSurfaceRuntime()
-const getConstrainedInitialPageExpansionMax = () => VSCODE_INITIAL_PAGE_EXPANSION_LIMITS[VSCODE_INITIAL_PAGE_EXPANSION_LIMITS.length - 1]
 const getEffectiveSessionCacheLimit = () => {
   if (isVSCodeRuntime()) return VSCODE_SESSION_CACHE_LIMIT
   if (isMobileSurfaceRuntime()) return MOBILE_SESSION_CACHE_LIMIT
@@ -96,9 +89,6 @@ const getInitialMessagePageSize = () => {
   if (isMobileSurfaceRuntime()) return MOBILE_INITIAL_MESSAGE_PAGE_SIZE
   return INITIAL_MESSAGE_PAGE_SIZE
 }
-const getInitialPageExpansionLimits = () => isConstrainedSessionRuntime()
-  ? VSCODE_INITIAL_PAGE_EXPANSION_LIMITS
-  : INITIAL_PAGE_EXPANSION_LIMITS
 const getDefaultMeta = (): SyncMeta => ({ limit: getInitialMessagePageSize(), cursor: undefined, complete: false, loading: false })
 
 function getPrefetchMeta(directory: string, sessionID: string): SyncMeta | undefined {
@@ -120,16 +110,6 @@ function isHeavyConstrainedSessionCache(state: Pick<State, "message" | "part">, 
   const messages = state.message[sessionID]
   if (!messages || messages.length === 0) return false
   return messages.length > getInitialMessagePageSize()
-}
-
-function isUserMessage(message: Message): boolean {
-  const info = message as Message & { clientRole?: unknown; role?: unknown }
-  const role = typeof info.clientRole === "string" ? info.clientRole : info.role
-  return role === "user"
-}
-
-function hasUserMessage(messages: Message[] | undefined): boolean {
-  return Boolean(messages?.some(isUserMessage))
 }
 
 export function shouldFetchSessionForRenderableSync(input: {
@@ -325,10 +305,16 @@ export function useSync() {
     async (sessionID: string, limit: number, before?: string) => {
       const startedAt = performance.now()
       sessionLoadDebug("reactive-request-start", { sessionID, directory, limit, before: before ?? null })
-      const result = await retry(async () => {
-        const response = await sdk.session.messages({ sessionID, directory, limit, before })
-        assertSdkSuccess(response, "session.messages")
-        return response
+      const result = await loadSessionMessagePage({
+        runtimeKey: getRuntimeKey(),
+        directory,
+        sessionID,
+        before,
+        request: () => retry(async () => {
+          const response = await sdk.session.messages({ sessionID, directory, limit, before })
+          assertSdkSuccess(response, "session.messages")
+          return response
+        }),
       })
       const items = (result.data ?? []).filter((x: { info?: { id?: string } }) => !!x?.info?.id)
       const session = items
@@ -373,21 +359,7 @@ export function useSync() {
         // (e.g. after a reconnect resync following a few new messages).
         const storeMessageCount = store.getState().message[sessionID]?.length ?? 0
         const limit = options?.before ? HISTORY_MESSAGE_PAGE_SIZE : Math.max(m.limit, storeMessageCount)
-        let page = await fetchMessages(sessionID, limit, options?.before)
-
-        // Keep the initial page small for switch performance. Some sessions
-        // have a very large final turn, so the latest records can
-        // contain only assistant/tool records and no user boundary. That makes
-        // turn projection render an empty chat until the user manually loads
-        // older messages. Expand only this initial tail fetch, with a hard cap.
-        if (!options?.before && !page.complete && !hasUserMessage(page.session)) {
-          for (const nextLimit of getInitialPageExpansionLimits()) {
-            if (nextLimit <= limit) continue
-            sessionLoadDebug("reactive-expand", { sessionID, directory, fromLimit: limit, toLimit: nextLimit })
-            page = await fetchMessages(sessionID, nextLimit)
-            if (page.complete || hasUserMessage(page.session)) break
-          }
-        }
+        const page = await fetchMessages(sessionID, limit, options?.before)
 
         // Merge optimistic items
         const items = getOptimistic(sessionID)
@@ -459,124 +431,75 @@ export function useSync() {
   // Sync a session (load if not cached)
   const syncSession = useCallback(
     async (sessionID: string, force?: boolean) => {
+      await waitForSessionStartupBarrier()
       touch(sessionID)
       const key = keyFor(sessionID)
+      return sessionSyncCoordinator.run({
+        scope: store,
+        key,
+        request: async (isStale) => {
+          const current = store.getState()
+          const m = getMetaFor(sessionID)
+          const materialization = getSessionMaterializationStatus(current, sessionID)
+          const cached = materialization.hasMessages && materialization.renderable && m.limit > 0
+          const prefetchInfo = !force ? getSessionPrefetch(directory, sessionID) : undefined
+          const cachedReady = cached
+          const hasSession = Binary.search(current.session, sessionID, (s) => s.id).found
+          if (cachedReady && hasSession && !force) return
 
-      // Dedup inflight requests
-      const existing = syncSessionInflightByKey.get(key)
-      if (existing) return existing
+          // Skip if recently fetched (TTL)
+          if (!force && shouldSkipSessionPrefetch({
+            hasMessages: cachedReady,
+            info: prefetchInfo,
+            pageSize: getInitialMessagePageSize(),
+          })) return
 
-      // This is a new request. Bump generation so any older request that
-      // might still be finishing (e.g. from a previous component lifecycle)
-      // knows it is stale and should not write to the store.
-      const generation = (syncSessionGenerationByKey.get(key) ?? 0) + 1
-      syncSessionGenerationByKey.set(key, generation)
-      const isStale = () => syncSessionGenerationByKey.get(key) !== generation
-
-      const current = store.getState()
-      const m = getMetaFor(sessionID)
-      const materialization = getSessionMaterializationStatus(current, sessionID)
-      const cached = materialization.hasMessages && materialization.renderable && m.limit > 0
-      const prefetchInfo = !force ? getSessionPrefetch(directory, sessionID) : undefined
-      const knownCachedLimit = Math.max(m.limit, prefetchInfo?.limit ?? 0)
-      const needsConstrainedInitialTurnBoundary = isConstrainedSessionRuntime()
-        && cached
-        && !hasUserMessage(current.message[sessionID])
-        && knownCachedLimit < getConstrainedInitialPageExpansionMax()
-        && !m.complete
-        && prefetchInfo?.complete !== true
-        && Boolean(m.cursor ?? prefetchInfo?.cursor)
-      if (needsConstrainedInitialTurnBoundary && prefetchInfo && prefetchInfo.limit > m.limit) {
-        setMetaFor(sessionID, {
-          limit: prefetchInfo.limit,
-          cursor: prefetchInfo.cursor,
-          complete: prefetchInfo.complete,
-        })
-      }
-      const cachedReady = cached && !needsConstrainedInitialTurnBoundary
-      const hasSession = Binary.search(current.session, sessionID, (s) => s.id).found
-      if (cachedReady && hasSession && !force) return
-
-      // Skip if recently fetched (TTL)
-      if (!force && !needsConstrainedInitialTurnBoundary) {
-        if (shouldSkipSessionPrefetch({
-          hasMessages: cachedReady,
-          info: prefetchInfo,
-          pageSize: getInitialMessagePageSize(),
-        })) return
-      }
-
-      const shouldLoadMessages = Boolean(!cachedReady || force)
-      const shouldFetchSession = shouldFetchSessionForRenderableSync({ hasSession, shouldLoadMessages, force: Boolean(force) })
-      sessionLoadDebug("reactive-sync-decision", {
-        sessionID,
-        directory,
-        cached,
-        cachedReady,
-        hasSession,
-        shouldLoadMessages,
-        shouldFetchSession,
-        force: Boolean(force),
-      })
-      const promise = (async () => {
-        await Promise.all([
-          shouldFetchSession
-            ? (async () => {
-                try {
-                  const result = await retry(async () => {
-                    const response = await sdk.session.get({ sessionID, directory })
-                    assertSdkSuccess(response, "session.get")
-                    return response
-                  })
-                  if (result.data && !isStale()) {
-                    const nextSession = stripSessionDiffSnapshots(result.data)
-                    const s = store.getState()
-                    const sessions = [...s.session]
-                    const idx = Binary.search(sessions, sessionID, (s) => s.id)
-                    if (idx.found) {
-                      sessions[idx.index] = nextSession
-                    } else {
-                      sessions.splice(idx.index, 0, nextSession)
+          const shouldLoadMessages = Boolean(!cachedReady || force)
+          const shouldFetchSession = shouldFetchSessionForRenderableSync({ hasSession, shouldLoadMessages, force: Boolean(force) })
+          sessionLoadDebug("reactive-sync-decision", {
+            sessionID,
+            directory,
+            cached,
+            cachedReady,
+            hasSession,
+            shouldLoadMessages,
+            shouldFetchSession,
+            force: Boolean(force),
+          })
+          await Promise.all([
+            shouldFetchSession
+              ? (async () => {
+                  try {
+                    const result = await retry(async () => {
+                      const response = await sdk.session.get({ sessionID, directory })
+                      assertSdkSuccess(response, "session.get")
+                      return response
+                    })
+                    if (result.data && !isStale()) {
+                      const nextSession = stripSessionDiffSnapshots(result.data)
+                      const s = store.getState()
+                      const sessions = [...s.session]
+                      const idx = Binary.search(sessions, sessionID, (s) => s.id)
+                      if (idx.found) {
+                        sessions[idx.index] = nextSession
+                      } else {
+                        sessions.splice(idx.index, 0, nextSession)
+                      }
+                      if (!isStale()) {
+                        store.setState({ session: sessions })
+                      }
                     }
-                    if (!isStale()) {
-                      store.setState({ session: sessions })
-                    }
+                  } catch (e) {
+                    console.error("[sync] failed to fetch session", sessionID, e)
                   }
-                } catch (e) {
-                  console.error("[sync] failed to fetch session", sessionID, e)
-                }
-              })()
-            : Promise.resolve(),
-          shouldLoadMessages ? loadMessages(sessionID, { isStale }) : Promise.resolve(),
-        ])
-
-        // Progressive mount (desktop/VS Code): after the initial page
-        // resolves, if the session isn't stale and the server indicated more
-        // messages, dispatch a second fetch to prepend older history — it
-        // gives the scroll container headroom so the scroll-up trigger fires
-        // seamlessly. Mobile deliberately opts out: it has no scroll-position
-        // trigger at all — ALL older history loads happen through the
-        // explicit "load older" button at the top, so every prepend lands
-        // from a resting state the user initiated. (The initial page itself,
-        // including the turn-boundary extension, is unaffected.)
-        if (!isStale() && !isMobileSurfaceRuntime()) {
-          const currentMeta = getMetaFor(sessionID)
-          if (currentMeta.cursor && !currentMeta.complete) {
-            sessionLoadDebug("reactive-auto-prepend", { sessionID, directory, before: currentMeta.cursor })
-            loadMessages(sessionID, { before: currentMeta.cursor, mode: "prepend", isStale })
-          }
-        }
-      })()
-
-      syncSessionInflightByKey.set(key, promise)
-      promise.finally(() => {
-        if (syncSessionInflightByKey.get(key) === promise) {
-          syncSessionInflightByKey.delete(key)
-        }
+                })()
+              : Promise.resolve(),
+            shouldLoadMessages ? loadMessages(sessionID, { isStale }) : Promise.resolve(),
+          ])
+        },
       })
-      return promise
     },
-    [store, sdk, keyFor, touch, getMetaFor, setMetaFor, loadMessages, directory],
+    [store, sdk, keyFor, touch, getMetaFor, loadMessages, directory],
   )
 
   // Load more (pagination)
@@ -588,6 +511,31 @@ export function useSync() {
       await loadMessages(sessionID, { before: m.cursor, mode: "prepend" })
     },
     [touch, getMetaFor, loadMessages],
+  )
+
+  const loadChildren = useCallback(
+    async (sessionID: string, directoryOverride?: string | null) => {
+      const targetDirectory = directoryOverride || directory
+      if (!sessionID || !targetDirectory) return
+      const targetStore = childStores.ensureChild(targetDirectory, { bootstrap: false })
+      const scopedClient = opencodeClient.getScopedSdkClient(targetDirectory)
+      const incoming = await loadSessionChildrenOnDemand({
+        runtimeKey: getRuntimeKey(),
+        directory: targetDirectory,
+        sessionID,
+        request: async () => {
+          const response = await scopedClient.session.children({ sessionID, directory: targetDirectory })
+          assertSdkSuccess(response, "session.children")
+          return (response.data ?? []) as import('@opencode-ai/sdk/v2').Session[]
+        },
+      })
+      targetStore.setState((state) => {
+        const sessions = mergeSessionChildren(state.session, incoming, sessionID)
+        if (sessions === state.session) return state
+        return { session: sessions, limit: Math.max(state.limit, sessions.length) }
+      })
+    },
+    [childStores, directory],
   )
 
   const hasMore = useCallback(
@@ -670,6 +618,7 @@ export function useSync() {
     () => ({
       ensureSessionRenderable: syncSession,
       syncSession,
+      loadChildren,
       loadMore,
       hasMore,
       isLoading,
@@ -680,6 +629,6 @@ export function useSync() {
         confirm: optimisticConfirm,
       },
     }),
-    [syncSession, loadMore, hasMore, isLoading, isComplete, optimisticAdd, optimisticRemove, optimisticConfirm],
+    [syncSession, loadChildren, loadMore, hasMore, isLoading, isComplete, optimisticAdd, optimisticRemove, optimisticConfirm],
   )
 }

@@ -103,21 +103,6 @@ const rememberTurnModel = (key: string, value: { messages: ChatMessageEntry[]; m
     turnModelCache.set(key, value)
 }
 
-export const shouldAutoLoadEarlierForUnderfilledPinnedViewport = (input: {
-    sessionId: string | null;
-    isPinned: boolean;
-    canLoadEarlier: boolean;
-    isLoadingOlder: boolean;
-    pendingRevealWork: boolean;
-    scrollHeight: number;
-    clientHeight: number;
-}): boolean => {
-    if (!input.sessionId) return false;
-    if (!input.isPinned || !input.canLoadEarlier) return false;
-    if (input.isLoadingOlder || input.pendingRevealWork) return false;
-    return input.scrollHeight <= input.clientHeight + 1;
-};
-
 export const isOlderHistoryPrependCommit = (input: {
     previousOldestId: string | null;
     previousNewestId: string | null;
@@ -708,86 +693,6 @@ export const useChatTimelineController = ({
 
         void loadEarlier({ userInitiated: true });
     }, [loadEarlier, scrollRef]);
-
-    const loadEarlierIfPinnedViewportUnderfilled = React.useCallback(() => {
-        // On mobile the initial page is intentionally smaller. Auto-prepending
-        // older rows after first paint shifts the narrow timeline; let explicit
-        // upward scroll request history instead.
-        if (isMobileSurfaceRuntime()) return;
-        if (historyInteractionRef.current) return;
-        const container = scrollRef.current;
-        if (!container) return;
-        if (!shouldAutoLoadEarlierForUnderfilledPinnedViewport({
-            sessionId: sessionIdRef.current,
-            isPinned: isPinnedRef.current,
-            canLoadEarlier: historySignalsRef.current.canLoadEarlier,
-            isLoadingOlder: isLoadingOlderRef.current,
-            pendingRevealWork: pendingRevealWorkRef.current,
-            scrollHeight: container.scrollHeight,
-            clientHeight: container.clientHeight,
-        })) {
-            return;
-        }
-
-        void loadEarlier();
-    }, [loadEarlier, scrollRef]);
-
-    React.useEffect(() => {
-        if (typeof window === 'undefined') {
-            return;
-        }
-
-        const frame = window.requestAnimationFrame(() => {
-            loadEarlierIfPinnedViewportUnderfilled();
-        });
-
-        return () => window.cancelAnimationFrame(frame);
-    }, [
-        historySignals.canLoadEarlier,
-        isLoadingOlder,
-        isPinned,
-        loadEarlierIfPinnedViewportUnderfilled,
-        pendingRevealWork,
-        renderedMessages.length,
-        sessionId,
-    ]);
-
-    React.useEffect(() => {
-        if (typeof window === 'undefined' || typeof ResizeObserver === 'undefined') {
-            return;
-        }
-
-        const container = scrollRef.current;
-        if (!container) {
-            return;
-        }
-
-        let frame: number | null = null;
-        const scheduleCheck = () => {
-            if (frame !== null) {
-                return;
-            }
-            frame = window.requestAnimationFrame(() => {
-                frame = null;
-                loadEarlierIfPinnedViewportUnderfilled();
-            });
-        };
-
-        const observer = new ResizeObserver(scheduleCheck);
-        observer.observe(container);
-        const content = container.firstElementChild;
-        if (content instanceof Element) {
-            observer.observe(content);
-        }
-        scheduleCheck();
-
-        return () => {
-            if (frame !== null) {
-                window.cancelAnimationFrame(frame);
-            }
-            observer.disconnect();
-        };
-    }, [loadEarlierIfPinnedViewportUnderfilled, scrollRef, sessionId]);
 
     const scrollToTurn = React.useCallback(async (
         turnId: string,

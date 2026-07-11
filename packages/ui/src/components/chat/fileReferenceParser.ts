@@ -24,6 +24,35 @@ export const normalizeReferencePath = (value: string): string => normalizeFilePa
 
 export const isAbsoluteReferencePath = (value: string): boolean => isAbsoluteFilePath(value);
 
+export const isLikelyFileReferencePath = (value: string): boolean => {
+    if (!value || value.startsWith('--') || value.includes('://')) {
+        return false;
+    }
+    if (/[<>]/.test(value) || /\s{2,}/.test(value)) {
+        return false;
+    }
+
+    const normalized = normalizeReferencePath(value);
+    const baseName = normalized.split('/').filter(Boolean).pop() ?? normalized;
+    if (!baseName || baseName === '.' || baseName === '..') {
+        return false;
+    }
+
+    const lowerBaseName = baseName.toLowerCase();
+    if (KNOWN_FILE_BASENAMES.has(lowerBaseName) || (lowerBaseName.startsWith('.') && lowerBaseName.length > 1)) {
+        return true;
+    }
+
+    // HARs showed timestamps and decimal measurements such as `56.312` being
+    // treated as extension-bearing files, producing dozens of pointless stat
+    // requests. A bare numeric decimal is never a useful file reference.
+    if (!normalized.includes('/') && /^\d+\.\d+$/.test(baseName)) {
+        return false;
+    }
+
+    return /\.[A-Za-z0-9_-]{1,16}$/.test(baseName);
+};
+
 const trimPathCandidate = (value: string): string => {
     let next = (value || '').trim();
     if (!next) {

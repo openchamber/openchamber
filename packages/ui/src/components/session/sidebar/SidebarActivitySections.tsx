@@ -11,6 +11,11 @@ import type { SessionNodeRenderExtras } from './sessionNodeItemUtils';
 import { SidebarSectionHeader } from './SidebarSectionHeader';
 import { SIDEBAR_MUTED_HINT_CLASS } from './utils';
 import { useSessionFocusStore } from '@/stores/useSessionFocusStore';
+import {
+  getRecentNavigationVisibleCount,
+  getRecentSectionDisplayState,
+  RECENT_SESSION_INITIAL_VISIBLE_COUNT,
+} from './activitySections';
 
 type ActivityItem = {
   node: SessionNode;
@@ -45,21 +50,13 @@ type Props = {
   openSidebarMenuKey: string | null;
   variant?: 'section' | 'flat';
   initialVisibleCount?: number;
-  batchSize?: number;
   /** Right-side chrome on the section title row (e.g. display-mode equalizer). */
   headerAccessory?: React.ReactNode;
   /** Publishes the exact root-session rows currently revealed by collapse/Show more state. */
   onVisibleSessionIdsChange?: (sessionIds: readonly string[]) => void;
-  hasMoreSessions?: boolean;
-  isLoadingMoreSessions?: boolean;
-  onLoadMoreSessions?: () => void;
 };
 
 type RenderExtras = SessionNodeRenderExtras;
-
-// Default Recent slice: keep the top of the sidebar short; Show more / Show
-// fewer expand and collapse in batches of the same size.
-const MAX_VISIBLE_RECENT_SESSIONS = 3;
 
 export function SidebarActivitySections({
   sections,
@@ -68,17 +65,13 @@ export function SidebarActivitySections({
   editingId,
   openSidebarMenuKey,
   variant = 'section',
-  initialVisibleCount = MAX_VISIBLE_RECENT_SESSIONS,
-  batchSize = MAX_VISIBLE_RECENT_SESSIONS,
+  initialVisibleCount = RECENT_SESSION_INITIAL_VISIBLE_COUNT,
   headerAccessory,
   onVisibleSessionIdsChange,
-  hasMoreSessions = false,
-  isLoadingMoreSessions = false,
-  onLoadMoreSessions,
 }: Props): React.ReactNode {
   const { t } = useI18n();
   const [collapsed, setCollapsed] = React.useState<Set<string>>(new Set());
-  const [visibleCountBySection, setVisibleCountBySection] = React.useState<Map<string, number>>(new Map());
+  const [expandedSections, setExpandedSections] = React.useState<Set<string>>(new Set());
   const recentFocusSessionId = useSessionFocusStore((state) => (
     state.focus?.scope === 'recent' ? state.focus.sessionId : null
   ));
@@ -87,10 +80,10 @@ export function SidebarActivitySections({
   const visibleSessionIds = React.useMemo(() => visibleSectionsForShortcutPublishing({
     sections,
     collapsed,
-    visibleCountBySection,
+    expandedSections,
     initialVisibleCount,
     flatVariant,
-  }), [collapsed, flatVariant, initialVisibleCount, sections, visibleCountBySection]);
+  }), [collapsed, expandedSections, flatVariant, initialVisibleCount, sections]);
 
   React.useLayoutEffect(() => {
     onVisibleSessionIdsChange?.(visibleSessionIds);
@@ -120,32 +113,39 @@ export function SidebarActivitySections({
       return next;
     });
 
-    const requiredCount = targetIndex + 1;
-    setVisibleCountBySection((prev) => {
-      const currentCount = Math.max(initialVisibleCount, prev.get(section.key) ?? initialVisibleCount);
-      if (currentCount >= requiredCount) {
+    // Keyboard navigation into a hidden Recent row behaves exactly like
+    // pressing Show more: reveal the entire bounded Recent list at once.
+    const requiredCount = getRecentNavigationVisibleCount(
+      targetIndex,
+      initialVisibleCount,
+      section.items.length,
+    );
+    if (requiredCount <= initialVisibleCount) {
+      return;
+    }
+    setExpandedSections((prev) => {
+      if (prev.has(section.key)) {
         return prev;
       }
-      const next = new Map(prev);
-      next.set(section.key, requiredCount);
+      const next = new Set(prev);
+      next.add(section.key);
       return next;
     });
   }, [initialVisibleCount, recentFocusSessionId, sections]);
 
   const resetSectionLimit = React.useCallback((key: string) => {
-    setVisibleCountBySection((prev) => {
+    setExpandedSections((prev) => {
       if (!prev.has(key)) {
         return prev;
       }
-      const next = new Map(prev);
+      const next = new Set(prev);
       next.delete(key);
       return next;
     });
   }, []);
 
   const toggleSection = React.useCallback((key: string) => {
-    // Collapsing/expanding resets any "show more" batches, matching the
-    // worktree/project group behavior.
+    // Collapsing/expanding resets the bounded Recent list to its short form.
     resetSectionLimit(key);
     setCollapsed((prev) => {
       const next = new Set(prev);
@@ -158,19 +158,16 @@ export function SidebarActivitySections({
     });
   }, [resetSectionLimit]);
 
-  const showMoreSessions = React.useCallback((key: string, currentVisibleCount: number, totalCount: number) => {
-    const nextVisibleCount = currentVisibleCount + batchSize;
-    setVisibleCountBySection((prev) => {
-      const next = new Map(prev);
-      // Keep the requested count even when it crosses the current local
-      // boundary; a remote page can then reveal rows immediately on arrival.
-      next.set(key, nextVisibleCount);
+  const showMoreSessions = React.useCallback((key: string) => {
+    setExpandedSections((prev) => {
+      if (prev.has(key)) {
+        return prev;
+      }
+      const next = new Set(prev);
+      next.add(key);
       return next;
     });
-    if (nextVisibleCount >= totalCount && hasMoreSessions && !isLoadingMoreSessions) {
-      onLoadMoreSessions?.();
-    }
-  }, [batchSize, hasMoreSessions, isLoadingMoreSessions, onLoadMoreSessions]);
+  }, []);
 
   const buildRenderExtras = React.useCallback((nodes: SessionNode[]) => {
     const subtreeContainsActive = new Set<string>();
@@ -213,16 +210,14 @@ export function SidebarActivitySections({
     <div className={cn(flatVariant ? 'space-y-0.5 pb-1' : 'pb-1')}>
       {visibleSections.map((section, sectionIndex) => {
         const isCollapsed = collapsed.has(section.key);
-        const visibleLimit = Math.max(
+        const isExpanded = expandedSections.has(section.key);
+        const displayState = getRecentSectionDisplayState(
+          section.items.length,
           initialVisibleCount,
-          visibleCountBySection.get(section.key) ?? initialVisibleCount,
+          isExpanded,
         );
-        const visibleItems = section.items.slice(0, visibleLimit);
-        const remainingCount = section.items.length - visibleItems.length;
-        const canShowFewer = !flatVariant
-          && section.items.length > initialVisibleCount
-          && remainingCount === 0
-          && !hasMoreSessions;
+        const visibleItems = section.items.slice(0, displayState.visibleCount);
+        const canShowFewer = !flatVariant && displayState.canShowFewer;
         const getRenderExtras = buildRenderExtras(visibleItems.map((item) => item.node));
         const renderItem = (item: ActivityItem) => (
           <React.Fragment key={`${item.projectId ?? ''}:${item.node.session.id}`}>
@@ -243,16 +238,11 @@ export function SidebarActivitySections({
           return (
             <div key={section.key} className="space-y-0.5">
               {visibleItems.map(renderItem)}
-              {remainingCount > 0 || hasMoreSessions ? (
+              {displayState.canShowMore ? (
                 <button
                   type="button"
-                  onClick={() => showMoreSessions(section.key, visibleItems.length, section.items.length)}
-                  disabled={isLoadingMoreSessions}
-                  className={cn(
-                    SIDEBAR_MUTED_HINT_CLASS,
-                    'hover:text-foreground hover:underline disabled:pointer-events-none',
-                    isLoadingMoreSessions && 'animate-pulse',
-                  )}
+                  onClick={() => showMoreSessions(section.key)}
+                  className={cn(SIDEBAR_MUTED_HINT_CLASS, 'hover:text-foreground hover:underline')}
                 >
                   {t('sessions.sidebar.group.showMore')}
                 </button>
@@ -273,16 +263,11 @@ export function SidebarActivitySections({
             {!isCollapsed ? (
               <div className="space-y-0.5">
                 {visibleItems.map(renderItem)}
-                {remainingCount > 0 || hasMoreSessions ? (
+                {displayState.canShowMore ? (
                   <button
                     type="button"
-                    onClick={() => showMoreSessions(section.key, visibleItems.length, section.items.length)}
-                    disabled={isLoadingMoreSessions}
-                    className={cn(
-                      SIDEBAR_MUTED_HINT_CLASS,
-                      'hover:text-foreground hover:underline disabled:pointer-events-none',
-                      isLoadingMoreSessions && 'animate-pulse',
-                    )}
+                    onClick={() => showMoreSessions(section.key)}
+                    className={cn(SIDEBAR_MUTED_HINT_CLASS, 'hover:text-foreground hover:underline')}
                   >
                     {t('sessions.sidebar.group.showMore')}
                   </button>
@@ -308,24 +293,25 @@ export function SidebarActivitySections({
 function visibleSectionsForShortcutPublishing({
   sections,
   collapsed,
-  visibleCountBySection,
+  expandedSections,
   initialVisibleCount,
   flatVariant,
 }: {
   sections: ActivitySection[];
   collapsed: Set<string>;
-  visibleCountBySection: Map<string, number>;
+  expandedSections: Set<string>;
   initialVisibleCount: number;
   flatVariant: boolean;
 }): string[] {
   const ids: string[] = [];
   sections.forEach((section) => {
     if (!flatVariant && collapsed.has(section.key)) return;
-    const visibleLimit = Math.max(
+    const displayState = getRecentSectionDisplayState(
+      section.items.length,
       initialVisibleCount,
-      visibleCountBySection.get(section.key) ?? initialVisibleCount,
+      expandedSections.has(section.key),
     );
-    section.items.slice(0, visibleLimit).forEach((item) => ids.push(item.node.session.id));
+    section.items.slice(0, displayState.visibleCount).forEach((item) => ids.push(item.node.session.id));
   });
   return ids;
 }

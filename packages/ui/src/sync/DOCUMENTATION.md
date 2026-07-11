@@ -36,6 +36,10 @@ So:
 - Use the **directory sync stores** for per-directory live session/message state
 - Use the **global sessions store** for cold/global session coverage (especially archived pages and unopened directories)
 - Use **aggregated child-store snapshots** for live session/status truth across already initialized directories
+- Sidebar-only consumers may create and subscribe to a child store with
+  `ensureChild(directory, { bootstrap: false })`. Global events can still route
+  live status/permission updates into that store, but merely rendering a cached
+  row must never start the directory's full bootstrap.
 
 ## Ownership map
 
@@ -104,10 +108,70 @@ Sidebar directory refreshes are intentionally bounded snapshots, not full catalo
 - directory-sync bootstrap also loads only 20 root sessions; it no longer performs a 500-row full pagination pass or a 200-row mixed root/child prefetch
 - active requests coalesce by directory with bounded concurrency
 - active pagination stores a per-directory cursor; reaching the local Show more boundary requests and appends the next 20 roots
-- child-session recovery queries `session.children` only for active parent candidates instead of periodically listing 200 mixed sessions
+- child sessions arrive through live `session.created` events. Historical
+  `session.children` recovery is requested only when the user selects that
+  parent session; the startup watchdog must not fan out one request per active
+  or persisted parent
 - `loadingDirectories` means no usable active snapshot; `refreshingDirectories` keeps stale rows visible
 - archived rows load only when the archived bucket is expanded
 - retention must wait for `hasLoadedFullCatalog` and use `ensureFullGlobalSessionsLoaded()`, never treat a bounded directory snapshot as authoritative for cleanup
+
+### Electron cold-start ownership
+
+Electron has one durable session-summary source: the runtime-isolated SQLite
+session index. The legacy per-directory `localStorage` session list is removed
+on child-store creation and must not be reintroduced. `main.tsx` establishes a
+startup barrier before React effects; `SessionStartupCoordinator` restores the
+SQLite snapshot, refreshes each known root/worktree directory through the
+bounded scheduler, writes one transaction batch, then releases normal global
+and directory bootstrap. A successful empty root page replaces stale index
+rows; a failed page preserves its last good cache.
+
+## Session message loading
+
+- The imperative session-selection path and the reactive `useSync()` path share
+  one app-wide single-flight request keyed by runtime, directory, session, and
+  pagination cursor. They must not issue duplicate tail requests during a React
+  mount or provider remount.
+- Session materialization coalescing is scoped to the owning directory store.
+  A remounted `SyncProvider` must start its own commit path even when the
+  runtime, directory, and session ids match an old in-flight request; transport
+  single-flight can still share the HTTP response, but the new store must not
+  reuse a promise that only commits into a detached store.
+- Initial history is a 30-message tail page on every surface. Commit that page
+  immediately; do not expand it to 100/150 messages while searching for a turn
+  boundary.
+- Older history is user-driven pagination (`loadMore`) only. Desktop and VS Code
+  must not automatically prepend a 100-message page after initial render.
+- A rejected shared request is removed from the coordinator so the next
+  explicit/reactive attempt can retry; failure must never be cached as an empty
+  authoritative history.
+- Reconnect recovery may poll lightweight status for multiple active sessions,
+  but it materializes `session.get + session.messages` only for the currently
+  viewed session. Background busy/incomplete sessions wait until selection and
+  continue receiving live events without fetching their bodies.
+- Network session-detail and message-page reads for the current selection use
+  high fetch priority; background materialization of other sessions does not.
+  Broad
+  cold-start discovery reads (status, config, Git, quota, and bounded session
+  lists) use low priority, so opening a chat is not stuck behind an already
+  queued bootstrap burst. This is only a direct-network scheduling hint; relay
+  request ordering and request payloads are unchanged.
+
+## Runtime endpoint lifecycle
+
+- A runtime transport identity change means the normalized direct endpoint URL
+  or relay descriptor changed. A direct-runtime key alias on the same endpoint
+  is storage metadata, not a transport change, and must not reset app state or
+  remount `SyncProvider`.
+- Updating a bearer token or request headers for the same endpoint is a
+  credential refresh, not a runtime switch. It must update transport auth in
+  place without re-running global bootstrap, authentication checks, or opening
+  another global event stream.
+- Startup host restoration can publish several intermediate endpoint identities
+  in one short burst. App reset and authentication consumers coalesce that burst
+  and apply only its final identity; never remount `SyncProvider` once per
+  intermediate host/token state.
 
 ## Session action rules
 

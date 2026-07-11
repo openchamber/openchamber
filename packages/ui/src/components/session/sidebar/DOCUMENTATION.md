@@ -4,16 +4,49 @@
 
 - `SessionSidebar.tsx` now acts mainly as orchestration; core logic moved to focused hooks/components.
 - Sidebar is now a single multi-project tree: `recent` top section, then projects, then worktrees/archived groups, then sessions.
-- The Recent section defaults to 3 visible sessions and supports the same Show more / Show fewer batching as project groups (batch size 3).
-- Show more first reveals already-fetched rows. When it reaches the local boundary, Recent fetches the next page for every loaded directory that still has a cursor, while project/worktree groups fetch only their own directory. Each remote page appends 20 root sessions and preserves existing rows on failure.
+- The Recent section is capped at the newest 8 sessions, defaults to 3 visible
+  sessions, and Show more reveals all remaining Recent rows at once before
+  switching to Show fewer. Expanded project/worktree
+  groups reveal 5 sessions by default from the already-fetched 20-session page;
+  Show more reveals cached rows before loading the next 20-session page on demand.
+- Project/worktree Show more first reveals already-fetched rows, then fetches the next 20-session page for its own directory at the local boundary. Recent never paginates remotely from its Show more control because its display set is capped at 8.
 - Project rows retain the persisted project-registry order while session and worktree data hydrates. A successfully sent message promotes its owning project to the top; ordinary activity and selection do not reorder the structural project tree. The Recent section represents session recency instead.
 - The Projects section header no longer shows a global syncing accessory. While a
   project's session directories are fetching, that project's folder icon swaps to a
   spinner. The expanded body shows localized "Loading sessions…" only when there is
   no usable snapshot; background refresh keeps the existing rows visible.
-- Cold start gives the current / active project first priority via `refreshGlobalSessionsForDirectories`, fetching at most the newest 20 active sessions per directory. Once persisted collapse state is restored, other projects load only when they are already expanded, later expanded, or included by expand-all. Requests coalesce per directory and share a global concurrency limit of 2. Archived sessions are a separate lazy path: the always-present, initially collapsed archived bucket fetches at most 20 archived sessions per directory when first expanded.
-- After persisted project-collapse state is restored, every project that is already logically expanded is hydrated automatically. Startup-expanded projects do not require a collapse/re-expand click to trigger their first session request.
+- Electron cold start first hydrates the local SQLite session-summary index, then
+  asks the Electron-owned Web Server to refresh the newest 20 root sessions for
+  every persisted project root and known worktree directory. The browser never
+  fans out project `session.list` calls. The server uses one preemptible background
+  lane; selected-session detail/message/children requests abort that lane, run
+  first, and let the directory resume afterward. Git/worktree discovery is not
+  part of session startup. Archived sessions remain a separate lazy path.
+- Cached starts use OpenCode's `start` timestamp filter and merge only sessions
+  changed since the last successful sync. SQLite separately tracks the last
+  incremental and last full reconciliation times; a full newest-20 pass runs at
+  most once per 24 hours to remove sessions deleted or archived while the app
+  was closed.
+- `SessionStartupCoordinator` owns that pass before `SessionSidebar` mounts its
+  normal orchestration. After starting the server job, the UI observes SQLite
+  revisions through one low-priority long poll. When SQLite has rows the startup
+  logo releases immediately and validation continues with cached rows visible.
+  A first run with an empty index stays in the global loading state until the
+  server job completes; sidebar code must not start another hydrate or list cycle.
+- Project collapse state controls presentation only; Electron session-summary
+  refresh targets come from the persisted project index, so no collapse/re-expand
+  gesture is required to make a project appear.
 - The native tray consumes the sidebar/global cache and lightweight global status; it does not trigger a delayed all-project session-list fanout.
+- Mounting active or archived session rows creates only lightweight child-store
+  subscriptions (`bootstrap: false`). Routed live status/permission events still
+  update those rows, while config/path/session bootstrap remains owned by the
+  active chat instead of fanning out across every visible sidebar directory.
+  Selecting a session never fetches its children; child sessions are loaded only
+  when the user expands the parent tree control.
+- Tray status is event-first. Its startup/reconnect compensation waits for an
+  established OpenCode connection, coalesces overlapping refreshes, and queries
+  at most two directories concurrently; the 30-second poll is only a missed-event
+  safety net.
 - An idle global-session store always triggers a priority refresh, including after a runtime endpoint reset; the status therefore cannot remain idle after the sidebar's one-time mount effect has already run.
 - `NavRail` is no longer part of sidebar/navigation flow.
 - Project headers now own root sessions directly; there is no separate rendered `project root` subgroup.
@@ -45,6 +78,7 @@
 - Session rows support compact inline dates in minimal mode and simplified metadata in default mode.
 - Session-row visual selection is published through a narrow row-only Focus store before authoritative navigation. Focus includes the render scope (`recent` or `project`) plus session/project identity, so duplicate representations never both receive the Active background or satisfy the wrong paint barrier.
 - Previous/next-session navigation consumes ordered snapshots published from the rendered sidebar model. A Recent-origin focus cycles Recent items; a project-origin focus cycles only the logically visible rows inside its current expanded project. Rows hidden by project/group/folder collapse or the group's Show more boundary are excluded, and shortcuts never cross into another project as a fallback.
+- Advancing through Recent with the next-session shortcut reveals all remaining rows in the bounded 8-session Recent set, exactly like Show more. Navigation wraps after the eighth row and never loads another remote Recent page.
 - Global Mod+1…9 navigation numbers the first nine logically visible session rows from top to bottom across Recent and the expanded project tree. Container headers never consume a number; duplicate Recent/Project representations remain distinct Focus rows. Holding the platform primary modifier for 500ms reveals compact shortcut chips only on those rows, while releasing it, window blur, or page hide clears the hints immediately.
 - Every session navigation announces a monotonic intent revision. A later sidebar, keyboard, deep-link, or switcher intent invalidates an older pending sidebar commit, including ABA sequences such as A -> B -> A.
 - Project/group/folder ancestors are auto-expanded at most once for each navigation intent. Explicitly collapsing the project that owns the focused session remains respected during later hydration or persistence refreshes.
@@ -81,7 +115,9 @@
 
 - `hooks/useSessionActions.ts`: Centralizes session row actions (select/open, rename, share/unshare, archive/delete, confirmations).
 - `hooks/useSessionSearchEffects.ts`: Handles search open/close UX and input focus behavior.
-- `hooks/useSessionPrefetch.ts`: Prefetches messages for nearby/active sessions to improve perceived load speed.
+- Session bodies are loaded only for the selected session. The sidebar does not
+  prefetch neighboring/recent session messages because those background pages
+  compete with the active chat during cold start and rapid navigation.
 - `hooks/useSessionGrouping.ts`: Builds grouped session structures and search text/filter helpers.
 - `hooks/useSessionSidebarSections.ts`: Composes final per-project sections and group search metadata for rendering.
 - `hooks/useProjectSessionSelection.ts`: Resolves active/current project-session selection logic and session-directory context.

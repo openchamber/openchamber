@@ -61,7 +61,6 @@ type Props = {
   groupSearchDataByGroup: WeakMap<SessionGroup, GroupSearchData>;
   visibleSessionCount?: number;
   collapsedGroups: Set<string>;
-  hideDirectoryControls: boolean;
   collapsedFolderIds: Set<string>;
   toggleFolderCollapse: (folderId: string) => void;
   renameFolder: (scopeKey: string, folderId: string, name: string) => void;
@@ -291,7 +290,6 @@ const areGroupPropsEqual = (prev: Props, next: Props): boolean => {
   return (
     prev.hasSessionSearchQuery === next.hasSessionSearchQuery
     && prev.normalizedSessionSearchQuery === next.normalizedSessionSearchQuery
-    && prev.hideDirectoryControls === next.hideDirectoryControls
     && prev.collapsedFolderIds === next.collapsedFolderIds
     && prev.toggleFolderCollapse === next.toggleFolderCollapse
     && prev.renameFolder === next.renameFolder
@@ -336,7 +334,6 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
     groupSearchDataByGroup,
     visibleSessionCount,
     collapsedGroups,
-    hideDirectoryControls,
     collapsedFolderIds,
     toggleFolderCollapse,
     renameFolder,
@@ -397,7 +394,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
     paginationDirectory ? state.activePaginationByDirectory.get(paginationDirectory) : undefined
   ));
   const isCollapsed = hasSessionSearchQuery ? false : collapsedGroups.has(groupKey);
-  const maxVisible = getDefaultProjectGroupVisibleCount(hideDirectoryControls);
+  const maxVisible = getDefaultProjectGroupVisibleCount();
   const nonArchivedVisibleCount = Math.max(maxVisible, visibleSessionCount ?? maxVisible);
   const groupMatchesSearch = hasSessionSearchQuery ? searchData?.groupMatches === true : false;
   const shouldFilterGroupContents = hasSessionSearchQuery;

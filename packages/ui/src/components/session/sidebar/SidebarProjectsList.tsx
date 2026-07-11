@@ -275,7 +275,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                   >
                     {!isCollapsed ? (
                       <div className="space-y-0 pt-0 pb-0.5">
-                        {isSessionsLoading ? (
+                        {isSessionsLoading && section.groups.length === 0 ? (
                           <div
                             className="box-border w-full py-1.5 text-left typography-ui-label font-normal text-muted-foreground/80 animate-pulse select-none"
                             style={{ paddingLeft: getSidebarRowPaddingLeft(1) }}

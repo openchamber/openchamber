@@ -8,12 +8,10 @@ import { formatDirectoryName, cn } from '@/lib/utils';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useAllLiveSessions } from '@/sync/sync-context';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { useSync } from '@/sync/use-sync';
-import { useSessionPrefetch } from './sidebar/hooks/useSessionPrefetch';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
-import { useGitStore, useGitAllBranches, useGitRepoStatusMap } from '@/stores/useGitStore';
+import { useGitAllBranches, useGitRepoStatusMap } from '@/stores/useGitStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { NewWorktreeDialog } from './NewWorktreeDialog';
 import { ScheduledTasksDialog } from './ScheduledTasksDialog';
@@ -45,8 +43,6 @@ import { SessionNodeItem } from './sidebar/SessionNodeItem';
 import type { SessionNodeRenderExtras } from './sidebar/sessionNodeItemUtils';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useShallow } from 'zustand/react/shallow';
-import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
-import { checkIsGitRepository } from '@/lib/gitApi';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { SortableDragHandleProps } from './sidebar/sortableItems';
 import {
@@ -69,6 +65,7 @@ import {
 import { type SessionGroup, type SessionNode } from './sidebar/types';
 import {
   deriveRecentSessions,
+  RECENT_SESSION_LIMIT,
 } from './sidebar/activitySections';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import {
@@ -343,7 +340,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const gitBranches = useGitAllBranches();
 
-  const sync = useSync();
   const liveSessions = useAllLiveSessions();
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
   const hasLoadedGlobalSessions = useGlobalSessionsStore((state) => state.hasLoaded);
@@ -353,7 +349,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const loadingDirectories = useGlobalSessionsStore((state) => state.loadingDirectories);
   const refreshingDirectories = useGlobalSessionsStore((state) => state.refreshingDirectories);
   const archivedLoadingDirectories = useGlobalSessionsStore((state) => state.archivedLoadingDirectories);
-  const activeSessionPagination = useGlobalSessionsStore((state) => state.activePaginationByDirectory);
   // Defer the heavy sidebar memo/DOM commit so typing/send stay on the urgent
   // lane while a per-directory session wave lands. Without this, one project
   // with a large history still freezes input for a frame when the list commits.
@@ -449,114 +444,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     [liveSessions],
   );
 
-  const projectWorktreeDiscoveryKey = React.useMemo(
-    () => projects
-      .map((project) => `${project.id}:${normalizePath(project.path) ?? ''}`)
-      .join('|'),
-    [projects],
-  );
-
-  React.useEffect(() => {
-    if (globalSessionsStatus !== 'idle') {
-      return;
-    }
-
-    // Cold start: only hydrate the current / active project directories.
-    // A global unfiltered session.list used to land thousands of rows in one
-    // commit and saturate OpenCode behind createSession. Other projects load
-    // when expanded (toggleProject / expandAll) or when their worktrees appear
-    // under an already-loaded project.
-    const priorityDirectories = new Set<string>();
-    const current = normalizePath(currentDirectory);
-    if (current) {
-      priorityDirectories.add(current);
-    }
-
-    const activeProject = projects.find((project) => project.id === activeProjectId)
-      ?? projects.find((project) => normalizePath(project.path) === current)
-      ?? null;
-    const activeProjectPath = normalizePath(activeProject?.path ?? null);
-    if (activeProjectPath) {
-      priorityDirectories.add(activeProjectPath);
-      if (!isVSCode) {
-        const worktrees = availableWorktreesByProject.get(activeProjectPath) ?? [];
-        worktrees.forEach((worktree) => {
-          const directory = normalizePath(worktree.path);
-          if (directory) priorityDirectories.add(directory);
-        });
-      }
-    }
-
-    void refreshGlobalSessionsForDirectories(priorityDirectories, syncSessionsSnapshotRef.current);
-  }, [activeProjectId, availableWorktreesByProject, currentDirectory, globalSessionsStatus, isVSCode, projects]);
-
-  // Tracks the last project list we already kicked off discovery for.
-  // A re-mount with the same project set shouldn't fan out another
-  // burst of `checkIsGitRepository` / `listProjectWorktrees` calls.
-  const discoveredProjectsRef = React.useRef<string>('');
-  React.useEffect(() => {
-    let cancelled = false;
-
-    const discoverWorktrees = async () => {
-      const projectEntries = useProjectsStore.getState().projects;
-      if (projectEntries.length === 0) return;
-
-      const worktreesByProject = new Map<string, WorktreeMetadata[]>();
-      const allWorktrees: WorktreeMetadata[] = [];
-
-      // Constrain fanout: previously `Promise.all(projects.map(...))` could
-      // spawn dozens of concurrent `git worktree list` and
-      // `checkIsGitRepository` calls on cold start, each touching the
-      // worktree process. Concurrency=3 keeps startup latency low while
-      // bounding peak worktree-process load.
-      const worktreeConcurrency = 3;
-      let cursor = 0;
-      const workers = Array.from({ length: worktreeConcurrency }, async () => {
-        while (true) {
-          const nextIndex = cursor;
-          cursor += 1;
-          if (nextIndex >= projectEntries.length) return;
-          const project = projectEntries[nextIndex];
-          const projectPath = normalizePath(project.path);
-          if (!projectPath) continue;
-          try {
-            // Use store-cached isGitRepo when available; fall back to
-            // a direct check for projects the Git store hasn't seen yet.
-            // Forcing `ensureStatus` here also warms the store so the
-            // PR/render paths downstream can read isGitRepo for free.
-            const cachedIsGitRepo = useGitStore.getState().directories.get(projectPath)?.isGitRepo;
-            const isGitRepo = cachedIsGitRepo ?? await checkIsGitRepository(projectPath);
-            if (!isGitRepo) continue;
-            const worktrees = await listProjectWorktrees({ id: project.id, path: projectPath });
-            if (cancelled || worktrees.length === 0) continue;
-            worktreesByProject.set(projectPath, worktrees);
-            allWorktrees.push(...worktrees);
-          } catch {
-            // ignore discovery errors
-          }
-        }
-      });
-      await Promise.all(workers);
-
-      if (cancelled) return;
-
-      useSessionUIStore.setState({
-        availableWorktrees: allWorktrees,
-        availableWorktreesByProject: worktreesByProject,
-      });
-    };
-
-    // Skip if we already discovered worktrees for this exact project set.
-    if (discoveredProjectsRef.current === projectWorktreeDiscoveryKey) {
-      return;
-    }
-    discoveredProjectsRef.current = projectWorktreeDiscoveryKey;
-    void discoverWorktrees();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [projectWorktreeDiscoveryKey]);
 
   React.useEffect(() => {
     let refreshTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -1182,6 +1069,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   useProjectRepoStatus({
     normalizedProjects,
+    activeProjectId,
     gitRepoStatus,
     setProjectRepoStatus,
     setProjectRootBranches,
@@ -1413,7 +1301,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     }
 
     return deriveRecentSessions(sessions)
-      .sort((a, b) => compareSessionsByPinnedAndTime(a, b, pinnedSessionIds));
+      .sort((a, b) => compareSessionsByPinnedAndTime(a, b, pinnedSessionIds))
+      .slice(0, RECENT_SESSION_LIMIT);
   }, [isVSCode, pinnedSessionIds, sessions, showRecentSection]);
 
   // Prefetch is wired below, after recentSessionIds is computed.
@@ -1468,19 +1357,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   );
 
 
-  const recentSessionIds = React.useMemo(() => {
-    return new Set(activeNowSessions.map((session) => session.id));
-  }, [activeNowSessions]);
-
-  const recentSessionIdsList = React.useMemo(() => [...recentSessionIds], [recentSessionIds]);
-
-  useSessionPrefetch({
-    currentSessionId,
-    sortedSessions,
-    recentSessionIds: recentSessionIdsList,
-    ensureSessionRenderable: sync.ensureSessionRenderable,
-  });
-
   const sectionsForSidebarRender = React.useMemo(() => {
     return showArchivedSessions
       ? sectionsForRender
@@ -1530,7 +1406,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       collapsedGroupKeys: collapsedGroups,
       collapsedFolderIds,
       visibleSessionCountByGroup,
-      defaultVisibleSessionCount: getDefaultProjectGroupVisibleCount(hideDirectoryControls),
+      defaultVisibleSessionCount: getDefaultProjectGroupVisibleCount(),
       hasSessionSearchQuery,
     })
   ), [
@@ -1538,7 +1414,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     collapsedGroups,
     collapsedProjects,
     hasSessionSearchQuery,
-    hideDirectoryControls,
     projectNavigationTargets,
     visibleSessionCountByGroup,
   ]);
@@ -1991,7 +1866,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         groupSearchDataByGroup={groupSearchDataByGroup}
         visibleSessionCount={visibleSessionCountByGroup.get(groupKey)}
         collapsedGroups={collapsedGroups}
-        hideDirectoryControls={hideDirectoryControls}
         collapsedFolderIds={collapsedFolderIds}
         toggleFolderCollapse={toggleFolderCollapse}
         renameFolder={renameFolder}
@@ -2051,7 +1925,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       collectDirectoriesForProjectId,
       visibleSessionCountByGroup,
       collapsedGroups,
-      hideDirectoryControls,
       collapsedFolderIds,
       toggleFolderCollapse,
       renameFolder,
@@ -2096,16 +1969,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       expandAllProjects={expandAllProjects}
     />
   ) : null;
-  const hasMoreRecentSessions = [...activeSessionPagination.values()].some((page) => page.hasMore);
-  const isLoadingMoreRecentSessions = [...activeSessionPagination.values()].some((page) => page.loadingMore);
-  const loadMoreRecentSessions = () => {
-    const directories = [...activeSessionPagination.entries()]
-      .filter(([, page]) => page.hasMore && !page.loadingMore)
-      .map(([directory]) => directory);
-    directories.forEach((directory) => {
-      void loadMoreGlobalSessionsForDirectory(directory);
-    });
-  };
   // Brand mark sits above Recent (Codex-style top-left wordmark). Kept outside
   // the Recent toggle so it still shows when the Recent section is hidden.
   const topContent = (!isVSCode && !hasSessionSearchQuery) ? (
@@ -2120,9 +1983,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
           openSidebarMenuKey={openSidebarMenuKey}
           variant="section"
           headerAccessory={displayModeMenu}
-          hasMoreSessions={hasMoreRecentSessions}
-          isLoadingMoreSessions={isLoadingMoreRecentSessions}
-          onLoadMoreSessions={loadMoreRecentSessions}
           onVisibleSessionIdsChange={handleVisibleRecentShortcutSessionIdsChange}
         />
       ) : displayModeMenu ? (

@@ -1,6 +1,38 @@
 import type { Session } from '@opencode-ai/sdk/v2';
 
 const RECENT_SESSION_MAX_AGE_MS = 48 * 60 * 60 * 1000;
+export const RECENT_SESSION_INITIAL_VISIBLE_COUNT = 3;
+export const RECENT_SESSION_LIMIT = 8;
+
+export const getRecentSectionDisplayState = (
+  totalCount: number,
+  initialVisibleCount: number,
+  expanded: boolean,
+): { visibleCount: number; canShowMore: boolean; canShowFewer: boolean } => {
+  const safeTotalCount = Math.max(0, totalCount);
+  const safeInitialVisibleCount = Math.max(0, initialVisibleCount);
+  const visibleCount = expanded
+    ? safeTotalCount
+    : Math.min(safeInitialVisibleCount, safeTotalCount);
+
+  return {
+    visibleCount,
+    canShowMore: !expanded && visibleCount < safeTotalCount,
+    canShowFewer: expanded && safeTotalCount > safeInitialVisibleCount,
+  };
+};
+
+export const getRecentNavigationVisibleCount = (
+  targetIndex: number,
+  initialVisibleCount: number,
+  totalCount: number,
+): number => {
+  const safeInitialVisibleCount = Math.max(0, initialVisibleCount);
+  if (targetIndex < safeInitialVisibleCount) {
+    return safeInitialVisibleCount;
+  }
+  return Math.max(safeInitialVisibleCount, totalCount);
+};
 
 const isSubtaskSession = (session: Session): boolean => {
   return Boolean((session as Session & { parentID?: string | null }).parentID);

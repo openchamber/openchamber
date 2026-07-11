@@ -35,7 +35,8 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { getRuntimeKey, isRuntimeEndpointIdentityChange, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { createRuntimeEndpointTransitionCoalescer } from '@/lib/runtime-endpoint-transition';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { resumeAutoReviewRun } from '@/lib/reviewFlow';
 import { SyncProvider } from '@/sync/sync-context';
@@ -58,7 +59,11 @@ import { SyncAppEffects } from '@/apps/AppEffects';
 import { resetAppForRuntimeEndpointChange } from '@/apps/runtimeEndpointReset';
 import { useAppFontEffects } from '@/apps/useAppFontEffects';
 import { OpenCodeUpdateToast } from '@/components/update/OpenCodeUpdateToast';
+import { StartupSessionSyncOverlay } from '@/components/session/StartupSessionSyncOverlay';
+import { SessionStartupCoordinator } from '@/components/session/SessionStartupCoordinator';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { markStartupTrace, startupTraceEnabled } from '@/lib/startupTrace';
+import { releaseSessionStartupBarrier, waitForSessionStartupBarrier } from '@/lib/session-startup-barrier';
 
 // Lazy-loaded heavy views — loaded on demand to reduce initial bundle size.
 const OnboardingScreen = lazyWithChunkRecovery(() =>
@@ -234,6 +239,7 @@ function App({ apis }: AppProps) {
   const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
   const mobileKeyboardMode = useUIStore((state) => state.mobileKeyboardMode);
   const isDesktopRuntime = React.useMemo(() => isDesktopShell(), []);
+  const hasCachedSessionIndex = useGlobalSessionsStore((state) => state.hasCachedSessionIndex);
   const setPlanModeEnabled = useFeatureFlagsStore((state) => state.setPlanModeEnabled);
   const [bootInjectionStatus, setBootInjectionStatus] = React.useState<BootInjectionStatus>(() => {
     return getBootInjectionStatus();
@@ -265,12 +271,20 @@ function App({ apis }: AppProps) {
   }, [apis.runtime.isVSCode]);
 
   React.useEffect(() => {
-    return subscribeRuntimeEndpointChanged((detail) => {
+    const transitions = createRuntimeEndpointTransitionCoalescer((detail: Parameters<typeof resetAppForRuntimeEndpointChange>[0]) => {
+      if (!isRuntimeEndpointIdentityChange(detail)) {
+        return;
+      }
       resetAppForRuntimeEndpointChange(detail);
       setRuntimeEndpointEpoch((epoch) => epoch + 1);
       setInitRetryExhausted(false);
       setInitRetryEpoch((epoch) => epoch + 1);
     });
+    const unsubscribe = subscribeRuntimeEndpointChanged((detail) => transitions.schedule(detail));
+    return () => {
+      unsubscribe();
+      transitions.cancel();
+    };
   }, []);
 
   const autoReviewResumeSignature = useAutoReviewStore((state) => {
@@ -287,12 +301,17 @@ function App({ apis }: AppProps) {
       return;
     }
 
-    const runtimeKey = getRuntimeKey();
-    const runs = Object.values(useAutoReviewStore.getState().runsByOriginalSessionID)
-      .filter((run) => run.status === 'running' && run.runtimeKey === runtimeKey);
-    for (const run of runs) {
-      resumeAutoReviewRun(run.originalSessionID);
-    }
+    let cancelled = false;
+    void waitForSessionStartupBarrier().then(() => {
+      if (cancelled) return;
+      const runtimeKey = getRuntimeKey();
+      const runs = Object.values(useAutoReviewStore.getState().runsByOriginalSessionID)
+        .filter((run) => run.status === 'running' && run.runtimeKey === runtimeKey);
+      for (const run of runs) {
+        resumeAutoReviewRun(run.originalSessionID);
+      }
+    });
+    return () => { cancelled = true; };
   }, [autoReviewResumeSignature, embeddedSessionChat, runtimeEndpointEpoch]);
 
   React.useEffect(() => {
@@ -312,7 +331,13 @@ function App({ apis }: AppProps) {
       return;
     }
 
-    void refreshGitHubAuthStatus(apis.github, { force: true });
+    let cancelled = false;
+    void waitForSessionStartupBarrier().then(() => {
+      if (!cancelled) {
+        void refreshGitHubAuthStatus(apis.github, { force: true });
+      }
+    });
+    return () => { cancelled = true; };
   }, [apis.github, embeddedSessionChat, refreshGitHubAuthStatus]);
 
   useAppFontEffects();
@@ -324,9 +349,11 @@ function App({ apis }: AppProps) {
   // Desktop shells strictly require a valid boot outcome before dismissing.
   // Non-main outcomes (chooser/recovery) can dismiss without waiting for init.
   React.useEffect(() => {
+    const readyForFirstDesktopPaint = isInitialized
+      || (isDesktopRuntime && bootViewIsMain && hasCachedSessionIndex);
     if (!canDismissInitialLoading({
       isDesktopShell: isDesktopRuntime,
-      isInitialized,
+      isInitialized: readyForFirstDesktopPaint,
       bootOutcomeKnown,
       bootViewIsMain,
     })) {
@@ -344,7 +371,7 @@ function App({ apis }: AppProps) {
     }, 150);
 
     return () => clearTimeout(timer);
-  }, [isDesktopRuntime, isInitialized, bootOutcomeKnown, bootViewIsMain]);
+  }, [isDesktopRuntime, isInitialized, bootOutcomeKnown, bootViewIsMain, hasCachedSessionIndex]);
 
   // Deterministic malformed handling: update splash text so the user
   // sees a specific error instead of a generic spinner, but do NOT
@@ -383,6 +410,8 @@ function App({ apis }: AppProps) {
     let cancelled = false;
 
     const run = async () => {
+      await waitForSessionStartupBarrier();
+      if (cancelled) return;
       const res = await runtimeFetch('/health', { method: 'GET' }).catch(() => null);
       if (!res || !res.ok || cancelled) return;
       const data = (await res.json().catch(() => null)) as null | {
@@ -407,7 +436,14 @@ function App({ apis }: AppProps) {
     if (isVSCodeRuntime) {
       return;
     }
-    void initializeApp();
+    let cancelled = false;
+    void waitForSessionStartupBarrier().then(() => {
+      if (!cancelled) {
+        return initializeApp();
+      }
+      return undefined;
+    });
+    return () => { cancelled = true; };
   }, [initializeApp, isVSCodeRuntime]);
 
   React.useEffect(() => {
@@ -431,6 +467,8 @@ function App({ apis }: AppProps) {
         return;
       }
       retryCount += 1;
+      await waitForSessionStartupBarrier();
+      if (!active) return;
       await state.initializeApp();
 
       const next = useConfigStore.getState();
@@ -829,6 +867,7 @@ function App({ apis }: AppProps) {
     setInitRetryExhausted(false);
     setManualInitRetrying(true);
     try {
+      await waitForSessionStartupBarrier();
       await useConfigStore.getState().initializeApp();
     } finally {
       setManualInitRetrying(false);
@@ -892,6 +931,7 @@ function App({ apis }: AppProps) {
   }
 
   if (embeddedSessionChat) {
+    releaseSessionStartupBarrier();
     return (
       <ErrorBoundary>
         <SyncProvider key={runtimeEndpointEpoch} sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
@@ -943,8 +983,10 @@ function App({ apis }: AppProps) {
               <TooltipProvider delayDuration={300} skipDelayDuration={150}>
                 <div className={isDesktopRuntime ? 'h-full text-foreground bg-transparent' : 'h-full text-foreground bg-background'}>
                   <SyncAppEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
+                  <SessionStartupCoordinator />
                   <OpenCodeUpdateToast />
                   <MainLayout />
+                  <StartupSessionSyncOverlay />
                   <Toaster />
                   {!isBootShell && (
                     <>

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { shouldApplyDirectoryChange } from './directoryChange';
 import { devtools } from 'zustand/middleware';
 import { opencodeClient } from '@/lib/opencode/client';
 import { getDesktopHomeDirectory, isVSCodeRuntime } from '@/lib/desktop';
@@ -267,6 +268,10 @@ export const useDirectoryStore = create<DirectoryStore>()(
         const resolvedPath = resolveDirectoryPath(path, homeDir);
         if (streamDebugEnabled()) {
           console.log('[DirectoryStore] setDirectory called with path:', resolvedPath);
+        }
+
+        if (!shouldApplyDirectoryChange(get().currentDirectory, resolvedPath)) {
+          return;
         }
 
         opencodeClient.setDirectory(resolvedPath);

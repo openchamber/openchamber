@@ -2,16 +2,13 @@
  * Persisted child-store metadata caches.
  *
  * VCS info, project metadata, and icons are cached to localStorage
- * per directory so they survive page reloads.
- * A small root-session snapshot is persisted for instant sidebar paint;
- * messages and parts are always loaded from the server.
+ * per directory so they survive page reloads. Session summaries deliberately
+ * do not live here: Electron's SQLite session index is their only durable
+ * source of truth.
  */
 
-import type { Session, VcsInfo } from "@opencode-ai/sdk/v2/client"
+import type { VcsInfo } from "@opencode-ai/sdk/v2/client"
 import type { ProjectMeta } from "./types"
-
-/** Cap persisted session lists so localStorage stays bounded per directory. */
-const PERSISTED_SESSION_LIMIT = 20
 
 // ---------------------------------------------------------------------------
 // Storage key generation
@@ -36,7 +33,7 @@ function storagePrefix(directory: string): string {
 // Typed cache helpers
 // ---------------------------------------------------------------------------
 
-type CacheKey = "vcs" | "projectMeta" | "icon" | "sessions"
+type CacheKey = "vcs" | "projectMeta" | "icon"
 
 function cacheKey(directory: string, key: CacheKey): string {
   return `${storagePrefix(directory)}.${key}`
@@ -73,7 +70,6 @@ export type PersistedDirCache = {
   vcs: VcsInfo | undefined
   projectMeta: ProjectMeta | undefined
   icon: string | undefined
-  sessions: Session[] | undefined
 }
 
 /** Read all cached metadata for a directory */
@@ -82,26 +78,16 @@ export function readDirCache(directory: string): PersistedDirCache {
     vcs: readCache<VcsInfo>(directory, "vcs"),
     projectMeta: readCache<ProjectMeta>(directory, "projectMeta"),
     icon: readCache<string>(directory, "icon"),
-    sessions: readCache<Session[]>(directory, "sessions"),
   }
 }
 
-/**
- * Write a capped slice of the directory session list to cache so the sidebar
- * can paint chats instantly on cold start. Refreshed by bootstrap loadSessions.
- */
-export function persistSessions(directory: string, sessions: Session[] | undefined): void {
-  if (!sessions || sessions.length === 0) {
-    writeCache(directory, "sessions", undefined)
-    return
+/** Remove the legacy per-directory session list after SQLite takes ownership. */
+export function clearLegacySessionCache(directory: string): void {
+  try {
+    localStorage.removeItem(`${storagePrefix(directory)}.sessions`)
+  } catch {
+    // Storage is only an obsolete acceleration layer; failure is harmless.
   }
-  // Persist only recent root conversations. Child sessions are discovered via
-  // live events or the targeted parent children endpoint when they are active.
-  const roots = sessions.filter((session) => !session.parentID)
-  const capped = [...roots]
-    .sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
-    .slice(0, PERSISTED_SESSION_LIMIT)
-  writeCache(directory, "sessions", capped)
 }
 
 /** Write vcs info to cache */

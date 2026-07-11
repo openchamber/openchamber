@@ -145,4 +145,29 @@ describe('runtime auth headers', () => {
       clearRuntimeAuthCredentialProvider();
     }
   });
+
+  test('does not invalidate URL auth when the bearer token is unchanged', async () => {
+    const previousFetch = globalThis.fetch;
+    let fetchCount = 0;
+    try {
+      clearRuntimeUrlAuthToken();
+      setRuntimeBearerToken('same-token');
+      globalThis.fetch = (async () => {
+        fetchCount += 1;
+        return Response.json({ token: `url-token-${fetchCount}`, expiresAt: Date.now() + 60_000 });
+      }) as typeof fetch;
+
+      const firstToken = await refreshRuntimeUrlAuthToken('https://runtime.example');
+      setRuntimeBearerToken(' same-token ');
+      const secondToken = await refreshRuntimeUrlAuthToken('https://runtime.example');
+
+      expect(firstToken).toBe('url-token-1');
+      expect(secondToken).toBe('url-token-1');
+      expect(fetchCount).toBe(1);
+    } finally {
+      globalThis.fetch = previousFetch;
+      clearRuntimeUrlAuthToken();
+      clearRuntimeAuthCredentialProvider();
+    }
+  });
 });

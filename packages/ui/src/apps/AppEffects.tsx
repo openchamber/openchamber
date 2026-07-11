@@ -66,7 +66,9 @@ const MiniChatPresenceBridge: React.FC = () => {
 export function SyncRuntimeEffects({ embeddedBackgroundWorkEnabled }: {
   embeddedBackgroundWorkEnabled: boolean;
 }) {
-  useSessionAutoCleanup(embeddedBackgroundWorkEnabled);
+  // Retention remains available from Settings, but never triggers a broad
+  // catalog fetch during normal startup.
+  useSessionAutoCleanup({ enabled: embeddedBackgroundWorkEnabled, autoRun: false });
   useQueuedMessageAutoSend(embeddedBackgroundWorkEnabled);
 
   return <SyncOptimisticBridge />;

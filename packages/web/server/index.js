@@ -74,6 +74,8 @@ import { createSessionRuntime } from './lib/opencode/session-runtime.js';
 import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
 import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
 import { createSessionTitleRuntime } from './lib/session-title/runtime.js';
+import { createSessionIndexService } from './lib/session-index/service.js';
+import { createSessionIndexSyncRuntime } from './lib/session-index/sync-runtime.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
 import { createTunnelWiringRuntime } from './lib/opencode/tunnel-wiring-runtime.js';
@@ -88,6 +90,7 @@ import { createNotificationTemplateRuntime } from './lib/notifications/template-
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
+import { applyRuntimeCorsHeaders } from './lib/request-cors.js';
 import { createClientPairingRuntime } from './lib/client-auth/pairing.js';
 import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
 import { attachRealtimeProxy } from './lib/realtime-proxy.js';
@@ -1216,6 +1219,16 @@ async function main(options = {}) {
   const getDesktopRuntimeConfig = typeof options.getDesktopRuntimeConfig === 'function'
     ? options.getDesktopRuntimeConfig
     : null;
+  const sessionIndexService = createSessionIndexService({
+    dbPath: typeof options.sessionIndexDbPath === 'string' ? options.sessionIndexDbPath : undefined,
+    getRuntimeConfig: () => getDesktopRuntimeConfig?.() ?? null,
+  });
+  const sessionIndexSyncRuntime = createSessionIndexSyncRuntime({
+    sessionIndexService,
+    buildOpenCodeUrl,
+    getOpenCodeAuthHeaders,
+    waitForOpenCodeReady,
+  });
 
   console.log(`Starting OpenChamber on port ${port === 0 ? 'auto' : port}`);
 
@@ -1245,13 +1258,14 @@ async function main(options = {}) {
   app.use((req, res, next) => {
     const origin = typeof req.headers.origin === 'string' ? req.headers.origin : '';
     if (packagedClientOrigins.has(origin) || isLocalDevClientOrigin(origin)) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
-      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With,Cache-Control,X-OpenCode-Directory,X-OpenCode-Directory-Encoding');
-      res.setHeader('Access-Control-Expose-Headers', 'x-next-cursor');
-      res.setHeader('Vary', 'Origin');
+      applyRuntimeCorsHeaders({
+        origin,
+        setHeader: (name, value) => res.setHeader(name, value),
+      });
       if (req.method === 'OPTIONS') {
+        if (OPENCHAMBER_VERBOSE_REQUEST_LOGS) {
+          console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+        }
         res.status(204).end();
         return;
       }
@@ -1368,6 +1382,8 @@ async function main(options = {}) {
     fetchFreeZenModels,
     getCachedZenModels,
     setAutoAcceptSession,
+    sessionIndexService,
+    sessionIndexSyncRuntime,
   });
   uiAuthController = bootstrapResult.uiAuthController;
   realtimeProxyRuntime = attachRealtimeProxy({
@@ -1474,7 +1490,9 @@ async function main(options = {}) {
     terminalHeartbeatIntervalMs: TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS,
     terminalRebindWindowMs: TERMINAL_INPUT_WS_REBIND_WINDOW_MS,
     terminalMaxRebindsPerWindow: TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW,
-    setupProxy,
+    setupProxy: (proxyApp) => setupProxy(proxyApp, {
+      onInteractiveSessionRequest: () => sessionIndexSyncRuntime?.noteInteractiveRequest(),
+    }),
     scheduleOpenCodeApiDetection,
     bootstrapOpenCodeAtStartup,
     triggerHealthCheck,
@@ -1556,6 +1574,12 @@ async function main(options = {}) {
       };
     },
     stop: (shutdownOptions = {}) => {
+      try {
+        sessionIndexSyncRuntime?.stop();
+        sessionIndexService?.close();
+      } catch {
+        // The index is a local cache; a failed close must not block shutdown.
+      }
       realtimeProxyRuntime.stop();
       clearInterval(relayReconcileTimer);
       try {

@@ -17,8 +17,9 @@ import { isSyntheticPart } from "@/lib/messages/synthetic"
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
 import { retry } from "./retry"
 import { sessionLoadDebug } from "./session-load-debug"
-import { isVSCodeRuntime } from "@/lib/desktop"
-import { isMobileSurfaceRuntime } from "@/lib/runtimeSurface"
+import { getRuntimeKey } from "@/lib/runtime-switch"
+import { loadSessionMessagePage } from "./session-message-loader"
+import { setSessionPrefetch } from "./session-prefetch-cache"
 import { stripMessageDiffSnapshots, stripSessionDiffSnapshots } from "./sanitize"
 import { sessionEvents } from "@/lib/sessionEvents"
 import {
@@ -41,6 +42,7 @@ const UNREVERT_REFETCH_RETRY_MS = 150
 let _sdk: OpencodeClient | null = null
 let _childStores: ChildStoreManager | null = null
 let _getDirectory: () => string = () => ""
+const PENDING_MESSAGE_FETCHES = new Map<string, { sessionID: string; directory: string }>()
 type OptimisticAddInput = { sessionID: string; directory?: string | null; message: Message; parts: Part[] }
 type OptimisticRemoveInput = { sessionID: string; directory?: string | null; messageID: string }
 type OptimisticConfirmInput = OptimisticRemoveInput
@@ -101,6 +103,16 @@ export function setActionRefs(
   _sdk = sdk
   _childStores = childStores
   _getDirectory = getDirectory
+
+  if (PENDING_MESSAGE_FETCHES.size > 0) {
+    const pending = [...PENDING_MESSAGE_FETCHES.values()]
+    PENDING_MESSAGE_FETCHES.clear()
+    queueMicrotask(() => {
+      for (const request of pending) {
+        void fetchMessagesForSession(request.sessionID, request.directory)
+      }
+    })
+  }
 }
 
 export function setOptimisticRefs(
@@ -1261,19 +1273,20 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
 // ---------------------------------------------------------------------------
 
 const FETCH_MESSAGES_LOADING = new Set<string>()
-const DESKTOP_INITIAL_PAGE_SIZE = 50
 const CONSTRAINED_INITIAL_PAGE_SIZE = 30
 
-const getFetchPageSize = () => {
-  if (isVSCodeRuntime() || isMobileSurfaceRuntime()) return CONSTRAINED_INITIAL_PAGE_SIZE
-  return DESKTOP_INITIAL_PAGE_SIZE
-}
+const getFetchPageSize = () => CONSTRAINED_INITIAL_PAGE_SIZE
 
 export async function fetchMessagesForSession(sessionID: string, directory?: string | null): Promise<void> {
   const resolvedDir = directory ?? dir()
   if (!resolvedDir) return
 
   const loadingKey = `${resolvedDir}:${sessionID}`
+  if (!_sdk || !_childStores) {
+    PENDING_MESSAGE_FETCHES.set(loadingKey, { sessionID, directory: resolvedDir })
+    sessionLoadDebug("imperative-queued", { sessionID, directory: resolvedDir })
+    return
+  }
   if (FETCH_MESSAGES_LOADING.has(loadingKey)) {
     sessionLoadDebug("imperative-deduped", { sessionID, directory: resolvedDir })
     return
@@ -1295,13 +1308,19 @@ export async function fetchMessagesForSession(sessionID: string, directory?: str
       return
     }
 
-    const result = await retry(async () => {
-      const response = await s.session.messages({
-        sessionID,
-        directory: resolvedDir,
-        limit,
-      })
-      return response
+    const result = await loadSessionMessagePage({
+      runtimeKey: getRuntimeKey(),
+      directory: resolvedDir,
+      sessionID,
+      request: () => retry(async () => {
+        const response = await s.session.messages({
+          sessionID,
+          directory: resolvedDir,
+          limit,
+        })
+        assertSdkSuccess(response, "session.messages")
+        return response
+      }),
     })
 
     const records = (assertSdkSuccess(result, "session.messages") ?? [])
@@ -1342,6 +1361,14 @@ export async function fetchMessagesForSession(sessionID: string, directory?: str
       )
       if (!materialized.messagesChanged && !materialized.partsChanged) return state
       return { message: materialized.message, part: materialized.part }
+    })
+    const cursor = result.response?.headers?.get?.("x-next-cursor") ?? undefined
+    setSessionPrefetch({
+      directory: resolvedDir,
+      sessionID,
+      limit: records.length,
+      cursor,
+      complete: !cursor,
     })
     sessionLoadDebug("imperative-committed", {
       sessionID,

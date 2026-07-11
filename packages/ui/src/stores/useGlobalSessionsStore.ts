@@ -4,6 +4,17 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { listGlobalSessionPages } from '@/stores/globalSessions';
 import { getReviewTransferDirection, type ReviewTransferDirection } from '@/lib/reviewFlow';
 import { getOriginalSessionID, getReviewSessionID } from '@/lib/sessionReviewMetadata';
+import { resetOpenCodeReadiness, waitForOpenCodeReadiness } from '@/lib/runtime-readiness';
+import {
+  loadSessionIndexSnapshot,
+  pollSessionIndexChanges,
+  persistSessionIndexDirectory,
+  persistSessionIndexDirectories,
+  persistSessionIndexSession,
+  removeSessionIndexSession,
+  startSessionIndexBackgroundSync,
+  type SessionIndexSnapshot,
+} from '@/lib/session-index-api';
 
 type GlobalSessionsStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -16,6 +27,18 @@ type DirectorySessionPagination = {
   cursor: number | null;
   hasMore: boolean;
   loadingMore: boolean;
+};
+
+type SessionIndexSyncMetadata = {
+  lastSyncedAt: number;
+  lastFullSyncedAt: number;
+};
+
+type StartupSessionSyncProgress = {
+  active: boolean;
+  phase: 'idle' | 'restoring' | 'syncing' | 'committing';
+  completed: number;
+  total: number;
 };
 
 type GlobalSessionsState = {
@@ -34,14 +57,33 @@ type GlobalSessionsState = {
   /** Directories with an in-flight archived-session refresh. */
   archivedLoadingDirectories: Set<string>;
   activePaginationByDirectory: Map<string, DirectorySessionPagination>;
+  /** Directories restored from Electron's persistent session-summary index. */
+  cachedDirectories: Set<string>;
+  /** True after the Electron session-index read has completed or deterministically declined. */
+  hasHydratedSessionIndex: boolean;
+  /** True when SQLite supplied at least one known directory for this runtime. */
+  hasCachedSessionIndex: boolean;
+  sessionIndexSyncByDirectory: Map<string, SessionIndexSyncMetadata>;
   /** True only after the unfiltered catalog used by retention has loaded successfully. */
   hasLoadedFullCatalog: boolean;
   hasLoaded: boolean;
   status: GlobalSessionsStatus;
+  /** Blocking Electron cold-start refresh progress for persisted directories. */
+  startupSyncProgress: StartupSessionSyncProgress;
   loadSessions: (fallbackActive?: Session[]) => Promise<LoadResult>;
-  refreshSessionsForDirectories: (directories: Iterable<string>, fallbackActive?: Session[]) => Promise<LoadResult>;
+  refreshSessionsForDirectories: (
+    directories: Iterable<string>,
+    fallbackActive?: Session[],
+    options?: {
+      persist?: boolean;
+      incrementalStart?: number;
+      onDirectoryResult?: (directory: string, success: boolean) => void;
+    },
+  ) => Promise<LoadResult>;
   refreshArchivedSessionsForDirectories: (directories: Iterable<string>) => Promise<LoadResult>;
   loadMoreSessionsForDirectory: (directory: string) => Promise<LoadResult>;
+  hydrateSessionIndex: () => Promise<void>;
+  startSessionIndexStartup: (directories: Iterable<string>) => Promise<LoadResult>;
   applySnapshot: (activeSessions: Session[], archivedSessions: Session[], status?: GlobalSessionsStatus) => void;
   upsertSession: (session: Session) => void;
   removeSessions: (ids: Iterable<string>) => void;
@@ -55,9 +97,13 @@ const PAGE_SIZE = 500;
 /** The sidebar only needs the newest sessions for each directory. */
 const DIRECTORY_SESSION_LIMIT = 20;
 // Three attempts plus 500ms/1s backoff keep the total directory budget near 10s.
-const DIRECTORY_SESSION_TIMEOUT_MS = 3_000;
-/** Cap concurrent per-directory session.list fanout so OpenCode stays responsive for create/send. */
-const DIRECTORY_FETCH_CONCURRENCY = 2;
+const DIRECTORY_SESSION_TIMEOUT_MS = 6_000;
+/** The eighth runtime slot stays free for interactive session/message reads. */
+const DIRECTORY_FETCH_CONCURRENCY_MAX = 7;
+const DIRECTORY_FETCH_CONCURRENCY_MID = 3;
+const DIRECTORY_FETCH_CONCURRENCY_MIN = 1;
+const DIRECTORY_RECOVERY_SUCCESS_THRESHOLD = 2;
+const STARTUP_RETRY_DELAY_MS = 750;
 
 let inflightLoad: Promise<LoadResult> | null = null;
 // Bumped on runtime switch: an in-flight load from the previous instance must
@@ -70,9 +116,37 @@ const inflightActiveDirectoryLoadMore = new Map<string, Promise<boolean>>();
 const directoryTaskQueue: Array<() => void> = [];
 const directoryAbortControllers = new Set<AbortController>();
 let runningDirectoryTasks = 0;
+let directoryFetchConcurrency = DIRECTORY_FETCH_CONCURRENCY_MAX;
+let consecutiveDirectorySuccesses = 0;
+let sessionIndexPollController: AbortController | null = null;
+
+const isDirectoryOverloaded = (error: unknown): boolean => {
+  const status = (error as { status?: number } | null)?.status;
+  if (status === 429 || status === 502 || status === 503) return true;
+  const message = String(error instanceof Error ? error.message : error).toLowerCase();
+  return message.includes('signal timed out') || message.includes('timeout');
+};
+
+const recordDirectoryFailure = (error: unknown): void => {
+  consecutiveDirectorySuccesses = 0;
+  if (!isDirectoryOverloaded(error)) return;
+  directoryFetchConcurrency = directoryFetchConcurrency > DIRECTORY_FETCH_CONCURRENCY_MID
+    ? DIRECTORY_FETCH_CONCURRENCY_MID
+    : DIRECTORY_FETCH_CONCURRENCY_MIN;
+};
+
+const recordDirectorySuccess = (): void => {
+  consecutiveDirectorySuccesses += 1;
+  if (
+    consecutiveDirectorySuccesses < DIRECTORY_RECOVERY_SUCCESS_THRESHOLD
+    || directoryFetchConcurrency >= DIRECTORY_FETCH_CONCURRENCY_MAX
+  ) return;
+  directoryFetchConcurrency += 1;
+  consecutiveDirectorySuccesses = 0;
+};
 
 const drainDirectoryTaskQueue = (): void => {
-  while (runningDirectoryTasks < DIRECTORY_FETCH_CONCURRENCY && directoryTaskQueue.length > 0) {
+  while (runningDirectoryTasks < directoryFetchConcurrency && directoryTaskQueue.length > 0) {
     const start = directoryTaskQueue.shift();
     if (!start) return;
     runningDirectoryTasks += 1;
@@ -286,6 +360,66 @@ const replaceSessionsForDirectories = (
   return sortSessionsByUpdated([...incomingById.values(), ...kept]);
 };
 
+const applySessionIndexSnapshotState = (
+  state: GlobalSessionsState,
+  snapshot: SessionIndexSnapshot,
+  authoritative: boolean,
+): Partial<GlobalSessionsState> => {
+  const snapshotDirectories = new Set(snapshot.directories.map((entry) => entry.directory));
+  const cachedSessions = snapshot.directories.flatMap((entry) => entry.sessions);
+  const activeSessions = authoritative
+    ? replaceSessionsForDirectories(state.activeSessions, cachedSessions, snapshotDirectories)
+    : sortSessionsByUpdated(mergeSessionLists(state.activeSessions, cachedSessions));
+  const nextPagination = new Map(state.activePaginationByDirectory);
+  const nextSyncMetadata = new Map(state.sessionIndexSyncByDirectory);
+  for (const entry of snapshot.directories) {
+    nextPagination.set(entry.directory, {
+      cursor: entry.cursor,
+      hasMore: entry.hasMore,
+      loadingMore: false,
+    });
+    nextSyncMetadata.set(entry.directory, {
+      lastSyncedAt: entry.lastSyncedAt,
+      lastFullSyncedAt: entry.lastFullSyncedAt,
+    });
+  }
+
+  const nextLoaded = new Set(state.loadedDirectories);
+  for (const directory of snapshotDirectories) nextLoaded.add(directory);
+  const nextLoading = new Set(state.loadingDirectories);
+  const nextRefreshing = new Set(state.refreshingDirectories);
+  for (const directory of snapshot.sync.pendingDirectories) {
+    if ((activeSessions.some((session) => resolveGlobalSessionDirectory(session) === directory))) {
+      nextRefreshing.add(directory);
+      nextLoading.delete(directory);
+    } else {
+      nextLoading.add(directory);
+    }
+  }
+  for (const directory of [
+    ...snapshot.sync.completedDirectories,
+    ...snapshot.sync.failedDirectories,
+  ]) {
+    nextLoading.delete(directory);
+    nextRefreshing.delete(directory);
+  }
+
+  return {
+    activeSessions,
+    sessionsByDirectory: buildSessionsByDirectory(activeSessions),
+    reviewTransferBySessionId: buildReviewTransferMap(activeSessions),
+    cachedDirectories: snapshotDirectories,
+    hasCachedSessionIndex: snapshot.directories.length > 0,
+    sessionIndexSyncByDirectory: nextSyncMetadata,
+    activePaginationByDirectory: nextPagination,
+    loadedDirectories: nextLoaded,
+    loadingDirectories: nextLoading,
+    refreshingDirectories: nextRefreshing,
+    hasLoaded: true,
+    status: state.status === 'idle' || state.status === 'loading' ? 'ready' : state.status,
+  };
+};
+
 const applyDirectoryRefreshPatch = (
   state: GlobalSessionsState,
   input: {
@@ -294,13 +428,16 @@ const applyDirectoryRefreshPatch = (
     directories: Set<string>;
     fallbackActive?: Session[];
     markReady: boolean;
+    mergeOnly?: boolean;
   },
 ): Partial<GlobalSessionsState> | GlobalSessionsState => {
-  let nextActiveSessions = replaceSessionsForDirectories(
-    state.activeSessions,
-    input.activeSessions,
-    input.directories,
-  );
+  let nextActiveSessions = input.mergeOnly
+    ? sortSessionsByUpdated(mergeSessionLists(state.activeSessions, input.activeSessions))
+    : replaceSessionsForDirectories(
+        state.activeSessions,
+        input.activeSessions,
+        input.directories,
+      );
   nextActiveSessions = mergeSessionLists(nextActiveSessions, input.fallbackActive);
   if (sameSessionList(state.activeSessions, nextActiveSessions)) {
     nextActiveSessions = state.activeSessions;
@@ -494,9 +631,14 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
   archivedLoadedDirectories: new Set(),
   archivedLoadingDirectories: new Set(),
   activePaginationByDirectory: new Map(),
+  cachedDirectories: new Set(),
+  hasHydratedSessionIndex: false,
+  hasCachedSessionIndex: false,
+  sessionIndexSyncByDirectory: new Map(),
   hasLoadedFullCatalog: false,
   hasLoaded: false,
   status: 'idle',
+  startupSyncProgress: { active: false, phase: 'idle', completed: 0, total: 0 },
 
   applySnapshot: (activeSessions, archivedSessions, status = 'ready') => {
     set((state) => applySnapshot(state, activeSessions, archivedSessions, status));
@@ -504,12 +646,17 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
 
   resetForRuntimeSwitch: () => {
     loadGeneration += 1;
+    resetOpenCodeReadiness();
     inflightLoad = null;
     inflightActiveDirectoryRefresh.clear();
     inflightArchivedDirectoryRefresh.clear();
     inflightActiveDirectoryLoadMore.clear();
     directoryAbortControllers.forEach((controller) => controller.abort());
     directoryAbortControllers.clear();
+    directoryFetchConcurrency = DIRECTORY_FETCH_CONCURRENCY_MAX;
+    consecutiveDirectorySuccesses = 0;
+    sessionIndexPollController?.abort();
+    sessionIndexPollController = null;
     set({
       activeSessions: [],
       archivedSessions: [],
@@ -521,10 +668,112 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       archivedLoadedDirectories: new Set(),
       archivedLoadingDirectories: new Set(),
       activePaginationByDirectory: new Map(),
+      cachedDirectories: new Set(),
+      hasHydratedSessionIndex: false,
+      hasCachedSessionIndex: false,
+      sessionIndexSyncByDirectory: new Map(),
       hasLoadedFullCatalog: false,
       hasLoaded: false,
       status: 'idle',
+      startupSyncProgress: { active: false, phase: 'idle', completed: 0, total: 0 },
     });
+  },
+
+  hydrateSessionIndex: async () => {
+    try {
+      const snapshot = await loadSessionIndexSnapshot();
+      if (!snapshot) return;
+      set((state) => applySessionIndexSnapshotState(state, snapshot, false));
+    } catch (error) {
+      // The index is an acceleration cache. A failed read must not block the
+      // authoritative OpenCode session flow.
+      console.warn('[GlobalSessions] Failed to hydrate Electron session index:', error);
+    } finally {
+      set((state) => state.hasHydratedSessionIndex ? state : { hasHydratedSessionIndex: true });
+    }
+  },
+
+  startSessionIndexStartup: async (directories) => {
+    set({ startupSyncProgress: { active: true, phase: 'restoring', completed: 0, total: 0 } });
+    await get().hydrateSessionIndex();
+    const directorySet = normalizeDirectorySet([
+      ...directories,
+      ...get().cachedDirectories,
+    ]);
+    if (directorySet.size === 0) {
+      set({ startupSyncProgress: { active: false, phase: 'idle', completed: 0, total: 0 } });
+      const state = get();
+      return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
+    }
+    const hasCachedSnapshot = get().hasCachedSessionIndex;
+    const snapshot = { activeSessions: get().activeSessions, archivedSessions: get().archivedSessions };
+    let initial: SessionIndexSnapshot | null = null;
+    try {
+      initial = await startSessionIndexBackgroundSync([...directorySet]);
+    } catch (error) {
+      console.warn('[GlobalSessions] Failed to start server-side session index sync:', error);
+    }
+
+    // Web and VS Code explicitly return unsupported and keep their existing
+    // SDK-backed path. Electron never falls through this branch.
+    if (!initial) {
+      const refresh = refreshStartupGlobalSessionsForDirectories(directorySet, snapshot.activeSessions, {
+        retryFailed: !hasCachedSnapshot,
+      });
+      if (!hasCachedSnapshot) await refresh;
+      else void refresh;
+      return snapshot;
+    }
+
+    sessionIndexPollController?.abort();
+    const controller = new AbortController();
+    sessionIndexPollController = controller;
+    const generation = loadGeneration;
+    const shouldBlock = !hasCachedSnapshot;
+    const initialSnapshot = initial;
+    if (!shouldBlock) {
+      set({ startupSyncProgress: { active: false, phase: 'idle', completed: 0, total: 0 } });
+    }
+    const consume = async () => {
+      let current = initialSnapshot;
+      while (!controller.signal.aborted && generation === loadGeneration) {
+        set((state) => ({
+          ...applySessionIndexSnapshotState(state, current, true),
+          startupSyncProgress: shouldBlock
+            ? {
+                active: current.sync.active,
+                phase: current.sync.active ? 'syncing' : 'idle',
+                completed: current.sync.completed,
+                total: current.sync.total,
+              }
+            : state.startupSyncProgress,
+        }));
+        if (!current.sync.active) break;
+        const next = await pollSessionIndexChanges(current.revision, controller.signal);
+        if (!next) break;
+        current = next;
+      }
+    };
+    const polling = consume().catch((error) => {
+      if (!controller.signal.aborted) {
+        console.warn('[GlobalSessions] Session index long poll failed:', error);
+      }
+    }).finally(() => {
+      if (sessionIndexPollController === controller) sessionIndexPollController = null;
+      if (shouldBlock && generation === loadGeneration) {
+        set((state) => ({
+          startupSyncProgress: {
+            active: false,
+            phase: 'idle',
+            completed: state.startupSyncProgress.completed,
+            total: state.startupSyncProgress.total,
+          },
+        }));
+      }
+    });
+    if (shouldBlock) await polling;
+    else void polling;
+    return { activeSessions: get().activeSessions, archivedSessions: get().archivedSessions };
   },
 
   loadSessions: async (fallbackActive) => {
@@ -539,6 +788,10 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       const current = get();
 
       try {
+        await waitForOpenCodeReadiness();
+        if (generation !== loadGeneration) {
+          return { activeSessions: [], archivedSessions: [] };
+        }
         const sdk = opencodeClient.getSdkClient();
         const [activeResult, archivedResult] = await Promise.allSettled([
           listGlobalSessionPages(sdk, { archived: false, pageSize: PAGE_SIZE }),
@@ -588,7 +841,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     return inflightLoad;
   },
 
-  refreshSessionsForDirectories: async (directories, fallbackActive) => {
+  refreshSessionsForDirectories: async (directories, fallbackActive, options) => {
     const directorySet = normalizeDirectorySet(directories);
     if (directorySet.size === 0) {
       // Stay idle when the caller has no directories yet (currentDirectory /
@@ -634,13 +887,17 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         directoryAbortControllers.add(controller);
         try {
           if (generation !== loadGeneration) return false;
+          await waitForOpenCodeReadiness();
+          if (generation !== loadGeneration) return false;
           const activeSessions = await listGlobalSessionPages(opencodeClient.getSdkClient(), {
             directory,
             archived: false,
             roots: true,
+            ...(options?.incrementalStart !== undefined ? { start: options.incrementalStart } : {}),
             pageSize: DIRECTORY_SESSION_LIMIT,
             maxItems: DIRECTORY_SESSION_LIMIT,
             timeoutMs: DIRECTORY_SESSION_TIMEOUT_MS,
+            retryAttempts: 2,
             signal: controller.signal,
           });
           if (generation !== loadGeneration) return false;
@@ -649,17 +906,40 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
               activeSessions,
               directories: new Set([directory]),
               markReady: true,
+              mergeOnly: options?.incrementalStart !== undefined,
             });
             const nextRefreshing = new Set(state.refreshingDirectories);
             const nextPagination = new Map(state.activePaginationByDirectory);
             nextRefreshing.delete(directory);
-            nextPagination.set(directory, getPaginationAfterPage(activeSessions));
+            if (options?.incrementalStart === undefined) {
+              nextPagination.set(directory, getPaginationAfterPage(activeSessions));
+            }
             return patch === state
               ? { refreshingDirectories: nextRefreshing, activePaginationByDirectory: nextPagination }
               : { ...patch, refreshingDirectories: nextRefreshing, activePaginationByDirectory: nextPagination };
           });
+          if (options?.persist !== false) {
+            const persistedSessions = get().sessionsByDirectory.get(directory) ?? [];
+            const pagination = get().activePaginationByDirectory.get(directory)
+              ?? getPaginationAfterPage(activeSessions);
+            try {
+              await persistSessionIndexDirectory({
+                directory,
+                sessions: persistedSessions,
+                cursor: pagination.cursor,
+                hasMore: pagination.hasMore,
+                fullSync: options?.incrementalStart === undefined,
+              });
+            } catch (error) {
+              // The OpenCode result remains authoritative for this run; a cache
+              // write failure must not erase it or mark the directory empty.
+              console.warn(`[GlobalSessions] Failed to persist session index for ${directory}:`, error);
+            }
+          }
+          recordDirectorySuccess();
           return true;
         } catch (error) {
+          recordDirectoryFailure(error);
           if (generation === loadGeneration) {
             console.warn(`[GlobalSessions] Failed to refresh active sessions for ${directory}:`, error);
             set((state) => {
@@ -686,6 +966,9 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
 
     const results = await Promise.all(tasks);
     if (generation !== loadGeneration) return { activeSessions: [], archivedSessions: [] };
+    [...directorySet].forEach((directory, index) => {
+      options?.onDirectoryResult?.(directory, results[index] ?? false);
+    });
     set((state) => ({
       status: state.status === 'loading'
         ? (results.some(Boolean) ? 'ready' : 'error')
@@ -723,6 +1006,8 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       const controller = new AbortController();
       directoryAbortControllers.add(controller);
       try {
+        await waitForOpenCodeReadiness();
+        if (generation !== loadGeneration) return false;
         const page = await listGlobalSessionPages(opencodeClient.getSdkClient(), {
           directory,
           archived: false,
@@ -731,6 +1016,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
           pageSize: DIRECTORY_SESSION_LIMIT,
           maxItems: DIRECTORY_SESSION_LIMIT,
           timeoutMs: DIRECTORY_SESSION_TIMEOUT_MS,
+          retryAttempts: 2,
           signal: controller.signal,
         });
         if (generation !== loadGeneration) return false;
@@ -759,8 +1045,10 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
             activePaginationByDirectory: nextPagination,
           };
         });
+        recordDirectorySuccess();
         return true;
       } catch (error) {
+        recordDirectoryFailure(error);
         if (generation === loadGeneration) {
           console.warn(`[GlobalSessions] Failed to load more sessions for ${directory}:`, error);
           set((state) => {
@@ -808,6 +1096,8 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         directoryAbortControllers.add(controller);
         try {
           if (generation !== loadGeneration) return false;
+          await waitForOpenCodeReadiness();
+          if (generation !== loadGeneration) return false;
           const archivedSessions = await listGlobalSessionPages(opencodeClient.getSdkClient(), {
             directory,
             archived: true,
@@ -815,6 +1105,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
             pageSize: DIRECTORY_SESSION_LIMIT,
             maxItems: DIRECTORY_SESSION_LIMIT,
             timeoutMs: DIRECTORY_SESSION_TIMEOUT_MS,
+            retryAttempts: 2,
             signal: controller.signal,
           });
           if (generation !== loadGeneration) return false;
@@ -863,11 +1154,13 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
   },
 
   upsertSession: (session) => {
+    let persistedSession: Session | null = null;
     set((state) => {
       const existingSession = state.activeSessions.find((candidate) => candidate.id === session.id)
         ?? state.archivedSessions.find((candidate) => candidate.id === session.id)
         ?? null;
       const sessionWithMetadata = mergeSessionDirectoryMetadata(session, existingSession);
+      persistedSession = sessionWithMetadata;
       const isArchived = Boolean(sessionWithMetadata.time?.archived);
       const nextActiveSessions = isArchived
         ? state.activeSessions.filter((candidate) => candidate.id !== session.id)
@@ -894,6 +1187,11 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
           : buildReviewTransferMap(nextActiveSessions),
       };
     });
+    if (persistedSession) {
+      void persistSessionIndexSession(persistedSession).catch((error) => {
+        console.warn(`[GlobalSessions] Failed to persist updated session ${persistedSession?.id}:`, error);
+      });
+    }
   },
 
   removeSessions: (ids) => {
@@ -920,6 +1218,11 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         reviewTransferBySessionId: buildReviewTransferMap(nextActiveSessions),
       };
     });
+    for (const id of idSet) {
+      void removeSessionIndexSession(id).catch((error) => {
+        console.warn(`[GlobalSessions] Failed to remove session ${id} from index:`, error);
+      });
+    }
   },
 
   archiveSessions: (ids, archivedAt = Date.now()) => {
@@ -987,11 +1290,146 @@ export const refreshGlobalSessions = async (fallbackActive?: Session[]): Promise
   return useGlobalSessionsStore.getState().loadSessions(fallbackActive);
 };
 
+export const startGlobalSessionIndexStartup = async (
+  directories: Iterable<string>,
+): Promise<LoadResult> => useGlobalSessionsStore.getState().startSessionIndexStartup(directories);
+
 export const refreshGlobalSessionsForDirectories = async (
   directories: Iterable<string>,
   fallbackActive?: Session[],
 ): Promise<LoadResult> => {
   return useGlobalSessionsStore.getState().refreshSessionsForDirectories(directories, fallbackActive);
+};
+
+/**
+ * Refresh every cold-start directory through the existing adaptive scheduler,
+ * while exposing deterministic progress for the global blocking overlay.
+ */
+export const refreshStartupGlobalSessionsForDirectories = async (
+  directories: Iterable<string>,
+  fallbackActive?: Session[],
+  options?: {
+    retryFailed?: boolean;
+    incrementalStartByDirectory?: ReadonlyMap<string, number>;
+  },
+): Promise<LoadResult> => {
+  const directorySet = normalizeDirectorySet(directories);
+  const generation = loadGeneration;
+  if (directorySet.size === 0) {
+    useGlobalSessionsStore.setState({
+      startupSyncProgress: { active: false, phase: 'idle', completed: 0, total: 0 },
+    });
+    const state = useGlobalSessionsStore.getState();
+    return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
+  }
+
+  useGlobalSessionsStore.setState({
+    startupSyncProgress: { active: true, phase: 'syncing', completed: 0, total: directorySet.size },
+  });
+
+  const completedDirectories = new Set<string>();
+  let pendingDirectories = new Set(directorySet);
+
+  try {
+    do {
+      await Promise.all([...pendingDirectories].map(async (directory) => {
+        let succeeded = false;
+        await useGlobalSessionsStore.getState().refreshSessionsForDirectories(
+          [directory],
+          fallbackActive,
+          {
+            persist: false,
+            incrementalStart: options?.incrementalStartByDirectory?.get(directory),
+            onDirectoryResult: (_directory, success) => { succeeded = success; },
+          },
+        );
+        if (
+          generation === loadGeneration
+          && succeeded
+          && !completedDirectories.has(directory)
+        ) {
+          completedDirectories.add(directory);
+          useGlobalSessionsStore.setState((state) => ({
+            startupSyncProgress: {
+              ...state.startupSyncProgress,
+              completed: completedDirectories.size,
+            },
+          }));
+        }
+      }));
+
+      pendingDirectories = new Set(
+        [...directorySet].filter((directory) => !completedDirectories.has(directory)),
+      );
+      if (
+        pendingDirectories.size > 0
+        && options?.retryFailed === true
+        && generation === loadGeneration
+      ) {
+        // Every request remains individually bounded. The short pause lets the
+        // adaptive scheduler apply its lower concurrency before the next wave.
+        await new Promise((resolve) => setTimeout(resolve, STARTUP_RETRY_DELAY_MS));
+      }
+    } while (
+      pendingDirectories.size > 0
+      && options?.retryFailed === true
+      && generation === loadGeneration
+    );
+
+    if (generation === loadGeneration) {
+      useGlobalSessionsStore.setState((state) => ({
+        startupSyncProgress: { ...state.startupSyncProgress, phase: 'committing' },
+      }));
+      const state = useGlobalSessionsStore.getState();
+      const snapshots = [...completedDirectories].flatMap((directory) => {
+        // A successful empty list is authoritative and must replace stale
+        // SQLite rows. Failed directories never enter completedDirectories,
+        // so their last good cache and sync watermark survive the retry.
+        const sessions = state.sessionsByDirectory.get(directory) ?? [];
+        const pagination = state.activePaginationByDirectory.get(directory);
+        return [{
+          directory,
+          sessions,
+          cursor: pagination?.cursor ?? null,
+          hasMore: pagination?.hasMore ?? false,
+          fullSync: !options?.incrementalStartByDirectory?.has(directory),
+        }];
+      });
+      try {
+        await persistSessionIndexDirectories(snapshots);
+        const syncedAt = Date.now();
+        useGlobalSessionsStore.setState((current) => {
+          const next = new Map(current.sessionIndexSyncByDirectory);
+          for (const snapshot of snapshots) {
+            const previous = next.get(snapshot.directory);
+            next.set(snapshot.directory, {
+              lastSyncedAt: syncedAt,
+              lastFullSyncedAt: snapshot.fullSync
+                ? syncedAt
+                : (previous?.lastFullSyncedAt ?? 0),
+            });
+          }
+          return { sessionIndexSyncByDirectory: next };
+        });
+      } catch (error) {
+        console.warn('[GlobalSessions] Failed to persist cold-start session index batch:', error);
+      }
+    }
+  } finally {
+    if (generation === loadGeneration) {
+      useGlobalSessionsStore.setState((state) => ({
+        startupSyncProgress: {
+          active: false,
+          phase: 'idle',
+          completed: completedDirectories.size,
+          total: state.startupSyncProgress.total,
+        },
+      }));
+    }
+  }
+
+  const state = useGlobalSessionsStore.getState();
+  return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
 };
 
 export const refreshArchivedSessionsForDirectories = async (

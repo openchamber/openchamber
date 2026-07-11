@@ -126,7 +126,6 @@ export async function bootstrapDirectory(input: {
     config: Record<string, unknown>
     projects: Project[]
   }
-  loadSessions: (directory: string) => Promise<void> | void
 }) {
   const { directory, sdk, getState, set, global: g } = input
   const state = getState()
@@ -278,10 +277,7 @@ export async function bootstrapDirectory(input: {
     }
   })
 
-  // ---------------------------------------------------------------------------
-  // Phase 3: Lazy — session list can be large; don't block on it.
-  // ---------------------------------------------------------------------------
-  void Promise.resolve(input.loadSessions(directory)).catch((err) => {
-    console.error(`[bootstrap] session load failed for ${directory}`, err)
-  })
+  // Session summaries are intentionally not loaded here. The root startup
+  // coordinator owns one bounded SQLite-backed list per project, avoiding a
+  // second active-directory `experimental.session.list` request.
 }

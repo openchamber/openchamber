@@ -166,8 +166,6 @@ export const useCommandsStore = create<CommandsStore>()(
 
             for (let attempt = 0; attempt < 3; attempt++) {
               try {
-                const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
-
                 // Ensure the list is scoped to the same directory we use for config source detection.
                 const commands = await opencodeClient.withDirectory(
                   directory,
@@ -175,45 +173,34 @@ export const useCommandsStore = create<CommandsStore>()(
                 );
 
                 const configurableCommands = commands.filter((cmd) => cmd.source !== 'skill');
-                const commandsWithScope = await Promise.all(
-                  configurableCommands.map(async (cmd) => {
-                    try {
-                      // Force no-cache
-                      const response = await runtimeFetch(`/api/config/commands/${encodeURIComponent(cmd.name)}${queryParams}`, {
-                        headers: {
-                          'Cache-Control': 'no-cache',
-                          ...(directory ? { 'x-opencode-directory': directory } : {}),
-                        }
+                let commandsWithScope = configurableCommands;
+                if (configurableCommands.length > 0) {
+                  try {
+                    const response = await runtimeFetch('/api/config/commands/metadata', {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        'Cache-Control': 'no-cache',
+                        ...(directory ? { 'x-opencode-directory': directory } : {}),
+                      },
+                      body: JSON.stringify({ names: configurableCommands.map((command) => command.name) }),
+                      query: directory ? { directory } : undefined,
+                    });
+                    if (response.ok) {
+                      const data = await response.json() as {
+                        commands?: Record<string, { scope?: unknown }>;
+                      };
+                      commandsWithScope = configurableCommands.map((command) => {
+                        const scope = data.commands?.[command.name]?.scope;
+                        return scope === 'project' || scope === 'user'
+                          ? { ...command, scope }
+                          : command;
                       });
-
-                      if (response.ok) {
-                        const data = await response.json();
-
-                        // Prioritize explicit scope
-                        let scope = data.scope;
-
-                        // Fallback to deducing from sources
-                        if (!scope && data.sources) {
-                          const sources = data.sources;
-                          scope = (sources.md?.exists ? sources.md.scope : undefined)
-                            ?? (sources.json?.exists ? sources.json.scope : undefined)
-                            ?? sources.md?.scope
-                            ?? sources.json?.scope;
-                        }
-
-                        if (scope === 'project' || scope === 'user') {
-                          return { ...cmd, scope: scope as CommandScope };
-                        }
-
-                        // Explicitly set null scope if not found
-                        return { ...cmd, scope: undefined };
-                      }
-                    } catch (err) {
-                      console.warn(`[CommandsStore] Failed to fetch config for command ${cmd.name}:`, err);
                     }
-                    return cmd;
-                  })
-                );
+                  } catch (error) {
+                    console.warn('[CommandsStore] Failed to fetch command metadata batch:', error);
+                  }
+                }
 
                 const nextSignature = buildCommandsSignature(commandsWithScope);
                 if (previousSignature !== nextSignature) {

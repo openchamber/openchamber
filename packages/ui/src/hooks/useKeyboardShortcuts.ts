@@ -258,8 +258,14 @@ export const useKeyboardShortcuts = () => {
         if (key === 'm' && canRunChatChord) {
           e.preventDefault();
           e.stopPropagation();
+          e.stopImmediatePropagation();
           clearLeaderKey();
-          setModelSelectorOpen(!isModelSelectorOpen);
+          // Mounting and auto-focusing the search input during this keydown can
+          // let the chord's trailing "m" become its first query character.
+          // Open after the current keyboard event has fully finished instead.
+          window.requestAnimationFrame(() => {
+            setModelSelectorOpen(!isModelSelectorOpen);
+          });
           return;
         }
 
@@ -353,6 +359,45 @@ export const useKeyboardShortcuts = () => {
       }
     };
 
+    const cycleThinkingVariant = (): boolean => {
+      const {
+        isSettingsDialogOpen,
+        isCommandPaletteOpen,
+        isHelpDialogOpen,
+        isSessionSwitcherOpen,
+        isAboutDialogOpen,
+        activeMainTab,
+      } = useUIStore.getState();
+
+      if (isSettingsDialogOpen) {
+        return false;
+      }
+
+      const hasOverlay = isCommandPaletteOpen || isHelpDialogOpen || isSessionSwitcherOpen || isAboutDialogOpen;
+      if (hasOverlay || activeMainTab !== 'chat') {
+        return false;
+      }
+
+      const configState = useConfigStore.getState();
+      if (configState.getCurrentModelVariants().length === 0) {
+        return false;
+      }
+
+      configState.cycleCurrentVariant();
+
+      const nextVariant = useConfigStore.getState().currentVariant;
+      const sessionId = useSessionUIStore.getState().currentSessionId;
+      const agentName = useConfigStore.getState().currentAgentName;
+      const providerId = useConfigStore.getState().currentProviderId;
+      const modelId = useConfigStore.getState().currentModelId;
+
+      if (sessionId && agentName && providerId && modelId) {
+        useSelectionStore.getState().saveAgentModelVariantForSession(sessionId, agentName, providerId, modelId, nextVariant);
+      }
+
+      return true;
+    };
+
     const handleKeyDown = (e: KeyboardEvent) => {
       // Cmd/Ctrl+W must run even when the terminal is focused: otherwise disabling
       // Electron's native Close accelerator would leave the shortcut dead in the PTY.
@@ -371,6 +416,20 @@ export const useKeyboardShortcuts = () => {
       const isChatInputTarget = (target: EventTarget | null) => {
         return target instanceof HTMLTextAreaElement && target.getAttribute('data-chat-input') === 'true';
       };
+
+      // Ctrl+T is reserved for thinking variants while the composer has focus.
+      // Elsewhere, Cmd/Ctrl+T continues to open the conversation timeline.
+      const isFocusedInputVariantShortcut = isChatInputTarget(e.target)
+        && e.ctrlKey
+        && !e.metaKey
+        && !e.shiftKey
+        && !e.altKey
+        && e.key.toLowerCase() === 't';
+      if (isFocusedInputVariantShortcut) {
+        e.preventDefault();
+        cycleThinkingVariant();
+        return;
+      }
 
       if (eventMatchesShortcut(e, combo('open_command_palette'))) {
         e.preventDefault();
@@ -688,45 +747,9 @@ export const useKeyboardShortcuts = () => {
 
       // Cmd/Ctrl+Shift+T: Cycle thinking variant (same gating as Shift+M)
       if (eventMatchesShortcut(e, combo('cycle_thinking_variant'))) {
-        const {
-          isSettingsDialogOpen,
-          isCommandPaletteOpen,
-          isHelpDialogOpen,
-          isSessionSwitcherOpen,
-          isAboutDialogOpen,
-          activeMainTab,
-        } = useUIStore.getState();
-
-        if (isSettingsDialogOpen) {
-          return;
+        if (cycleThinkingVariant()) {
+          e.preventDefault();
         }
-
-        const hasOverlay = isCommandPaletteOpen || isHelpDialogOpen || isSessionSwitcherOpen || isAboutDialogOpen;
-        const isChatActive = activeMainTab === 'chat';
-
-        if (hasOverlay || !isChatActive) {
-          return;
-        }
-
-        const configState = useConfigStore.getState();
-        const variants = configState.getCurrentModelVariants();
-        if (variants.length === 0) {
-          return;
-        }
-
-        e.preventDefault();
-        configState.cycleCurrentVariant();
-
-        const nextVariant = useConfigStore.getState().currentVariant;
-        const sessionId = useSessionUIStore.getState().currentSessionId;
-        const agentName = useConfigStore.getState().currentAgentName;
-        const providerId = useConfigStore.getState().currentProviderId;
-        const modelId = useConfigStore.getState().currentModelId;
-
-        if (sessionId && agentName && providerId && modelId) {
-          useSelectionStore.getState().saveAgentModelVariantForSession(sessionId, agentName, providerId, modelId, nextVariant);
-        }
-
         return;
       }
 

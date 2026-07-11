@@ -222,17 +222,38 @@ function createChildStores(entries: Array<[string, StoreApi<DirectoryStore>]>) {
 }
 
 describe("fetchMessagesForSession startup race", () => {
-  test("does not reject before sync action refs are initialized", async () => {
-    const { fetchMessagesForSession } = await import("./session-actions")
+  test("replays a selection fetch queued before sync action refs initialize", async () => {
+    replyCalls.length = 0
+    sessionMessagesResult = { data: [] }
+    const store = createStore({}, { session: [{ id: "startup-session", time: { created: 1 } } as Session] })
+    const childStores = createChildStores([["/test/project", store]])
+    const { fetchMessagesForSession, setActionRefs } = await import("./session-actions")
 
-    let error: unknown = null
-    try {
-      await fetchMessagesForSession("session-a", "/test/project")
-    } catch (err) {
-      error = err
-    }
+    await fetchMessagesForSession("startup-session", "/test/project")
+    expect(replyCalls.filter((call) => call.method === "session.messages")).toHaveLength(0)
 
-    expect(error).toBe(null)
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(replyCalls.filter((call) => call.method === "session.messages")).toHaveLength(1)
+  })
+
+  test("uses one small initial request for concurrent session selection loads", async () => {
+    replyCalls.length = 0
+    sessionMessagesResult = { data: [] }
+    const store = createStore({}, { session: [{ id: "session-a", time: { created: 1 } } as Session] })
+    const childStores = createChildStores([["/test/project", store]])
+    const { fetchMessagesForSession, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    await Promise.all([
+      fetchMessagesForSession("session-a", "/test/project"),
+      fetchMessagesForSession("session-a", "/test/project"),
+    ])
+
+    const messageCalls = replyCalls.filter((call) => call.method === "session.messages")
+    expect(messageCalls).toHaveLength(1)
+    expect(messageCalls[0]?.params.limit).toBe(30)
   })
 })
 

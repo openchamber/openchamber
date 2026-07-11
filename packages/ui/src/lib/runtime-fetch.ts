@@ -98,6 +98,85 @@ const shouldAttachRuntimeAuth = (input: string | URL | Request): boolean => {
   }
 };
 
+const INTERACTIVE_SESSION_READ_PATH = /^\/api\/session\/(?!status$)([^/]+)(?:\/(?:message|children|todo|diff))?$/;
+let interactiveSessionRequestId: string | null = null;
+
+export const setRuntimeInteractiveSessionRequestId = (sessionId: string | null): void => {
+  interactiveSessionRequestId = sessionId;
+};
+const BACKGROUND_READ_EXACT_PATHS = new Set([
+  '/health',
+  '/api/opencode/health',
+  '/api/opencode/upgrade-status',
+  '/api/global/config',
+  '/api/project',
+  '/api/project/current',
+  '/api/config',
+  '/api/config/providers',
+  '/api/config/settings',
+  '/api/config/themes',
+  '/api/experimental/session',
+  '/api/session/status',
+  '/api/session-folders',
+  '/api/github/pr/status',
+  '/api/openchamber/models-metadata',
+  '/api/openchamber/session-index/changes',
+]);
+const BACKGROUND_READ_PREFIXES = [
+  '/api/agent',
+  '/api/command',
+  '/api/mcp',
+  '/api/lsp',
+  '/api/vcs',
+  '/api/question',
+  '/api/permission',
+  '/api/git/check',
+  '/api/git/primary-root',
+  '/api/git/status',
+  '/api/git/worktrees',
+  '/api/quota',
+] as const;
+
+const isBackgroundReadPath = (pathname: string): boolean => (
+  BACKGROUND_READ_EXACT_PATHS.has(pathname)
+  || BACKGROUND_READ_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))
+);
+
+const isRuntimeRequestUrl = (rawUrl: string): boolean => {
+  if (!isAbsoluteUrl(rawUrl)) return shouldResolveApiPath(rawUrl);
+  try {
+    return isActiveRuntimeServiceUrl(new URL(rawUrl));
+  } catch {
+    return false;
+  }
+};
+
+const runtimeRequestPathname = (rawUrl: string): string | null => {
+  try {
+    return new URL(rawUrl, 'http://openchamber.local').pathname;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Keep the currently selected session's detail/body reads ahead of cold-start
+ * discovery work in Chromium's per-origin request queue. This is only a
+ * network scheduling hint: it never changes request ordering in relay mode.
+ */
+export const getRuntimeRequestPriority = (
+  method: string,
+  rawUrl: string,
+): RequestPriority | undefined => {
+  if (method.toUpperCase() !== 'GET' || !isRuntimeRequestUrl(rawUrl)) return undefined;
+  const pathname = runtimeRequestPathname(rawUrl);
+  if (!pathname) return undefined;
+  const interactiveSessionMatch = pathname.match(INTERACTIVE_SESSION_READ_PATH);
+  if (interactiveSessionMatch?.[1] === interactiveSessionRequestId) return 'high';
+  if (isBackgroundReadPath(pathname)) return 'low';
+  return undefined;
+};
+
 // Headers API only accepts ISO-8859-1 (Latin-1) characters. Any value containing
 // characters outside \u0000-\u00FF causes "Failed to construct/set 'Headers':
 // String contains non ISO-8859-1 code point." Encode those values so they round-trip
@@ -266,9 +345,6 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
     const resolvedInput = resolveRuntimeFetchInput(input, query);
     const inputHeaders = resolvedInput instanceof Request ? resolvedInput.headers : undefined;
     const headers = await mergeHeaders(inputHeaders, requestInit.headers, shouldAttachRuntimeAuth(resolvedInput));
-    doFetch = resolvedInput instanceof Request
-      ? () => fetch(new Request(resolvedInput, { ...requestInit, headers }))
-      : () => fetch(resolvedInput, { ...requestInit, headers });
     url =
       resolvedInput instanceof Request ? resolvedInput.url
       : resolvedInput instanceof URL ? resolvedInput.toString()
@@ -276,6 +352,13 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
     method = String(
       requestInit.method ?? (resolvedInput instanceof Request ? resolvedInput.method : 'GET'),
     ).toUpperCase();
+    const inferredPriority = requestInit.priority ?? getRuntimeRequestPriority(method, url);
+    const networkRequestInit = inferredPriority
+      ? { ...requestInit, priority: inferredPriority }
+      : requestInit;
+    doFetch = resolvedInput instanceof Request
+      ? () => fetch(new Request(resolvedInput, { ...networkRequestInit, headers }))
+      : () => fetch(resolvedInput, { ...networkRequestInit, headers });
   }
 
   // A Request always carries a (possibly default) signal; treat any Request, or

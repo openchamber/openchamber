@@ -233,6 +233,8 @@ mock.module('@/lib/runtime-auth', () => ({
 
 mock.module('@/lib/runtime-switch', () => ({
   getRuntimeApiBaseUrl: mock(() => ''),
+  getRuntimeKey: mock(() => 'auth-gate-test-runtime'),
+  isRuntimeEndpointIdentityChange: mock(() => true),
   subscribeRuntimeEndpointChanged: mock(() => () => {}),
   switchRuntimeEndpoint: mock(() => undefined),
 }));

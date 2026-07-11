@@ -39,6 +39,7 @@ import { DualLimitLru } from '@/lib/dualLimitLru';
 import {
   BLOCK_PATH_TOKEN_RE,
   isAbsoluteReferencePath,
+  isLikelyFileReferencePath,
   normalizeReferencePath,
   parseFileReference,
   type ParsedFileReference,
@@ -169,16 +170,6 @@ const getFileReferenceLinkLimit = (): number => (
   isVSCodeRuntime() ? VSCODE_FILE_REFERENCE_LINK_LIMIT : FILE_REFERENCE_LINK_LIMIT
 );
 
-const KNOWN_FILE_BASENAMES = new Set([
-  'dockerfile',
-  'makefile',
-  'readme',
-  'license',
-  '.env',
-  '.gitignore',
-  '.npmrc',
-]);
-
 const normalizePath = (value: string): string => {
   return normalizeReferencePath(value);
 };
@@ -191,35 +182,8 @@ const toAbsolutePath = (basePath: string, targetPath: string): string => {
   return toAbsoluteFilePath(basePath, targetPath);
 };
 
-const hasFileExtension = (path: string): boolean => {
-  const base = path.split('/').filter(Boolean).pop() ?? '';
-  if (!base || base.endsWith('.')) {
-    return false;
-  }
-  return /\.[A-Za-z0-9_-]{1,16}$/.test(base);
-};
-
 const isLikelyFilePathValue = (path: string): boolean => {
-  if (!path || path.startsWith('--') || path.includes('://')) {
-    return false;
-  }
-
-  if (/[<>]/.test(path) || /\s{2,}/.test(path)) {
-    return false;
-  }
-
-  const normalized = normalizePath(path);
-  const baseName = normalized.split('/').filter(Boolean).pop() ?? normalized;
-  if (!baseName || baseName === '.' || baseName === '..') {
-    return false;
-  }
-
-  const base = baseName.toLowerCase();
-  if (KNOWN_FILE_BASENAMES.has(base) || (base.startsWith('.') && base.length > 1)) {
-    return true;
-  }
-
-  return hasFileExtension(normalized);
+  return isLikelyFileReferencePath(path);
 };
 
 const isLikelyFilePath = (value: string): boolean => {

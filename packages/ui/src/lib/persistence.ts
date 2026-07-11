@@ -1398,7 +1398,7 @@ const _flushSettingsUpdate = async (): Promise<void> => {
         persistToLocalStorage(updated);
         applyDesktopUiPreferences(updated);
         dispatchSettingsSynced(updated);
-        _settingsCache = null;
+        _settingsCache = { value: sanitizeWebSettings(updated), at: Date.now() };
       }
       waiters.forEach((resolve) => resolve());
       return;
@@ -1427,8 +1427,7 @@ const _flushSettingsUpdate = async (): Promise<void> => {
       persistToLocalStorage(updated);
       applyDesktopUiPreferences(updated);
       dispatchSettingsSynced(updated);
-      // Invalidate GET cache so next read sees the fresh data
-      _settingsCache = null;
+      _settingsCache = { value: sanitizeWebSettings(updated), at: Date.now() };
     }
   } catch (error) {
     console.warn('Failed to update shared settings via API:', error);
@@ -1442,7 +1441,24 @@ export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): 
     return;
   }
 
-  _pendingSettingsChanges = { ...(_pendingSettingsChanges ?? {}), ...changes };
+  const nextChanges = { ...(_pendingSettingsChanges ?? {}) } as Record<string, unknown>;
+  const hydrated = _settingsCache?.value as Record<string, unknown> | null | undefined;
+  for (const [key, value] of Object.entries(changes)) {
+    const currentValue = hydrated?.[key];
+    const matchesHydrated = Object.is(value, currentValue)
+      || (value !== undefined && currentValue !== undefined
+        && JSON.stringify(value) === JSON.stringify(currentValue));
+    if (matchesHydrated) {
+      delete nextChanges[key];
+    } else {
+      nextChanges[key] = value;
+    }
+  }
+  _pendingSettingsChanges = nextChanges as Partial<DesktopSettings>;
+
+  if (Object.keys(nextChanges).length === 0 && !_settingsFlushTimer) {
+    return;
+  }
 
   if (_settingsFlushTimer) {
     clearTimeout(_settingsFlushTimer);

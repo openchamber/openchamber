@@ -284,6 +284,39 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
     }
   });
 
+  app.post('/api/config/commands/metadata', async (req, res) => {
+    try {
+      const { directory, error } = await resolveProjectDirectory(req);
+      if (!directory) {
+        return res.status(400).json({ error });
+      }
+      if (!Array.isArray(req.body?.names)) {
+        return res.status(400).json({ error: 'names must be an array' });
+      }
+
+      const names = [...new Set(req.body.names
+        .filter((name) => typeof name === 'string')
+        .map((name) => name.trim())
+        .filter(Boolean))]
+        .slice(0, 500);
+      const commands = {};
+      for (const commandName of names) {
+        const sources = getCommandSources(commandName, directory);
+        const scope = sources.md.exists
+          ? sources.md.scope
+          : (sources.json.exists ? sources.json.scope : null);
+        commands[commandName] = {
+          scope,
+          isBuiltIn: !sources.md.exists && !sources.json.exists,
+        };
+      }
+      return res.json({ commands });
+    } catch (error) {
+      console.error('Failed to get command metadata batch:', error);
+      return res.status(500).json({ error: 'Failed to get command configuration metadata' });
+    }
+  });
+
   app.get('/api/config/commands/:name', async (req, res) => {
     try {
       const commandName = req.params.name;

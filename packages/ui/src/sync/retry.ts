@@ -15,6 +15,11 @@ const TRANSIENT_MESSAGES = [
   "econnrefused",
   "etimedout",
   "socket hang up",
+  // AbortSignal.timeout() (used by bounded session-list requests) surfaces
+  // this exact message in Bun/Electron. Treat it like ETIMEDOUT so a cold
+  // OpenCode index warm-up gets the same bounded retry budget as other
+  // transient transport failures.
+  "signal timed out",
   "opencode api unavailable",
   "503",
   "502",

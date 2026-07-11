@@ -175,6 +175,12 @@ const sanitizeSessionListPayload = (payload) => {
   return payload.map((session) => sanitizeSessionListItem(session));
 };
 
+export const isInteractiveSessionRequest = (method, requestUrl) => {
+  if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) return false;
+  const pathname = new URL(requestUrl || '/', 'http://openchamber.local').pathname;
+  return /^\/api\/session\/[^/]+(?:\/(?:message|children|todo|diff))?$/.test(pathname);
+};
+
 export const registerOpenCodeProxy = (app, deps) => {
   const {
     fs,
@@ -186,6 +192,7 @@ export const registerOpenCodeProxy = (app, deps) => {
     getOpenCodeAuthHeaders,
     buildOpenCodeUrl,
     ensureOpenCodeApiPrefix,
+    onInteractiveSessionRequest,
   } = deps;
 
   if (app.get('opencodeProxyConfigured')) {
@@ -547,6 +554,16 @@ export const registerOpenCodeProxy = (app, deps) => {
   // Ensure API prefix is detected before proxying
   app.use('/api', (_req, _res, next) => {
     ensureOpenCodeApiPrefix();
+    next();
+  });
+
+  // Session detail reads are user-blocking. Abort/yield the Electron-owned
+  // background summary sync before this request enters the OpenCode gate so a
+  // project refresh can never sit ahead of the selected conversation.
+  app.use('/api', (req, _res, next) => {
+    if (isInteractiveSessionRequest(req.method, req.originalUrl || req.url)) {
+      onInteractiveSessionRequest?.();
+    }
     next();
   });
 

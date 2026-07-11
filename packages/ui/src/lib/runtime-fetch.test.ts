@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
-import { buildRuntimeFetchUrl, isLatin1Safe, runtimeFetch, sanitizeHeadersForBrowser } from './runtime-fetch';
+import {
+  buildRuntimeFetchUrl,
+  getRuntimeRequestPriority,
+  isLatin1Safe,
+  runtimeFetch,
+  sanitizeHeadersForBrowser,
+  setRuntimeInteractiveSessionRequestId,
+} from './runtime-fetch';
 import { clearRuntimeAuthCredentialProvider, setRuntimeBearerToken } from './runtime-auth';
 import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from './runtime-url';
 
@@ -45,6 +52,36 @@ describe('buildRuntimeFetchUrl', () => {
       globalThis.fetch = originalFetch;
       clearRuntimeAuthCredentialProvider();
     }
+  });
+});
+
+describe('runtime request priority', () => {
+  test('prioritizes only session detail and message reads needed for the selected chat', () => {
+    const previous = getRuntimeUrlResolver();
+    try {
+      configureRuntimeUrlResolver({ apiBaseUrl: 'http://127.0.0.1:57123' });
+      setRuntimeInteractiveSessionRequestId('ses_1');
+      expect(getRuntimeRequestPriority('GET', 'http://127.0.0.1:57123/api/session/ses_1?directory=%2Frepo')).toBe('high');
+      expect(getRuntimeRequestPriority('GET', 'http://127.0.0.1:57123/api/session/ses_1/message?limit=30')).toBe('high');
+
+      expect(getRuntimeRequestPriority('GET', 'http://127.0.0.1:57123/api/session/status?directory=%2Frepo')).toBe('low');
+      expect(getRuntimeRequestPriority('GET', 'http://127.0.0.1:57123/api/session/ses_1/children?directory=%2Frepo')).toBe('high');
+      expect(getRuntimeRequestPriority('GET', 'http://127.0.0.1:57123/api/session/ses_background/message?limit=30')).toBe(undefined);
+      expect(getRuntimeRequestPriority('GET', 'http://127.0.0.1:57123/api/experimental/session?limit=20')).toBe('low');
+    } finally {
+      setRuntimeInteractiveSessionRequestId(null);
+      setRuntimeUrlResolver(previous);
+    }
+  });
+
+  test('keeps cold-start background reads behind interactive session loading', () => {
+    expect(getRuntimeRequestPriority('GET', '/api/global/config')).toBe('low');
+    expect(getRuntimeRequestPriority('GET', '/api/config/providers?directory=%2Frepo')).toBe('low');
+    expect(getRuntimeRequestPriority('GET', '/api/git/status?directory=%2Frepo')).toBe('low');
+    expect(getRuntimeRequestPriority('GET', '/api/quota/usage')).toBe('low');
+    expect(getRuntimeRequestPriority('GET', '/api/openchamber/session-index/changes?since=2')).toBe('low');
+    expect(getRuntimeRequestPriority('POST', '/api/session/ses_1/message')).toBe(undefined);
+    expect(getRuntimeRequestPriority('GET', 'https://external.example/api/session/ses_1/message')).toBe(undefined);
   });
 });
 

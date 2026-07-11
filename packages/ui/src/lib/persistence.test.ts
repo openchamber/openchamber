@@ -4,7 +4,7 @@ import type { RuntimeAPIs, SettingsPayload } from '@/lib/api/types';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { startModelPrefsAutoSave } from '@/lib/modelPrefsAutoSave';
 import { useUIStore } from '@/stores/useUIStore';
-import { applyPersistedHomeDirectoryToWindow, syncDesktopSettings, updateDesktopSettings } from './persistence';
+import { applyPersistedHomeDirectoryToWindow, invalidateSettingsCache, syncDesktopSettings, updateDesktopSettings } from './persistence';
 
 type TestWindow = {
   __OPENCHAMBER_HOME__?: string;
@@ -124,6 +124,7 @@ describe('updateDesktopSettings', () => {
   beforeEach(() => {
     getWindow();
     registerRuntimeAPIs(null);
+    invalidateSettingsCache();
     resetModelPrefsState();
   });
 
@@ -194,6 +195,22 @@ describe('updateDesktopSettings', () => {
     expect(saveCalls).toEqual([{ themeVariant: 'dark', fontSize: 14 }]);
     expect(firstResolved).toBe(true);
     expect(secondResolved).toBe(true);
+  });
+
+  test('does not write fields that already match the hydrated server settings', async () => {
+    const saveCalls: Array<Partial<SettingsPayload>> = [];
+    registerSettingsApi(
+      async (changes) => {
+        saveCalls.push(changes);
+        return changes as SettingsPayload;
+      },
+      async () => ({ settings: { themeVariant: 'dark', homeDirectory: '/Users/example' }, source: 'web' }),
+    );
+
+    await syncDesktopSettings();
+    await updateDesktopSettings({ themeVariant: 'dark', homeDirectory: '/Users/example' });
+
+    expect(saveCalls).toHaveLength(0);
   });
 
   test('applies model selector settings from server settings', async () => {

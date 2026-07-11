@@ -1199,7 +1199,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const availableSkills = useSkillsStore((s) => s.skills);
     const knownSlashNames = React.useMemo(() => {
         const names = new Set<string>([
-            'init', 'review', 'undo', 'redo', 'timeline', 'compact', 'summary', 'workspace-review', 'plan-feature', 'catch-up', 'debug', 'weigh', 'explore',
+            'init', 'review', 'undo', 'redo', 'timeline', 'model', 'compact', 'summary', 'workspace-review', 'plan-feature', 'catch-up', 'debug', 'weigh', 'explore',
         ]);
         if (!isMobile && !isVSCodeRuntime()) names.add('handoff-review');
         for (const command of availableCommands) names.add(command.name.toLowerCase());
@@ -1596,21 +1596,24 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
     }, [clearPendingDraftPersist, currentSessionId, persistChatDraft, persistDraftImmediately]);
 
-    // Focus textarea when new session draft is opened
-    const prevNewSessionDraftOpenRef = React.useRef(newSessionDraftOpen);
-    React.useEffect(() => {
-        if (!prevNewSessionDraftOpenRef.current && newSessionDraftOpen) {
-            // New session draft just opened - focus the textarea
-            requestAnimationFrame(() => {
-                if (isMobile) {
-                    // On mobile, use preventScroll to avoid viewport jumping
-                    textareaRef.current?.focus({ preventScroll: true });
-                } else {
-                    textareaRef.current?.focus();
-                }
-            });
+    // Welcome/new-session drafts own desktop focus so every entry path (including
+    // Cmd+N and restored drafts) lands in the composer after its DOM commits.
+    React.useLayoutEffect(() => {
+        if (!newSessionDraftOpen || isMobile) {
+            return;
         }
-        prevNewSessionDraftOpenRef.current = newSessionDraftOpen;
+
+        const focusDraftInput = () => {
+            const textarea = textareaRef.current;
+            if (!textarea || textarea.disabled) {
+                return;
+            }
+            textarea.focus({ preventScroll: true });
+        };
+
+        focusDraftInput();
+        const frame = window.requestAnimationFrame(focusDraftInput);
+        return () => window.cancelAnimationFrame(frame);
     }, [newSessionDraftOpen, isMobile]);
 
     // Persist chat input draft to localStorage per session (only if setting enabled)
@@ -1794,6 +1797,24 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 hasContent: options.presetText.trim().length > 0 || sendableAttachedFiles.length > 0 || hasDrafts,
             }
             : getCurrentInputSnapshot();
+        const normalizedInput = inputSnapshot.message.trimStart();
+        const isModelCommand = inputMode === 'normal' && /^\/model(?:\s|$)/i.test(normalizedInput);
+
+        if (!queuedOnly && isModelCommand) {
+            setMessage('');
+            confirmedMentionsRef.current.clear();
+            saveStoredDraft(currentSessionId, '');
+            saveConfirmedMentions(currentSessionId, confirmedMentionsRef.current);
+            setShowCommandAutocomplete(false);
+            setCommandQuery('');
+
+            if (isMobile) {
+                handleOpenMobilePanel('model');
+            } else {
+                useUIStore.getState().setModelSelectorOpen(true);
+            }
+            return;
+        }
         const queuedMessagesToSend = queuedMessageId
             ? queuedMessages.filter((message) => message.id === queuedMessageId)
             : queuedMessages;

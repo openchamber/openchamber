@@ -350,13 +350,11 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const sessionDirectory =
     normalizePath((session as Session & { directory?: string | null }).directory ?? null)
     ?? normalizePath(groupDirectory ?? null);
-  // Archived rows are historical and never need live state, yet they point at
-  // dozens of (often deleted) worktrees — bootstrapping each from the sidebar
-  // triggers a pointless session-list fetch + 6×2s empty-retry storm on startup.
-  // Skip bootstrap for archived rows; the store ref is only read on-demand via
-  // getState() in the export handlers (never subscribed). Active rows keep
-  // bootstrapping so live cross-directory session/status still aggregates.
-  const directoryStore = useDirectoryStore(sessionDirectory ?? undefined, { bootstrap: !archivedBucket });
+  // A sidebar row is a lightweight consumer. Creating/subscribing to the child
+  // store lets routed live events update status and permissions, but must not
+  // start the directory's full config/path/session bootstrap. The active chat
+  // remains the authoritative consumer that opts into bootstrap.
+  const directoryStore = useDirectoryStore(sessionDirectory ?? undefined, { bootstrap: false });
   const sync = useSync();
 
   const selectionModeEnabled = useSessionMultiSelectStore((state) => state.enabled);
@@ -386,7 +384,11 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     React.useCallback((state) => Boolean(state.sessionMemoryState.get(viewportSessionKey(session.id))?.isZombie), [session.id]),
   );
   const sessionStatus = useGlobalSessionStatus(session.id);
-  const sessionPermissions = useSessionPermissions(session.id, sessionDirectory ?? undefined);
+  const sessionPermissions = useSessionPermissions(
+    session.id,
+    sessionDirectory ?? undefined,
+    { bootstrap: false },
+  );
   const rowFocus = React.useMemo<SessionFocusIdentity>(() => ({
     scope: renderContext,
     sessionId: session.id,
@@ -412,6 +414,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const expansionKey = menuInstanceKey;
   const isExpanded = hasSessionSearchQuery ? true : expandedParents.has(expansionKey);
   const isSubtaskSession = Boolean((resolvedSession as Session & { parentID?: string | null }).parentID);
+  const isRecentContext = renderContext === 'recent';
   const unseenCount = useSessionUnseenCount(session.id);
   const needsAttention = unseenCount > 0 && (!isSubtaskSession || notifyOnSubtasks);
   const sessionTimestamp = resolvedSession.time?.updated || resolvedSession.time?.created || Date.now();
@@ -423,7 +426,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const isMultiRunLikeSession = React.useMemo(() => parseMultiRunSessionTitle(resolvedSession.title) !== null, [resolvedSession.title]);
   const [fusionDialogOpen, setFusionDialogOpen] = React.useState(false);
   // Recent is a flat recency list — no pin/chevron/tree chrome (those live in Projects).
-  const isRecentContext = renderContext === 'recent';
 
   const descendantCount = React.useMemo(() => collectNodeDescendantIds(node).length, [collectNodeDescendantIds, node]);
 
@@ -695,21 +697,28 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   ) : null;
   // Subsession chevron: align with the folder-icon column; idle hidden, hover only
   // (touch / alwaysShowActions keeps it visible). Omitted entirely in Recent.
-  const hideChevronUntilHover = hasChildren && !alwaysShowActions;
+  const canExpandSubsessions = !isRecentContext && !isSubtaskSession;
+  const hideChevronUntilHover = canExpandSubsessions && !alwaysShowActions;
   const subsessionChevronLeft = getSidebarRowPaddingLeft(Math.max(0, depth - 1));
-  const subsessionChevron = !isRecentContext && hasChildren ? (
+  const toggleSubsessionTree = () => {
+    if (!isExpanded && node.children.length === 0) {
+      void sync.loadChildren(session.id, sessionDirectory).catch(() => undefined);
+    }
+    toggleParent(expansionKey);
+  };
+  const subsessionChevron = canExpandSubsessions ? (
     <span
       role="button"
       tabIndex={0}
       onClick={(event) => {
         event.stopPropagation();
-        toggleParent(expansionKey);
+        toggleSubsessionTree();
       }}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
           event.stopPropagation();
-          toggleParent(expansionKey);
+          toggleSubsessionTree();
         }
       }}
       style={{

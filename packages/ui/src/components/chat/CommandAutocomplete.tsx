@@ -149,6 +149,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
               ]
             : []
           ),
+          { id: 'openchamber:model', name: 'model', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.modelDescription'), isBuiltIn: true },
           { id: 'openchamber:compact', name: 'compact', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.compactDescription'), isBuiltIn: true },
           ...(hasSession
             ? [{ id: 'openchamber:summary', name: 'summary', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.summaryDescription'), isOpenChamber: true }]
@@ -218,6 +219,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
               ]
             : []
           ),
+          { id: 'openchamber:model', name: 'model', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.modelDescription'), isBuiltIn: true },
           { id: 'openchamber:compact', name: 'compact', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.compactDescription'), isBuiltIn: true },
           ...(hasSession
             ? [{ id: 'openchamber:summary', name: 'summary', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.summaryDescription'), isOpenChamber: true }]

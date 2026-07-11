@@ -8,6 +8,7 @@ type Project = { id: string; path: string; normalizedPath: string };
 
 type Args = {
   normalizedProjects: Project[];
+  activeProjectId: string | null;
   gitRepoStatus: Map<string, { isGitRepo: boolean | null; branch: string | null }>;
   setProjectRepoStatus: React.Dispatch<React.SetStateAction<Map<string, boolean | null>>>;
   setProjectRootBranches: React.Dispatch<React.SetStateAction<Map<string, string>>>;
@@ -16,6 +17,7 @@ type Args = {
 export const useProjectRepoStatus = (args: Args): void => {
   const {
     normalizedProjects,
+    activeProjectId,
     gitRepoStatus,
     setProjectRepoStatus,
     setProjectRootBranches,
@@ -23,37 +25,42 @@ export const useProjectRepoStatus = (args: Args): void => {
 
   const { git } = useRuntimeAPIs();
   const ensureStatus = useGitStore((state) => state.ensureStatus);
+  const activeProjects = React.useMemo(
+    () => normalizedProjects.filter((project) => project.id === activeProjectId),
+    [activeProjectId, normalizedProjects],
+  );
 
   // Derive repo status from centralized Git store
   React.useEffect(() => {
-    if (!git || normalizedProjects.length === 0) {
+    if (!git || activeProjects.length === 0) {
       setProjectRepoStatus(new Map());
       return;
     }
 
-    // Trigger ensureStatus for each project to populate store
-    normalizedProjects.forEach((project) => {
+    // Git is visible-demand-driven: cold session hydration must not issue a
+    // status request for every project in the sidebar.
+    activeProjects.forEach((project) => {
       void ensureStatus(project.normalizedPath, git);
     });
-  }, [normalizedProjects, git, ensureStatus, setProjectRepoStatus]);
+  }, [activeProjects, git, ensureStatus, setProjectRepoStatus]);
 
   // Read isGitRepo from the store-populated state
   React.useEffect(() => {
     const next = new Map<string, boolean | null>();
-    normalizedProjects.forEach((project) => {
+    activeProjects.forEach((project) => {
       next.set(project.id, gitRepoStatus.get(project.normalizedPath)?.isGitRepo ?? null);
     });
     setProjectRepoStatus(next);
-  }, [normalizedProjects, gitRepoStatus, setProjectRepoStatus]);
+  }, [activeProjects, gitRepoStatus, setProjectRepoStatus]);
 
   const projectGitBranchesKey = React.useMemo(() => {
-    return normalizedProjects
+    return activeProjects
       .map((project) => {
         const branch = gitRepoStatus.get(project.normalizedPath)?.branch ?? '';
         return `${project.id}:${branch}`;
       })
       .join('|');
-  }, [normalizedProjects, gitRepoStatus]);
+  }, [activeProjects, gitRepoStatus]);
 
   // Tracks the project path + input branch we last resolved against, per project.
   // Used to resolve `getRootBranch` only for projects that are new or whose
@@ -78,7 +85,7 @@ export const useProjectRepoStatus = (args: Args): void => {
     // settles into a single resolution pass instead of one pass per project.
     const timer = setTimeout(() => {
       const run = async () => {
-        const validIds = new Set(normalizedProjects.map((project) => project.id));
+        const validIds = new Set(activeProjects.map((project) => project.id));
         // Drop bookkeeping for projects that are no longer present.
         for (const id of resolvedInputKeyByProjectId.current.keys()) {
           if (!validIds.has(id)) {
@@ -88,7 +95,7 @@ export const useProjectRepoStatus = (args: Args): void => {
         }
 
         const now = Date.now();
-        const pending = normalizedProjects.filter((project) => {
+        const pending = activeProjects.filter((project) => {
           const status = gitRepoStatus.get(project.normalizedPath);
           if (status?.isGitRepo === false) {
             resolvedInputKeyByProjectId.current.delete(project.id);
@@ -168,5 +175,5 @@ export const useProjectRepoStatus = (args: Args): void => {
     // in the deps array since it never changes during the component
     // lifetime.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [normalizedProjects, projectGitBranchesKey, gitRepoStatus, setProjectRootBranches]);
+  }, [activeProjects, projectGitBranchesKey, gitRepoStatus, setProjectRootBranches]);
 };

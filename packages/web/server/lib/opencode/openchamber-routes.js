@@ -1,3 +1,5 @@
+import { registerSessionIndexRoutes } from '../session-index/routes.js';
+
 export const registerOpenChamberRoutes = (app, dependencies) => {
   const {
     fs,
@@ -11,7 +13,11 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     readSettingsFromDiskMigrated,
     fetchFreeZenModels,
     getCachedZenModels,
+    sessionIndexService,
+    sessionIndexSyncRuntime,
   } = dependencies;
+
+  registerSessionIndexRoutes(app, { sessionIndexService, sessionIndexSyncRuntime });
 
   app.get('/api/openchamber/update-check', async (req, res) => {
     try {
