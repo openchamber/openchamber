@@ -575,7 +575,6 @@ interface UIStore {
   sessionRecapEnabled: boolean;
   sessionSuggestionEnabled: boolean;
   collapsibleThinkingBlocks: boolean;
-  groupReasoningBlocks: boolean;
   chatRenderMode: ChatRenderMode;
   activityRenderMode: ActivityRenderMode;
   showDeletionDialog: boolean;
@@ -639,6 +638,7 @@ interface UIStore {
   showOpenCodeUpdateNotifications: boolean;
   inputSpellcheckEnabled: boolean;
   wideChatLayoutEnabled: boolean;
+  codeBlockLineWrap: boolean;
   showToolFileIcons: boolean;
   showTurnChangedFiles: boolean;
   showExpandedBashTools: boolean;
@@ -787,6 +787,7 @@ interface UIStore {
   setShowOpenCodeUpdateNotifications: (value: boolean) => void;
   setInputSpellcheckEnabled: (value: boolean) => void;
   setWideChatLayoutEnabled: (value: boolean) => void;
+  setCodeBlockLineWrap: (value: boolean) => void;
   setShowToolFileIcons: (value: boolean) => void;
   setShowTurnChangedFiles: (value: boolean) => void;
   setShowExpandedBashTools: (value: boolean) => void;
@@ -871,7 +872,6 @@ export const useUIStore = create<UIStore>()(
         sessionRecapEnabled: true,
         sessionSuggestionEnabled: true,
         collapsibleThinkingBlocks: true,
-        groupReasoningBlocks: true,
         chatRenderMode: 'live',
         activityRenderMode: 'summary',
         showDeletionDialog: true,
@@ -929,6 +929,7 @@ export const useUIStore = create<UIStore>()(
         showOpenCodeUpdateNotifications: true,
         inputSpellcheckEnabled: false,
         wideChatLayoutEnabled: false,
+        codeBlockLineWrap: true,
         showToolFileIcons: true,
         showTurnChangedFiles: false,
         showExpandedBashTools: false,
@@ -2043,6 +2044,9 @@ export const useUIStore = create<UIStore>()(
         setWideChatLayoutEnabled: (value) => {
           set({ wideChatLayoutEnabled: value });
         },
+        setCodeBlockLineWrap: (value) => {
+          set({ codeBlockLineWrap: value });
+        },
         setShowToolFileIcons: (value) => {
           set({ showToolFileIcons: value });
         },
@@ -2306,6 +2310,7 @@ export const useUIStore = create<UIStore>()(
           showOpenCodeUpdateNotifications: state.showOpenCodeUpdateNotifications,
           inputSpellcheckEnabled: state.inputSpellcheckEnabled,
           wideChatLayoutEnabled: state.wideChatLayoutEnabled,
+          codeBlockLineWrap: state.codeBlockLineWrap,
           showToolFileIcons: state.showToolFileIcons,
           showTurnChangedFiles: state.showTurnChangedFiles,
           showExpandedBashTools: state.showExpandedBashTools,

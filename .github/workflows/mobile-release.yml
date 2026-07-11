@@ -11,10 +11,24 @@ on:
         description: Build number. Leave empty to use GitHub run number.
         required: false
         type: string
+      release_tag:
+        description: Existing GitHub Release tag for Android artifact upload, for example v1.14.1.
+        required: false
+        type: string
       upload_github_release:
         description: Upload Android artifacts to GitHub Release. Requires release_tag when called by the release workflow.
         required: false
         default: false
+        type: boolean
+      build_android:
+        description: Build Android signed APK/AAB artifacts.
+        required: false
+        default: true
+        type: boolean
+      build_ios:
+        description: Build iOS IPA and upload it to TestFlight.
+        required: false
+        default: true
         type: boolean
   workflow_call:
     inputs:
@@ -34,6 +48,16 @@ on:
         description: Upload Android artifacts to the matching GitHub Release.
         required: false
         default: false
+        type: boolean
+      build_android:
+        description: Build Android signed APK/AAB artifacts.
+        required: false
+        default: true
+        type: boolean
+      build_ios:
+        description: Build iOS IPA and upload it to TestFlight.
+        required: false
+        default: true
         type: boolean
 
 concurrency:
@@ -65,7 +89,14 @@ jobs:
           input_version='${{ inputs.version_name }}'
           input_build='${{ inputs.build_number }}'
           input_release_tag='${{ inputs.release_tag }}'
+          build_android='${{ inputs.build_android }}'
+          build_ios='${{ inputs.build_ios }}'
           package_version="$(node -p "require('./package.json').version")"
+
+          if [[ "$build_android" != "true" && "$build_ios" != "true" ]]; then
+            echo "Select at least one platform: build_android or build_ios."
+            exit 1
+          fi
 
           version_name="${input_version:-$package_version}"
           build_number="${input_build:-${{ github.run_number }}}"
@@ -79,6 +110,7 @@ jobs:
 
   android-release:
     name: Android signed release
+    if: inputs.build_android
     runs-on: ubuntu-latest
     needs: resolve-version
     permissions:
@@ -136,18 +168,25 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ needs.resolve-version.outputs.release_tag }}
+          VERSION_NAME: ${{ needs.resolve-version.outputs.version_name }}
+          BUILD_NUMBER: ${{ needs.resolve-version.outputs.build_number }}
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p release-assets
+          cp app/build/outputs/bundle/release/*.aab "release-assets/OpenChamber-${VERSION_NAME}-${BUILD_NUMBER}-android.aab"
+          cp app/build/outputs/apk/release/*.apk "release-assets/OpenChamber-${VERSION_NAME}-${BUILD_NUMBER}-android.apk"
           files=(
             app/build/outputs/bundle/release/*.aab
             app/build/outputs/apk/release/*.apk
+            release-assets/*
           )
           gh release upload "$RELEASE_TAG" "${files[@]}" --clobber --repo "${{ github.repository }}"
         working-directory: ${{ env.ANDROID_PROJECT_DIR }}
 
   ios-testflight:
     name: iOS TestFlight upload
+    if: inputs.build_ios
     runs-on: macos-26
     needs: resolve-version
     steps:

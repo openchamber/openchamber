@@ -281,7 +281,7 @@ type DefaultAgentModelSelection = {
 // fresh draft (applyDefaultModelAgentSelection), so the two paths stay identical.
 //
 //   Agent: settings.defaultAgent → opencode default_agent → build → first primary → first
-//   Model: settings.defaultModel → resolved agent's pinned model+variant → opencode config.model
+//   Model: project.defaultModel → settings.defaultModel → resolved agent's pinned model+variant → opencode config.model
 //          → opencode/big-pickle → first
 //
 // The opencode default_agent / default model (config fields on the OpenCode server) are honored
@@ -292,6 +292,7 @@ type DefaultAgentModelSelection = {
 const resolveDefaultAgentModelSelection = ({
     agents,
     providers,
+    projectDefaultModel,
     settingsDefaultAgent,
     settingsDefaultModel,
     settingsDefaultVariant,
@@ -300,6 +301,7 @@ const resolveDefaultAgentModelSelection = ({
 }: {
     agents: Agent[];
     providers: ProviderWithModelList[];
+    projectDefaultModel?: string;
     settingsDefaultAgent?: string;
     settingsDefaultModel?: string;
     settingsDefaultVariant?: string;
@@ -348,12 +350,14 @@ const resolveDefaultAgentModelSelection = ({
     let modelId: string | undefined;
     let variant: string | undefined;
 
-    if (settingsDefaultModel) {
-        const parsed = parseModelString(settingsDefaultModel);
+    const effectiveDefaultModel = projectDefaultModel || settingsDefaultModel;
+
+    if (effectiveDefaultModel) {
+        const parsed = parseModelString(effectiveDefaultModel);
         if (parsed && hasProviderModel(providers, parsed.providerId, parsed.modelId)) {
             providerId = parsed.providerId;
             modelId = parsed.modelId;
-            variant = resolveVariant(providerId, modelId, settingsDefaultVariant);
+            variant = resolveVariant(providerId, modelId, projectDefaultModel ? undefined : settingsDefaultVariant);
         }
     }
 
@@ -1048,7 +1052,7 @@ interface ConfigStore {
     cycleCurrentVariant: () => void;
     getCurrentModelVariants: () => string[];
     setAgent: (agentName: string | undefined) => void;
-    applyDefaultModelAgentSelection: () => void;
+    applyDefaultModelAgentSelection: (options?: { projectDefaultModel?: string }) => void;
     applyOpenCodeConfigDefaults: (directory?: string | null, source?: string, config?: Config) => void;
     setSelectedProvider: (providerId: string) => void;
     setSettingsDefaultModel: (model: string | undefined) => void;
@@ -2497,10 +2501,10 @@ export const useConfigStore = create<ConfigStore>()(
 
                 // Re-applies the same priority cascade used at app startup (see loadAgents):
                 //   agent: settings.defaultAgent → build → first primary → first agent
-                //   model: settings.defaultModel → agent's preferred model → opencode/big-pickle → first
+                //   model: project.defaultModel → settings.defaultModel → agent's preferred model → opencode/big-pickle → first
                 // Used when entering a fresh draft session so model/agent reset to defaults
                 // instead of sticking to the previously open session's selection.
-                applyDefaultModelAgentSelection: () => {
+                applyDefaultModelAgentSelection: (options) => {
                     const {
                         agents,
                         providers,
@@ -2523,6 +2527,7 @@ export const useConfigStore = create<ConfigStore>()(
                     } = resolveDefaultAgentModelSelection({
                         agents,
                         providers,
+                        projectDefaultModel: options?.projectDefaultModel,
                         settingsDefaultAgent,
                         settingsDefaultModel,
                         settingsDefaultVariant,

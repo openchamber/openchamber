@@ -397,7 +397,13 @@ export function useSync() {
           return { messages: materialized.messages, cursor: merged.cursor, complete: merged.complete }
         }
 
-        const limit = options?.before ? HISTORY_MESSAGE_PAGE_SIZE : m.limit
+        // Live events can append messages without growing m.limit. A resync
+        // must cover everything already rendered or it can manufacture an
+        // "older" cursor for history that is already on screen.
+        const storeMessageCount = store.getState().message[sessionID]?.length ?? 0
+        const limit = options?.before
+          ? HISTORY_MESSAGE_PAGE_SIZE
+          : Math.max(m.limit, storeMessageCount)
         const page = await fetchMessages(sessionID, limit, options?.before)
 
         // Commit the first page to the store immediately so the hydrating
@@ -678,6 +684,13 @@ export function useSync() {
     [clearOptimistic, getOptimisticStore],
   )
 
+  const optimisticConfirm = useCallback(
+    (input: { sessionID: string; directory?: string | null; messageID: string }) => {
+      clearOptimistic(input.sessionID, input.messageID, input.directory)
+    },
+    [clearOptimistic],
+  )
+
   return useMemo(
     () => ({
       ensureSessionRenderable: syncSession,
@@ -689,8 +702,9 @@ export function useSync() {
       optimistic: {
         add: optimisticAdd,
         remove: optimisticRemove,
+        confirm: optimisticConfirm,
       },
     }),
-    [syncSession, loadMore, hasMore, isLoading, isComplete, optimisticAdd, optimisticRemove],
+    [syncSession, loadMore, hasMore, isLoading, isComplete, optimisticAdd, optimisticRemove, optimisticConfirm],
   )
 }

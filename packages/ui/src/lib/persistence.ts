@@ -507,6 +507,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.showToolFileIcons === 'boolean' && settings.showToolFileIcons !== store.showToolFileIcons) {
     store.setShowToolFileIcons(settings.showToolFileIcons);
   }
+  if (typeof settings.codeBlockLineWrap === 'boolean' && settings.codeBlockLineWrap !== store.codeBlockLineWrap) {
+    store.setCodeBlockLineWrap(settings.codeBlockLineWrap);
+  }
   if (typeof settings.showTurnChangedFiles === 'boolean' && settings.showTurnChangedFiles !== store.showTurnChangedFiles) {
     store.setShowTurnChangedFiles(settings.showTurnChangedFiles);
   }
@@ -743,6 +746,12 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.desktopLanAccessEnabled === 'boolean') {
     result.desktopLanAccessEnabled = candidate.desktopLanAccessEnabled;
+  }
+  if (typeof candidate.desktopKeepAwakeEnabled === 'boolean') {
+    result.desktopKeepAwakeEnabled = candidate.desktopKeepAwakeEnabled;
+  }
+  if (typeof candidate.desktopMinimizeToTrayEnabled === 'boolean') {
+    result.desktopMinimizeToTrayEnabled = candidate.desktopMinimizeToTrayEnabled;
   }
 
   const projects = sanitizeProjects(candidate.projects);
@@ -1043,6 +1052,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.showToolFileIcons === 'boolean') {
     result.showToolFileIcons = candidate.showToolFileIcons;
+  }
+  if (typeof candidate.codeBlockLineWrap === 'boolean') {
+    result.codeBlockLineWrap = candidate.codeBlockLineWrap;
   }
   if (typeof candidate.showTurnChangedFiles === 'boolean') {
     result.showTurnChangedFiles = candidate.showTurnChangedFiles;
