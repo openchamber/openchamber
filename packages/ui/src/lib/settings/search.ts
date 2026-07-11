@@ -80,6 +80,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => ctx.isMac,
   },
   {
+    id: 'appearance.sidebar-brand',
+    page: 'appearance',
+    titleKey: 'settings.openchamber.visual.field.sidebarBrand',
+    descriptionKey: 'settings.openchamber.visual.field.sidebarBrandHint',
+    keywords: ['logo', 'brand', 'wordmark', 'sidebar'],
+  },
+  {
     id: 'appearance.pwa-install-name',
     page: 'appearance',
     titleKey: 'settings.openchamber.visual.field.installAppName',

@@ -27,6 +27,7 @@ import { updateDesktopSettings } from '@/lib/persistence';
 import { CODE_FONT_OPTIONS, DEFAULT_MONO_FONT, DEFAULT_UI_FONT, UI_FONT_OPTIONS, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { useI18n, type Locale } from '@/lib/i18n';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useSidebarBrandStore } from '@/stores/useSidebarBrandStore';
 import { normalizeMobileKeyboardMode, supportsMobileKeyboardResizeContent, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { getStoredMobileLayoutPreference, setStoredMobileLayoutPreference, type MobileLayoutPreference } from '@/lib/mobileLayoutPreference';
 import {
@@ -245,7 +246,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-type VisibleSetting = 'sessionAssist' | 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar';
+type VisibleSetting = 'sessionAssist' | 'theme' | 'sidebarBrand' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -327,6 +328,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setWeekStartPreference = useUIStore(state => state.setWeekStartPreference);
     const showSplitAssistantMessageActions = useUIStore(state => state.showSplitAssistantMessageActions);
     const setShowSplitAssistantMessageActions = useUIStore(state => state.setShowSplitAssistantMessageActions);
+    const sidebarBrandName = useSidebarBrandStore(state => state.sidebarBrandName);
+    const setSidebarBrandName = useSidebarBrandStore(state => state.setSidebarBrandName);
     const messageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport);
     const setMessageStreamTransport = useConfigStore((state) => state.setSettingsMessageStreamTransport);
     const effectiveMessageStreamTransport = messageStreamTransport;
@@ -553,8 +556,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const hasLocalizationSettings = shouldShow('theme') || shouldShow('timeFormat') || shouldShow('weekStart');
     const showMobileLayoutSetting = isMobile && isWebRuntime() && !isDesktopShell() && !isVSCode;
     const hasAppearanceSettings = isVSCode
-        ? hasLocalizationSettings
-        : (shouldShow('theme') || showMobileLayoutSetting || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart'));
+        ? (hasLocalizationSettings || shouldShow('sidebarBrand'))
+        : (shouldShow('theme') || shouldShow('sidebarBrand') || showMobileLayoutSetting || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart'));
     const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('spacing') || shouldShow('inputBarOffset');
     const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || shouldShow('fileEditorKeymap') || shouldShow('expandedEditorToolbar');
     const hasBehaviorSettings = shouldShow('mermaidRendering')
@@ -979,6 +982,24 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         )}
                                     </div>
                                 )}
+                            </section>
+                        )}
+
+                        {shouldShow('sidebarBrand') && (
+                            <section className="px-2 pb-2 pt-0 space-y-2">
+                                <div data-settings-item="appearance.sidebar-brand" className="py-1.5 space-y-1.5">
+                                    <div className="flex min-w-0 flex-col">
+                                        <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.sidebarBrand')}</span>
+                                        <span className="typography-meta text-muted-foreground">{t('settings.openchamber.visual.field.sidebarBrandHint')}</span>
+                                    </div>
+                                    <Input
+                                        value={sidebarBrandName}
+                                        onChange={(event) => setSidebarBrandName(event.target.value)}
+                                        className="h-7 max-w-[28rem]"
+                                        maxLength={64}
+                                        aria-label={t('settings.openchamber.visual.field.sidebarBrandAria')}
+                                    />
+                                </div>
                             </section>
                         )}
 

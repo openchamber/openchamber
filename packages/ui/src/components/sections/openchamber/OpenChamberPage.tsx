@@ -126,6 +126,7 @@ const VisualSectionContent: React.FC = () => {
     const isVSCode = isVSCodeRuntime();
     return <OpenChamberVisualSettings visibleSettings={[
         'theme',
+        'sidebarBrand',
         'pwaInstallName',
         'pwaOrientation',
         'mobileKeyboardMode',

@@ -1,24 +1,34 @@
 import React from 'react';
 import { loadBrandDisplayFont } from '@/lib/fontLoader';
+import { DEFAULT_SIDEBAR_BRAND_NAME, useSidebarBrandStore } from '@/stores/useSidebarBrandStore';
 
 /**
- * Left-sidebar wordmark ("YEE CODE"), rendered above the Recent section.
+ * Left-sidebar wordmark, rendered above the Recent section.
  *
- * Dual-tone like Codex branding: first name in the surface foreground,
- * surname in the primary accent. Set in Syne (geometric display face) with
- * open tracking so it reads as a mark rather than body UI text.
+ * Dual-tone like Codex branding: leading words use the surface foreground and
+ * the final word uses the primary accent. Set in Syne (geometric display face)
+ * with open tracking so it reads as a mark rather than body UI text.
  *
- * Brand copy is intentional and fixed — not localized.
+ * The configured text is split on whitespace: all but its final word use the
+ * normal foreground and the final word uses the theme accent. Brand copy is
+ * user content, so it is intentionally not localized.
  */
 export const SidebarBrandMark: React.FC = () => {
+  const sidebarBrandName = useSidebarBrandStore((state) => state.sidebarBrandName);
+
   React.useEffect(() => {
     void loadBrandDisplayFont();
   }, []);
 
+  const words = sidebarBrandName.trim().split(/\s+/).filter(Boolean);
+  const brandWords = words.length > 0 ? words : DEFAULT_SIDEBAR_BRAND_NAME.split(' ');
+  const leadingWords = brandWords.slice(0, -1);
+  const highlightedWord = brandWords.at(-1);
+
   return (
     <div className="px-2 pb-2 pt-1">
       <span
-        aria-label="YEE CODE"
+        aria-label={brandWords.join(' ')}
         className="inline-flex min-w-0 items-baseline gap-[0.28em] truncate"
         style={{
           fontFamily: '"Syne", var(--font-sans, system-ui, sans-serif)',
@@ -28,10 +38,8 @@ export const SidebarBrandMark: React.FC = () => {
           lineHeight: 1,
         }}
       >
-        {/* 前半段：主色前景，对应 Codex 里偏亮的产品名 */}
-        <span className="text-foreground">YEE</span>
-        {/* 后半段：主题 primary 点缀，对应 Codex 里偏紫的副名 */}
-        <span className="text-primary">CODE</span>
+        {leadingWords.length > 0 && <span className="text-foreground">{leadingWords.join(' ')}</span>}
+        {highlightedWord && <span className="text-primary">{highlightedWord}</span>}
       </span>
     </div>
   );
