@@ -10,7 +10,6 @@ describe('Daytona routes', () => {
   let mockLifecycle;
   let mockRegistry;
   let mockMonitor;
-  let mockBridge;
   let mockDaytonaService;
   let logger;
 
@@ -34,16 +33,10 @@ describe('Daytona routes', () => {
       resetTimer: vi.fn(),
     };
 
-    mockBridge = {
-      disconnect: vi.fn(),
-      isConnected: vi.fn(() => false),
-    };
-
     mockDaytonaService = {
       lifecycle: mockLifecycle,
       registry: mockRegistry,
       monitor: mockMonitor,
-      bridge: mockBridge,
     };
 
     logger = {
@@ -64,8 +57,10 @@ describe('Daytona routes', () => {
         .expect(201);
 
       expect(res.body.sandboxId).toBe('sbx-session-abc');
-      expect(res.body.status).toBe('active');
+      expect(res.body.sessionId).toBe('session-abc');
+      expect(res.body.status).toBe('running');
       expect(res.body.openCodeUrl).toBe('http://localhost:4000/session-abc');
+      expect(res.body.createdAt).toBeTypeOf('string');
       expect(mockLifecycle.createSandbox).toHaveBeenCalledWith('session-abc');
       expect(mockMonitor.resetTimer).toHaveBeenCalledWith('session-abc');
     });
@@ -116,7 +111,6 @@ describe('Daytona routes', () => {
       expect(res.body.success).toBe(true);
       expect(res.body.sessionId).toBe('session-abc');
       expect(mockLifecycle.destroySandbox).toHaveBeenCalledWith('session-abc');
-      expect(mockBridge.disconnect).toHaveBeenCalledWith('session-abc');
     });
 
     it('returns 404 when sandbox does not exist', async () => {
@@ -155,7 +149,6 @@ describe('Daytona routes', () => {
         createdAt: 1700000000000,
         lastActivityAt: 1700000001000,
       });
-      mockBridge.isConnected.mockReturnValueOnce(true);
 
       const res = await request
         .get('/api/daytona/sandbox/session-abc/status')
@@ -167,7 +160,6 @@ describe('Daytona routes', () => {
       expect(res.body.openCodeUrl).toBe('http://localhost:4000/session-abc');
       expect(res.body.createdAt).toBe(1700000000000);
       expect(res.body.lastActivityAt).toBe(1700000001000);
-      expect(res.body.bridgeConnected).toBe(true);
     });
 
     it('returns 404 for unknown session', async () => {

@@ -14,11 +14,22 @@ import { WebSocketServer, WebSocket } from 'ws';
  * @param {import('express').Application} app - Express application instance.
  * @param {{
  *   daytonaService: ReturnType<typeof import('./service.js').createDaytonaService>,
+ *   uiAuthController?: { enabled: boolean, requireAuth: Function } | null,
  *   logger?: Pick<Console, 'log' | 'warn' | 'error'>,
  * }} dependencies
  */
-export const registerDaytonaProxyRoutes = (app, { daytonaService, logger = console }) => {
+export const registerDaytonaProxyRoutes = (app, { daytonaService, uiAuthController = null, logger = console }) => {
   const { registry, monitor } = daytonaService;
+
+  /**
+   * Auth middleware for proxy routes. Applied when UI auth is enabled.
+   */
+  const authMiddleware = (req, res, next) => {
+    if (uiAuthController && uiAuthController.enabled && typeof uiAuthController.requireAuth === 'function') {
+      return uiAuthController.requireAuth(req, res, next);
+    }
+    return next();
+  };
 
   /**
    * Middleware to resolve the sandbox entry from the sessionId param.
@@ -39,7 +50,7 @@ export const registerDaytonaProxyRoutes = (app, { daytonaService, logger = conso
   };
 
   // GET /api/daytona/sandbox/:sessionId/event - SSE forwarder from sandbox OpenCode.
-  app.get('/api/daytona/sandbox/:sessionId/event', resolveSandbox, async (req, res) => {
+  app.get('/api/daytona/sandbox/:sessionId/event', authMiddleware, resolveSandbox, async (req, res) => {
     const { daytonaSandbox } = req;
     const abortController = new AbortController();
     let upstream = null;
@@ -121,7 +132,7 @@ export const registerDaytonaProxyRoutes = (app, { daytonaService, logger = conso
   });
 
   // POST /api/daytona/sandbox/:sessionId/message - Message forwarder to sandbox OpenCode.
-  app.post('/api/daytona/sandbox/:sessionId/message', resolveSandbox, async (req, res) => {
+  app.post('/api/daytona/sandbox/:sessionId/message', authMiddleware, resolveSandbox, async (req, res) => {
     const { daytonaSandbox } = req;
 
     try {
@@ -151,7 +162,7 @@ export const registerDaytonaProxyRoutes = (app, { daytonaService, logger = conso
 
   // ALL /api/daytona/sandbox/:sessionId/opencode/* - Generic OpenCode API proxy.
   // Uses http-proxy-middleware for pass-through proxying of any OpenCode API call.
-  app.use('/api/daytona/sandbox/:sessionId/opencode', resolveSandbox, (req, res, next) => {
+  app.use('/api/daytona/sandbox/:sessionId/opencode', authMiddleware, resolveSandbox, (req, res, next) => {
     const { daytonaSandbox } = req;
     const target = daytonaSandbox.openCodeUrl;
 
@@ -241,11 +252,22 @@ export const attachDaytonaWsProxy = (server, { daytonaService, logger = console 
       const upstreamWsUrl = entry.openCodeUrl.replace(/^http/, 'ws') + '/ws';
       let upstream = null;
 
+      // Attach error handler on clientWs early to prevent unhandled exceptions
+      // if the client socket errors out before upstream is established.
+      clientWs.on('error', (error) => {
+        logger.error(`[Daytona WS] Client error for session ${sessionId}: ${error?.message ?? error}`);
+        if (upstream && (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING)) {
+          upstream.close();
+        }
+      });
+
       try {
         upstream = new WebSocket(upstreamWsUrl);
       } catch (error) {
         logger.error(`[Daytona WS] Failed to connect upstream for session ${sessionId}: ${error?.message ?? error}`);
-        clientWs.close(1011, 'Upstream connection failed');
+        if (clientWs.readyState === WebSocket.OPEN || clientWs.readyState === WebSocket.CONNECTING) {
+          clientWs.close(1011, 'Upstream connection failed');
+        }
         return;
       }
 
@@ -281,13 +303,6 @@ export const attachDaytonaWsProxy = (server, { daytonaService, logger = console 
 
       clientWs.on('close', () => {
         if (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING) {
-          upstream.close();
-        }
-      });
-
-      clientWs.on('error', (error) => {
-        logger.error(`[Daytona WS] Client error for session ${sessionId}: ${error?.message ?? error}`);
-        if (upstream.readyState === WebSocket.OPEN) {
           upstream.close();
         }
       });

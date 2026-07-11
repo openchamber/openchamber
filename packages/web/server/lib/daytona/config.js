@@ -7,6 +7,7 @@
 const DEFAULT_API_URL = 'https://app.daytona.io';
 const DEFAULT_SANDBOX_IMAGE = 'daytonaio/ai-opencode:latest';
 const DEFAULT_TIMEOUT_MS = 600000; // 10 minutes
+const DEFAULT_OPENCODE_PORT = 4096;
 
 const parsePositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(String(value ?? ''), 10);
@@ -22,6 +23,7 @@ const parsePositiveInt = (value, fallback) => {
  *   apiUrl: string,
  *   sandboxImage: string,
  *   timeoutMs: number,
+ *   openCodePort: number,
  * }}
  */
 export const resolveDaytonaConfig = () => {
@@ -29,6 +31,7 @@ export const resolveDaytonaConfig = () => {
   const apiUrl = process.env.DAYTONA_API_URL?.trim() || DEFAULT_API_URL;
   const sandboxImage = process.env.DAYTONA_SANDBOX_IMAGE?.trim() || DEFAULT_SANDBOX_IMAGE;
   const timeoutMs = parsePositiveInt(process.env.DAYTONA_SANDBOX_TIMEOUT_MS, DEFAULT_TIMEOUT_MS);
+  const openCodePort = parsePositiveInt(process.env.DAYTONA_OPENCODE_PORT, DEFAULT_OPENCODE_PORT);
 
   return {
     enabled: apiKey !== null && apiKey.length > 0,
@@ -36,5 +39,6 @@ export const resolveDaytonaConfig = () => {
     apiUrl,
     sandboxImage,
     timeoutMs,
+    openCodePort,
   };
 };

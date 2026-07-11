@@ -10,6 +10,7 @@ describe('resolveDaytonaConfig', () => {
     delete process.env.DAYTONA_API_URL;
     delete process.env.DAYTONA_SANDBOX_IMAGE;
     delete process.env.DAYTONA_SANDBOX_TIMEOUT_MS;
+    delete process.env.DAYTONA_OPENCODE_PORT;
   });
 
   afterEach(() => {
@@ -38,6 +39,7 @@ describe('resolveDaytonaConfig', () => {
     expect(config.apiUrl).toBe('https://app.daytona.io');
     expect(config.sandboxImage).toBe('daytonaio/ai-opencode:latest');
     expect(config.timeoutMs).toBe(600000);
+    expect(config.openCodePort).toBe(4096);
   });
 
   it('uses custom DAYTONA_API_URL when provided', () => {
@@ -87,5 +89,21 @@ describe('resolveDaytonaConfig', () => {
 
     expect(config.apiKey).toBe('my-key');
     expect(config.apiUrl).toBe('https://trimmed.url');
+  });
+
+  it('uses custom DAYTONA_OPENCODE_PORT when valid number', () => {
+    process.env.DAYTONA_API_KEY = 'test-key';
+    process.env.DAYTONA_OPENCODE_PORT = '8080';
+    const config = resolveDaytonaConfig();
+
+    expect(config.openCodePort).toBe(8080);
+  });
+
+  it('falls back to default port 4096 when DAYTONA_OPENCODE_PORT is invalid', () => {
+    process.env.DAYTONA_API_KEY = 'test-key';
+    process.env.DAYTONA_OPENCODE_PORT = 'not-a-number';
+    const config = resolveDaytonaConfig();
+
+    expect(config.openCodePort).toBe(4096);
   });
 });

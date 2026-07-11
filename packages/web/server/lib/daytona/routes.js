@@ -12,14 +12,20 @@ import express from 'express';
  * @param {import('express').Application} app - Express application instance.
  * @param {{
  *   daytonaService: ReturnType<typeof import('./service.js').createDaytonaService>,
+ *   uiAuthController?: { enabled: boolean, requireAuth: Function } | null,
  *   logger?: Pick<Console, 'log' | 'warn' | 'error'>,
  * }} dependencies
  */
-export const registerDaytonaRoutes = (app, { daytonaService, logger = console }) => {
+export const registerDaytonaRoutes = (app, { daytonaService, uiAuthController = null, logger = console }) => {
   const { lifecycle, registry, monitor } = daytonaService;
 
   const router = express.Router();
   router.use(express.json({ limit: '16kb' }));
+
+  // Apply authentication when the UI auth controller is enabled.
+  if (uiAuthController && uiAuthController.enabled && typeof uiAuthController.requireAuth === 'function') {
+    router.use((req, res, next) => uiAuthController.requireAuth(req, res, next));
+  }
 
   // POST /api/daytona/sandbox - Create a new sandbox for a chat session.
   router.post('/sandbox', async (req, res) => {
@@ -37,8 +43,10 @@ export const registerDaytonaRoutes = (app, { daytonaService, logger = console })
 
       return res.status(201).json({
         sandboxId: result.sandboxId,
-        status: 'active',
+        sessionId,
+        status: 'running',
         openCodeUrl: result.openCodeUrl,
+        createdAt: new Date().toISOString(),
       });
     } catch (error) {
       logger.error(`[Daytona] Failed to create sandbox for session ${sessionId}: ${error?.message ?? error}`);
@@ -57,7 +65,6 @@ export const registerDaytonaRoutes = (app, { daytonaService, logger = console })
       }
 
       await lifecycle.destroySandbox(sessionId);
-      daytonaService.bridge.disconnect(sessionId);
 
       logger.log(`[Daytona] Sandbox destroyed via API for session ${sessionId}`);
 
@@ -84,7 +91,6 @@ export const registerDaytonaRoutes = (app, { daytonaService, logger = console })
       openCodeUrl: entry.openCodeUrl,
       createdAt: entry.createdAt,
       lastActivityAt: entry.lastActivityAt,
-      bridgeConnected: daytonaService.bridge.isConnected(sessionId),
     });
   });
 

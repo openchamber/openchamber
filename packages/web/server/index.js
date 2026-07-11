@@ -1408,8 +1408,8 @@ async function main(options = {}) {
   });
   if (daytonaService.isEnabled()) {
     console.log('[Daytona] Service enabled, registering routes...');
-    registerDaytonaRoutes(app, { daytonaService, logger: console });
-    registerDaytonaProxyRoutes(app, { daytonaService, logger: console });
+    registerDaytonaRoutes(app, { daytonaService, uiAuthController, logger: console });
+    registerDaytonaProxyRoutes(app, { daytonaService, uiAuthController, logger: console });
     attachDaytonaWsProxy(server, { daytonaService, logger: console });
     daytonaService.monitor.start();
   } else {

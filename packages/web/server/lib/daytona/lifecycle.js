@@ -8,13 +8,14 @@ import { Daytona } from '@daytona/sdk';
 
 /**
  * @param {{
- *   config: { apiKey: string, apiUrl: string, sandboxImage: string },
+ *   config: { apiKey: string, apiUrl: string, sandboxImage: string, openCodePort?: number },
  *   registry: import('./sandbox-registry.js').ReturnType<typeof import('./sandbox-registry.js').createSandboxRegistry>,
  *   logger?: Pick<Console, 'log' | 'warn' | 'error'>,
  * }} dependencies
  */
 export const createDaytonaSandboxLifecycle = ({ config, registry, logger = console }) => {
   let daytonaClient = null;
+  const openCodePort = config.openCodePort || 4096;
 
   const getClient = () => {
     if (!daytonaClient) {
@@ -55,8 +56,8 @@ export const createDaytonaSandboxLifecycle = ({ config, registry, logger = conso
     logger.log(`[Daytona] Sandbox ${sandboxId} created for session ${sessionId}`);
 
     // The sandbox image has OpenCode pre-installed and configured to listen
-    // on port 4096 by default. Construct the URL to reach it.
-    const openCodeUrl = `https://${sandboxId}-4096.${new URL(config.apiUrl).hostname}`;
+    // on the configured port (default 4096). Construct the URL to reach it.
+    const openCodeUrl = `https://${sandboxId}-${openCodePort}.${new URL(config.apiUrl).hostname}`;
 
     registry.register(sessionId, {
       sandboxId,
