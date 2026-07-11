@@ -575,7 +575,6 @@ interface UIStore {
   sessionRecapEnabled: boolean;
   sessionSuggestionEnabled: boolean;
   collapsibleThinkingBlocks: boolean;
-  groupReasoningBlocks: boolean;
   chatRenderMode: ChatRenderMode;
   activityRenderMode: ActivityRenderMode;
   showDeletionDialog: boolean;
@@ -588,6 +587,7 @@ interface UIStore {
   // Global draft welcome starters; null = unset (use the default built-in set).
   globalDraftStarters: DraftStarterRef[] | null;
   terminalFontSize: number;
+  editorFontSize: number;
   uiFont: UiFontOption;
   monoFont: MonoFontOption;
   padding: number;
@@ -737,6 +737,7 @@ interface UIStore {
   setFontSize: (size: number) => void;
   setGlobalDraftStarters: (refs: DraftStarterRef[]) => void;
   setTerminalFontSize: (size: number) => void;
+  setEditorFontSize: (size: number) => void;
   setUiFont: (font: UiFontOption) => void;
   setMonoFont: (font: MonoFontOption) => void;
   setPadding: (size: number) => void;
@@ -873,7 +874,6 @@ export const useUIStore = create<UIStore>()(
         sessionRecapEnabled: true,
         sessionSuggestionEnabled: true,
         collapsibleThinkingBlocks: true,
-        groupReasoningBlocks: true,
         chatRenderMode: 'live',
         activityRenderMode: 'summary',
         showDeletionDialog: true,
@@ -885,6 +885,7 @@ export const useUIStore = create<UIStore>()(
         fontSize: 100,
         globalDraftStarters: null,
         terminalFontSize: 13,
+        editorFontSize: 13,
         uiFont: DEFAULT_UI_FONT,
         monoFont: DEFAULT_MONO_FONT,
         padding: 100,
@@ -1635,6 +1636,12 @@ export const useUIStore = create<UIStore>()(
           set({ terminalFontSize: clamped });
         },
 
+        setEditorFontSize: (size) => {
+          const rounded = Math.round(size);
+          const clamped = Math.max(9, Math.min(32, rounded));
+          set({ editorFontSize: clamped });
+        },
+
         setUiFont: (font) => {
           set({ uiFont: font });
         },
@@ -2281,6 +2288,7 @@ export const useUIStore = create<UIStore>()(
           fontSize: state.fontSize,
           globalDraftStarters: state.globalDraftStarters,
           terminalFontSize: state.terminalFontSize,
+          editorFontSize: state.editorFontSize,
           uiFont: state.uiFont,
           monoFont: state.monoFont,
           padding: state.padding,

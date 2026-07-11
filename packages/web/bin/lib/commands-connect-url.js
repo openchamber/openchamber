@@ -13,6 +13,7 @@ import {
 import { discoverRunningInstances } from './cli-lifecycle.js';
 import { getInstanceFilePath, readInstanceOptions } from './cli-process.js';
 import { createRemoteClientAuthRuntime } from '../../server/lib/client-auth/remote-clients.js';
+import { createClientPairingRuntime } from '../../server/lib/client-auth/pairing.js';
 import { createRelayIdentityRuntime } from '../../server/lib/relay/identity.js';
 import { DEFAULT_RELAY_URL } from '../../server/lib/relay/service.js';
 import { bytesToBase64Url } from '../../server/lib/relay/e2ee.js';
@@ -28,6 +29,7 @@ import {
 
 const REMOTE_CLIENTS_FILE_NAME = 'remote-clients.json';
 const SETTINGS_FILE_NAME = 'settings.json';
+const PAIRING_SESSIONS_FILE_NAME = 'client-pairing-sessions.json';
 
 function isValidRelayUrl(value) {
   if (typeof value !== 'string') return false;
@@ -69,59 +71,70 @@ function createSettingsAccessors() {
   return { readSettingsFromDiskMigrated, writeSettingsToDisk };
 }
 
-// Builds an end-to-end-encrypted relay pairing link. Reuses the instance's relay
-// identity (serverId + encryption public key), generating it if the relay was
-// never enabled. The client reads the relay URL from the offer, so no client-side
-// configuration is needed.
-async function buildRelayConnectionPayload({ token, label }) {
+// Resolves the instance's relay identity (serverId + encryption public key,
+// generating it if the relay was never enabled) into a pairing-v2 relay
+// candidate. Relay is a transport, not a separate link format: the candidate
+// carries no token — the client redeems the one-time pairing secret over the
+// E2EE tunnel like any other candidate. `enabled` reports whether the host relay
+// is actually on (a relay candidate only connects when the host is relaying).
+async function buildRelayPairingCandidate() {
   const accessors = createSettingsAccessors();
   const settings = await accessors.readSettingsFromDiskMigrated();
   const relayUrl = resolveRelayUrl(settings);
   const identityRuntime = createRelayIdentityRuntime({ crypto, ...accessors });
   const identity = await identityRuntime.getRelayIdentity();
-  const offer = {
-    v: 1,
-    mode: 'relay',
+  return {
+    enabled: settings?.privateRelay?.enabled === true,
     relayUrl,
     serverId: identity.serverId,
-    hostEncPubJwk: identity.hostEncPubJwk,
-    label,
-    token,
+    candidate: {
+      type: 'relay',
+      relayUrl,
+      serverId: identity.serverId,
+      hostEncPubJwk: identity.hostEncPubJwk,
+      priority: 30,
+    },
   };
-  const encoded = bytesToBase64Url(new TextEncoder().encode(JSON.stringify(offer)));
-  return { connectUrl: `openchamber://connect?v=1&mode=relay#offer=${encoded}`, relayUrl, serverId: identity.serverId };
 }
 
-async function generateRelayConnectUrl(options) {
-  const label = options.name || os.hostname();
-  const runtime = createRemoteClientAuthRuntime({
+// Pairing runtime backed by the same on-disk store the running host reads, so a
+// session created here is redeemable by the live server. createPairingSession
+// only writes the store (no server needed to mint); redeem is served by the host.
+function createCliPairingRuntime() {
+  const dataDir = getOpenChamberDataDir();
+  const remoteClientAuthRuntime = createRemoteClientAuthRuntime({
     fsPromises: fs.promises,
     path,
     crypto,
-    storePath: path.join(getOpenChamberDataDir(), REMOTE_CLIENTS_FILE_NAME),
+    storePath: path.join(dataDir, REMOTE_CLIENTS_FILE_NAME),
   });
-  const result = await runtime.createClient({ label, clientKind: 'relay' });
-  const { connectUrl, relayUrl, serverId } = await buildRelayConnectionPayload({ token: result.token, label });
+  return createClientPairingRuntime({
+    fsPromises: fs.promises,
+    path,
+    crypto,
+    storePath: path.join(dataDir, PAIRING_SESSIONS_FILE_NAME),
+    remoteClientAuthRuntime,
+  });
+}
 
-  if (isJsonMode(options)) {
-    printJson({ mode: 'relay', relayUrl, serverId, connectUrl, token: result.token, client: result.client });
-    return;
-  }
+// Mirror of encodePairingConnectionPayload in @openchamber/ui (the bin cannot
+// import the UI package). Keep in sync: v2 payload → base64url(JSON) in the URL
+// query, so the one-time secret rides the link, never the network.
+function encodePairingConnectUrl(payload) {
+  const encoded = bytesToBase64Url(new TextEncoder().encode(JSON.stringify(payload)));
+  return `openchamber://connect?v=2&p=${encoded}`;
+}
 
-  if (isQuietMode(options)) {
-    process.stdout.write(`${connectUrl}\n`);
-    return;
-  }
-
-  clackIntro('OpenChamber relay connect URL');
-  logStatus('success', connectUrl);
-  clackLog.info(`Relay: ${relayUrl}`);
-  logStatus('info', '[RELAY_ENABLE]', 'Enable the relay on this instance so this link can connect (Settings -> Remote Instances).');
-  clackLog.info('Copy this link into another OpenChamber client. The token is shown only once.');
-  if (options.qr === true) {
-    await displayTunnelQrCode(connectUrl);
-  }
-  clackOutro('relay connect URL generated');
+function buildPairingPayload({ pairing, label, candidates }) {
+  return {
+    v: 2,
+    pairingId: pairing.id,
+    secret: pairing.secret,
+    ...(label ? { label } : {}),
+    ...(pairing.fingerprint ? { fingerprint: pairing.fingerprint } : {}),
+    ...(pairing.expiresAt ? { expiresAt: pairing.expiresAt } : {}),
+    candidates,
+  };
 }
 
 async function resolveConnectUrlServerUrl(options) {
@@ -169,6 +182,15 @@ function isWildcardBindHost(host) {
   return host === '0.0.0.0' || host === '::' || host === '[::]';
 }
 
+function isLoopbackServerUrl(serverUrl) {
+  try {
+    const hostname = new URL(serverUrl).hostname.replace(/^\[|\]$/g, '');
+    return hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '::1';
+  } catch {
+    return false;
+  }
+}
+
 function normalizeServerUrlForConnection(value) {
   const trimmed = typeof value === 'string' ? value.trim() : '';
   if (!trimmed) return null;
@@ -190,15 +212,6 @@ function getOpenChamberDataDir() {
     : path.join(os.homedir(), '.config', 'openchamber');
 }
 
-function buildClientConnectionPayload({ serverUrl, token, label }) {
-  const params = new URLSearchParams();
-  params.set('v', '1');
-  params.set('server', serverUrl.trim().replace(/\/+$/, ''));
-  params.set('token', token.trim());
-  if (label?.trim()) params.set('label', label.trim());
-  return `openchamber://connect?${params.toString()}`;
-}
-
 async function displayTunnelQrCode(url) {
   try {
     const qrcode = await import('qrcode-terminal');
@@ -216,13 +229,6 @@ function createConnectUrlCommand({ serveCommand }) {
     const explicitServerUrl = options.server ? normalizeServerUrlForConnection(options.server) : null;
     if (options.server && !explicitServerUrl) {
       throw new TunnelCliError('Invalid --server URL. Use an http:// or https:// URL.', EXIT_CODE.USAGE_ERROR);
-    }
-
-    // Relay pairing needs neither a reachable server URL nor a running server:
-    // the link is built from the instance's local relay identity + a fresh client
-    // token. The client reads the relay endpoint from the offer.
-    if (options.relay) {
-      return await generateRelayConnectUrl(options);
     }
 
     const running = await discoverRunningInstances();
@@ -247,18 +253,35 @@ function createConnectUrlCommand({ serveCommand }) {
       ? { serverUrl: explicitServerUrl, source: 'explicit' }
       : await resolveConnectUrlServerUrl(options);
     const serverUrl = resolvedServerUrl.serverUrl;
-    const label = options.name || `OpenChamber ${serverUrl}`;
-    const runtime = createRemoteClientAuthRuntime({
-      fsPromises: fs.promises,
-      path,
-      crypto,
-      storePath: path.join(getOpenChamberDataDir(), REMOTE_CLIENTS_FILE_NAME),
-    });
-    const result = await runtime.createClient({ label });
-    const connectUrl = buildClientConnectionPayload({ serverUrl, token: result.token, label });
+    const label = options.name || os.hostname();
+
+    // Direct candidate for the reachable server URL, plus the relay transport as
+    // a fallback candidate — one link that works both on the LAN and off-network.
+    // Candidate priorities make the client prefer the direct route and try the
+    // relay last, mirroring the UI's "Anywhere" pairing. `--relay` opts in even
+    // when the host relay is not up yet (the demand-driven lifecycle starts it);
+    // otherwise the relay rides along only when it is already enabled.
+    const candidates = [{ type: serverUrl.startsWith('https://') ? 'tunnel' : 'lan', url: serverUrl, priority: 10 }];
+    const relay = await buildRelayPairingCandidate();
+    if (options.relay || relay.enabled) candidates.push(relay.candidate);
+
+    const pairingRuntime = createCliPairingRuntime();
+    // Mark relay-carrying sessions like the server route does, so the host's
+    // demand-driven relay lifecycle keeps the relay up while the link is pending.
+    const usesRelay = candidates.some((candidate) => candidate.type === 'relay');
+    const { pairing } = await pairingRuntime.createPairingSession({ label, usesRelay });
+    const connectUrl = encodePairingConnectUrl(buildPairingPayload({ pairing, label, candidates }));
 
     if (isJsonMode(options)) {
-      printJson({ serverUrl, connectUrl, token: result.token, client: result.client, autoStarted: serverState.autoStarted });
+      printJson({
+        serverUrl,
+        connectUrl,
+        pairingId: pairing.id,
+        fingerprint: pairing.fingerprint,
+        expiresAt: pairing.expiresAt,
+        candidates,
+        autoStarted: serverState.autoStarted,
+      });
       return;
     }
 
@@ -267,22 +290,40 @@ function createConnectUrlCommand({ serveCommand }) {
       return;
     }
 
-    clackIntro('OpenChamber connect URL');
+    clackIntro('OpenChamber pairing link');
     if (serverState.autoStarted) {
       logStatus('success', `started OpenChamber on port ${options.port}`);
     }
     logStatus('success', connectUrl);
     clackLog.info(`Server URL: ${serverUrl}`);
+    if (options.relay || relay.enabled) {
+      clackLog.info(`Relay fallback: ${relay.relayUrl}`);
+    }
+    if (options.relay && !relay.enabled) {
+      logStatus('info', '[RELAY_STARTING]', 'Relay is not up yet. A running instance starts it within a minute; a stopped instance starts it on next launch.');
+    }
+    if (pairing.fingerprint) {
+      clackLog.info(`Fingerprint: ${pairing.fingerprint}`);
+    }
     if (resolvedServerUrl.source === 'lan-detected') {
       clackLog.info('Detected a LAN address because OpenChamber is bound to all interfaces. Use --server to override it.');
     } else if (resolvedServerUrl.source === 'loopback-fallback') {
       clackLog.warn('OpenChamber is bound to all interfaces, but no LAN address was detected. Use --server to provide a reachable URL.');
+    } else if (isLoopbackServerUrl(serverUrl)) {
+      // The direct candidate points at this machine only — other devices cannot
+      // use it. Say so instead of letting a "LAN" link silently not work (or a
+      // --relay link silently go relay-only).
+      if (options.relay) {
+        logStatus('warn', '[LAN_UNREACHABLE]', 'OpenChamber only listens on this machine, so devices will always connect through the relay. Restart with --lan to allow direct home-network connections.');
+      } else {
+        logStatus('warn', '[LAN_UNREACHABLE]', 'OpenChamber only listens on this machine, so other devices cannot use this link. Restart with --lan, or use --server to provide a reachable URL.');
+      }
     }
-    clackLog.info('Copy this connection link into another OpenChamber client. The token is shown only once.');
+    clackLog.info('Scan or paste this link into another OpenChamber client. It is single-use and expires.');
     if (options.qr === true) {
       await displayTunnelQrCode(connectUrl);
     }
-    clackOutro('connect URL generated');
+    clackOutro('pairing link generated');
   };
 }
 

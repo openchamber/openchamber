@@ -126,14 +126,3 @@ export const RelayCloseCode = {
   ChannelFailure: 1011,
 } as const;
 
-// Pairing payload carried in QR / deep-link URL fragments only.
-export interface RelayOfferV1 {
-  v: 1;
-  mode: 'relay';
-  relayUrl: string;
-  serverId: string;
-  hostEncPubJwk: JsonWebKey;
-  label?: string;
-  token?: string;
-  grant?: string;
-}

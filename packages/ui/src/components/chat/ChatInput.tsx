@@ -556,6 +556,16 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
                         type="button"
                         className={footerIconButtonClass}
                         onClick={props.onOpenMobileSheet}
+                        // Same guard as PermissionAutoAcceptButton: keep the tap
+                        // from dismissing the keyboard. On Android's
+                        // resizes-content viewport the keyboard-close relayout
+                        // moves this button mid-tap and the click never lands.
+                        onMouseDown={(event) => event.preventDefault()}
+                        onPointerDownCapture={(event) => {
+                            if (event.pointerType === 'touch') {
+                                event.preventDefault();
+                            }
+                        }}
                         title={t('chat.chatInput.actions.addAttachment')}
                         aria-label={t('chat.chatInput.actions.addAttachment')}
                     >
@@ -1111,6 +1121,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const inputBarOffset = useUIStore((state) => state.inputBarOffset);
     const persistChatDraft = useUIStore((state) => state.persistChatDraft);
     const inputSpellcheckEnabled = useUIStore((state) => state.inputSpellcheckEnabled);
+    const editorFontSize = useUIStore((state) => state.editorFontSize);
     const isExpandedInput = useUIStore((state) => state.isExpandedInput);
     const setExpandedInput = useUIStore((state) => state.setExpandedInput);
     const setTimelineDialogOpen = useUIStore((state) => state.setTimelineDialogOpen);
@@ -4087,7 +4098,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, [newSessionDraftOpen, openNewSessionDraft, currentDirectory]);
 
     const openMobileAttachSheet = React.useCallback(() => {
+        // Same order as handleOpenMobilePanel: mark the sheet open BEFORE the
+        // blur so the collapse watcher sees an overlay when the keyboard-close
+        // lands. The trigger button blocks the tap's own focus transfer, so
+        // the keyboard must be dismissed explicitly here.
         setMobileAttachMenuOpen(true);
+        textareaRef.current?.blur();
     }, []);
 
     const mobileComposerExpandedRef = React.useRef(mobileComposerExpanded);
@@ -5241,6 +5257,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                     maxHeight: !isComposerExpanded && textareaSize ? `${textareaSize.maxHeight}px` : undefined,
                                     borderTopLeftRadius: chatInputRadius,
                                     borderTopRightRadius: chatInputRadius,
+                                    fontSize: `${editorFontSize}px`,
                                 }}
                                 rows={1}
                             />
