@@ -1,0 +1,32 @@
+{
+  "id": "FEAT-005",
+  "type": "fix",
+  "description": "Address code review feedback: fix status enum mismatch, add missing response fields, add auth middleware, fix duplicate provisioning race, remove unused WsBridge module, make OpenCode port configurable, and add WebSocket proxy error handling.",
+  "status": "completed",
+  "steps": [
+    "Fix status enum mismatch: routes.js returns 'running' instead of 'active'",
+    "Fix missing response fields: POST /api/daytona/sandbox returns sessionId and createdAt",
+    "Add authentication middleware to Daytona routes and proxy routes",
+    "Fix duplicate provisioning race: remove auto-create from useSandboxSession hook",
+    "Remove unused WsBridge module (ws-bridge.js) and all references",
+    "Make OpenCode port configurable in lifecycle.js via DAYTONA_OPENCODE_PORT env var",
+    "Add error handler on clientWs in WebSocket proxy upgrade callback"
+  ],
+  "acceptance_criteria": [
+    "Backend returns status 'running' to match frontend union type",
+    "POST /api/daytona/sandbox response includes sessionId and createdAt",
+    "Daytona routes check uiAuthController when enabled",
+    "Only one provisioning path exists (session-actions.ts), hook does not auto-create",
+    "WsBridge module is removed, no dead code",
+    "lifecycle.js reads DAYTONA_OPENCODE_PORT env var with default 4096",
+    "clientWs has an error handler attached before upstream connection attempt"
+  ],
+  "verification": [
+    "bun run type-check",
+    "bun run lint",
+    "bun run --cwd packages/web test",
+    "bun run build"
+  ],
+  "blocked_reason": null,
+  "findings": "All 7 review issues fixed. Tests: 679 passed (2 new config tests for openCodePort), 3 skipped (pre-existing). Type-check, lint, and build all pass cleanly. The registry still stores status as 'active' internally (GET /status returns 'active') but the POST create response now returns 'running' to match the frontend SandboxInfo union type. The frontend CreateSandboxResponse mapping handles the correct fields. WsBridge module fully removed with no dead references remaining."
+}

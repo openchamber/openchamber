@@ -1,0 +1,34 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Add frontend integration for Daytona sandbox sessions. Create a Zustand store to track sandbox state, modify the session creation flow to optionally provision a Daytona sandbox (new chat session = new container), handle the exit command to destroy sandboxes, display sandbox status in the UI, and handle inactivity timeout notifications. The frontend Android client connects to the backend server which orchestrates the sandboxes.",
+  "status": "completed",
+  "steps": [
+    "Create packages/ui/src/stores/useDaytonaSandboxStore.ts - Zustand store for Daytona sandbox state. Tracks: sandboxesBySession (Map<sessionId, { sandboxId, status, createdAt }>), isSandboxMode (global toggle), sandboxCreating/sandboxDestroying loading states. Actions: createSandbox(sessionId), destroySandbox(sessionId), updateSandboxStatus(sessionId, status), setSandboxMode(enabled).",
+    "Create packages/ui/src/lib/daytona/api.ts - API client functions for the Daytona backend endpoints. Functions: createDaytonaSandbox(sessionId), destroyDaytonaSandbox(sessionId), getSandboxStatus(sessionId), sendActivityHeartbeat(sessionId), listActiveSandboxes(). Uses runtimeFetch from packages/ui/src/lib/runtime-fetch.ts to make requests to the /api/daytona/* endpoints.",
+    "Create packages/ui/src/lib/daytona/sandbox-session.ts - Session-sandbox lifecycle coordinator. Exports useSandboxSession() hook that: 1) Creates a sandbox when a new chat session is created (hooks into session creation flow), 2) Sets up an activity heartbeat interval while the session is active, 3) Handles the 'exit' command detection to trigger sandbox destruction, 4) Cleans up the sandbox on session unmount/close.",
+    "Create packages/ui/src/components/chat/SandboxStatusIndicator.tsx - Small UI component showing sandbox status (creating/running/stopping/destroyed/timed-out) in the chat view. Shows a colored dot + text. Placed in the chat header area when sandbox mode is active.",
+    "Modify packages/ui/src/sync/session-actions.ts - In the createSession() function, after the session is created, if sandbox mode is enabled in the store, call createDaytonaSandbox(session.id) to provision a new container for this chat session. Add error handling so session creation still succeeds even if sandbox provisioning fails (degrade gracefully).",
+    "Create packages/ui/src/components/sections/DaytonaSettingsSection.tsx - Settings section for Daytona configuration. Shows: sandbox mode toggle (enable/disable), status of current sandboxes, and a button to destroy all active sandboxes. Follows the existing settings section pattern in packages/ui/src/components/sections/.",
+    "Handle the inactivity timeout event from the server. When the backend sends an SSE event indicating a sandbox is about to be destroyed due to inactivity, show a toast notification to the user using the existing toast system from packages/ui/src/components/ui/."
+  ],
+  "acceptance_criteria": [
+    "useDaytonaSandboxStore correctly tracks sandbox state per session",
+    "API client functions correctly call the /api/daytona/* endpoints",
+    "New chat sessions automatically provision a Daytona sandbox when sandbox mode is enabled",
+    "Exit command in chat destroys the associated sandbox",
+    "SandboxStatusIndicator shows correct status visually",
+    "Settings section allows toggling sandbox mode",
+    "Inactivity timeout notifications are shown to the user",
+    "All new TypeScript files pass type-check",
+    "Graceful degradation: if sandbox creation fails, the session still works (falls back to non-sandbox mode)"
+  ],
+  "verification": [
+    "Run 'bun run type-check:ui' and confirm no type errors in new files",
+    "Run 'bun run type-check' to confirm no cross-package type issues",
+    "Run 'bun run lint:ui' and confirm no lint errors",
+    "Run 'bun run build' and confirm the build succeeds with new files included"
+  ],
+  "blocked_reason": null,
+  "findings": "All 8 files created/modified successfully. Type-check passes across all packages (ui, web, mobile). Lint passes. Build succeeds. All 639 existing tests pass. Files created: useDaytonaSandboxStore.ts (Zustand store with Map-based sandbox tracking + localStorage persistence for sandboxMode), lib/daytona/api.ts (5 API client functions using runtimeFetch), lib/daytona/sandbox-session.ts (useSandboxSession hook with heartbeat + destroy), lib/daytona/sandbox-timeout-handler.ts (toast notifications for timeout/destroy events), lib/daytona/index.ts (barrel export), components/chat/SandboxStatusIndicator.tsx (colored dot + status text), components/sections/DaytonaSettingsSection.tsx (toggle + sandbox list + destroy all). Modified session-actions.ts to call provisionSandboxForSession after createSession (fire-and-forget, non-fatal)."
+}

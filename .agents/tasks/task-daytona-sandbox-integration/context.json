@@ -1,0 +1,32 @@
+{
+  "project_type": "TypeScript/JavaScript monorepo - Express server + React frontend + Capacitor Android app",
+  "language": "JavaScript (server), TypeScript (frontend/UI)",
+  "build_system": "Bun workspaces with Vite for frontend build. Server is plain JS ESM (no transpilation needed for server code).",
+  "test_framework": "Vitest (packages/web has vitest config). Test files colocated as *.test.js or *.test.ts.",
+  "build_command": "bun run build",
+  "test_command": "bun run --cwd packages/web test",
+  "verification_instructions": "1. Run 'bun run type-check' (must pass). 2. Run 'bun run lint' (must pass). 3. Run 'bun run build' (must succeed). 4. Run 'bun run --cwd packages/web test' for unit tests.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "1. cd /projects/sandbox/openchamber. 2. bun install (dependencies already installed).",
+  "environment_constraints": "OPEN_INTERNET network mode. Bun 1.3.14 and Node >=22 available. No Docker daemon needed for this task (backend code only). Daytona SDK (@daytona/sdk) will be installed as new dependency.",
+  "contribution_requirements": "Functional React components only. TypeScript strict mode. No 'any' without justification. Follow existing patterns. Keep diffs tight. Prefer early returns. Tailwind v4 for styling. Run type-check and lint before finalizing.",
+  "key_patterns": "Server modules use createXxxRuntime() factory pattern returning an API object. Routes registered via registerXxxRoutes(app, dependencies). Config via env vars. Settings persisted to disk via settings-runtime. WebSocket/SSE for real-time communication. OpenCode integration managed via lifecycle.js with health checks. Session management via session-runtime.js. The server proxies OpenCode API calls to a local/remote OpenCode process.",
+  "relevant_files": [
+    "packages/web/server/index.js",
+    "packages/web/server/lib/opencode/lifecycle.js",
+    "packages/web/server/lib/opencode/managed-process-registry.js",
+    "packages/web/server/lib/opencode/session-runtime.js",
+    "packages/web/server/lib/opencode/proxy.js",
+    "packages/web/server/lib/opencode/env-config.js",
+    "packages/web/server/lib/opencode/DOCUMENTATION.md",
+    "packages/web/server/lib/relay/service.js",
+    "packages/web/server/lib/relay/DOCUMENTATION.md",
+    "packages/web/server/lib/event-stream/index.js",
+    "packages/ui/src/sync/session-actions.ts",
+    "packages/ui/src/sync/event-pipeline.ts",
+    "packages/ui/src/lib/opencode/client.ts",
+    "packages/web/package.json",
+    "package.json"
+  ],
+  "directory_structure": "packages/web/server/lib/ contains focused modules (opencode/, relay/, notifications/, terminal/, etc). Each module has a service/runtime factory and optional routes. Frontend state in packages/ui/src/sync/ and packages/ui/src/stores/. The Daytona integration will add a new packages/web/server/lib/daytona/ module following the same pattern."
+}

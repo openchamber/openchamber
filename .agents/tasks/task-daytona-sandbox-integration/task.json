@@ -1,0 +1,14 @@
+{
+  "task_id": "task-daytona-sandbox-integration",
+  "task_description": "Integrate Daytona sandbox infrastructure into OpenChamber so that each chat session spawns a new Daytona container running OpenCode. The backend Express server orchestrates Daytona sandboxes (create/destroy), proxies OpenCode communication between the frontend and the container, implements a 10-minute inactivity timeout for auto-cleanup, and supports an exit command to manually destroy sandboxes. The frontend (used by the Android client) controls the sandbox lifecycle through the backend API.",
+  "status": "completed",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004"],
+  "blocked_reason": null,
+  "verification": {
+    "build": "pass",
+    "tests": "pass",
+    "test_quality": "pass",
+    "docker_build": "skipped",
+    "summary": "All checks pass after two review iterations. Type-check (all 3 packages pass), lint (all 3 packages pass), build (all packages build successfully), tests (81 test files, 679 tests passing, 3 pre-existing skipped). Two review passes completed: v1 found 7 issues (all fixed), v2 found 3 remaining issues (all fixed). Status normalization, auth middleware, documentation, proxy caching, and WebSocket error handling are all addressed."
+  }
+}
