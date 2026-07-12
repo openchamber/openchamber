@@ -3,6 +3,7 @@ import http from 'node:http';
 import { WebSocket, WebSocketServer } from 'ws';
 
 import { createClientHandshake } from '../../../../ui/src/lib/relay/handshake.ts';
+import { createDirectE2eeTunnelClient } from '../../../../ui/src/lib/relay/direct-e2ee-tunnel-client.ts';
 import { createTunnelAuth, createInternalTransportMarker, DIRECT_E2EE_TRANSPORT_HEADER } from '../opencode/tunnel-auth.js';
 import { createUiAuth } from '../ui-auth/ui-auth.js';
 import { exportPublicKeyJwk, generateEcdhKeyPair } from '../relay/e2ee.js';
@@ -115,6 +116,21 @@ const startFixture = async ({ authDeadlineMs = 500, limits = {}, logs = [], reje
   return { service, outer, keys, received, marker, lifecycle, mintUrlToken, logs };
 };
 
+const wrapActualClientSocket = (url, port) => {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}${DIRECT_E2EE_PATH}`, { headers: { Host: 'direct.example.test' }, perMessageDeflate: false });
+  const wire = {
+    get readyState() { return ws.readyState; },
+    send(data) { ws.send(data); },
+    close(code, reason) { ws.close(code, reason); },
+    onopen: null, onmessage: null, onclose: null, onerror: null,
+  };
+  ws.on('open', () => wire.onopen?.());
+  ws.on('message', (data, binary) => wire.onmessage?.({ data: binary ? new Uint8Array(data) : data.toString() }));
+  ws.on('close', (code, reason) => wire.onclose?.({ code, reason: reason.toString() }));
+  ws.on('error', () => wire.onerror?.());
+  return wire;
+};
+
 const connectEncrypted = async (fx) => {
   const client = await createClientHandshake(await exportPublicKeyJwk(fx.keys.publicKey), { batch: false });
   const ws = new WebSocket(`ws://127.0.0.1:${fx.outer.address().port}${DIRECT_E2EE_PATH}`, { headers: { Host: 'direct.example.test' }, perMessageDeflate: false });
@@ -146,6 +162,49 @@ const connectEncrypted = async (fx) => {
 };
 
 describe('direct E2EE encrypted integration', () => {
+  it('shared direct client promotes every replacement channel before queued API traffic', async () => {
+    const authState = { valid: true };
+    const fx = await startFixture({ authState, authDeadlineMs: 1_000 });
+    const descriptor = {
+      wssUrl: 'wss://direct.example.test/api/openchamber/direct-e2ee/ws',
+      hostEncPubJwk: await exportPublicKeyJwk(fx.keys.publicKey),
+    };
+    const outerUrls = [];
+    const client = createDirectE2eeTunnelClient(descriptor, 'valid-client', {
+      createOuterWebSocket: (url) => { outerUrls.push(url); return wrapActualClientSocket(url, fx.outer.address().port); },
+      reconnectBaseDelayMs: 10,
+      reconnectMaxDelayMs: 20,
+      helloRetryMs: 10,
+      helloTimeoutMs: 1_000,
+      pingIntervalMs: 5_000,
+    });
+    cleanups.push(() => client.close());
+
+    const api = () => client.fetch('/api/test', { headers: { Authorization: 'Bearer valid-client' } });
+    expect((await api()).status).toBe(200);
+    expect(JSON.stringify({ descriptor, outerUrls, status: client.getStatus() })).not.toContain('valid-client');
+    const healthCount = () => fx.received.filter((request) => request.url === '/health').length;
+    const authCount = () => fx.received.filter((request) => request.url === '/auth/session').length;
+    const apiCount = () => fx.received.filter((request) => request.url === '/api/test').length;
+    expect([healthCount(), authCount(), apiCount()]).toEqual([1, 1, 1]);
+
+    fx.service.closeAll('test-disconnect');
+    await waitFor(() => client.getStatus().state === 'reconnecting');
+    const queued = api();
+    expect((await queued).status).toBe(200);
+    expect([healthCount(), authCount(), apiCount()]).toEqual([2, 2, 2]);
+
+    authState.valid = false;
+    fx.service.closeAll('test-disconnect');
+    await waitFor(() => client.getStatus().state === 'reconnecting');
+    const blocked = expect(api()).rejects.toThrow('direct E2EE bearer token rejected');
+    await waitFor(() => client.getStatus().state === 'error');
+    expect(client.getStatus()).toMatchObject({ state: 'error', failureClassification: 'terminal' });
+    expect(healthCount()).toBe(3);
+    expect(authCount()).toBe(3);
+    expect(apiCount()).toBe(2);
+    await blocked;
+  });
   it('closes the outer session for a disallowed HTTP path', async () => {
     const fx = await startFixture();
     const client = await connectEncrypted(fx);
