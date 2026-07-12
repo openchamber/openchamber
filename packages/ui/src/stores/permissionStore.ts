@@ -1,372 +1,120 @@
 import { create } from "zustand";
-import { devtools, persist } from "zustand/middleware";
+import { persist } from "zustand/middleware";
 import type { Session } from "@opencode-ai/sdk/v2/client";
-import {
-    autoRespondsPermission,
-    type PermissionAutoAcceptMap,
-} from "./utils/permissionAutoAccept";
-import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
-import { getAllSyncSessions, getSyncChildStores } from "@/sync/sync-refs";
-import { opencodeClient } from "@/lib/opencode/client";
-import { respondToPermission } from "@/sync/session-actions";
-import { useSessionUIStore } from "@/sync/session-ui-store";
+import { autoRespondsPermission, type PermissionAutoAcceptMap } from "./utils/permissionAutoAccept";
+import { getAllSyncSessions } from "@/sync/sync-refs";
 import { runtimeFetch } from "@/lib/runtime-fetch";
+import { isVSCodeRuntime } from "@/lib/desktop";
+import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
+import { useSessionUIStore } from "@/sync/session-ui-store";
+import { opencodeClient } from "@/lib/opencode/client";
 
-interface PermissionState {
+type PermissionPolicySnapshot = {
+    sessions: PermissionAutoAcceptMap;
+};
+
+interface PermissionStore {
     autoAccept: PermissionAutoAcceptMap;
-}
-
-interface PermissionActions {
+    loaded: boolean;
+    saving: boolean;
+    hydrate: () => Promise<void>;
+    applySnapshot: (snapshot: PermissionPolicySnapshot) => void;
+    reset: () => void;
     isSessionAutoAccepting: (sessionId: string) => boolean;
     setSessionAutoAccept: (sessionId: string, enabled: boolean) => Promise<void>;
 }
 
-type PermissionStore = PermissionState & PermissionActions;
-
-const coerceAutoAcceptValue = (value: unknown): boolean => {
-    if (typeof value === "boolean") {
-        return value;
+const readSnapshot = async (response: Response): Promise<PermissionPolicySnapshot> => {
+    if (!response.ok) throw new Error(`Permission auto-accept request failed (${response.status})`);
+    const payload = await response.json() as Partial<PermissionPolicySnapshot>;
+    if (!payload.sessions || typeof payload.sessions !== "object") {
+        throw new Error("Invalid permission auto-accept response");
     }
-
-    if (typeof value === "string") {
-        const normalized = value.trim().toLowerCase();
-        if (normalized === "true") {
-            return true;
-        }
-        if (normalized === "false") {
-            return false;
-        }
+    const sessions: PermissionAutoAcceptMap = {};
+    for (const [sessionId, enabled] of Object.entries(payload.sessions)) {
+        if (sessionId && typeof enabled === "boolean") sessions[sessionId] = enabled;
     }
-
-    if (typeof value === "number") {
-        return value === 1;
-    }
-
-    return false;
+    return { sessions };
 };
 
-const isLegacyDirectoryAutoAcceptKey = (key: string): boolean => key.endsWith("/*");
+const requestSnapshot = async (path: string, init?: RequestInit) => readSnapshot(await runtimeFetch(path, init));
 
-const extractSessionIdFromLegacyKey = (key: string): string | null => {
-    const trimmed = key.trim();
-    if (!trimmed) {
-        return null;
-    }
-    const lastSlash = trimmed.lastIndexOf("/");
-    if (lastSlash === -1 || lastSlash === trimmed.length - 1) {
-        return trimmed;
-    }
-    return trimmed.slice(lastSlash + 1);
-};
+const isAutoAccepting = (autoAccept: PermissionAutoAcceptMap, sessions: Session[], sessionId: string) =>
+    autoRespondsPermission({ autoAccept, sessions, sessionID: sessionId });
 
-const resolveSessionScope = (sessionID: string, sessions: Session[]): Set<string> => {
-    const map = new Map<string, Session>();
-    const children = new Map<string, string[]>();
-    for (const session of sessions) {
-        map.set(session.id, session);
-        if (session.parentID) {
-            const list = children.get(session.parentID);
-            if (list) {
-                list.push(session.id);
-            } else {
-                children.set(session.parentID, [session.id]);
+export const usePermissionStore = create<PermissionStore>()(persist((set, get) => ({
+    autoAccept: {},
+    loaded: false,
+    saving: false,
+
+    hydrate: async () => {
+        let snapshot = await requestSnapshot("/api/permission-auto-accept");
+        const legacyEntries = Object.entries(get().autoAccept)
+            .filter(([sessionId, enabled]) => !sessionId.includes("/") && typeof enabled === "boolean");
+        if (Object.keys(snapshot.sessions).length === 0 && legacyEntries.length > 0) {
+            for (const [sessionId, enabled] of legacyEntries) {
+                if (!sessionId || typeof enabled !== "boolean") continue;
+                snapshot = await requestSnapshot(
+                    `/api/permission-auto-accept/sessions/${encodeURIComponent(sessionId)}`,
+                    {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ enabled }),
+                    },
+                );
             }
         }
-    }
+        set({ autoAccept: snapshot.sessions, loaded: true });
+    },
 
-    if (!map.has(sessionID)) {
-        return new Set([sessionID]);
-    }
+    reset: () => set({ autoAccept: {}, loaded: false, saving: false }),
 
-    const result = new Set<string>();
-    const seen = new Set<string>();
-    const queue = [sessionID];
-    while (queue.length > 0) {
-        const current = queue.shift();
-        if (!current || seen.has(current)) {
-            continue;
+    applySnapshot: (snapshot) => {
+        const sessions: PermissionAutoAcceptMap = {};
+        for (const [sessionId, enabled] of Object.entries(snapshot.sessions ?? {})) {
+            if (sessionId && typeof enabled === "boolean") sessions[sessionId] = enabled;
         }
-        seen.add(current);
-        result.add(current);
-        const nextChildren = children.get(current);
-        if (!nextChildren || nextChildren.length === 0) {
-            continue;
+        set({ autoAccept: sessions, loaded: true });
+    },
+
+    isSessionAutoAccepting: (sessionId) => {
+        if (!sessionId) return false;
+        return isAutoAccepting(get().autoAccept, getAllSyncSessions(), sessionId);
+    },
+
+    setSessionAutoAccept: async (sessionId, enabled) => {
+        if (!sessionId) return;
+        if (isVSCodeRuntime()) {
+            const response = await runtimeFetch("/api/notifications/auto-accept", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ sessionId, enabled }),
+            });
+            if (!response.ok) throw new Error(`Permission auto-accept request failed (${response.status})`);
+            set((state) => ({ autoAccept: { ...state.autoAccept, [sessionId]: enabled }, loaded: true }));
+            return;
         }
-        for (const child of nextChildren) {
-            if (!seen.has(child)) {
-                queue.push(child);
-            }
-        }
-    }
-
-    return result;
-};
-
-const normalizeDirectoryCandidate = (value: unknown): string | null => {
-    if (typeof value !== "string") return null;
-    const trimmed = value.trim();
-    return trimmed.length > 0 ? trimmed : null;
-};
-
-const collectPendingFromSyncStores = (): Array<{ id: string; sessionID: string }> => {
-    try {
-        const stores = getSyncChildStores();
-        const pending: Array<{ id: string; sessionID: string }> = [];
-        for (const store of stores.children.values()) {
-            const permissionMap = store.getState().permission ?? {};
-            for (const [sessionId, entries] of Object.entries(permissionMap)) {
-                for (const permission of entries ?? []) {
-                    if (!permission?.id) continue;
-                    pending.push({ id: permission.id, sessionID: permission.sessionID || sessionId });
-                }
-            }
-        }
-        return pending;
-    } catch {
-        return [];
-    }
-};
-
-const sessionBelongsToScope = async (
-    sessionID: string,
-    rootSessionID: string,
-    knownSessions: Session[],
-    directories: string[],
-): Promise<boolean> => {
-    if (sessionID === rootSessionID) {
-        return true;
-    }
-
-    const knownById = new Map<string, Session>();
-    for (const session of knownSessions) {
-        knownById.set(session.id, session);
-    }
-
-    const fetchedById = new Map<string, Session>();
-    const fetchSession = async (id: string): Promise<Session | null> => {
-        const known = knownById.get(id) ?? fetchedById.get(id);
-        if (known) return known;
-
-        for (const directory of directories) {
-            try {
-                const result = await opencodeClient.getScopedSdkClient(directory).session.get({
-                    sessionID: id,
-                    directory,
-                });
-                if (result.data) {
-                    fetchedById.set(id, result.data);
-                    return result.data;
-                }
-            } catch {
-                // Try the next known project directory.
-            }
-        }
-
+        set({ saving: true });
         try {
-            const result = await opencodeClient.getSdkClient().session.get({ sessionID: id });
-            if (result.data) {
-                fetchedById.set(id, result.data);
-                return result.data;
-            }
-        } catch {
-            // Missing session metadata means we cannot safely inherit the parent setting.
+            const directory = useSessionUIStore.getState().getDirectoryForSession(sessionId)
+                ?? opencodeClient.getDirectory()
+                ?? undefined;
+            const snapshot = await requestSnapshot(
+                `/api/permission-auto-accept/sessions/${encodeURIComponent(sessionId)}`,
+                {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ enabled, directory }),
+                },
+            );
+            set({ autoAccept: snapshot.sessions, loaded: true });
+        } finally {
+            set({ saving: false });
         }
+    },
 
-        return null;
-    };
-
-    const seen = new Set<string>();
-    let current: string | undefined = sessionID;
-    while (current && !seen.has(current)) {
-        if (current === rootSessionID) {
-            return true;
-        }
-        seen.add(current);
-        const session = await fetchSession(current);
-        current = session?.parentID ?? undefined;
-    }
-
-    return false;
-};
-
-const autoRespondsPermissionBySession = (
-    autoAccept: PermissionAutoAcceptMap,
-    sessions: Session[],
-    sessionID: string,
-): boolean => {
-    return autoRespondsPermission({
-        autoAccept,
-        sessionID,
-        sessions,
-    });
-};
-
-const getStorage = () => createDeferredSafeJSONStorage();
-
-export const usePermissionStore = create<PermissionStore>()(
-    devtools(
-        persist(
-            (set, get) => ({
-                autoAccept: {},
-
-                isSessionAutoAccepting: (sessionId: string) => {
-                    if (!sessionId) {
-                        return false;
-                    }
-
-                    const sessions = getAllSyncSessions();
-                    return autoRespondsPermissionBySession(get().autoAccept, sessions, sessionId);
-                },
-
-                setSessionAutoAccept: async (sessionId: string, enabled: boolean) => {
-                    if (!sessionId) {
-                        return;
-                    }
-
-                    const sessions = getAllSyncSessions();
-
-                    set((state) => {
-                        const autoAccept = { ...state.autoAccept };
-                        autoAccept[sessionId] = enabled;
-                        return { autoAccept };
-                    });
-
-                    const sessionScope = resolveSessionScope(sessionId, sessions);
-
-                    // Mirror inherited state to the server so it can suppress
-                    // permission notifications before the client auto-response
-                    // round-trip. Send known descendants too; server-side
-                    // ancestry lookup can lag OpenCode session indexing.
-                    for (const scopedSessionId of sessionScope) {
-                        void runtimeFetch('/api/notifications/auto-accept', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ sessionId: scopedSessionId, enabled }),
-                        }).catch(() => { /* best-effort */ });
-                    }
-
-                    if (!enabled) {
-                        return;
-                    }
-
-                    const sessionDirectory = useSessionUIStore.getState().getDirectoryForSession(sessionId);
-                    const directories = new Set<string>();
-                    const currentDirectory = normalizeDirectoryCandidate(opencodeClient.getDirectory());
-                    if (currentDirectory) {
-                        directories.add(currentDirectory);
-                    }
-                    const mappedSessionDirectory = normalizeDirectoryCandidate(sessionDirectory);
-                    if (mappedSessionDirectory) {
-                        directories.add(mappedSessionDirectory);
-                    }
-                    for (const scopedSessionId of sessionScope) {
-                        const mapped = normalizeDirectoryCandidate(useSessionUIStore.getState().getDirectoryForSession(scopedSessionId));
-                        if (mapped) {
-                            directories.add(mapped);
-                        }
-                    }
-
-                    const directoryList = Array.from(directories);
-                    const pendingFromStores = collectPendingFromSyncStores();
-                    // Best-effort: if listPendingPermissions throws (transient fetch failure),
-                    // proceed with whatever sync-store snapshots gave us. The next SSE event
-                    // or reconnect resync will auto-accept anything we missed.
-                    const pendingFromApi = await opencodeClient
-                      .listPendingPermissions({ directories: Array.from(directories) })
-                      .catch(() => []);
-                    const mergedPending = new Map<string, { id: string; sessionID: string }>();
-
-                    for (const permission of pendingFromStores) {
-                        if (sessionScope.has(permission.sessionID)) {
-                            mergedPending.set(permission.id, permission);
-                            continue;
-                        }
-                        if (await sessionBelongsToScope(permission.sessionID, sessionId, sessions, directoryList)) {
-                            mergedPending.set(permission.id, permission);
-                        }
-                    }
-                    for (const permission of pendingFromApi) {
-                        if (!permission?.id || !permission?.sessionID) {
-                            continue;
-                        }
-                        if (!sessionScope.has(permission.sessionID)) {
-                            const belongsToScope = await sessionBelongsToScope(permission.sessionID, sessionId, sessions, directoryList);
-                            if (!belongsToScope) {
-                                continue;
-                            }
-                        }
-                        mergedPending.set(permission.id, { id: permission.id, sessionID: permission.sessionID });
-                    }
-
-                    await Promise.all(
-                        Array.from(mergedPending.values())
-                            .map((permission) => respondToPermission(permission.sessionID, permission.id, "once").catch(() => undefined)),
-                    );
-                },
-            }),
-            {
-                name: "permission-store",
-                storage: getStorage(),
-                partialize: (state) => ({ autoAccept: state.autoAccept }),
-                merge: (persistedState, currentState) => {
-                    const merged = {
-                        ...currentState,
-                        ...(persistedState as Partial<PermissionStore>),
-                    };
-
-                    const persisted = Object.entries(merged.autoAccept || {});
-                    const nextAutoAccept: PermissionAutoAcceptMap = {};
-
-                    for (const [rawKey, rawEnabled] of persisted) {
-                        if (rawKey.includes("/") || isLegacyDirectoryAutoAcceptKey(rawKey)) {
-                            continue;
-                        }
-                        nextAutoAccept[rawKey] = coerceAutoAcceptValue(rawEnabled);
-                    }
-
-                    for (const [rawKey, rawEnabled] of persisted) {
-                        if (isLegacyDirectoryAutoAcceptKey(rawKey)) {
-                            continue;
-                        }
-                        if (!rawKey.includes("/")) {
-                            continue;
-                        }
-
-                        const sessionId = extractSessionIdFromLegacyKey(rawKey);
-                        if (!sessionId) {
-                            continue;
-                        }
-                        if (Object.prototype.hasOwnProperty.call(nextAutoAccept, sessionId)) {
-                            continue;
-                        }
-
-                        const normalized = coerceAutoAcceptValue(rawEnabled);
-                        const existing = nextAutoAccept[sessionId];
-                        nextAutoAccept[sessionId] = existing === true ? true : normalized;
-                    }
-
-                    return {
-                        ...merged,
-                        autoAccept: nextAutoAccept,
-                    };
-                },
-                onRehydrateStorage: () => (state) => {
-                    if (!state) return;
-                    // Re-broadcast auto-accept state to the server after
-                    // rehydration so server-side notification suppression
-                    // survives page reloads / server restarts.
-                    for (const [sid, enabled] of Object.entries(state.autoAccept || {})) {
-                        if (enabled === true) {
-                            void runtimeFetch('/api/notifications/auto-accept', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ sessionId: sid, enabled: true }),
-                            }).catch(() => { /* best-effort */ });
-                        }
-                    }
-                },
-            }
-        ),
-        { name: "permission-store" }
-    )
-);
+}), {
+    name: "permission-store",
+    storage: createDeferredSafeJSONStorage(),
+    partialize: (state) => ({ autoAccept: state.autoAccept }),
+}));

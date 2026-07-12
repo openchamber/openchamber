@@ -15,6 +15,10 @@ export const createNotificationTriggerRuntime = (deps) => {
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
   } = deps;
+  let getIsSessionAutoAccepting = deps.getIsSessionAutoAccepting;
+  const setGetIsSessionAutoAccepting = (resolver) => {
+    getIsSessionAutoAccepting = typeof resolver === 'function' ? resolver : undefined;
+  };
 
   // App-icon badge for native push: the set of DISTINCT collapse-ids (the push
   // `tag`, e.g. `ready-<sessionId>` / `permission-<requestKey>`) we've sent since
@@ -609,7 +613,8 @@ export const createNotificationTriggerRuntime = (deps) => {
       // Client may be in Permission Auto-Accept for this session (or any
       // ancestor). Skip the whole notification path — the client responds
       // directly and the user has opted out of approval prompts.
-      if (await isSessionAutoAccepting(sessionId, notificationDirectory)) {
+      if (await (getIsSessionAutoAccepting?.(sessionId, notificationDirectory)
+        ?? isSessionAutoAccepting(sessionId, notificationDirectory))) {
         if (requestKey) notifiedPermissionRequests.add(requestKey);
         return;
       }
@@ -622,7 +627,8 @@ export const createNotificationTriggerRuntime = (deps) => {
       const timer = setTimeout(async () => {
         pushPermissionDebounceTimers.delete(sessionId);
 
-        if (await isSessionAutoAccepting(sessionId, notificationDirectory)) {
+        if (await (getIsSessionAutoAccepting?.(sessionId, notificationDirectory)
+          ?? isSessionAutoAccepting(sessionId, notificationDirectory))) {
           if (requestKey) notifiedPermissionRequests.add(requestKey);
           return;
         }
@@ -742,6 +748,7 @@ export const createNotificationTriggerRuntime = (deps) => {
     maybeSendPushForTrigger,
     setAutoAcceptSession,
     setGetIsWindowFocused,
+    setGetIsSessionAutoAccepting,
     clearPendingPushBadge,
     sendGoalSettlePush,
   };
