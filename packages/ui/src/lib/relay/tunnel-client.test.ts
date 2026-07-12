@@ -246,12 +246,14 @@ const setupClient = async (
   killWire: () => void;
   sendTextToClient: (text: string) => void;
   clientBinaryCount: () => number;
+  requestedUrls: () => string[];
 }> => {
   const hostKeyPair = await generateEcdhKeyPair();
   const hostPubJwk = await exportPublicKeyJwk(hostKeyPair.publicKey);
   let count = 0;
   let lastClientEndpoint: FakeEndpoint | null = null;
   let lastHostEndpoint: FakeEndpoint | null = null;
+  const urls: string[] = [];
   const client = createRelayTunnelClient({
     relayUrl: 'wss://relay.test/ws',
     serverId: 'server-1',
@@ -262,7 +264,8 @@ const setupClient = async (
     reconnectBaseDelayMs: 20,
     reconnectMaxDelayMs: 80,
     ...clientOverrides,
-    createWireSocket: () => {
+    createWireSocket: (url) => {
+      urls.push(url);
       count += 1;
       const clientEndpoint = new FakeEndpoint();
       const hostEndpoint = new FakeEndpoint();
@@ -278,9 +281,10 @@ const setupClient = async (
   return {
     client,
     connectionCount: () => count,
-    killWire: () => lastClientEndpoint?.close(1006, 'killed'),
+    killWire: (code = 1006, reason = 'killed') => lastClientEndpoint?.close(code, reason),
     sendTextToClient: (text: string) => lastHostEndpoint?.send(text),
     clientBinaryCount: () => lastClientEndpoint?.binarySent ?? 0,
+    requestedUrls: () => urls,
   };
 };
 
@@ -296,6 +300,83 @@ const track = (client: RelayTunnelClient): RelayTunnelClient => {
 };
 
 describe('createRelayTunnelClient', () => {
+  test('does not publish or expose a channel until readiness succeeds', async () => {
+    let release!: () => void;
+    const readiness = new Promise<void>((resolve) => { release = resolve; });
+    const { client } = await setupClient({}, { channelReadiness: async ({ fetch }) => {
+      const health = await fetch('/health');
+      expect(health.status).toBe(200);
+      await readiness;
+    } });
+    track(client);
+    const request = client.fetch('/health');
+    await wait(50);
+    expect(client.getStatus().state).not.toBe('connected');
+    let settled = false;
+    void request.finally(() => { settled = true; });
+    await wait(10);
+    expect(settled).toBe(false);
+    release();
+    expect((await request).status).toBe(200);
+    expect(client.getStatus().state).toBe('connected');
+  });
+
+  test('runs readiness again before queued requests resume after reconnect', async () => {
+    let checks = 0;
+    let releaseSecond!: () => void;
+    const second = new Promise<void>((resolve) => { releaseSecond = resolve; });
+    const { client, killWire } = await setupClient({}, { channelReadiness: async ({ fetch }) => {
+      checks += 1;
+      expect((await fetch('/health')).status).toBe(200);
+      if (checks === 2) await second;
+    } });
+    track(client);
+    await client.fetch('/health');
+    killWire();
+    await wait(10);
+    const queued = client.fetch('/health');
+    await wait(80);
+    expect(checks).toBe(2);
+    expect(client.getStatus().state).not.toBe('connected');
+    releaseSecond();
+    expect((await queued).status).toBe(200);
+  });
+
+  test('keeps public fetch and WebSocket blocked together until readiness publishes', async () => {
+    let release!: () => void;
+    const readiness = new Promise<void>((resolve) => { release = resolve; });
+    const { client } = await setupClient({}, { channelReadiness: async () => readiness });
+    track(client);
+    const request = client.fetch('/health');
+    const socket = client.openWebSocket('/api/event/ws');
+    let fetchSettled = false;
+    let socketOpened = false;
+    void request.then(() => { fetchSettled = true; });
+    socket.onopen = () => { socketOpened = true; };
+    await wait(50);
+    expect(fetchSettled).toBe(false);
+    expect(socketOpened).toBe(false);
+    expect(socket.readyState).toBe(0);
+    release();
+    expect((await request).status).toBe(200);
+    await wait(20);
+    expect(socketOpened).toBe(true);
+  });
+  test('preserves relay URL construction by default and accepts an exact outer URL', async () => {
+    const relay = await setupClient();
+    track(relay.client);
+    await relay.client.fetch('/health');
+    const relayUrl = new URL(relay.requestedUrls()[0]);
+    expect(relayUrl.origin + relayUrl.pathname).toBe('wss://relay.test/ws');
+    expect(relayUrl.searchParams.get('role')).toBe('client');
+    expect(relayUrl.searchParams.get('serverId')).toBe('server-1');
+
+    const direct = await setupClient({}, { outerWebSocketUrl: 'wss://managed.example/api/openchamber/direct-e2ee/ws' });
+    track(direct.client);
+    await direct.client.fetch('/health');
+    expect(direct.requestedUrls()[0]).toBe('wss://managed.example/api/openchamber/direct-e2ee/ws');
+  });
+
   test('performs concurrent fetches over one tunnel', async () => {
     const { client } = await setupClient();
     track(client);
@@ -366,6 +447,10 @@ describe('createRelayTunnelClient', () => {
   test('fails open streams on reconnect and recovers on retry', async () => {
     const { client, connectionCount, killWire } = await setupClient();
     track(client);
+    const failures: string[] = [];
+    client.subscribeStatus((status) => {
+      if (status.failureClassification) failures.push(status.failureClassification);
+    });
     const response = await client.fetch('/never-ends');
     const reader = response.body!.getReader();
     await reader.read();
@@ -380,6 +465,7 @@ describe('createRelayTunnelClient', () => {
     killWire();
     await expect(reader.read()).rejects.toThrow();
     expect(await socketClosed).toBe(1012);
+    expect(failures).toContain('network');
 
     // The client reconnects a fresh wire and works again.
     const health = await client.fetch('/health');
@@ -430,12 +516,17 @@ describe('createRelayTunnelClient', () => {
   test('fails closed on non-ready plaintext after establishment', async () => {
     const { client, connectionCount, sendTextToClient } = await setupClient();
     track(client);
+    const failures: string[] = [];
+    client.subscribeStatus((status) => {
+      if (status.failureClassification) failures.push(status.failureClassification);
+    });
     await client.fetch('/health');
     expect(connectionCount()).toBe(1);
     sendTextToClient('{"anything":"plaintext"}');
     // The channel must reset (fail closed) and the client reconnect a new wire.
     await wait(150);
     expect(connectionCount()).toBeGreaterThan(1);
+    expect(failures).toContain('protocol');
   });
 
   test('publishes status transitions to subscribers', async () => {
