@@ -47,6 +47,13 @@ promotion. All fragment state is discarded with its stream or outer session.
 Before promotion only encrypted `GET /health`, pairing redemption, and
 bearer-authenticated `GET /auth/session` are dispatched. Pairing alone never
 promotes. A successful session response binds the authenticated client ID.
+After promotion, `/auth` traffic has an exact no-query allowlist: `GET /auth/session`,
+`POST /auth/url-token`, and `GET /auth/passkey/status`. The status response exposes
+only passkey enablement, relying-party metadata, and credential count; browser
+passkey ceremonies remain unavailable. The exact `/auth` path and every other
+`/auth/*` target, method, query, subpath, unknown route, or case variant fail closed
+by terminating the outer session before loopback dispatch. Non-authenticated-route
+policy is unchanged.
 Unlike hosted relay sessions, direct sessions treat every ignored textual frame
 before establishment (malformed JSON, unsupported version, non-hello type, or empty
 text) as terminal. An identical valid hello retry still receives the same ready

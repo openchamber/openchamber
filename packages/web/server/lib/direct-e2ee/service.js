@@ -224,8 +224,14 @@ export const createDirectE2eeService = ({
       logReason('preauth-route-rejected', entry.id);
       return 'Authentication required';
     }
-    if (request.path === '/auth/session' && method !== 'GET') return 'Browser authentication is unavailable';
-    if (request.path.startsWith('/auth/passkey')) return 'Browser authentication is unavailable';
+    const authenticatedAuthRequestAllowed = !request.query && (
+      (method === 'GET' && request.path === '/auth/session')
+      || (method === 'POST' && request.path === '/auth/url-token')
+      || (method === 'GET' && request.path === '/auth/passkey/status')
+    );
+    if (authenticatedAuthRequestAllowed) return true;
+    const normalizedPath = request.path.toLowerCase();
+    if (normalizedPath === '/auth' || normalizedPath.startsWith('/auth/')) return 'Browser authentication is unavailable';
     return true;
   };
 
