@@ -2,6 +2,7 @@ import { afterAll, describe, expect, it } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createInternalTransportMarker, createTunnelAuth, DIRECT_E2EE_TRANSPORT_HEADER } from '../opencode/tunnel-auth.js';
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-ui-auth-test-'));
 process.env.OPENCHAMBER_DATA_DIR = dataDir;
@@ -45,6 +46,14 @@ const createResponse = () => {
 };
 
 describe('ui auth client credential seam', () => {
+  it('classifies only the exact process marker as remote-client', () => {
+    const marker = createInternalTransportMarker();
+    const auth = createTunnelAuth({ internalRemoteClientMarker: marker });
+    const request = (value) => ({ headers: { host: '127.0.0.1', [DIRECT_E2EE_TRANSPORT_HEADER]: value }, socket: { remoteAddress: '127.0.0.1' } });
+    expect(auth.classifyRequestScope(request(marker))).toBe('remote-client');
+    expect(auth.classifyRequestScope(request('attacker'))).toBe('local');
+    expect(auth.classifyRequestScope(request(undefined))).toBe('local');
+  });
   it('accepts bearer client credentials when UI password auth is enabled', async () => {
     const createUiAuth = await loadCreateUiAuth();
     const auth = createUiAuth({
