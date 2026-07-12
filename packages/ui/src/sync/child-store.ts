@@ -19,6 +19,10 @@ function createDirectoryStore(directory: string): StoreApi<DirectoryStore> {
   // paints chats instantly. Bootstrap phase-3 loadSessions overwrites with the
   // fresh list (its empty-list race guard preserves these until then).
   const cachedSessions = cached.sessions ?? INITIAL_STATE.session
+  // Track that the session list is currently the cache seed, not live data.
+  // The bootstrap empty-list race guard reads this to decide whether an empty
+  // server response should clear stale cache entries (issue #2105).
+  const sessionListFromCache = cachedSessions.length > 0
 
   const store = create<DirectoryStore>()((set) => ({
     ...INITIAL_STATE,
@@ -28,6 +32,7 @@ function createDirectoryStore(directory: string): StoreApi<DirectoryStore> {
     session: cachedSessions,
     sessionTotal: cachedSessions.length,
     limit: Math.max(cachedSessions.length, INITIAL_STATE.limit),
+    sessionListFromCache,
     patch: (partial) => set(partial),
     replace: (next) => set(next),
   }))

@@ -49,6 +49,7 @@ import { listProjectWorktrees, worktreeMapsEqual } from '@/lib/worktrees/worktre
 import { checkIsGitRepository } from '@/lib/gitApi';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { SortableDragHandleProps } from './sidebar/sortableItems';
+import { PROJECT_ACTIVE_SESSION_STORAGE_KEY } from '@/lib/sessionStorageKeys';
 import {
   BulkSessionDeleteConfirmDialog,
   FolderDeleteConfirmDialog,
@@ -85,7 +86,7 @@ const SHARE_OPINION_TOAST_STORAGE_KEY = 'openchamber.shareOpinionToast.dismissed
 const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
 const GROUP_COLLAPSE_STORAGE_KEY = 'oc.sessions.groupCollapse';
-const PROJECT_ACTIVE_SESSION_STORAGE_KEY = 'oc.sessions.activeSessionByProject';
+// Imported from @/lib/sessionStorageKeys — shared with session-actions.ts (issue #2105)
 // v2 key holds composite "${renderContext}:${active|archived}:${sessionId}"
 // entries so the same session in different render contexts (e.g. "Recent"
 // and a project's root) has independent expand state. v1 held bare session

@@ -32,6 +32,8 @@ import { opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
+import { useSessionUIStore } from "./session-ui-store"
+import { cleanupActiveSessionByProject } from "./session-actions"
 import { toast } from "@/components/ui"
 import { appendNotification } from "./notification-store"
 import { applyGlobalSessionStatusEvent } from "./global-session-status"
@@ -1583,6 +1585,22 @@ function handleEvent(
     onSetSessionTodo: (sessionID, todos) => {
       useTodosPersistStore.getState().setSessionTodos(sessionID, todos)
     },
+    onSessionRemoved: (sessionID) => {
+      // The synchronous deleteSession() action clears currentSessionId itself,
+      // but an SSE session.deleted can arrive independently (another client,
+      // or a server cascade-delete of child sessions). If the deleted session
+      // was the current one, clear the pointer so the UI doesn't render a
+      // non-existent session (issue #2105 "Session not found: ses_xxx").
+      //
+      // Also clean up the activeSessionByProject localStorage map for ANY
+      // deleted session — not just the current one — so a restart doesn't
+      // restore a pointer to a session deleted by another client.
+      cleanupActiveSessionByProject(sessionID)
+      const ui = useSessionUIStore.getState()
+      if (ui.currentSessionId === sessionID) {
+        ui.setCurrentSession(null)
+      }
+    },
   })
   const reducerChanged = typeof reducerResult === "boolean" ? reducerResult : reducerResult.changed
   const materializationResult = typeof reducerResult === "boolean" ? undefined : reducerResult.materialization
@@ -1794,13 +1812,23 @@ export function SyncProvider(props: {
               // answer HTTP with empty sessions while WS delivers session
               // events for the same data (disk warmup race on app launch).
               const currentSessions = store.getState().session
-              if (sessions.length === 0 && currentSessions.length > 0) {
+              const fromCache = store.getState().sessionListFromCache
+              if (sessions.length === 0 && currentSessions.length > 0 && !fromCache) {
                 console.warn(
                   `[bootstrap] experimental.session.list returned empty for ${dir}; preserving ${currentSessions.length} existing sessions`,
                 )
                 return
               }
-              store.setState({ session: sessions, sessionTotal: rootSessions.length, limit: Math.max(sessions.length, 50) })
+              // If the cached sessions were only the localStorage seed (no live
+              // SSE data yet) and the server authoritatively returned empty,
+              // clear the stale cache seed so a restart doesn't restore
+              // pointers to deleted sessions (issue #2105 "Session not found").
+              if (sessions.length === 0 && fromCache) {
+                store.setState({ session: [], sessionTotal: 0, limit: 50, sessionListFromCache: false })
+                ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
+                return
+              }
+              store.setState({ session: sessions, sessionTotal: rootSessions.length, limit: Math.max(sessions.length, 50), sessionListFromCache: false })
               ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
             }),
           })
