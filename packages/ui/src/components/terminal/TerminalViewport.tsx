@@ -982,6 +982,7 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
       let restorePatchedScrollToBottom: (() => void) | null = null;
       let restorePatchedScrollbar: (() => void) | null = null;
       let restoreContainerFocus: (() => void) | null = null;
+      let desktopInputCleanup: (() => void) | null = null;
 
       const container = containerRef.current;
       if (!container) {
@@ -1079,6 +1080,42 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
 
           terminal.loadAddon(fitAddon);
           terminal.open(container);
+
+          // Handle desktop text before Ghostty's input handler. Some browsers
+          // emit beforeinput without a usable printable keydown, and Ghostty
+          // drops that text while its composing state is active.
+          if (!useHiddenInputOverlay) {
+            const handlePrintableKeydown = (event: KeyboardEvent) => {
+              if (
+                event.ctrlKey ||
+                event.metaKey ||
+                event.altKey ||
+                event.key.length !== 1
+              ) {
+                return;
+              }
+
+              event.preventDefault();
+              event.stopPropagation();
+              inputHandlerRef.current(event.key);
+            };
+            const handleBeforeInput = (event: InputEvent) => {
+              if (event.inputType !== 'insertText' || !event.data) {
+                return;
+              }
+
+              event.preventDefault();
+              event.stopPropagation();
+              inputHandlerRef.current(event.data);
+            };
+            container.addEventListener('keydown', handlePrintableKeydown, true);
+            container.addEventListener('beforeinput', handleBeforeInput, true);
+            desktopInputCleanup = () => {
+              container.removeEventListener('keydown', handlePrintableKeydown, true);
+              container.removeEventListener('beforeinput', handleBeforeInput, true);
+            };
+          }
+
           if (enableTouchScroll) {
             const renderer = (terminal as unknown as TerminalWithRenderer).renderer;
             if (renderer && typeof renderer.renderScrollbar === 'function') {
@@ -1187,6 +1224,8 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
         restorePatchedScrollToBottom = null;
         restorePatchedScrollbar?.();
         restorePatchedScrollbar = null;
+        desktopInputCleanup?.();
+        desktopInputCleanup = null;
         if (localTerminalTextarea) {
           localTerminalTextarea.removeEventListener('focus', handleTerminalTextareaFocus);
           localTerminalTextarea.removeEventListener('blur', handleTerminalTextareaBlur);
