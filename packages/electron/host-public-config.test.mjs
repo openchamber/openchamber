@@ -1,0 +1,44 @@
+import { describe, expect, test } from 'bun:test';
+
+import { resolveDesktopHostsForSender } from './host-public-config.mjs';
+
+const fullConfig = {
+  hosts: [{
+    id: 'host-one', label: 'Remote', url: 'https://user:pass@remote.example/path?token=secret#fragment', apiUrl: 'https://remote.example/api?key=secret',
+    clientToken: 'bearer-secret', requestHeaders: { Authorization: 'Bearer secret', 'CF-Access-Client-Secret': 'secret' }, pairingSecret: 'pairing-secret',
+    relay: { relayUrl: 'wss://relay.example/ws', serverId: 'server-one', grant: 'grant-secret', hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'rx', y: 'ry', d: 'private', unknown: 'strip' } },
+    directE2ee: { wssUrl: 'wss://direct.example/api/openchamber/direct-e2ee/ws', pairing: { secret: 'nested' }, hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'dx', y: 'dy', d: 'private' } },
+    unknown: { clientToken: 'nested-secret' },
+  }],
+  defaultHostId: 'host-one', initialHostChoiceCompleted: true, localClientToken: 'local-secret', privateJwk: { d: 'private' }, localOrigin: 'http://127.0.0.1:3901',
+};
+const allowed = { localOrigin: 'http://127.0.0.1:3901', sidecarUrl: 'http://127.0.0.1:57123' };
+
+describe('desktop host public config', () => {
+  test('returns the exact full config only to exact local senders', () => {
+    expect(resolveDesktopHostsForSender('http://127.0.0.1:3901/settings', fullConfig, allowed)).toBe(fullConfig);
+    expect(resolveDesktopHostsForSender('openchamber-ui://app/index.html', fullConfig, allowed)).toBe(fullConfig);
+  });
+
+  test('redacts hostile remote callers and strips nested unknown credential fields', () => {
+    for (const sender of ['https://evil.example/path', 'http://127.0.0.1:3901.evil.example/path']) {
+      const result = resolveDesktopHostsForSender(sender, fullConfig, allowed);
+      expect(result).toEqual({
+        hosts: [{
+          id: 'host-one', label: 'Remote', url: 'https://remote.example/path', apiUrl: 'https://remote.example/api',
+          relay: { relayUrl: 'wss://relay.example/ws', serverId: 'server-one', hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'rx', y: 'ry' } },
+          directE2ee: { wssUrl: 'wss://direct.example/api/openchamber/direct-e2ee/ws', hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'dx', y: 'dy' } },
+        }],
+        defaultHostId: 'host-one', initialHostChoiceCompleted: true, localOrigin: 'http://127.0.0.1:3901',
+      });
+      expect(JSON.stringify(result)).not.toMatch(/secret|clientToken|requestHeaders|grant|privateJwk|"d"/i);
+    }
+  });
+
+  test('uses only the supplied window config without crossing per-window host state', () => {
+    const other = { ...fullConfig, hosts: [{ id: 'host-two', label: 'Two', url: 'https://two.example', clientToken: 'two-secret' }] };
+    expect(resolveDesktopHostsForSender('https://evil.example/path', other, allowed).hosts).toEqual([
+      { id: 'host-two', label: 'Two', url: 'https://two.example' },
+    ]);
+  });
+});

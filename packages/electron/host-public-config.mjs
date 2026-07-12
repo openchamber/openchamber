@@ -1,0 +1,53 @@
+import { isRuntimeBootstrapSenderAllowed } from './runtime-bootstrap.mjs';
+import { sanitizeHostDirectE2eeForStorage, sanitizeHostRelayForStorage } from './host-storage-sanitizer.mjs';
+
+const sanitizePublicUrl = (value, protocols) => {
+  if (typeof value !== 'string') return null;
+  try {
+    const url = new URL(value.trim());
+    if (!protocols.has(url.protocol)) return null;
+    url.username = '';
+    url.password = '';
+    url.search = '';
+    url.hash = '';
+    const normalized = url.toString();
+    return url.pathname === '/' ? normalized.replace(/\/$/, '') : normalized;
+  } catch {
+    return null;
+  }
+};
+
+const redactHost = (host) => {
+  if (!host || typeof host !== 'object' || Array.isArray(host)) return null;
+  const id = typeof host.id === 'string' ? host.id.trim() : '';
+  const label = typeof host.label === 'string' ? host.label.trim() : '';
+  if (!id || !label) return null;
+  const url = sanitizePublicUrl(host.url, new Set(['http:', 'https:'])) || (typeof host.url === 'string' && /^(?:relay|direct-e2ee):\/\/[a-zA-Z0-9._-]+$/.test(host.url) ? host.url : null);
+  const apiUrl = sanitizePublicUrl(host.apiUrl, new Set(['http:', 'https:']));
+  const relay = sanitizeHostRelayForStorage(host.relay);
+  const directE2ee = sanitizeHostDirectE2eeForStorage(host.directE2ee);
+  if (!url && !apiUrl && !relay && !directE2ee) return null;
+  const publicRelay = relay ? {
+    ...relay,
+    relayUrl: sanitizePublicUrl(relay.relayUrl, new Set(['ws:', 'wss:'])),
+  } : null;
+  return {
+    id,
+    label,
+    ...(url ? { url } : {}),
+    ...(apiUrl ? { apiUrl } : {}),
+    ...(publicRelay?.relayUrl ? { relay: publicRelay } : {}),
+    ...(directE2ee ? { directE2ee } : {}),
+  };
+};
+
+export const redactDesktopHostsConfig = (config) => ({
+  hosts: Array.isArray(config?.hosts) ? config.hosts.map(redactHost).filter(Boolean) : [],
+  defaultHostId: typeof config?.defaultHostId === 'string' ? config.defaultHostId : null,
+  initialHostChoiceCompleted: config?.initialHostChoiceCompleted === true,
+  localOrigin: sanitizePublicUrl(config?.localOrigin, new Set(['http:', 'https:'])),
+});
+
+export const resolveDesktopHostsForSender = (senderUrl, fullConfig, allowed) => (
+  isRuntimeBootstrapSenderAllowed(senderUrl, allowed) ? fullConfig : redactDesktopHostsConfig(fullConfig)
+);
