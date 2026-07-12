@@ -644,10 +644,8 @@ export const SidebarFilesTree: React.FC = () => {
       const pathsToRefresh = [root, ...normalizedExpanded];
 
       loadedDirsRef.current = new Set(loadedDirsRef.current);
-      inFlightDirsRef.current = new Set(inFlightDirsRef.current);
       for (const dirPath of pathsToRefresh) {
         loadedDirsRef.current.delete(dirPath);
-        inFlightDirsRef.current.delete(dirPath);
       }
 
       setLoadErrorsByDir((prev) => {

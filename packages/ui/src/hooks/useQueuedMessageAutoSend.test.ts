@@ -29,19 +29,44 @@ mock.module('@/sync/session-ui-store', () => ({
 
 import {
   buildQueuedAutoSendPayload,
+  getQueuedAutoSendRetryDelayMs,
+  isQueuedAutoSendBackedOff,
   sendQueuedAutoSendPayload,
   shouldDispatchQueuedAutoSend,
 } from './useQueuedMessageAutoSend';
 
 describe('shouldDispatchQueuedAutoSend', () => {
   test('dispatches only after an active session becomes idle', () => {
-    expect(shouldDispatchQueuedAutoSend('busy', 'idle')).toBe(true);
-    expect(shouldDispatchQueuedAutoSend('retry', 'idle')).toBe(true);
+    expect(shouldDispatchQueuedAutoSend('busy', 'idle', false)).toBe(true);
+    expect(shouldDispatchQueuedAutoSend('retry', 'idle', false)).toBe(true);
   });
 
   test('does not dispatch when idle is only first seen or status is missing', () => {
-    expect(shouldDispatchQueuedAutoSend(undefined, 'idle')).toBe(false);
-    expect(shouldDispatchQueuedAutoSend('idle', 'idle')).toBe(false);
+    expect(shouldDispatchQueuedAutoSend(undefined, 'idle', false)).toBe(false);
+    expect(shouldDispatchQueuedAutoSend('idle', 'idle', false)).toBe(false);
+  });
+
+  test('dispatches when idle→idle and queue has items', () => {
+    expect(shouldDispatchQueuedAutoSend('idle', 'idle', true)).toBe(true);
+  });
+});
+
+describe('queued auto-send retry backoff', () => {
+  test('delay grows exponentially and is capped', () => {
+    expect(getQueuedAutoSendRetryDelayMs(1)).toBe(2000);
+    expect(getQueuedAutoSendRetryDelayMs(2)).toBe(4000);
+    expect(getQueuedAutoSendRetryDelayMs(3)).toBe(8000);
+    expect(getQueuedAutoSendRetryDelayMs(10)).toBe(60000);
+    expect(getQueuedAutoSendRetryDelayMs(100)).toBe(60000);
+  });
+
+  test('backs off only the failed message within its window', () => {
+    const failure = { messageId: 'queued-1', failures: 1, nextAttemptAt: 10_000 };
+
+    expect(isQueuedAutoSendBackedOff(failure, 'queued-1', 9_999)).toBe(true);
+    expect(isQueuedAutoSendBackedOff(failure, 'queued-1', 10_000)).toBe(false);
+    expect(isQueuedAutoSendBackedOff(failure, 'queued-2', 9_999)).toBe(false);
+    expect(isQueuedAutoSendBackedOff(undefined, 'queued-1', 0)).toBe(false);
   });
 });
 

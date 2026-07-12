@@ -700,4 +700,14 @@ describe('client auth routes', () => {
 
     expect(dependencies.uiAuthController.handlePasskeyStatus).toHaveBeenCalledTimes(1);
   });
+
+  it('does not trust a private Host header from a public socket peer', () => {
+    const tunnelAuthController = createTunnelAuth();
+    tunnelAuthController.setActiveTunnel({ tunnelId: 'tunnel-1', publicUrl: 'https://tunnel.example.com' });
+
+    expect(tunnelAuthController.classifyRequestScope({
+      headers: { host: '192.168.1.5:57123' },
+      socket: { remoteAddress: '203.0.113.10' },
+    })).toBe('unknown-public');
+  });
 });

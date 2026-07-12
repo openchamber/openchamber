@@ -45,7 +45,7 @@ import { SessionNodeItem } from './sidebar/SessionNodeItem';
 import type { SessionNodeRenderExtras } from './sidebar/sessionNodeItemUtils';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useShallow } from 'zustand/react/shallow';
-import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
+import { listProjectWorktrees, worktreeMapsEqual } from '@/lib/worktrees/worktreeManager';
 import { checkIsGitRepository } from '@/lib/gitApi';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { SortableDragHandleProps } from './sidebar/sortableItems';
@@ -320,6 +320,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const liveSessions = useAllLiveSessions();
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
   const hasLoadedGlobalSessions = useGlobalSessionsStore((state) => state.hasLoaded);
+  const hasAuthoritativeGlobalSessions = useGlobalSessionsStore((state) => state.status === 'ready');
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const archivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
@@ -477,10 +478,14 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
       if (cancelled) return;
 
-      useSessionUIStore.setState({
-        availableWorktrees: allWorktrees,
-        availableWorktreesByProject: worktreesByProject,
-      });
+      // Skip update if nothing changed — see worktreeMapsEqual JSDoc.
+      const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
+      if (!worktreeMapsEqual(worktreesByProject, currentByProject)) {
+        useSessionUIStore.setState({
+          availableWorktrees: allWorktrees,
+          availableWorktreesByProject: worktreesByProject,
+        });
+      }
     };
 
     // Skip if we already discovered worktrees for this exact project set.
@@ -535,7 +540,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const { scheduleCollapsedProjectsPersist } = useSidebarPersistence({
     isVSCode,
-    hasLoadedGlobalSessions,
+    hasAuthoritativeGlobalSessions,
     safeStorage,
     keys: {
       sessionExpanded: SESSION_EXPANDED_STORAGE_KEY,
@@ -1032,25 +1037,43 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
   const manualProjectOrder = useProjectsStore((state) => state.manualProjectOrder);
 
+  const recentProjectIdsRef = React.useRef<Set<string>>(new Set());
   const recentProjectIds = React.useMemo(() => {
     const recentSessions = deriveRecentSessions(sessions);
-    if (recentSessions.length === 0) return new Set<string>();
-
-    const pathToId = new Map<string, string>();
-    for (const project of normalizedProjects) {
-      if (project.normalizedPath) {
-        pathToId.set(project.normalizedPath, project.id);
-      }
-    }
-
     const ids = new Set<string>();
-    for (const session of recentSessions) {
-      const directory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
-      if (directory) {
-        const projectId = pathToId.get(directory);
-        if (projectId) ids.add(projectId);
+
+    if (recentSessions.length > 0) {
+      const pathToId = new Map<string, string>();
+      for (const project of normalizedProjects) {
+        if (project.normalizedPath) {
+          pathToId.set(project.normalizedPath, project.id);
+        }
+      }
+
+      for (const session of recentSessions) {
+        const directory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
+        if (directory) {
+          const projectId = pathToId.get(directory);
+          if (projectId) ids.add(projectId);
+        }
       }
     }
+
+    // Sessions update on every SSE event; keep the previous Set reference when
+    // membership is unchanged so sortedProjects (and the sidebar sections built
+    // from it) do not recompute on every streaming event.
+    const previous = recentProjectIdsRef.current;
+    if (previous.size === ids.size) {
+      let unchanged = true;
+      for (const id of ids) {
+        if (!previous.has(id)) {
+          unchanged = false;
+          break;
+        }
+      }
+      if (unchanged) return previous;
+    }
+    recentProjectIdsRef.current = ids;
     return ids;
   }, [sessions, normalizedProjects]);
 

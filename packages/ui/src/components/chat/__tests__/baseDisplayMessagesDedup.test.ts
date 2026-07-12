@@ -4,11 +4,17 @@ import type { ChatMessageEntry } from '../lib/turns/types';
 /**
  * Dedup logic extracted from MessageList.tsx baseDisplayMessages.
  * Tests verify that deduplication preserves chronological order
- * and keeps the first occurrence of each message ID.
+ * while keeping the latest value for each message ID.
  */
 function deduplicateMessages(messages: ChatMessageEntry[]): ChatMessageEntry[] {
     const seenIds = new Set<string>();
+    const latestById = new Map<string, ChatMessageEntry>();
     const dedupedMessages: ChatMessageEntry[] = [];
+
+    for (const message of messages) {
+        const messageId = message.info?.id;
+        if (typeof messageId === 'string') latestById.set(messageId, message);
+    }
 
     for (let index = 0; index < messages.length; index += 1) {
         const message = messages[index];
@@ -19,7 +25,9 @@ function deduplicateMessages(messages: ChatMessageEntry[]): ChatMessageEntry[] {
             }
             seenIds.add(messageId);
         }
-        dedupedMessages.push(message);
+        dedupedMessages.push(
+            typeof messageId === 'string' ? latestById.get(messageId) ?? message : message,
+        );
     }
 
     return dedupedMessages;
@@ -48,7 +56,7 @@ function createMessageEntry({
 }
 
 describe('baseDisplayMessages dedup', () => {
-    test('removes duplicate message IDs, keeping the first occurrence', () => {
+    test('removes duplicate message IDs, keeping the latest value', () => {
         const msg1 = createMessageEntry({ id: 'msg-1', role: 'user', createdAt: 1 });
         const msg2 = createMessageEntry({ id: 'msg-2', role: 'assistant', createdAt: 2 });
         const msg1Duplicate = createMessageEntry({ id: 'msg-1', role: 'user', createdAt: 3 });
@@ -57,6 +65,7 @@ describe('baseDisplayMessages dedup', () => {
 
         expect(result).toHaveLength(2);
         expect(result[0]?.info.id).toBe('msg-1');
+        expect(result[0]?.info.time.created).toBe(3);
         expect(result[1]?.info.id).toBe('msg-2');
     });
 
@@ -106,7 +115,7 @@ describe('baseDisplayMessages dedup', () => {
         expect(result[0]?.info.id).toBe('msg-1');
     });
 
-    test('all messages sharing same ID keeps only first', () => {
+    test('all messages sharing same ID keeps only the latest value', () => {
         const msg1 = createMessageEntry({ id: 'same-id', role: 'user', createdAt: 1 });
         const msg2 = createMessageEntry({ id: 'same-id', role: 'assistant', createdAt: 2 });
         const msg3 = createMessageEntry({ id: 'same-id', role: 'user', createdAt: 3 });
@@ -116,6 +125,7 @@ describe('baseDisplayMessages dedup', () => {
         expect(result).toHaveLength(1);
         expect(result[0]?.info.id).toBe('same-id');
         expect(result[0]?.info.role).toBe('user');
+        expect(result[0]?.info.time.created).toBe(3);
     });
 
     test('deduplication scenario: prepend history with overlapping IDs', () => {
@@ -133,10 +143,10 @@ describe('baseDisplayMessages dedup', () => {
 
         const result = deduplicateMessages(messages);
 
-        // Should keep all unique IDs, first occurrence wins
+        // Keep the prepended ordering position while retaining the existing value.
         expect(result).toHaveLength(3);
         expect(result[0]?.info.id).toBe('msg-0'); // prepended (oldest)
-        expect(result[1]?.info.id).toBe('msg-1'); // first occurrence from prepend
+        expect(result[1]).toBe(existingMsg1);
         expect(result[2]?.info.id).toBe('msg-2'); // existing
     });
 
@@ -149,16 +159,16 @@ describe('baseDisplayMessages dedup', () => {
 
         expect(result).toHaveLength(1);
         expect(result[0]?.info.id).toBe('msg-1');
+        expect(result[0]?.info.time.created).toBe(3);
     });
 
-    test('preserves first occurrence when duplicates appear later', () => {
+    test('preserves first position while using a later duplicate value', () => {
         const msg1First = createMessageEntry({ id: 'msg-1', role: 'user', createdAt: 1 });
         const msg1Later = createMessageEntry({ id: 'msg-1', role: 'assistant', createdAt: 5 });
 
         const result = deduplicateMessages([msg1First, msg1Later]);
 
         expect(result).toHaveLength(1);
-        // Should keep the first occurrence (createdAt: 1), not the later one
-        expect(result[0]?.info.role).toBe('user');
+        expect(result[0]?.info.role).toBe('assistant');
     });
 });

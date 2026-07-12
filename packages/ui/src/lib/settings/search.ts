@@ -187,6 +187,20 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['suggestion', 'assist', 'small model', 'follow up'],
   },
   {
+    id: 'chat.session-goal',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.sessionGoal',
+    keywords: ['goal', 'objective', 'auto continue', 'small model'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'chat.session-goal-budget',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.goal.budgetLabel',
+    keywords: ['goal', 'budget', 'tokens', 'limit'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'chat.reasoning-traces',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.showReasoningTraces',

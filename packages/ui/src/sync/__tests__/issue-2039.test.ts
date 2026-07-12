@@ -323,6 +323,7 @@ describe("issue 2039 draft auto-accept", () => {
       providerID: "provider",
       modelID: "model",
     })
+    await new Promise((resolve) => setTimeout(resolve, 0))
 
     expect(result?.sessionId).toBe("ses_issue_2039")
     expect(createSessionCalls).toHaveLength(1)

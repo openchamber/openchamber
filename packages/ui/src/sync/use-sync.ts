@@ -360,14 +360,14 @@ export function useSync() {
           mode: "replace" | "prepend" | undefined,
           isStale?: () => boolean,
         ) => {
+          if (isStale?.()) {
+            return { messages: [], cursor: page.cursor, complete: page.complete }
+          }
+
           const items = getOptimistic(sessionID)
           const merged = mergeOptimisticPage(page, items)
           for (const messageID of merged.confirmed) {
             clearOptimistic(sessionID, messageID)
-          }
-
-          if (isStale?.()) {
-            return { messages: [], cursor: merged.cursor, complete: merged.complete }
           }
 
           const current = store.getState()
@@ -447,8 +447,9 @@ export function useSync() {
         // user sees content as soon as a user boundary appears, instead of
         // waiting for the full expansion sequence before the first paint.
         if (!options?.before && !page.complete && !hasUserMessage(page.session)) {
-          for (const nextLimit of getInitialPageExpansionLimits()) {
-            if (nextLimit <= limit) continue
+          const expansionLimits = getInitialPageExpansionLimits().filter((nextLimit) => nextLimit > limit)
+          for (let index = 0; index < expansionLimits.length; index += 1) {
+            const nextLimit = expansionLimits[index]
             if (options?.isStale?.()) {
               setMetaFor(sessionID, { loading: false })
               return
@@ -458,12 +459,22 @@ export function useSync() {
               setMetaFor(sessionID, { loading: false })
               return
             }
-            committed = commitMessagesToStore(expandedPage, options?.mode, options?.isStale)
+            const hasBoundary = hasUserMessage(expandedPage.session)
+            const isFinalExpansion = index === expansionLimits.length - 1
+            if (expandedPage.complete || hasBoundary || isFinalExpansion) {
+              committed = commitMessagesToStore(expandedPage, options?.mode, options?.isStale)
+            } else {
+              committed = {
+                messages: expandedPage.session,
+                cursor: expandedPage.cursor,
+                complete: expandedPage.complete,
+              }
+            }
             if (options?.isStale?.()) {
               setMetaFor(sessionID, { loading: false })
               return
             }
-            if (expandedPage.complete || hasUserMessage(expandedPage.session)) break
+            if (expandedPage.complete || hasBoundary) break
           }
         }
 
