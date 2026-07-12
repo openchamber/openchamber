@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
-import { isElectronShell, isDesktopShell } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isElectronShell, isDesktopShell } from '@/lib/desktop';
 import { Icon } from "@/components/icon/Icon";
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
@@ -25,15 +25,16 @@ import {
   getDesktopHostApiUrl,
   locationMatchesHost,
   normalizeHostUrl,
-  probeRelayDesktopHost,
+  getDesktopHostRuntimeSwitchOptions,
+  probeDesktopHostTransports,
   redactSensitiveUrl,
   resolveDesktopHostUrl,
+  shouldDelegateDesktopHostActivation,
   type DesktopHost,
   type HostProbeResult,
 } from '@/lib/desktopHosts';
 import { scheduleDesktopHostCandidateRefresh } from '@/lib/desktopRelayRestore';
 import { adoptRelayTunnel } from '@/lib/relay/runtime-tunnel';
-import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import {
   desktopSshConnect,
@@ -56,7 +57,7 @@ type HostStatus = {
   status: HostProbeResult['status'];
   latencyMs: number;
   /** Which transport the successful probe used (multi-transport hosts). */
-  via?: 'relay';
+  via?: 'direct' | 'relay' | 'direct-e2ee';
 };
 
 // Last known statuses survive the dropdown unmounting (it remounts on every
@@ -253,7 +254,7 @@ const resolveCurrentHost = (hosts: DesktopHost[]) => {
   // matching can't distinguish them — identify the active relay host by its
   // stable runtime key instead.
   const activeRuntimeKey = getRuntimeKey();
-  const relayMatch = hosts.find((h) => h.relay && runtimeKeyForHost(h) === activeRuntimeKey);
+  const relayMatch = hosts.find((h) => (h.relay || h.directE2ee) && runtimeKeyForHost(h) === activeRuntimeKey);
   if (relayMatch) {
     return { id: relayMatch.id, label: relayMatch.label, url: relayMatch.url };
   }
@@ -429,32 +430,15 @@ export function DesktopHostSwitcherDialog({
 
   const probeAll = React.useCallback(async (hosts: DesktopHost[]) => {
     if (!isDesktopShell()) return;
+    if (isElectronShell() && !isDesktopLocalOriginActive()) return;
     setIsProbing(true);
     try {
       const localClientToken = await getLocalClientToken();
       const results = await Promise.all(
         hosts.map(async (h) => {
-          const probeRelayLeg = async (): Promise<HostStatus> => {
-            const res = await probeRelayDesktopHost(h.relay!).catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
-            return { status: res.status, latencyMs: res.latencyMs, ...(res.status === 'ok' ? { via: 'relay' as const } : {}) };
-          };
-          // Relay-only host: no HTTP address — probe through the E2EE tunnel.
-          if (h.relay && !h.apiUrl) {
-            return [h.id, await probeRelayLeg()] as const;
-          }
-          const url = normalizeHostUrl(isElectronShell() ? getDesktopHostApiUrl(h) : h.url);
-          if (!url) {
-            return [h.id, { status: 'unreachable' as const, latencyMs: 0 } satisfies HostStatus] as const;
-          }
           const clientToken = h.id === LOCAL_HOST_ID ? localClientToken : (h.clientToken || '');
-          const res = await desktopHostProbe(url, { clientToken: clientToken || null, requestHeaders: h.requestHeaders || null }).catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
-          // Multi-transport host away from its network: the direct leg fails
-          // but the relay may still reach it.
-          if (isBlockedHostStatus(res.status) && h.relay) {
-            const relayStatus = await probeRelayLeg();
-            if (relayStatus.status === 'ok') return [h.id, relayStatus] as const;
-          }
-          return [h.id, { status: res.status, latencyMs: res.latencyMs } satisfies HostStatus] as const;
+          const selection = await probeDesktopHostTransports({ ...h, ...(clientToken ? { clientToken } : {}) });
+          return [h.id, { ...selection.probe, ...(selection.transport ? { via: selection.transport.kind } : {}) } satisfies HostStatus] as const;
         })
       );
       const next: Record<string, HostStatus> = {};
@@ -512,34 +496,51 @@ export function DesktopHostSwitcherDialog({
   }, [open]);
 
   const handleSwitch = React.useCallback(async (host: DesktopHost) => {
+    if (isElectronShell() && shouldDelegateDesktopHostActivation(isDesktopLocalOriginActive())) {
+      setSwitchingHostId(host.id);
+      try {
+        await desktopOpenNewWindowForHost(host.id);
+        onHostSwitched?.();
+      } finally {
+        setSwitchingHostId(null);
+      }
+      return;
+    }
     // Relay legs ride the E2EE tunnel activated in-renderer via
     // switchRuntimeEndpoint({ relay }); the runtime fetch/socket layers route
     // through the tunnel from the singleton registry.
-    const activateRelay = (relay: NonNullable<DesktopHost['relay']>, liveTunnel?: ReturnType<typeof createRelayTunnelClient>) => {
-      // Adopt the probe's live tunnel (when it kept one) BEFORE the switch: the
-      // activate call inside switchRuntimeEndpoint sees an equal descriptor and
-      // reuses it — no second WebSocket connect + E2EE handshake.
-      if (liveTunnel) {
-        adoptRelayTunnel({ relayUrl: relay.relayUrl, serverId: relay.serverId, hostEncPubJwk: relay.hostEncPubJwk }, liveTunnel);
+    const activateTransport = (
+      transport: NonNullable<Awaited<ReturnType<typeof probeDesktopHostTransports>>['transport']>,
+      clientToken: string,
+    ): boolean => {
+      const options = getDesktopHostRuntimeSwitchOptions(
+        { ...host, clientToken: clientToken || undefined },
+        transport,
+        window.location.origin,
+        runtimeKeyForHost(host),
+      );
+      if (!options) {
+        if (transport.kind === 'relay') transport.tunnel?.close();
+        return false;
       }
-      switchRuntimeEndpoint({
-        apiBaseUrl: typeof window !== 'undefined' ? window.location.origin : '',
-        clientToken: host.clientToken || null,
-        runtimeKey: runtimeKeyForHost(host),
-        relay,
-      });
-      // On the relay: learn the server's current LAN address in the background
-      // and hot-switch back to direct if the stored one merely went stale.
-      scheduleDesktopHostCandidateRefresh(host.id);
+      // Adopt the probe's live relay tunnel before switching so activation does
+      // not pay for a second WebSocket connection and E2EE handshake.
+      if (transport.kind === 'relay' && transport.tunnel) {
+        adoptRelayTunnel(transport.descriptor, transport.tunnel);
+      }
+      switchRuntimeEndpoint(options);
+      if (transport.kind === 'relay') {
+        scheduleDesktopHostCandidateRefresh(host.id);
+      }
+      return true;
     };
-
     const origin = host.id === LOCAL_HOST_ID ? localOrigin : (normalizeHostUrl(host.url) || '');
     const apiOrigin = host.id === LOCAL_HOST_ID ? localOrigin : (normalizeHostUrl(getDesktopHostApiUrl(host)) || '');
-    const relayOnly = Boolean(host.relay) && !host.apiUrl && host.id !== LOCAL_HOST_ID;
+    const relayOnly = Boolean(host.relay || host.directE2ee) && !host.apiUrl && host.id !== LOCAL_HOST_ID;
     if (!origin && !relayOnly) return;
 
     if (isElectronShell()) {
-      if (!apiOrigin && !host.relay) return;
+      if (!apiOrigin && !host.relay && !host.directE2ee) return;
       setSwitchingHostId(host.id);
       const clientToken = host.id === LOCAL_HOST_ID ? await getLocalClientToken() : (host.clientToken || '');
 
@@ -548,12 +549,16 @@ export function DesktopHostSwitcherDialog({
       // flashed transient Unreachable states over a known-good host).
       const cached = statusById[host.id];
       if (cached?.status === 'ok') {
-        if (cached.via === 'relay' && host.relay) {
-          activateRelay(host.relay);
-        } else if (apiOrigin) {
-          switchRuntimeEndpoint({ apiBaseUrl: apiOrigin, clientToken: clientToken || null, requestHeaders: host.requestHeaders || null, runtimeKey: runtimeKeyForHost(host) });
-        } else if (host.relay) {
-          activateRelay(host.relay);
+        const transport = cached.via === 'direct-e2ee' && host.directE2ee
+          ? { kind: 'direct-e2ee' as const, descriptor: host.directE2ee }
+          : cached.via === 'relay' && host.relay
+            ? { kind: 'relay' as const, descriptor: host.relay }
+            : cached.via === 'direct' && apiOrigin
+              ? { kind: 'direct' as const, url: apiOrigin }
+              : null;
+        if (!transport || !activateTransport(transport, clientToken)) {
+          setSwitchingHostId(null);
+          return;
         }
         onHostSwitched?.();
         setSwitchingHostId(null);
@@ -563,34 +568,30 @@ export function DesktopHostSwitcherDialog({
       // No usable probe result — probe now: direct first, relay fallback.
       // Statuses are written once, with the final outcome, so the row never
       // flashes intermediate failures while the fallback is still running.
-      let finalStatus: HostStatus = { status: 'unreachable', latencyMs: 0 };
-      let transport: 'direct' | 'relay' | null = null;
-      if (apiOrigin) {
-        const probe = await desktopHostProbe(apiOrigin, { clientToken: clientToken || null, requestHeaders: host.requestHeaders || null }).catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
-        finalStatus = { status: probe.status, latencyMs: probe.latencyMs };
-        if (!isBlockedHostStatus(probe.status)) transport = 'direct';
-      }
-      let relayProbeTunnel: ReturnType<typeof createRelayTunnelClient> | undefined;
-      if (!transport && host.relay) {
-        const probe = await probeRelayDesktopHost(host.relay, { keepTunnel: true })
-          .catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
-        if (probe.status === 'ok') {
-          finalStatus = { status: probe.status, latencyMs: probe.latencyMs, via: 'relay' };
-          transport = 'relay';
-          relayProbeTunnel = 'tunnel' in probe ? probe.tunnel : undefined;
-        }
-      }
+      const selection = await probeDesktopHostTransports({ ...host, ...(clientToken ? { clientToken } : {}) });
+      const finalStatus: HostStatus = { ...selection.probe, ...(selection.transport ? { via: selection.transport.kind } : {}) };
       setStatusById((prev) => ({ ...prev, [host.id]: finalStatus }));
 
-      if (!transport) {
+      if (!selection.transport) {
         toast.error(t('desktopHostSwitcher.toast.instanceUnreachable', { host: redactSensitiveUrl(host.label) }));
         setSwitchingHostId(null);
         return;
       }
-      if (transport === 'relay' && host.relay) {
-        activateRelay(host.relay, relayProbeTunnel);
-      } else {
-        switchRuntimeEndpoint({ apiBaseUrl: apiOrigin, clientToken: clientToken || null, requestHeaders: host.requestHeaders || null, runtimeKey: runtimeKeyForHost(host) });
+      if (!activateTransport(selection.transport, clientToken)) {
+        setSwitchingHostId(null);
+        return;
+      }
+      if (selection.lateDirect && selection.directUrl) {
+        void selection.lateDirect.then((probe) => {
+          if (isBlockedHostStatus(probe.status)) return;
+          if (getRuntimeKey() !== runtimeKeyForHost(host)) return;
+          switchRuntimeEndpoint({
+            apiBaseUrl: selection.directUrl!,
+            clientToken: clientToken || null,
+            requestHeaders: host.requestHeaders || null,
+            runtimeKey: runtimeKeyForHost(host),
+          });
+        });
       }
       onHostSwitched?.();
       setSwitchingHostId(null);
@@ -752,9 +753,13 @@ export function DesktopHostSwitcherDialog({
         description: err instanceof Error ? err.message : String(err),
       });
     };
+    if (isElectronShell() && shouldDelegateDesktopHostActivation(isDesktopLocalOriginActive())) {
+      desktopOpenNewWindowForHost(host.id).catch(reportFailure);
+      return;
+    }
     // Relay-capable hosts can't be expressed as a fixed window URL — the new
     // window boots the local UI and picks direct-vs-tunnel itself.
-    if (host.relay && host.id !== LOCAL_HOST_ID) {
+    if ((host.relay || host.directE2ee) && host.id !== LOCAL_HOST_ID) {
       desktopOpenNewWindowForHost(host.id).catch(reportFailure);
       return;
     }
@@ -943,7 +948,7 @@ export function DesktopHostSwitcherDialog({
                 // Relay-only hosts have a relay:// pseudo-URL that means nothing
                 // to a person — say how the connection works instead. Hosts with
                 // a direct leg show their address.
-                const displayUrl = host.relay && !host.apiUrl ? t('mobile.connect.relay.badge') : redactSensitiveUrl(effectiveUrl);
+                 const displayUrl = (host.relay || host.directE2ee) && !host.apiUrl ? t('mobile.connect.relay.badge') : redactSensitiveUrl(effectiveUrl);
 
                 return (
                   <div
