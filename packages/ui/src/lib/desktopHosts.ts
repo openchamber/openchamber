@@ -111,6 +111,8 @@ export type DesktopHostTransport =
 export type DesktopHostSelection = {
   probe: HostProbeResult;
   transport: DesktopHostTransport | null;
+  lateDirect?: Promise<HostProbeResult>;
+  directUrl?: string;
 };
 
 export type DesktopHostRuntimeSwitchOptions = {
@@ -355,6 +357,7 @@ export const desktopInstallIdGet = async (): Promise<string> => {
 };
 
 const RELAY_PROBE_TIMEOUT_MS = 8_000;
+const RELAY_RACE_HEADSTART_MS = 1_500;
 
 /**
  * Reachability check for a relay host: open a throwaway E2EE tunnel and hit
@@ -457,17 +460,33 @@ export const probeDesktopHostTransports = async (
 ): Promise<DesktopHostSelection> => {
   let finalProbe = unreachableProbe();
   const directUrl = normalizeHostUrl(host.apiUrl || host.url);
-  if (directUrl) {
-    finalProbe = await dependencies.probeDirect(directUrl, {
+  const probeDirect = async (): Promise<HostProbeResult> => {
+    if (!directUrl) return unreachableProbe();
+    return dependencies.probeDirect(directUrl, {
       clientToken: host.clientToken || null,
       requestHeaders: host.requestHeaders || null,
       expectedServerId: host.relay?.serverId || null,
     }).catch(unreachableProbe);
-    if (!blockedDirectStatus(finalProbe.status)) {
-      return { probe: finalProbe, transport: { kind: 'direct', url: directUrl } };
-    }
-  }
+  };
+  const probeRelay = async (): Promise<DesktopHostSelection> => {
+    if (!host.relay) return { probe: unreachableProbe(), transport: null };
+    const probe: HostProbeResult & { tunnel?: ReturnType<typeof createRelayTunnelClient> } = await dependencies
+      .probeRelay(host.relay, host.clientToken || null)
+      .catch(unreachableProbe);
+    return !failedEncryptedStatus(probe.status)
+      ? { probe, transport: { kind: 'relay', descriptor: host.relay, tunnel: probe.tunnel } }
+      : { probe, transport: null };
+  };
+
+  // A managed direct-E2EE leg has terminal security semantics, so keep explicit
+  // candidate order and never let a relay race win before its verdict.
   if (host.directE2ee) {
+    if (directUrl) {
+      finalProbe = await probeDirect();
+      if (!blockedDirectStatus(finalProbe.status)) {
+        return { probe: finalProbe, transport: { kind: 'direct', url: directUrl } };
+      }
+    }
     if (!host.clientToken) {
       finalProbe = { status: 'auth', latencyMs: 1 };
     } else {
@@ -477,14 +496,54 @@ export const probeDesktopHostTransports = async (
       }
       if (terminalEncryptedFailure(finalProbe)) return { probe: finalProbe, transport: null };
     }
+    if (!host.relay) return { probe: finalProbe, transport: null };
+    return probeRelay();
   }
-  if (host.relay) {
-    finalProbe = await dependencies.probeRelay(host.relay, host.clientToken || null).catch(unreachableProbe);
-    if (!failedEncryptedStatus(finalProbe.status)) {
-      return { probe: finalProbe, transport: { kind: 'relay', descriptor: host.relay, tunnel: finalProbe.tunnel } };
+
+  if (!directUrl) return probeRelay();
+  if (!host.relay) {
+    finalProbe = await probeDirect();
+    return !blockedDirectStatus(finalProbe.status)
+      ? { probe: finalProbe, transport: { kind: 'direct', url: directUrl } }
+      : { probe: finalProbe, transport: null };
+  }
+
+  // Existing LAN+relay hosts retain direct priority while avoiding a full dead
+  // LAN timeout before relay startup. The relay selection carries the live probe
+  // tunnel, and the still-running LAN probe is exposed for a late hot-switch.
+  const directPromise = probeDirect();
+  const headstart = await Promise.race([
+    directPromise.then((probe) => ({ probe })),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), RELAY_RACE_HEADSTART_MS)),
+  ]);
+  if (headstart) {
+    if (!blockedDirectStatus(headstart.probe.status)) {
+      return { probe: headstart.probe, transport: { kind: 'direct', url: directUrl } };
     }
+    return probeRelay();
   }
-  return { probe: finalProbe, transport: null };
+
+  const relayPromise = probeRelay();
+  const first = await Promise.race([
+    directPromise.then((probe) => ({ kind: 'direct' as const, probe })),
+    relayPromise.then((selection) => ({ kind: 'relay' as const, selection })),
+  ]);
+  if (first.kind === 'direct') {
+    if (!blockedDirectStatus(first.probe.status)) {
+      void relayPromise.then((selection) => {
+        if (selection.transport?.kind === 'relay') selection.transport.tunnel?.close();
+      });
+      return { probe: first.probe, transport: { kind: 'direct', url: directUrl } };
+    }
+    return relayPromise;
+  }
+  if (first.selection.transport) {
+    return { ...first.selection, lateDirect: directPromise, directUrl };
+  }
+  const lateDirect = await directPromise;
+  return !blockedDirectStatus(lateDirect.status)
+    ? { probe: lateDirect, transport: { kind: 'direct', url: directUrl } }
+    : first.selection;
 };
 
 export const desktopHostProbe = async (url: string, options?: { clientToken?: string | null; requestHeaders?: Record<string, string> | null; expectedServerId?: string | null }): Promise<HostProbeResult> => {
