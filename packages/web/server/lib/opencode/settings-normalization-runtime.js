@@ -75,16 +75,17 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     const uppercaseDriveLetter = (p) =>
       p.replace(/^([a-z]):/, (_, letter) => letter.toUpperCase() + ':');
 
-    const caseNormalized = uppercaseDriveLetter(trimmed);
+    const isWindows = processLike.platform === 'win32';
+    const caseNormalized = isWindows ? uppercaseDriveLetter(trimmed) : trimmed;
     const resolved = options.resolveRealpath === false ? caseNormalized : safeRealpathSync(caseNormalized);
 
     // Re-normalize after realpath — safeRealpathSync may return a
     // lowercase drive letter on some Windows environments.
-    const finalResolved = typeof resolved === 'string'
+    const finalResolved = isWindows && typeof resolved === 'string'
       ? uppercaseDriveLetter(resolved)
       : resolved;
 
-    if (processLike.platform !== 'win32') {
+    if (!isWindows) {
       return finalResolved;
     }
 

@@ -53,6 +53,12 @@ describe('settings normalization runtime - symlink resolution', () => {
       expect(result).toBe('/some/path');
     });
 
+    it('preserves lowercase colon-prefixed paths on non-Windows platforms', () => {
+      const runtime = createTestRuntime({ realpathSync: undefined });
+
+      expect(runtime.normalizePathForPersistence('c:project')).toBe('c:project');
+    });
+
     it('uppercases Windows drive letter before and after realpath resolution', () => {
       const runtime = createTestRuntime({
         processLike: { platform: 'win32', env: {} },
