@@ -1177,6 +1177,7 @@ export interface ClientAuthAPI {
     // produces a relay-only link (no direct candidate).
     includeRelay?: boolean;
     includeDirect?: boolean;
+    includeDirectE2ee?: boolean;
   }): Promise<PairingSessionCreateResult>;
   purgeRevokedClients(): Promise<RemoteClientPurgeRevokedResult>;
   revokeClient(id: string): Promise<RemoteClientRevokeResult>;
@@ -1185,7 +1186,7 @@ export interface ClientAuthAPI {
   cancelPairing(id: string): Promise<{ cancelled: boolean }>;
   // Direct transports the server can be reached on, for the create-device dialog.
   // LAN reflects the server's actual bind, independent of the UI origin.
-  getPairingTransports(): Promise<{ local: string | null; lan: string | null; relayAvailable: boolean }>;
+  getPairingTransports(): Promise<{ local: string | null; lan: string | null; relayAvailable: boolean; directE2eeAvailable?: boolean }>;
 }
 
 export interface RuntimeAPIs {

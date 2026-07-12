@@ -49,6 +49,7 @@ export const createWebClientAuthAPI = (): ClientAuthAPI => ({
         ...(input.serverUrl ? { serverUrl: input.serverUrl } : {}),
         ...(typeof input.includeRelay === 'boolean' ? { includeRelay: input.includeRelay } : {}),
         ...(typeof input.includeDirect === 'boolean' ? { includeDirect: input.includeDirect } : {}),
+        ...(typeof input.includeDirectE2ee === 'boolean' ? { includeDirectE2ee: input.includeDirectE2ee } : {}),
       }),
     });
     const payload = await jsonOrNull<PairingSessionCreateResult & { error?: string }>(response);
@@ -70,16 +71,16 @@ export const createWebClientAuthAPI = (): ClientAuthAPI => ({
     return Array.isArray(payload.pending) ? payload.pending : [];
   },
 
-  async getPairingTransports(): Promise<{ local: string | null; lan: string | null; relayAvailable: boolean }> {
+  async getPairingTransports(): Promise<{ local: string | null; lan: string | null; relayAvailable: boolean; directE2eeAvailable?: boolean }> {
     const response = await runtimeFetch('/api/client-auth/pairing/transports', {
       method: 'GET',
       headers: { Accept: 'application/json' },
     });
-    const payload = await jsonOrNull<{ local?: string | null; lan?: string | null; relayAvailable?: boolean; error?: string }>(response);
+    const payload = await jsonOrNull<{ local?: string | null; lan?: string | null; relayAvailable?: boolean; directE2eeAvailable?: boolean; error?: string }>(response);
     if (!response.ok || !payload) {
       throw new Error(payload?.error || response.statusText || 'Failed to load pairing transports');
     }
-    return { local: payload.local ?? null, lan: payload.lan ?? null, relayAvailable: payload.relayAvailable !== false };
+    return { local: payload.local ?? null, lan: payload.lan ?? null, relayAvailable: payload.relayAvailable !== false, directE2eeAvailable: !!payload.directE2eeAvailable };
   },
 
   async cancelPairing(id: string): Promise<{ cancelled: boolean }> {
