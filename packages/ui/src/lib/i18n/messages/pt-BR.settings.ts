@@ -1436,6 +1436,7 @@ export const settingsDict = {
   "settings.openchamber.defaults.backgroundAutoAccept.label": "Aceitação automática em segundo plano",
   "settings.openchamber.defaults.backgroundAutoAccept.description": "Mantém ativas suas políticas existentes de aceitação automática de permissões quando nenhum cliente de interface está conectado.",
   "settings.openchamber.defaults.backgroundAutoAccept.warning": "Aviso: o OpenChamber aprovará automaticamente as permissões correspondentes enquanto esta opção estiver ativada.",
+  "settings.openchamber.defaults.backgroundAutoAccept.saveFailed": "Não foi possível salvar a configuração de aceitação automática em segundo plano",
   "settings.openchamber.defaults.field.openFilesPreviewAria": "Abrir arquivos em modo prévia",
   "settings.openchamber.defaults.field.openFilesPreview": "Abrir arquivos em modo prévia",
   "settings.openchamber.defaults.option.default": "Padrão",

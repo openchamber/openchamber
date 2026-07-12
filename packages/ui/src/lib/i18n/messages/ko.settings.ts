@@ -1436,6 +1436,7 @@ export const settingsDict = {
   'settings.openchamber.defaults.backgroundAutoAccept.label': '백그라운드 자동 승인',
   'settings.openchamber.defaults.backgroundAutoAccept.description': 'UI 클라이언트가 연결되지 않은 경우에도 기존 권한 자동 승인 정책을 활성 상태로 유지합니다.',
   'settings.openchamber.defaults.backgroundAutoAccept.warning': '경고: 이 옵션이 활성화되어 있는 동안 OpenChamber가 일치하는 권한을 자동으로 승인합니다.',
+  'settings.openchamber.defaults.backgroundAutoAccept.saveFailed': '백그라운드 자동 승인 설정을 저장하지 못했습니다',
   'settings.openchamber.defaults.field.openFilesPreviewAria': '파일을 미리보기 모드로 열기',
   'settings.openchamber.defaults.field.openFilesPreview': '파일을 미리보기 모드로 열기',
   'settings.openchamber.defaults.option.default': '기본값',

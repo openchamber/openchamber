@@ -10,12 +10,11 @@ import { useUIStore } from '@/stores/useUIStore';
 import { usePermissionStore } from '@/stores/permissionStore';
 import { useBackgroundAutoAcceptStore } from '@/stores/backgroundAutoAcceptStore';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
-import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { opencodeClient } from '@/lib/opencode/client';
 
 const getDisplayModel = (
   storedModel: string | undefined
@@ -30,7 +29,6 @@ const getDisplayModel = (
 
 export const DefaultsSettings: React.FC = () => {
   const { t } = useI18n();
-  const { runtime } = useRuntimeAPIs();
   const setProvider = useConfigStore((state) => state.setProvider);
   const setModel = useConfigStore((state) => state.setModel);
   const setAgent = useConfigStore((state) => state.setAgent);
@@ -42,7 +40,6 @@ export const DefaultsSettings: React.FC = () => {
   const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
   const providers = useConfigStore((state) => state.providers);
   const backgroundAutoAcceptEnabled = useBackgroundAutoAcceptStore((state) => state.enabled);
-  const backgroundAutoAcceptLoading = useBackgroundAutoAcceptStore((state) => state.loading);
   const backgroundAutoAcceptSaving = useBackgroundAutoAcceptStore((state) => state.saving);
   const setBackgroundAutoAcceptEnabled = useBackgroundAutoAcceptStore((state) => state.setEnabled);
 
@@ -56,18 +53,16 @@ export const DefaultsSettings: React.FC = () => {
 
   const parsedModel = React.useMemo(() => getDisplayModel(defaultModel), [defaultModel]);
 
-  const handleBackgroundAutoAcceptChange = React.useCallback(async (enabled: boolean) => {
+  const handleBackgroundAutoAcceptChange = async (enabled: boolean) => {
     try {
-      const directory = opencodeClient.getDirectory();
       await setBackgroundAutoAcceptEnabled(
         enabled,
-        { ...usePermissionStore.getState().autoAccept },
-        directory ? [directory] : [],
+        usePermissionStore.getState().autoAccept,
       );
     } catch {
-      toast.error(t('settings.mcp.page.toast.saveFailed'));
+      toast.error(t('settings.openchamber.defaults.backgroundAutoAccept.saveFailed'));
     }
-  }, [setBackgroundAutoAcceptEnabled, t]);
+  };
 
   React.useEffect(() => {
     const loadSettings = async () => {
@@ -386,12 +381,12 @@ export const DefaultsSettings: React.FC = () => {
           <span className="typography-ui-label text-foreground">{t('settings.openchamber.defaults.field.showDeletionDialog')}</span>
         </div>
 
-        {!runtime.isVSCode ? (
+        {!isVSCodeRuntime() ? (
           <div data-settings-item="sessions.background-auto-accept" className="py-1.5">
             <div className="flex items-center gap-2">
               <Checkbox
                 checked={backgroundAutoAcceptEnabled === true}
-                disabled={backgroundAutoAcceptEnabled === null || backgroundAutoAcceptLoading || backgroundAutoAcceptSaving}
+                disabled={backgroundAutoAcceptEnabled === null || backgroundAutoAcceptSaving}
                 onChange={(enabled) => void handleBackgroundAutoAcceptChange(enabled)}
                 ariaLabel={t('settings.openchamber.defaults.backgroundAutoAccept.label')}
               />

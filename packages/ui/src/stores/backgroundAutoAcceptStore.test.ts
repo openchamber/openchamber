@@ -27,9 +27,9 @@ describe('background auto-accept store', () => {
       return json({ enabled: true });
     };
 
-    await useBackgroundAutoAcceptStore.getState().setEnabled(true, { session: true }, ['/project']);
+    await useBackgroundAutoAcceptStore.getState().setEnabled(true, { session: true });
 
-    expect(body).toEqual({ enabled: true, policies: { session: true }, directories: ['/project'] });
+    expect(body).toEqual({ enabled: true, policies: { session: true } });
     expect(useBackgroundAutoAcceptStore.getState().enabled).toBe(true);
   });
 

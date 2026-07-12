@@ -1469,6 +1469,7 @@ export const settingsDict = {
   'settings.openchamber.defaults.backgroundAutoAccept.label': 'バックグラウンド自動承認',
   'settings.openchamber.defaults.backgroundAutoAccept.description': 'UI クライアントが接続されていない場合も、既存の権限自動承認ポリシーを有効に保ちます。',
   'settings.openchamber.defaults.backgroundAutoAccept.warning': '警告: 有効中は、OpenChamber が一致する権限を自動的に承認します。',
+  'settings.openchamber.defaults.backgroundAutoAccept.saveFailed': 'バックグラウンド自動承認の設定を保存できませんでした',
   'settings.openchamber.defaults.field.openFilesPreviewAria': 'ファイルをプレビューモードで開く',
   'settings.openchamber.defaults.field.openFilesPreview': 'ファイルをプレビューモードで開く',
   'settings.openchamber.defaults.option.default': 'デフォルト',

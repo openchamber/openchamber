@@ -681,6 +681,7 @@ export const settingsDict = {
   'settings.openchamber.defaults.backgroundAutoAccept.label': 'Automatyczna akceptacja w tle',
   'settings.openchamber.defaults.backgroundAutoAccept.description': 'Utrzymuje aktywne istniejące zasady automatycznej akceptacji uprawnień, gdy żaden klient interfejsu nie jest połączony.',
   'settings.openchamber.defaults.backgroundAutoAccept.warning': 'Ostrzeżenie: gdy ta opcja jest włączona, OpenChamber automatycznie zatwierdza pasujące uprawnienia.',
+  'settings.openchamber.defaults.backgroundAutoAccept.saveFailed': 'Nie udało się zapisać ustawienia automatycznej akceptacji w tle',
   'settings.openchamber.defaults.smallModel.title': 'Mały model',
   'settings.openchamber.defaults.smallModel.description': 'Tani model do szybkich zadań pomocniczych, takich jak krótkie podsumowania.',
   'settings.openchamber.defaults.smallModel.useDefault': 'Używaj domyślnego małego modelu',

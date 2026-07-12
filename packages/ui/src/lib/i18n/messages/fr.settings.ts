@@ -1364,6 +1364,7 @@ export const settingsDict = {
   'settings.openchamber.defaults.backgroundAutoAccept.label': 'Acceptation automatique en arrière-plan',
   'settings.openchamber.defaults.backgroundAutoAccept.description': 'Maintient vos politiques existantes d’acceptation automatique des autorisations actives lorsqu’aucun client d’interface n’est connecté.',
   'settings.openchamber.defaults.backgroundAutoAccept.warning': 'Avertissement : OpenChamber approuvera automatiquement les autorisations correspondantes tant que cette option est activée.',
+  'settings.openchamber.defaults.backgroundAutoAccept.saveFailed': 'Impossible d’enregistrer le réglage d’acceptation automatique en arrière-plan',
   'settings.openchamber.defaults.field.openFilesPreviewAria': 'Ouvrir les fichiers en mode aperçu',
   'settings.openchamber.defaults.field.openFilesPreview': 'Ouvrir les fichiers en mode aperçu',
   'settings.openchamber.defaults.option.default': 'Défaut',

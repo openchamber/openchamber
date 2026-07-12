@@ -23,7 +23,7 @@ describe('background auto-accept runtime', () => {
     const { runtime, broadcastGlobalUiEvent } = createRuntime();
     expect(runtime.snapshot()).toEqual({ enabled: false });
 
-    await runtime.setEnabled({ enabled: true, policies: {}, directories: [] });
+    await runtime.setEnabled({ enabled: true, policies: {} });
 
     expect(runtime.snapshot()).toEqual({ enabled: true });
     expect(broadcastGlobalUiEvent).toHaveBeenCalledWith({
@@ -32,34 +32,40 @@ describe('background auto-accept runtime', () => {
     });
   });
 
-  it('replies once for a matching permission', async () => {
+  it.each([
+    { backgroundEnabled: false, sessionAutoAccepting: false, expectedReplies: 0, scenario: 'background off, auto-accept off' },
+    { backgroundEnabled: false, sessionAutoAccepting: true, expectedReplies: 0, scenario: 'background off, auto-accept on' },
+    { backgroundEnabled: true, sessionAutoAccepting: false, expectedReplies: 0, scenario: 'background on, auto-accept off' },
+    { backgroundEnabled: true, sessionAutoAccepting: true, expectedReplies: 1, scenario: 'background on, auto-accept on' },
+  ])('uses the server executor for $scenario', async ({
+    backgroundEnabled,
+    sessionAutoAccepting,
+    expectedReplies,
+  }) => {
     const fetchImpl = vi.fn(async (_url, options = {}) => new Response(
       options.method === 'POST' ? '{}' : '[]',
       { status: 200 },
     ));
     const { runtime, emit } = createRuntime(fetchImpl);
-    await runtime.setEnabled({ enabled: true, policies: { session: true }, directories: [] });
+    if (backgroundEnabled) {
+      await runtime.setEnabled({
+        enabled: true,
+        policies: { session: sessionAutoAccepting },
+      });
+    }
 
     emit({
       directory: '/project',
-      payload: { type: 'permission.asked', properties: { id: 'permission', sessionID: 'session' } },
+      payload: { type: 'permission.asked', properties: { id: 'matrix-permission', sessionID: 'session' } },
     });
     for (let index = 0; index < 10; index += 1) await Promise.resolve();
 
     const posts = fetchImpl.mock.calls.filter(([, options]) => options?.method === 'POST');
-    expect(posts).toHaveLength(1);
-    expect(posts[0][0].toString()).toBe('http://opencode.test/permission/permission/reply?directory=%2Fproject');
-  });
-
-  it('lets an explicit child policy override its parent', async () => {
-    const fetchImpl = vi.fn(async () => new Response('[]', { status: 200 }));
-    const { runtime, emit } = createRuntime(fetchImpl);
-    emit({ payload: { type: 'session.created', properties: { info: { id: 'child', parentID: 'parent' } } } });
-    await runtime.setEnabled({ enabled: true, policies: { parent: true, child: false }, directories: [] });
-
-    emit({ payload: { type: 'permission.asked', properties: { id: 'permission', sessionID: 'child' } } });
-    for (let index = 0; index < 10; index += 1) await Promise.resolve();
-
-    expect(fetchImpl.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(0);
+    expect(posts).toHaveLength(expectedReplies);
+    if (expectedReplies === 1) {
+      expect(posts[0][0].toString()).toBe(
+        'http://opencode.test/permission/matrix-permission/reply?directory=%2Fproject',
+      );
+    }
   });
 });

@@ -1347,6 +1347,7 @@
   'settings.openchamber.defaults.backgroundAutoAccept.label': '背景自動核准',
   'settings.openchamber.defaults.backgroundAutoAccept.description': '沒有 UI 用戶端連線時，仍保留現有的權限自動核准規則。',
   'settings.openchamber.defaults.backgroundAutoAccept.warning': '警告：啟用後，OpenChamber 會自動核准相符的權限請求。',
+  'settings.openchamber.defaults.backgroundAutoAccept.saveFailed': '無法儲存背景自動核准設定',
   'settings.openchamber.defaults.field.openFilesPreviewAria': '以預覽模式開啟檔案',
   'settings.openchamber.defaults.field.openFilesPreview': '以預覽模式開啟檔案',
   'settings.openchamber.defaults.option.default': '預設',

@@ -227,12 +227,9 @@ export const usePermissionStore = create<PermissionStore>()(
                     const sessions = getAllSyncSessions();
                     const backgroundEnabled = useBackgroundAutoAcceptStore.getState().enabled;
                     if (backgroundEnabled === true) {
-                        const directory = useSessionUIStore.getState().getDirectoryForSession(sessionId)
-                            ?? opencodeClient.getDirectory()
-                            ?? undefined;
                         const updated = await useBackgroundAutoAcceptStore
                             .getState()
-                            .setSessionPolicy(sessionId, enabled, directory);
+                            .setSessionPolicy(sessionId, enabled);
                         if (!updated) throw new Error("Background auto-accept is disabled");
                     }
 

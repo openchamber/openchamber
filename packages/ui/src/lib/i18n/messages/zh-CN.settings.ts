@@ -1436,6 +1436,7 @@ export const settingsDict = {
   'settings.openchamber.defaults.backgroundAutoAccept.label': '后台自动批准',
   'settings.openchamber.defaults.backgroundAutoAccept.description': '在没有 UI 客户端连接时，保持现有的权限自动批准策略生效。',
   'settings.openchamber.defaults.backgroundAutoAccept.warning': '警告：启用后，OpenChamber 将自动批准匹配的权限请求。',
+  'settings.openchamber.defaults.backgroundAutoAccept.saveFailed': '无法保存后台自动批准设置',
   'settings.openchamber.defaults.field.openFilesPreviewAria': '以预览模式打开文件',
   'settings.openchamber.defaults.field.openFilesPreview': '以预览模式打开文件',
   'settings.openchamber.defaults.option.default': '默认',
