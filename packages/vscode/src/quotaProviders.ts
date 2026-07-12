@@ -453,6 +453,11 @@ export const listConfiguredQuotaProviders = () => {
     configured.add('wafer');
   }
 
+  const deepseekAuth = normalizeAuthEntry(getAuthEntry(auth, ['deepseek']));
+  if (deepseekAuth && ((deepseekAuth as Record<string, unknown>).key || (deepseekAuth as Record<string, unknown>).token)) {
+    configured.add('deepseek');
+  }
+
   return Array.from(configured);
 };
 
@@ -1862,12 +1867,118 @@ const fetchWaferQuota = async (): Promise<ProviderResult> => {
   }
 };
 
+const DEEPSEEK_BALANCE_URL = 'https://api.deepseek.com/user/balance';
+
+const currencySymbol = (currency: string) => {
+  if (currency === 'CNY') return 'CN\u00a5';
+  if (currency === 'USD') return '$';
+  return currency;
+};
+
+const formatBalanceLabel = (info: Record<string, unknown>) => {
+  const symbol = currencySymbol(info.currency as string);
+  const part = (val: unknown) => formatMoney(toNumber(val));
+  const parts = [`${symbol}${part(info.total_balance)}`];
+  const topped = toNumber(info.topped_up_balance);
+  const granted = toNumber(info.granted_balance);
+  if (topped && granted) {
+    parts.push(`(${symbol}${part(topped)} topped up + ${symbol}${part(granted)} granted)`);
+  } else if (topped) {
+    parts.push(`(${symbol}${part(topped)} topped up)`);
+  } else if (granted) {
+    parts.push(`(${symbol}${part(granted)} granted)`);
+  }
+  return parts.join(' ');
+};
+
+const fetchDeepseekQuota = async (): Promise<ProviderResult> => {
+  const auth = readAuthFile();
+  const entry = normalizeAuthEntry(getAuthEntry(auth, ['deepseek'])) as Record<string, unknown> | null;
+  const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
+
+  if (!apiKey) {
+    return buildResult({
+      providerId: 'deepseek',
+      providerName: 'DeepSeek',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+    });
+  }
+
+  try {
+    const response = await fetch(DEEPSEEK_BALANCE_URL, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      return buildResult({
+        providerId: 'deepseek',
+        providerName: 'DeepSeek',
+        ok: false,
+        configured: true,
+        error: response.status === 401
+          ? 'Invalid API key \u2014 please re-authenticate with DeepSeek'
+          : `API error: ${response.status}`,
+      });
+    }
+
+    const payload = await response.json() as Record<string, unknown>;
+    const balanceInfos = Array.isArray(payload.balance_infos) ? payload.balance_infos : [];
+
+    if (balanceInfos.length === 0) {
+      return buildResult({
+        providerId: 'deepseek',
+        providerName: 'DeepSeek',
+        ok: false,
+        configured: true,
+        error: 'No balance data returned',
+      });
+    }
+
+    const windows: Record<string, UsageWindow> = {};
+
+    for (const info of balanceInfos) {
+      const entry = info as Record<string, unknown>;
+      if (!entry || typeof entry.currency !== 'string') continue;
+      windows[entry.currency.toUpperCase()] = toUsageWindow({
+        usedPercent: null,
+        windowSeconds: null,
+        resetAt: null,
+        valueLabel: formatBalanceLabel(entry),
+      });
+    }
+
+    return buildResult({
+      providerId: 'deepseek',
+      providerName: 'DeepSeek',
+      ok: true,
+      configured: true,
+      usage: { windows },
+    });
+  } catch (error) {
+    return buildResult({
+      providerId: 'deepseek',
+      providerName: 'DeepSeek',
+      ok: false,
+      configured: true,
+      error: error instanceof Error ? error.message : 'Request failed',
+    });
+  }
+};
+
 export const fetchQuotaForProvider = async (providerId: string): Promise<ProviderResult> => {
   switch (providerId) {
     case 'claude':
       return fetchClaudeQuota();
     case 'codex':
       return fetchCodexQuota();
+    case 'deepseek':
+      return fetchDeepseekQuota();
     case 'github-copilot':
       return fetchCopilotQuota();
     case 'github-copilot-addon':
