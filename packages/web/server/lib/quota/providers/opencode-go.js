@@ -44,9 +44,10 @@ export const fetchOpenCodeGoUsage = async (credential, fetchImpl = fetch) => {
       Cookie: `auth=${credential.authCookie}`,
       'User-Agent': 'OpenChamber quota provider',
     },
+    redirect: 'manual',
     signal: AbortSignal.timeout(15_000),
   });
-  if (response.status === 401 || response.status === 403 || (response.redirected && /\/auth(?:\/|$|\?)/.test(new URL(response.url).pathname))) {
+  if (response.status === 401 || response.status === 403 || (response.status >= 300 && response.status < 400)) {
     throw new Error('OpenCode Go authentication failed');
   }
   if (!response.ok) throw new Error(`OpenCode Go dashboard returned HTTP ${response.status}`);

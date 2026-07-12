@@ -6,7 +6,8 @@ import { randomUUID } from 'crypto';
 import { removeProviderConfig, getProviderSources } from './opencodeConfig';
 import { getProviderAuth, removeProviderAuth } from './opencodeAuth';
 import { fetchQuotaForProvider, listConfiguredQuotaProviders } from './quotaProviders';
-import { deleteOpenCodeGoCredential, fetchOpenCodeGoUsage, getOpenCodeGoCredentialStatus, normalizeOpenCodeGoCredential, readOpenCodeGoCredential, writeOpenCodeGoCredential } from './opencodeGoQuota';
+import { fetchOpenCodeGoUsage } from './opencodeGoQuota';
+import { credentialStatus, deleteCredential, importCursorCredential, normalizeCredential, readCredential, validateCredential, writeCredential, type ManagedProvider } from './quotaCredentials';
 import { getSessionActivitySnapshot } from './sessionActivityWatcher';
 import type { BridgeContext, BridgeResponse } from './bridge';
 
@@ -482,21 +483,30 @@ export async function handleSystemBridgeMessage(
       }
     }
 
-    case 'api:quota:opencode-go-credentials': {
-      const { method, credential: input } = (payload || {}) as { method?: string; credential?: unknown };
+    case 'api:quota:credentials': {
+      const { providerId, method, credential: input } = (payload || {}) as { providerId?: ManagedProvider; method?: string; credential?: unknown };
       try {
-        if (method === 'GET') return { id, type, success: true, data: getOpenCodeGoCredentialStatus() };
-        if (method === 'DELETE') { deleteOpenCodeGoCredential(); return { id, type, success: true, data: { configured: false } }; }
+        if (!providerId || !['opencode-go', 'ollama-cloud', 'cursor'].includes(providerId)) return { id, type, success: false, error: 'Unsupported credential provider' };
+        if (method === 'GET') return { id, type, success: true, data: credentialStatus(providerId) };
+        if (method === 'DELETE') { deleteCredential(providerId); return { id, type, success: true, data: { configured: false } }; }
+        if (method === 'IMPORT') {
+          if (providerId !== 'cursor') return { id, type, success: false, error: 'Import unavailable' };
+          const credential = importCursorCredential();
+          await validateCredential(providerId, credential);
+          return { id, type, success: true, data: writeCredential(providerId, credential) };
+        }
         if (method === 'PUT') {
-          const credential = normalizeOpenCodeGoCredential(input);
-          if (!credential) return { id, type, success: false, error: 'Workspace ID and auth cookie are required' };
-          await fetchOpenCodeGoUsage(credential);
-          return { id, type, success: true, data: writeOpenCodeGoCredential(credential) };
+          const credential = normalizeCredential(providerId, input);
+          if (!credential) return { id, type, success: false, error: 'Invalid credential' };
+          if (providerId === 'opencode-go') await fetchOpenCodeGoUsage(credential as { workspaceId: string; authCookie: string });
+          else await validateCredential(providerId, credential);
+          return { id, type, success: true, data: writeCredential(providerId, credential) };
         }
         if (method === 'VALIDATE') {
-          const credential = readOpenCodeGoCredential();
+          const credential = readCredential(providerId);
           if (!credential) return { id, type, success: false, error: 'Not configured' };
-          await fetchOpenCodeGoUsage(credential);
+          if (providerId === 'opencode-go') await fetchOpenCodeGoUsage(credential as { workspaceId: string; authCookie: string });
+          else await validateCredential(providerId, credential);
           return { id, type, success: true, data: { valid: true } };
         }
         return { id, type, success: false, error: 'Unsupported method' };

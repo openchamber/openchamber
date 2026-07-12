@@ -1041,11 +1041,12 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     }
   }
 
-  if (pathname === '/api/quota/credentials/opencode-go' || pathname === '/api/quota/credentials/opencode-go/validate') {
+  const quotaCredentialMatch = pathname.match(/^\/api\/quota\/credentials\/(opencode-go|ollama-cloud|cursor)(?:\/(validate|import))?$/);
+  if (quotaCredentialMatch) {
     try {
       const body = method === 'PUT' ? await extractJsonBody(input, init, method) : undefined;
-      const bridgeMethod = pathname.endsWith('/validate') ? 'VALIDATE' : method;
-      const data = await sendBridgeMessage('api:quota:opencode-go-credentials', { method: bridgeMethod, credential: body });
+      const bridgeMethod = quotaCredentialMatch[2]?.toUpperCase() || method;
+      const data = await sendBridgeMessage('api:quota:credentials', { providerId: quotaCredentialMatch[1], method: bridgeMethod, credential: body });
       return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

@@ -31,7 +31,7 @@ describe('OpenCode Go credential routes', () => {
         body: JSON.stringify({ workspaceId: 'wrk_test', authCookie: 'auth=secret' }),
       });
       expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({ configured: true, workspaceId: 'wrk_test', authCookieMasked: '••••••••' });
+      expect(await response.json()).toEqual({ configured: true, workspaceId: 'wrk_test', secretMasked: '••••••••' });
     } finally {
       globalThis.fetch = originalFetch;
       server.close();
