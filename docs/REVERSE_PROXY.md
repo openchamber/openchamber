@@ -14,6 +14,7 @@ Use this guide when running OpenChamber behind Nginx, Nginx Proxy Manager, Caddy
   - `/api/event/ws`
   - `/api/global/event/ws`
   - `/api/terminal/ws`
+  - `/api/openchamber/direct-e2ee/ws` (only when intentionally exposing direct E2EE)
 - SSE without buffering:
   - `/api/event`
   - `/api/global/event`
@@ -30,6 +31,10 @@ Use this guide when running OpenChamber behind Nginx, Nginx Proxy Manager, Caddy
 - Disable gzip on the proxy if OpenChamber is already compressing responses.
 - Keep compression enabled in only one layer.
 - Forward normal proxy headers such as `Host`, `X-Forwarded-For`, and `X-Forwarded-Proto`.
+- Preserve the original `Host` header for `/api/openchamber/direct-e2ee/ws`.
+  Its credential-free outer connection carries only ciphertext,
+  and direct E2EE validates the exact authority before admitting the encrypted channel.
+  Do not add query credentials to this endpoint.
 - Increase body size limits if users upload files.
 
 ## Quick checklist
@@ -60,6 +65,18 @@ proxy_set_header X-Forwarded-Proto $scheme;
 proxy_set_header X-Forwarded-Host $host;
 
 gzip off;
+
+# Include this exact location only when intentionally reverse-proxying direct E2EE.
+location = /api/openchamber/direct-e2ee/ws {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Host $host;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
 
 location = /api/terminal/ws {
     proxy_pass http://127.0.0.1:3000;
@@ -149,6 +166,19 @@ proxy_set_header X-Forwarded-Proto $scheme;
 proxy_set_header X-Forwarded-Host $host;
 
 gzip off;
+
+# Include this exact location only when intentionally reverse-proxying direct E2EE.
+location = /api/openchamber/direct-e2ee/ws {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Host $host;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_connect_timeout 30s;
+}
 
 location = /api/terminal/ws {
     proxy_pass http://127.0.0.1:3000;
