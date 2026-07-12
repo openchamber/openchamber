@@ -22,6 +22,7 @@ import { writeSecureAtomicJson } from './secure-json-file.mjs';
 import { buildDesktopAdditionalArguments, buildRuntimeBootMetadataScript, isRuntimeBootstrapSenderAllowed, resolveRuntimeBootstrap } from './runtime-bootstrap.mjs';
 import { resolveDesktopHostsForSender } from './host-public-config.mjs';
 import { decidePairingV2DeepLink } from './pairing-deep-link.mjs';
+import { planInitialRuntime } from './initial-runtime-plan.mjs';
 import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
 
 const execFileAsync = promisify(execFile);
@@ -2162,6 +2163,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
     apiBaseUrl: desktopApiBaseUrl,
     clientToken: desktopClientToken,
     requestHeaders: desktopRequestHeaders,
+    relayHostId: rendererRuntimeConfig.relayHostId || '',
     homeDirectory: desktopHome,
   };
   browserWindow.__ocInitScript = buildInitScript(state.bootOutcome);
@@ -2401,8 +2403,8 @@ const activateMainWindow = async (url, localOrigin, bootOutcome, runtimeConfig =
 
 const openMainWindow = async () => {
   if (!state.localOrigin) {
-    const { initialUrl, localOrigin, bootOutcome, apiBaseUrl, clientToken, requestHeaders } = await resolveInitialUrl();
-    return activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
+    const { initialUrl, localOrigin, bootOutcome, apiBaseUrl, clientToken, requestHeaders, relayHostId } = await resolveInitialUrl();
+    return activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders, relayHostId });
   }
 
   const config = readDesktopHostsConfig();
@@ -2666,30 +2668,22 @@ const resolveInitialUrl = async () => {
   const localAvailable = Boolean(localUrl);
 
   const localOrigin = new URL(localUrl).origin;
-  let initialUrl = localUiUrl;
-  let apiBaseUrl = localUrl;
-  let clientToken = readDesktopLocalClientToken();
-  let requestHeaders = {};
   let remoteProbe = null;
 
   const envTarget = normalizeHostUrl(process.env.OPENCHAMBER_SERVER_URL || '');
   const config = readDesktopHostsConfig();
-  if (envTarget) {
-    apiBaseUrl = envTarget;
-    clientToken = '';
-    requestHeaders = {};
-    initialUrl = shouldUsePackagedUi() ? localUiUrl : envTarget;
-  } else if (config.defaultHostId && config.defaultHostId !== LOCAL_HOST_ID) {
-    const host = config.hosts.find((entry) => entry.id === config.defaultHostId);
-    if (host?.url) {
-      apiBaseUrl = host.apiUrl || host.url;
-      clientToken = host.clientToken || '';
-      requestHeaders = sanitizeRuntimeRequestHeaders(host.requestHeaders || {});
-      initialUrl = shouldUsePackagedUi() ? localUiUrl : host.url;
-    }
-  }
+  const initialPlan = planInitialRuntime({
+    envTarget,
+    defaultHostId: config.defaultHostId,
+    hosts: config.hosts,
+    localUiUrl,
+    localUrl,
+    localClientToken: readDesktopLocalClientToken(),
+    useRemoteUi: !shouldUsePackagedUi(),
+  });
+  let { initialUrl, apiBaseUrl, clientToken, requestHeaders, relayHostId } = initialPlan;
 
-  if (apiBaseUrl && apiBaseUrl !== localUrl) {
+  if (initialPlan.probeRemote && apiBaseUrl && apiBaseUrl !== localUrl) {
     remoteProbe = await probeHostWithTimeout(apiBaseUrl, 2_000, clientToken, requestHeaders);
     if (remoteProbe.status === 'unreachable') {
       remoteProbe = await probeHostWithTimeout(apiBaseUrl, 10_000, clientToken, requestHeaders);
@@ -2710,7 +2704,7 @@ const resolveInitialUrl = async () => {
     localAvailable,
   });
 
-  return { initialUrl, localOrigin, localUiUrl, bootOutcome, apiBaseUrl, clientToken, requestHeaders };
+  return { initialUrl, localOrigin, localUiUrl, bootOutcome, apiBaseUrl, clientToken, requestHeaders, relayHostId };
 };
 
 const compareSemver = (left, right) => {
@@ -4842,8 +4836,8 @@ app.whenReady().then(async () => {
   const initial = extractInitialDeepLinks();
   if (initial.length > 0) handleDeepLinks(initial);
 
-  const { initialUrl, localOrigin, bootOutcome, apiBaseUrl, clientToken, requestHeaders } = await resolveInitialUrl();
-  await activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
+  const { initialUrl, localOrigin, bootOutcome, apiBaseUrl, clientToken, requestHeaders, relayHostId } = await resolveInitialUrl();
+  await activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders, relayHostId });
 
   // Notify renderer on OS wake-from-sleep so the SSE event pipeline can
   // reconnect immediately instead of waiting for the heartbeat watchdog.
