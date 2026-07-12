@@ -50,6 +50,9 @@ export const createNotificationTriggerRuntime = (deps) => {
     error: 'Agent hit an error',
     question: 'Agent needs your input',
     permission: 'Agent needs permission',
+    goal_complete: 'Goal complete',
+    goal_blocked: 'Goal blocked',
+    goal_budget: 'Goal reached its token budget',
   };
 
   const toApnsGenericPayload = (payload) => {
@@ -272,6 +275,28 @@ export const createNotificationTriggerRuntime = (deps) => {
       .join(' ');
   };
 
+  // A session with an ACTIVE goal suppresses per-turn ready notifications;
+  // the session-goal runtime sends its own notification when the goal
+  // settles. Fetch failures fall through to normal notification behavior.
+  const hasActiveSessionGoal = async (sessionId, directory) => {
+    if (!sessionId) return false;
+    try {
+      const base = buildOpenCodeUrl(`/session/${encodeURIComponent(sessionId)}`, '');
+      const url = directory ? `${base}?directory=${encodeURIComponent(directory)}` : base;
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+        signal: AbortSignal.timeout(2000),
+      });
+      if (!response.ok) return false;
+      const session = await response.json().catch(() => null);
+      const goal = session?.metadata?.openchamber?.goal;
+      return Boolean(goal && typeof goal === 'object' && goal.status === 'active');
+    } catch {
+      return false;
+    }
+  };
+
   const maybeSendPushForTrigger = async (payload) => {
     if (!payload || typeof payload !== 'object') {
       return;
@@ -298,6 +323,13 @@ export const createNotificationTriggerRuntime = (deps) => {
         }
 
         if (settings.notifyOnCompletion === false) {
+          return;
+        }
+
+        // While a goal drives the session, per-turn "ready" notifications are
+        // noise produced by the goal loop itself — the goal's own settle
+        // notification (complete/blocked/budget) is the final word instead.
+        if (await hasActiveSessionGoal(sessionId, notificationDirectory)) {
           return;
         }
 
@@ -644,10 +676,48 @@ export const createNotificationTriggerRuntime = (deps) => {
     }
   };
 
+  // Goal settle push: same fanout as the trigger paths (web-push with the
+  // full text; APNs with the generic per-type title and the session name as
+  // body, so the relay never sees content).
+  const sendGoalSettlePush = async ({ sessionId, directory, status, title, body }) => {
+    let sessionName = '';
+    try {
+      const base = buildOpenCodeUrl(`/session/${encodeURIComponent(sessionId)}`, '');
+      const url = directory ? `${base}?directory=${encodeURIComponent(directory)}` : base;
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+        signal: AbortSignal.timeout(2000),
+      });
+      if (response.ok) {
+        const session = await response.json().catch(() => null);
+        if (typeof session?.title === 'string') sessionName = session.title.trim();
+      }
+    } catch {
+      // Session name is presentation sugar for the mobile push — never block on it.
+    }
+    const type = status === 'complete' ? 'goal_complete' : (status === 'budgetLimited' ? 'goal_budget' : 'goal_blocked');
+    await fanoutPush(
+      {
+        title,
+        body,
+        tag: `goal-${sessionId}`,
+        data: {
+          url: buildSessionDeepLinkUrl(sessionId),
+          sessionId,
+          sessionName,
+          type,
+        },
+      },
+      { requireNoSse: true },
+    );
+  };
+
   return {
     maybeSendPushForTrigger,
     setAutoAcceptSession,
     setGetIsWindowFocused,
     clearPendingPushBadge,
+    sendGoalSettlePush,
   };
 };

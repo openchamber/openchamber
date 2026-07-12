@@ -1,5 +1,6 @@
 import React from 'react';
 import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
+import { isCapacitorApp } from '@/lib/platform';
 
 type DeviceType = 'desktop' | 'mobile' | 'tablet';
 
@@ -32,6 +33,11 @@ const DEFAULT_DEVICE_INFO: DeviceInfo = {
   breakpoint: 'lg',
   hasTouchInput: false,
   hasTouchOnlyPointer: false,
+};
+
+const hasDesktopSurfaceOverride = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  return new URLSearchParams(window.location.search).get('surface') === 'desktop';
 };
 
 const getNavigatorDeviceHints = (maxTouchPoints: number) => {
@@ -102,8 +108,8 @@ export function getDeviceInfo(): DeviceInfo {
   const prefersCoarsePointer = pointerQuery?.matches ?? false;
   const noHover = hoverQuery?.matches ?? false;
   const maxTouchPoints = typeof navigator !== 'undefined' ? navigator.maxTouchPoints ?? 0 : 0;
-  // VS Code is a desktop surface — don't misdetect a narrow panel as mobile (#1261)
-  const isDesktopShellRuntime = isDesktopShell() || isVSCodeRuntime();
+  // Desktop panels are desktop surfaces even when their viewport is narrow.
+  const isDesktopShellRuntime = isDesktopShell() || isVSCodeRuntime() || hasDesktopSurfaceOverride();
   const { isExplicitTablet } = getNavigatorDeviceHints(maxTouchPoints);
 
   const hasTouchInput = prefersCoarsePointer || noHover || maxTouchPoints > 0;
@@ -122,6 +128,15 @@ export function getDeviceInfo(): DeviceInfo {
     isTablet = false;
     isDesktop = true;
     deviceType = 'desktop';
+  } else if (isCapacitorApp()) {
+    // The Capacitor shell IS the phone UI: every surface in that bundle is
+    // built mobile-first, so wide devices (iPad, Android tablets) must not
+    // fall into tablet/desktop branches scattered across shared components.
+    // iPad-specific layout upgrades gate on isIPadApp()/orientation instead.
+    isMobile = true;
+    isTablet = false;
+    isDesktop = false;
+    deviceType = 'mobile';
   } else if (isMobile) {
     deviceType = 'mobile';
   } else if (isTablet) {
@@ -346,6 +361,27 @@ export function useTabletStandalonePwaRuntime(): boolean {
   }, []);
 
   return value;
+}
+
+export type Orientation = 'portrait' | 'landscape';
+
+const getOrientation = (): Orientation => {
+  if (typeof window === 'undefined') return 'portrait';
+  return window.matchMedia?.('(orientation: landscape)')?.matches ? 'landscape' : 'portrait';
+};
+
+export function useOrientation(): Orientation {
+  const [orientation, setOrientation] = React.useState<Orientation>(getOrientation);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const query = window.matchMedia('(orientation: landscape)');
+    const update = () => setOrientation(query.matches ? 'landscape' : 'portrait');
+    update();
+    return attachMediaQueryListener(query, update);
+  }, []);
+
+  return orientation;
 }
 
 export function useDeviceInfo(): DeviceInfo {

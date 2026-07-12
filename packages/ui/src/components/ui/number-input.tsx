@@ -110,10 +110,26 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
       return 0
     }, [fallbackValue, min, value])
 
+    // Tracks the most recent user-committed snapshot so back-to-back clicks
+    // within the same render cycle operate on the latest value, not the stale
+    // `value` prop (which only updates after the parent re-renders in response
+    // to onValueChange). See packages/ui/src/components/ui/number-input.test.tsx.
+    const committedValueRef = React.useRef<number>(baseValue)
+
+    // Assumes a well-behaved controlled parent: when the parent updates the
+    // `value` prop, the effect syncs the ref. If a parent ever rejects or
+    // debounces `onValueChange`, the ref can briefly lead the prop. Today no
+    // production caller rejects; revisit if a debounced caller is added.
+    React.useEffect(() => {
+      committedValueRef.current = baseValue
+    }, [baseValue])
+
     const commitValue = React.useCallback(
       (rawValue: number) => {
         const clamped = clamp(rawValue, min, max)
-        onValueChange(normalizeToStep(clamped, step))
+        const normalized = normalizeToStep(clamped, step)
+        committedValueRef.current = normalized
+        onValueChange(normalized)
       },
       [max, min, onValueChange, step]
     )
@@ -155,14 +171,21 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
           const clamped = clamp(parsed, min, max)
           const normalized = normalizeToStep(clamped, step)
           if (normalized !== value) {
-            onValueChange(normalized)
+            // Route through commitValue so committedValueRef stays in sync with
+            // the typed value. Without this, a typed-then-stepper sequence
+            // would read a stale ref and drift. See number-input.test.tsx.
+            commitValue(parsed)
+          } else {
+            // No effective change, but keep the ref aligned with the prop in
+            // case it diverged via the baseValue useEffect.
+            committedValueRef.current = normalized
           }
           setDraft(String(normalized))
         }
 
         onBlur?.(event)
       },
-      [draft, max, min, onBlur, onClear, onValueChange, step, value]
+      [commitValue, draft, max, min, onBlur, onClear, step, value]
     )
 
     const incrementDisabled = Boolean(disabled || baseValue >= max)
@@ -170,13 +193,13 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
 
     const handleMobileDecrement = () => {
       if (!decrementDisabled) {
-        commitValue(baseValue - step)
+        commitValue(committedValueRef.current - step)
       }
     }
 
     const handleMobileIncrement = () => {
       if (!incrementDisabled) {
-        commitValue(baseValue + step)
+        commitValue(committedValueRef.current + step)
       }
     }
 
@@ -269,7 +292,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
           type="button"
           aria-label={t('numberInput.actions.decreaseAria')}
           disabled={decrementDisabled}
-          onClick={() => commitValue(baseValue - step)}
+          onClick={() => commitValue(committedValueRef.current - step)}
           className={cn(
             "flex h-full w-7 items-center justify-center overflow-x-hidden overflow-y-hidden border-r border-border p-0 leading-none touch-manipulation",
             "text-muted-foreground hover:bg-interactive-hover hover:text-foreground",
@@ -303,7 +326,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
           type="button"
           aria-label={t('numberInput.actions.increaseAria')}
           disabled={incrementDisabled}
-          onClick={() => commitValue(baseValue + step)}
+          onClick={() => commitValue(committedValueRef.current + step)}
           className={cn(
             "flex h-full w-7 items-center justify-center overflow-x-hidden overflow-y-hidden border-l border-border p-0 leading-none touch-manipulation",
             "text-muted-foreground hover:bg-interactive-hover hover:text-foreground",

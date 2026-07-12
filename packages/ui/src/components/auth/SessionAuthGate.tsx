@@ -15,6 +15,7 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeExtraHeadersSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { desktopHostsGet, desktopHostsSet, getDesktopHostApiUrl, normalizeHostUrl } from '@/lib/desktopHosts';
+import { resolveStatusCheckFailureState, type GateState } from './sessionAuthGateState';
 import {
   authenticateWithPasskey,
   cancelPasskeyCeremony,
@@ -51,11 +52,30 @@ const shouldIssueDesktopClientToken = (): boolean => {
   return isDesktopShell();
 };
 
+const isLoopbackHostname = (hostname: string): boolean => {
+  const clean = hostname.replace(/^\[|\]$/g, '');
+  return clean === 'localhost' || clean === '127.0.0.1' || clean === '::1';
+};
+
 const isLocalDesktopRuntime = (): boolean => {
   if (!isDesktopShell()) return false;
-  const apiBaseUrl = getRuntimeApiBaseUrl();
   const localOrigin = readLocalOrigin();
-  return Boolean(localOrigin && sameOrigin(localOrigin, apiBaseUrl));
+  if (!localOrigin) return false;
+  // An empty api base means same-origin requests against the page itself —
+  // which on desktop IS the embedded local server. Requiring an exact origin
+  // match here used to leave local client tokens untagged (no desktop-local
+  // clientKind), and the server's client-create gate then 403'd them.
+  const apiBaseUrl = getRuntimeApiBaseUrl();
+  const effectiveTarget = apiBaseUrl || (typeof window !== 'undefined' ? window.location.origin : '');
+  if (sameOrigin(localOrigin, effectiveTarget)) return true;
+  // Loopback aliases (localhost vs 127.0.0.1) still address this machine's
+  // own server.
+  try {
+    const normalized = normalizeHostUrl(effectiveTarget);
+    return Boolean(normalized && isLoopbackHostname(new URL(normalized).hostname));
+  } catch {
+    return false;
+  }
 };
 
 const desktopClientAuthMetadata = (): { clientKind?: string; dedupeKey?: string } => {
@@ -273,8 +293,6 @@ interface SessionAuthGateProps {
   children: React.ReactNode;
 }
 
-type GateState = 'pending' | 'authenticated' | 'locked' | 'error' | 'rate-limited';
-
 interface ErrorScreenProps {
   onRetry: () => void;
   errorType?: 'network' | 'rate-limit';
@@ -282,7 +300,9 @@ interface ErrorScreenProps {
   children?: React.ReactNode;
 }
 
-export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) => {
+export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
+  children,
+}) => {
   const { t } = useI18n();
   const vscodeRuntime = React.useMemo(() => isVSCodeRuntime(), []);
   const skipAuth = vscodeRuntime;
@@ -403,7 +423,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
       setIsTunnelLocked(false);
     } catch (error) {
       console.warn('Failed to check session status:', error);
-      if (shouldUseDesktopShellPasswordLogin()) {
+      if (resolveStatusCheckFailureState({ shouldUseDesktopShellPasswordLogin: shouldUseDesktopShellPasswordLogin() }) === 'locked') {
         setState('locked');
         setRetryAfter(undefined);
         setIsTunnelLocked(false);

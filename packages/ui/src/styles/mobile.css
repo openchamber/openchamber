@@ -519,7 +519,32 @@
    not match — so nothing reserves bottom room in the native app. Expose it as a token
    so any native surface can consume it; the chat shell does so below. */
 :root.oc-capacitor-app {
-  --oc-app-bottom-safe: max(16px, calc(env(safe-area-inset-bottom, 0px) * 0.5));
+  --oc-app-bottom-safe: max(16px, calc(var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) * 0.5));
+}
+
+/* Android native safe areas. Every --oc-safe-area-* definition above is gated
+   behind -webkit-touch-callout (iOS) or display-mode: standalone, neither of
+   which matches the Capacitor Android WebView — so the Android app used to rely
+   entirely on StatusBar overlay:false insetting the WebView natively. Android 15
+   enforces edge-to-edge and ignores that call, leaving content under the status
+   bar. Capacitor injects the real insets as --safe-area-inset-* inline vars on
+   <html> (env() still reads 0 on WebViews without the safe-area passthrough
+   fix), so read those first and fall back to env(). On devices where the native
+   inset still applies, both sources report 0 — no double padding. */
+:root.oc-capacitor-app.oc-platform-android {
+  --oc-safe-area-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --oc-safe-area-right: var(--safe-area-inset-right, env(safe-area-inset-right, 0px));
+  --oc-safe-area-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+  --oc-safe-area-bottom-visual: clamp(0px, calc(var(--oc-safe-area-bottom) * 0.05), 4px);
+  --oc-safe-area-left: var(--safe-area-inset-left, env(safe-area-inset-left, 0px));
+}
+
+:root.oc-capacitor-app.oc-platform-android .header-safe-area {
+  padding-top: var(--oc-safe-area-top);
+}
+
+:root.oc-capacitor-app.oc-platform-android [data-sonner-toaster][data-y-position='top'] {
+  top: calc(var(--oc-safe-area-top) + 16px) !important;
 }
 
 /* Paint the document canvas with the theme background in the native app — the same
@@ -537,31 +562,39 @@
 
 /* Native (Capacitor) keyboard handling.
    The Keyboard plugin runs in `resize: 'none'` mode so the WebView keeps its full
-   height; instead we shrink the app shell by the keyboard frame height, exposed as
-   --oc-keyboard-inset and set once from `keyboardWillShow` (see useNativeMobileChrome).
+   height; instead we shrink the app shell by the keyboard frame height. Two vars,
+   both set by useNativeMobileChrome: --oc-keyboard-inset is the keyboard's target
+   height from the moment `keyboardWillShow` fires (overlay surfaces below animate
+   against it as before), while --oc-kb-layout is the same height applied to the
+   shell's LAYOUT only at the choreography point where a resize is invisible.
    Scoped to .oc-capacitor-app so the browser PWA keeps its dvh / interactive-widget
    behaviour untouched.
 
-   `keyboardWillShow` fires at the start of the iOS keyboard animation, so the inset
-   is set once and the transition carries the rise. The duration/curve are tuned to
-   mimic the native iOS keyboard (≈0.25s, cubic-bezier(0.38, 0.7, 0.125, 1)) so our
-   layout and the keyboard move together. (visualViewport live-tracking would be exact
+   The shell height is NOT transitioned. Animating `height` reflows the whole shell
+   every frame and forces the chat's ResizeObserver to chase the bottom on each of
+   those frames — the source of the visible micro-jitter on the composer/chat while
+   pinned. Instead the visual rise is transform-only (compositor) — a FLIP
+   choreography driven by useNativeMobileChrome:
+
+     show: shell keeps its full height for the whole 0.25s; the composer (and, when
+           pinned, the chat scroll container — see useChatAutoFollow) slides up via
+           inline transforms in sync with the keyboard; at the end the shell snaps to
+           its final height (--oc-kb-layout, one reflow) and the shift is removed
+           in the same frame — visually identical, so the swap is invisible.
+     hide: the shell snaps back to full height immediately (still hidden behind the
+           keyboard), the composer/content are FLIP-offset to their raised position
+           and slide down with the keyboard.
+
+   `keyboardWillShow` fires at the start of the iOS keyboard animation with the final
+   height, and the duration/curve mimic the native keyboard (≈0.25s,
+   cubic-bezier(0.38, 0.7, 0.125, 1)). (visualViewport live-tracking would be exact
    but doesn't report under WKWebView's `resize: 'none'`, so this is the best signal.) */
 :root.oc-capacitor-app .oc-mobile-app-shell {
-  height: calc(100dvh - var(--oc-keyboard-inset, 0px));
+  height: calc(100dvh - var(--oc-kb-layout, 0px));
   /* Reserve the bottom safe area only while the keyboard is down — when it's up the
      inset cancels it out (the home indicator is hidden and the composer should sit
      flush above the keyboard). The shell keeps its own bg behind this padding. */
-  padding-bottom: max(0px, calc(var(--oc-app-bottom-safe, 0px) - var(--oc-keyboard-inset, 0px)));
-  transition: height 0.25s cubic-bezier(0.38, 0.7, 0.125, 1),
-              padding-bottom 0.25s cubic-bezier(0.38, 0.7, 0.125, 1);
-}
-
-/* Android resizes the window for the keyboard natively (no manual --oc-keyboard-inset),
-   so 100dvh changes instantly. Animating height against that instant resize makes the
-   header/content bounce on keyboard open — disable the transition on Android. */
-:root.oc-capacitor-app.oc-platform-android .oc-mobile-app-shell {
-  transition: none;
+  padding-bottom: max(0px, calc(var(--oc-app-bottom-safe, 0px) - var(--oc-kb-layout, 0px)));
 }
 
 /* Portal surfaces (bottom sheets, overlay panels) render at <body> level, outside
@@ -575,6 +608,12 @@
   bottom: var(--oc-keyboard-inset, 0px);
   transition: bottom 0.25s cubic-bezier(0.38, 0.7, 0.125, 1), opacity 0.2s ease-out;
 }
+/* While a panel is playing its enter animation, its bottom anchor snaps
+   instead of transitioning — opening an overlay typically dismisses the
+   keyboard in the same moment, and animating both made the entrance jerky. */
+:root.oc-capacitor-app .oc-keyboard-inset-surface.oc-keyboard-inset-snap {
+  transition: opacity 0.2s ease-out;
+}
 
 /* Full-screen scroll views (e.g. the connect/login screen) live outside the app
    shell, so shrink them by the keyboard height the same way the shell does. Capping
@@ -587,13 +626,143 @@
   transition: height 0.25s cubic-bezier(0.38, 0.7, 0.125, 1);
 }
 
-/* The composer keeps its 1rem bottom padding while the keyboard is down (breathing
-   room above the home indicator), but that gap looks artificial sitting above the
-   keyboard's accessory bar — so tighten it while the keyboard is open. Animated to
-   match the keyboard motion. */
-:root.oc-capacitor-app .oc-mobile-composer {
-  transition: padding-bottom 0.25s cubic-bezier(0.38, 0.7, 0.125, 1);
+/* Keyboard slide choreography: the composer (and the draft title, see
+   .oc-draft-center note below) are moved with INLINE transform/transition set
+   by useNativeMobileChrome — WebKit does not reliably start transitions when a
+   transform changes via a CSS custom property, which parked the composer until
+   the keyboard finished. Only the sliding backdrop lives here. */
+:root.oc-capacitor-app.oc-kb-animating .oc-mobile-composer {
+  /* While sliding, the composer passes over chat content that hasn't moved (user
+     scrolled up) — give it an opaque backdrop so text doesn't show through the
+     form's transparent padding. */
+  background: var(--background);
 }
+
+/* Constant-viewport trick for the chat scroller: when the keyboard settles the
+   shell shrinks by --oc-kb-layout, but the scroller keeps its full height by
+   extending that far below its (shrunken) region — behind the composer and the
+   keyboard — and converts the covered strip into its own bottom padding. For
+   the virtualizer NOTHING resizes across keyboard transitions: clientHeight is
+   constant, every row that can become visible is already mounted, and the
+   open/close reposition is a single cheap scrollTop change (the settle re-pin /
+   the clamp) instead of a viewport resize that mounts rows with a visible
+   pause on long chats. */
+:root.oc-capacitor-app .oc-mobile-app-shell .chat-scroll {
+  /* The shell shrinks by the keyboard height BUT also gives up its bottom
+     safe-area padding at the same moment (see the shell's padding-bottom
+     formula) — so the scroller's parent only loses (keyboard − safe). Extend
+     by exactly that, or the settle grows clientHeight by the safe inset and
+     the pinned chat clamps one row down a beat after the keyboard opens. */
+  bottom: calc(-1 * max(var(--oc-kb-layout, 0px) - var(--oc-app-bottom-safe, 0px), 0px));
+  /* The padding leg is driven by its own variable so it can be applied at the
+     very START of the keyboard rise (with an immediate re-pin — the bottom of
+     the chat moves up as the keyboard begins, not after it finishes), while
+     the bottom-extension leg still tracks the shell's settle-time shrink. Both
+     legs equal the keyboard height once settled, so the settle snap is
+     geometry-neutral for the scroller. */
+  padding-bottom: var(--oc-kb-scroll-inset, var(--oc-kb-layout, 0px));
+}
+
+/* WKWebView draws the text caret as a native layer that ignores CSS transforms:
+   after the keyboard rise it visibly flies from the pre-keyboard position to
+   the final one. Hide it during the transition (+ UIKit's reposition lag,
+   see oc-kb-caret-hold timing in useNativeMobileChrome) and pop it back in. */
+:root.oc-capacitor-app.oc-kb-caret-hold textarea,
+:root.oc-capacitor-app.oc-kb-caret-hold input {
+  caret-color: transparent;
+}
+
+/* The composer keeps its 1rem bottom padding while the keyboard is down (breathing
+   room above the home indicator), but that gap looks artificial sitting right above
+   the keyboard — so tighten it while the keyboard is open. Snaps at the start of the
+   show animation (a ~10px pre-slide change; transitioning it would reflow the chat
+   every frame). */
 :root.oc-capacitor-app.oc-keyboard-open .oc-mobile-composer {
-  padding-bottom: 6px;
+  padding-bottom: 12px;
+}
+
+/* Draft starter chips leave the moment the keyboard starts rising
+   (oc-keyboard-open lands at keyboardWillShow) and return when it's gone —
+   with the keyboard up there is only room for the draft title. Instant
+   show/hide (no squish animation); the title's own keyboard compensation
+   (.oc-draft-center below) carries the smooth motion. */
+:root.oc-capacitor-app.oc-keyboard-open .oc-draft-starters,
+:root.oc-browser-keyboard-open .oc-draft-starters {
+  display: none;
+}
+
+/* The draft title (.oc-draft-center) is vertically centered, so it has no
+   scroll-pinning to compensate the keyboard like the chat does. It rides the
+   keyboard choreography with an INLINE transform of half the keyboard shift
+   (exactly how far the center moves after the shell snap) — see the kb-movers
+   list in useNativeMobileChrome. No CSS rules needed here; the class only
+   marks the element for the mover query. */
+
+/* Mobile-browser fullscreen composer (visual-viewport pinned form in
+   ChatInput): the header would otherwise paint above it — the form can't
+   out-stack it from inside the composer wrapper's z-10 context. */
+:root.oc-browser-kb-fullscreen .oc-mobile-header {
+  visibility: hidden;
+}
+
+/* Installed PWA (standalone) safe areas. In the in-browser page Safari's own
+   chrome covers the home indicator and status bar, and the Capacitor shell has
+   its own choreography (--oc-app-bottom-safe + keyboard FLIP) — neither matches
+   display-mode: standalone, so this block is PWA-only and cannot regress them.
+   Standalone runs the page edge-to-edge (viewport-fit=cover), so the composer
+   needs real top/bottom safe-area room of its own. */
+@media (display-mode: standalone) {
+  /* Bottom: reserve home-indicator room under the composer while the keyboard
+     is down. The generic .bottom-safe-area token is intentionally capped at
+     4px (visual tuck under the gradient overlay), which is not enough to keep
+     controls clear of the indicator / rounded corners. A fixed floor is
+     required: iOS 26 standalone reports env(safe-area-inset-bottom) as 0.
+     Cancel the room while the keyboard is up (the indicator area is behind the
+     keyboard, and the pinned form anchors by its offsetHeight). The class flip
+     is deliberately delayed (tap race, see ChatInput onBlur) — the transition
+     turns that late flip into a slide instead of a dip-then-pop. */
+  :root:not(.oc-capacitor-app) .oc-mobile-composer {
+    transition: padding-bottom 220ms cubic-bezier(0.33, 1, 0.68, 1);
+  }
+
+  :root:not(.oc-capacitor-app):not(.oc-browser-keyboard-open) .oc-mobile-composer {
+    padding-bottom: calc(0.75rem + max(16px, var(--oc-safe-area-bottom, env(safe-area-inset-bottom, 0px)))) !important;
+  }
+
+  /* Fullscreen composer: ChatInput pins the form to the visual viewport from
+     y = visualViewport.offsetTop, which is 0 in standalone (no URL bar), so the
+     form's first row lands under the status bar / Dynamic Island. Pad the
+     content down into the safe region instead. */
+  :root.oc-browser-kb-fullscreen:not(.oc-capacitor-app) .oc-mobile-composer {
+    padding-top: calc(var(--oc-safe-area-top, env(safe-area-inset-top, 0px)) + 0.5rem) !important;
+  }
+
+  /* iOS standalone can leave 100dvh stuck at the keyboard-shrunk value after
+     the keyboard hides (WebKit doesn't reliably restore the dynamic viewport),
+     which shifted the whole shell up by that leftover. Standalone has no
+     collapsing browser chrome, so the dynamic and large viewports are the same
+     thing — pin the shell to 100lvh, which always reports full screen height.
+     Initial geometry is identical (lvh == dvh on load). */
+  :root:not(.oc-capacitor-app) .h-\[100dvh\] {
+    height: 100lvh;
+  }
+
+  /* Top toasts: same offset the Capacitor shell already applies — without it
+     they render under the clock / Dynamic Island. */
+  :root:not(.oc-capacitor-app) [data-sonner-toaster][data-y-position='top'] {
+    top: calc(var(--oc-safe-area-top, env(safe-area-inset-top, 0px)) + 16px) !important;
+  }
+}
+
+@keyframes oc-composer-morph-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Voice overlay variant: the overlay BACKGROUND appears immediately (it rides
+   the morphing shape), but its content stays hidden until the shape has mostly
+   finished growing, then fades in — no clipped controls mid-morph. Timings
+   follow the 340ms wrapper morph in ChatInput. */
+.oc-composer-morph-content-fade > * {
+  animation: oc-composer-morph-fade 0.18s ease-out 0.26s both;
 }

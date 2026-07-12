@@ -1,5 +1,13 @@
 import { refreshRuntimeUrlAuthToken, setRuntimeBearerToken, setRuntimeExtraHeaders } from '@/lib/runtime-auth';
 import { configureRuntimeUrlResolver } from '@/lib/runtime-url';
+import {
+  activateRelayTunnel,
+  deactivateRelayTunnel,
+  getActiveRelayTunnel,
+  type RelayRuntimeDescriptor,
+} from '@/lib/relay/runtime-tunnel';
+
+export { getActiveRelayTunnel };
 
 export type RuntimeEndpointChangedDetail = {
   apiBaseUrl: string;
@@ -85,7 +93,7 @@ export const initializeRuntimeEndpoint = (options: { apiBaseUrl?: string | null;
   activeRuntimeKey = options.runtimeKey?.trim() || (sameOrigin(apiBaseUrl, readInjectedLocalOrigin()) ? 'local' : normalizeRuntimeUrlKey(apiBaseUrl));
 };
 
-export const switchRuntimeEndpoint = (options: { apiBaseUrl: string; clientToken?: string | null; runtimeKey?: string | null; requestHeaders?: Record<string, string> | null }): void => {
+export const switchRuntimeEndpoint = (options: { apiBaseUrl: string; clientToken?: string | null; runtimeKey?: string | null; requestHeaders?: Record<string, string> | null; relay?: RelayRuntimeDescriptor | null }): void => {
   const apiBaseUrl = options.apiBaseUrl.trim();
   const previousApiBaseUrl = getRuntimeApiBaseUrl();
   const previousRuntimeKey = getRuntimeKey();
@@ -105,6 +113,14 @@ export const switchRuntimeEndpoint = (options: { apiBaseUrl: string; clientToken
   configureRuntimeUrlResolver({ apiBaseUrl, realtimeBaseUrl: apiBaseUrl });
   setRuntimeExtraHeaders(options.requestHeaders || null);
   setRuntimeBearerToken(options.clientToken || null);
+  // Relay mode routes runtime HTTP/WS through an E2EE tunnel instead of the
+  // network. Activate the tunnel BEFORE minting the url token, since the mint
+  // itself rides the tunnel (runtimeFetch -> tunnel.fetch).
+  if (options.relay) {
+    activateRelayTunnel(options.relay);
+  } else {
+    deactivateRelayTunnel();
+  }
   void refreshRuntimeUrlAuthToken(apiBaseUrl).catch(() => {});
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent<RuntimeEndpointChangedDetail>(RUNTIME_ENDPOINT_CHANGED_EVENT, {

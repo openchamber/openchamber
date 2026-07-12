@@ -199,6 +199,12 @@ export const useChatAutoFollow = ({
     // ANIMATION_GUARD_MS). 0 = no animation guard active.
     const animationGuardUntilRef = React.useRef(0);
 
+    // True while the native (Capacitor iOS) keyboard slide choreography is in
+    // flight (between 'oc:keyboard-anim' and 'oc:keyboard-settled' from
+    // useNativeMobileChrome). During that window the pinned content is moved by a
+    // transform on the inner wrapper, so the ResizeObserver chase must stand down.
+    const keyboardAnimRef = React.useRef(false);
+
     // Last observed scrollTop, used to derive scroll DIRECTION in the scroll
     // handler so the bottom-zone re-engage only fires when arriving at the bottom
     // by scrolling down — never when a user scrolling UP merely lands in the zone.
@@ -668,6 +674,13 @@ export const useChatAutoFollow = ({
         if (!container || typeof ResizeObserver === 'undefined') return;
 
         const observer = new ResizeObserver(() => {
+            // Keyboard slide in flight: the container/composer resizes it reports
+            // are part of the transform choreography — the settle handler does the
+            // single deterministic re-pin, so chasing here would just fight it.
+            if (keyboardAnimRef.current) {
+                updateOverflowAndButton();
+                return;
+            }
             const el = scrollRef.current;
             if (el && !canScroll(el)) {
                 setStateValue('following');
@@ -702,6 +715,58 @@ export const useChatAutoFollow = ({
         }
         return () => observer.disconnect();
     }, [armEntryStickQuiet, containerEl, isActive, scrollToBottom, setStateValue, updateOverflowAndButton]);
+
+    // ── native keyboard transitions (Capacitor choreography) ────────────────
+    // The chat scroller gets NO transforms during the keyboard transition:
+    // transforming the scroll container (or its content) forces WebKit to
+    // rebuild the composited scrolling layers, which stalls for seconds on
+    // long chats. Instead the chat repositions with instant snaps that hide
+    // behind the keyboard itself:
+    //   show: content stays put while the keyboard/composer slide over it; the
+    //         settled event (shell layout snap) does ONE instant re-pin.
+    //   hide: the shell layout is restored up-front — the scrollTop clamp
+    //         happens while the keyboard still covers that region — and the
+    //         settled event re-pins once at the end.
+    // During the window we only guard the scroll heuristics and the observer
+    // chase. These events never fire outside the Capacitor app.
+    React.useEffect(() => {
+        if (typeof window === 'undefined') return;
+
+        const handleKeyboardAnim = (event: Event) => {
+            const detail = (event as CustomEvent<{ phase: 'show' | 'hide'; slide: number; durationMs: number; easing: string }>).detail;
+            if (!detail) return;
+            keyboardAnimRef.current = true;
+            // The clamp/resize during the choreography can dispatch scroll events
+            // that land away from the auto marker — never read those as a user
+            // scroll-away.
+            animationGuardUntilRef.current = now() + detail.durationMs + ANIMATION_GUARD_MS;
+        };
+
+        const handleKeyboardSettled = () => {
+            keyboardAnimRef.current = false;
+            const el = scrollRef.current;
+            if (!el) {
+                updateOverflowAndButton();
+                return;
+            }
+            // Single deterministic re-pin, same task as the layout swap → lands
+            // before paint. (scrollToBottomNow, not scrollToBottom: this must not
+            // be gated on working/settling — the keyboard resize is a viewport
+            // change, not content growth.)
+            if (stateRef.current === 'following' && canScroll(el)) {
+                scrollToBottomNow('auto');
+            }
+            updateOverflowAndButton();
+        };
+
+        window.addEventListener('oc:keyboard-anim', handleKeyboardAnim);
+        window.addEventListener('oc:keyboard-settled', handleKeyboardSettled);
+        return () => {
+            window.removeEventListener('oc:keyboard-anim', handleKeyboardAnim);
+            window.removeEventListener('oc:keyboard-settled', handleKeyboardSettled);
+            keyboardAnimRef.current = false;
+        };
+    }, [scrollToBottomNow, updateOverflowAndButton]);
 
     React.useEffect(() => {
         updateOverflowAndButton();

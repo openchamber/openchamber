@@ -12,10 +12,11 @@ import {
 import { useGitStore, useGitBranches, useGitLoadingBranches, useGitLoadingStatus, useIsGitRepo } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
+import {
+  LAST_WORKTREE_SOURCE_BRANCH_KEY,
+  resolveWorktreeSourceBranchPreference,
+} from '@/lib/worktrees/worktreeSourceBranchPreference';
 import { useI18n } from '@/lib/i18n';
-
-/** localStorage key matching NewWorktreeDialog */
-const LAST_SOURCE_BRANCH_KEY = 'oc:lastWorktreeSourceBranch';
 
 export interface BranchSelectorProps {
   /** Current directory to check for git repository */
@@ -117,24 +118,35 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
   // Resolve default source branch (same priority as NewWorktreeDialog)
   React.useEffect(() => {
     if (disabled || isLoading || allBranches.length === 0) return;
-    // If current value is valid, keep it
     if (value && allBranches.includes(value)) return;
+
+    const currentValue = value;
+    let cancelled = false;
 
     const resolve = async () => {
       try {
         const rootBranch = directory ? await getRootBranch(directory).catch(() => null) : null;
-        const saved = localStorage.getItem(LAST_SOURCE_BRANCH_KEY);
+        if (cancelled) return;
 
-        if (saved && allBranches.includes(saved)) {
-          onChange(saved);
-        } else if (rootBranch && allBranches.includes(rootBranch)) {
-          onChange(rootBranch);
-        } else if (allBranches.includes('main')) {
-          onChange('main');
-        } else if (allBranches.includes('master')) {
-          onChange('master');
-        } else if (allBranches[0]) {
-          onChange(allBranches[0]);
+        const saved = localStorage.getItem(LAST_WORKTREE_SOURCE_BRANCH_KEY);
+
+        const {
+          sourceBranch,
+          shouldClearSavedSourceBranch,
+        } = resolveWorktreeSourceBranchPreference({
+          branches: allBranches,
+          savedSourceBranch: saved,
+          rootBranch,
+        });
+
+        if (shouldClearSavedSourceBranch) {
+          localStorage.removeItem(LAST_WORKTREE_SOURCE_BRANCH_KEY);
+        }
+
+        if (cancelled || (currentValue && allBranches.includes(currentValue))) return;
+
+        if (sourceBranch) {
+          onChange(sourceBranch);
         }
       } catch {
         // ignore
@@ -142,6 +154,9 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
     };
 
     void resolve();
+    return () => {
+      cancelled = true;
+    };
   }, [allBranches, directory, disabled, isLoading, onChange, value]);
 
   const isDisabled = disabled || !isGitRepository || isLoading;
