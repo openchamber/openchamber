@@ -281,21 +281,28 @@ const callCodexResponses = async ({ accessToken, accountId, modelID, prompt, sys
 };
 
 // ---------------------------------------------------------------------------
-// Custom provider base URL support
+// Custom provider configuration support
 // ---------------------------------------------------------------------------
 
-const readCustomProviderBaseURL = (workingDirectory, providerID) => {
+const readProviderConfig = (workingDirectory, providerID) => {
   try {
     const config = readConfig(workingDirectory);
     const providerCfg = config?.provider?.[providerID];
     if (!providerCfg || typeof providerCfg !== 'object') return null;
     const baseURL = typeof providerCfg?.options?.baseURL === 'string' ? providerCfg.options.baseURL.trim() : null;
-    return baseURL || null;
+    const apiKey = typeof providerCfg?.options?.apiKey === 'string' ? providerCfg.options.apiKey.trim() : null;
+    return {
+      baseURL,
+      // Shape the config-supplied key as a regular api-key auth entry so it
+      // can win the precedence check below and flow through the dispatch's
+      // `entry.type === 'api' ? entry.key : ...` branch unchanged.
+      auth: apiKey ? { type: 'api', key: apiKey } : null,
+    };
   } catch {
     // Provider config is non-essential — continue with catalog-only resolution.
     return null;
   }
-};
+}
 
 // ---------------------------------------------------------------------------
 // Dispatch
@@ -303,7 +310,11 @@ const readCustomProviderBaseURL = (workingDirectory, providerID) => {
 
 export async function callSmallModel({ auth, catalog, workingDirectory, providerID, modelID, prompt, system, maxOutputTokens }) {
   const tokens = Number(maxOutputTokens) > 0 ? Number(maxOutputTokens) : DEFAULT_MAX_OUTPUT_TOKENS;
-  const entry = getAuthEntryForProvider(auth, providerID);
+  const providerConfig = readProviderConfig(workingDirectory, providerID);
+  // Match OpenCode's resolveSDK precedence:
+  // config provider.<id>.options.apiKey (providerConfig.auth) wins; the
+  // auth.json entry is only a fallback.
+  const entry = providerConfig?.auth || getAuthEntryForProvider(auth, providerID);
   if (!entry) {
     throw new Error(`No OpenCode login found for provider "${providerID}"`);
   }
@@ -367,7 +378,7 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
   // provider also respects provider.openai.options.baseURL — OpenCode itself
   // uses the same config for all providers including openai.
   const provider = getCatalogProvider(catalog, providerID);
-  const providerConfigUrl = readCustomProviderBaseURL(workingDirectory, providerID);
+  const providerConfigUrl = providerConfig?.baseURL;
   const defaultOpenaiUrl = 'https://api.openai.com/v1';
   const baseURL = typeof providerConfigUrl === 'string' && providerConfigUrl
     ? providerConfigUrl
