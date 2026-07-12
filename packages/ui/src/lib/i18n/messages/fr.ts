@@ -1258,6 +1258,7 @@ export const dict = {
   'chat.goal.action.save': 'Enregistrer l\'objectif',
   'chat.goal.action.start': 'Lancer l\'objectif',
   'chat.goal.toast.actionFailed': 'Échec de la mise à jour de l\'objectif',
+  "chat.goal.toast.distillFallback": "L'objectif dépassait la limite et n'a pas pu être condensé — l'auditeur utilise une version tronquée",
   'chat.goal.row.aria': 'Objectif de session — ouvrir les détails',
   'chat.goal.button.createAria': 'Définir un objectif de session',
   'chat.goal.button.manageAria': 'Gérer l\'objectif de session',

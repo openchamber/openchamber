@@ -1415,6 +1415,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.goal.action.save": "Guardar objetivo",
   "chat.goal.action.start": "Iniciar objetivo",
   "chat.goal.toast.actionFailed": "No se pudo actualizar el objetivo",
+  "chat.goal.toast.distillFallback": "El objetivo superó el límite y no se pudo destilar — el auditor usa una versión recortada",
   "chat.goal.row.aria": "Objetivo de sesión — abrir detalles",
   "chat.goal.button.createAria": "Definir un objetivo de sesión",
   "chat.goal.button.manageAria": "Gestionar el objetivo de sesión",

@@ -59,6 +59,25 @@ The host dispatcher restricts tunneled traffic to explicit path allowlists (one 
 4. **Handshake.** Over that connection pair, client and host run the E2EE handshake and derive a shared encrypted channel the relay cannot read.
 5. **Traffic.** All normal app traffic is multiplexed and encrypted through that channel. On the host, decrypted requests are dispatched to the local server over loopback; responses stream back encrypted. Reconnects re-establish a fresh channel and the app's existing retry machinery recovers.
 
+## Candidate refresh (staying off the relay when direct works)
+
+Pairing-payload transport candidates are a snapshot: when DHCP hands the host
+machine a new LAN address, a device's saved direct candidate goes stale and the
+device silently degrades to relay-only. To recover, an already-paired client can
+call `GET /api/client-auth/connection/candidates` (UI session or client bearer;
+registered with the auth/access routes) over any live transport — including
+through the tunnel — to learn the server's **current** LAN URLs plus the relay
+candidate, and update its saved candidate set (mobile: `mobileConnections.ts`;
+desktop: `desktopRelayRestore.ts`).
+
+Identity gating: the response carries the stable `serverId` (base64url SHA-256 of
+the public signing JWK — the same identity the relay routes by, exposed by the
+relay service's `getServerId()` and echoed unauthenticated on `/health` and
+`/api/version`). Clients ignore a refresh whose `serverId` does not match their
+pinned relay identity, and verify `/health`'s `serverId` on a learned address
+**before** sending their bearer token to it — a re-assigned LAN address may now
+belong to a different machine.
+
 ## Two implementations, kept in sync
 
 The E2EE and framing logic exists twice: TypeScript in `packages/ui/src/lib/relay/` (shared by the client and the normative reference) and a JavaScript mirror in this module (the host, which is plain JS ESM). They **must stay byte-compatible** — a client encrypted by one must decrypt on the other. A cross-compatibility test (`cross-compat.test.js`) imports the TS modules directly and exercises a full TS-client ↔ JS-host exchange. Any change to the wire format, frame codec, handshake, or batching must update both sides and keep that test green.

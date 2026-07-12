@@ -85,6 +85,7 @@ import { createNotificationTriggerRuntime } from './lib/notifications/runtime.js
 import { createPushRuntime } from './lib/notifications/push-runtime.js';
 import { createApnsRuntime } from './lib/notifications/apns-runtime.js';
 import { createNotificationTemplateRuntime } from './lib/notifications/template-runtime.js';
+import { createPermissionAutoAcceptRuntime } from './lib/permission-auto-accept/runtime.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
@@ -364,6 +365,7 @@ const settingsRuntime = createSettingsRuntime({
 
 const readSettingsFromDiskMigrated = (...args) => settingsRuntime.readSettingsFromDiskMigrated(...args);
 const readSettingsFromDisk = (...args) => settingsRuntime.readSettingsFromDisk(...args);
+const readSettingsFromDiskStrict = (...args) => settingsRuntime.readSettingsFromDiskStrict(...args);
 const writeSettingsToDisk = (...args) => settingsRuntime.writeSettingsToDisk(...args);
 const persistSettings = (...args) => settingsRuntime.persistSettings(...args);
 
@@ -408,6 +410,7 @@ const apnsRuntime = createApnsRuntime({
   APNS_TOKENS_FILE_PATH,
   readSettingsFromDiskMigrated,
   writeSettingsToDisk,
+  readSettingsStrict: readSettingsFromDiskStrict,
 });
 
 const addOrUpdateApnsToken = (...args) => apnsRuntime.addOrUpdateApnsToken(...args);
@@ -716,7 +719,7 @@ const notificationTriggerRuntime = createNotificationTriggerRuntime({
 });
 
 const maybeSendPushForTrigger = (...args) => notificationTriggerRuntime.maybeSendPushForTrigger(...args);
-const setAutoAcceptSession = (...args) => notificationTriggerRuntime.setAutoAcceptSession(...args);
+const setAutoAcceptSession = (sessionId, enabled) => permissionAutoAcceptRuntime.setSessionPolicy(sessionId, enabled);
 clearPendingPushBadge = () => notificationTriggerRuntime.clearPendingPushBadge();
 
 const sessionAssistRuntime = createSessionAssistRuntime({
@@ -770,6 +773,19 @@ const globalMessageStreamHub = createGlobalMessageStreamHub({
   getOpenCodeAuthHeaders,
   upstreamStallTimeoutMs: getUpstreamStallTimeoutMs,
 });
+
+const permissionAutoAcceptRuntime = createPermissionAutoAcceptRuntime({
+  globalEventHub: globalMessageStreamHub,
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  readSettingsFromDiskMigrated,
+  persistSettings,
+  broadcastGlobalUiEvent,
+});
+permissionAutoAcceptRuntime.start();
+notificationTriggerRuntime.setGetIsSessionAutoAccepting(
+  (sessionId, directory) => permissionAutoAcceptRuntime.isSessionAutoAccepting(sessionId, directory),
+);
 
 const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   waitForOpenCodePort: (...args) => waitForOpenCodePort(...args),
@@ -1200,6 +1216,37 @@ async function main(options = {}) {
     const lan = lanHost ? `http://${lanHost.includes(':') ? `[${lanHost}]` : lanHost}:${activePort}` : null;
     return { local, lan, relayAvailable: true };
   };
+  // ALL direct LAN URLs this server is currently reachable on, for the
+  // candidates-refresh endpoint: the address the requesting client already
+  // reached us on first (guaranteed routable from its network — over the relay
+  // tunnel this is loopback and yields nothing), then every non-internal IPv4
+  // interface. A client that paired while the machine had a different DHCP
+  // lease uses this to replace its stale LAN candidate.
+  const resolveDirectLanUrls = (req) => {
+    const activePort = tunnelRuntimeContext.getActivePort() || port;
+    const urls = [];
+    const push = (host) => {
+      if (typeof host !== 'string' || !host) return;
+      const url = `http://${host.includes(':') ? `[${host}]` : host}:${activePort}`;
+      if (!urls.includes(url)) urls.push(url);
+    };
+    if (isNetworkExposedBindHost(effectiveBindHost)) {
+      push(requestReachedLanAddress(req));
+      try {
+        for (const list of Object.values(os.networkInterfaces())) {
+          for (const entry of (list || [])) {
+            if (entry.family === 'IPv4' && !entry.internal) push(entry.address);
+          }
+        }
+      } catch {
+        // interface scan failure → whatever we already collected
+      }
+    } else {
+      const h = String(effectiveBindHost || '').toLowerCase();
+      if (h && h !== '127.0.0.1' && h !== 'localhost' && h !== '::1') push(effectiveBindHost);
+    }
+    return urls;
+  };
   const uiPassword = typeof options.uiPassword === 'string'
     ? options.uiPassword
     : (typeof process.env.OPENCHAMBER_UI_PASSWORD === 'string' ? process.env.OPENCHAMBER_UI_PASSWORD : null);
@@ -1360,6 +1407,10 @@ async function main(options = {}) {
     // redeemed device can flip relay demand on or off).
     reconcileRelay: () => (relayServiceInstance ? relayServiceInstance.reconcile() : Promise.resolve()),
     getPairingTransports: resolvePairingTransports,
+    getDirectCandidateUrls: resolveDirectLanUrls,
+    // Stable server identity for client-side verification of learned addresses.
+    // Lazily resolved: the relay service is constructed after these routes.
+    getServerId: () => (relayServiceInstance ? relayServiceInstance.getServerId() : Promise.resolve(null)),
     // The display name a paired device shows for THIS server. Devices name the
     // connection by the issuing machine's hostname, not the per-device pairing
     // label typed by the operator.
@@ -1422,6 +1473,7 @@ async function main(options = {}) {
     os,
     readSettingsFromDiskMigrated,
     writeSettingsToDisk,
+    readSettingsStrict: readSettingsFromDiskStrict,
     remoteClientAuthRuntime,
     getLocalPort: () => tunnelRuntimeContext.getActivePort(),
     // Relay demand = any paired device or pending pairing session that uses the
@@ -1470,6 +1522,7 @@ async function main(options = {}) {
     scheduledTasksRuntime,
     getOpenChamberEventClients: () => uiOpenChamberEventClients,
     writeSseEvent,
+    permissionAutoAcceptRuntime,
   });
 
   const previewProxyRuntime = createPreviewProxyRuntime({

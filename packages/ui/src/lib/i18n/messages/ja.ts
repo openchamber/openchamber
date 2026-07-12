@@ -1433,6 +1433,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.goal.action.save': 'ゴールを保存',
   'chat.goal.action.start': 'ゴールを開始',
   'chat.goal.toast.actionFailed': 'ゴールの更新に失敗しました',
+  'chat.goal.toast.distillFallback': '目標が上限を超え、要約もできませんでした — 監査には抜粋版を使用します',
   'chat.goal.row.aria': 'セッションゴール — 詳細を開く',
   'chat.goal.button.createAria': 'セッションゴールを設定',
   'chat.goal.button.manageAria': 'セッションゴールを管理',

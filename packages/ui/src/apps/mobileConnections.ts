@@ -734,6 +734,12 @@ const probeConnectionCandidates = async (
   options?: { fast?: boolean },
 ): Promise<ProbeResult> => {
   const requestOptions = options?.fast ? { totalTimeoutMs: MOBILE_FAST_PROBE_TIMEOUT_MS } : undefined;
+  // Identity gate for direct probes: when the device knows its server's identity
+  // (via its relay pairing), a direct candidate must report the SAME serverId in
+  // /health before we send the bearer token to it — a re-assigned LAN address may
+  // now belong to a different machine. Older servers omit serverId from /health;
+  // the gate only rejects an explicit mismatch (matching today's behavior otherwise).
+  const expectedServerId = relayCandidateOf({ candidates })?.serverId ?? null;
   for (const candidate of candidates) {
     if (candidate.kind === 'relay') {
       const outcome = await probeRelaySession(candidate.relay, token, undefined, options?.fast ? MOBILE_FAST_PROBE_TIMEOUT_MS : undefined);
@@ -743,8 +749,18 @@ const probeConnectionCandidates = async (
     }
     const url = normalizeConnectionUrl(candidate.url) || candidate.url;
     const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
-    const health = await requestWithTimeout(`${url}/health`, { method: 'GET', headers }, requestOptions);
+    // /health is unauthenticated by design — never send the bearer token to an
+    // address whose identity has not been checked yet.
+    const health = await requestWithTimeout(`${url}/health`, { method: 'GET' }, requestOptions);
     if (!health?.ok) continue;
+    if (expectedServerId) {
+      const payload = await health.json().catch(() => null);
+      const reported = payload && typeof payload === 'object' ? (payload as Record<string, unknown>).serverId : null;
+      if (typeof reported === 'string' && reported && reported !== expectedServerId) {
+        logConnect('probe:server-id-mismatch', { url });
+        continue;
+      }
+    }
     const session = await requestWithTimeout(`${url}/auth/session`, { method: 'GET', credentials: 'include', headers }, requestOptions);
     if (session?.status === 401) return { status: 'needs-login' };
     if (!session || (!session.ok && session.status !== 404)) continue;
@@ -774,6 +790,10 @@ const switchToTransport = (
   } else {
     switchRuntimeEndpoint({ apiBaseUrl: transport.url, clientToken: token, runtimeKey: options?.runtimeKey });
   }
+  // Every live connection is an opportunity to learn the server's CURRENT LAN
+  // addresses (pairing-payload candidates go stale when DHCP reassigns the
+  // host's IP). Background-only: never blocks or repaints the connect flow.
+  scheduleCandidateRefresh();
 };
 
 // Cold-launch auto-connect: silently reconnect to the most-recently-used saved
@@ -864,6 +884,9 @@ const pairingCandidatesToMobile = (candidates: PairingEndpointCandidate[]): Mobi
 const establishLiveTransport = async (
   candidates: MobileTransportCandidate[],
 ): Promise<LiveTransport | null> => {
+  // Same identity gate as probeConnectionCandidates: a redeem/login must not send
+  // its secret to a direct address that reports a different server identity.
+  const expectedServerId = relayCandidateOf({ candidates })?.serverId ?? null;
   for (const candidate of candidates) {
     if (candidate.kind === 'relay') {
       const tunnel = createRelayTunnelClient(candidate.relay);
@@ -876,7 +899,16 @@ const establishLiveTransport = async (
     const url = normalizeConnectionUrl(candidate.url) || candidate.url;
     const health = await requestWithTimeout(`${url}/health`, { method: 'GET' });
     logConnect('establish:direct:health', { ok: health?.ok === true, status: health?.status ?? null });
-    if (health?.ok) return { kind: 'direct', url };
+    if (!health?.ok) continue;
+    if (expectedServerId) {
+      const payload = await health.json().catch(() => null);
+      const reported = payload && typeof payload === 'object' ? (payload as Record<string, unknown>).serverId : null;
+      if (typeof reported === 'string' && reported && reported !== expectedServerId) {
+        logConnect('establish:server-id-mismatch', { url });
+        continue;
+      }
+    }
+    return { kind: 'direct', url };
   }
   return null;
 };
@@ -963,7 +995,14 @@ export const reprobeActiveConnection = async (): Promise<ReprobeOutcome> => {
   // 2. No better transport — is the current one still alive on its live channel?
   if (currentIndex >= 0) {
     const stillValid = await validateActiveRuntimeSession({ url: getRuntimeApiBaseUrl(), clientToken: token }, { fast: true });
-    if (stillValid) return 'unchanged';
+    if (stillValid) {
+      // Still on the same transport (typically: woke up on the relay, old LAN
+      // candidate dead). Ask the server for its current LAN addresses in the
+      // background — if it moved, the refreshed candidates trigger one more
+      // re-probe and the hot-switch back to direct.
+      scheduleCandidateRefresh();
+      return 'unchanged';
+    }
   }
 
   // 3. Current transport is dead — fall through to lower-priority candidates.
@@ -975,6 +1014,99 @@ export const reprobeActiveConnection = async (): Promise<ReprobeOutcome> => {
     return 'switched';
   }
   return 'unreachable';
+};
+
+// ---------------------------------------------------------------------------
+// Candidate refresh: learn the server's CURRENT direct addresses over the live
+// (authenticated) runtime transport and update the saved candidate set, so a
+// device that paired under an old DHCP lease is not stuck on the relay forever.
+// ---------------------------------------------------------------------------
+
+// Let the post-switch bootstrap traffic settle before adding our own request.
+const CANDIDATE_REFRESH_DELAY_MS = 5_000;
+
+type CandidateRefreshResult = 'updated' | 'unchanged' | 'skipped';
+
+let candidateRefreshInFlight = false;
+
+// Fetch /api/client-auth/connection/candidates through the ACTIVE runtime
+// transport (direct or relay — runtimeFetch routes it) and merge the reported
+// LAN addresses into the active saved connection:
+//   - fresh `lan` candidates REPLACE the previous http:// (LAN-class) direct
+//     candidates — a LAN address the server no longer holds is dead weight that
+//     slows every future re-probe;
+//   - https:// (tunnel-class) direct candidates are preserved — the server does
+//     not know its own public tunnel hostnames;
+//   - the relay candidate is preserved as the last-resort transport.
+// Only runs for relay-paired connections: their token/runtime key derives from
+// the stable relay identity, so rewriting direct URLs cannot orphan the stored
+// token. The response must echo the connection's serverId or it is ignored.
+export const refreshActiveConnectionCandidates = async (): Promise<CandidateRefreshResult> => {
+  if (candidateRefreshInFlight) return 'skipped';
+  const active = findActiveConnection();
+  if (!active) return 'skipped';
+  const relay = relayCandidateOf(active);
+  if (!relay) return 'skipped';
+  candidateRefreshInFlight = true;
+  try {
+    const response = await raceWithTimeout(
+      RELAY_CONNECT_TIMEOUT_MS,
+      runtimeFetch('/api/client-auth/connection/candidates').then((r): Response | null => r).catch(() => null),
+    );
+    if (!response?.ok) return 'skipped';
+    const payload = await response.json().catch(() => null) as { serverId?: unknown; candidates?: unknown } | null;
+    // Identity gate: the refresh must come from the server this device paired
+    // with. Old servers (no serverId) are skipped rather than trusted blindly.
+    if (!payload || payload.serverId !== relay.serverId) return 'skipped';
+    const reported = Array.isArray(payload.candidates) ? payload.candidates : [];
+    const lanUrls: string[] = [];
+    for (const entry of reported) {
+      if (!entry || typeof entry !== 'object') continue;
+      const record = entry as Record<string, unknown>;
+      if (record.type !== 'lan' || typeof record.url !== 'string') continue;
+      try {
+        const url = normalizeConnectionUrl(record.url);
+        if (url && !lanUrls.includes(url)) lanUrls.push(url);
+      } catch {
+        // invalid URL → drop
+      }
+    }
+    // No LAN reported (loopback-only bind or interface-scan failure): keep the
+    // existing candidates — deleting them on a possibly-transient empty answer
+    // would be silent data loss; a stale entry only costs one fast probe.
+    if (lanUrls.length === 0) return 'skipped';
+    const preservedHttps = directCandidates(active).filter((candidate) => candidate.url.startsWith('https://'));
+    const next: MobileTransportCandidate[] = [
+      ...lanUrls.map((url): MobileTransportCandidate => ({ kind: 'direct', url })),
+      ...preservedHttps,
+      { kind: 'relay', relay },
+    ];
+    const unchanged = JSON.stringify(active.candidates.map(serializeCandidate)) === JSON.stringify(next.map(serializeCandidate));
+    if (unchanged) return 'unchanged';
+    logConnect('candidates:refreshed', { lanCount: lanUrls.length });
+    await upsertMobileConnection({ id: active.id, label: active.label, candidates: next });
+    return 'updated';
+  } finally {
+    candidateRefreshInFlight = false;
+  }
+};
+
+// Background candidate refresh + opportunistic hot-switch. Fire-and-forget by
+// design: no UI state, no rerenders — the only visible effect is the runtime
+// quietly switching relay → direct when a fresh LAN address turns out reachable
+// (reprobeActiveConnection re-reads storage and applies its usual identity-gated
+// probe + stable-runtime-key switch). Converges: a re-entered refresh reports
+// 'unchanged'/'skipped', which never triggers another re-probe.
+const scheduleCandidateRefresh = (): void => {
+  if (typeof window === 'undefined') return;
+  window.setTimeout(() => {
+    void (async () => {
+      const result = await refreshActiveConnectionCandidates().catch((): CandidateRefreshResult => 'skipped');
+      if (result === 'updated' && isRelayModeActive()) {
+        await reprobeActiveConnection().catch(() => null);
+      }
+    })();
+  }, CANDIDATE_REFRESH_DELAY_MS);
 };
 
 // ---------------------------------------------------------------------------

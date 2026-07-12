@@ -58,13 +58,16 @@ export const createRelayService = ({
   crypto,
   readSettingsFromDiskMigrated,
   writeSettingsToDisk,
+  // Strict settings reader (throws on corrupt/unreadable) gating identity
+  // regeneration — see identity.js/signing-key.js.
+  readSettingsStrict,
   getLocalPort,
   // Returns true when any paired device or pending pairing session uses the
   // relay transport. The relay lifecycle is driven purely by this demand.
   hasRelayDemand = async () => false,
   logger = console,
 }) => {
-  const identityRuntime = createRelayIdentityRuntime({ crypto, readSettingsFromDiskMigrated, writeSettingsToDisk });
+  const identityRuntime = createRelayIdentityRuntime({ crypto, readSettingsFromDiskMigrated, writeSettingsToDisk, readSettingsStrict });
 
   let hostClient = null;
   let status = { state: 'disabled', lastError: null, connectedClients: 0 };
@@ -143,6 +146,15 @@ export const createRelayService = ({
     } catch (error) {
       logger.warn(`[Relay] reconcile failed: ${error?.message ?? error}`);
     }
+  };
+
+  // Stable server identity (base64url SHA-256 of the canonical public signing
+  // JWK). Derived from a public key, so it is not a secret; clients use it to
+  // verify that a learned/probed address belongs to this server before trusting
+  // it. Independent of whether the relay host is currently enabled.
+  const getServerId = async () => {
+    const identity = await identityRuntime.getRelayIdentity();
+    return identity.serverId;
   };
 
   const getStatus = async () => {
@@ -241,6 +253,7 @@ export const createRelayService = ({
     reconcile,
     stop,
     getStatus,
+    getServerId,
     getPairingCandidate,
     ensureEnabledForPairing,
   };

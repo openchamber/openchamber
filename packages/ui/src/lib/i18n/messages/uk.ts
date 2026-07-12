@@ -1415,6 +1415,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.goal.action.save": "Зберегти ціль",
   "chat.goal.action.start": "Розпочати ціль",
   "chat.goal.toast.actionFailed": "Не вдалося оновити ціль",
+  "chat.goal.toast.distillFallback": "Ціль перевищила ліміт і її не вдалося стиснути — аудитор використовує скорочену версію",
   "chat.goal.row.aria": "Ціль сесії — відкрити деталі",
   "chat.goal.button.createAria": "Встановити ціль сесії",
   "chat.goal.button.manageAria": "Керувати ціллю сесії",

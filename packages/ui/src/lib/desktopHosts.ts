@@ -325,13 +325,16 @@ export const probeRelayDesktopHost = async (relay: DesktopHostRelay): Promise<Ho
   }
 };
 
-export const desktopHostProbe = async (url: string, options?: { clientToken?: string | null; requestHeaders?: Record<string, string> | null }): Promise<HostProbeResult> => {
+export const desktopHostProbe = async (url: string, options?: { clientToken?: string | null; requestHeaders?: Record<string, string> | null; expectedServerId?: string | null }): Promise<HostProbeResult> => {
   const invoke = getInvoke();
   if (!invoke) {
     return { status: 'unreachable', latencyMs: 0 };
   }
 
-  const raw = await invoke('desktop_host_probe', { url, clientToken: options?.clientToken || undefined, requestHeaders: options?.requestHeaders || undefined });
+  // `expectedServerId` makes the main-process probe verify the address's
+  // UNAUTHENTICATED /health identity before sending the bearer token — required
+  // when probing an address learned at runtime rather than typed by the user.
+  const raw = await invoke('desktop_host_probe', { url, clientToken: options?.clientToken || undefined, requestHeaders: options?.requestHeaders || undefined, expectedServerId: options?.expectedServerId || undefined });
   if (!isRecord(raw)) {
     return { status: 'unreachable', latencyMs: 0 };
   }

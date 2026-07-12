@@ -598,11 +598,20 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
         // "Run as goal" rides the same arm mechanism as the composer target
         // button; set explicitly either way so a stray armed flag cannot
         // leak into a non-goal plan send. The objective override carries the
-        // actual plan content — "Implement this plan: X" alone would give
-        // the progress audit nothing to judge against.
+        // plan substance — "Implement this plan: X" alone would give the
+        // progress audit nothing to judge against. Plans that exceed the
+        // objective limit are distilled into completion criteria by the
+        // small model (the working agent always reads the full plan from
+        // its file); on distillation failure a head+tail excerpt keeps the
+        // intent (top) and acceptance criteria (bottom), sacrificing the
+        // implementation middle the agent reads from the file anyway.
+        // Oversized objectives (huge plans) are distilled into audit
+        // criteria inside setSessionGoal — the shared path for every goal
+        // source. Here we only compose header + full content.
         const goalObjective = execution.runAsGoal === true
           ? [
               `Implement the plan "${sendPromptTitle}" end-to-end${resolvedPath ? ` (plan file: ${resolvedPath})` : ''}.`,
+              'Re-read that file for full details — it is the source of truth.',
               '',
               content,
             ].join('\n')

@@ -31,6 +31,7 @@ import {
   type DesktopHost,
   type HostProbeResult,
 } from '@/lib/desktopHosts';
+import { scheduleDesktopHostCandidateRefresh } from '@/lib/desktopRelayRestore';
 import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import {
   desktopSshConnect,
@@ -519,6 +520,9 @@ export function DesktopHostSwitcherDialog({
         runtimeKey: runtimeKeyForHost(host),
         relay,
       });
+      // On the relay: learn the server's current LAN address in the background
+      // and hot-switch back to direct if the stored one merely went stale.
+      scheduleDesktopHostCandidateRefresh(host.id);
     };
 
     const origin = host.id === LOCAL_HOST_ID ? localOrigin : (normalizeHostUrl(host.url) || '');
