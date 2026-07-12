@@ -20,9 +20,11 @@ import React from 'react';
 
 import { useI18n } from '@/lib/i18n';
 import type { PairingConnectionPayload, PairingEndpointCandidate } from '@/lib/connectionPayload';
+import { redeemPairingCandidate } from '@/lib/pairingCandidateRedemption';
 import { isCapacitorApp } from '@/lib/platform';
 import { adoptRelayTunnel, isRelayModeActive } from '@/lib/relay/runtime-tunnel';
-import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
+import { createDirectE2eeTunnelClient } from '@/lib/relay/direct-e2ee-tunnel-client';
+import { createRelayTunnelClient, type RelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 
@@ -83,6 +85,11 @@ export type MobileRelayConfig = {
   hostEncPubJwk: JsonWebKey;
 };
 
+export type MobileDirectE2eeConfig = {
+  wssUrl: string;
+  hostEncPubJwk: JsonWebKey;
+};
+
 // One reachable transport for a saved device: a direct HTTP URL, or the E2EE
 // relay tunnel. A saved connection holds an ORDERED SET of these (index 0 tried
 // first — LAN preferred, relay fallback) plus a single client token, and the app
@@ -90,7 +97,8 @@ export type MobileRelayConfig = {
 // (direct) and away (relay) without re-pairing.
 export type MobileTransportCandidate =
   | { kind: 'direct'; url: string }
-  | { kind: 'relay'; relay: MobileRelayConfig };
+  | { kind: 'relay'; relay: MobileRelayConfig }
+  | { kind: 'direct-e2ee'; directE2ee: MobileDirectE2eeConfig };
 
 export type MobileSavedConnection = {
   id: string;
@@ -135,13 +143,6 @@ type MobileSessionStatus = {
   authenticated?: boolean;
   disabled?: boolean;
   scope?: string;
-};
-
-type PairingRedeemResponse = {
-  ok?: boolean;
-  clientToken?: unknown;
-  client?: { label?: unknown } | null;
-  server?: { label?: unknown; url?: unknown } | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -200,13 +201,20 @@ const relayCandidateOf = (connection: { candidates: MobileTransportCandidate[] }
   return found && found.kind === 'relay' ? found.relay : null;
 };
 
+const directE2eeCandidateOf = (connection: { candidates: MobileTransportCandidate[] }): MobileDirectE2eeConfig | null => {
+  const found = connection.candidates.find((candidate) => candidate.kind === 'direct-e2ee');
+  return found?.kind === 'direct-e2ee' ? found.directE2ee : null;
+};
+
 // Display URL for a saved connection: the first direct URL, else the relay
 // pseudo-URL. Used only for the connections list UI.
 export const connectionDisplayUrl = (connection: { candidates: MobileTransportCandidate[] }): string => {
   const direct = directCandidates(connection)[0];
   if (direct) return direct.url;
   const relay = relayCandidateOf(connection);
-  return relay ? canonicalRelayUrl(relay) : '';
+  if (relay) return canonicalRelayUrl(relay);
+  const directE2ee = directE2eeCandidateOf(connection);
+  return directE2ee ? directE2ee.wssUrl : '';
 };
 
 // Secure-store / dedupe key for a saved device. A device has ONE token that
@@ -216,6 +224,8 @@ export const connectionDisplayUrl = (connection: { candidates: MobileTransportCa
 const secureTokenKeyOf = (connection: { candidates: MobileTransportCandidate[] }): string => {
   const relay = relayCandidateOf(connection);
   if (relay) return relayConnectionRuntimeKey(relay);
+  const directE2ee = directE2eeCandidateOf(connection);
+  if (directE2ee) return `direct-e2ee:${directE2ee.wssUrl}`;
   const direct = directCandidates(connection)[0];
   return direct ? getConnectionStorageKey(direct.url) : '';
 };
@@ -228,6 +238,9 @@ const candidateSetsMatch = (a: MobileTransportCandidate[], b: MobileTransportCan
   const aUrls = new Set(a.filter((c) => c.kind === 'direct').map((c) => getConnectionStorageKey((c as { url: string }).url)));
   return b.some((c) => {
     if (c.kind === 'relay') return aServerId !== null && c.relay.serverId === aServerId;
+    if (c.kind === 'direct-e2ee') {
+      return a.some((candidate) => candidate.kind === 'direct-e2ee' && candidate.directE2ee.wssUrl === c.directE2ee.wssUrl);
+    }
     return aUrls.has(getConnectionStorageKey(c.url));
   });
 };
@@ -272,6 +285,23 @@ const parseRelayConfig = (value: unknown): MobileRelayConfig | null => {
     serverId: record.serverId,
     hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: key.x, y: key.y },
   };
+};
+
+const parseDirectE2eeConfig = (value: unknown): MobileDirectE2eeConfig | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.wssUrl !== 'string') return null;
+  const jwk = record.hostEncPubJwk;
+  if (!jwk || typeof jwk !== 'object' || Array.isArray(jwk)) return null;
+  const key = jwk as Record<string, unknown>;
+  try {
+    const url = new URL(record.wssUrl);
+    if (url.protocol !== 'wss:' || url.pathname !== '/api/openchamber/direct-e2ee/ws' || url.search || url.hash || url.username || url.password) return null;
+    if (key.kty !== 'EC' || key.crv !== 'P-256' || typeof key.x !== 'string' || typeof key.y !== 'string') return null;
+    return { wssUrl: url.toString(), hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: key.x, y: key.y } };
+  } catch {
+    return null;
+  }
 };
 
 // ---------------------------------------------------------------------------
@@ -332,15 +362,15 @@ const nativeHttpRequest = async (url: string, init?: RequestInit): Promise<Mobil
       source: 'native-http',
       json: async () => parseMaybeJson(response.data),
     };
-  } catch (error) {
-    console.warn('[mobile-connect]', 'native-http failed', logDetail({ url, error: error instanceof Error ? error.message : String(error) }));
+  } catch {
+    console.warn('[mobile-connect]', 'native-http failed', logDetail({ failed: true }));
     return null;
   }
 };
 
 const browserFetchRequest = async (url: string, init?: RequestInit): Promise<MobileFetchResponse | null> => {
-  const response = await fetch(url, init).catch((error) => {
-    console.warn('[mobile-connect]', 'browser-fetch failed', logDetail({ url, error: error instanceof Error ? error.message : String(error) }));
+  const response = await fetch(url, init).catch(() => {
+    console.warn('[mobile-connect]', 'browser-fetch failed', logDetail({ failed: true }));
     return null;
   });
   if (!response) return null;
@@ -504,6 +534,10 @@ const parseCandidate = (value: unknown): MobileTransportCandidate | null => {
     const relay = parseRelayConfig(c.relay);
     return relay ? { kind: 'relay', relay } : null;
   }
+  if (c.kind === 'direct-e2ee') {
+    const directE2ee = parseDirectE2eeConfig(c.directE2ee);
+    return directE2ee ? { kind: 'direct-e2ee', directE2ee } : null;
+  }
   return null;
 };
 
@@ -554,7 +588,9 @@ const readConnections = (): MobileSavedConnection[] => {
 const serializeCandidate = (c: MobileTransportCandidate): unknown =>
   c.kind === 'relay'
     ? { kind: 'relay', relay: { relayUrl: c.relay.relayUrl, serverId: c.relay.serverId, hostEncPubJwk: c.relay.hostEncPubJwk } }
-    : { kind: 'direct', url: c.url };
+    : c.kind === 'direct-e2ee'
+      ? { kind: 'direct-e2ee', directE2ee: c.directE2ee }
+      : { kind: 'direct', url: c.url };
 
 const writeConnections = (connections: MobileSavedConnection[]): void => {
   if (typeof window === 'undefined') return;
@@ -573,8 +609,8 @@ const writeConnections = (connections: MobileSavedConnection[]): void => {
   });
   try {
     window.localStorage.setItem(MOBILE_CONNECTIONS_STORAGE_KEY, JSON.stringify(serialized));
-  } catch (error) {
-    console.warn('[mobile-storage] failed to persist connection metadata', error);
+  } catch {
+    console.warn('[mobile-storage]', 'metadata:write-failed');
   }
 };
 
@@ -643,8 +679,8 @@ const withTimeout = async <T,>(operation: Promise<T>, fallback: T): Promise<T> =
 const boundedSecure = async <T,>(label: string, run: () => Promise<T>, fallback: T): Promise<T> => {
   if (!isCapacitorApp()) return fallback;
   return withTimeout(
-    run().catch((error) => {
-      console.warn(`[mobile-storage] ${label} failed`, error);
+    run().catch(() => {
+      console.warn('[mobile-storage]', `${label}:failed`);
       return fallback;
     }),
     fallback,
@@ -652,19 +688,19 @@ const boundedSecure = async <T,>(label: string, run: () => Promise<T>, fallback:
 };
 
 const readSecureToken = async (key: string): Promise<string | undefined> => {
-  logStorage('secure:read-start', { key });
+  logStorage('secure:read-start');
   const value = await boundedSecure(
     'secure:read',
     async () => (await nativeSecure.internalGetItem({ prefixedKey: prefixedTokenKey(key), sync: false })).data,
     null,
   );
   const token = typeof value === 'string' && value.trim() ? value : undefined;
-  logStorage('secure:read', { key, hasToken: Boolean(token) });
+  logStorage('secure:read', { hasToken: Boolean(token) });
   return token;
 };
 
 const writeSecureToken = async (key: string, token: string): Promise<boolean> => {
-  logStorage('secure:write-start', { key });
+  logStorage('secure:write-start');
   const ok = await boundedSecure('secure:write', async () => {
     await nativeSecure.internalSetItem({
       prefixedKey: prefixedTokenKey(key),
@@ -674,7 +710,7 @@ const writeSecureToken = async (key: string, token: string): Promise<boolean> =>
     });
     return true;
   }, false);
-  logStorage('secure:write', { key, ok });
+  logStorage('secure:write', { ok });
   return ok;
 };
 
@@ -744,11 +780,13 @@ export const deleteMobileConnection = async (id: string): Promise<MobileSavedCon
 // tunnel instead of dialing a fresh one.
 type ChosenTransport =
   | { kind: 'direct'; url: string }
-  | { kind: 'relay'; relay: MobileRelayConfig; tunnel?: ReturnType<typeof createRelayTunnelClient> };
+  | { kind: 'relay'; relay: MobileRelayConfig; tunnel?: ReturnType<typeof createRelayTunnelClient> }
+  | { kind: 'direct-e2ee'; directE2ee: MobileDirectE2eeConfig };
 
 type ProbeResult =
   | { status: 'ok'; transport: ChosenTransport }
   | { status: 'needs-login' }
+  | { status: 'security' }
   | { status: 'unreachable' };
 
 // How long the direct (LAN/tunnel) candidates keep the track to themselves
@@ -758,18 +796,30 @@ type ProbeResult =
 // (which alone cost up to MOBILE_CONNECT_TIMEOUT_MS per stale address).
 const RELAY_RACE_HEADSTART_MS = 1_500;
 
+const tunnelSecurityFailure = (tunnel: ReturnType<typeof createDirectE2eeTunnelClient>): boolean => {
+  const classification = tunnel.getStatus().failureClassification;
+  return classification === 'crypto' || classification === 'protocol' || classification === 'terminal';
+};
+
 // Probe a saved device's candidates and return the first transport that is both
-// reachable AND accepts the token. This is the heart of "one device, many
-// transports": at home the LAN candidate answers; away it is unreachable so we
-// fall through to relay — no re-pairing. Direct candidates are probed in order
-// and keep priority; the relay probe races them after a short headstart instead
-// of waiting for every direct timeout. An explicit auth rejection (401 /
-// authenticated:false) applies to every transport (same token), so it
-// short-circuits to needs-login; a merely unreachable candidate is skipped.
-const probeConnectionCandidates = async (
+// reachable and accepts the token. Existing LAN+relay devices keep the relay
+// head-start race. A direct-E2EE candidate is tried in persisted order before a
+// later relay candidate so crypto/protocol/terminal failures can fail closed;
+// ordinary network failure may still advance to the next candidate.
+export const probeConnectionCandidates = async (
   candidates: MobileTransportCandidate[],
   token: string | undefined,
-  options?: { fast?: boolean },
+  options?: {
+    fast?: boolean;
+    probeRelay?: (
+      relay: MobileRelayConfig,
+      token?: string,
+      grant?: string,
+      timeoutMs?: number,
+      options?: { keepTunnel?: boolean },
+    ) => Promise<RelayProbeOutcome | RelayProbeResult>;
+    createDirectE2eeClient?: (descriptor: MobileDirectE2eeConfig) => RelayTunnelClient;
+  },
 ): Promise<ProbeResult> => {
   const requestOptions = options?.fast ? { totalTimeoutMs: MOBILE_FAST_PROBE_TIMEOUT_MS } : undefined;
   // Identity gate for direct probes: when the device knows its server's identity
@@ -781,33 +831,57 @@ const probeConnectionCandidates = async (
   const relayCandidate = candidates.find((c): c is Extract<MobileTransportCandidate, { kind: 'relay' }> => c.kind === 'relay') ?? null;
   const directList = candidates.filter((c): c is Extract<MobileTransportCandidate, { kind: 'direct' }> => c.kind === 'direct');
 
+  const probeDirect = async (candidate: Extract<MobileTransportCandidate, { kind: 'direct' }>): Promise<ProbeResult> => {
+    const url = normalizeConnectionUrl(candidate.url) || candidate.url;
+    const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+    // /health is unauthenticated by design — never send the bearer token to an
+    // address whose identity has not been checked yet.
+    const health = await requestWithTimeout(`${url}/health`, { method: 'GET' }, requestOptions);
+    if (!health?.ok) return { status: 'unreachable' };
+    if (expectedServerId) {
+      const payload = await health.json().catch(() => null);
+      const reported = payload && typeof payload === 'object' ? (payload as Record<string, unknown>).serverId : null;
+      if (typeof reported === 'string' && reported && reported !== expectedServerId) {
+        logConnect('probe:server-id-mismatch', { url });
+        return { status: 'unreachable' };
+      }
+    }
+    const session = await requestWithTimeout(`${url}/auth/session`, { method: 'GET', credentials: 'include', headers }, requestOptions);
+    if (session?.status === 401) return { status: 'needs-login' };
+    if (!session || (!session.ok && session.status !== 404)) return { status: 'unreachable' };
+    const status = await readSessionStatus(session);
+    if (status && status.disabled !== true && status.authenticated === false) return { status: 'needs-login' };
+    // A cookie-only native session (authenticated, but not a `client` bearer scope
+    // and not auth-disabled) is not enough — the native runtime transport needs a
+    // bearer token, so fall through to the password flow to mint one.
+    const authDisabled = status?.disabled === true;
+    if (!token && isCapacitorApp() && !authDisabled && status?.scope !== 'client') return { status: 'needs-login' };
+    return { status: 'ok', transport: { kind: 'direct', url } };
+  };
+
+  const probeDirectE2ee = async (
+    candidate: Extract<MobileTransportCandidate, { kind: 'direct-e2ee' }>,
+  ): Promise<ProbeResult> => {
+    const tunnel = options?.createDirectE2eeClient?.(candidate.directE2ee) ?? createDirectE2eeTunnelClient(candidate.directE2ee);
+    try {
+      const health = await raceWithTimeout(RELAY_CONNECT_TIMEOUT_MS, tunnel.fetch('/health').catch(() => null));
+      if (tunnelSecurityFailure(tunnel)) return { status: 'security' };
+      if (!health?.ok) return { status: 'unreachable' };
+      const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+      const session = await raceWithTimeout(RELAY_CONNECT_TIMEOUT_MS, tunnel.fetch('/auth/session', { headers }).catch(() => null));
+      if (tunnelSecurityFailure(tunnel)) return { status: 'security' };
+      if (session?.ok) return { status: 'ok', transport: { kind: 'direct-e2ee', directE2ee: candidate.directE2ee } };
+      if (session?.status === 401) return { status: 'needs-login' };
+      return { status: 'unreachable' };
+    } finally {
+      tunnel.close();
+    }
+  };
+
   const probeDirectChain = async (): Promise<ProbeResult> => {
     for (const candidate of directList) {
-      const url = normalizeConnectionUrl(candidate.url) || candidate.url;
-      const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
-      // /health is unauthenticated by design — never send the bearer token to an
-      // address whose identity has not been checked yet.
-      const health = await requestWithTimeout(`${url}/health`, { method: 'GET' }, requestOptions);
-      if (!health?.ok) continue;
-      if (expectedServerId) {
-        const payload = await health.json().catch(() => null);
-        const reported = payload && typeof payload === 'object' ? (payload as Record<string, unknown>).serverId : null;
-        if (typeof reported === 'string' && reported && reported !== expectedServerId) {
-          logConnect('probe:server-id-mismatch', { url });
-          continue;
-        }
-      }
-      const session = await requestWithTimeout(`${url}/auth/session`, { method: 'GET', credentials: 'include', headers }, requestOptions);
-      if (session?.status === 401) return { status: 'needs-login' };
-      if (!session || (!session.ok && session.status !== 404)) continue;
-      const status = await readSessionStatus(session);
-      if (status && status.disabled !== true && status.authenticated === false) return { status: 'needs-login' };
-      // A cookie-only native session (authenticated, but not a `client` bearer scope
-      // and not auth-disabled) is not enough — the native runtime transport needs a
-      // bearer token, so fall through to the password flow to mint one.
-      const authDisabled = status?.disabled === true;
-      if (!token && isCapacitorApp() && !authDisabled && status?.scope !== 'client') return { status: 'needs-login' };
-      return { status: 'ok', transport: { kind: 'direct', url } };
+      const result = await probeDirect(candidate);
+      if (result.status !== 'unreachable') return result;
     }
     return { status: 'unreachable' };
   };
@@ -816,17 +890,30 @@ const probeConnectionCandidates = async (
     if (!relayCandidate) return { status: 'unreachable' };
     // keepTunnel: an 'ok' probe hands its live tunnel to switchToTransport,
     // which adopts it as the runtime tunnel — no second connect + handshake.
-    const { outcome, tunnel } = await probeRelaySession(
+    const result = await (options?.probeRelay ?? probeRelaySession)(
       relayCandidate.relay,
       token,
       undefined,
       options?.fast ? MOBILE_FAST_PROBE_TIMEOUT_MS : undefined,
       { keepTunnel: true },
     );
+    const { outcome, tunnel } = typeof result === 'string' ? { outcome: result, tunnel: undefined } : result;
     if (outcome === 'ok') return { status: 'ok', transport: { kind: 'relay', relay: relayCandidate.relay, tunnel } };
     if (outcome === 'needs-login' || outcome === 'auth-failed') return { status: 'needs-login' };
     return { status: 'unreachable' };
   };
+
+  if (candidates.some((candidate) => candidate.kind === 'direct-e2ee')) {
+    for (const candidate of candidates) {
+      const result = candidate.kind === 'direct'
+        ? await probeDirect(candidate)
+        : candidate.kind === 'direct-e2ee'
+          ? await probeDirectE2ee(candidate)
+          : await probeRelay();
+      if (result.status !== 'unreachable') return result;
+    }
+    return { status: 'unreachable' };
+  }
 
   if (!relayCandidate) return probeDirectChain();
   if (directList.length === 0) return probeRelay();
@@ -905,6 +992,13 @@ const switchToTransport = (
 ): void => {
   if (transport.kind === 'relay') {
     switchToRelayRuntime(transport.relay, token, options?.grant, options?.runtimeKey, transport.tunnel);
+  } else if (transport.kind === 'direct-e2ee') {
+    switchRuntimeEndpoint({
+      apiBaseUrl: typeof window !== 'undefined' ? window.location.origin : '',
+      clientToken: token,
+      runtimeKey: options?.runtimeKey,
+      tunnel: { type: 'direct-e2ee', ...transport.directE2ee },
+    });
   } else {
     switchRuntimeEndpoint({ apiBaseUrl: transport.url, clientToken: token, runtimeKey: options?.runtimeKey });
   }
@@ -993,7 +1087,11 @@ const pairingCandidatesToMobile = (candidates: PairingEndpointCandidate[]): Mobi
     .sort((left, right) => {
       const delta = (left.priority ?? 100) - (right.priority ?? 100);
       if (delta !== 0) return delta;
-      const rank = (c: PairingEndpointCandidate): number => (c.type === 'relay' ? 2 : c.url.startsWith('https://') ? 0 : 1);
+      const rank = (c: PairingEndpointCandidate): number => {
+        if (c.type === 'relay') return 3;
+        if (c.type === 'direct-e2ee') return 2;
+        return c.url.startsWith('https://') ? 0 : 1;
+      };
       return rank(left) - rank(right);
     })
     .flatMap((c): MobileTransportCandidate[] => {
@@ -1001,6 +1099,7 @@ const pairingCandidatesToMobile = (candidates: PairingEndpointCandidate[]): Mobi
         const relay = parseRelayConfig({ relayUrl: c.relayUrl, serverId: c.serverId, hostEncPubJwk: c.hostEncPubJwk });
         return relay ? [{ kind: 'relay', relay }] : [];
       }
+      if (c.type === 'direct-e2ee') return [{ kind: 'direct-e2ee', directE2ee: { wssUrl: c.wssUrl, hostEncPubJwk: c.hostEncPubJwk } }];
       return directCandidatesFromUrl(c.url);
     });
 
@@ -1022,6 +1121,7 @@ const establishLiveTransport = async (
       tunnel.close();
       continue;
     }
+    if (candidate.kind === 'direct-e2ee') continue;
     const url = normalizeConnectionUrl(candidate.url) || candidate.url;
     const health = await requestWithTimeout(`${url}/health`, { method: 'GET' });
     logConnect('establish:direct:health', { ok: health?.ok === true, status: health?.status ?? null });
@@ -1065,7 +1165,7 @@ export const validateActiveRuntimeSession = async (input: {
 // from the runtime's mode instead: relay when the tunnel is active, else the
 // direct base URL.
 const transportMatchesCurrentRuntime = (transport: ChosenTransport): boolean =>
-  transport.kind === 'relay'
+  transport.kind === 'relay' || transport.kind === 'direct-e2ee'
     ? isRelayModeActive()
     : !isRelayModeActive() && isSameConnectionUrl(transport.url, getRuntimeApiBaseUrl());
 
@@ -1105,7 +1205,13 @@ export const reprobeActiveConnection = async (): Promise<ReprobeOutcome> => {
   if (!token) return 'unreachable';
 
   const currentIndex = active.candidates.findIndex(
-    (candidate) => transportMatchesCurrentRuntime(candidate.kind === 'relay' ? { kind: 'relay', relay: candidate.relay } : { kind: 'direct', url: candidate.url }),
+    (candidate) => transportMatchesCurrentRuntime(
+      candidate.kind === 'relay'
+        ? { kind: 'relay', relay: candidate.relay }
+        : candidate.kind === 'direct-e2ee'
+          ? { kind: 'direct-e2ee', directE2ee: candidate.directE2ee }
+          : { kind: 'direct', url: candidate.url },
+    ),
   );
 
   // 1. A higher-priority transport becoming reachable means "came home" (relay → LAN).
@@ -1344,7 +1450,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       const result = await probeConnectionCandidates(candidates, token);
       logConnect('connect:probe', { status: result.status });
 
-      if (result.status === 'unreachable') {
+       if (result.status === 'unreachable' || result.status === 'security') {
         setError(t('mobile.connect.error.unreachable'));
         return;
       }
@@ -1368,8 +1474,8 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       persistMetadata({ id: saved?.id, label, candidates, clientToken: token });
       switchToTransport(result.transport, token ?? null, { runtimeKey: secureTokenKeyOf({ candidates }), grant });
       onConnected();
-    } catch (error) {
-      console.warn('[mobile-connect] connect threw', error);
+    } catch {
+      console.warn('[mobile-connect]', 'connect:failed');
       setError(t('mobile.connect.error.invalidUrl'));
     } finally {
       endBusy('connect');
@@ -1381,23 +1487,8 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
     setError(null);
     beginBusy('pairing');
     const deviceCandidates = pairingCandidatesToMobile(payload.candidates);
-    // A chosen relay transport owns an open tunnel; close it unless the switch
-    // adopted it as the runtime tunnel.
-    let chosen: LiveTransport | null = null;
-    let adopted = false;
     try {
-      // 1. Find the first reachable transport across all candidates.
-      chosen = await establishLiveTransport(deviceCandidates);
-      if (!chosen) {
-        setError(t('mobile.connect.error.unreachable'));
-        return;
-      }
-
-      // 2. Redeem the one-time secret over that transport. Single-use: we never
-      // retry other candidates once redeem runs (the secret is consumed).
-      const redeemBody = JSON.stringify({
-        pairingId: payload.pairingId,
-        secret: payload.secret,
+      const redeemed = await redeemPairingCandidate(payload, { redeemBody: {
         clientLabel: 'OpenChamber Mobile',
         clientKind: 'mobile',
         deviceName: 'OpenChamber Mobile',
@@ -1405,30 +1496,9 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
         // Re-pairing this same phone reuses its one device record instead of
         // adding a duplicate row on the server.
         dedupeKey: mobileClientDedupeKey(),
-      });
-      const redeemInit = {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: redeemBody,
-      } as const;
-      const response = chosen.kind === 'relay'
-        ? await raceWithTimeout(RELAY_CONNECT_TIMEOUT_MS, chosen.tunnel.fetch('/api/client-auth/pairing/redeem', redeemInit).catch(() => null))
-        : await requestWithTimeout(`${chosen.url}/api/client-auth/pairing/redeem`, redeemInit);
-      if (!response?.ok) {
-        setError(t('mobile.connect.error.authRequired'));
-        return;
-      }
-      const result = await response.json().catch(() => null) as PairingRedeemResponse | null;
-      const issuedToken = typeof result?.clientToken === 'string' ? result.clientToken.trim() : '';
-      if (!issuedToken) {
-        setError(t('mobile.connect.error.authRequired'));
-        return;
-      }
-      // Name the connection by the issuing server (its hostname), not the
-      // per-device pairing label — that label is the operator's name for THIS
-      // phone in their device list, not a name for the server we connect to.
-      const serverLabel = typeof result?.server?.label === 'string' ? result.server.label : '';
-      const label = payload.label || serverLabel || getConnectionLabel(connectionDisplayUrl({ candidates: deviceCandidates }));
+      } });
+      const issuedToken = redeemed.token;
+      const label = payload.label || getConnectionLabel(connectionDisplayUrl({ candidates: deviceCandidates }));
 
       // 3. Persist the device with ALL its candidates + one token, then switch to
       // whichever transport answered. Reconnect re-probes the full set so the
@@ -1441,20 +1511,22 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
         }
       }
       persistMetadata({ label, candidates: deviceCandidates, clientToken: issuedToken });
-      // A relay transport hands its live redeem tunnel to the runtime (adopted
-      // inside switchToTransport) — closing it here would tear down the runtime.
+      // The redemption helper closes its temporary transport deterministically;
+      // switch the runtime using the verified public descriptor it returned.
       switchToTransport(
-        chosen.kind === 'relay' ? { kind: 'relay', relay: chosen.relay, tunnel: chosen.tunnel } : { kind: 'direct', url: chosen.url },
+        redeemed.transport.kind === 'relay'
+          ? { kind: 'relay', relay: redeemed.transport }
+          : redeemed.transport.kind === 'direct-e2ee'
+            ? { kind: 'direct-e2ee', directE2ee: redeemed.transport }
+            : { kind: 'direct', url: redeemed.transport.url },
         issuedToken,
         { runtimeKey: secureTokenKeyOf({ candidates: deviceCandidates }) },
       );
-      adopted = chosen.kind === 'relay';
       onConnected();
-    } catch (error) {
-      console.warn('[mobile-connect] pairing threw', error);
+    } catch {
+      console.warn('[mobile-connect]', 'pairing:failed');
       setError(t('mobile.connect.error.authRequired'));
     } finally {
-      if (!adopted && chosen?.kind === 'relay') chosen.tunnel.close();
       endBusy('pairing');
     }
   }, [beginBusy, endBusy, onConnected, persistMetadata, t]);
@@ -1528,8 +1600,8 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       );
       adopted = chosen.kind === 'relay';
       onConnected();
-    } catch (error) {
-      console.warn('[mobile-connect] password threw', error);
+    } catch {
+      console.warn('[mobile-connect]', 'password:failed');
       setError(t('mobile.connect.error.passwordFailed'));
     } finally {
       if (!adopted && chosen?.kind === 'relay') chosen.tunnel.close();

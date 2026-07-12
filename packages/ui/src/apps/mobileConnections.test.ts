@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from 'bun:test';
 
-import { loadMobileConnections, upsertMobileConnection, validateMobileConnectionSession, type MobileRelayConfig } from './mobileConnections';
+import { deleteMobileConnection, loadMobileConnections, probeConnectionCandidates, upsertMobileConnection, validateMobileConnectionSession, type MobileDirectE2eeConfig, type MobileRelayConfig } from './mobileConnections';
+import type { RelayTunnelClient, RelayTunnelFailureClassification } from '@/lib/relay/tunnel-client';
 
 const originalFetch = globalThis.fetch;
 const originalWindow = globalThis.window;
@@ -14,13 +15,13 @@ const createLocalStorageStub = () => {
   };
 };
 
-const installTestWindow = () => {
+const installTestWindow = (protocol = 'https:') => {
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
     value: {
       setTimeout: globalThis.setTimeout.bind(globalThis),
       clearTimeout: globalThis.clearTimeout.bind(globalThis),
-      location: { protocol: 'https:' },
+      location: { protocol },
       localStorage: createLocalStorageStub(),
     },
   });
@@ -40,6 +41,43 @@ const testRelay: MobileRelayConfig = {
 };
 
 describe('mobile connection storage', () => {
+  test('native secure storage operations and migration never log connection descriptors or secrets', async () => {
+    const sentinels = [
+      'sentinel.example',
+      'wss://sentinel.example/api/openchamber/direct-e2ee/ws',
+      'sentinel-token',
+      'sentinel-jwk-x',
+      'sentinel-jwk-y',
+    ];
+    const logs: unknown[][] = [];
+    const originalInfo = console.info;
+    const originalWarn = console.warn;
+    console.info = (...args: unknown[]) => { logs.push(args); };
+    console.warn = (...args: unknown[]) => { logs.push(args); };
+    try {
+      installTestWindow('capacitor:');
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify([{
+        id: 'legacy', label: 'Legacy', url: 'https://sentinel.example', lastUsedAt: 1, clientToken: 'sentinel-token',
+      }]));
+      await loadMobileConnections();
+      const saved = await upsertMobileConnection({
+        label: 'Sentinel',
+        candidates: [{ kind: 'direct-e2ee', directE2ee: {
+          wssUrl: sentinels[1]!,
+          hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: sentinels[3], y: sentinels[4] },
+        } }],
+        clientToken: sentinels[2],
+      });
+      await deleteMobileConnection(saved[0]!.id);
+      const output = JSON.stringify(logs);
+      for (const sentinel of sentinels) expect(output).not.toContain(sentinel);
+    } finally {
+      console.info = originalInfo;
+      console.warn = originalWarn;
+      restoreGlobals();
+    }
+  });
+
   test('entries persisted before candidates migrate to a single direct candidate', async () => {
     try {
       installTestWindow();
@@ -96,6 +134,26 @@ describe('mobile connection storage', () => {
 
       const connections = await loadMobileConnections();
       expect(connections[0]?.candidates.map((c) => c.kind)).toEqual(['direct', 'relay']);
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  test('a direct E2EE device persists only its public pinned descriptor and token', async () => {
+    try {
+      installTestWindow();
+      await upsertMobileConnection({
+        label: 'E2EE',
+        candidates: [{ kind: 'direct-e2ee', directE2ee: {
+          wssUrl: 'wss://host.example/api/openchamber/direct-e2ee/ws',
+          hostEncPubJwk: testRelay.hostEncPubJwk,
+        } }],
+        clientToken: 'oc_client_token',
+      });
+      const raw = window.localStorage.getItem(STORAGE_KEY) || '';
+      expect(raw).toContain('direct-e2ee');
+      expect(raw).not.toContain('pairingId');
+      expect(raw).not.toContain('one-time');
     } finally {
       restoreGlobals();
     }
@@ -182,5 +240,48 @@ describe('validateMobileConnectionSession', () => {
     } finally {
       restoreGlobals();
     }
+  });
+});
+
+describe('mobile encrypted candidate fallback policy', () => {
+  const directE2ee: MobileDirectE2eeConfig = {
+    wssUrl: 'wss://host.example/api/openchamber/direct-e2ee/ws',
+    hostEncPubJwk: testRelay.hostEncPubJwk,
+  };
+
+  const failingClient = (failureClassification: RelayTunnelFailureClassification): RelayTunnelClient => ({
+    fetch: async () => { throw new Error('direct failed'); },
+    openWebSocket: () => { throw new Error('unused'); },
+    getStatus: () => ({ state: failureClassification === 'network' ? 'reconnecting' : 'error', failureClassification }),
+    subscribeStatus: () => () => {},
+    close: () => {},
+  });
+
+  test('does not probe relay after direct crypto, protocol, or terminal failure', async () => {
+    for (const failureClassification of ['crypto', 'protocol', 'terminal'] as const) {
+      let relayCalls = 0;
+      const result = await probeConnectionCandidates([
+        { kind: 'direct-e2ee', directE2ee },
+        { kind: 'relay', relay: testRelay },
+      ], 'token', {
+        createDirectE2eeClient: () => failingClient(failureClassification),
+        probeRelay: async () => { relayCalls += 1; return 'ok'; },
+      });
+      expect(result.status).toBe('security');
+      expect(relayCalls).toBe(0);
+    }
+  });
+
+  test('probes relay after an ordinary unreachable direct failure', async () => {
+    let relayCalls = 0;
+    const result = await probeConnectionCandidates([
+      { kind: 'direct-e2ee', directE2ee },
+      { kind: 'relay', relay: testRelay },
+    ], 'token', {
+      createDirectE2eeClient: () => failingClient('network'),
+      probeRelay: async () => { relayCalls += 1; return 'ok'; },
+    });
+    expect(result.status).toBe('ok');
+    expect(relayCalls).toBe(1);
   });
 });
