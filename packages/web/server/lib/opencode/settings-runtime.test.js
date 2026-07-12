@@ -39,6 +39,46 @@ const createRuntime = async () => {
 };
 
 describe('settings runtime', () => {
+  it.skipIf(process.platform === 'win32')('writes settings owner-only and repairs a permissive file', async () => {
+    const { runtime, settingsFilePath, cleanup } = await createRuntime();
+    try {
+      await fsPromises.writeFile(settingsFilePath, '{}', { mode: 0o644 });
+      await runtime.writeSettingsToDisk({ secret: true });
+      expect((await fsPromises.stat(settingsFilePath)).mode & 0o777).toBe(0o600);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('removes the settings temp file when replacement fails', async () => {
+    const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-settings-runtime-'));
+    const settingsFilePath = path.join(tempRoot, 'settings.json');
+    const wrappedFs = { ...fsPromises, rename: async () => { throw new Error('replace failed'); } };
+    const runtime = createSettingsRuntime({
+      fsPromises: wrappedFs,
+      path,
+      crypto,
+      SETTINGS_FILE_PATH: settingsFilePath,
+      sanitizeProjects: (projects) => Array.isArray(projects) ? projects : [],
+      sanitizeSettingsUpdate: (settings) => settings,
+      mergePersistedSettings: (_current, changes) => changes,
+      normalizeSettingsPaths: (settings) => ({ settings, changed: false }),
+      normalizeStringArray: (values) => values,
+      formatSettingsResponse: (settings) => settings,
+      resolveDirectoryCandidate: (value) => value,
+      normalizeManagedRemoteTunnelHostname: (value) => value,
+      normalizeManagedRemoteTunnelPresets: (value) => value,
+      normalizeManagedRemoteTunnelPresetTokens: (value) => value,
+      syncManagedRemoteTunnelConfigWithPresets: async () => {},
+      upsertManagedRemoteTunnelToken: async () => {},
+    });
+    try {
+      await expect(runtime.writeSettingsToDisk({ secret: true })).rejects.toThrow('replace failed');
+      expect((await fsPromises.readdir(tempRoot)).filter((entry) => entry.includes('.tmp-'))).toEqual([]);
+    } finally {
+      await fsPromises.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
   it('only remaps project plan paths within the migrated storage directory', async () => {
     const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
     try {
@@ -83,7 +123,7 @@ describe('settings runtime', () => {
     }
   });
 
-  it.skipIf(process.platform !== 'win32')('falls back when Windows blocks atomic settings replacement', async () => {
+  it('falls back when Windows blocks atomic settings replacement', async () => {
     const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-settings-runtime-'));
     const settingsFilePath = path.join(tempRoot, 'settings.json');
     const wrappedFs = {
@@ -99,6 +139,7 @@ describe('settings runtime', () => {
       path,
       crypto,
       SETTINGS_FILE_PATH: settingsFilePath,
+      platform: 'win32',
       sanitizeProjects: (projects) => Array.isArray(projects) ? projects : [],
       sanitizeSettingsUpdate: (settings) => settings,
       mergePersistedSettings: (_current, changes) => changes,
