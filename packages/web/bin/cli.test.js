@@ -204,6 +204,14 @@ describe('cli args', () => {
     expect(parsed.options.server).toBe('http://homebridge:3002');
   });
 
+  it('parses connect-url --relay flag', () => {
+    const parsed = parseArgs(['connect-url', '--relay', '--name', 'My laptop']);
+
+    expect(parsed.command).toBe('connect-url');
+    expect(parsed.options.relay).toBe(true);
+    expect(parsed.options.name).toBe('My laptop');
+  });
+
   it('parses connect-url api-only help', () => {
     const parsed = parseArgs(['connect-url', '--api-only', '--help']);
 

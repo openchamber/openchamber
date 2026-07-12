@@ -1,7 +1,7 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
-import { dedupeSessionsById, isSessionRelatedToProject, normalizePath } from '../utils';
+import { collectKnownProjectDirectories, dedupeSessionsById, isSessionRelatedToProject, normalizePath } from '../utils';
 
 type WorktreeMeta = { path: string };
 
@@ -37,23 +37,10 @@ export const useProjectSessionLists = (args: Args) => {
   // worktree. Walking this set is O(P + W) per Sidebar render and lets
   // us skip the bulk of `sessions` (whose directory is not associated
   // with a known project) when building `sessionsByDirectory`.
-  const allowedDirectories = React.useMemo(() => {
-    const set = new Set<string>();
-    normalizedProjects.forEach((project) => {
-      if (project.normalizedPath) {
-        set.add(project.normalizedPath);
-      }
-    });
-    if (!isVSCode) {
-      for (const worktrees of availableWorktreesByProject.values()) {
-        for (const worktree of worktrees) {
-          const normalized = normalizePath(worktree.path);
-          if (normalized) set.add(normalized);
-        }
-      }
-    }
-    return set;
-  }, [normalizedProjects, availableWorktreesByProject, isVSCode]);
+  const knownProjectDirectories = React.useMemo(
+    () => collectKnownProjectDirectories(normalizedProjects, availableWorktreesByProject, isVSCode),
+    [normalizedProjects, availableWorktreesByProject, isVSCode],
+  );
 
   const sessionsByDirectory = React.useMemo(() => {
     const next = new Map<string, Session[]>();
@@ -67,7 +54,7 @@ export const useProjectSessionLists = (args: Args) => {
       // every session the server has ever seen, even ones for
       // long-removed worktrees; the sidebar's downstream filters
       // would then drop them anyway.
-      if (!allowedDirectories.has(directory)) {
+      if (!knownProjectDirectories.has(directory)) {
         return;
       }
 
@@ -76,7 +63,7 @@ export const useProjectSessionLists = (args: Args) => {
       next.set(directory, collection);
     });
     return next;
-  }, [sessions, allowedDirectories]);
+  }, [sessions, knownProjectDirectories]);
 
   const getSessionsForProject = React.useCallback(
     (project: { normalizedPath: string }) => {
@@ -92,7 +79,7 @@ export const useProjectSessionLists = (args: Args) => {
       const collected: Session[] = [];
 
       directories.forEach((directory) => {
-        const sessionsForDirectory = sessionsByDirectory.get(directory) ?? [];
+        const sessionsForDirectory: Session[] = sessionsByDirectory.get(directory) ?? [];
         sessionsForDirectory.forEach((session) => {
           if (seen.has(session.id)) {
             return;
@@ -145,7 +132,7 @@ export const useProjectSessionLists = (args: Args) => {
       ]);
 
       const collect = (input: Session[]): Session[] => input.filter((session) =>
-        isSessionRelatedToProject(session, project.normalizedPath, validDirectories),
+        isSessionRelatedToProject(session, project.normalizedPath, validDirectories, knownProjectDirectories),
       );
 
       const archived = collect(archivedSessions);
@@ -161,12 +148,12 @@ export const useProjectSessionLists = (args: Args) => {
         if (!projectWorktree) {
           return false;
         }
-        return projectWorktree === project.normalizedPath || projectWorktree.startsWith(`${project.normalizedPath}/`);
+        return isSessionRelatedToProject(session, project.normalizedPath, validDirectories, knownProjectDirectories);
       });
 
       return dedupeSessionsById([...archived, ...unassignedLive]);
     },
-    [archivedSessions, availableWorktreesByProject, isVSCode, sessions],
+    [archivedSessions, availableWorktreesByProject, isVSCode, knownProjectDirectories, sessions],
   );
 
   return {

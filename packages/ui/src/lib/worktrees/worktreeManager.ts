@@ -229,6 +229,49 @@ const toCreatePayload = (args: {
   };
 };
 
+/**
+ * Compare two worktree-by-project maps for equality.
+ * Compares discovery-owned metadata (not reference equality)
+ * because readStableProjectWorktrees creates new object instances on
+ * each call, making reference checks always report changed.
+ *
+ * `branch` is included so an external `git checkout` between
+ * discoveries — which changes `branch` (and the derived `label`
+ * and `headState`) while leaving `path` unchanged — still triggers
+ * a store update. Without this, the branch label in the sidebar
+ * could go stale until the next worktree create/remove or project
+ * switch, since there is no periodic worktree-list refresh.
+ *
+ * Status changes (`worktreeStatus`) are not compared here: those
+ * flow through `setStoredWorktreeStatus`, which writes a new Map
+ * reference that the persist subscriber picks up directly.
+ *
+ */
+export const worktreeMapsEqual = (
+  a: Map<string, WorktreeMetadata[]>,
+  b: Map<string, WorktreeMetadata[]>,
+): boolean => {
+  if (a.size !== b.size) return false;
+  for (const [key, value] of a) {
+    const existing = b.get(key);
+    if (!existing || existing.length !== value.length) return false;
+    for (let i = 0; i < value.length; i++) {
+      const next = value[i];
+      const current = existing[i];
+      if (next.path !== current.path
+        || next.branch !== current.branch
+        || next.name !== current.name
+        || next.label !== current.label
+        || next.projectDirectory !== current.projectDirectory
+        || next.worktreeRoot !== current.worktreeRoot
+        || next.headState !== current.headState
+        || next.worktreeSource !== current.worktreeSource
+        || next.source !== current.source) return false;
+    }
+  }
+  return true;
+};
+
 // Cache worktree listings to avoid repeated git worktree list + rev-parse calls
 const _worktreeListCache = new Map<string, { value: WorktreeMetadata[]; at: number }>();
 const _worktreeListInflight = new Map<string, Promise<WorktreeMetadata[]>>();

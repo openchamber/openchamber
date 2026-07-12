@@ -41,6 +41,8 @@ const EXPANDED_CONTENT_TRANSITION = { duration: 0.2, ease: 'easeOut' as const };
 /** Strip common markdown syntax so the header preview reads as plain text. */
 const stripMarkdown = (text: string): string =>
     text
+        // Empty HTML comments are frequently appended by model tool wrappers.
+        .replace(/<!--\s*-->/g, '')
         // Fenced code blocks → keep inner text on one line
         .replace(/```[\w]*\n?([\s\S]*?)```/g, (_, inner: string) => inner.trim())
         // Inline code

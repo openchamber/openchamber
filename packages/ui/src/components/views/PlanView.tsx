@@ -29,6 +29,7 @@ import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitStore } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -345,12 +346,14 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
     };
   }, [cancel, commentText, editingDraftId, isMobile, lineSelection]);
 
+  const editorFontSize = useUIStore((state) => state.editorFontSize);
+
   const editorExtensions = React.useMemo(() => {
     // Shiki token colors only for code files; markdown keeps the lezer
     // highlighter (markdown-aware bold headings etc., and no Shiki view to match).
     const shikiLanguage = resolvedPath ? getLanguageFromExtension(resolvedPath) : null;
     const useShiki = Boolean(shikiLanguage) && shikiLanguage !== 'markdown';
-    const extensions = [createFlexokiCodeMirrorTheme(currentTheme, useShiki ? { syntaxColors: false } : undefined)];
+    const extensions = [createFlexokiCodeMirrorTheme(currentTheme, useShiki ? { syntaxColors: false, fontSize: editorFontSize } : { fontSize: editorFontSize })];
     const language = languageByExtension(resolvedPath || 'plan.md');
     if (language) {
       extensions.push(language);
@@ -364,7 +367,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
     }
     extensions.push(EditorView.lineWrapping);
     return extensions;
-  }, [currentTheme, resolvedPath]);
+  }, [currentTheme, resolvedPath, editorFontSize]);
 
   React.useEffect(() => {
     // Saved project plans opened via context panel should work even when session plan mode is off.
@@ -592,6 +595,19 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
         }
 
         setCurrentSession(sessionId, directoryHint);
+        // "Run as goal" rides the same arm mechanism as the composer target
+        // button; set explicitly either way so a stray armed flag cannot
+        // leak into a non-goal plan send. The objective override carries the
+        // actual plan content — "Implement this plan: X" alone would give
+        // the progress audit nothing to judge against.
+        const goalObjective = execution.runAsGoal === true
+          ? [
+              `Implement the plan "${sendPromptTitle}" end-to-end${resolvedPath ? ` (plan file: ${resolvedPath})` : ''}.`,
+              '',
+              content,
+            ].join('\n')
+          : null;
+        useSessionGoalArmStore.getState().setArmed(execution.runAsGoal === true, goalObjective);
         await sendMessage(
           visiblePrompt,
           execution.providerID,
@@ -608,7 +624,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
         setIsPlanSendSubmitting(false);
       }
     },
-    [canCreateWorktree, createSession, currentProjectRef, initializeNewOpenChamberSession, pendingPlanSend, resolvedPath, routeToChat, sendMessage, sendPromptTitle, setCurrentSession]
+    [canCreateWorktree, content, createSession, currentProjectRef, initializeNewOpenChamberSession, pendingPlanSend, resolvedPath, routeToChat, sendMessage, sendPromptTitle, setCurrentSession]
   );
 
   const blockWidgets = React.useMemo(() => {
@@ -776,6 +792,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
         target={pendingPlanSend?.target ?? 'session'}
         projectDirectory={currentProjectRef?.path ?? null}
         submitting={isPlanSendSubmitting}
+        allowRunAsGoal
         onConfirm={handleConfirmPlanSend}
       />
 

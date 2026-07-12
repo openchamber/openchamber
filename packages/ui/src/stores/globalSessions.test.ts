@@ -55,4 +55,44 @@ describe('listGlobalSessionPages', () => {
     expect(session.revert).toEqual({ messageID: 'msg_1' })
     expect(session.summary).toEqual({ additions: 5, deletions: 3, files: 2 })
   })
+
+  test('paginates through all session-list pages', async () => {
+    const calls: Array<Record<string, unknown>> = []
+    const apiClient = {
+      experimental: {
+        session: {
+          list: async (options: Record<string, unknown>) => {
+            calls.push(options)
+            if (options.cursor === undefined) {
+              return {
+                data: [
+                  { id: 'ses_root', time: { updated: 20 } },
+                  { id: 'ses_child_1', time: { updated: 10 } },
+                ],
+                response: { headers: new Headers({ 'x-next-cursor': '10' }) },
+              }
+            }
+            return {
+              data: [
+                { id: 'ses_child_2', time: { updated: 5 } },
+              ],
+              response: { headers: new Headers() },
+            }
+          },
+        },
+      },
+    } as unknown as OpencodeClient
+
+    const sessions = await listGlobalSessionPages(apiClient, {
+      directory: '/repo',
+      archived: false,
+      roots: false,
+      pageSize: 2,
+    })
+
+    expect(calls).toHaveLength(2)
+    expect(calls[0]).toEqual({ directory: '/repo', archived: false, roots: false, limit: 2 })
+    expect(calls[1]).toEqual({ directory: '/repo', archived: false, roots: false, limit: 2, cursor: 10 })
+    expect(sessions.map((session) => session.id)).toEqual(['ses_root', 'ses_child_1', 'ses_child_2'])
+  })
 })

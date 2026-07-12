@@ -406,6 +406,21 @@ export const createScheduledTasksRuntime = (deps) => {
     return projectRunning < maxProjectConcurrency;
   };
 
+  // Same instruction the composer attaches on an armed goal send: the agent
+  // must know goal mode is on from turn one, and each turn has to end with a
+  // factual report for the independent audit.
+  const buildGoalIntroText = (tokenBudget) => {
+    const budgetLine = tokenBudget
+      ? ` A token budget of ${tokenBudget} tokens applies to this goal.`
+      : '';
+    return '<system-reminder>\n'
+      + 'Goal mode is active for this session. The user message above defines the goal objective. '
+      + 'Work toward it across turns; whenever you stop before the objective is verifiably complete, the system will automatically prompt you to continue. '
+      + 'Progress is evaluated independently after each turn, so end every turn with a clear, factual statement of what is done, what was verified, and what remains.'
+      + budgetLine
+      + '\n</system-reminder>';
+  };
+
   const buildPromptAsyncPayload = (task, projectPath) => ({
     model: {
       providerID: task.execution.providerID,
@@ -418,8 +433,46 @@ export const createScheduledTasksRuntime = (deps) => {
         type: 'text',
         text: expandSnippets(task.execution.prompt, projectPath),
       },
+      ...(task.execution.goalEnabled
+        ? [{ type: 'text', text: buildGoalIntroText(task.execution.goalTokenBudget), synthetic: true }]
+        : []),
     ],
   });
+
+  // Scheduled goal runs: stamp the goal onto the fresh session's metadata
+  // before the prompt goes out; the session-goal runtime picks the loop up
+  // from session events like any other goal.
+  const createTaskGoal = async ({ baseUrl, authHeaders, sessionID, projectPath, task }) => {
+    const now = Date.now();
+    const goal = {
+      id: `${now.toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+      objective: expandSnippets(task.execution.prompt, projectPath).slice(0, 2000),
+      status: 'active',
+      tokenBudget: task.execution.goalTokenBudget || null,
+      tokensUsed: 0,
+      turnsUsed: 0,
+      blockedStreak: 0,
+      note: '',
+      statusReason: '',
+      lastAccountedMessageID: '',
+      createdAt: now,
+      updatedAt: now,
+    };
+    const url = new URL(`${baseUrl}/session/${encodeURIComponent(sessionID)}`);
+    url.searchParams.set('directory', projectPath);
+    const response = await fetch(url.toString(), {
+      method: 'PATCH',
+      headers: {
+        ...authHeaders,
+        'content-type': 'application/json',
+        accept: 'application/json',
+      },
+      body: JSON.stringify({ metadata: { openchamber: { goal } } }),
+    });
+    if (!response.ok) {
+      throw new Error(`goal metadata patch failed (${response.status})`);
+    }
+  };
 
   const runPromptAsync = async ({ baseUrl, authHeaders, sessionID, projectPath, task }) => {
     const promptUrl = new URL(`${baseUrl}/session/${encodeURIComponent(sessionID)}/prompt_async`);
@@ -509,6 +562,10 @@ export const createScheduledTasksRuntime = (deps) => {
         sessionID,
       });
     } catch {
+    }
+
+    if (task.execution.goalEnabled) {
+      await createTaskGoal({ baseUrl, authHeaders, sessionID, projectPath, task });
     }
 
     const executedAsCommand = await runScheduledCommandIfApplicable({
