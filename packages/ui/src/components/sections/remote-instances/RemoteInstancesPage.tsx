@@ -33,7 +33,9 @@ import { openExternalUrl } from '@/lib/url';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { PendingPairingRecord, RemoteClientRecord } from '@/lib/api/types';
-import { buildPairingConnectionPayload, encodePairingConnectionPayload, parsePairingConnectionPayload, type PairingEndpointCandidate } from '@/lib/connectionPayload';
+import { buildPairingConnectionPayload, encodePairingConnectionPayload, parsePairingConnectionPayload, normalizePairingCandidate, type PairingEndpointCandidate } from '@/lib/connectionPayload';
+import { resolvePairingTransportRequest, consumeAddDeviceIntent, selectPairingTransport } from '@/lib/pairingTransportOptions';
+import { redeemPairingCandidate } from '@/lib/pairingCandidateRedemption';
 import {
   desktopSshLogsClear,
   desktopSshLogs,
@@ -42,21 +44,20 @@ import {
   type DesktopSshPortForwardType,
 } from '@/lib/desktopSsh';
 import {
-  desktopHostProbe,
   desktopHostsGet,
   desktopHostsSet,
   desktopInstallIdGet,
-  getDesktopHostApiUrl,
   normalizeHostUrl,
-  probeRelayDesktopHost,
+  probeDesktopHostTransports,
   redactSensitiveUrl,
   resolveDesktopHostUrl,
   relayHostDisplayUrl,
   type DesktopHost,
   type DesktopHostRelay,
+  type DesktopHostDirectE2ee,
+  directE2eeHostFingerprint,
   type HostProbeResult,
 } from '@/lib/desktopHosts';
-import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { getDesktopLanAddress, isDesktopLocalOriginActive, isDesktopShell } from '@/lib/desktop';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeApiBaseUrl, switchRuntimeEndpoint } from '@/lib/runtime-switch';
@@ -455,9 +456,12 @@ export const RemoteInstancesPage: React.FC = () => {
   const [addDeviceOpen, setAddDeviceOpen] = React.useState(false);
   const [addDevicePhase, setAddDevicePhase] = React.useState<'configure' | 'result'>('configure');
   const [addDeviceCreating, setAddDeviceCreating] = React.useState(false);
-  const [addDeviceTransport, setAddDeviceTransport] = React.useState<'local' | 'lan' | 'relay'>('relay');
+  const [addDeviceTransport, setAddDeviceTransport] = React.useState<'local' | 'lan' | 'relay' | 'managed-e2ee'>('relay');
+
   const [addDeviceFallback, setAddDeviceFallback] = React.useState(true);
-  const [transportOptions, setTransportOptions] = React.useState<{ localUrl: string | null; lanUrl: string | null; relayAvailable: boolean } | null>(null);
+  const [transportOptions, setTransportOptions] = React.useState<{ localUrl: string | null; lanUrl: string | null; relayAvailable: boolean; directE2eeAvailable?: boolean } | null>(null);
+
+
   const revokedClientCount = React.useMemo(() => remoteClients.filter((client) => Boolean(client.revokedAt)).length, [remoteClients]);
   const [sshAddDialogOpen, setSshAddDialogOpen] = React.useState(false);
   const [sshCommandDraft, setSshCommandDraft] = React.useState('ssh user@example.com');
@@ -539,88 +543,14 @@ export const RemoteInstancesPage: React.FC = () => {
     // same device however it reaches the server). The install-id dedupe key
     // collapses re-pairing / re-auth of this desktop into one device record.
     const installId = await desktopInstallIdGet().catch(() => '');
-    const redeemBody = JSON.stringify({
-      pairingId: payload.pairingId,
-      secret: payload.secret,
+    const redeemBody = {
       clientLabel: payload.label || 'OpenChamber Desktop',
       clientKind: 'desktop',
       deviceName: 'OpenChamber Desktop',
       devicePlatform: desktopPlatformName(),
       ...(installId ? { dedupeKey: `desktop:${installId}` } : {}),
-    });
-    const redeemInit: RequestInit = {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: redeemBody,
     };
-    const tokenFromResponse = async (response: Response): Promise<string | null> => {
-      if (!response.ok) return null;
-      const body = (await response.json().catch(() => null)) as { clientToken?: unknown } | null;
-      const token = typeof body?.clientToken === 'string' ? body.clientToken.trim() : '';
-      return token || null;
-    };
-
-    // Try direct (LAN/tunnel) candidates first — they're cheaper and don't need
-    // relay infrastructure — then fall back to relay. Ordered by payload priority.
-    const ordered = [...payload.candidates].sort(
-      (a, b) => (a.type === 'relay' ? 1 : 0) - (b.type === 'relay' ? 1 : 0),
-    );
-
-    let redeemed:
-      | { kind: 'direct'; url: string; token: string }
-      | { kind: 'relay'; relay: DesktopHostRelay; token: string }
-      | null = null;
-
-    for (const candidate of ordered) {
-      if (candidate.type === 'relay') {
-        // Open a throwaway E2EE tunnel just to redeem the one-time secret; the
-        // grant (if any) authorizes admission to the relay for this serverId.
-        const tunnel = createRelayTunnelClient({
-          relayUrl: candidate.relayUrl,
-          serverId: candidate.serverId,
-          hostEncPubJwk: candidate.hostEncPubJwk,
-          ...(candidate.grant ? { grant: candidate.grant } : {}),
-        });
-        try {
-          const response = await tunnel.fetch('/api/client-auth/pairing/redeem', redeemInit);
-          const token = await tokenFromResponse(response);
-          if (token) {
-            redeemed = {
-              kind: 'relay',
-              // grant is intentionally not persisted (one-time pairing artifact).
-              relay: { relayUrl: candidate.relayUrl, serverId: candidate.serverId, hostEncPubJwk: candidate.hostEncPubJwk },
-              token,
-            };
-            break;
-          }
-        } catch {
-          // Relay unreachable / handshake failed — try the next candidate.
-        } finally {
-          tunnel.close();
-        }
-        continue;
-      }
-      if (candidate.type === 'direct-e2ee') {
-        // PR D teaches shared clients to parse the encrypted candidate; the
-        // managed-tunnel pairing UI is enabled by the following settings layer.
-        continue;
-      }
-      // Direct: the remote instance is a user-provided URL, so a plain
-      // cross-origin fetch is correct here (not the active runtime).
-      const candidateUrl = normalizeHostUrl(candidate.url);
-      if (!candidateUrl) continue;
-      try {
-        const response = await fetch(`${candidateUrl}/api/client-auth/pairing/redeem`, redeemInit);
-        const token = await tokenFromResponse(response);
-        if (token) {
-          redeemed = { kind: 'direct', url: candidateUrl, token };
-          break;
-        }
-      } catch {
-        // Unreachable candidate — try the next one.
-      }
-    }
-
+    const redeemed = await redeemPairingCandidate(payload, { redeemBody }).catch(() => null);
     if (!redeemed) {
       setDirectError(t('desktopHostSwitcher.error.invalidUrl'));
       return;
@@ -637,19 +567,28 @@ export const RemoteInstancesPage: React.FC = () => {
     const linkRelayCandidate = payload.candidates.find(
       (candidate): candidate is Extract<PairingEndpointCandidate, { type: 'relay' }> => candidate.type === 'relay',
     );
-    const relay: DesktopHostRelay | undefined = redeemed.kind === 'relay'
-      ? redeemed.relay
+    const relay: DesktopHostRelay | undefined = redeemed.transport.kind === 'relay'
+      ? redeemed.transport
       : linkRelayCandidate
         ? { relayUrl: linkRelayCandidate.relayUrl, serverId: linkRelayCandidate.serverId, hostEncPubJwk: linkRelayCandidate.hostEncPubJwk }
         : undefined;
-    const firstDirectUrl = payload.candidates
-      .filter((candidate): candidate is Extract<PairingEndpointCandidate, { type: 'lan' | 'tunnel' }> => candidate.type !== 'relay')
-      .map((candidate) => normalizeHostUrl(candidate.url))
-      .find((value): value is string => Boolean(value));
-    const directUrl = redeemed.kind === 'direct' ? redeemed.url : firstDirectUrl;
+    const firstDirectCandidate = payload.candidates.find(
+      (candidate): candidate is Extract<PairingEndpointCandidate, { type: 'lan' | 'tunnel' }> =>
+        candidate.type === 'lan' || candidate.type === 'tunnel',
+    );
+    const firstDirectUrl = normalizeHostUrl(firstDirectCandidate?.url || '') || undefined;
+    const directE2eeCandidate = payload.candidates.find(
+      (candidate): candidate is Extract<PairingEndpointCandidate, { type: 'direct-e2ee' }> => candidate.type === 'direct-e2ee',
+    );
+    const directE2ee: DesktopHostDirectE2ee | undefined = redeemed.transport.kind === 'direct-e2ee'
+      ? redeemed.transport
+      : directE2eeCandidate
+        ? { wssUrl: directE2eeCandidate.wssUrl, hostEncPubJwk: directE2eeCandidate.hostEncPubJwk }
+        : undefined;
+    const directUrl = redeemed.transport.kind === 'direct' ? redeemed.transport.url : firstDirectUrl;
     const { token } = redeemed;
 
-    const url = directUrl || (relay ? relayHostDisplayUrl(relay.serverId) : null);
+    const url = directUrl || (relay ? relayHostDisplayUrl(relay.serverId) : directE2ee ? `direct-e2ee://${new URL(directE2ee.wssUrl).hostname}` : null);
     if (!url) {
       setDirectError(t('desktopHostSwitcher.error.invalidUrl'));
       return;
@@ -659,11 +598,14 @@ export const RemoteInstancesPage: React.FC = () => {
       apiUrl: directUrl || undefined,
       clientToken: token,
       ...(relay ? { relay } : {}),
+      ...(directE2ee ? { directE2ee } : {}),
     };
     // One host per server: match by relay serverId when the link has a relay
     // leg, else by direct URL — re-importing updates the record in place.
     const existing = directHosts.find((host) => (
-      relay ? host.relay?.serverId === relay.serverId : (!host.relay && normalizeHostUrl(host.apiUrl || host.url) === url)
+      directE2ee
+        ? Boolean(host.directE2ee && directE2eeHostFingerprint(host.directE2ee) === directE2eeHostFingerprint(directE2ee))
+        : relay ? host.relay?.serverId === relay.serverId : (!host.relay && normalizeHostUrl(host.apiUrl || host.url) === url)
     ));
     if (existing) {
       const nextHosts = directHosts.map((host) => host.id === existing.id
@@ -754,23 +696,8 @@ export const RemoteInstancesPage: React.FC = () => {
     if (!showInstanceManagement || directHosts.length === 0) return;
     let cancelled = false;
     void Promise.all(directHosts.map(async (host) => {
-      const relayProbe = () => probeRelayDesktopHost(host.relay!).catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
-      // Relay-only host: tunnel probe. Multi-transport host: direct first,
-      // relay as the away-from-home fallback.
-      if (host.relay && !host.apiUrl) {
-        return [host.id, await relayProbe()] as const;
-      }
-      const url = normalizeHostUrl(getDesktopHostApiUrl(host));
-      if (!url) {
-        return [host.id, host.relay ? await relayProbe() : ({ status: 'unreachable', latencyMs: 0 } as HostProbeResult)] as const;
-      }
-      const direct = await desktopHostProbe(url, { clientToken: host.clientToken || null, requestHeaders: host.requestHeaders || null })
-        .catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
-      if (direct.status === 'unreachable' && host.relay) {
-        const relayResult = await relayProbe();
-        if (relayResult.status === 'ok') return [host.id, relayResult] as const;
-      }
-      return [host.id, direct] as const;
+      const selection = await probeDesktopHostTransports(host);
+      return [host.id, selection.probe] as const;
     })).then((entries) => {
       if (cancelled) return;
       setDirectHostStatus(Object.fromEntries(entries));
@@ -853,11 +780,11 @@ export const RemoteInstancesPage: React.FC = () => {
   // for LAN reachability (derived from its bind, not the UI origin), so "Local
   // network" works even when the UI is opened on localhost. Falls back to the
   // client-side guess if the endpoint is unavailable.
-  const resolveTransportOptions = React.useCallback(async (): Promise<{ localUrl: string | null; lanUrl: string | null; relayAvailable: boolean }> => {
+  const resolveTransportOptions = React.useCallback(async (): Promise<{ localUrl: string | null; lanUrl: string | null; relayAvailable: boolean; directE2eeAvailable: boolean }> => {
     if (clientAuth?.getPairingTransports) {
       try {
         const transports = await clientAuth.getPairingTransports();
-        return { localUrl: transports.local, lanUrl: transports.lan, relayAvailable: transports.relayAvailable };
+        return { localUrl: transports.local, lanUrl: transports.lan, relayAvailable: transports.relayAvailable, directE2eeAvailable: !!transports.directE2eeAvailable };
       } catch {
         // fall through to the client-side guess
       }
@@ -871,10 +798,10 @@ export const RemoteInstancesPage: React.FC = () => {
     } catch {
       // keep null
     }
-    return { localUrl, lanUrl, relayAvailable: true };
+    return { localUrl, lanUrl, relayAvailable: true, directE2eeAvailable: false };
   }, [clientAuth]);
 
-  const openAddDevice = React.useCallback(async () => {
+  const openAddDevice = React.useCallback(async (preferredTransport?: 'managed-e2ee') => {
     setRemoteClientError(null);
     setPairingUrl(null);
     setPairingQrDataUrl(null);
@@ -887,8 +814,19 @@ export const RemoteInstancesPage: React.FC = () => {
     setTransportOptions(opts);
     // "Anywhere" (relay, with home-network preference) is the right default for
     // most people; fall back to narrower options only when relay is unavailable.
-    setAddDeviceTransport(opts.relayAvailable ? 'relay' : opts.lanUrl ? 'lan' : 'local');
-  }, [resolveTransportOptions]);
+    const selected = selectPairingTransport(preferredTransport, opts);
+    setAddDeviceTransport(selected);
+    if (preferredTransport === 'managed-e2ee' && selected !== 'managed-e2ee') {
+      toast.error(t('settings.openchamber.tunnel.field.directE2eeUnsupported'));
+    }
+  }, [resolveTransportOptions, t]);
+
+  React.useEffect(() => {
+    const intent = consumeAddDeviceIntent();
+    if (intent === 'managed-e2ee') {
+      void openAddDevice('managed-e2ee');
+    }
+  }, [openAddDevice]);
 
   const createPairingLink = React.useCallback(async () => {
     if (!clientAuth?.createPairingSession || !transportOptions) return;
@@ -897,30 +835,19 @@ export const RemoteInstancesPage: React.FC = () => {
     try {
       const label = remoteClientLabel.trim() || undefined;
       // Map the chosen transport (+ fallback) to the per-link candidate request.
-      let serverUrl: string | undefined;
-      let includeRelay: boolean;
-      let includeDirect = true;
-      if (addDeviceTransport === 'local') {
-        serverUrl = transportOptions.localUrl ?? undefined;
-        includeRelay = false;
-      } else if (addDeviceTransport === 'lan') {
-        serverUrl = transportOptions.lanUrl ?? undefined;
-        includeRelay = addDeviceFallback;
-      } else if (addDeviceFallback && transportOptions.lanUrl) {
-        // Relay, but prefer the local network when available: carry both.
-        serverUrl = transportOptions.lanUrl;
-        includeRelay = true;
-      } else {
-        // Relay only.
-        includeDirect = false;
-        includeRelay = true;
-      }
+      const { serverUrl, includeRelay, includeDirect, includeDirectE2ee } = resolvePairingTransportRequest(addDeviceTransport, {
+        localUrl: transportOptions.localUrl,
+        lanUrl: transportOptions.lanUrl,
+        addDeviceFallback,
+        relayAvailable: transportOptions.relayAvailable
+      });
       const { pairing, server } = await clientAuth.createPairingSession({
         label,
         allowedClientKinds: ['mobile', 'desktop'],
         serverUrl,
         includeRelay,
         includeDirect,
+        includeDirectE2ee,
       });
       const payload = buildPairingConnectionPayload({
         pairingId: pairing.id,
@@ -932,7 +859,7 @@ export const RemoteInstancesPage: React.FC = () => {
         label: server.label,
         fingerprint: pairing.fingerprint ?? undefined,
         expiresAt: pairing.expiresAt,
-        candidates: server.candidates as unknown as PairingEndpointCandidate[],
+        candidates: server.candidates.map(normalizePairingCandidate).filter((c): c is PairingEndpointCandidate => c !== null),
       });
       const encoded = encodePairingConnectionPayload(payload);
       setPairingUrl(encoded);
@@ -1023,7 +950,7 @@ export const RemoteInstancesPage: React.FC = () => {
     // Use requestAnimationFrame for smoother clock updates without setInterval overhead
     let rafId: number | null = null;
     let lastTime = Date.now();
-    
+
     const tick = () => {
       const now = Date.now();
       // Update only once per second
@@ -1033,12 +960,12 @@ export const RemoteInstancesPage: React.FC = () => {
       }
       rafId = requestAnimationFrame(tick);
     };
-    
+
     // Only run when visible
     if (typeof document === 'undefined' || document.visibilityState === 'visible') {
       rafId = requestAnimationFrame(tick);
     }
-    
+
     const onVisibility = () => {
       if (document.visibilityState === 'visible' && rafId === null) {
         rafId = requestAnimationFrame(tick);
@@ -1047,9 +974,9 @@ export const RemoteInstancesPage: React.FC = () => {
         rafId = null;
       }
     };
-    
+
     document.addEventListener('visibilitychange', onVisibility);
-    
+
     return () => {
       document.removeEventListener('visibilitychange', onVisibility);
       if (rafId !== null) {
@@ -1697,6 +1624,7 @@ export const RemoteInstancesPage: React.FC = () => {
                       plain words — "relay" appears only inside the description. */}
                   <div role="radiogroup" aria-label={t('settings.remoteInstances.clientAuth.addDevice.transportLabel')} className="space-y-1.5">
                     {([
+                      ...(transportOptions?.directE2eeAvailable ? [{ key: 'managed-e2ee' as const, label: t('settings.remoteInstances.transport.managedE2ee.label'), hint: t('settings.remoteInstances.transport.managedE2ee.description'), available: true }] : []),
                       { key: 'relay' as const, label: t('settings.remoteInstances.clientAuth.addDevice.transport.relay'), hint: t('settings.remoteInstances.clientAuth.addDevice.transport.relayHint'), available: Boolean(transportOptions?.relayAvailable) },
                       { key: 'lan' as const, label: t('settings.remoteInstances.clientAuth.addDevice.transport.lan'), hint: t('settings.remoteInstances.clientAuth.addDevice.transport.lanHint'), available: Boolean(transportOptions?.lanUrl) },
                       { key: 'local' as const, label: t('settings.remoteInstances.clientAuth.addDevice.transport.local'), hint: t('settings.remoteInstances.clientAuth.addDevice.transport.localHint'), available: Boolean(transportOptions?.localUrl) },
@@ -1730,7 +1658,24 @@ export const RemoteInstancesPage: React.FC = () => {
                       <span className="typography-meta text-muted-foreground">{t('settings.remoteInstances.clientAuth.addDevice.fallback.relay')}</span>
                     </label>
                   ) : null}
-                  {addDeviceTransport === 'relay' && transportOptions?.lanUrl ? (
+                  {addDeviceTransport === 'managed-e2ee' ? (
+                    <div className="space-y-2">
+                      <div className="rounded-md border border-[var(--status-info-border)] bg-[var(--status-info-background)]/30 p-3">
+                        <div className="flex items-start gap-2">
+                          <Icon name="information" className="mt-0.5 size-4 shrink-0 text-[var(--status-info)]" />
+                          <p className="typography-meta text-[var(--status-info)]">
+                            {t('settings.remoteInstances.transport.managedE2ee.note')}
+                          </p>
+                        </div>
+                      </div>
+                      {transportOptions?.relayAvailable ? (
+                        <label className="flex w-fit cursor-pointer items-center gap-2 pt-1">
+                          <Checkbox checked={addDeviceFallback} onChange={setAddDeviceFallback} ariaLabel={t('settings.remoteInstances.clientAuth.addDevice.fallback.relay')} />
+                          <span className="typography-meta text-muted-foreground">{t('settings.remoteInstances.clientAuth.addDevice.fallback.relay')}</span>
+                        </label>
+                      ) : null}
+                    </div>
+                  ) : addDeviceTransport === 'relay' && transportOptions?.lanUrl ? (
                     <label className="flex w-fit cursor-pointer items-center gap-2 pt-1">
                       <Checkbox checked={addDeviceFallback} onChange={setAddDeviceFallback} ariaLabel={t('settings.remoteInstances.clientAuth.addDevice.fallback.preferLocal')} />
                       <span className="typography-meta text-muted-foreground">{t('settings.remoteInstances.clientAuth.addDevice.fallback.preferLocal')}</span>
