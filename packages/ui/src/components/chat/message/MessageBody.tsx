@@ -9,7 +9,7 @@ import { MessageFilesDisplay } from '../FileAttachment';
 import { TurnChangedFilesDropdown } from '../TurnChangedFilesDropdown';
 import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
 import type { StreamPhase, ToolPopupContent, AgentMentionInfo } from './types';
-import type { TurnChangedFile, TurnGroupingContext } from '../lib/turns/types';
+import type { TurnActivityRecord, TurnChangedFile, TurnGroupingContext } from '../lib/turns/types';
 import { cn } from '@/lib/utils';
 import { isEmptyTextPart, extractTextContent } from './partUtils';
 import { FadeInOnReveal } from './FadeInOnReveal';
@@ -39,8 +39,10 @@ import { Icon } from "@/components/icon/Icon";
 import { formatTimestampForDisplay } from './timeFormat';
 import { ToolRevealOnMount } from './parts/ToolRevealOnMount';
 import { StaticToolRow } from './parts/ProgressiveGroup';
-import { isExpandableTool, isStandaloneTool } from './parts/toolRenderUtils';
+import { isStandaloneTool } from './parts/toolRenderUtils';
 import TurnActivity from '../components/TurnActivity';
+import { ContextToolGroupRow } from './parts/ContextToolGroupRow';
+import { projectToolSegmentRows } from './parts/toolSegmentProjection';
 import { createProjectPlanFile } from '@/lib/openchamberConfig';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -1677,16 +1679,13 @@ const AssistantMessageBody = React.memo(({
 
         if (shouldRenderActivityGroup && toggleActivityGroup) {
             activityGroupSegmentsForMessage.forEach((segment) => {
-                const visibleSegmentParts = showReasoningTraces
-                    ? segment.parts
-                    : segment.parts.filter((activity) => activity.kind !== 'reasoning');
-                if (visibleSegmentParts.length === 0) {
+                if (segment.parts.length === 0) {
                     return;
                 }
                 rendered.push(
                     <div key={`progressive-group-${segment.id}`} className="mb-3">
                         <TurnActivity
-                            parts={visibleSegmentParts}
+                            parts={segment.parts}
                             isExpanded={turnGroupingContext.isGroupExpanded === true}
                             collapsedPreviewCount={collapsedPreviewCount}
                             onToggle={toggleActivityGroup}
@@ -1701,6 +1700,7 @@ const AssistantMessageBody = React.memo(({
                             animatedToolIds={animatedToolIdsLookup}
                             diffStats={turnGroupingContext.diffStats}
                             renderJustificationActions={renderJustificationActions}
+                            showReasoningTraces={showReasoningTraces}
                         />
                     </div>
                 );
@@ -1790,69 +1790,119 @@ const AssistantMessageBody = React.memo(({
             }
 
             if (part.type === 'tool') {
-                const toolPart = part as ToolPartType;
-                const toolName = toolPart.tool?.toLowerCase() ?? '';
-
                 if (isSortedRenderMode && !isActivityOwnerMessage) {
                     i += 1;
                     continue;
                 }
 
-                const activity = activityByPart.get(part);
-                if (activity?.kind === 'tool' && (shouldRenderActivityGroup || !isStandaloneTool(toolName))) {
+                const currentToolPart = part as ToolPartType;
+                const currentToolName = currentToolPart.tool?.toLowerCase() ?? '';
+                const currentActivity = activityByPart.get(currentToolPart);
+                const shouldSkipCurrentActivity = currentActivity?.kind === 'tool' && (shouldRenderActivityGroup || !isStandaloneTool(currentToolName));
+                if (isStandaloneTool(currentToolName)) {
+                    if (!shouldSkipCurrentActivity && shouldShowTool(currentToolPart)) {
+                        rendered.push(
+                            <FadeInOnReveal key={`tool-${currentToolPart.id}`}>
+                                <ToolRevealOnMount animate={animatedToolIdsLookup.has(currentToolPart.id)} wipe>
+                                    <ToolPart
+                                        part={currentToolPart}
+                                        isExpanded={expandedTools.has(currentToolPart.id)}
+                                        expandedTools={expandedTools}
+                                        onToggle={onToggleTool}
+                                        isMobile={isMobile}
+                                        alwaysShowActions={alwaysShowMessageActions}
+                                        onContentChange={onContentChange}
+                                        onShowPopup={onShowPopup}
+                                        animateTailText={animatedToolIdsLookup.has(currentToolPart.id)}
+                                    />
+                                </ToolRevealOnMount>
+                            </FadeInOnReveal>
+                        );
+                    }
                     i += 1;
                     continue;
                 }
 
-                if (!shouldShowTool(toolPart)) {
-                    i++;
-                    continue;
+                const toolActivities: TurnActivityRecord[] = [];
+                let j = i;
+                while (j < visibleParts.length && visibleParts[j]?.type === 'tool') {
+                    const toolPart = visibleParts[j] as ToolPartType;
+                    const toolName = toolPart.tool?.toLowerCase() ?? '';
+                    if (isStandaloneTool(toolName)) {
+                        break;
+                    }
+                    const activity = activityByPart.get(toolPart);
+                    if (!(activity?.kind === 'tool' && (shouldRenderActivityGroup || !isStandaloneTool(toolName))) && shouldShowTool(toolPart)) {
+                        toolActivities.push({
+                            id: toolPart.id,
+                            turnId: '',
+                            messageId,
+                            partIndex: j,
+                            part: toolPart,
+                            kind: 'tool' as const,
+                        });
+                    }
+                    j += 1;
                 }
 
-                // Expandable tools: bash, edit, write, task, question — individual rows
-                if (isExpandableTool(toolName)) {
+                for (const row of projectToolSegmentRows(toolActivities)) {
+                    if (row.type === 'tool-expandable') {
+                        const toolPart = row.activity.part as ToolPartType;
+                        rendered.push(
+                            <FadeInOnReveal key={row.key}>
+                                <ToolRevealOnMount animate={animatedToolIdsLookup.has(toolPart.id)} wipe>
+                                    <ToolPart
+                                        part={toolPart}
+                                        isExpanded={expandedTools.has(toolPart.id)}
+                                        expandedTools={expandedTools}
+                                        onToggle={onToggleTool}
+                                        isMobile={isMobile}
+                                        alwaysShowActions={alwaysShowMessageActions}
+                                        onContentChange={onContentChange}
+                                        onShowPopup={onShowPopup}
+                                        animateTailText={animatedToolIdsLookup.has(toolPart.id)}
+                                    />
+                                </ToolRevealOnMount>
+                            </FadeInOnReveal>
+                        );
+                        continue;
+                    }
+
+                    if (row.type === 'tool-static') {
+                        rendered.push(
+                            <FadeInOnReveal key={row.key}>
+                                <ToolRevealOnMount animate={animatedToolIdsLookup.has(row.activity.id)} wipe>
+                                    <StaticToolRow
+                                        toolName={row.toolName}
+                                        activities={[row.activity]}
+                                        animateTailText={animatedToolIdsLookup.has(row.activity.id)}
+                                    />
+                                </ToolRevealOnMount>
+                            </FadeInOnReveal>
+                        );
+                        continue;
+                    }
+
+                    const animateContextRow = row.activities.some((activity) => animatedToolIdsLookup.has(activity.id));
                     rendered.push(
-                        <FadeInOnReveal key={`tool-${toolPart.id}`}>
-                            <ToolRevealOnMount animate={animatedToolIdsLookup.has(toolPart.id)} wipe>
-                                <ToolPart
-                                    part={toolPart}
-                                    isExpanded={expandedTools.has(toolPart.id)}
-                                    onToggle={onToggleTool}
-                                    isMobile={isMobile}
-                                    alwaysShowActions={alwaysShowMessageActions}
-                                    onContentChange={onContentChange}
-                                    onShowPopup={onShowPopup}
-                                    animateTailText={animatedToolIdsLookup.has(toolPart.id)}
+                        <FadeInOnReveal key={row.key}>
+                            <ToolRevealOnMount animate={animateContextRow} wipe>
+                                <ContextToolGroupRow
+                                    rowKey={row.key}
+                                    status={row.status}
+                                    counts={row.counts}
+                                    children={row.children}
+                                    renderSignature={row.renderSignature}
+                                    animateTailText={animateContextRow}
+                                    isExpanded={expandedTools.has(row.key)}
+                                    onToggleTool={onToggleTool}
                                 />
                             </ToolRevealOnMount>
                         </FadeInOnReveal>
                     );
-                    i++;
-                    continue;
                 }
 
-                // Static tools: one row per tool call (no grouping)
-                rendered.push(
-                    <FadeInOnReveal key={`static-tools-${toolPart.id}`}>
-                        <ToolRevealOnMount animate={animatedToolIdsLookup.has(toolPart.id)} wipe>
-                            <StaticToolRow
-                                toolName={toolName}
-                                activities={[
-                                    {
-                                        id: toolPart.id,
-                                        turnId: '',
-                                        messageId,
-                                        partIndex: 0,
-                                        part: toolPart,
-                                        kind: 'tool' as const,
-                                    },
-                                ]}
-                                animateTailText={animatedToolIdsLookup.has(toolPart.id)}
-                            />
-                        </ToolRevealOnMount>
-                    </FadeInOnReveal>
-                );
-                i++;
+                i = j;
                 continue;
             }
 

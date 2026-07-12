@@ -18,6 +18,16 @@ const normalizeToolName = (toolName: unknown): string => {
     return withoutIndex;
 };
 
+export type ContextToolSummaryKind = 'read' | 'search' | 'list';
+
+export const getContextToolSummaryKind = (toolName: unknown): ContextToolSummaryKind | null => {
+    const tool = typeof toolName === 'string' ? toolName.trim().toLowerCase() : '';
+    if (tool === 'read') return 'read';
+    if (tool === 'grep' || tool === 'glob' || tool === 'search') return 'search';
+    if (tool === 'list') return 'list';
+    return null;
+};
+
 export const isExpandableTool = (toolName: unknown): boolean => {
     return !isStaticTool(toolName);
 };
