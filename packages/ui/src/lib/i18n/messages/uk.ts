@@ -1131,6 +1131,8 @@ export const dict: Record<I18nKey, string> = {
   "filesView.editor.enableLineWrap": "Увімкнути перенос рядків",
   "filesView.editor.findInFile": "Знайти у файлі",
   "filesView.editor.goToLine": "Перейти до рядка",
+  "filesView.editor.switchToEditMode": "Перемкнутися в режим редагування",
+  "filesView.editor.switchToPreviewMode": "Перемкнутися в режим попереднього перегляду",
   "filesView.editor.switchToTextView": "Перемкнутися на текстовий перегляд",
   "filesView.editor.switchToTreeView": "Перейти до перегляду дерева",
   "filesView.toast.copyFailed": "Помилка копіювання",

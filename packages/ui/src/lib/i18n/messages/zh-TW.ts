@@ -1142,6 +1142,8 @@ export const dict: Record<I18nKey, string> = {
   'filesView.editor.enableLineWrap': '開啟自動換行',
   'filesView.editor.findInFile': '檔案內尋找',
   'filesView.editor.goToLine': '跳轉到行',
+  'filesView.editor.switchToEditMode': '切換到編輯模式',
+  'filesView.editor.switchToPreviewMode': '切換到預覽模式',
   'filesView.editor.switchToTextView': '切換到文字檢視',
   'filesView.editor.switchToTreeView': '切換到樹狀檢視',
   'filesView.toast.copyFailed': '複製失敗',

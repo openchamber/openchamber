@@ -1165,6 +1165,8 @@ export const dict = {
   'filesView.editor.enableLineWrap': 'Enable line wrap',
   'filesView.editor.findInFile': 'Find in file',
   'filesView.editor.goToLine': 'Go to line',
+  'filesView.editor.switchToEditMode': 'Switch to edit mode',
+  'filesView.editor.switchToPreviewMode': 'Switch to preview mode',
   'filesView.editor.switchToTextView': 'Switch to Text View',
   'filesView.editor.switchToTreeView': 'Switch to Tree View',
   'filesView.toast.copyFailed': 'Copy failed',

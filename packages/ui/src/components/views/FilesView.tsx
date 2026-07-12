@@ -3302,15 +3302,32 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           />
         )}
 
-        {(isMarkdown || isHtmlFile(selectedFile?.path ?? '')) && (
+        {isMarkdown && (
+          withTooltip(
+            t(getMdViewMode() === 'preview' ? 'filesView.editor.switchToEditMode' : 'filesView.editor.switchToPreviewMode'),
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => saveMdViewMode(getMdViewMode() === 'preview' ? 'edit' : 'preview')}
+              className={cn(
+                'size-6 p-0 transition-colors hover:bg-[var(--interactive-hover)] focus-visible:bg-[var(--interactive-hover)] active:bg-[var(--interactive-hover)]',
+                getMdViewMode() === 'preview'
+                  ? 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)] hover:bg-[var(--interactive-selection)] focus-visible:bg-[var(--interactive-selection)] active:bg-[var(--interactive-selection)]'
+                  : 'text-muted-foreground opacity-65 hover:opacity-100'
+              )}
+              title={t(getMdViewMode() === 'preview' ? 'filesView.editor.switchToEditMode' : 'filesView.editor.switchToPreviewMode')}
+              aria-label={t(getMdViewMode() === 'preview' ? 'filesView.editor.switchToEditMode' : 'filesView.editor.switchToPreviewMode')}
+            >
+              <Icon name="eye" className="size-4" />
+            </Button>
+          )
+        )}
+
+        {isHtmlFile(selectedFile?.path ?? '') && (
           <PreviewToggleButton
-            currentMode={isMarkdown ? getMdViewMode() : getHtmlViewMode()}
+            currentMode={getHtmlViewMode()}
             onToggle={() => {
-              if (isHtmlFile(selectedFile?.path ?? '')) {
-                saveHtmlViewMode(getHtmlViewMode() === 'preview' ? 'edit' : 'preview');
-              } else {
-                saveMdViewMode(getMdViewMode() === 'preview' ? 'edit' : 'preview');
-              }
+              saveHtmlViewMode(getHtmlViewMode() === 'preview' ? 'edit' : 'preview');
             }}
           />
         )}
@@ -3716,7 +3733,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           <div
             ref={floatingToolbarRef}
             className="absolute right-3 top-3 z-30"
-            onMouseEnter={() => setIsFloatingToolbarOpen(true)}
+            onMouseEnter={() => {
+              if (isMarkdown) return;
+              setIsFloatingToolbarOpen(true);
+            }}
             onMouseLeave={() => {
               if (toolbarDropdownOpenCountRef.current > 0) return;
               setIsFloatingToolbarOpen(false);
@@ -3725,23 +3745,51 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             {isFloatingToolbarOpen ? (
               renderFloatingFileControls()
             ) : (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="inline-flex">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setIsFloatingToolbarOpen(true)}
-                      className="size-8 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-0 text-muted-foreground shadow-sm hover:text-foreground"
-                      aria-label={t('filesView.editor.showControlsAria')}
-                      title={t('filesView.editor.controlsTitle')}
-                    >
-                      <Icon name="more-2-fill" className="size-4" />
-                    </Button>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" sideOffset={6}>{t('filesView.editor.controlsTitle')}</TooltipContent>
-              </Tooltip>
+              <div className="flex items-center gap-1">
+                {isMarkdown ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => saveMdViewMode(getMdViewMode() === 'preview' ? 'edit' : 'preview')}
+                          className={cn(
+                            'size-8 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-0 shadow-sm transition-colors',
+                            getMdViewMode() === 'preview'
+                              ? 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)] hover:bg-[var(--interactive-selection)]'
+                              : 'text-muted-foreground hover:text-foreground'
+                          )}
+                          aria-label={t(getMdViewMode() === 'preview' ? 'filesView.editor.switchToEditMode' : 'filesView.editor.switchToPreviewMode')}
+                          title={t(getMdViewMode() === 'preview' ? 'filesView.editor.switchToEditMode' : 'filesView.editor.switchToPreviewMode')}
+                        >
+                          <Icon name={getMdViewMode() === 'preview' ? 'eye' : 'eye-off'} className="size-4" />
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" sideOffset={6}>
+                      {t(getMdViewMode() === 'preview' ? 'filesView.editor.switchToEditMode' : 'filesView.editor.switchToPreviewMode')}
+                    </TooltipContent>
+                  </Tooltip>
+                ) : null}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setIsFloatingToolbarOpen(true)}
+                        className="size-8 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-0 text-muted-foreground shadow-sm hover:text-foreground"
+                        aria-label={t('filesView.editor.showControlsAria')}
+                        title={t('filesView.editor.controlsTitle')}
+                      >
+                        <Icon name="more-2-fill" className="size-4" />
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" sideOffset={6}>{t('filesView.editor.controlsTitle')}</TooltipContent>
+                </Tooltip>
+              </div>
             )}
           </div>
         )}

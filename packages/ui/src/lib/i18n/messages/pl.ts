@@ -1649,6 +1649,8 @@ export const dict: Record<I18nKey, string> = {
   'filesView.editor.fullscreen': 'Pełny ekran',
   'filesView.editor.goToLine': 'Przejdź do linii',
   'filesView.editor.htmlPreviewTitle': 'Podgląd HTML',
+  'filesView.editor.switchToEditMode': 'Przełącz na tryb edycji',
+  'filesView.editor.switchToPreviewMode': 'Przełącz na tryb podglądu',
   'filesView.diagram.closeDiagramView': 'Zamknij widok diagramu',
   'filesView.diagram.saveDiagram': 'Zapisz diagram',
   'filesView.editor.imageAltFallback': 'Obraz',

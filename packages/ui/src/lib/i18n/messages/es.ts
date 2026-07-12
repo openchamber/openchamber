@@ -1131,6 +1131,8 @@ export const dict: Record<I18nKey, string> = {
   "filesView.editor.enableLineWrap": "Activar ajuste de línea",
   "filesView.editor.findInFile": "Buscar en el archivo",
   "filesView.editor.goToLine": "Ir a línea",
+  "filesView.editor.switchToEditMode": "Cambiar al modo de edición",
+  "filesView.editor.switchToPreviewMode": "Cambiar al modo de vista previa",
   "filesView.editor.switchToTextView": "Cambiar a vista de texto",
   "filesView.editor.switchToTreeView": "Cambiar a vista de árbol",
   "filesView.toast.copyFailed": "No se pudo copiar",

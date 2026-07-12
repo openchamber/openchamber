@@ -995,6 +995,8 @@ export const dict = {
   'filesView.editor.enableLineWrap': 'Activer le retour à la ligne',
   'filesView.editor.findInFile': 'Rechercher dans le fichier',
   'filesView.editor.goToLine': 'Aller à la ligne',
+  'filesView.editor.switchToEditMode': 'Passer en mode édition',
+  'filesView.editor.switchToPreviewMode': 'Passer en mode aperçu',
   'filesView.editor.switchToTextView': 'Passer à l\'affichage texte',
   'filesView.editor.switchToTreeView': 'Passer à l\'arborescence',
   'filesView.toast.copyFailed': 'Échec de la copie',

@@ -1168,6 +1168,8 @@ export const dict: Record<I18nKey, string> = {
   'filesView.editor.enableLineWrap': '줄 바꿈 켜기',
   'filesView.editor.findInFile': '파일에서 찾기',
   'filesView.editor.goToLine': '줄로 이동',
+  'filesView.editor.switchToEditMode': '편집 모드로 전환',
+  'filesView.editor.switchToPreviewMode': '미리보기 모드로 전환',
   'filesView.editor.switchToTextView': '텍스트 보기로 전환',
   'filesView.editor.switchToTreeView': '트리 보기로 전환',
   'filesView.toast.copyFailed': '복사 실패',

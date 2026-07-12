@@ -1161,6 +1161,8 @@ export const dict: Record<I18nKey, string> = {
   'filesView.editor.enableLineWrap': '行の折り返しを有効にする',
   'filesView.editor.findInFile': 'ファイル内を検索',
   'filesView.editor.goToLine': '指定行に移動',
+  'filesView.editor.switchToEditMode': '編集モードに切り替え',
+  'filesView.editor.switchToPreviewMode': 'プレビューモードに切り替え',
   'filesView.editor.switchToTextView': 'テキストビューに切り替え',
   'filesView.editor.switchToTreeView': 'ツリービューに切り替え',
   'filesView.toast.copyFailed': 'コピーに失敗しました',
