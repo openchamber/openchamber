@@ -35,6 +35,17 @@ const ALLOWED_WS_PATHS = new Set([
   '/api/dictation/ws',
 ]);
 
+const canonicalizeTarget = (path, query) => {
+  if (typeof path !== 'string' || typeof query !== 'string' || !path.startsWith('/') || path.startsWith('//')) return null;
+  if (/[%](?:2f|5c|2e)/i.test(path) || /[\\?#\0-\x1f\x7f]/.test(path) || path.includes('//')) return null;
+  let decoded;
+  try { decoded = decodeURIComponent(path); } catch { return null; }
+  if (decoded.split('/').some((part) => part === '.' || part === '..') || /[\\?#\0-\x1f\x7f]/.test(decoded)) return null;
+  const url = new URL(`${path}${query ? `?${query}` : ''}`, 'http://loopback.invalid');
+  if (url.username || url.password || url.pathname !== path || url.search.slice(1) !== query) return null;
+  return { path: url.pathname, query: url.search.slice(1) };
+};
+
 // Hop-by-hop headers stripped from tunneled requests; `host` is set by fetch
 // to the loopback origin. content-length is dropped too because the body is
 // re-chunked through the tunnel and undici computes framing itself.
@@ -46,6 +57,13 @@ const STRIPPED_REQUEST_HEADERS = new Set([
   'host',
   'content-length',
 ]);
+
+const isUntrustedTransportHeader = (name, stripOrigin) =>
+  name === 'forwarded'
+  || name.startsWith('x-forwarded-')
+  || name.startsWith('cf-')
+  || name.startsWith('x-openchamber-')
+  || (stripOrigin && name === 'origin');
 
 // Response framing headers that no longer apply once the body crosses the
 // tunnel as HttpBody chunks (loopback fetch already decoded content-encoding).
@@ -85,13 +103,39 @@ const isWsClosePayload = (parsed) => Boolean(parsed && typeof parsed === 'object
  *   getLocalPort: () => number,
  *   sendFrame: (plaintextFrame: Uint8Array) => void | Promise<void>,
  *   getBufferedAmount: () => number,
+ *   transportContext?: { requestHeaders?: Record<string, string>, wsHeaders?: Record<string, string>, metadataHeader?: string | null, stripOrigin?: boolean },
+ *   requestPolicy?: (request: { kind: 'http' | 'ws', streamId: number, generation: number, method?: string, path: string, query: string, headers?: Record<string, string> }) => boolean | string | Promise<boolean | string>,
+ *   onRequest?: (request: object) => void,
+ *   onResponse?: (response: { kind: 'http', streamId: number, generation: number, status: number }) => void | Promise<void>,
+ *   onLimitExceeded?: (reason: string) => void,
+ *   onStreamClosed?: (event: { streamId: number, generation: number, kind: 'http' | 'ws', reason: string }) => void,
+ *   limits?: { maxStreams?: number, maxWebSockets?: number, maxIncompleteFragments?: number, maxIncompleteFragmentBytes?: number, getMaxIncompleteFragmentBytes?: () => number, maxStreamOpens?: number, streamOpenWindowMs?: number },
+ *   failClosedPolicy?: boolean,
+ *   onProtocolFailure?: () => void,
  * }} deps
  */
-export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBufferedAmount }) => {
-  /** @type {Map<number, { kind: 'http', abort: AbortController, body: ReadableStreamDefaultController | null } | { kind: 'ws', socket: WebSocket, opened: boolean }>} */
+export const createTunnelHost = ({
+  connectionId,
+  getLocalPort,
+  sendFrame,
+  getBufferedAmount,
+  transportContext = {},
+  requestPolicy,
+  onRequest,
+  onResponse,
+  onLimitExceeded,
+  onStreamClosed,
+  limits = {},
+  failClosedPolicy = false,
+  onProtocolFailure,
+}) => {
+  /** @type {Map<number, { kind: 'http', abort: AbortController, body: ReadableStreamDefaultController | null, responseBody: ReadableStream | null, noBody: boolean } | { kind: 'ws', socket: WebSocket, opened: boolean }>} */
   const streams = new Map();
   const assembler = createFragmentAssembler();
+  const incompleteFragments = new Set();
   let closed = false;
+  const streamOpenTimes = [];
+  let nextGeneration = 1;
 
   const send = async (frame) => {
     if (closed) return;
@@ -105,22 +149,23 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     await sendJson(TunnelFrameType.StreamAbort, streamId, { reason: String(reason ?? 'stream error') });
   };
 
-  const dropStream = (streamId) => {
+  const dropStream = (streamId, reason = 'completed') => {
+    const stream = streams.get(streamId);
     streams.delete(streamId);
     assembler.dropStream(streamId);
+    for (const key of incompleteFragments) {
+      if (key.startsWith(`${streamId}:`)) incompleteFragments.delete(key);
+    }
+    if (stream) onStreamClosed?.({ streamId, generation: stream.generation, kind: stream.kind, reason });
   };
 
   const abortLocalStream = (streamId, reason) => {
     const stream = streams.get(streamId);
     if (!stream) return;
-    dropStream(streamId);
+    dropStream(streamId, String(reason ?? 'aborted'));
     if (stream.kind === 'http') {
-      try {
-        stream.body?.error(new Error(String(reason ?? 'aborted')));
-      } catch {
-        // body already closed
-      }
       stream.abort.abort();
+      void stream.responseBody?.cancel().catch(() => {});
     } else {
       try {
         stream.socket.terminate();
@@ -146,12 +191,43 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     for (const [name, value] of Object.entries(rawHeaders)) {
       if (typeof name !== 'string' || typeof value !== 'string') continue;
       const lower = name.toLowerCase();
-      if (STRIPPED_REQUEST_HEADERS.has(lower)) continue;
+      if (STRIPPED_REQUEST_HEADERS.has(lower) || isUntrustedTransportHeader(lower, transportContext.stripOrigin === true)) continue;
       if (/[\r\n]/.test(name) || /[\r\n]/.test(value)) continue;
       headers[lower] = value;
     }
-    headers['x-openchamber-relay-connection'] = connectionId;
+    const metadataHeader = transportContext.metadataHeader === undefined
+      ? 'x-openchamber-relay-connection'
+      : transportContext.metadataHeader;
+    if (metadataHeader) headers[metadataHeader.toLowerCase()] = connectionId;
+    for (const [name, value] of Object.entries(transportContext.requestHeaders ?? {})) {
+      headers[name.toLowerCase()] = value;
+    }
     return headers;
+  };
+
+  const policyRejection = async (request) => {
+    onRequest?.(request);
+    const result = await requestPolicy?.(request);
+    if (result === false) return 'Request rejected by transport policy';
+    return typeof result === 'string' ? result : null;
+  };
+
+  const exceedsOpenRate = () => {
+    if (!Number.isFinite(limits.maxStreamOpens)) return false;
+    const now = Date.now();
+    const windowMs = Number.isFinite(limits.streamOpenWindowMs) ? limits.streamOpenWindowMs : 10_000;
+    while (streamOpenTimes.length > 0 && now - streamOpenTimes[0] >= windowMs) streamOpenTimes.shift();
+    if (streamOpenTimes.length >= limits.maxStreamOpens) return true;
+    streamOpenTimes.push(now);
+    return false;
+  };
+
+  const atStreamLimit = (kind) => {
+    if (Number.isFinite(limits.maxStreams) && streams.size >= limits.maxStreams) return true;
+    if (kind !== 'ws' || !Number.isFinite(limits.maxWebSockets)) return false;
+    let count = 0;
+    for (const stream of streams.values()) if (stream.kind === 'ws') count += 1;
+    return count >= limits.maxWebSockets;
   };
 
   // Synthetic responses never ship an empty body: `reason` states explicitly
@@ -166,15 +242,26 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
   };
 
   const runHttpStream = async (streamId, request) => {
+    const target = canonicalizeTarget(request.path, request.query);
+    if (!target) throw new Error('invalid request target');
+    request.path = target.path;
+    request.query = target.query;
     const method = request.method.toUpperCase();
     if (!isAllowedHttpPath(request.path)) {
-      dropStream(streamId);
+      dropStream(streamId, 'path-rejected');
+      if (failClosedPolicy) throw new Error('path rejected');
       await syntheticResponse(streamId, 403, 'Path is not allowed through the relay');
       return;
     }
-
     const stream = streams.get(streamId);
     if (!stream || stream.kind !== 'http') return;
+    const rejected = await policyRejection({ kind: 'http', streamId, generation: stream.generation, method, path: request.path, query: request.query, headers: request.headers });
+    if (rejected) {
+      dropStream(streamId, 'policy-rejected');
+      if (failClosedPolicy) throw new Error('request rejected by transport policy');
+      await syntheticResponse(streamId, 403, rejected);
+      return;
+    }
 
     const hasBody = method !== 'GET' && method !== 'HEAD';
     let requestBody;
@@ -186,7 +273,6 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       });
     } else {
       stream.body = null;
-      stream.noBody = true;
     }
 
     const url = `http://127.0.0.1:${getLocalPort()}${request.path}${request.query ? `?${request.query}` : ''}`;
@@ -201,11 +287,12 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       });
     } catch (error) {
       if (streams.get(streamId) === stream) {
-        dropStream(streamId);
+        dropStream(streamId, 'request-failed');
         await sendAbort(streamId, error?.message ?? 'loopback request failed');
       }
       return;
     }
+    stream.responseBody = response.body;
 
     const responseHeaders = {};
     for (const [name, value] of response.headers.entries()) {
@@ -213,6 +300,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       responseHeaders[name] = value;
     }
     await sendJson(TunnelFrameType.HttpResponse, streamId, { status: response.status, headers: responseHeaders });
+    await onResponse?.({ kind: 'http', streamId, generation: stream.generation, status: response.status });
 
     try {
       if (response.body) {
@@ -227,12 +315,12 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
         }
       }
       if (streams.get(streamId) === stream) {
-        dropStream(streamId);
+        dropStream(streamId, 'completed');
         await send(encodeTunnelFrame(TunnelFrameType.StreamEnd, streamId, new Uint8Array(0)));
       }
     } catch (error) {
       if (streams.get(streamId) === stream) {
-        dropStream(streamId);
+        dropStream(streamId, 'response-failed');
         await sendAbort(streamId, error?.message ?? 'loopback response failed');
       }
     }
@@ -248,17 +336,29 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     try {
       request = decodeJsonPayload(payload, isHttpRequestPayload);
     } catch (error) {
+      if (failClosedPolicy) throw error;
       void sendAbort(streamId, error?.message ?? 'malformed request');
       return;
     }
-    const stream = { kind: 'http', abort: new AbortController(), body: null, noBody: false };
+    const method = request.method.toUpperCase();
+    const stream = { kind: 'http', generation: nextGeneration++, abort: new AbortController(), body: null, responseBody: null, noBody: method === 'GET' || method === 'HEAD' };
+    if (atStreamLimit('http')) {
+      onLimitExceeded?.('stream-limit');
+      void sendAbort(streamId, 'stream limit exceeded');
+      return;
+    }
+    if (exceedsOpenRate()) {
+      onLimitExceeded?.('stream-open-rate');
+      void sendAbort(streamId, 'stream open rate exceeded');
+      return;
+    }
     streams.set(streamId, stream);
-    void runHttpStream(streamId, request);
+    void runHttpStream(streamId, request).catch(() => onProtocolFailure?.());
   };
 
   const handleHttpBody = (streamId, payload) => {
     const stream = streams.get(streamId);
-    if (!stream || stream.kind !== 'http' || stream.noBody) return;
+    if (!stream || stream.kind !== 'http' || stream.noBody) throw new Error('unsolicited http body');
     // The body controller attaches synchronously in runHttpStream before any
     // await, so by the time body frames arrive it is set for body-carrying
     // methods; drop stray body bytes otherwise.
@@ -271,7 +371,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
 
   const handleStreamEnd = (streamId) => {
     const stream = streams.get(streamId);
-    if (!stream || stream.kind !== 'http') return;
+    if (!stream || stream.kind !== 'http') throw new Error('unsolicited stream end');
     try {
       stream.body?.close();
     } catch {
@@ -284,7 +384,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
   // WebSocket
   // -------------------------------------------------------------------------
 
-  const handleWsOpen = (streamId, payload) => {
+  const handleWsOpen = async (streamId, payload) => {
     if (streams.has(streamId)) {
       abortLocalStream(streamId, 'duplicate stream id');
       void sendAbort(streamId, 'duplicate stream id');
@@ -294,11 +394,34 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     try {
       open = decodeJsonPayload(payload, isWsOpenPayload);
     } catch (error) {
+      if (failClosedPolicy) throw error;
       void sendAbort(streamId, error?.message ?? 'malformed ws open');
       return;
     }
+    const target = canonicalizeTarget(open.path, open.query);
+    if (!target) throw new Error('invalid websocket target');
+    open.path = target.path;
+    open.query = target.query;
     if (!ALLOWED_WS_PATHS.has(open.path)) {
+      if (failClosedPolicy) throw new Error('path rejected');
       void sendAbort(streamId, 'Path is not allowed through the relay');
+      return;
+    }
+    const generation = nextGeneration++;
+    const rejected = await policyRejection({ kind: 'ws', streamId, generation, path: open.path, query: open.query });
+    if (rejected) {
+      if (failClosedPolicy) throw new Error('request rejected by transport policy');
+      void sendAbort(streamId, rejected);
+      return;
+    }
+    if (atStreamLimit('ws')) {
+      onLimitExceeded?.('websocket-limit');
+      void sendAbort(streamId, 'stream limit exceeded');
+      return;
+    }
+    if (exceedsOpenRate()) {
+      onLimitExceeded?.('stream-open-rate');
+      void sendAbort(streamId, 'stream open rate exceeded');
       return;
     }
 
@@ -311,9 +434,13 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     // otherwise — a no-origin upgrade is rejected 403. The request itself is still
     // authenticated by the tunneled oc_url_token, not by this origin.
     const dialHeaders = {
-      'x-openchamber-relay-connection': connectionId,
       origin: `http://127.0.0.1:${getLocalPort()}`,
     };
+    const metadataHeader = transportContext.metadataHeader === undefined
+      ? 'x-openchamber-relay-connection'
+      : transportContext.metadataHeader;
+    if (metadataHeader) dialHeaders[metadataHeader.toLowerCase()] = connectionId;
+    Object.assign(dialHeaders, transportContext.wsHeaders ?? {});
     let socket;
     try {
       socket = new WebSocket(url, open.protocols, {
@@ -323,7 +450,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       void sendAbort(streamId, error?.message ?? 'ws dial failed');
       return;
     }
-    const stream = { kind: 'ws', socket, opened: false };
+    const stream = { kind: 'ws', generation, socket, opened: false, sendChain: Promise.resolve() };
     streams.set(streamId, stream);
 
     socket.on('open', () => {
@@ -335,17 +462,21 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       if (streams.get(streamId) !== stream || closed) return;
       const bytes = Buffer.isBuffer(data) ? new Uint8Array(data) : new Uint8Array(Buffer.concat(data));
       const frameType = isBinary ? TunnelFrameType.WsBinary : TunnelFrameType.WsText;
-      void (async () => {
+      stream.sendChain = stream.sendChain.then(async () => {
         for (const frame of encodeFragmentedMessage(frameType, streamId, bytes)) {
           await waitForBackpressure(null);
           if (streams.get(streamId) !== stream || closed) return;
           await send(frame);
         }
-      })();
+      }).catch(() => {
+        if (streams.get(streamId) !== stream) return;
+        abortLocalStream(streamId, 'send-failed');
+        onProtocolFailure?.();
+      });
     });
     socket.on('close', (code, reasonBuffer) => {
       if (streams.get(streamId) !== stream) return;
-      dropStream(streamId);
+      dropStream(streamId, 'upstream-closed');
       const reason = reasonBuffer ? reasonBuffer.toString('utf8') : '';
       if (stream.opened) {
         void sendJson(TunnelFrameType.WsClose, streamId, { code: code || 1000, reason });
@@ -356,7 +487,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     socket.on('error', (error) => {
       if (streams.get(streamId) !== stream) return;
       if (!stream.opened) {
-        dropStream(streamId);
+        dropStream(streamId, 'upstream-error');
         try {
           socket.terminate();
         } catch {
@@ -370,7 +501,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
 
   const handleWsMessage = (streamId, frameType, message) => {
     const stream = streams.get(streamId);
-    if (!stream || stream.kind !== 'ws' || stream.socket.readyState !== WebSocket.OPEN) return;
+    if (!stream || stream.kind !== 'ws' || !stream.opened || stream.socket.readyState !== WebSocket.OPEN) throw new Error('unsolicited websocket data');
     if (frameType === TunnelFrameType.WsText) {
       stream.socket.send(Buffer.from(message).toString('utf8'));
     } else {
@@ -381,7 +512,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
   const handleWsClose = (streamId, payload) => {
     const stream = streams.get(streamId);
     if (!stream || stream.kind !== 'ws') return;
-    dropStream(streamId);
+    dropStream(streamId, 'closed-by-client');
     let close = { code: 1000, reason: '' };
     try {
       close = decodeJsonPayload(payload, isWsClosePayload);
@@ -407,8 +538,26 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
 
     // WS message frames can be fragmented; everything else arrives whole.
     if (frame.frameType === TunnelFrameType.WsText || frame.frameType === TunnelFrameType.WsBinary) {
+      const stream = streams.get(frame.streamId);
+      if (!stream || stream.kind !== 'ws' || !stream.opened || stream.socket.readyState !== WebSocket.OPEN) {
+        throw new Error('unsolicited websocket data');
+      }
+      const fragmentKey = `${frame.streamId}:${frame.frameType}`;
+      if (frame.hasMoreFragments && !incompleteFragments.has(fragmentKey)) {
+        if (Number.isFinite(limits.maxIncompleteFragments) && incompleteFragments.size >= limits.maxIncompleteFragments) {
+          onLimitExceeded?.('fragment-limit');
+          await sendAbort(frame.streamId, 'incomplete fragment limit exceeded');
+          return;
+        }
+        incompleteFragments.add(fragmentKey);
+      }
       const message = assembler.push(frame);
+      const fragmentByteLimit = limits.getMaxIncompleteFragmentBytes?.() ?? limits.maxIncompleteFragmentBytes;
+      if (Number.isFinite(fragmentByteLimit) && assembler.pendingBytes > fragmentByteLimit) {
+        throw new Error('incomplete fragment byte limit exceeded');
+      }
       if (message === null) return;
+      incompleteFragments.delete(fragmentKey);
       handleWsMessage(frame.streamId, frame.frameType, message);
       return;
     }
@@ -427,7 +576,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
         abortLocalStream(frame.streamId, 'aborted by client');
         return;
       case TunnelFrameType.WsOpen:
-        handleWsOpen(frame.streamId, frame.payload);
+        await handleWsOpen(frame.streamId, frame.payload);
         return;
       case TunnelFrameType.WsClose:
         handleWsClose(frame.streamId, frame.payload);
@@ -438,8 +587,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       case TunnelFrameType.Pong:
         return;
       default:
-        // Host never receives HttpResponse/WsOpened; ignore rather than tear down.
-        return;
+        throw new Error('prohibited tunnel frame');
     }
   };
 
@@ -450,6 +598,8 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       abortLocalStream(streamId, 'connection closed');
     }
     streams.clear();
+    incompleteFragments.clear();
+    assembler.clear();
   };
 
   return {
