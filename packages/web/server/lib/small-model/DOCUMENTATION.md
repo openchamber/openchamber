@@ -47,7 +47,9 @@ other runtime API.
   - **Anthropic** (`type: api`): `/v1/messages` with `x-api-key`.
   - **Google** (`type: api`): `generateContent` with `x-goog-api-key`.
   - Everything else: OpenAI-compatible `/chat/completions` against the
-    provider's models.dev base URL with `Authorization: Bearer <key>`.
+    provider's base URL, resolved from (1) `provider.<id>.options.baseURL`
+    in the OpenCode config, (2) the hardcoded `https://api.openai.com/v1`
+    endpoint, or (3) the provider's `api` field from the models.dev catalog.
 - `catalog.js` — models.dev catalog via the shared in-process cache
   (`../opencode/models-metadata.js`, also serving
   `/api/openchamber/models-metadata`).
