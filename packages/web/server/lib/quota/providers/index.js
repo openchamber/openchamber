@@ -16,6 +16,7 @@ import * as kimi from './kimi.js';
 import * as nanogpt from './nanogpt.js';
 import * as openai from './openai.js';
 import * as openrouter from './openrouter.js';
+import * as kiro from './kiro.js';
 import * as zai from './zai.js';
 import * as zhipuaiCodingPlan from './zhipuai-coding-plan.js';
 import * as minimaxCodingPlan from './minimax-coding-plan.js';
@@ -47,6 +48,12 @@ const registry = {
     providerName: google.providerName,
     isConfigured: google.isConfigured,
     fetchQuota: google.fetchGoogleQuota
+  },
+  kiro: {
+    providerId: kiro.providerId,
+    providerName: kiro.providerName,
+    isConfigured: kiro.isConfigured,
+    fetchQuota: kiro.fetchQuota
   },
   'zai-coding-plan': {
     providerId: zai.providerId,
@@ -167,6 +174,7 @@ export const fetchCopilotQuota = copilot.fetchQuota;
 export const fetchCopilotAddonQuota = copilot.fetchQuotaAddon;
 export const fetchKimiQuota = kimi.fetchQuota;
 export const fetchOpenRouterQuota = openrouter.fetchQuota;
+export const fetchKiroQuota = kiro.fetchQuota;
 export const fetchZaiQuota = zai.fetchQuota;
 const fetchZhipuaiCodingPlanQuota = zhipuaiCodingPlan.fetchQuota;
 export const fetchNanoGptQuota = nanogpt.fetchQuota;
