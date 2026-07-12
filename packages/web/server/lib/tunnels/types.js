@@ -10,7 +10,7 @@ export const TUNNEL_MODE_MANAGED_LOCAL = 'managed-local';
 
 export const TUNNEL_INTENT_EPHEMERAL_PUBLIC = 'ephemeral-public';
 export const TUNNEL_INTENT_PERSISTENT_PUBLIC = 'persistent-public';
-export const TUNNEL_INTENT_PRIVATE_NETWORK = 'private-network';
+const TUNNEL_INTENT_PRIVATE_NETWORK = 'private-network';
 
 const SUPPORTED_TUNNEL_INTENTS = new Set([
   TUNNEL_INTENT_EPHEMERAL_PUBLIC,
@@ -108,7 +108,7 @@ export function normalizeTunnelMode(value) {
   return TUNNEL_MODE_QUICK;
 }
 
-export function normalizeTunnelIntent(value) {
+function normalizeTunnelIntent(value) {
   if (typeof value !== 'string') {
     return undefined;
   }

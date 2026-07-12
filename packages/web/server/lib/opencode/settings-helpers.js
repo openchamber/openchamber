@@ -26,6 +26,9 @@ export const createSettingsHelpers = (dependencies) => {
   const SHORTCUT_OVERRIDE_VALUE_MAX_LENGTH = 128;
   const PWA_ORIENTATION_VALUES = new Set(['system', 'portrait', 'landscape']);
   const MOBILE_KEYBOARD_MODE_VALUES = new Set(['native', 'resize-content']);
+  const HIDDEN_MODELS_MAX = 1024;
+  const RECENT_EFFORTS_MAX_KEYS = 128;
+  const RECENT_EFFORTS_MAX_VARIANTS_PER_KEY = 5;
 
   const sanitizeShortcutOverrides = (value) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -39,6 +42,35 @@ export const createSettingsHelpers = (dependencies) => {
       result[key.slice(0, SHORTCUT_OVERRIDE_KEY_MAX_LENGTH)] = combo.slice(0, SHORTCUT_OVERRIDE_VALUE_MAX_LENGTH);
     }
     return result;
+  };
+
+  const sanitizeRecentEfforts = (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null;
+    }
+    const result = {};
+    const seenKeys = new Set();
+    let count = 0;
+    for (const [rawKey, rawVariants] of Object.entries(value)) {
+      const key = typeof rawKey === 'string' ? rawKey.trim() : '';
+      if (!key || seenKeys.has(key)) continue;
+      if (!Array.isArray(rawVariants)) continue;
+      const variants = [];
+      const seenVariants = new Set();
+      for (const rawVariant of rawVariants) {
+        const variant = typeof rawVariant === 'string' ? rawVariant.trim() : '';
+        if (!variant || seenVariants.has(variant)) continue;
+        seenVariants.add(variant);
+        variants.push(variant);
+        if (variants.length >= RECENT_EFFORTS_MAX_VARIANTS_PER_KEY) break;
+      }
+      if (variants.length === 0) continue;
+      seenKeys.add(key);
+      result[key] = variants;
+      count += 1;
+      if (count >= RECENT_EFFORTS_MAX_KEYS) break;
+    }
+    return count > 0 ? result : null;
   };
 
   const normalizePwaAppName = (value, fallback = '') => {
@@ -72,6 +104,20 @@ export const createSettingsHelpers = (dependencies) => {
       return normalized;
     }
     return fallback;
+  };
+
+  const normalizeFollowUpBehavior = (value, legacyQueueModeEnabled = null) => {
+    // "immediate" was removed (it was wire-identical to "steer"); collapse it.
+    if (value === 'immediate') {
+      return 'steer';
+    }
+    if (value === 'steer' || value === 'queue') {
+      return value;
+    }
+    if (legacyQueueModeEnabled === false) {
+      return 'steer';
+    }
+    return 'queue';
   };
 
   const sanitizeSettingsUpdate = (payload) => {
@@ -131,6 +177,12 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.desktopLanAccessEnabled === 'boolean') {
       result.desktopLanAccessEnabled = candidate.desktopLanAccessEnabled;
+    }
+    if (typeof candidate.desktopKeepAwakeEnabled === 'boolean') {
+      result.desktopKeepAwakeEnabled = candidate.desktopKeepAwakeEnabled;
+    }
+    if (typeof candidate.desktopMinimizeToTrayEnabled === 'boolean') {
+      result.desktopMinimizeToTrayEnabled = candidate.desktopMinimizeToTrayEnabled;
     }
     if (typeof candidate.desktopUiPassword === 'string') {
       result.desktopUiPassword = candidate.desktopUiPassword.trim();
@@ -195,6 +247,21 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.showReasoningTraces === 'boolean') {
       result.showReasoningTraces = candidate.showReasoningTraces;
+    }
+    if (typeof candidate.sessionRecapEnabled === 'boolean') {
+      result.sessionRecapEnabled = candidate.sessionRecapEnabled;
+    }
+    if (typeof candidate.sessionSuggestionEnabled === 'boolean') {
+      result.sessionSuggestionEnabled = candidate.sessionSuggestionEnabled;
+    }
+    if (typeof candidate.sessionGoalEnabled === 'boolean') {
+      result.sessionGoalEnabled = candidate.sessionGoalEnabled;
+    }
+    if (typeof candidate.sessionGoalDefaultBudgetEnabled === 'boolean') {
+      result.sessionGoalDefaultBudgetEnabled = candidate.sessionGoalDefaultBudgetEnabled;
+    }
+    if (typeof candidate.sessionGoalDefaultBudget === 'number' && Number.isFinite(candidate.sessionGoalDefaultBudget) && candidate.sessionGoalDefaultBudget > 0) {
+      result.sessionGoalDefaultBudget = Math.floor(candidate.sessionGoalDefaultBudget);
     }
     if (typeof candidate.collapsibleThinkingBlocks === 'boolean') {
       result.collapsibleThinkingBlocks = candidate.collapsibleThinkingBlocks;
@@ -325,12 +392,21 @@ export const createSettingsHelpers = (dependencies) => {
       const trimmed = candidate.defaultAgent.trim();
       result.defaultAgent = trimmed.length > 0 ? trimmed : undefined;
     }
+    if (typeof candidate.smallModelUseDefault === 'boolean') {
+      result.smallModelUseDefault = candidate.smallModelUseDefault;
+    }
+    if (typeof candidate.smallModelOverride === 'string') {
+      const trimmed = candidate.smallModelOverride.trim();
+      result.smallModelOverride = trimmed.length > 0 ? trimmed : undefined;
+    }
     if (typeof candidate.defaultGitIdentityId === 'string') {
       const trimmed = candidate.defaultGitIdentityId.trim();
       result.defaultGitIdentityId = trimmed.length > 0 ? trimmed : undefined;
     }
-    if (typeof candidate.queueModeEnabled === 'boolean') {
-      result.queueModeEnabled = candidate.queueModeEnabled;
+    if (typeof candidate.followUpBehavior === 'string') {
+      result.followUpBehavior = normalizeFollowUpBehavior(candidate.followUpBehavior);
+    } else if (typeof candidate.queueModeEnabled === 'boolean') {
+      result.followUpBehavior = normalizeFollowUpBehavior(undefined, candidate.queueModeEnabled);
     }
     if (typeof candidate.autoCreateWorktree === 'boolean') {
       result.autoCreateWorktree = candidate.autoCreateWorktree;
@@ -473,6 +549,28 @@ export const createSettingsHelpers = (dependencies) => {
     const recentModels = sanitizeModelRefs(candidate.recentModels, 16);
     if (recentModels) {
       result.recentModels = recentModels;
+    }
+
+    // Cap at 1024: users with several providers (anthropic, openai, google,
+    // bedrock, azure, etc.) each exposing dozens-to-hundreds of models can
+    // exceed 256 hidden entries quickly. 1024 covers dense multi-provider
+    // setups while still bounding persistence/memory.
+    const hiddenModels = sanitizeModelRefs(candidate.hiddenModels, HIDDEN_MODELS_MAX);
+    if (hiddenModels) {
+      result.hiddenModels = hiddenModels;
+    }
+
+    if (Array.isArray(candidate.collapsedModelProviders)) {
+      result.collapsedModelProviders = normalizeStringArray(candidate.collapsedModelProviders);
+    }
+
+    if (Array.isArray(candidate.recentAgents)) {
+      result.recentAgents = normalizeStringArray(candidate.recentAgents);
+    }
+
+    const recentEfforts = sanitizeRecentEfforts(candidate.recentEfforts);
+    if (recentEfforts) {
+      result.recentEfforts = recentEfforts;
     }
     if (typeof candidate.diffLayoutPreference === 'string') {
       const mode = candidate.diffLayoutPreference.trim();
@@ -648,10 +746,18 @@ export const createSettingsHelpers = (dependencies) => {
       }
     }
 
+    if (typeof candidate.dictationEnabled === 'boolean') {
+      result.dictationEnabled = candidate.dictationEnabled;
+    }
     if (typeof candidate.sttProvider === 'string') {
       const provider = candidate.sttProvider.trim();
-      if (provider === 'browser' || provider === 'server' || provider === 'wasm') {
+      if (provider === 'local' || provider === 'openai-compatible') {
         result.sttProvider = provider;
+      } else if (provider === 'server') {
+        // Legacy provider migration: 'server' was the OpenAI-compatible endpoint.
+        result.sttProvider = 'openai-compatible';
+      } else if (provider === 'browser' || provider === 'wasm') {
+        result.sttProvider = 'local';
       }
     }
     if (typeof candidate.sttServerUrl === 'string') {
@@ -666,10 +772,10 @@ export const createSettingsHelpers = (dependencies) => {
         result.sttModel = trimmed;
       }
     }
-    if (typeof candidate.wasmSttModel === 'string') {
-      const trimmed = candidate.wasmSttModel.trim();
-      if (trimmed.length <= 256) {
-        result.wasmSttModel = trimmed;
+    if (typeof candidate.sttLocalModel === 'string') {
+      const trimmed = candidate.sttLocalModel.trim();
+      if (trimmed.length <= STT_MODEL_MAX_LENGTH) {
+        result.sttLocalModel = trimmed;
       }
     }
     if (typeof candidate.sttLanguage === 'string') {
@@ -677,15 +783,6 @@ export const createSettingsHelpers = (dependencies) => {
       if (trimmed.length <= STT_LANGUAGE_MAX_LENGTH) {
         result.sttLanguage = trimmed;
       }
-    }
-    if (typeof candidate.sttSilenceThresholdDb === 'number' && Number.isFinite(candidate.sttSilenceThresholdDb)) {
-      result.sttSilenceThresholdDb = Math.max(-100, Math.min(0, candidate.sttSilenceThresholdDb));
-    }
-    if (typeof candidate.sttSilenceHoldMs === 'number' && Number.isFinite(candidate.sttSilenceHoldMs)) {
-      result.sttSilenceHoldMs = Math.max(250, Math.min(10000, Math.round(candidate.sttSilenceHoldMs)));
-    }
-    if (typeof candidate.sttTranscribeOnStop === 'boolean') {
-      result.sttTranscribeOnStop = candidate.sttTranscribeOnStop;
     }
 
     return result;

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
-import { devtools, persist, createJSONStorage } from 'zustand/middleware';
+import { devtools, persist } from 'zustand/middleware';
 import type { SidebarSection } from '@/constants/sidebar';
-import { getSafeStorage } from './utils/safeStorage';
+import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import { SEMANTIC_TYPOGRAPHY, getTypographyVariable, type SemanticTypographyKey } from '@/lib/typography';
 import type { ShortcutCombo } from '@/lib/shortcuts';
 import type { DraftStarterRef } from '@/lib/draftStarters';
@@ -10,6 +10,7 @@ import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobi
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
+export type PendingDiffScope = 'working' | 'staged' | 'turn';
 export type RightSidebarTab = 'git' | 'files' | 'context';
 export type ContextPanelMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'browser';
 export type MermaidRenderingMode = 'svg' | 'ascii';
@@ -31,8 +32,10 @@ type ContextPanelTab = {
   targetPath: string | null;
   dedupeKey: string;
   label: string | null;
+  sessionTitleFallback: string | null;
   readOnly: boolean;
   stagedDiff: boolean;
+  diffScope: PendingDiffScope | null;
   touchedAt: number;
 };
 
@@ -41,8 +44,10 @@ type ContextPanelTabDescriptor = {
   targetPath?: string | null;
   dedupeKey?: string | null;
   label?: string | null;
+  sessionTitleFallback?: string | null;
   readOnly?: boolean;
   stagedDiff?: boolean;
+  diffScope?: PendingDiffScope | null;
 };
 
 type ContextPanelDirectoryState = {
@@ -175,6 +180,10 @@ const normalizeContextTabLabel = (value: string | null | undefined): string | nu
     : trimmed;
 };
 
+const normalizePendingDiffScope = (value: unknown): PendingDiffScope | null => {
+  return value === 'working' || value === 'staged' || value === 'turn' ? value : null;
+};
+
 const buildDefaultContextPanelTabDedupeKey = (mode: ContextPanelMode, targetPath: string | null): string => {
   if (mode === 'file') {
     return targetPath || mode;
@@ -223,8 +232,10 @@ const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPa
     targetPath: normalizedTargetPath,
     dedupeKey,
     label: normalizeContextTabLabel(descriptor.label),
+    sessionTitleFallback: normalizeContextTabLabel(descriptor.sessionTitleFallback),
     readOnly: descriptor.readOnly === true,
     stagedDiff: descriptor.stagedDiff === true,
+    diffScope: normalizePendingDiffScope(descriptor.diffScope) ?? (descriptor.stagedDiff === true ? 'staged' : 'working'),
     touchedAt: Date.now(),
   };
 };
@@ -263,8 +274,10 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       targetPath?: unknown;
       dedupeKey?: unknown;
       label?: unknown;
+      sessionTitleFallback?: unknown;
       readOnly?: unknown;
       stagedDiff?: unknown;
+      diffScope?: unknown;
       touchedAt?: unknown;
     };
 
@@ -290,8 +303,10 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       targetPath,
       dedupeKey,
       label: normalizeContextTabLabel(typeof candidate.label === 'string' ? candidate.label : null),
+      sessionTitleFallback: normalizeContextTabLabel(typeof candidate.sessionTitleFallback === 'string' ? candidate.sessionTitleFallback : null),
       readOnly: candidate.readOnly === true,
       stagedDiff: candidate.stagedDiff === true,
+      diffScope: normalizePendingDiffScope(candidate.diffScope) ?? (candidate.stagedDiff === true ? 'staged' : 'working'),
       touchedAt: typeof candidate.touchedAt === 'number' && Number.isFinite(candidate.touchedAt)
         ? candidate.touchedAt
         : Date.now(),
@@ -350,7 +365,9 @@ const upsertContextPanelTab = (
           targetPath: nextTab.targetPath || tab.targetPath,
           dedupeKey: nextTab.dedupeKey,
           label: nextTab.label,
+          sessionTitleFallback: nextTab.sessionTitleFallback || tab.sessionTitleFallback,
           stagedDiff: nextTab.stagedDiff,
+          diffScope: nextTab.diffScope,
           readOnly: nextTab.readOnly,
           touchedAt: Date.now(),
         }
@@ -530,6 +547,7 @@ interface UIStore {
   sidebarOpenBeforeFullscreenTab: boolean | null;
   pendingDiffFile: string | null;
   pendingDiffStaged: boolean;
+  pendingDiffScope: PendingDiffScope | null;
   pendingDiagramFile: string | null;
   pendingFileNavigation: PendingFileNavigation | null;
   pendingFileFocusPath: string | null;
@@ -554,8 +572,12 @@ interface UIStore {
   eventStreamStatus: EventStreamStatus;
   eventStreamHint: string | null;
   showReasoningTraces: boolean;
+  sessionRecapEnabled: boolean;
+  sessionSuggestionEnabled: boolean;
+  sessionGoalEnabled: boolean;
+  sessionGoalDefaultBudgetEnabled: boolean;
+  sessionGoalDefaultBudget: number;
   collapsibleThinkingBlocks: boolean;
-  groupReasoningBlocks: boolean;
   chatRenderMode: ChatRenderMode;
   activityRenderMode: ActivityRenderMode;
   showDeletionDialog: boolean;
@@ -568,6 +590,7 @@ interface UIStore {
   // Global draft welcome starters; null = unset (use the default built-in set).
   globalDraftStarters: DraftStarterRef[] | null;
   terminalFontSize: number;
+  editorFontSize: number;
   uiFont: UiFontOption;
   monoFont: MonoFontOption;
   padding: number;
@@ -577,6 +600,7 @@ interface UIStore {
 
   favoriteModels: Array<{ providerID: string; modelID: string }>;
   hiddenModels: Array<{ providerID: string; modelID: string }>;
+  providerOrder: string[];
   collapsedModelProviders: string[];
   recentModels: Array<{ providerID: string; modelID: string }>;
   recentAgents: string[];
@@ -591,6 +615,8 @@ interface UIStore {
   nativeNotificationsEnabled: boolean;
   notificationMode: 'always' | 'hidden-only';
   notifyOnSubtasks: boolean;
+  // Desktop dock badge showing the count of sessions with unseen activity (macOS).
+  dockBadgeEnabled: boolean;
 
   // Event toggles (which events trigger notifications)
   notifyOnCompletion: boolean;
@@ -616,6 +642,7 @@ interface UIStore {
   showOpenCodeUpdateNotifications: boolean;
   inputSpellcheckEnabled: boolean;
   wideChatLayoutEnabled: boolean;
+  codeBlockLineWrap: boolean;
   showToolFileIcons: boolean;
   showTurnChangedFiles: boolean;
   showExpandedBashTools: boolean;
@@ -645,7 +672,7 @@ interface UIStore {
   setRightSidebarWidth: (width: number) => void;
   setRightSidebarTab: (tab: RightSidebarTab) => void;
   openContextPanelTab: (directory: string, tab: ContextPanelTabDescriptor) => void;
-  openContextDiff: (directory: string, filePath: string, staged?: boolean) => void;
+  openContextDiff: (directory: string, filePath: string, staged?: boolean, scope?: PendingDiffScope | null) => void;
   openContextFile: (directory: string, filePath: string) => void;
   openContextFileAtLine: (directory: string, filePath: string, line: number, column?: number) => void;
   openContextOverview: (directory: string) => void;
@@ -671,11 +698,11 @@ interface UIStore {
   prepareForRuntimeSwitch: (runtimeKey?: string | null) => void;
   restoreForRuntimeSwitch: (runtimeKey?: string | null) => void;
   setMainTabGuard: (guard: MainTabGuard | null) => void;
-  setPendingDiffFile: (filePath: string | null, staged?: boolean) => void;
+  setPendingDiffFile: (filePath: string | null, staged?: boolean, scope?: PendingDiffScope | null) => void;
   setPendingDiagramFile: (filePath: string | null) => void;
   setPendingFileNavigation: (navigation: PendingFileNavigation | null) => void;
   setPendingFileFocusPath: (path: string | null) => void;
-  navigateToDiff: (filePath: string, staged?: boolean) => void;
+  navigateToDiff: (filePath: string, staged?: boolean, scope?: PendingDiffScope | null) => void;
   consumePendingDiffFile: () => string | null;
   navigateToDiagram: (filePath: string) => void;
   consumePendingDiagramFile: () => string | null;
@@ -699,6 +726,11 @@ interface UIStore {
   setSettingsRemoteInstancesSelectedId: (instanceId: string | null) => void;
   setEventStreamStatus: (status: EventStreamStatus, hint?: string | null) => void;
   setShowReasoningTraces: (value: boolean) => void;
+  setSessionRecapEnabled: (value: boolean) => void;
+  setSessionSuggestionEnabled: (value: boolean) => void;
+  setSessionGoalEnabled: (value: boolean) => void;
+  setSessionGoalDefaultBudgetEnabled: (value: boolean) => void;
+  setSessionGoalDefaultBudget: (value: number) => void;
   setCollapsibleThinkingBlocks: (value: boolean) => void;
   setChatRenderMode: (value: ChatRenderMode) => void;
   setActivityRenderMode: (value: ActivityRenderMode) => void;
@@ -711,6 +743,7 @@ interface UIStore {
   setFontSize: (size: number) => void;
   setGlobalDraftStarters: (refs: DraftStarterRef[]) => void;
   setTerminalFontSize: (size: number) => void;
+  setEditorFontSize: (size: number) => void;
   setUiFont: (font: UiFontOption) => void;
   setMonoFont: (font: MonoFontOption) => void;
   setPadding: (size: number) => void;
@@ -727,6 +760,7 @@ interface UIStore {
     overProviderID: string,
     overModelID: string,
   ) => void;
+  setProviderOrder: (orderedProviderIDs: string[]) => void;
   toggleHiddenModel: (providerID: string, modelID: string) => void;
   isHiddenModel: (providerID: string, modelID: string) => boolean;
   hideAllModels: (providerID: string, modelIDs: string[]) => void;
@@ -748,6 +782,7 @@ interface UIStore {
   setNotificationMode: (mode: 'always' | 'hidden-only') => void;
   setShowTerminalQuickKeysOnDesktop: (value: boolean) => void;
   setNotifyOnSubtasks: (value: boolean) => void;
+  setDockBadgeEnabled: (value: boolean) => void;
   setNotifyOnCompletion: (value: boolean) => void;
   setNotifyOnError: (value: boolean) => void;
   setNotifyOnQuestion: (value: boolean) => void;
@@ -760,6 +795,7 @@ interface UIStore {
   setShowOpenCodeUpdateNotifications: (value: boolean) => void;
   setInputSpellcheckEnabled: (value: boolean) => void;
   setWideChatLayoutEnabled: (value: boolean) => void;
+  setCodeBlockLineWrap: (value: boolean) => void;
   setShowToolFileIcons: (value: boolean) => void;
   setShowTurnChangedFiles: (value: boolean) => void;
   setShowExpandedBashTools: (value: boolean) => void;
@@ -818,6 +854,7 @@ export const useUIStore = create<UIStore>()(
         sidebarOpenBeforeFullscreenTab: null,
         pendingDiffFile: null,
         pendingDiffStaged: false,
+        pendingDiffScope: null,
         pendingDiagramFile: null,
         pendingFileNavigation: null,
         pendingFileFocusPath: null,
@@ -840,8 +877,12 @@ export const useUIStore = create<UIStore>()(
         eventStreamStatus: 'idle',
         eventStreamHint: null,
         showReasoningTraces: true,
+        sessionRecapEnabled: true,
+        sessionSuggestionEnabled: true,
+        sessionGoalEnabled: true,
+        sessionGoalDefaultBudgetEnabled: false,
+        sessionGoalDefaultBudget: 200_000,
         collapsibleThinkingBlocks: true,
-        groupReasoningBlocks: true,
         chatRenderMode: 'live',
         activityRenderMode: 'summary',
         showDeletionDialog: true,
@@ -853,6 +894,7 @@ export const useUIStore = create<UIStore>()(
         fontSize: 100,
         globalDraftStarters: null,
         terminalFontSize: 13,
+        editorFontSize: 13,
         uiFont: DEFAULT_UI_FONT,
         monoFont: DEFAULT_MONO_FONT,
         padding: 100,
@@ -861,6 +903,7 @@ export const useUIStore = create<UIStore>()(
         mobileKeyboardMode: getStoredMobileKeyboardMode(),
         favoriteModels: [],
         hiddenModels: [],
+        providerOrder: [],
         collapsedModelProviders: [],
         recentModels: [],
         recentAgents: [],
@@ -874,6 +917,7 @@ export const useUIStore = create<UIStore>()(
         nativeNotificationsEnabled: false,
         notificationMode: 'hidden-only',
         notifyOnSubtasks: true,
+        dockBadgeEnabled: true,
 
         // Event toggles (which events trigger notifications)
         notifyOnCompletion: true,
@@ -897,6 +941,7 @@ export const useUIStore = create<UIStore>()(
         showOpenCodeUpdateNotifications: true,
         inputSpellcheckEnabled: false,
         wideChatLayoutEnabled: false,
+        codeBlockLineWrap: true,
         showToolFileIcons: true,
         showTurnChangedFiles: false,
         showExpandedBashTools: false,
@@ -1023,17 +1068,20 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
-        openContextDiff: (directory, filePath, staged = false) => {
+        openContextDiff: (directory, filePath, staged = false, scope = null) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           const normalizedFilePath = (filePath || '').trim();
           if (!normalizedDirectory || !normalizedFilePath) {
             return;
           }
 
+          const diffScope = normalizePendingDiffScope(scope) ?? (staged ? 'staged' : 'working');
+
           get().openContextPanelTab(normalizedDirectory, {
             mode: 'diff',
             targetPath: normalizedFilePath,
-            stagedDiff: staged,
+            stagedDiff: diffScope === 'staged',
+            diffScope,
           });
         },
 
@@ -1395,8 +1443,12 @@ export const useUIStore = create<UIStore>()(
           set({ activeMainTab: restored });
         },
 
-        setPendingDiffFile: (filePath, staged = false) => {
-          set({ pendingDiffFile: filePath, pendingDiffStaged: filePath ? staged : false });
+        setPendingDiffFile: (filePath, staged = false, scope = null) => {
+          set({
+            pendingDiffFile: filePath,
+            pendingDiffStaged: filePath ? staged : false,
+            pendingDiffScope: filePath ? scope : null,
+          });
         },
 
         setPendingDiagramFile: (filePath) => {
@@ -1411,18 +1463,18 @@ export const useUIStore = create<UIStore>()(
           set({ pendingFileFocusPath: path });
         },
 
-        navigateToDiff: (filePath, staged = false) => {
+        navigateToDiff: (filePath, staged = false, scope = null) => {
           const guard = get().mainTabGuard;
           if (guard && !guard('diff')) {
             return;
           }
-          set({ pendingDiffFile: filePath, pendingDiffStaged: staged, activeMainTab: 'diff' });
+          set({ pendingDiffFile: filePath, pendingDiffStaged: staged, pendingDiffScope: scope, activeMainTab: 'diff' });
         },
 
         consumePendingDiffFile: () => {
           const { pendingDiffFile } = get();
           if (pendingDiffFile) {
-            set({ pendingDiffFile: null, pendingDiffStaged: false });
+            set({ pendingDiffFile: null, pendingDiffStaged: false, pendingDiffScope: null });
           }
           return pendingDiffFile;
         },
@@ -1530,6 +1582,26 @@ export const useUIStore = create<UIStore>()(
           set({ showReasoningTraces: value });
         },
 
+        setSessionRecapEnabled: (value) => {
+          set({ sessionRecapEnabled: value });
+        },
+
+        setSessionSuggestionEnabled: (value) => {
+          set({ sessionSuggestionEnabled: value });
+        },
+
+        setSessionGoalEnabled: (value) => {
+          set({ sessionGoalEnabled: value });
+        },
+
+        setSessionGoalDefaultBudgetEnabled: (value) => {
+          set({ sessionGoalDefaultBudgetEnabled: value });
+        },
+
+        setSessionGoalDefaultBudget: (value) => {
+          set({ sessionGoalDefaultBudget: value });
+        },
+
         setCollapsibleThinkingBlocks: (value) => {
           set({ collapsibleThinkingBlocks: value });
         },
@@ -1583,6 +1655,12 @@ export const useUIStore = create<UIStore>()(
           const rounded = Math.round(size);
           const clamped = Math.max(9, Math.min(52, rounded));
           set({ terminalFontSize: clamped });
+        },
+
+        setEditorFontSize: (size) => {
+          const rounded = Math.round(size);
+          const clamped = Math.max(9, Math.min(32, rounded));
+          set({ editorFontSize: clamped });
         },
 
         setUiFont: (font) => {
@@ -1732,6 +1810,17 @@ export const useUIStore = create<UIStore>()(
             }
             nextFavorites.splice(newIndex, 0, moved);
             return { favoriteModels: nextFavorites };
+          });
+        },
+
+        setProviderOrder: (orderedProviderIDs) => {
+          set((state) => {
+            const next = orderedProviderIDs.filter((id) => typeof id === 'string' && id.length > 0);
+            const current = state.providerOrder;
+            if (current.length === next.length && current.every((id, index) => id === next[index])) {
+              return state;
+            }
+            return { providerOrder: next };
           });
         },
 
@@ -1961,6 +2050,10 @@ export const useUIStore = create<UIStore>()(
           set({ notifyOnSubtasks: value });
         },
 
+        setDockBadgeEnabled: (value) => {
+          set({ dockBadgeEnabled: value });
+        },
+
         setNotifyOnCompletion: (value) => { set({ notifyOnCompletion: value }); },
         setNotifyOnError: (value) => { set({ notifyOnError: value }); },
         setNotifyOnQuestion: (value) => { set({ notifyOnQuestion: value }); },
@@ -1980,6 +2073,9 @@ export const useUIStore = create<UIStore>()(
         },
         setWideChatLayoutEnabled: (value) => {
           set({ wideChatLayoutEnabled: value });
+        },
+        setCodeBlockLineWrap: (value) => {
+          set({ codeBlockLineWrap: value });
         },
         setShowToolFileIcons: (value) => {
           set({ showToolFileIcons: value });
@@ -2078,7 +2174,7 @@ export const useUIStore = create<UIStore>()(
       }),
       {
         name: 'ui-store',
-        storage: createJSONStorage(() => getSafeStorage()),
+        storage: createDeferredSafeJSONStorage(),
         version: 10,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
@@ -2199,6 +2295,11 @@ export const useUIStore = create<UIStore>()(
           isSessionCreateDialogOpen: state.isSessionCreateDialogOpen,
           // Note: isSettingsDialogOpen intentionally NOT persisted
           showReasoningTraces: state.showReasoningTraces,
+          sessionRecapEnabled: state.sessionRecapEnabled,
+          sessionSuggestionEnabled: state.sessionSuggestionEnabled,
+          sessionGoalEnabled: state.sessionGoalEnabled,
+          sessionGoalDefaultBudgetEnabled: state.sessionGoalDefaultBudgetEnabled,
+          sessionGoalDefaultBudget: state.sessionGoalDefaultBudget,
           collapsibleThinkingBlocks: state.collapsibleThinkingBlocks,
           chatRenderMode: state.chatRenderMode,
           activityRenderMode: state.activityRenderMode,
@@ -2211,12 +2312,14 @@ export const useUIStore = create<UIStore>()(
           fontSize: state.fontSize,
           globalDraftStarters: state.globalDraftStarters,
           terminalFontSize: state.terminalFontSize,
+          editorFontSize: state.editorFontSize,
           uiFont: state.uiFont,
           monoFont: state.monoFont,
           padding: state.padding,
           cornerRadius: state.cornerRadius,
           favoriteModels: state.favoriteModels,
           hiddenModels: state.hiddenModels,
+          providerOrder: state.providerOrder,
           collapsedModelProviders: state.collapsedModelProviders,
           recentModels: state.recentModels,
           recentAgents: state.recentAgents,
@@ -2228,6 +2331,7 @@ export const useUIStore = create<UIStore>()(
           notificationMode: state.notificationMode,
           showTerminalQuickKeysOnDesktop: state.showTerminalQuickKeysOnDesktop,
           notifyOnSubtasks: state.notifyOnSubtasks,
+          dockBadgeEnabled: state.dockBadgeEnabled,
           notifyOnCompletion: state.notifyOnCompletion,
           notifyOnError: state.notifyOnError,
           notifyOnQuestion: state.notifyOnQuestion,
@@ -2240,6 +2344,7 @@ export const useUIStore = create<UIStore>()(
           showOpenCodeUpdateNotifications: state.showOpenCodeUpdateNotifications,
           inputSpellcheckEnabled: state.inputSpellcheckEnabled,
           wideChatLayoutEnabled: state.wideChatLayoutEnabled,
+          codeBlockLineWrap: state.codeBlockLineWrap,
           showToolFileIcons: state.showToolFileIcons,
           showTurnChangedFiles: state.showTurnChangedFiles,
           showExpandedBashTools: state.showExpandedBashTools,

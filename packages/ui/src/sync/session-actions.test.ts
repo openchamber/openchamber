@@ -8,7 +8,10 @@ const scopedClientDirectories: string[] = []
 const registeredSessionDirectories: Array<{ sessionID: string; directory: string }> = []
 let sessionRevertResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
 let questionReplyError: unknown | null = null
+let questionRejectError: unknown | null = null
 let sessionShareResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
+let sessionUpdateResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
+let sessionMessagesResult: { data?: unknown; error?: unknown; response?: { status?: number } } = { data: [] }
 const globalUpsertedSessions: unknown[] = []
 
 const mockScopedClient = {
@@ -28,6 +31,9 @@ const mockScopedClient = {
     }),
     reject: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "question.reject", params })
+      if (questionRejectError) {
+        return Promise.resolve({ error: questionRejectError, response: { status: 404 } })
+      }
       return Promise.resolve({ data: true })
     }),
   },
@@ -37,7 +43,7 @@ const mockSdk = {
   session: {
     messages: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "session.messages", params })
-      return Promise.resolve({ data: [] })
+      return Promise.resolve(sessionMessagesResult)
     }),
     revert: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "session.revert", params })
@@ -46,6 +52,14 @@ const mockSdk = {
     abort: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "session.abort", params })
       return Promise.resolve({ data: true })
+    }),
+    updateSession: mock((sessionId: string, changes: Record<string, unknown>, directory?: string | null) => {
+      replyCalls.push({ method: "session.update", params: { sessionID: sessionId, ...changes, directory } })
+      return Promise.resolve(sessionUpdateResult.data as Session)
+    }),
+    update: mock((params: Record<string, unknown>) => {
+      replyCalls.push({ method: "session.update", params })
+      return Promise.resolve(sessionUpdateResult)
     }),
     share: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "session.share", params })
@@ -72,6 +86,9 @@ const mockSdk = {
     }),
     reject: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "question.reject", params })
+      if (questionRejectError) {
+        return Promise.resolve({ error: questionRejectError, response: { status: 404 } })
+      }
       return Promise.resolve({ data: true })
     }),
   },
@@ -103,6 +120,10 @@ mock.module("@/lib/opencode/client", () => ({
         throw new Error(`session.revert failed${status ? ` (${status})` : ""}: rejected`)
       }
       return Promise.resolve(sessionRevertResult.data)
+    }),
+    updateSession: mock((sessionId: string, changes: Record<string, unknown>, directory?: string | null) => {
+      replyCalls.push({ method: "session.update", params: { sessionID: sessionId, ...changes, directory } })
+      return Promise.resolve(sessionUpdateResult.data)
     }),
   },
 }))
@@ -213,6 +234,21 @@ function createChildStores(entries: Array<[string, StoreApi<DirectoryStore>]>) {
   } as unknown as import("./child-store").ChildStoreManager
 }
 
+describe("fetchMessagesForSession startup race", () => {
+  test("does not reject before sync action refs are initialized", async () => {
+    const { fetchMessagesForSession } = await import("./session-actions")
+
+    let error: unknown = null
+    try {
+      await fetchMessagesForSession("session-a", "/test/project")
+    } catch (err) {
+      error = err
+    }
+
+    expect(error).toBe(null)
+  })
+})
+
 describe("shareSession live state", () => {
   beforeEach(() => {
     replyCalls.length = 0
@@ -317,10 +353,39 @@ describe("shareSession live state", () => {
   })
 })
 
+describe("updateSessionTitle live state", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+    globalUpsertedSessions.length = 0
+    sessionUpdateResult = {}
+  })
+
+  test("updates the live directory store after renaming", async () => {
+    const oldSession = { id: "session-a", title: "Old Title", time: { created: 1, updated: 1 } } as Session
+    const updatedSession = { id: "session-a", title: "New Title", time: { created: 1, updated: 2 } } as Session
+    const sessionStore = createStore({}, { session: [oldSession] })
+    const childStores = createChildStores([["/test/project", sessionStore]])
+    sessionUpdateResult = { data: updatedSession }
+
+    const { setActionRefs, updateSessionTitle } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/current/project")
+
+    await updateSessionTitle("session-a", "New Title")
+
+    const updateCall = replyCalls.find((call) => call.method === "session.update")
+    expect(updateCall?.params.sessionID).toBe("session-a")
+    expect(updateCall?.params.title).toBe("New Title")
+    expect(updateCall?.params.directory).toBe("/test/project")
+    expect(globalUpsertedSessions).toEqual([updatedSession])
+    expect(sessionStore.getState().session[0].title).toBe("New Title")
+  })
+})
+
 describe("optimisticSend target directory", () => {
   beforeEach(() => {
     replyCalls.length = 0
     scopedClientDirectories.length = 0
+    sessionMessagesResult = { data: [] }
   })
 
   test("passes the prompt directory to optimistic state during session switch races", async () => {
@@ -364,6 +429,146 @@ describe("optimisticSend target directory", () => {
     expect(optimisticRemove).toBe(null)
     expect(targetStore.getState().session_status["session-new"]?.type).toBe("busy")
     expect(currentStore.getState().session_status["session-new"]).toBe(undefined)
+  })
+
+  test("allows callers to block final send when runtime changes after optimistic insert", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    let optimisticAdd: OptimisticAddCall | null = null
+    let optimisticRemove: OptimisticRemoveCall | null = null
+    let finalSendCalled = false
+    const { getRuntimeKey, switchRuntimeEndpoint } = await import("../lib/runtime-switch")
+    switchRuntimeEndpoint({ apiBaseUrl: "http://runtime-a.test", runtimeKey: "runtime-a" })
+
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(
+      (input) => {
+        optimisticAdd = input
+      },
+      (input) => {
+        optimisticRemove = input
+      },
+    )
+
+    let caught: unknown = null
+    try {
+      await optimisticSend({
+        sessionId: "session-race",
+        directory: "/target/project",
+        content: "hello",
+        providerID: "provider",
+        modelID: "model",
+        beforeOptimisticInsert: () => {
+          expect(getRuntimeKey()).toBe("runtime-a")
+        },
+        send: async () => {
+          switchRuntimeEndpoint({ apiBaseUrl: "http://runtime-b.test", runtimeKey: "runtime-b" })
+          if (getRuntimeKey() !== "runtime-a") throw new Error("Auto-review stopped because the runtime changed.")
+          finalSendCalled = true
+        },
+      })
+    } catch (error) {
+      caught = error
+    }
+
+    expect(caught).toBeInstanceOf(Error)
+    expect((caught as Error).message).toContain("runtime changed")
+
+    expect(optimisticAdd).not.toBeNull()
+    expect(finalSendCalled).toBe(false)
+    expect(optimisticRemove).not.toBeNull()
+    expect((optimisticRemove as unknown as OptimisticRemoveCall).sessionID).toBe("session-race")
+    expect(targetStore.getState().session_status["session-race"]?.type).toBe("idle")
+  })
+
+  test("confirms an ambiguous send failure with a recent message refetch", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    let optimisticRemove: OptimisticRemoveCall | null = null
+    let optimisticConfirm: OptimisticRemoveCall | null = null
+    let sentMessageID = ""
+
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(
+      () => {},
+      (input) => {
+        optimisticRemove = input
+      },
+      (input) => {
+        optimisticConfirm = input
+      },
+    )
+
+    await optimisticSend({
+      sessionId: "session-confirmed",
+      directory: "/target/project",
+      content: "hello",
+      providerID: "provider",
+      modelID: "model",
+      send: async (messageID) => {
+        sentMessageID = messageID
+        sessionMessagesResult = {
+          data: [{
+            info: { id: messageID, role: "user", sessionID: "session-confirmed", time: { created: 1 } } as Message,
+            parts: [{ id: "server-part", type: "text", text: "hello" } as Part],
+          }],
+        }
+        const error = new Error("Failed to send message (504): gateway timeout") as Error & { status?: number }
+        error.status = 504
+        throw error
+      },
+    })
+
+    expect(optimisticRemove).toBe(null)
+    expect((optimisticConfirm as OptimisticRemoveCall | null)?.messageID).toBe(sentMessageID)
+    expect(replyCalls.find((call) => call.method === "session.messages")?.params.limit).toBe(30)
+    expect(targetStore.getState().message["session-confirmed"]?.[0]?.id).toBe(sentMessageID)
+    expect(targetStore.getState().part[sentMessageID]?.[0]?.id).toBe("server-part")
+  })
+
+  test("rolls back an ambiguous send failure when recent messages do not contain the sent ID", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    let optimisticRemove: OptimisticRemoveCall | null = null
+    let optimisticConfirm: OptimisticRemoveCall | null = null
+
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(
+      () => {},
+      (input) => {
+        optimisticRemove = input
+      },
+      (input) => {
+        optimisticConfirm = input
+      },
+    )
+
+    let caught: unknown = null
+    try {
+      await optimisticSend({
+        sessionId: "session-missing",
+        directory: "/target/project",
+        content: "hello",
+        providerID: "provider",
+        modelID: "model",
+        send: async () => {
+          const error = new Error("Failed to send message (504): gateway timeout") as Error & { status?: number }
+          error.status = 504
+          throw error
+        },
+      })
+    } catch (error) {
+      caught = error
+    }
+
+    expect(caught).toBeInstanceOf(Error)
+    expect((optimisticRemove as OptimisticRemoveCall | null)?.sessionID).toBe("session-missing")
+    expect(optimisticConfirm).toBe(null)
+    expect(replyCalls.filter((call) => call.method === "session.messages").every((call) => call.params.limit === 30)).toBe(true)
+    expect(targetStore.getState().session_status["session-missing"]?.type).toBe("idle")
   })
 })
 
@@ -597,5 +802,93 @@ describe("rejectQuestion passes directory", () => {
     expect(replyCalls.length).toBe(1)
     expect(replyCalls[0].params.requestID).toBe("q-2")
     expect(replyCalls[0].params.directory).toBe("/test/project")
+  })
+})
+
+function buildQuestion(id: string, sessionId: string): QuestionRequest {
+  return {
+    id,
+    sessionID: sessionId,
+    questions: [
+      {
+        question: "Choose an option",
+        header: "Choice",
+        options: [{ label: "Yes", description: "Proceed" }],
+      },
+    ],
+  }
+}
+
+describe("dismissOpenQuestionsForSession", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+    scopedClientDirectories.length = 0
+    questionReplyError = null
+  })
+
+  test("returns false and rejects nothing when no questions are pending", async () => {
+    const store = createStore({}, { session: [{ id: "session-a", time: { created: 1 } } as Session] })
+    const childStores = createChildStores([["/test/project", store]])
+
+    const { setActionRefs, dismissOpenQuestionsForSession } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    const dismissed = await dismissOpenQuestionsForSession("session-a")
+
+    expect(dismissed).toBe(false)
+    expect(replyCalls.filter((call) => call.method === "question.reject")).toHaveLength(0)
+  })
+
+  test("rejects every pending question in the session subtree (root + subagent child)", async () => {
+    const rootQuestion = buildQuestion("q-root", "session-a")
+    const childQuestion = buildQuestion("q-child", "session-child")
+    const store = createStore({}, {
+      session: [
+        { id: "session-a", time: { created: 1 } } as Session,
+        { id: "session-child", parentID: "session-a", time: { created: 2 } } as Session,
+      ],
+      question: {
+        "session-a": [rootQuestion],
+        "session-child": [childQuestion],
+      },
+    })
+    const childStores = createChildStores([["/test/project", store]])
+
+    const { setActionRefs, dismissOpenQuestionsForSession } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    const dismissed = await dismissOpenQuestionsForSession("session-a")
+
+    expect(dismissed).toBe(true)
+    const rejectCalls = replyCalls.filter((call) => call.method === "question.reject")
+    expect(rejectCalls).toHaveLength(2)
+    const rejectedIds = rejectCalls.map((call) => call.params.requestID).sort()
+    expect(rejectedIds).toEqual(["q-child", "q-root"])
+    // Optimistic clear: the questions are removed from the local store so the
+    // prompt disappears instantly, without waiting for the reject round-trip.
+    expect(store.getState().question["session-a"]).toBe(undefined)
+    expect(store.getState().question["session-child"]).toBe(undefined)
+  })
+
+  test("swallows QuestionNotFoundError so a stranded question never blocks the send", async () => {
+    const staleQuestion = buildQuestion("q-stale", "session-a")
+    const store = createStore({}, {
+      session: [{ id: "session-a", time: { created: 1 } } as Session],
+      question: { "session-a": [staleQuestion] },
+    })
+    const childStores = createChildStores([["/test/project", store]])
+    questionRejectError = Object.assign(new Error("question.reject failed (404): QuestionNotFoundError"), { status: 404 })
+
+    const { setActionRefs, dismissOpenQuestionsForSession } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    const dismissed = await dismissOpenQuestionsForSession("session-a")
+
+    expect(dismissed).toBe(true)
+    const rejectCalls = replyCalls.filter((call) => call.method === "question.reject")
+    expect(rejectCalls).toHaveLength(1)
+    expect(rejectCalls[0].params.requestID).toBe("q-stale")
+    // The stale entry is cleared from the store even though the server reported not-found.
+    expect(store.getState().question["session-a"]).toBe(undefined)
   })
 })

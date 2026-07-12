@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "519320768353",
+    "project_id": "openchamber-8bf7e",
+    "storage_bucket": "openchamber-8bf7e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:519320768353:android:e70fd113d740a86c233f20",
+        "android_client_info": {
+          "package_name": "com.openchamber.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyADEQ6yRHXBMlwbaG6y8Vb1elC2q7mx6-A"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -16,14 +16,9 @@ import type { Event, OpencodeClient, SessionStatus } from "@opencode-ai/sdk/v2/c
 import { opencodeClient } from "@/lib/opencode/client"
 import { getRuntimeUrlResolver } from "@/lib/runtime-url"
 import { clearRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from "@/lib/runtime-auth"
+import { type RelayTunnelWebSocket } from "@/lib/relay/tunnel-client"
+import { openRuntimeWebSocket } from "@/lib/relay/runtime-socket"
 import { syncDebug } from "./debug"
-
-export type QueuedEvent = {
-  directory: string
-  payload: Event
-}
-
-export type FlushHandler = (events: QueuedEvent[]) => void
 
 const FLUSH_FRAME_MS = 33
 const BACKPRESSURE_FLUSH_FRAME_MS = 200
@@ -217,6 +212,17 @@ function buildGlobalEventWsUrl(lastEventId?: string): string {
     `${normalizedBase}global/event/ws`,
     lastEventId && lastEventId.length > 0 ? { lastEventId } : undefined,
   )
+}
+
+// In relay mode the global-event WebSocket rides the E2EE tunnel instead of a
+// native network socket. The resolver still builds the authenticated URL (it
+// carries the oc_url_token the host replays to the loopback origin); we hand
+// its path+query to the tunnel, which returns a socket-like with the exact
+// on* handler surface this pipeline uses. Direct-URL runtimes keep the native
+// WebSocket path, wrapped to the same shape so the caller holds one type.
+function openGlobalEventSocket(lastEventId?: string): RelayTunnelWebSocket {
+  const url = buildGlobalEventWsUrl(lastEventId)
+  return openRuntimeWebSocket(url)
 }
 
 type DirectoryQueue = {
@@ -576,7 +582,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
       let settled = false
       let opened = false
       let readyAt = 0
-      const socket = new WebSocket(buildGlobalEventWsUrl(lastEventId))
+      const socket: RelayTunnelWebSocket = openGlobalEventSocket(lastEventId)
       const setFallbackCode = (error: Error, force = false) => {
         if ((force || !opened) && transport === "auto") {
           wsFallbackUntil = Date.now() + WS_FALLBACK_WINDOW_MS

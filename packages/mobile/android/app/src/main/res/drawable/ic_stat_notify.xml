@@ -1,0 +1,22 @@
+<!-- Notification small icon: a monochrome (alpha-only) silhouette of the OpenChamber cube.
+     Android tints it white in the status bar / notification, so only the shape matters. The small
+     filled diamond on the top face is a minimal stand-in for the OpenCode mark, so the tiny
+     silhouette still reads as the OpenChamber logo rather than a generic cube. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Cube wireframe: outer hexagon + the three edges meeting at the front vertex. -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.8"
+        android:strokeLineJoin="round"
+        android:strokeLineCap="round"
+        android:pathData="M12,2.02 L20.65,7.01 L20.65,16.99 L12,21.98 L3.35,16.99 L3.35,7.01 Z M3.35,7.01 L12,12 L20.65,7.01 M12,12 L12,21.98" />
+    <!-- OpenCode mark on the top face (iso-proportioned diamond). -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,5.7 L14.6,7.2 L12,8.7 L9.4,7.2 Z" />
+</vector>

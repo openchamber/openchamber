@@ -1,3 +1,79 @@
+## [1.15.0] - 2026-07-10
+
+- Chat/Tools: every tool call now expands to show its input, result, and errors, including MCP, plugin, and custom tools; Read and Skill stay compact links to their files. JSON results now offer navigable summary, tree, and raw views.
+- Chat/Tools: expanded file-edit and patch results include per-file buttons to open the diff or jump to the first changed line in the editor.
+- Chat/Thinking: reasoning parts stay separate and in chronological order instead of merging into one block, and collapsed previews no longer show empty trailing HTML comments.
+- Chat: Mermaid diagrams now have zoom controls (thanks to @c-w-xiaohei).
+- Chat: code blocks can show line numbers that stay aligned while streaming, and a new Wrap Code Block Lines setting controls long-line wrapping.
+- Chat: with Sticky User Header enabled, user messages no longer float over earlier messages in long conversations.
+- Chat: if sending a message times out or loses the connection after OpenCode accepted it, the extension now keeps the sent message instead of rolling it back as failed.
+- Editor Integration: the "Add to Context" command and active-editor pin-selection now use workspace-relative filenames so the model reads the correct file when names collide (thanks to @Catan).
+
+## [1.14.1] - 2026-07-07
+
+- Chat: the timeline dialog can now load older messages when the current session history has not all been fetched yet.
+- Chat: file references with line ranges like `src/file.ts:10-20` are now clickable in messages (thanks to @Catan).
+- Chat: favorite models now stay saved after restarting the extension (thanks to @Catan).
+- Settings: closing Settings returns to the previous extension view instead of always showing the sessions list (thanks to @Catan).
+
+## [1.14.0] - 2026-07-05
+
+- Chat: loading older messages keeps your scroll position steady.
+- Chat: the stop button now aborts sessions running in a different project or worktree than the currently open one — previously those aborts silently did nothing.
+- Startup: on Windows, OpenCode installed via npm now launches from paths with spaces (such as C:\Program Files\nodejs), a binary path pasted with surrounding quotes into the Opencode Binary setting works, and discovery also checks the system-wide npm prefix and Scoop's shims.
+
+## [1.13.9] - 2026-07-02
+
+- Agents: clearing optional agent fields now removes them from agent config instead of saving `null` values.
+- Startup: the extension no longer picks OpenCode desktop app installs when looking for the standalone OpenCode CLI.
+- Chat: fixed edge cases where late-loading tool content, subagent content, or streaming Thinking blocks could pull the conversation away from the latest message or fight manual scrolling.
+- Chat: embedded JSON examples in messages no longer render as generated-result cards.
+- Sync: chat state now recovers after idle reconnects instead of leaving sessions stuck in a stale busy state.
+
+## [1.13.8] - 2026-06-29
+
+- Chat: a new Follow-up behavior setting controls what happens when you press Enter on a message while the agent is still responding — Steer inserts it into the agent's current turn, or Queue holds it until the turn finishes. Replaces the previous queue-mode toggle (thanks to @bashrusakh).
+- Sync: a connected but quiet session (for example an agent running a long tool call) no longer triggers repeated background refreshes every ~15 seconds (thanks to @tomzx).
+
+## [1.13.7] - 2026-06-28
+
+- Chat: with tool calls (such as Bash and Edit) shown expanded by default, scrolling no longer twitches, and slow scrolling no longer jumps past several messages.
+- Providers: the Add provider form stays open while provider data refreshes or a model is picked in the background, instead of snapping back to an existing provider.
+
+## [1.13.6] - 2026-06-28
+
+- Chat: scrolling in conversations now stays steady while sending, queueing, streaming, switching sessions, and loading older messages.
+
+## [1.13.5] - 2026-06-27
+
+- No notable changes.
+
+## [1.13.4] - 2026-06-27
+
+- UI/Localization: added Japanese interface translations (thanks to @yuchi0531).
+- Chat: queued messages can now be reordered by dragging them in the queue (thanks to @makeittech).
+- Chat: sending a message now closes an open question prompt instead of leaving stale question UI in the composer (thanks to @tomzx).
+- Chat: conversations pinned to the bottom no longer jiggle or double-scroll after sending, and revisiting older sessions snaps to the latest message without a smooth-scroll delay.
+- Models: the model picker now remembers provider group expansion and custom ordering, and Shift+Delete removes a recent model from recents (thanks to @makeittech).
+- Agents: agent edits against an external OpenCode server no longer show a saved-state update when the save did not succeed (thanks to @makeittech).
+- Providers: the add-provider form no longer loses the selected provider during background provider refreshes (thanks to @IbrahimKhan12).
+
+## [1.13.3] - 2026-06-24
+
+- Chat: selecting a user-installed skill from the slash command menu now invokes the skill instead of inserting the skill name as plain text (thanks to @IbrahimKhan12).
+- Chat: pasted text containing `@` no longer opens file mention autocomplete unexpectedly (thanks to @charpeni).
+- Chat: code blocks in user messages now preserve characters like `<` and `->` instead of escaping them inside the code block (thanks to @bashrusakh).
+- Chat: switching sessions and loading older messages no longer causes the conversation to jump backward or oscillate around the current scroll position (thanks to @herjarsa).
+- Chat: Arrow Up opens prompt history again when the cursor is at the start of the composer.
+- Sessions: new sessions now stay attached to the selected workspace directory instead of sometimes appearing under a stale project (thanks to @bashrusakh).
+- Sessions: pinned sessions and folder rows no longer disappear from the sidebar after an empty session-list refresh (thanks to @bashrusakh).
+- Agents: agent settings now include thinking variant, temperature, and top-p controls, and clearing temperature or top-p now removes the override (thanks to @bashrusakh).
+- Settings/Models: per-model visibility and sibling model selections now stay saved after changes (thanks to @attilaszasz).
+- Settings: font size and padding preferences now apply inside the extension webview (thanks to @Sin991114).
+- Settings/Skills: the skills catalog refreshes after catalog settings change (thanks to @gokulkgm).
+- Usage: MiniMax M3 and Token Plan usage now handle the provider's latest API response format (thanks to @baruchvitorino).
+- Startup: managed OpenCode server processes left behind by a previous extension crash are cleaned up on the next start.
+
 ## [1.13.2] - 2026-06-18
 
 - Chat/Performance: long conversations and large session lists now stay smooth and responsive while a response is streaming (thanks to @bashrusakh).

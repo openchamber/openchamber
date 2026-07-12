@@ -13,10 +13,12 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
-import { useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
+import { useUIStore, type ContextPanelMode, type PendingDiffScope } from '@/stores/useUIStore';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
+import { markSessionViewed } from '@/sync/notification-store';
+import { setExternallyViewedSession, useDirectoryStore } from '@/sync/sync-context';
 import { ContextPanelContent } from './ContextSidebarTab';
 import { toast } from '@/components/ui';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -43,6 +45,7 @@ const CONTEXT_PANEL_MAX_WIDTH = 1400;
 const CONTEXT_PANEL_DEFAULT_WIDTH = 600;
 const CONTEXT_TAB_LABEL_MAX_CHARS = 24;
 type TranslateFn = ReturnType<typeof useI18n>['t'];
+const EMPTY_SESSION_TITLE_MAP = new Map<string, string>();
 
 type PreviewConsoleEvent = {
   id: number;
@@ -175,9 +178,27 @@ const getFileNameFromPath = (path: string | null): string | null => {
 };
 
 const getTabLabel = (
-  tab: { mode: ContextPanelMode; label: string | null; targetPath: string | null; stagedDiff?: boolean },
+  tab: { mode: ContextPanelMode; label: string | null; targetPath: string | null; dedupeKey?: string; sessionTitleFallback?: string | null; stagedDiff?: boolean },
+  sessionTitleById: ReadonlyMap<string, string>,
   t: TranslateFn
 ): string => {
+  if (tab.mode === 'chat') {
+    const sessionID = getSessionIDFromDedupeKey(tab.dedupeKey);
+    if (sessionID) {
+      const sessionTitle = sessionTitleById.get(sessionID)?.trim();
+      if (sessionTitle) {
+        return sessionTitle;
+      }
+    }
+
+    const sessionTitleFallback = tab.sessionTitleFallback?.trim();
+    if (sessionTitleFallback) {
+      return sessionTitleFallback;
+    }
+
+    return t('contextPanel.mode.chat');
+  }
+
   if (tab.label) {
     return tab.label;
   }
@@ -247,6 +268,47 @@ const getSessionIDFromDedupeKey = (dedupeKey: string | undefined): string | null
 
   const sessionID = dedupeKey.slice('session:'.length).trim();
   return sessionID || null;
+};
+
+const areTitleMapsEqual = (a: ReadonlyMap<string, string>, b: ReadonlyMap<string, string>): boolean => {
+  if (a.size !== b.size) return false;
+  for (const [key, value] of a) {
+    if (b.get(key) !== value) return false;
+  }
+  return true;
+};
+
+const buildSessionTitleMap = (sessions: Array<{ id: string; title?: string | null }>, sessionIDs: readonly string[]): Map<string, string> => {
+  if (sessionIDs.length === 0) return EMPTY_SESSION_TITLE_MAP;
+  const wanted = new Set(sessionIDs);
+  const next = new Map<string, string>();
+  for (const session of sessions) {
+    if (!wanted.has(session.id)) continue;
+    const title = session.title?.trim();
+    if (title) next.set(session.id, title);
+  }
+  return next.size === 0 ? EMPTY_SESSION_TITLE_MAP : next;
+};
+
+const useSessionTitleMap = (directory: string | undefined, sessionIDs: readonly string[]): ReadonlyMap<string, string> => {
+  const store = useDirectoryStore(directory);
+  const snapshotRef = React.useRef<ReadonlyMap<string, string>>(EMPTY_SESSION_TITLE_MAP);
+  const sessionIDsRef = React.useRef<readonly string[]>(sessionIDs);
+
+  sessionIDsRef.current = sessionIDs;
+
+  return React.useSyncExternalStore(
+    store.subscribe,
+    React.useCallback(() => {
+      const next = buildSessionTitleMap(store.getState().session, sessionIDsRef.current);
+      if (areTitleMapsEqual(snapshotRef.current, next)) {
+        return snapshotRef.current;
+      }
+      snapshotRef.current = next;
+      return next;
+    }, [store]),
+    () => EMPTY_SESSION_TITLE_MAP,
+  );
 };
 
 const DESKTOP_BROWSER_INSPECT_SCRIPT = `new Promise((resolve) => {
@@ -447,6 +509,21 @@ const stripPreviewTokenFromUrl = (value: string): string => {
     return value;
   }
 };
+
+const stripPreviewQueryParams = (value: string): string => {
+  if (!value) return value;
+  try {
+    const parsed = new URL(value);
+    parsed.searchParams.delete('ocPreview');
+    parsed.searchParams.delete('oc_preview_token');
+    parsed.searchParams.delete('oc_client_token');
+    parsed.searchParams.delete('oc_url_token');
+    return parsed.toString();
+  } catch {
+    return value;
+  }
+};
+
 const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
@@ -593,6 +670,8 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
     ? (() => {
       const path = normalizedUrl.pathname || '/';
       const searchParams = new URLSearchParams(normalizedUrl.search);
+      searchParams.delete('oc_url_token');
+      searchParams.delete('oc_client_token');
       searchParams.set('ocPreview', String(reloadNonce));
       searchParams.set('oc_preview_token', proxyState.previewToken || '');
       const search = searchParams.toString();
@@ -1227,6 +1306,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
   const startUrl = normalized !== 'about:blank' ? normalized : '';
   const [urlInput, setUrlInput] = React.useState(startUrl);
   const [currentUrl, setCurrentUrl] = React.useState(startUrl);
+  const [loadedUrl, setLoadedUrl] = React.useState(startUrl);
   const [history, setHistory] = React.useState<string[]>(() => startUrl ? [startUrl] : []);
   const [historyIndex, setHistoryIndex] = React.useState(() => startUrl ? 0 : -1);
   const [reloadNonce, bumpReload] = React.useReducer((value: number) => value + 1, 0);
@@ -1245,12 +1325,17 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
     setContextPanelTabTargetPath(directory, tabID, url);
   }, [directory, tabID, setContextPanelTabTargetPath]);
 
-  const applyUrl = React.useCallback((url: string, options?: { replaceHistory?: boolean }) => {
+  const applyUrl = React.useCallback((url: string, options?: { replaceHistory?: boolean; inFrame?: boolean }) => {
     const normalizedUrl = normalizeBrowserUrl(url);
     const nextUrl = normalizedUrl !== 'about:blank' ? normalizedUrl : '';
     setCurrentUrl(nextUrl);
     setUrlInput(nextUrl);
-    setIsLoading(Boolean(nextUrl));
+    if (!options?.inFrame) {
+      setLoadedUrl(nextUrl);
+      setIsLoading(Boolean(nextUrl));
+    } else {
+      setIsLoading(false);
+    }
     persistUrl(nextUrl);
 
     setHistory((current) => {
@@ -1281,6 +1366,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
     if (!nextUrl) return;
     setHistoryIndex(nextIndex);
     setCurrentUrl(nextUrl);
+    setLoadedUrl(nextUrl);
     setUrlInput(nextUrl);
     setIsLoading(true);
     persistUrl(nextUrl);
@@ -1297,12 +1383,12 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
   }, [currentUrl]);
 
   React.useEffect(() => {
-    if (!currentUrl) {
+    if (!loadedUrl) {
       setProxyState({ status: 'idle' });
       return;
     }
 
-    const proxyTargetKey = getBrowserProxyTargetKey(currentUrl);
+    const proxyTargetKey = getBrowserProxyTargetKey(loadedUrl);
     const cached = getCachedProxyTarget(proxyTargetKey);
     if (cached?.previewToken) {
       setProxyState({ status: 'ready', proxyBasePath: cached.proxyBasePath, previewToken: cached.previewToken, expiresAt: cached.expiresAt });
@@ -1322,7 +1408,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ url: currentUrl, allowExternal: true }),
+          body: JSON.stringify({ url: loadedUrl, allowExternal: true }),
         });
 
         if (!response.ok) {
@@ -1362,9 +1448,9 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
     return () => {
       cancelled = true;
     };
-  }, [currentUrl, t]);
+  }, [loadedUrl, t]);
 
-  const proxyUrlAuthKey = currentUrl && proxyState.status === 'ready'
+  const proxyUrlAuthKey = loadedUrl && proxyState.status === 'ready'
     ? `${proxyState.proxyBasePath}|${proxyState.previewToken || ''}|${reloadNonce}`
     : '';
 
@@ -1389,11 +1475,13 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
 
   const proxySrc = React.useMemo(() => {
     if (urlAuthReadyKey !== proxyUrlAuthKey) return '';
-    if (!currentUrl || proxyState.status !== 'ready') return '';
+    if (!loadedUrl || proxyState.status !== 'ready') return '';
     try {
-      const parsed = new URL(currentUrl);
+      const parsed = new URL(loadedUrl);
       const path = parsed.pathname || '/';
       const searchParams = new URLSearchParams(parsed.search);
+      searchParams.delete('oc_url_token');
+      searchParams.delete('oc_client_token');
       searchParams.set('ocPreview', String(reloadNonce));
       searchParams.set('oc_preview_token', proxyState.previewToken || '');
       const search = searchParams.toString();
@@ -1401,12 +1489,12 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
     } catch {
       return '';
     }
-  }, [currentUrl, proxyState, proxyUrlAuthKey, reloadNonce, urlAuthReadyKey]);
+  }, [loadedUrl, proxyState, proxyUrlAuthKey, reloadNonce, urlAuthReadyKey]);
 
-  const iframeSrc = proxySrc || (proxyState.status === 'error' ? currentUrl : '');
+  const iframeSrc = proxySrc || (proxyState.status === 'error' ? loadedUrl : '');
 
   const getCurrentUrlFromFrameUrl = React.useCallback((frameUrl: string): string => {
-    if (!frameUrl || !currentUrl || proxyState.status !== 'ready') return '';
+    if (!frameUrl || !loadedUrl || proxyState.status !== 'ready') return '';
     try {
       const parsedFrameUrl = new URL(frameUrl, window.location.origin);
       const proxyBasePath = proxyState.proxyBasePath.endsWith('/')
@@ -1417,18 +1505,18 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
       }
 
       const rest = parsedFrameUrl.pathname.slice(proxyBasePath.length) || '/';
-      const upstreamOrigin = new URL(currentUrl).origin;
-      return new URL(`${rest}${parsedFrameUrl.search}${parsedFrameUrl.hash}`, upstreamOrigin).toString();
+      const upstreamOrigin = new URL(loadedUrl).origin;
+      return stripPreviewQueryParams(new URL(`${rest}${parsedFrameUrl.search}${parsedFrameUrl.hash}`, upstreamOrigin).toString());
     } catch {
       return '';
     }
-  }, [currentUrl, proxyState]);
+  }, [loadedUrl, proxyState]);
 
   const getUpstreamUrlFromLocalFrameUrl = React.useCallback((frameUrl: string): string => {
-    if (!frameUrl || !currentUrl || proxyState.status !== 'ready') return '';
+    if (!frameUrl || !loadedUrl || proxyState.status !== 'ready') return '';
     try {
       const parsedFrameUrl = new URL(frameUrl, window.location.origin);
-      const upstreamOrigin = new URL(currentUrl).origin;
+      const upstreamOrigin = new URL(loadedUrl).origin;
       if (parsedFrameUrl.origin !== window.location.origin || upstreamOrigin === window.location.origin) {
         return '';
       }
@@ -1440,11 +1528,11 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
         return '';
       }
 
-      return new URL(`${parsedFrameUrl.pathname}${parsedFrameUrl.search}${parsedFrameUrl.hash}`, upstreamOrigin).toString();
+      return stripPreviewQueryParams(new URL(`${parsedFrameUrl.pathname}${parsedFrameUrl.search}${parsedFrameUrl.hash}`, upstreamOrigin).toString());
     } catch {
       return '';
     }
-  }, [currentUrl, proxyState]);
+  }, [loadedUrl, proxyState]);
 
   const postInspectMode = React.useCallback((enabled: boolean) => {
     const frameWindow = iframeRef.current?.contentWindow;
@@ -1533,7 +1621,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
         const frameUrl = typeof data.url === 'string' ? data.url : '';
         const nextUrl = getCurrentUrlFromFrameUrl(frameUrl);
         if (nextUrl && nextUrl !== currentUrl) {
-          applyUrl(nextUrl);
+          applyUrl(nextUrl, { inFrame: true });
         }
         return;
       }
@@ -1604,8 +1692,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
       const frameUrl = iframeRef.current?.contentWindow?.location.href || '';
       const upstreamUrl = getUpstreamUrlFromLocalFrameUrl(frameUrl);
       if (upstreamUrl) {
-        setIsLoading(true);
-        applyUrl(upstreamUrl);
+        applyUrl(upstreamUrl, { inFrame: true });
         return;
       }
     } catch {
@@ -1658,7 +1745,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
         {iframeSrc ? (
           <div className="absolute inset-0">
             <iframe
-              key={`${iframeSrc}:${reloadNonce}`}
+              key={`${tabID}:${reloadNonce}`}
               ref={iframeRef}
               src={iframeSrc}
               title={t('contextPanel.browser.empty')}
@@ -1707,6 +1794,7 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dir
   const setContextPanelTabTargetPath = useUIStore((state) => state.setContextPanelTabTargetPath);
   const normalized = normalizeBrowserUrl(initialUrl);
   const startUrl = normalized !== 'about:blank' ? normalized : '';
+  const initialWebviewSrcRef = React.useRef(normalizeBrowserUrl(initialUrl));
   const [urlInput, setUrlInput] = React.useState(startUrl);
   const [currentUrl, setCurrentUrl] = React.useState(startUrl);
   const [isInspecting, setIsInspecting] = React.useState(false);
@@ -1946,7 +2034,7 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dir
       <div className="relative min-h-0 flex-1 bg-background">
         <webview
           ref={webviewRef}
-          src={normalizeBrowserUrl(initialUrl)}
+          src={initialWebviewSrcRef.current}
           partition="persist:openchamber-browser"
           allowpopups
           style={{ width: '100%', height: '100%', border: 'none' }}
@@ -1989,6 +2077,16 @@ export const ContextPanel: React.FC = () => {
   const isOpen = Boolean(panelState?.isOpen && activeTab);
   const isExpanded = Boolean(isOpen && panelState?.expanded);
   const width = clampWidth(panelState?.width ?? CONTEXT_PANEL_DEFAULT_WIDTH);
+  const chatSessionIDs = React.useMemo(() => {
+    const ids: string[] = [];
+    for (const tab of tabs) {
+      if (tab.mode !== 'chat') continue;
+      const sessionID = getSessionIDFromDedupeKey(tab.dedupeKey);
+      if (sessionID && !ids.includes(sessionID)) ids.push(sessionID);
+    }
+    return ids;
+  }, [tabs]);
+  const sessionTitleById = useSessionTitleMap(directoryKey || undefined, chatSessionIDs);
 
   const [isResizing, setIsResizing] = React.useState(false);
   const [suppressWidthTransition, setSuppressWidthTransition] = React.useState(false);
@@ -2157,6 +2255,37 @@ export const ContextPanel: React.FC = () => {
   }, [activeTab, directoryKey, setSelectedFilePath]);
 
   const activeChatTabID = activeTab?.mode === 'chat' ? activeTab.id : null;
+  const activeChatSessionID = activeTab?.mode === 'chat' ? getSessionIDFromDedupeKey(activeTab.dedupeKey) : null;
+
+  React.useEffect(() => {
+    if (!isOpen || !directoryKey || !activeChatSessionID || typeof window === 'undefined') {
+      return;
+    }
+
+    const markActiveChatViewed = () => {
+      if (document.visibilityState === 'hidden' || !document.hasFocus()) {
+        setExternallyViewedSession(directoryKey, activeChatSessionID, false);
+        return;
+      }
+
+      markSessionViewed(activeChatSessionID);
+      setExternallyViewedSession(directoryKey, activeChatSessionID, true);
+    };
+
+    markActiveChatViewed();
+    const interval = window.setInterval(markActiveChatViewed, 10_000);
+    window.addEventListener('focus', markActiveChatViewed);
+    window.addEventListener('blur', markActiveChatViewed);
+    document.addEventListener('visibilitychange', markActiveChatViewed);
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', markActiveChatViewed);
+      window.removeEventListener('blur', markActiveChatViewed);
+      document.removeEventListener('visibilitychange', markActiveChatViewed);
+      setExternallyViewedSession(directoryKey, activeChatSessionID, false);
+    };
+  }, [activeChatSessionID, directoryKey, isOpen]);
 
   const getEmbeddedChatSrc = React.useCallback((tabID: string, sessionID: string, readOnly: boolean): string => {
     return getOrCreateEmbeddedSessionChatURL(chatFrameSrcByTabIDRef.current, tabID, sessionID, directoryKey || null, readOnly, {
@@ -2176,7 +2305,7 @@ export const ContextPanel: React.FC = () => {
     }
   }, [tabs]);
 
-  const handleDiffScopeChange = React.useCallback((nextScope: 'working' | 'staged') => {
+  const handleDiffScopeChange = React.useCallback((nextScope: PendingDiffScope) => {
     if (!directoryKey || activeTab?.mode !== 'diff') {
       return;
     }
@@ -2185,6 +2314,7 @@ export const ContextPanel: React.FC = () => {
       mode: 'diff',
       targetPath: activeTab.targetPath,
       stagedDiff: nextScope === 'staged',
+      diffScope: nextScope,
     });
   }, [activeTab, directoryKey, openContextPanelTab]);
 
@@ -2306,7 +2436,7 @@ export const ContextPanel: React.FC = () => {
   }, [darkThemeId, lightThemeId, postEmbeddedVisibilityToChats, postThemeSyncToEmbeddedChat, tabs, themeMode]);
 
   const tabItems = React.useMemo(() => tabs.map((tab) => {
-    const rawLabel = getTabLabel(tab, t);
+    const rawLabel = getTabLabel(tab, sessionTitleById, t);
     const label = truncateTabLabel(rawLabel, CONTEXT_TAB_LABEL_MAX_CHARS);
     const tabPathLabel = getRelativePathLabel(tab.targetPath, effectiveDirectory);
     return {
@@ -2316,7 +2446,7 @@ export const ContextPanel: React.FC = () => {
       title: tabPathLabel ? `${rawLabel}: ${tabPathLabel}` : rawLabel,
       closeLabel: t('contextPanel.tab.closeTabAria', { label }),
     };
-  }), [effectiveDirectory, t, tabs]);
+  }), [effectiveDirectory, sessionTitleById, t, tabs]);
 
   const activeNonChatContent = activeTab?.mode === 'context'
         ? <ContextPanelContent />
@@ -2527,7 +2657,7 @@ export const ContextPanel: React.FC = () => {
               stackedDefaultCollapsedAll
               pinSelectedFileHeaderToTopOnNavigate
               showOpenInEditorAction
-              diffScope={tab.stagedDiff ? 'staged' : 'working'}
+              diffScope={tab.diffScope ?? (tab.stagedDiff ? 'staged' : 'working')}
               onDiffScopeChange={handleDiffScopeChange}
               targetFilePath={tab.targetPath}
               flushContent

@@ -7,7 +7,7 @@ import type {
   GitLogResponse,
   GitIdentitySummary,
 } from '@/lib/api/types';
-import { getSafeStorage } from '@/stores/utils/safeStorage';
+import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 
 const LOG_STALE_THRESHOLD = 10000;
 const REPO_CHECK_STALE_THRESHOLD = 60_000;
@@ -155,7 +155,7 @@ const GIT_BRANCH_CACHE_KEY = 'oc.gitBranchCache';
 
 const readBranchCache = (): Record<string, GitBranch> => {
   try {
-    const raw = getSafeStorage().getItem(GIT_BRANCH_CACHE_KEY);
+    const raw = getDeferredSafeStorage().getItem(GIT_BRANCH_CACHE_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw) as Record<string, GitBranch>;
     return parsed && typeof parsed === 'object' ? parsed : {};
@@ -169,7 +169,7 @@ const writeCachedBranches = (directory: string, branches: GitBranch): void => {
   try {
     const cache = readBranchCache();
     cache[directory] = branches;
-    getSafeStorage().setItem(GIT_BRANCH_CACHE_KEY, JSON.stringify(cache));
+    getDeferredSafeStorage().setItem(GIT_BRANCH_CACHE_KEY, JSON.stringify(cache));
   } catch {
     // quota / serialization — ignore; live fetch still refreshes the store
   }
@@ -1048,13 +1048,6 @@ export const useIsGitRepo = (directory: string | null) => {
   });
 };
 
-export const useGitFileCount = (directory: string | null) => {
-  return useGitStore((state) => {
-    if (!directory) return 0;
-    return state.directories.get(directory)?.status?.files?.length ?? 0;
-  });
-};
-
 export const useGitBranchLabel = (directory: string | null) => {
   return useGitStore((state) => {
     if (!directory) return null;
@@ -1079,26 +1072,6 @@ export const useGitAllBranches = () => {
       result.set(dir, dirState.status?.current ?? null);
     }
     allBranchesCacheRef.current = result;
-    return result;
-  });
-};
-
-export const useGitBranchMap = (directories: string[]) => {
-  const cacheRef = React.useRef<Map<string, string | null>>(new Map());
-  return useGitStore((state) => {
-    const prev = cacheRef.current;
-    let same = prev.size === directories.length;
-    if (same) {
-      for (const dir of directories) {
-        if (prev.get(dir) !== (state.directories.get(dir)?.status?.current ?? null)) { same = false; break; }
-      }
-    }
-    if (same) return prev;
-    const result = new Map<string, string | null>();
-    for (const dir of directories) {
-      result.set(dir, state.directories.get(dir)?.status?.current ?? null);
-    }
-    cacheRef.current = result;
     return result;
   });
 };
@@ -1144,12 +1117,5 @@ export const useGitLoadingBranches = (directory: string | null) => {
   return useGitStore((state) => {
     if (!directory) return false;
     return state.directories.get(directory)?.isLoadingBranches ?? false;
-  });
-};
-
-export const useGitLoadingIdentity = (directory: string | null) => {
-  return useGitStore((state) => {
-    if (!directory) return false;
-    return state.directories.get(directory)?.isLoadingIdentity ?? false;
   });
 };

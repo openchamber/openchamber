@@ -6,7 +6,12 @@ vi.mock('node:child_process', () => ({
   spawnSync: vi.fn(() => ({ status: 0, stdout: '/usr/local/bin', stderr: '' })),
 }));
 
-const { checkForUpdates } = await import('./package-manager.js');
+const {
+  checkForUpdates,
+  detectPackageManager,
+  executeUpdate,
+  getCurrentVersion,
+} = await import('./package-manager.js');
 
 /** Helper: create a fetch mock that routes by URL pattern */
 function createFetchMock() {
@@ -242,5 +247,19 @@ describe('checkForUpdates', () => {
     const result = await checkForUpdates({ currentVersion: '1.9.10' });
 
     expect(result.available).toBe(false);
+  });
+});
+
+describe('getCurrentVersion', () => {
+  it('is exported for the CLI update command', () => {
+    expect(typeof getCurrentVersion).toBe('function');
+    expect(getCurrentVersion()).toMatch(/^\d+\.\d+\.\d+|unknown$/);
+  });
+});
+
+describe('CLI update exports', () => {
+  it('exports package-manager helpers used by the update command', () => {
+    expect(typeof detectPackageManager).toBe('function');
+    expect(typeof executeUpdate).toBe('function');
   });
 });

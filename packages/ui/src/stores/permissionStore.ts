@@ -1,11 +1,11 @@
 import { create } from "zustand";
-import { devtools, persist, createJSONStorage } from "zustand/middleware";
+import { devtools, persist } from "zustand/middleware";
 import type { Session } from "@opencode-ai/sdk/v2/client";
 import {
     autoRespondsPermission,
     type PermissionAutoAcceptMap,
 } from "./utils/permissionAutoAccept";
-import { getSafeStorage } from "./utils/safeStorage";
+import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
 import { getAllSyncSessions, getSyncChildStores } from "@/sync/sync-refs";
 import { opencodeClient } from "@/lib/opencode/client";
 import { respondToPermission } from "@/sync/session-actions";
@@ -201,7 +201,7 @@ const autoRespondsPermissionBySession = (
     });
 };
 
-const getStorage = () => createJSONStorage(() => getSafeStorage());
+const getStorage = () => createDeferredSafeJSONStorage();
 
 export const usePermissionStore = create<PermissionStore>()(
     devtools(

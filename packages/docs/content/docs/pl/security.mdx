@@ -25,13 +25,20 @@ Po ustawieniu hasła możesz dodać klucze dostępu (Face ID, Touch ID, klucz be
 
 Klucze dostępu są powiązane z bieżącym hasłem. Jeśli zmienisz lub usuniesz hasło, zapisane klucze dostępu zostaną wyczyszczone i będziesz je dodawać ponownie.
 
+## Tokeny urządzeń
+
+Urządzenia sparowane przez [Połącz urządzenie](/pl/connect-devices/) uwierzytelniają się własnymi tokenami per urządzenie, a nie hasłem UI. Linki parowania są jednorazowe i wygasają, jeśli nie zostaną użyte; każde sparowane urządzenie jest widoczne w **Settings → Remote Instances → Połącz z tym serwerem**, gdzie w każdej chwili możesz unieważnić dowolne z nich. Połączenia spoza domu przechodzą przez [Private Relay](/pl/private-relay/), który jest szyfrowany end-to-end i nie może odczytać Twojego ruchu.
+
 ## Zanim ją udostępnisz
 
 - Domyślnie OpenChamber nasłuchuje tylko na Twojej własnej maszynie (`127.0.0.1`). Nasłuchiwanie szerzej wymaga celowej zmiany i najpierw powinieneś ustawić hasło.
-- Preferuj [tunel](/pl/tunnels/) lub sieć prywatną (jak VPN) zamiast otwierania portu do internetu.
+- Dla własnych urządzeń preferuj [parowanie](/pl/connect-devices/) z [Private Relay](/pl/private-relay/) — nic nie jest wtedy wystawione publicznie.
+- Jeśli potrzebujesz publicznego adresu URL, preferuj [tunel](/pl/tunnels/) lub sieć prywatną (jak VPN) zamiast otwierania portu do internetu.
 - Jeśli umieszczasz OpenChamber za własnym serwerem HTTPS, zobacz [Reverse Proxy](/pl/reverse-proxy/).
 
 ## Powiązane
 
-- [Tunele](/pl/tunnels/) — zalecany sposób na zdalne dotarcie do instancji
+- [Połącz urządzenie](/pl/connect-devices/) — jednorazowe parowanie i tokeny per urządzenie
+- [Private Relay](/pl/private-relay/) — szyfrowany end-to-end dostęp z dowolnego miejsca
+- [Tunele](/pl/tunnels/) — udostępnij publiczny URL, gdy go potrzebujesz
 - [Reverse Proxy](/pl/reverse-proxy/) — uruchom OpenChamber za własnym serwerem

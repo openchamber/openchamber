@@ -1,7 +1,13 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
-import { dedupeSessionsById, getArchivedScopeKey, isSessionRelatedToProject, normalizePath } from '../utils';
+import {
+  collectKnownProjectDirectories,
+  dedupeSessionsById,
+  getArchivedScopeKey,
+  isSessionRelatedToProject,
+  normalizePath,
+} from '../utils';
 
 type NormalizedProject = {
   id: string;
@@ -33,8 +39,17 @@ export const useSessionFolderCleanup = (args: Args): void => {
     cleanupSessions,
   } = args;
 
+  const knownProjectDirectories = React.useMemo(
+    () => collectKnownProjectDirectories(normalizedProjects, availableWorktreesByProject, isVSCode),
+    [normalizedProjects, availableWorktreesByProject, isVSCode],
+  );
+
   React.useEffect(() => {
     if (isSessionsLoading || !hasLoadedGlobalSessions) {
+      return;
+    }
+
+    if (sessions.length === 0 && archivedSessions.length === 0) {
       return;
     }
 
@@ -72,9 +87,9 @@ export const useSessionFolderCleanup = (args: Args): void => {
           if (sessionDirectory) {
             return false;
           }
-          return isSessionRelatedToProject(session, project.normalizedPath, validDirectories);
+          return isSessionRelatedToProject(session, project.normalizedPath, validDirectories, knownProjectDirectories);
         }),
-      ]).filter((session) => isSessionRelatedToProject(session, project.normalizedPath, validDirectories));
+      ]).filter((session) => isSessionRelatedToProject(session, project.normalizedPath, validDirectories, knownProjectDirectories));
 
       idsByScope.set(scopeKey, new Set(archivedForProject.map((session) => session.id)));
     });
@@ -91,6 +106,7 @@ export const useSessionFolderCleanup = (args: Args): void => {
     hasLoadedGlobalSessions,
     isSessionsLoading,
     isVSCode,
+    knownProjectDirectories,
     normalizedProjects,
     sessions,
   ]);

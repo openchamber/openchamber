@@ -2,9 +2,9 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-export const NPM_CACHE_TTL_MS = 3_600_000;
-export const NPM_FETCH_TIMEOUT_MS = 5_000;
-export const NPM_REGISTRY_BASE = 'https://registry.npmjs.org';
+const NPM_CACHE_TTL_MS = 3_600_000;
+const NPM_FETCH_TIMEOUT_MS = 5_000;
+const NPM_REGISTRY_BASE = 'https://registry.npmjs.org';
 
 /**
  * @typedef {Object} NpmPackagePayload

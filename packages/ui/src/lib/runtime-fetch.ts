@@ -1,3 +1,5 @@
+import { getActiveRelayTunnel } from './relay/runtime-tunnel';
+import { TUNNEL_PARSE_BASE } from './relay/tunnel-payloads';
 import { buildRuntimeAuthHeaders } from './runtime-auth';
 import { getRuntimeUrlResolver, type RuntimeUrlQuery } from './runtime-url';
 
@@ -96,15 +98,108 @@ const shouldAttachRuntimeAuth = (input: string | URL | Request): boolean => {
   }
 };
 
+// Headers API only accepts ISO-8859-1 (Latin-1) characters. Any value containing
+// characters outside \u0000-\u00FF causes "Failed to construct/set 'Headers':
+// String contains non ISO-8859-1 code point." Encode those values so they round-trip
+// safely through the browser's Headers API. Directory hints get an explicit marker
+// only when encoded, so plain ASCII paths remain compatible with routes that read
+// the header directly.
+export const isLatin1Safe = (value: string): boolean => {
+  for (let i = 0; i < value.length; i += 1) {
+    if (value.charCodeAt(i) > 0xFF) return false;
+  }
+  return true;
+};
+
+const shouldEncodeHeaderValue = (_key: string, value: string): boolean => !isLatin1Safe(value);
+
+export const sanitizeHeadersForBrowser = (init?: HeadersInit): [string, string][] | undefined => {
+  if (!init) return undefined;
+  // Normalize any HeadersInit shape into a plain array of entries so we can
+  // safely inspect and re-encode non-Latin-1 values.
+  const sourceEntries: [string, string][] = init instanceof Headers
+    ? Array.from(init.entries())
+    : Array.isArray(init)
+      ? init
+      : Object.entries(init);
+  if (sourceEntries.length === 0) return undefined;
+  const entries: [string, string][] = [];
+  let dirty = false;
+  let encodedDirectoryHint = false;
+  for (const [key, value] of sourceEntries) {
+    if (shouldEncodeHeaderValue(key, value)) {
+      entries.push([key, encodeURIComponent(value)]);
+      dirty = true;
+      if (key.toLowerCase() === 'x-opencode-directory') encodedDirectoryHint = true;
+    } else {
+      entries.push([key, value]);
+    }
+  }
+  if (encodedDirectoryHint) {
+    entries.push(['x-opencode-directory-encoding', 'uri']);
+  }
+  return dirty ? entries : undefined;
+};
+
 const mergeHeaders = async (inputHeaders?: HeadersInit, initHeaders?: HeadersInit, attachAuth = true): Promise<Headers> => {
-  const headers = new Headers(inputHeaders);
+  const headers = new Headers(sanitizeHeadersForBrowser(inputHeaders) ?? inputHeaders);
   if (initHeaders) {
-    new Headers(initHeaders).forEach((value, key) => headers.set(key, value));
+    new Headers(sanitizeHeadersForBrowser(initHeaders) ?? initHeaders).forEach((value, key) => headers.set(key, value));
   }
   if (!attachAuth) {
     return headers;
   }
   return buildRuntimeAuthHeaders(headers);
+};
+
+// ── Relay-mode routing ─────────────────────────────────────────────────────
+// When the active runtime is a private relay, runtime HTTP does not go to the
+// network: it rides the E2EE tunnel. We route exactly the same paths we would
+// resolve for a network runtime (/api, /auth, /health) and attach identical
+// auth headers; the bearer/url-token semantics are unchanged, only the
+// transport differs. Non-runtime requests (external URLs) fall through to the
+// real network fetch.
+const appendPathQuery = (path: string, query?: RuntimeUrlQuery): string => {
+  if (!query) return path;
+  const url = new URL(path, TUNNEL_PARSE_BASE);
+  appendRuntimeQuery(url, query);
+  return `${url.pathname}${url.search}`;
+};
+
+const extractRelayPath = (input: string | URL | Request, query?: RuntimeUrlQuery): string | null => {
+  const raw = input instanceof Request ? input.url : input.toString();
+  if (!isAbsoluteUrl(raw)) {
+    if (!shouldResolveApiPath(raw)) return null;
+    return appendPathQuery(raw, query);
+  }
+  try {
+    const url = new URL(raw);
+    if (!isCurrentWindowUrl(url) || !shouldResolveApiPath(url.pathname)) return null;
+    appendRuntimeQuery(url, query);
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return null;
+  }
+};
+
+const tryRelayFetch = async (
+  input: string | URL | Request,
+  requestInit: RequestInit,
+  query?: RuntimeUrlQuery,
+): Promise<Response | null> => {
+  const relay = getActiveRelayTunnel();
+  if (!relay) return null;
+  const path = extractRelayPath(input, query);
+  if (path === null) return null;
+  const inputHeaders = input instanceof Request ? input.headers : undefined;
+  const headers = await mergeHeaders(inputHeaders, requestInit.headers, true);
+  if (input instanceof Request) {
+    // Forward the Request itself — the tunnel reads its method/body/signal
+    // natively (incl. stream bodies). Re-wrapping as `new Request(path, input)`
+    // throws on a stream body without duplex:'half'.
+    return relay.fetch(input, { ...requestInit, headers });
+  }
+  return relay.fetch(path, { ...requestInit, headers });
 };
 
 const resolveRuntimeFetchInput = (input: string | URL | Request, query?: RuntimeUrlQuery): string | URL | Request => {
@@ -149,25 +244,43 @@ const coalesceReadKey = (method: string, url: string, hasSignal: boolean): strin
 
 export const runtimeFetch = async (input: string | URL | Request, init: RuntimeFetchOptions = {}): Promise<Response> => {
   const { query, ...requestInit } = init;
-  const resolvedInput = resolveRuntimeFetchInput(input, query);
-  const inputHeaders = resolvedInput instanceof Request ? resolvedInput.headers : undefined;
-  const headers = await mergeHeaders(inputHeaders, requestInit.headers, shouldAttachRuntimeAuth(resolvedInput));
 
-  const doFetch = (): Promise<Response> =>
-    resolvedInput instanceof Request
-      ? fetch(new Request(resolvedInput, { ...requestInit, headers }))
-      : fetch(resolvedInput, { ...requestInit, headers });
+  // Resolve the transport once — relay tunnel or network — then apply the SAME
+  // read-coalescing to both. On a relay the tunnel is bandwidth/latency-bound, so
+  // deduping concurrent identical GETs matters there most.
+  const relay = getActiveRelayTunnel();
+  const relayPath = relay ? extractRelayPath(input, query) : null;
 
-  const url =
-    resolvedInput instanceof Request ? resolvedInput.url
-    : resolvedInput instanceof URL ? resolvedInput.toString()
-    : String(resolvedInput);
-  const method = String(
-    requestInit.method ?? (resolvedInput instanceof Request ? resolvedInput.method : 'GET'),
-  ).toUpperCase();
+  let doFetch: () => Promise<Response>;
+  let url: string;
+  let method: string;
+  if (relay && relayPath !== null) {
+    const inputHeaders = input instanceof Request ? input.headers : undefined;
+    const headers = await mergeHeaders(inputHeaders, requestInit.headers, true);
+    doFetch = input instanceof Request
+      ? () => relay.fetch(input, { ...requestInit, headers })
+      : () => relay.fetch(relayPath, { ...requestInit, headers });
+    url = relayPath;
+    method = String(requestInit.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
+  } else {
+    const resolvedInput = resolveRuntimeFetchInput(input, query);
+    const inputHeaders = resolvedInput instanceof Request ? resolvedInput.headers : undefined;
+    const headers = await mergeHeaders(inputHeaders, requestInit.headers, shouldAttachRuntimeAuth(resolvedInput));
+    doFetch = resolvedInput instanceof Request
+      ? () => fetch(new Request(resolvedInput, { ...requestInit, headers }))
+      : () => fetch(resolvedInput, { ...requestInit, headers });
+    url =
+      resolvedInput instanceof Request ? resolvedInput.url
+      : resolvedInput instanceof URL ? resolvedInput.toString()
+      : String(resolvedInput);
+    method = String(
+      requestInit.method ?? (resolvedInput instanceof Request ? resolvedInput.method : 'GET'),
+    ).toUpperCase();
+  }
+
   // A Request always carries a (possibly default) signal; treat any Request, or
   // an explicit init.signal, as "has signal" and skip coalescing for safety.
-  const hasSignal = requestInit.signal != null || resolvedInput instanceof Request;
+  const hasSignal = requestInit.signal != null || input instanceof Request;
 
   const key = coalesceReadKey(method, url, hasSignal);
   if (!key) return doFetch();
@@ -192,6 +305,8 @@ export const installRuntimeFetchBridge = (): void => {
 
   const nativeFetch = window.fetch.bind(window);
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const relayResponse = await tryRelayFetch(input, init ?? {});
+    if (relayResponse) return relayResponse;
     if (typeof input === 'string') {
       if (!shouldResolveFetchInput(input)) {
         try {

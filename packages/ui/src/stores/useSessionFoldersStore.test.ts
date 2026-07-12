@@ -22,6 +22,7 @@ const safeStorage = {
 } as Storage;
 
 mock.module('./utils/safeStorage', () => ({
+  getDeferredSafeStorage: () => safeStorage,
   getSafeStorage: () => safeStorage,
 }));
 

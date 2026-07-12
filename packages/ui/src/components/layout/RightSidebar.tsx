@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils';
 import { useUIStore, RIGHT_SIDEBAR_MIN_WIDTH, RIGHT_SIDEBAR_MAX_WIDTH } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 
-export const RIGHT_SIDEBAR_CONTENT_WIDTH = 420;
+const RIGHT_SIDEBAR_CONTENT_WIDTH = 420;
 
 interface RightSidebarProps {
   isOpen: boolean;
@@ -40,6 +40,20 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ isOpen, children, cl
 
   const openWidth = Math.min(RIGHT_SIDEBAR_MAX_WIDTH, Math.max(RIGHT_SIDEBAR_MIN_WIDTH, rightSidebarWidth || RIGHT_SIDEBAR_CONTENT_WIDTH));
   const appliedWidth = isOpen ? openWidth : 0;
+
+  React.useLayoutEffect(() => {
+    if (isResizing) {
+      return;
+    }
+
+    const sidebar = sidebarRef.current;
+    if (!sidebar) {
+      return;
+    }
+
+    sidebar.style.minWidth = '';
+    sidebar.style.maxWidth = '';
+  }, [isOpen, isResizing, openWidth]);
 
   const handlePointerDown = (event: React.PointerEvent) => {
     if (!isOpen) {

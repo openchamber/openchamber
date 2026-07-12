@@ -45,7 +45,7 @@ export type Snippet = {
 };
 
 export type PluginScope = 'user' | 'project';
-export type PluginParsedKind = 'npm' | 'path';
+type PluginParsedKind = 'npm' | 'path';
 
 export type PluginEntry = {
   id: string;
@@ -200,7 +200,7 @@ const getUserAgentPath = (agentName: string, lookupCache: AgentLookupCache = glo
   return pluralPath;
 };
 
-export const getAgentScope = (
+const getAgentScope = (
   agentName: string,
   workingDirectory?: string,
   lookupCache: AgentLookupCache = globalAgentLookupCache
@@ -273,7 +273,7 @@ const getUserCommandPath = (commandName: string): string => {
   return pluralPath;
 };
 
-export const getCommandScope = (commandName: string, workingDirectory?: string): { scope: CommandScope | null; path: string | null } => {
+const getCommandScope = (commandName: string, workingDirectory?: string): { scope: CommandScope | null; path: string | null } => {
   if (workingDirectory) {
     const projectPath = getProjectCommandPath(workingDirectory, commandName);
     if (fs.existsSync(projectPath)) {
@@ -1194,23 +1194,6 @@ export const queryPluginRegistry = async (
   return { results };
 };
 
-export type McpLocalConfig = {
-  type: 'local';
-  command?: string[];
-  environment?: Record<string, string>;
-  enabled?: boolean;
-};
-
-export type McpRemoteConfig = {
-  type: 'remote';
-  url?: string;
-  environment?: Record<string, string>;
-  headers?: Record<string, string>;
-  enabled?: boolean;
-};
-
-export type McpConfigPayload = McpLocalConfig | McpRemoteConfig;
-
 export type McpConfigEntry = {
   name: string;
   scope?: AgentScope | null;
@@ -1622,10 +1605,28 @@ export const createAgent = (agentName: string, config: Record<string, unknown>, 
   }
 
   // Extract scope and prompt from config - scope is only used for path determination, not written to file
-  const { prompt, scope: _ignored, ...frontmatter } = config as Record<string, unknown> & { prompt?: unknown; scope?: unknown };
+  const { prompt, scope: _ignored, ...rawFrontmatter } = config as Record<string, unknown> & { prompt?: unknown; scope?: unknown };
   void _ignored; // Scope is only used for path determination
+  const frontmatter = Object.fromEntries(
+    Object.entries(rawFrontmatter).filter(([, value]) => value !== null && value !== undefined)
+  );
   writeMdFile(targetPath, frontmatter, typeof prompt === 'string' ? prompt : '');
   resetAgentLookupCache(globalAgentLookupCache);
+};
+
+const deleteAgentJsonField = (config: Record<string, unknown>, agentName: string, field: string): boolean => {
+  const agentMap = config.agent as Record<string, unknown> | undefined;
+  const current = agentMap?.[agentName] as Record<string, unknown> | undefined;
+  if (!agentMap || !current || !(field in current)) return false;
+
+  delete current[field];
+  if (Object.keys(current).length === 0) {
+    delete agentMap[agentName];
+  }
+  if (Object.keys(agentMap).length === 0) {
+    delete config.agent;
+  }
+  return true;
 };
 
 export const updateAgent = (agentName: string, updates: Record<string, unknown>, workingDirectory?: string) => {
@@ -1665,6 +1666,9 @@ export const updateAgent = (agentName: string, updates: Record<string, unknown>,
   const creatingNewMd = isBuiltinOverride;
 
   for (const [field, value] of Object.entries(updates || {})) {
+    // Skip undefined values — they would overwrite existing frontmatter fields with nothing
+    if (value === undefined) continue;
+
     if (field === 'prompt') {
       if (value === null) {
         if (mdExists || creatingNewMd) {
@@ -1773,6 +1777,19 @@ export const updateAgent = (agentName: string, updates: Record<string, unknown>,
 
     const hasMdField = Boolean(mdData?.frontmatter?.[field] !== undefined);
     const hasJsonField = Boolean(jsonSection?.[field] !== undefined);
+
+    if (value === null) {
+      if (hasMdField && mdData) {
+        delete mdData.frontmatter[field];
+        mdModified = true;
+      }
+
+      if (hasJsonField && deleteAgentJsonField(config, agentName, field)) {
+        jsonModified = true;
+      }
+
+      continue;
+    }
 
     // JSON takes precedence over md, so update JSON first if field exists there
     if (hasJsonField) {
@@ -2241,7 +2258,7 @@ export const SKILL_SCOPE = {
 export type SkillScope = typeof SKILL_SCOPE[keyof typeof SKILL_SCOPE];
 export type SkillSource = 'opencode' | 'claude' | 'agents';
 
-export type SupportingFile = {
+type SupportingFile = {
   name: string;
   path: string;
   fullPath: string;
@@ -2382,9 +2399,9 @@ const getProjectAgentsSkillDir = (workingDirectory: string, skillName: string): 
   return path.join(workingDirectory, '.agents', 'skills', skillName);
 };
 
-export const getSkillScope = (skillName: string, workingDirectory?: string): { 
-  scope: SkillScope | null; 
-  path: string | null; 
+const getSkillScope = (skillName: string, workingDirectory?: string): {
+  scope: SkillScope | null;
+  path: string | null;
   source: SkillSource | null;
 } => {
   const discovered = discoverSkills(workingDirectory).find((skill) => skill.name === skillName);

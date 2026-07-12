@@ -29,7 +29,7 @@ export const parseGoogleRefreshToken = (rawRefreshToken) => {
   };
 };
 
-export const resolveGoogleWindow = (sourceId, resetAt) => {
+const resolveGoogleWindow = (sourceId, resetAt) => {
   if (sourceId === 'gemini') {
     return { label: 'daily', seconds: GOOGLE_DAILY_WINDOW_SECONDS };
   }

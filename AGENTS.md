@@ -115,6 +115,12 @@ Server-side text-to-speech services and summarization helpers for `/api/tts/*` e
 
 - Module docs: `packages/web/server/lib/tts/DOCUMENTATION.md`
 
+##### relay
+
+Host side of the private relay: outbound E2EE tunnel that lets remote clients reach this instance through OpenChamber-hosted relay infrastructure without inbound exposure. Load the `relay-transport` skill before changing it or any WebSocket/streaming endpoint that rides it.
+
+- Module docs: `packages/web/server/lib/relay/DOCUMENTATION.md`
+
 ##### tunnels
 
 Tunnel provider setup and runtime helpers for exposing OpenChamber over remote URLs.
@@ -340,6 +346,8 @@ Project skills live under `.agents/skills/*/SKILL.md`. Before editing, agents **
 | User-facing UI text: labels, buttons, placeholders, aria labels, empty/error/loading states, toasts, dialogs, settings copy, or navigation labels | `skill({ name: "locale-ui-patterns" })` |
 | Settings pages, settings dialogs, configuration UI, or visual/layout changes inside Settings | `skill({ name: "settings-ui-patterns" })` |
 | Drag-to-reorder, sortable lists/chips/grids, or `@dnd-kit` behavior including touch/mobile and wrapping variable-width items | `skill({ name: "drag-to-reorder" })` |
+| iOS Simulator preview/control for the mobile app, `serve-sim`, simulator taps/typing/gestures/rotation, or headless install/launch workflows outside Xcode | `skill({ name: "serve-sim" })` |
+| WebSocket/SSE/streaming endpoints (terminal, dictation/voice, event stream, notifications), opening a WebSocket in shared UI, runtime transport refactors (`runtime-fetch`/`runtime-url`/`runtime-switch`/`runtime-auth`), the private relay tunnel, or anything under `packages/ui/src/lib/relay` or `packages/web/server/lib/relay` | `skill({ name: "relay-transport" })` |
 
 Skill docs are the source of truth for detailed patterns. Do not duplicate their full guidance here; load the skill and follow it before making matching changes.
 
@@ -451,7 +459,7 @@ A single store with N properties means every subscriber re-evaluates on every st
 
 ## Validation expectations
 
-- Run type-check/lint validation before finalizing source-code changes that can affect TypeScript, runtime behavior, builds, lint rules, package resolution, or generated assets, but keep validation scoped to the edited workspace by default. Prefer the package-level command for the package you changed (for example the relevant workspace's `type-check`/`lint`) instead of workspace-wide `bun run type-check` / `bun run lint`. Use workspace-wide checks only when the change spans multiple workspaces, shared package contracts, root tooling/config, dependency resolution, generated assets used across packages, or when a narrower command cannot cover the risk. Use a sufficiently long tool timeout for any broad checks (for example 240000ms) so successful package-level results are not lost to a tool timeout. For docs-only or isolated config-only changes, run the narrowest relevant validation instead (for example JSON/schema validation) and do not run full checks unless the change can affect code execution.
+- Run type-check/lint validation before finalizing source-code changes that can affect TypeScript, runtime behavior, builds, lint rules, package resolution, or generated assets, and run `bun run dead-code` when the change can add, remove, rename, or reshape files, exports, types, workspace entrypoints, or module imports. Keep validation scoped to the edited workspace by default. Prefer the package-level command for the package you changed (for example the relevant workspace's `type-check`/`lint`) instead of workspace-wide `bun run type-check` / `bun run lint`. Use workspace-wide checks only when the change spans multiple workspaces, shared package contracts, root tooling/config, dependency resolution, generated assets used across packages, or when a narrower command cannot cover the risk. Use a sufficiently long tool timeout for any broad checks (for example 240000ms) so successful package-level results are not lost to a tool timeout. For docs-only or isolated config-only changes, run the narrowest relevant validation instead (for example JSON/schema validation) and do not run full checks unless the change can affect code execution.
 - For hot-path changes, verify behavior under streaming or repeated events, not just static render.
 - For sync or startup changes, verify fresh load, retry/failure, and restart behavior.
 - For session changes, verify create, stream, abort, permission, archive/delete, and revisit flows when relevant.

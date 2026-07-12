@@ -35,16 +35,16 @@ import { markSessionViewed } from '@/sync/notification-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { opencodeClient } from '@/lib/opencode/client';
-import { disposeTerminalInputTransport } from '@/lib/terminalApi';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
+import { resumeAutoReviewRun } from '@/lib/reviewFlow';
 import { SyncProvider } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { AboutDialog } from '@/components/ui/AboutDialog';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
-import { VoiceProvider } from '@/components/voice';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
@@ -56,8 +56,8 @@ import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { useI18n } from '@/lib/i18n';
 import { applyMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { SyncAppEffects } from '@/apps/AppEffects';
+import { resetAppForRuntimeEndpointChange } from '@/apps/runtimeEndpointReset';
 import { useAppFontEffects } from '@/apps/useAppFontEffects';
-import { resetStreamingState } from '@/sync/streaming';
 import { OpenCodeUpdateToast } from '@/components/update/OpenCodeUpdateToast';
 import { markStartupTrace, startupTraceEnabled } from '@/lib/startupTrace';
 
@@ -274,27 +274,34 @@ function App({ apis }: AppProps) {
 
   React.useEffect(() => {
     return subscribeRuntimeEndpointChanged((detail) => {
-      useSessionUIStore.getState().prepareForRuntimeSwitch(detail.previousRuntimeKey);
-      useUIStore.getState().prepareForRuntimeSwitch(detail.previousRuntimeKey);
-      disposeTerminalInputTransport();
-      opencodeClient.reconnectToRuntimeBaseUrl();
-      useConfigStore.setState({
-        providers: [],
-        agents: [],
-        isConnected: false,
-        isInitialized: false,
-        connectionPhase: 'connecting',
-        lastDisconnectReason: null,
-      });
-      useProjectsStore.getState().resetForRuntimeSwitch();
-      useSessionUIStore.getState().restoreForRuntimeSwitch(detail.runtimeKey);
-      useUIStore.getState().restoreForRuntimeSwitch(detail.runtimeKey);
-      resetStreamingState();
+      resetAppForRuntimeEndpointChange(detail);
       setRuntimeEndpointEpoch((epoch) => epoch + 1);
       setInitRetryExhausted(false);
       setInitRetryEpoch((epoch) => epoch + 1);
     });
   }, []);
+
+  const autoReviewResumeSignature = useAutoReviewStore((state) => {
+    const runtimeKey = getRuntimeKey();
+    return Object.values(state.runsByOriginalSessionID)
+      .filter((run) => run.status === 'running' && run.runtimeKey === runtimeKey)
+      .map((run) => `${run.originalSessionID}:${run.phase}:${run.lastForwardedMessageID ?? ''}:${run.expectedAssistantParentID ?? ''}`)
+      .sort()
+      .join('|');
+  });
+
+  React.useEffect(() => {
+    if (embeddedSessionChat) {
+      return;
+    }
+
+    const runtimeKey = getRuntimeKey();
+    const runs = Object.values(useAutoReviewStore.getState().runsByOriginalSessionID)
+      .filter((run) => run.status === 'running' && run.runtimeKey === runtimeKey);
+    for (const run of runs) {
+      resumeAutoReviewRun(run.originalSessionID);
+    }
+  }, [autoReviewResumeSignature, embeddedSessionChat, runtimeEndpointEpoch]);
 
   React.useEffect(() => {
     document.documentElement.classList.toggle('wide-chat-layout', wideChatLayoutEnabled);
@@ -928,8 +935,8 @@ function App({ apis }: AppProps) {
   }
 
   // Always mount the full provider tree to avoid remounts when isInitialized
-  // flips from false → true. FireworksProvider and VoiceProvider are lightweight
-  // shells; their heavy children are only activated when actually needed.
+  // flips from false → true. FireworksProvider is a lightweight shell; its
+  // heavy children are only activated when actually needed.
   const isBootShell = !isInitialized && !isDesktopRuntime;
 
   return (
@@ -937,7 +944,6 @@ function App({ apis }: AppProps) {
       <SyncProvider key={runtimeEndpointEpoch} sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
         <RuntimeAPIProvider apis={apis}>
           <FireworksProvider>
-            <VoiceProvider>
               <TooltipProvider delayDuration={300} skipDelayDuration={150}>
                 <div className={isDesktopRuntime ? 'h-full text-foreground bg-transparent' : 'h-full text-foreground bg-background'}>
                   <SyncAppEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
@@ -955,7 +961,6 @@ function App({ apis }: AppProps) {
                   )}
                 </div>
               </TooltipProvider>
-            </VoiceProvider>
           </FireworksProvider>
         </RuntimeAPIProvider>
       </SyncProvider>

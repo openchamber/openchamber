@@ -9,6 +9,7 @@ import net from 'net';
 import { fileURLToPath } from 'url';
 import os from 'os';
 import crypto from 'crypto';
+import http2 from 'node:http2';
 import { createUiAuth } from './lib/ui-auth/ui-auth.js';
 import { createTunnelAuth } from './lib/opencode/tunnel-auth.js';
 import { createManagedTunnelConfigRuntime } from './lib/tunnels/managed-config.js';
@@ -37,6 +38,7 @@ import { prepareNotificationLastMessage } from './lib/notifications/index.js';
 import { registerTtsRoutes } from './lib/tts/routes.js';
 import { detectSayTtsCapability } from './lib/tts/capability-runtime.js';
 import { createTerminalRuntime } from './lib/terminal/runtime.js';
+import { createDictationRuntime } from './lib/dictation/runtime.js';
 import {
   createGlobalUiEventBroadcaster,
   createGlobalMessageStreamHub,
@@ -70,6 +72,8 @@ import { createOpenCodeResolutionRuntime } from './lib/opencode/opencode-resolut
 import { createBootstrapRuntime } from './lib/opencode/bootstrap-runtime.js';
 import { createSessionRuntime } from './lib/opencode/session-runtime.js';
 import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
+import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
+import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
 import { createTunnelWiringRuntime } from './lib/opencode/tunnel-wiring-runtime.js';
@@ -79,11 +83,15 @@ import { registerNotificationRoutes } from './lib/notifications/routes.js';
 import { createNotificationEmitterRuntime } from './lib/notifications/emitter-runtime.js';
 import { createNotificationTriggerRuntime } from './lib/notifications/runtime.js';
 import { createPushRuntime } from './lib/notifications/push-runtime.js';
+import { createApnsRuntime } from './lib/notifications/apns-runtime.js';
 import { createNotificationTemplateRuntime } from './lib/notifications/template-runtime.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
+import { createClientPairingRuntime } from './lib/client-auth/pairing.js';
 import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
+import { attachRealtimeProxy } from './lib/realtime-proxy.js';
+import { createRelayService } from './lib/relay/service.js';
 import { createProxyMiddleware, responseInterceptor } from 'http-proxy-middleware';
 import webPush from 'web-push';
 
@@ -135,9 +143,14 @@ const SSE_PATH_PREFIXES = [
   '/api/global/event',
   '/api/notifications/stream',
   '/api/openchamber/events',
+  '/api/openchamber/realtime-proxy/sse',
 ];
 
 function shouldSkipCompression(req, res) {
+  if (process.env.OPENCHAMBER_RUNTIME === 'desktop') {
+    return true;
+  }
+
   if (headerIncludesEventStream(req.headers.accept)) {
     return true;
   }
@@ -269,7 +282,9 @@ const OPENCHAMBER_DATA_DIR = process.env.OPENCHAMBER_DATA_DIR
   : path.join(os.homedir(), '.config', 'openchamber');
 const SETTINGS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'settings.json');
 const PUSH_SUBSCRIPTIONS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'push-subscriptions.json');
+const APNS_TOKENS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'apns-tokens.json');
 const REMOTE_CLIENTS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'remote-clients.json');
+const CLIENT_PAIRING_SESSIONS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'client-pairing-sessions.json');
 const CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'cloudflare-managed-remote-tunnels.json');
 const CLOUDFLARE_LEGACY_NAMED_TUNNELS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'cloudflare-named-tunnels.json');
 const CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION = 1;
@@ -371,11 +386,33 @@ const getOrCreateVapidKeys = (...args) => pushRuntime.getOrCreateVapidKeys(...ar
 const addOrUpdatePushSubscription = (...args) => pushRuntime.addOrUpdatePushSubscription(...args);
 const removePushSubscription = (...args) => pushRuntime.removePushSubscription(...args);
 const sendPushToAllUiSessions = (...args) => pushRuntime.sendPushToAllUiSessions(...args);
-const updateUiVisibility = (...args) => pushRuntime.updateUiVisibility(...args);
+// Set once the notification trigger runtime exists (declared later). When a UI
+// client reports it became visible, reset the native push badge set — the same
+// moment the device zeroes its icon badge on becomeActive, keeping them in sync.
+let clearPendingPushBadge = () => {};
+const updateUiVisibility = (token, visible, platform) => {
+  if (visible === true) clearPendingPushBadge();
+  return pushRuntime.updateUiVisibility(token, visible, platform);
+};
 const isAnyUiVisible = (...args) => pushRuntime.isAnyUiVisible(...args);
+const isAnyInteractiveClientVisible = (...args) => pushRuntime.isAnyInteractiveClientVisible(...args);
 const isUiVisible = (...args) => pushRuntime.isUiVisible(...args);
 const ensurePushInitialized = (...args) => pushRuntime.ensurePushInitialized(...args);
 const setPushInitialized = (...args) => pushRuntime.setPushInitialized(...args);
+
+const apnsRuntime = createApnsRuntime({
+  fsPromises,
+  path,
+  crypto,
+  http2,
+  APNS_TOKENS_FILE_PATH,
+  readSettingsFromDiskMigrated,
+  writeSettingsToDisk,
+});
+
+const addOrUpdateApnsToken = (...args) => apnsRuntime.addOrUpdateApnsToken(...args);
+const removeApnsToken = (...args) => apnsRuntime.removeApnsToken(...args);
+const sendApnsToAllUiSessions = (...args) => apnsRuntime.sendApnsToAllUiSessions(...args);
 
 const TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW = 128;
 const TERMINAL_INPUT_WS_REBIND_WINDOW_MS = 60 * 1000;
@@ -464,6 +501,7 @@ const tunnelAuthController = createTunnelAuth();
 let runtimeManagedRemoteTunnelToken = '';
 let runtimeManagedRemoteTunnelHostname = '';
 let terminalRuntime = null;
+let dictationRuntime = null;
 let messageStreamRuntime = null;
 const userProvidedOpenCodePassword = hmrStateRuntime.getUserProvidedOpenCodePassword(hmrState);
 const initialOpenCodeAuthState = hmrStateRuntime.resolveOpenCodeAuthFromState({
@@ -568,6 +606,7 @@ Object.defineProperties(openCodeNetworkState, {
 const openCodeNetworkRuntime = createOpenCodeNetworkRuntime({
   state: openCodeNetworkState,
   getOpenCodeAuthHeaders,
+  configuredOpenCodeHostname: ENV_CONFIGURED_OPENCODE_HOSTNAME,
 });
 
 const waitForReady = (...args) => openCodeNetworkRuntime.waitForReady(...args);
@@ -670,12 +709,61 @@ const notificationTriggerRuntime = createNotificationTriggerRuntime({
   emitDesktopNotification,
   broadcastUiNotification,
   sendPushToAllUiSessions,
+  sendApnsToAllUiSessions,
+  isAnyInteractiveClientVisible,
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
 });
 
 const maybeSendPushForTrigger = (...args) => notificationTriggerRuntime.maybeSendPushForTrigger(...args);
 const setAutoAcceptSession = (...args) => notificationTriggerRuntime.setAutoAcceptSession(...args);
+clearPendingPushBadge = () => notificationTriggerRuntime.clearPendingPushBadge();
+
+const sessionAssistRuntime = createSessionAssistRuntime({
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  getSmallModelService: async () => import('./lib/small-model/index.js'),
+});
+
+const sessionGoalRuntime = createSessionGoalRuntime({
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  getSmallModelService: async () => import('./lib/small-model/index.js'),
+  emitGoalNotification: async ({ sessionId, directory, status, goal }) => {
+    // The goal settle notification replaces the per-turn ready notifications
+    // (suppressed while the goal is active) — so it obeys the same toggle.
+    const settings = await readSettingsFromDisk();
+    if (settings.notifyOnCompletion === false) {
+      return;
+    }
+    const title = status === 'complete'
+      ? 'Goal complete'
+      : (status === 'budgetLimited' ? 'Goal reached its token budget' : 'Goal blocked');
+    const detail = goal?.statusReason && goal.statusReason !== 'verified by audit' && goal.statusReason !== 'reported by agent'
+      ? goal.statusReason
+      : (goal?.note || '');
+    const objective = typeof goal?.objective === 'string' ? goal.objective.slice(0, 140) : '';
+    const notificationPayload = {
+      title,
+      body: [objective, detail].filter(Boolean).join(' — ').slice(0, 240),
+      tag: `goal-${sessionId}`,
+      kind: 'goal',
+      sessionId,
+      directory,
+    };
+    const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
+    broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
+    void notificationTriggerRuntime.sendGoalSettlePush({
+      sessionId,
+      directory,
+      status,
+      title,
+      body: notificationPayload.body,
+    }).catch((error) => {
+      console.warn('[session-goal] push fanout failed:', error?.message || error);
+    });
+  },
+});
 
 const globalMessageStreamHub = createGlobalMessageStreamHub({
   buildOpenCodeUrl,
@@ -694,6 +782,20 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
     void maybeSendPushForTrigger(payload);
     sessionRuntime.processOpenCodeSsePayload(payload);
   },
+});
+
+// Session-assist subscribes to the hub directly: it needs the envelope's
+// directory to route its own OpenCode calls to the right instance.
+console.log('[session-assist] listening for session events');
+globalMessageStreamHub.subscribeEvent((event) => {
+  const raw = event?.payload;
+  const payload = raw?.payload && typeof raw.payload === 'object' ? raw.payload : raw;
+  if (!payload || typeof payload !== 'object') return;
+  const directory = typeof event?.directory === 'string' && event.directory && event.directory !== 'global'
+    ? event.directory
+    : '';
+  sessionAssistRuntime.processPayload(payload, directory);
+  sessionGoalRuntime.processPayload(payload, directory);
 });
 
 const processForwardedEventPayload = (payload, emitSyntheticEvent) => {
@@ -815,6 +917,13 @@ const remoteClientAuthRuntime = createRemoteClientAuthRuntime({
   crypto,
   storePath: REMOTE_CLIENTS_FILE_PATH,
 });
+const clientPairingRuntime = createClientPairingRuntime({
+  fsPromises,
+  path,
+  crypto,
+  storePath: CLIENT_PAIRING_SESSIONS_FILE_PATH,
+  remoteClientAuthRuntime,
+});
 const featureRoutesRuntime = createFeatureRoutesRuntime({
   clientReloadDelayMs: CLIENT_RELOAD_DELAY_MS,
 });
@@ -864,6 +973,7 @@ const tunnelWiringRuntime = createTunnelWiringRuntime({
 });
 const startupPipelineRuntime = createStartupPipelineRuntime({
   createTerminalRuntime,
+  createDictationRuntime,
   createMessageStreamWsRuntime,
   createServerStartupRuntime,
 });
@@ -977,11 +1087,12 @@ const bootstrapOpenCodeAtStartup = async (...args) => {
   if (openCodeLifecycleState.openCodeProcess && !openCodeLifecycleState.isExternalOpenCode) {
     startHealthMonitoring();
   }
-  if (ENV_DESKTOP_NOTIFY) {
-    void ensureGlobalWatcherStarted().catch((error) => {
-      console.warn(`Global event watcher startup failed: ${error?.message || error}`);
-    });
-  }
+  // The global watcher used to start only for desktop notifications; the
+  // session-assist runtime also rides its event hub, so it now starts
+  // unconditionally once OpenCode is up.
+  void ensureGlobalWatcherStarted().catch((error) => {
+    console.warn(`Global event watcher startup failed: ${error?.message || error}`);
+  });
 };
 const killProcessOnPort = (...args) => openCodeLifecycleRuntime.killProcessOnPort(...args);
 const waitForPortRelease = (...args) => openCodeLifecycleRuntime.waitForPortRelease(...args);
@@ -1000,6 +1111,8 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   },
   syncToHmrState,
   openCodeWatcherRuntime,
+  sessionAssistRuntime,
+  sessionGoalRuntime,
   sessionRuntime,
   getHealthCheckInterval: () => healthCheckInterval,
   clearHealthCheckInterval: (value) => clearInterval(value),
@@ -1041,6 +1154,52 @@ async function main(options = {}) {
     || (typeof process.env.OPENCHAMBER_HOST === 'string' && process.env.OPENCHAMBER_HOST.trim().length > 0
       ? process.env.OPENCHAMBER_HOST.trim()
       : '127.0.0.1');
+
+  // Pairing transports advertised to the create-device dialog. LAN reachability is
+  // derived from the SERVER's actual bind (a wildcard bind → the machine's LAN IP;
+  // a specific non-loopback host → that host), NOT from how the UI was opened — so
+  // "Local network" works even when the UI is opened on localhost, and is absent
+  // when the server is only bound to loopback (a LAN link would not connect).
+  // The IPv4 the requesting client actually reached this server on (if any).
+  // Strips the IPv6-mapped prefix; loopback means "not a LAN path".
+  const requestReachedLanAddress = (req) => {
+    const raw = typeof req?.socket?.localAddress === 'string' ? req.socket.localAddress : '';
+    const address = raw.startsWith('::ffff:') ? raw.slice(7) : raw;
+    if (!/^\d+\.\d+\.\d+\.\d+$/.test(address)) return null;
+    if (address.startsWith('127.')) return null;
+    return address;
+  };
+  const resolvePairingTransports = (req) => {
+    const activePort = tunnelRuntimeContext.getActivePort() || port;
+    const local = `http://127.0.0.1:${activePort}`;
+    let lanHost = null;
+    if (isNetworkExposedBindHost(effectiveBindHost)) {
+      // Prefer the address the client is ALREADY talking to us on — it is the
+      // one interface guaranteed to be routable from that client's network.
+      // Interface scanning is only a fallback: on servers with virtual bridges
+      // (docker0 etc.) the first non-internal IPv4 can be an address no other
+      // machine can reach, which produced pairing links whose LAN candidate
+      // silently failed and forced devices onto the relay.
+      lanHost = requestReachedLanAddress(req);
+      try {
+        if (!lanHost) {
+          for (const list of Object.values(os.networkInterfaces())) {
+            for (const entry of (list || [])) {
+              if (entry.family === 'IPv4' && !entry.internal) { lanHost = entry.address; break; }
+            }
+            if (lanHost) break;
+          }
+        }
+      } catch {
+        lanHost = null;
+      }
+    } else {
+      const h = String(effectiveBindHost || '').toLowerCase();
+      if (h && h !== '127.0.0.1' && h !== 'localhost' && h !== '::1') lanHost = effectiveBindHost;
+    }
+    const lan = lanHost ? `http://${lanHost.includes(':') ? `[${lanHost}]` : lanHost}:${activePort}` : null;
+    return { local, lan, relayAvailable: true };
+  };
   const uiPassword = typeof options.uiPassword === 'string'
     ? options.uiPassword
     : (typeof process.env.OPENCHAMBER_UI_PASSWORD === 'string' ? process.env.OPENCHAMBER_UI_PASSWORD : null);
@@ -1087,6 +1246,9 @@ async function main(options = {}) {
   if (typeof options.getIsWindowFocused === 'function') {
     notificationTriggerRuntime.setGetIsWindowFocused(options.getIsWindowFocused);
   }
+  const getDesktopRuntimeConfig = typeof options.getDesktopRuntimeConfig === 'function'
+    ? options.getDesktopRuntimeConfig
+    : null;
 
   console.log(`Starting OpenChamber on port ${port === 0 ? 'auto' : port}`);
 
@@ -1094,7 +1256,13 @@ async function main(options = {}) {
 
   const app = express();
   const serverStartedAt = new Date().toISOString();
-  const packagedClientOrigins = new Set(['openchamber-ui://app']);
+  const packagedClientOrigins = new Set([
+    'openchamber-ui://app',
+    'capacitor://localhost',
+    'http://localhost',
+    'https://localhost',
+  ]);
+  const isLocalDevClientOrigin = (origin) => /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);
   app.set('trust proxy', true);
   // Keep self-hosted instances out of search engines. The app shell is served
   // publicly (it loads before prompting for the UI password), so without this
@@ -1109,11 +1277,11 @@ async function main(options = {}) {
   });
   app.use((req, res, next) => {
     const origin = typeof req.headers.origin === 'string' ? req.headers.origin : '';
-    if (packagedClientOrigins.has(origin)) {
+    if (packagedClientOrigins.has(origin) || isLocalDevClientOrigin(origin)) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Credentials', 'true');
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With,Cache-Control,X-OpenCode-Directory');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With,Cache-Control,X-OpenCode-Directory,X-OpenCode-Directory-Encoding');
       res.setHeader('Access-Control-Expose-Headers', 'x-next-cursor');
       res.setHeader('Vary', 'Origin');
       if (req.method === 'OPTIONS') {
@@ -1132,6 +1300,12 @@ async function main(options = {}) {
   }));
   expressApp = app;
   server = http.createServer(app);
+  let realtimeProxyRuntime = { stop: () => {} };
+
+  // The relay service is constructed further below (it depends on the tunnel
+  // runtime's active port). The pairing routes registered here only read the
+  // relay candidate lazily at request time, so a late-bound holder is enough.
+  let relayServiceInstance = null;
 
   const bootstrapResult = bootstrapRuntime.setupBaseRoutes(app, {
     process,
@@ -1173,6 +1347,30 @@ async function main(options = {}) {
     uiPassword,
     tunnelAuthController,
     remoteClientAuthRuntime,
+    clientPairingRuntime,
+    getRelayPairingCandidate: (options) => {
+      if (!relayServiceInstance) return null;
+      // A relay pairing link enables the relay on demand; a plain link only
+      // advertises relay when it is already on.
+      return options?.ensureEnabled
+        ? relayServiceInstance.ensureEnabledForPairing()
+        : relayServiceInstance.getPairingCandidate();
+    },
+    // Re-evaluate the relay lifecycle after pairing/device changes (a revoked or
+    // redeemed device can flip relay demand on or off).
+    reconcileRelay: () => (relayServiceInstance ? relayServiceInstance.reconcile() : Promise.resolve()),
+    getPairingTransports: resolvePairingTransports,
+    // The display name a paired device shows for THIS server. Devices name the
+    // connection by the issuing machine's hostname, not the per-device pairing
+    // label typed by the operator.
+    getServerLabel: () => {
+      try {
+        const name = os.hostname();
+        return typeof name === 'string' && name.trim().length > 0 ? name.trim() : 'OpenChamber';
+      } catch {
+        return 'OpenChamber';
+      }
+    },
     readSettingsFromDiskMigrated,
     normalizeTunnelSessionTtlMs,
     sayTTSCapability,
@@ -1183,7 +1381,10 @@ async function main(options = {}) {
     writeSettingsToDisk,
     addOrUpdatePushSubscription,
     removePushSubscription,
+    addOrUpdateApnsToken,
+    removeApnsToken,
     updateUiVisibility,
+    clearPendingPushBadge: () => clearPendingPushBadge(),
     isUiVisible,
     getUiNotificationClients: () => uiNotificationClients,
     writeSseEvent,
@@ -1202,9 +1403,39 @@ async function main(options = {}) {
     setAutoAcceptSession,
   });
   uiAuthController = bootstrapResult.uiAuthController;
+  realtimeProxyRuntime = attachRealtimeProxy({
+    app,
+    server,
+    getDesktopRuntimeConfig,
+    getUiAuthController: () => uiAuthController,
+    isRequestOriginAllowed,
+  });
 
   const tunnelRuntimeContext = tunnelWiringRuntime.initialize(app, port);
   const { tunnelService, startTunnelWithNormalizedRequest } = tunnelRuntimeContext;
+
+  // Private relay host service: config + management routes + host client
+  // lifecycle. Loopback port comes from the same source the tunnel uses so
+  // relay-tunneled requests hit the local Express app on 127.0.0.1.
+  const relayService = createRelayService({
+    crypto,
+    os,
+    readSettingsFromDiskMigrated,
+    writeSettingsToDisk,
+    remoteClientAuthRuntime,
+    getLocalPort: () => tunnelRuntimeContext.getActivePort(),
+    // Relay demand = any paired device or pending pairing session that uses the
+    // relay transport. Drives the auto on/off lifecycle.
+    hasRelayDemand: async () => {
+      const [pendingRelay, deviceRelay] = await Promise.all([
+        clientPairingRuntime.hasActiveRelaySession().catch(() => false),
+        remoteClientAuthRuntime.hasActiveRelayClients().catch(() => false),
+      ]);
+      return pendingRelay || deviceRelay;
+    },
+  });
+  relayServiceInstance = relayService;
+  relayService.registerRoutes(app);
 
   await featureRoutesRuntime.registerRoutes(app, {
     crypto,
@@ -1303,8 +1534,10 @@ async function main(options = {}) {
     tunnelRuntimeContext,
     attachSignals,
     apiOnly,
+    dictationModelsDir: path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'speech-models'),
   });
   terminalRuntime = startupPipelineResult.terminalRuntime;
+  dictationRuntime = startupPipelineResult.dictationRuntime;
   messageStreamRuntime = startupPipelineResult.messageStreamRuntime;
 
   try {
@@ -1312,6 +1545,20 @@ async function main(options = {}) {
   } catch (error) {
     console.warn('[ScheduledTasks] Failed to start runtime:', error?.message || error);
   }
+
+  // Only opens a relay control socket when the user opted in (config enabled).
+  // Reconcile the relay lifecycle from demand on startup: run it if any relay
+  // device/session exists, stop it (and clear a stale enabled flag) otherwise.
+  void relayService.reconcile();
+
+  // Relay demand can change outside our routes: `openchamber connect-url
+  // --relay` writes a pending relay session straight to the on-disk store, and
+  // pending sessions expire without any request hitting us. Poll reconcile so a
+  // headless instance picks the relay up (or drops it) within a minute.
+  const relayReconcileTimer = setInterval(() => {
+    void relayService.reconcile();
+  }, 60_000);
+  relayReconcileTimer.unref?.();
 
   return {
     expressApp: app,
@@ -1327,13 +1574,35 @@ async function main(options = {}) {
     }),
     isReady: () => isOpenCodeReady,
     restartOpenCode: () => restartOpenCode(),
-    getOpenCodeProcessInfo: () => ({
-      managed: Boolean((openCodeProcess || openCodePort) && !ENV_SKIP_OPENCODE_START && !isExternalOpenCode),
-      pid: typeof openCodeProcess?.pid === 'number' ? openCodeProcess.pid : null,
-      port: openCodePort,
-    }),
-    stop: (shutdownOptions = {}) =>
-      gracefulShutdown({ exitProcess: shutdownOptions.exitProcess ?? false })
+    getOpenCodeProcessInfo: () => {
+      const managed = Boolean((openCodeProcess || openCodePort) && !ENV_SKIP_OPENCODE_START && !isExternalOpenCode);
+      // Only ever expose pid/port for a server WE manage. The Electron-side
+      // killer kills by port (lsof + kill -KILL), so returning a port we don't
+      // own — e.g. an external/desktop OpenCode on 4096 we attached to — would
+      // let a single miscomputed `managed` flag take down the user's separate
+      // server. Structurally withhold what isn't ours so the killer has no
+      // target, instead of relying on the flag check alone.
+      return {
+        managed,
+        pid: managed && typeof openCodeProcess?.pid === 'number' ? openCodeProcess.pid : null,
+        port: managed ? openCodePort : null,
+      };
+    },
+    stop: (shutdownOptions = {}) => {
+      realtimeProxyRuntime.stop();
+      clearInterval(relayReconcileTimer);
+      try {
+        relayService.stop();
+      } catch {
+        // best-effort teardown of the relay host client
+      }
+      try {
+        dictationRuntime?.stop?.();
+      } catch {
+        // best-effort shutdown of the dictation worker
+      }
+      return gracefulShutdown({ exitProcess: shutdownOptions.exitProcess ?? false });
+    }
   };
 }
 

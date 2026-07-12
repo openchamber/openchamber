@@ -1,4 +1,6 @@
-export type RuntimeAuthCredential =
+import { getActiveRelayTunnel } from '@/lib/relay/runtime-tunnel';
+
+type RuntimeAuthCredential =
   | { type: 'bearer'; token: string }
   | null;
 
@@ -6,12 +8,34 @@ export type RuntimeAuthCredentialProvider = () => RuntimeAuthCredential | Promis
 
 let credentialProvider: RuntimeAuthCredentialProvider = () => null;
 let runtimeBearerToken = '';
+let runtimeExtraHeaders: Record<string, string> = {};
 let runtimeUrlAuthToken = '';
 let runtimeUrlAuthTokenExpiresAt = 0;
 let runtimeUrlAuthRefreshPromise: Promise<string> | null = null;
+let localRuntimeUrlAuthToken = '';
+let localRuntimeUrlAuthTokenExpiresAt = 0;
+let localRuntimeUrlAuthRefreshPromise: Promise<string> | null = null;
 let runtimeAuthGeneration = 0;
 
 const URL_AUTH_REFRESH_SKEW_MS = 10_000;
+
+const isReservedRuntimeExtraHeaderName = (name: string): boolean => name.toLowerCase() === 'authorization';
+
+const sanitizeRuntimeExtraHeaders = (headers: Record<string, string> | null | undefined): Record<string, string> => {
+  const next: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers || {})) {
+    const name = key.trim();
+    const headerValue = value.trim();
+    if (name && headerValue && !isReservedRuntimeExtraHeaderName(name)) next[name] = headerValue;
+  }
+  return next;
+};
+
+const runtimeExtraHeadersEqual = (left: Record<string, string>, right: Record<string, string>): boolean => {
+  const leftEntries = Object.entries(left);
+  if (leftEntries.length !== Object.keys(right).length) return false;
+  return leftEntries.every(([key, value]) => right[key] === value);
+};
 
 const normalizeBearerToken = (token: string | null | undefined): string => {
   if (typeof token !== 'string') return '';
@@ -45,6 +69,8 @@ const buildAuthUrl = (apiBaseUrl: string | null | undefined, path: string): stri
 export const clearRuntimeUrlAuthToken = (): void => {
   runtimeUrlAuthToken = '';
   runtimeUrlAuthTokenExpiresAt = 0;
+  localRuntimeUrlAuthToken = '';
+  localRuntimeUrlAuthTokenExpiresAt = 0;
 };
 
 const resetRuntimeAuthGeneration = (): void => {
@@ -74,6 +100,22 @@ export const setRuntimeBearerToken = (token: string | null | undefined): void =>
   credentialProvider = () => normalized ? { type: 'bearer', token: normalized } : null;
 };
 
+export const setRuntimeExtraHeaders = (headers: Record<string, string> | null | undefined): void => {
+  // These headers are for runtime HTTP fetches and URL-token minting. Browser-owned
+  // realtime transports (EventSource/WebSocket) cannot attach arbitrary headers.
+  const next = sanitizeRuntimeExtraHeaders(headers);
+  if (runtimeExtraHeadersEqual(runtimeExtraHeaders, next)) return;
+  runtimeExtraHeaders = next;
+  resetRuntimeAuthGeneration();
+};
+
+export const getRuntimeExtraHeadersSync = (): Record<string, string> => {
+  if (Object.keys(runtimeExtraHeaders).length > 0) return runtimeExtraHeaders;
+  if (typeof window === 'undefined') return {};
+  const injected = (window as typeof window & { __OPENCHAMBER_RUNTIME_HEADERS__?: Record<string, string> }).__OPENCHAMBER_RUNTIME_HEADERS__;
+  return injected && typeof injected === 'object' ? sanitizeRuntimeExtraHeaders(injected) : {};
+};
+
 export const getRuntimeBearerTokenSync = (): string => runtimeBearerToken || readInjectedBearerToken();
 
 export const setRuntimeUrlAuthToken = (token: string | null | undefined, expiresAt: number | null | undefined): void => {
@@ -93,12 +135,32 @@ export const setRuntimeUrlAuthToken = (token: string | null | undefined, expires
   }
 };
 
+export const setLocalRuntimeUrlAuthToken = (token: string | null | undefined, expiresAt: number | null | undefined): void => {
+  const normalized = normalizeBearerToken(token);
+  if (!normalized || typeof expiresAt !== 'number' || !Number.isFinite(expiresAt)) {
+    localRuntimeUrlAuthToken = '';
+    localRuntimeUrlAuthTokenExpiresAt = 0;
+    return;
+  }
+  localRuntimeUrlAuthToken = normalized;
+  localRuntimeUrlAuthTokenExpiresAt = expiresAt;
+};
+
 const readValidRuntimeUrlAuthTokenSync = (): string => {
   if (!runtimeUrlAuthToken || runtimeUrlAuthTokenExpiresAt <= Date.now() + URL_AUTH_REFRESH_SKEW_MS) {
     clearRuntimeUrlAuthToken();
     return '';
   }
   return runtimeUrlAuthToken;
+};
+
+const readValidLocalRuntimeUrlAuthTokenSync = (): string => {
+  if (!localRuntimeUrlAuthToken || localRuntimeUrlAuthTokenExpiresAt <= Date.now() + URL_AUTH_REFRESH_SKEW_MS) {
+    localRuntimeUrlAuthToken = '';
+    localRuntimeUrlAuthTokenExpiresAt = 0;
+    return '';
+  }
+  return localRuntimeUrlAuthToken;
 };
 
 export const getRuntimeUrlAuthTokenSync = (): string => {
@@ -109,7 +171,15 @@ export const getRuntimeUrlAuthTokenSync = (): string => {
   return token;
 };
 
-export const getRuntimeAuthCredential = async (): Promise<RuntimeAuthCredential> => {
+export const getLocalRuntimeUrlAuthTokenSync = (localOrigin?: string | null): string => {
+  const token = readValidLocalRuntimeUrlAuthTokenSync();
+  if (!token && localOrigin && typeof window !== 'undefined') {
+    void refreshLocalRuntimeUrlAuthToken(localOrigin).catch(() => {});
+  }
+  return token;
+};
+
+const getRuntimeAuthCredential = async (): Promise<RuntimeAuthCredential> => {
   const credential = await credentialProvider();
   const token = credential?.type === 'bearer'
     ? normalizeBearerToken(credential.token)
@@ -127,14 +197,22 @@ const mintRuntimeUrlAuthToken = (apiBaseUrl?: string | null): Promise<string> =>
   const refreshPromise = (async () => {
     const credential = await getRuntimeAuthCredential();
     const headers = new Headers();
+    for (const [key, value] of Object.entries(getRuntimeExtraHeadersSync())) {
+      headers.set(key, value);
+    }
     if (credential?.type === 'bearer') {
       headers.set('Authorization', `Bearer ${credential.token}`);
     }
-    const response = await fetch(buildAuthUrl(apiBaseUrl, '/auth/url-token'), {
-      method: 'POST',
-      headers,
-      credentials: 'include',
-    });
+    // In relay mode the mint must ride the tunnel, not the network: there is no
+    // reachable network base URL. Same auth headers, same route, tunneled.
+    const relay = getActiveRelayTunnel();
+    const response = relay
+      ? await relay.fetch('/auth/url-token', { method: 'POST', headers })
+      : await fetch(buildAuthUrl(apiBaseUrl, '/auth/url-token'), {
+          method: 'POST',
+          headers,
+          credentials: 'include',
+        });
     if (!response.ok) {
       if (generation === runtimeAuthGeneration) {
         clearRuntimeUrlAuthToken();
@@ -163,12 +241,49 @@ const mintRuntimeUrlAuthToken = (apiBaseUrl?: string | null): Promise<string> =>
   return runtimeUrlAuthRefreshPromise;
 };
 
+const mintLocalRuntimeUrlAuthToken = (localOrigin: string): Promise<string> => {
+  if (localRuntimeUrlAuthRefreshPromise) return localRuntimeUrlAuthRefreshPromise;
+  const refreshPromise = (async () => {
+    const response = await fetch(buildAuthUrl(localOrigin, '/auth/url-token'), {
+      method: 'POST',
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      localRuntimeUrlAuthToken = '';
+      localRuntimeUrlAuthTokenExpiresAt = 0;
+      throw new Error(`Failed to mint local runtime URL auth token (${response.status})`);
+    }
+    const payload = await response.json().catch(() => null) as { token?: unknown; expiresAt?: unknown } | null;
+    const token = typeof payload?.token === 'string' ? payload.token.trim() : '';
+    const expiresAt = typeof payload?.expiresAt === 'number' ? payload.expiresAt : 0;
+    if (!token || !Number.isFinite(expiresAt)) {
+      throw new Error('Local runtime URL auth token response was invalid');
+    }
+    localRuntimeUrlAuthToken = token;
+    localRuntimeUrlAuthTokenExpiresAt = expiresAt;
+    return token;
+  })();
+  const trackedPromise = refreshPromise.finally(() => {
+    if (localRuntimeUrlAuthRefreshPromise === trackedPromise) {
+      localRuntimeUrlAuthRefreshPromise = null;
+    }
+  });
+  localRuntimeUrlAuthRefreshPromise = trackedPromise;
+  return localRuntimeUrlAuthRefreshPromise;
+};
+
 // Returns a valid token without a network call, minting only when the current
 // token is missing or already inside the skew window.
 export const refreshRuntimeUrlAuthToken = async (apiBaseUrl?: string | null): Promise<string> => {
   const existing = readValidRuntimeUrlAuthTokenSync();
   if (existing) return existing;
   return mintRuntimeUrlAuthToken(apiBaseUrl);
+};
+
+export const refreshLocalRuntimeUrlAuthToken = async (localOrigin: string): Promise<string> => {
+  const existing = readValidLocalRuntimeUrlAuthTokenSync();
+  if (existing) return existing;
+  return mintLocalRuntimeUrlAuthToken(localOrigin);
 };
 
 // ── Proactive URL auth token refresh ──────────────────────────────────────
@@ -257,6 +372,9 @@ export const subscribeRuntimeUrlAuthToken = (listener: () => void): (() => void)
 
 export const buildRuntimeAuthHeaders = async (headers?: HeadersInit): Promise<Headers> => {
   const next = new Headers(headers);
+  for (const [key, value] of Object.entries(getRuntimeExtraHeadersSync())) {
+    if (!next.has(key)) next.set(key, value);
+  }
   if (next.has('Authorization')) {
     return next;
   }

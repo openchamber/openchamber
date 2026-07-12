@@ -14,6 +14,7 @@ import type { FileDiff, GlobalState, State } from "./types"
 import { dropSessionCaches } from "./session-cache"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { syncDebug } from "./debug"
+import { shouldSkipStaleSessionEvent } from "./session-event-freshness"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const DELTA_OVERLAP_FIELDS = ["text", "output"] as const
@@ -151,10 +152,23 @@ export type GlobalEventResult = {
   project: Project
 } | null
 
+export type SessionMaterializationReason =
+  | "missing-owning-message"
+  | "orphan-delta"
+  | "missing-delta-part"
+  | "empty-assistant-message"
+  | "child-session-idle"
+  | "child-session-discovered"
+  | "ensure-session-messages"
+  | "stream-reconnect"
+  | "transport-switch"
+  | "stale-status-resync"
+
 export type DirectoryEventResult = boolean | {
   changed: boolean
   materialization: {
     type: "incomplete-session-snapshot"
+    reason: SessionMaterializationReason
     sessionID?: string
     messageID: string
     partID?: string
@@ -213,6 +227,9 @@ export function applyDirectoryEvent(
       const info = stripSessionDiffSnapshots((event.properties as { info: Session }).info)
       const sessions = draft.session
       const result = Binary.search(sessions, info.id, (s) => s.id)
+      if (result.found && shouldSkipStaleSessionEvent(sessions[result.index], info)) {
+        return false
+      }
       if (result.found) {
         sessions[result.index] = info
       } else {
@@ -227,6 +244,13 @@ export function applyDirectoryEvent(
       const info = stripSessionDiffSnapshots((event.properties as { info: Session }).info)
       const sessions = draft.session
       const result = Binary.search(sessions, info.id, (s) => s.id)
+      // Keep the freshness check ahead of the archive branch: direct archive
+      // responses handle the store update on their own (optimistic removal +
+      // SDK response), so stale SSE echoes should not win just because they
+      // mark the session archived.
+      if (result.found && shouldSkipStaleSessionEvent(sessions[result.index], info)) {
+        return false
+      }
 
       if (info.time.archived) {
         if (result.found) sessions.splice(result.index, 1)
@@ -356,7 +380,7 @@ export function applyDirectoryEvent(
         return missingOwningMessage
           ? {
             changed: true,
-            materialization: { type: "incomplete-session-snapshot", sessionID, messageID, partID: part.id },
+            materialization: { type: "incomplete-session-snapshot", reason: "missing-owning-message", sessionID, messageID, partID: part.id },
           }
           : true
       }
@@ -390,7 +414,7 @@ export function applyDirectoryEvent(
       return missingOwningMessage
         ? {
           changed: true,
-          materialization: { type: "incomplete-session-snapshot", sessionID, messageID, partID: part.id },
+          materialization: { type: "incomplete-session-snapshot", reason: "missing-owning-message", sessionID, messageID, partID: part.id },
         }
         : true
     }
@@ -426,7 +450,7 @@ export function applyDirectoryEvent(
         syncDebug.reducer.partDeltaNoParts(props.messageID, props.partID)
         return {
           changed: false,
-          materialization: { type: "incomplete-session-snapshot", sessionID: props.sessionID, messageID: props.messageID, partID: props.partID },
+          materialization: { type: "incomplete-session-snapshot", reason: "orphan-delta", sessionID: props.sessionID, messageID: props.messageID, partID: props.partID },
         }
       }
       const result = Binary.search(parts, props.partID, (p) => p.id)
@@ -434,7 +458,7 @@ export function applyDirectoryEvent(
         syncDebug.reducer.partDeltaNotFound(props.messageID, props.partID)
         return {
           changed: false,
-          materialization: { type: "incomplete-session-snapshot", sessionID: props.sessionID, messageID: props.messageID, partID: props.partID },
+          materialization: { type: "incomplete-session-snapshot", reason: "missing-delta-part", sessionID: props.sessionID, messageID: props.messageID, partID: props.partID },
         }
       }
       const existing = parts[result.index] as Record<string, unknown>

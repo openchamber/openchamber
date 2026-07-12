@@ -1,0 +1,47 @@
+{
+  "name": "@openchamber/mobile",
+  "version": "1.13.2",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun run --cwd ../web build && node scripts/prepare-web-assets.mjs",
+    "sync": "node scripts/with-mobile-env.mjs \"bun run build && cap sync\"",
+    "add:ios": "cap add ios",
+    "add:android": "cap add android",
+    "build:android:debug": "node scripts/with-mobile-env.mjs \"bun run sync && ./android/gradlew -p android assembleDebug\"",
+    "android:devices": "node scripts/with-mobile-env.mjs \"node scripts/android-device.mjs devices\"",
+    "android:install": "node scripts/with-mobile-env.mjs \"node scripts/android-device.mjs install\"",
+    "android:launch": "node scripts/with-mobile-env.mjs \"node scripts/android-device.mjs launch\"",
+    "android:run": "node scripts/with-mobile-env.mjs \"node scripts/android-device.mjs run\"",
+    "android:logcat": "node scripts/with-mobile-env.mjs \"node scripts/android-device.mjs logcat\"",
+    "build:ios:simulator": "node scripts/with-mobile-env.mjs \"node scripts/ios-sim-build.mjs\"",
+    "sim:boot": "node scripts/with-mobile-env.mjs \"node scripts/ios-sim.mjs boot\"",
+    "sim:install": "node scripts/with-mobile-env.mjs \"node scripts/ios-sim.mjs install\"",
+    "sim:launch": "node scripts/with-mobile-env.mjs \"node scripts/ios-sim.mjs launch\"",
+    "sim:run": "node scripts/with-mobile-env.mjs \"node scripts/ios-sim.mjs run\"",
+    "sim:serve": "node scripts/with-mobile-env.mjs \"serve-sim --detach -q\"",
+    "sim:list": "node scripts/with-mobile-env.mjs \"serve-sim --list -q\"",
+    "sim:kill": "node scripts/with-mobile-env.mjs \"serve-sim --kill\"",
+    "open:ios": "cap open ios",
+    "open:android": "cap open android",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint \"./**/*.{ts,tsx,js,mjs}\" --config ../../eslint.config.js --ignore-pattern dist --ignore-pattern ios --ignore-pattern android"
+  },
+  "dependencies": {
+    "@aparajita/capacitor-secure-storage": "^8.0.0",
+    "@capacitor-mlkit/barcode-scanning": "^8.1.0",
+    "@capacitor/app": "^8.0.0",
+    "@capacitor/core": "^8.4.1",
+    "@capacitor/keyboard": "^8.0.0",
+    "@capacitor/push-notifications": "^8.1.1",
+    "@capacitor/status-bar": "^8.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^8.4.1",
+    "@capacitor/cli": "^8.4.1",
+    "@capacitor/ios": "^8.4.1",
+    "@types/node": "^24.3.1",
+    "serve-sim": "^0.1.34",
+    "typescript": "~5.9.0"
+  }
+}

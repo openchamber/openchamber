@@ -10,9 +10,86 @@ export const createNotificationTriggerRuntime = (deps) => {
     emitDesktopNotification,
     broadcastUiNotification,
     sendPushToAllUiSessions,
+    sendApnsToAllUiSessions,
+    isAnyInteractiveClientVisible,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
   } = deps;
+
+  // App-icon badge for native push: the set of DISTINCT collapse-ids (the push
+  // `tag`, e.g. `ready-<sessionId>` / `permission-<requestKey>`) we've sent since
+  // the app was last foregrounded. The badge is the absolute APNs `aps.badge`.
+  //
+  // We key by `tag`, not sessionId, because the tag IS the banner identity: iOS
+  // uses it as `apns-collapse-id`, so same-tag pushes REPLACE one banner while
+  // different tags are distinct banners. One session can raise several banners
+  // (ready + question + permission are different tags), so counting sessionIds
+  // both over- and under-counts the lock-screen stack; counting tags mirrors it.
+  //
+  // We deliberately do NOT derive this from the live attention snapshot
+  // (needsAttention/isViewed): that machinery is for in-app indicators on
+  // connected clients — a backgrounded client stays "viewing", and needsAttention
+  // is set by a separate session.status event that races the push trigger. The
+  // set is cleared when a UI client reports visible (`clearPendingPushBadge`),
+  // the same moment the device zeroes its icon badge on becomeActive.
+  const pendingPushTags = new Set();
+  const clearPendingPushBadge = () => {
+    pendingPushTags.clear();
+  };
+  const trackPushAndCountBadge = (tag) => {
+    if (typeof tag === 'string' && tag.length > 0) {
+      pendingPushTags.add(tag);
+    }
+    return pendingPushTags.size;
+  };
+
+  // Generic notification for native push (per the mobile design): a fixed, scenario-based
+  // title + the session name as the body. No model/project/message content crosses the relay.
+  const APNS_TITLE_BY_TYPE = {
+    ready: 'Agent response is ready',
+    error: 'Agent hit an error',
+    question: 'Agent needs your input',
+    permission: 'Agent needs permission',
+    goal_complete: 'Goal complete',
+    goal_blocked: 'Goal blocked',
+    goal_budget: 'Goal reached its token budget',
+  };
+
+  const toApnsGenericPayload = (payload) => {
+    const data = payload?.data && typeof payload.data === 'object' ? payload.data : {};
+    const sessionName = typeof data.sessionName === 'string' && data.sessionName.trim().length > 0
+      ? data.sessionName.trim()
+      : 'Session';
+    return {
+      title: APNS_TITLE_BY_TYPE[data.type] || 'Agent update',
+      body: sessionName,
+      badge: trackPushAndCountBadge(typeof payload?.tag === 'string' ? payload.tag : undefined),
+      tag: payload?.tag,
+      // sessionId is forwarded so a tapped push can deep-link; it is an opaque id, not content.
+      data: typeof data.sessionId === 'string' ? { sessionId: data.sessionId } : undefined,
+    };
+  };
+
+  // Fan a notification out to every delivery channel: browser web-push (full templated
+  // payload) and native iOS APNs (generic model-based text). Both share the dedup tag and
+  // `requireNoSse` focus gate; a failure in one channel must not block the other.
+  const fanoutPush = (payload, options) => {
+    // Presence-aware routing: if any interactive (non-mobile) client — desktop/web/vscode — is
+    // currently visible, it already shows the in-app notification, so skip the native push to the
+    // phone. Gated on the desktop's visibility (reliable), never the phone's own. When we skip we
+    // also skip toApnsGenericPayload, so the badge isn't incremented for an undelivered push.
+    const interactiveVisible = isAnyInteractiveClientVisible?.() === true;
+    return Promise.all([
+      Promise.resolve(sendPushToAllUiSessions?.(payload, options)).catch((error) => {
+        console.warn('[Push] web-push fanout failed:', error?.message ?? error);
+      }),
+      interactiveVisible
+        ? Promise.resolve()
+        : Promise.resolve(sendApnsToAllUiSessions?.(toApnsGenericPayload(payload), options)).catch((error) => {
+            console.warn('[APNs] fanout failed:', error?.message ?? error);
+          }),
+    ]);
+  };
 
   let getIsWindowFocused = typeof deps.getIsWindowFocused === 'function'
     ? deps.getIsWindowFocused
@@ -198,6 +275,28 @@ export const createNotificationTriggerRuntime = (deps) => {
       .join(' ');
   };
 
+  // A session with an ACTIVE goal suppresses per-turn ready notifications;
+  // the session-goal runtime sends its own notification when the goal
+  // settles. Fetch failures fall through to normal notification behavior.
+  const hasActiveSessionGoal = async (sessionId, directory) => {
+    if (!sessionId) return false;
+    try {
+      const base = buildOpenCodeUrl(`/session/${encodeURIComponent(sessionId)}`, '');
+      const url = directory ? `${base}?directory=${encodeURIComponent(directory)}` : base;
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+        signal: AbortSignal.timeout(2000),
+      });
+      if (!response.ok) return false;
+      const session = await response.json().catch(() => null);
+      const goal = session?.metadata?.openchamber?.goal;
+      return Boolean(goal && typeof goal === 'object' && goal.status === 'active');
+    } catch {
+      return false;
+    }
+  };
+
   const maybeSendPushForTrigger = async (payload) => {
     if (!payload || typeof payload !== 'object') {
       return;
@@ -227,6 +326,13 @@ export const createNotificationTriggerRuntime = (deps) => {
           return;
         }
 
+        // While a goal drives the session, per-turn "ready" notifications are
+        // noise produced by the goal loop itself — the goal's own settle
+        // notification (complete/blocked/budget) is the final word instead.
+        if (await hasActiveSessionGoal(sessionId, notificationDirectory)) {
+          return;
+        }
+
         if (settings.notificationMode !== 'always' && getIsWindowFocused?.()) {
           return;
         }
@@ -240,6 +346,7 @@ export const createNotificationTriggerRuntime = (deps) => {
 
         let title = `${formatMode(info?.mode)} agent is ready`;
         let body = `${formatModelId(info?.modelID)} completed the task`;
+        let sessionName = '';
 
         try {
           const templates = settings.notificationTemplates || {};
@@ -249,6 +356,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             : (templates.completion || { title: '{agent_name} is ready', message: '{model_name} completed the task' });
 
           const variables = await buildTemplateVariables(payload, sessionId);
+          sessionName = typeof variables.session_name === 'string' ? variables.session_name : sessionName;
 
           const messageId = info?.id;
           let lastMessage = extractLastMessageText(payload);
@@ -283,7 +391,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
         }
 
-        await sendPushToAllUiSessions(
+        await fanoutPush(
           {
             title,
             body,
@@ -291,6 +399,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             data: {
               url: buildSessionDeepLinkUrl(sessionId),
               sessionId,
+              sessionName,
               type: 'ready',
             },
           },
@@ -308,9 +417,11 @@ export const createNotificationTriggerRuntime = (deps) => {
 
         let title = 'Tool error';
         let body = 'An error occurred';
+        let sessionName = '';
 
         try {
           const variables = await buildTemplateVariables(payload, sessionId);
+          sessionName = typeof variables.session_name === 'string' ? variables.session_name : sessionName;
           const errorMessageId = info?.id;
           let lastMessage = extractLastMessageText(payload);
           if (!lastMessage) {
@@ -345,7 +456,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
         }
 
-        await sendPushToAllUiSessions(
+        await fanoutPush(
           {
             title,
             body,
@@ -353,6 +464,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             data: {
               url: buildSessionDeepLinkUrl(sessionId),
               sessionId,
+              sessionName,
               type: 'error',
             },
           },
@@ -391,9 +503,11 @@ export const createNotificationTriggerRuntime = (deps) => {
             ? 'Switch to build mode'
             : header || 'Input needed';
         let body = questionText || 'Agent is waiting for your response';
+        let sessionName = '';
 
         try {
           const variables = await buildTemplateVariables(payload, sessionId);
+          sessionName = typeof variables.session_name === 'string' ? variables.session_name : sessionName;
           variables.last_message = questionText || header || '';
 
           const templates = settings.notificationTemplates || {};
@@ -421,7 +535,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
         }
 
-        void sendPushToAllUiSessions(
+        void fanoutPush(
           {
             title,
             body,
@@ -429,6 +543,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             data: {
               url: buildSessionDeepLinkUrl(sessionId),
               sessionId,
+              sessionName,
               type: 'question',
             },
           },
@@ -505,9 +620,11 @@ export const createNotificationTriggerRuntime = (deps) => {
 
         let title = 'Permission required';
         let body = fallbackMessage;
+        let sessionName = '';
 
         try {
           const variables = await buildTemplateVariables(payload, sessionId);
+          sessionName = typeof variables.session_name === 'string' ? variables.session_name : sessionName;
           variables.last_message = fallbackMessage;
 
           const templates = settings.notificationTemplates || {};
@@ -539,7 +656,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           notifiedPermissionRequests.add(requestKey);
         }
 
-        void sendPushToAllUiSessions(
+        void fanoutPush(
           {
             title,
             body,
@@ -547,6 +664,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             data: {
               url: buildSessionDeepLinkUrl(sessionId),
               sessionId,
+              sessionName,
               type: 'permission',
             },
           },
@@ -558,9 +676,48 @@ export const createNotificationTriggerRuntime = (deps) => {
     }
   };
 
+  // Goal settle push: same fanout as the trigger paths (web-push with the
+  // full text; APNs with the generic per-type title and the session name as
+  // body, so the relay never sees content).
+  const sendGoalSettlePush = async ({ sessionId, directory, status, title, body }) => {
+    let sessionName = '';
+    try {
+      const base = buildOpenCodeUrl(`/session/${encodeURIComponent(sessionId)}`, '');
+      const url = directory ? `${base}?directory=${encodeURIComponent(directory)}` : base;
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+        signal: AbortSignal.timeout(2000),
+      });
+      if (response.ok) {
+        const session = await response.json().catch(() => null);
+        if (typeof session?.title === 'string') sessionName = session.title.trim();
+      }
+    } catch {
+      // Session name is presentation sugar for the mobile push — never block on it.
+    }
+    const type = status === 'complete' ? 'goal_complete' : (status === 'budgetLimited' ? 'goal_budget' : 'goal_blocked');
+    await fanoutPush(
+      {
+        title,
+        body,
+        tag: `goal-${sessionId}`,
+        data: {
+          url: buildSessionDeepLinkUrl(sessionId),
+          sessionId,
+          sessionName,
+          type,
+        },
+      },
+      { requireNoSse: true },
+    );
+  };
+
   return {
     maybeSendPushForTrigger,
     setAutoAcceptSession,
     setGetIsWindowFocused,
+    clearPendingPushBadge,
+    sendGoalSettlePush,
   };
 };

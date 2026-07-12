@@ -1,7 +1,8 @@
 import React from 'react';
-import { isDesktopShell } from '@/lib/desktop';
+import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
+import { isCapacitorApp } from '@/lib/platform';
 
-export type DeviceType = 'desktop' | 'mobile' | 'tablet';
+type DeviceType = 'desktop' | 'mobile' | 'tablet';
 
 export interface DeviceInfo {
   isMobile: boolean;
@@ -14,13 +15,7 @@ export interface DeviceInfo {
   hasTouchOnlyPointer: boolean;
 }
 
-export const CSS_DEVICE_VARIABLES = {
-  IS_MOBILE: 'var(--is-mobile)',
-  DEVICE_TYPE: 'var(--device-type)',
-  HAS_TOUCH_INPUT: 'var(--has-touch-input)',
-} as const;
-
-export const BREAKPOINTS = {
+const BREAKPOINTS = {
   xs: 0,
   sm: 640,
   md: 768,
@@ -38,6 +33,11 @@ const DEFAULT_DEVICE_INFO: DeviceInfo = {
   breakpoint: 'lg',
   hasTouchInput: false,
   hasTouchOnlyPointer: false,
+};
+
+const hasDesktopSurfaceOverride = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  return new URLSearchParams(window.location.search).get('surface') === 'desktop';
 };
 
 const getNavigatorDeviceHints = (maxTouchPoints: number) => {
@@ -108,7 +108,8 @@ export function getDeviceInfo(): DeviceInfo {
   const prefersCoarsePointer = pointerQuery?.matches ?? false;
   const noHover = hoverQuery?.matches ?? false;
   const maxTouchPoints = typeof navigator !== 'undefined' ? navigator.maxTouchPoints ?? 0 : 0;
-  const isDesktopShellRuntime = isDesktopShell();
+  // Desktop panels are desktop surfaces even when their viewport is narrow.
+  const isDesktopShellRuntime = isDesktopShell() || isVSCodeRuntime() || hasDesktopSurfaceOverride();
   const { isExplicitTablet } = getNavigatorDeviceHints(maxTouchPoints);
 
   const hasTouchInput = prefersCoarsePointer || noHover || maxTouchPoints > 0;
@@ -127,6 +128,15 @@ export function getDeviceInfo(): DeviceInfo {
     isTablet = false;
     isDesktop = true;
     deviceType = 'desktop';
+  } else if (isCapacitorApp()) {
+    // The Capacitor shell IS the phone UI: every surface in that bundle is
+    // built mobile-first, so wide devices (iPad, Android tablets) must not
+    // fall into tablet/desktop branches scattered across shared components.
+    // iPad-specific layout upgrades gate on isIPadApp()/orientation instead.
+    isMobile = true;
+    isTablet = false;
+    isDesktop = false;
+    deviceType = 'mobile';
   } else if (isMobile) {
     deviceType = 'mobile';
   } else if (isTablet) {
@@ -290,7 +300,7 @@ export function isMobileDeviceViaCSS(): boolean {
   return isMobileValue === '1' || isMobileValue === 'true';
 }
 
-export const isStandalonePwaRuntime = (): boolean => {
+const isStandalonePwaRuntime = (): boolean => {
   if (typeof window === 'undefined') return false;
 
   const standaloneNavigator = navigator as Navigator & { standalone?: boolean };
@@ -301,7 +311,7 @@ export const isStandalonePwaRuntime = (): boolean => {
   );
 };
 
-export const isTabletStandalonePwaRuntime = (): boolean => {
+const isTabletStandalonePwaRuntime = (): boolean => {
   if (typeof window === 'undefined' || isDesktopShell()) return false;
 
   const maxTouchPoints = typeof navigator !== 'undefined' ? navigator.maxTouchPoints ?? 0 : 0;
@@ -351,6 +361,27 @@ export function useTabletStandalonePwaRuntime(): boolean {
   }, []);
 
   return value;
+}
+
+export type Orientation = 'portrait' | 'landscape';
+
+const getOrientation = (): Orientation => {
+  if (typeof window === 'undefined') return 'portrait';
+  return window.matchMedia?.('(orientation: landscape)')?.matches ? 'landscape' : 'portrait';
+};
+
+export function useOrientation(): Orientation {
+  const [orientation, setOrientation] = React.useState<Orientation>(getOrientation);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const query = window.matchMedia('(orientation: landscape)');
+    const update = () => setOrientation(query.matches ? 'landscape' : 'portrait');
+    update();
+    return attachMediaQueryListener(query, update);
+  }, []);
+
+  return orientation;
 }
 
 export function useDeviceInfo(): DeviceInfo {

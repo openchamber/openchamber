@@ -5,9 +5,10 @@ import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 
-export type AssistantNotificationPayload = {
-  title?: string;
-  body?: string;
+type ManagedRemoteTunnelPreset = {
+  id: string;
+  name: string;
+  hostname: string;
 };
 
 export type UpdateInfo = {
@@ -16,6 +17,8 @@ export type UpdateInfo = {
   currentVersion: string;
   body?: string;
   date?: string;
+  releaseUrl?: string;
+  downloadUrl?: string;
   nextSuggestedCheckInSec?: number;
   // Web-specific fields
   packageManager?: string;
@@ -35,12 +38,6 @@ export type SkillCatalogConfig = {
   gitIdentityId?: string;
 };
 
-export type ManagedRemoteTunnelPreset = {
-  id: string;
-  name: string;
-  hostname: string;
-};
-
 export type DesktopSettings = {
   themeId?: string;
   useSystemTheme?: boolean;
@@ -56,6 +53,8 @@ export type DesktopSettings = {
   // Optional absolute path to `opencode` binary.
   opencodeBinary?: string;
   desktopLanAccessEnabled?: boolean;
+  desktopKeepAwakeEnabled?: boolean;
+  desktopMinimizeToTrayEnabled?: boolean;
   desktopUiPassword?: string;
   projects?: ProjectEntry[];
   activeProjectId?: string;
@@ -117,9 +116,17 @@ export type DesktopSettings = {
   defaultModel?: string; // format: "provider/model"
   defaultVariant?: string;
   defaultAgent?: string;
+  smallModelUseDefault?: boolean;
+  sessionRecapEnabled?: boolean;
+  sessionSuggestionEnabled?: boolean;
+  sessionGoalEnabled?: boolean;
+  sessionGoalDefaultBudgetEnabled?: boolean;
+  sessionGoalDefaultBudget?: number;
+  smallModelOverride?: string; // format: "provider/model"
   defaultGitIdentityId?: string; // ''/undefined = unset, 'global' or profile id
   openInAppId?: string;
   autoCreateWorktree?: boolean;
+  followUpBehavior?: 'steer' | 'queue';
   queueModeEnabled?: boolean;
   gitmojiEnabled?: boolean;
   defaultFileViewerPreview?: boolean;
@@ -133,6 +140,7 @@ export type DesktopSettings = {
   showOpenCodeUpdateNotifications?: boolean;
   openCodeUpdateToastDismissedVersion?: string;
   showToolFileIcons?: boolean;
+  codeBlockLineWrap?: boolean;
   showTurnChangedFiles?: boolean;
   showExpandedBashTools?: boolean;
   showExpandedEditTools?: boolean;
@@ -150,6 +158,7 @@ export type DesktopSettings = {
   showSplitAssistantMessageActions?: boolean;
   fontSize?: number;
   terminalFontSize?: number;
+  editorFontSize?: number;
   uiFont?: string;
   monoFont?: string;
   padding?: number;
@@ -158,7 +167,11 @@ export type DesktopSettings = {
   shortcutOverrides?: Record<string, string>;
 
   favoriteModels?: Array<{ providerID: string; modelID: string }>;
+  hiddenModels?: Array<{ providerID: string; modelID: string }>;
+  collapsedModelProviders?: string[];
   recentModels?: Array<{ providerID: string; modelID: string }>;
+  recentAgents?: string[];
+  recentEfforts?: Record<string, string[]>;
   diffLayoutPreference?: 'dynamic' | 'inline' | 'side-by-side';
   gitChangesViewMode?: 'flat' | 'tree';
   directoryShowHidden?: boolean;
@@ -177,14 +190,12 @@ export type DesktopSettings = {
   responseStyleEnabled?: boolean;
   responseStylePreset?: 'concise' | 'detailed' | 'mentor' | 'pushback' | 'noFiller' | 'matchEnergy' | 'warmPeer' | 'custom';
   responseStyleCustomInstructions?: string;
-  sttProvider?: 'browser' | 'server' | 'wasm';
+  dictationEnabled?: boolean;
+  sttProvider?: 'local' | 'openai-compatible';
   sttServerUrl?: string;
   sttModel?: string;
-  wasmSttModel?: string;
+  sttLocalModel?: string;
   sttLanguage?: string;
-  sttSilenceThresholdDb?: number;
-  sttSilenceHoldMs?: number;
-  sttTranscribeOnStop?: boolean;
   // Global draft welcome starters (pinned commands/skills), persisted to settings.json
   draftStarters?: DraftStarterRef[];
 };
@@ -235,6 +246,17 @@ type LaunchAtLoginStatus = {
   enabled: boolean;
 };
 
+type KeepAwakeStatus = {
+  supported: boolean;
+  enabled: boolean;
+  active: boolean;
+};
+
+type MinimizeToTrayStatus = {
+  supported: boolean;
+  enabled: boolean;
+};
+
 export const getDesktopLaunchAtLogin = async (): Promise<LaunchAtLoginStatus | null> => {
   if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
     return null;
@@ -265,6 +287,74 @@ export const setDesktopLaunchAtLogin = async (enabled: boolean): Promise<LaunchA
     return result;
   } catch (error) {
     console.warn('Failed to set launch at login status', error);
+    return null;
+  }
+};
+
+export const getDesktopMinimizeToTray = async (): Promise<MinimizeToTrayStatus | null> => {
+  if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
+    return null;
+  }
+
+  try {
+    const result = await invokeDesktop<MinimizeToTrayStatus>('desktop_get_minimize_to_tray');
+    if (!result || typeof result.supported !== 'boolean' || typeof result.enabled !== 'boolean') {
+      return null;
+    }
+    return result;
+  } catch (error) {
+    console.warn('Failed to get minimize to tray status', error);
+    return null;
+  }
+};
+
+export const setDesktopMinimizeToTray = async (enabled: boolean): Promise<MinimizeToTrayStatus | null> => {
+  if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
+    return null;
+  }
+
+  try {
+    const result = await invokeDesktop<MinimizeToTrayStatus>('desktop_set_minimize_to_tray', { enabled });
+    if (!result || typeof result.supported !== 'boolean' || typeof result.enabled !== 'boolean') {
+      return null;
+    }
+    return result;
+  } catch (error) {
+    console.warn('Failed to set minimize to tray status', error);
+    return null;
+  }
+};
+
+export const getDesktopKeepAwake = async (): Promise<KeepAwakeStatus | null> => {
+  if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
+    return null;
+  }
+
+  try {
+    const result = await invokeDesktop<KeepAwakeStatus>('desktop_get_keep_awake');
+    if (!result || typeof result.supported !== 'boolean' || typeof result.enabled !== 'boolean' || typeof result.active !== 'boolean') {
+      return null;
+    }
+    return result;
+  } catch (error) {
+    console.warn('Failed to get keep awake status', error);
+    return null;
+  }
+};
+
+export const setDesktopKeepAwake = async (enabled: boolean): Promise<KeepAwakeStatus | null> => {
+  if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
+    return null;
+  }
+
+  try {
+    const result = await invokeDesktop<KeepAwakeStatus>('desktop_set_keep_awake', { enabled });
+    if (!result || typeof result.supported !== 'boolean' || typeof result.enabled !== 'boolean' || typeof result.active !== 'boolean') {
+      return null;
+    }
+    return result;
+  } catch (error) {
+    console.warn('Failed to set keep awake status', error);
     return null;
   }
 };
@@ -522,28 +612,6 @@ export const stopAccessingDirectory = async (
   return { success: true };
 };
 
-export const sendAssistantCompletionNotification = async (
-  payload?: AssistantNotificationPayload
-): Promise<boolean> => {
-  if (hasDesktopInvoke()) {
-    try {
-      await invokeDesktop('desktop_notify', {
-        payload: {
-          title: payload?.title,
-          body: payload?.body,
-          tag: 'openchamber-agent-complete',
-        },
-      });
-      return true;
-    } catch (error) {
-      console.warn('Failed to send assistant completion notification', error);
-      return false;
-    }
-  }
-
-  return false;
-};
-
 export const checkForDesktopUpdates = async (): Promise<UpdateInfo | null> => {
   if (!hasDesktopInvoke()) {
     return null;
@@ -783,58 +851,6 @@ export const openDesktopFileInApp = async (
   }
 };
 
-export const filterInstalledDesktopApps = async (apps: string[]): Promise<string[]> => {
-  if (!hasDesktopInvoke() || !isDesktopLocalOriginActive()) {
-    return [];
-  }
-
-  const candidate = Array.isArray(apps) ? apps.filter((value) => typeof value === 'string') : [];
-  if (candidate.length === 0) {
-    return [];
-  }
-
-  try {
-    const result = await invokeDesktop<string[]>('desktop_filter_installed_apps', {
-      apps: candidate,
-    });
-    return Array.isArray(result) ? result.filter((value) => typeof value === 'string') : [];
-  } catch (error) {
-    console.warn('Failed to check installed apps', error);
-    return [];
-  }
-};
-
-export const fetchDesktopAppIcons = async (apps: string[]): Promise<Record<string, string>> => {
-  if (!hasDesktopInvoke() || !isDesktopLocalOriginActive()) {
-    return {};
-  }
-
-  const candidate = Array.isArray(apps) ? apps.filter((value) => typeof value === 'string') : [];
-  if (candidate.length === 0) {
-    return {};
-  }
-
-  try {
-    const result = await invokeDesktop<unknown[]>('desktop_fetch_app_icons', {
-      apps: candidate,
-    });
-    if (!Array.isArray(result)) {
-      return {};
-    }
-    const map: Record<string, string> = {};
-    for (const entry of result) {
-      if (!entry || typeof entry !== 'object') continue;
-      const candidateEntry = entry as { app?: unknown; data_url?: unknown };
-      if (typeof candidateEntry.app !== 'string' || typeof candidateEntry.data_url !== 'string') continue;
-      map[candidateEntry.app] = candidateEntry.data_url;
-    }
-    return map;
-  } catch (error) {
-    console.warn('Failed to fetch installed app icons', error);
-    return {};
-  }
-};
-
 export type InstalledDesktopAppInfo = {
   name: string;
   iconDataUrl?: string | null;
@@ -891,19 +907,5 @@ export const fetchDesktopInstalledApps = async (
   } catch (error) {
     console.warn('Failed to fetch installed apps', error);
     return { apps: [], success: false, hasCache: false, isCacheStale: false };
-  }
-};
-
-export const clearDesktopCache = async (): Promise<boolean> => {
-  if (!hasDesktopInvoke() || !isDesktopLocalOriginActive()) {
-    return false;
-  }
-
-  try {
-    await invokeDesktop('desktop_clear_cache');
-    return true;
-  } catch (error) {
-    console.warn('Failed to clear cache', error);
-    return false;
   }
 };

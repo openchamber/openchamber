@@ -12,6 +12,7 @@ const PACKAGE_NAME = '@openchamber/web';
 const PACKAGE_PATH_SEGMENTS = PACKAGE_NAME.split('/');
 const NPM_REGISTRY_URL = `https://registry.npmjs.org/${PACKAGE_NAME}`;
 const CHANGELOG_URL = 'https://raw.githubusercontent.com/btriapitsyn/openchamber/main/CHANGELOG.md';
+const GITHUB_RELEASES_URL = 'https://github.com/openchamber/openchamber/releases';
 let cachedDetectedPm = null;
 
 function getSpawnSyncBaseOptions() {
@@ -29,7 +30,7 @@ function getOpenChamberConfigDir() {
 }
 
 function sanitizeInstallScope(scope) {
-  if (scope === 'desktop-electron' || scope === 'vscode' || scope === 'web') return scope;
+  if (scope === 'desktop-electron' || scope === 'vscode' || scope === 'web' || scope === 'mobile-capacitor') return scope;
   return 'web';
 }
 
@@ -65,7 +66,7 @@ function mapArch(value) {
 }
 
 function normalizeAppType(value) {
-  if (value === 'web' || value === 'desktop-electron' || value === 'vscode') return value;
+  if (value === 'web' || value === 'desktop-electron' || value === 'vscode' || value === 'mobile-capacitor') return value;
   return 'web';
 }
 
@@ -75,7 +76,7 @@ function normalizeDeviceClass(value) {
 }
 
 function normalizePlatform(value) {
-  if (value === 'macos' || value === 'windows' || value === 'linux' || value === 'web') return value;
+  if (value === 'macos' || value === 'windows' || value === 'linux' || value === 'web' || value === 'android' || value === 'ios') return value;
   return mapPlatform(process.platform);
 }
 
@@ -89,8 +90,9 @@ async function checkForUpdatesFromApi(currentVersion, options = {}) {
     const appType = normalizeAppType(options.appType);
     const hostPlatform = mapPlatform(process.platform);
     const hostArch = mapArch(process.arch);
-    const platform = appType === 'vscode' ? normalizePlatform(options.platform) : hostPlatform;
-    const arch = appType === 'vscode' ? normalizeArch(options.arch) : hostArch;
+    const shouldTrustClientPlatform = appType === 'vscode' || appType === 'mobile-capacitor';
+    const platform = shouldTrustClientPlatform ? normalizePlatform(options.platform) : hostPlatform;
+    const arch = shouldTrustClientPlatform ? normalizeArch(options.arch) : hostArch;
     const payload = {
       appType,
       deviceClass: normalizeDeviceClass(options.deviceClass),
@@ -120,11 +122,19 @@ async function checkForUpdatesFromApi(currentVersion, options = {}) {
     const versionComparison = compareVersions(data.latestVersion, currentVersion);
     if (versionComparison < 0) return null;
 
+    const releaseUrl = `${GITHUB_RELEASES_URL}/tag/v${data.latestVersion}`;
+    const downloadUrl = typeof data.downloadUrl === 'string'
+      ? data.downloadUrl
+      : typeof data.download?.url === 'string'
+        ? data.download.url
+        : undefined;
     return {
       available: Boolean(data.updateAvailable) && versionComparison > 0,
       version: data.latestVersion,
       currentVersion,
       body: typeof data.releaseNotes === 'string' ? data.releaseNotes : undefined,
+      releaseUrl: typeof data.releaseNotesUrl === 'string' ? data.releaseNotesUrl : releaseUrl,
+      downloadUrl: appType === 'mobile-capacitor' ? (downloadUrl || releaseUrl) : undefined,
       nextSuggestedCheckInSec:
         typeof data.nextSuggestedCheckInSec === 'number' && Number.isFinite(data.nextSuggestedCheckInSec)
           ? data.nextSuggestedCheckInSec
@@ -634,7 +644,7 @@ export function getCurrentVersion() {
 /**
  * Fetch latest version from npm registry
  */
-export async function getLatestVersion() {
+async function getLatestVersion() {
   try {
     const response = await fetch(NPM_REGISTRY_URL, {
       headers: { Accept: 'application/json' },
@@ -690,7 +700,7 @@ function compareVersions(left, right) {
 /**
  * Fetch changelog notes between versions
  */
-export async function fetchChangelogNotes(fromVersion, toVersion) {
+async function fetchChangelogNotes(fromVersion, toVersion) {
   try {
     const response = await fetch(CHANGELOG_URL, {
       signal: AbortSignal.timeout(10000),
@@ -721,6 +731,7 @@ export async function checkForUpdates(options = {}) {
   const currentVersion = options.currentVersion || getCurrentVersion();
   const pm = detectPackageManager();
   const appType = normalizeAppType(options.appType);
+  const platform = normalizePlatform(options.platform);
 
   if (currentVersion !== 'unknown') {
     const remote = await checkForUpdatesFromApi(currentVersion, options);
@@ -760,6 +771,8 @@ export async function checkForUpdates(options = {}) {
     version: latestVersion,
     currentVersion,
     body: changelog,
+    releaseUrl: `${GITHUB_RELEASES_URL}/tag/v${latestVersion}`,
+    downloadUrl: appType === 'mobile-capacitor' && platform === 'android' ? `${GITHUB_RELEASES_URL}/tag/v${latestVersion}` : undefined,
     packageManager: pm,
     // Show our CLI command, not raw package manager command
     updateCommand: 'openchamber update',

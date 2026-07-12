@@ -19,6 +19,7 @@ import { QUOTA_PROVIDERS, formatWindowLabel, formatQuotaValueLabel } from '@/lib
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGitStore } from '@/stores/useGitStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { resolveProjectForSessionDirectory, normalizeProjectPath } from '@/lib/projectResolution';
 import type { ProjectEntry } from '@/lib/api/types';
 import type { WorktreeMetadata } from '@/types/worktree';
@@ -26,12 +27,12 @@ import { toast } from '@/components/ui';
 import type { PermissionRequest } from '@/types/permission';
 import type { QuestionRequest } from '@/types/question';
 
-// macOS menu bar bridge. The Electron main process owns the Tray UI; this hook
+// Native tray/menu bar bridge. The Electron main process owns the Tray UI; this hook
 // streams a compact snapshot of live session/approval state to it via the
 // `desktop_tray_update` IPC command, and routes tray clicks back into the app.
 //
-// Only meaningful on the macOS desktop shell — main.mjs no-ops the command on
-// other platforms, but we still gate here to avoid pointless work.
+// Only meaningful on desktop platforms with a native tray/menu bar — main.mjs
+// no-ops the command elsewhere, but we still gate here to avoid pointless work.
 
 const TRAY_ACTION_EVENT = 'openchamber:tray-action';
 // Event-driven updates do the real work; this is just a slow safety net.
@@ -80,6 +81,9 @@ type TraySnapshot = {
   // dropdown (same "configured to show" rule as the header/mobile). Empty
   // groups → the tray omits the Usage submenu entirely.
   usage: TrayUsage;
+  // Number of chats (root sessions) with unseen activity, for the macOS dock
+  // badge. 0 when the user disabled the badge — the main process clears it.
+  dockBadgeCount: number;
 };
 
 // focus-session / new-session are routed natively by the main process through
@@ -95,9 +99,10 @@ type DesktopBridgeGlobal = {
   ) => Promise<() => void>;
 };
 
-const isMac = (): boolean => {
+const isTrayPlatform = (): boolean => {
   if (typeof window === 'undefined') return false;
-  return (window as unknown as { __OPENCHAMBER_PLATFORM__?: string }).__OPENCHAMBER_PLATFORM__ === 'darwin';
+  const platform = (window as unknown as { __OPENCHAMBER_PLATFORM__?: string }).__OPENCHAMBER_PLATFORM__;
+  return platform === 'darwin' || platform === 'win32';
 };
 
 const permissionLabel = (request: PermissionRequest): string => {
@@ -389,12 +394,31 @@ const buildSnapshot = (instanceName: string): TraySnapshot => {
 
   const approvals = live.approvals.map((a) => ({ ...a, sessionTitle: titleById.get(a.sessionId) || '' }));
 
-  return { sessions, approvals, instanceName, usage: buildUsage() };
+  // Dock badge: count chats (root sessions) with unseen activity over the FULL
+  // cross-project list — not the MAX_SESSIONS-capped `sessions` above — so the
+  // number is accurate even with many projects. A subtask's unseen rolls up to
+  // its root only when the user opted into subtask notifications, matching the
+  // sidebar's needs-attention rule.
+  const ui = useUIStore.getState();
+  let dockBadgeCount = 0;
+  if (ui.dockBadgeEnabled) {
+    for (const session of allSessions) {
+      if (!session?.id || session.parentID) continue; // roots only
+      let familyUnseen = notif.unseenCount[session.id] ?? 0;
+      if (familyUnseen === 0 && ui.notifyOnSubtasks) {
+        familyUnseen = collectDescendants(session.id)
+          .reduce((sum, id) => sum + (notif.unseenCount[id] ?? 0), 0);
+      }
+      if (familyUnseen > 0) dockBadgeCount += 1;
+    }
+  }
+
+  return { sessions, approvals, instanceName, usage: buildUsage(), dockBadgeCount };
 };
 
 export const useTraySync = (): void => {
   React.useEffect(() => {
-    if (!isMac() || !canUseElectronDesktopIPC()) return;
+    if (!isTrayPlatform() || !canUseElectronDesktopIPC()) return;
 
     let disposed = false;
     let lastSerialized = '';
@@ -491,6 +515,9 @@ export const useTraySync = (): void => {
     const unsubscribeProjects = useProjectsStore.subscribe(() => scheduleFlush());
     const unsubscribeWorktrees = useSessionUIStore.subscribe(() => scheduleFlush());
     const unsubscribeGit = useGitStore.subscribe(() => scheduleFlush());
+    // The dock-badge toggle and subtask-notification preference live here; a
+    // change must re-push the snapshot so the badge appears/clears immediately.
+    const unsubscribeUI = useUIStore.subscribe(() => scheduleFlush());
     // Cross-project status map: fed live by the sync dispatcher from the global
     // event stream, and seeded/reconciled by the poll below.
     const unsubscribeGlobalStatus = useGlobalSessionStatusStore.subscribe(() => scheduleFlush());
@@ -541,6 +568,7 @@ export const useTraySync = (): void => {
       unsubscribeProjects();
       unsubscribeWorktrees();
       unsubscribeGit();
+      unsubscribeUI();
       unsubscribeGlobalStatus();
       unsubscribeQuota();
       unsubscribeRegistry?.();
@@ -550,7 +578,7 @@ export const useTraySync = (): void => {
   }, []);
 
   React.useEffect(() => {
-    if (!isMac() || typeof window === 'undefined') return;
+    if (!isTrayPlatform() || typeof window === 'undefined') return;
     const bridge = (window as unknown as { __OPENCHAMBER_DESKTOP__?: DesktopBridgeGlobal }).__OPENCHAMBER_DESKTOP__;
     const listen = bridge?.listen;
     if (typeof listen !== 'function') return;

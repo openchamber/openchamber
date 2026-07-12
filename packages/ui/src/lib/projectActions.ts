@@ -1,8 +1,4 @@
 import type {
-  OpenChamberProjectAction,
-  OpenChamberProjectActionPlatform,
-} from '@/lib/openchamberConfig';
-import type {
   DesktopSshInstance,
   DesktopSshPortForward,
 } from '@/lib/desktopSsh';
@@ -68,30 +64,6 @@ export const normalizeProjectActionDirectory = (value: string): string => {
     return '/';
   }
   return trimmed.length > 1 ? trimmed.replace(/\/+$/, '') : trimmed;
-};
-
-export const getCurrentProjectActionPlatform = (): OpenChamberProjectActionPlatform => {
-  if (typeof navigator === 'undefined') {
-    return 'macos';
-  }
-  const ua = (navigator.userAgent || '').toLowerCase();
-  if (ua.includes('windows')) {
-    return 'windows';
-  }
-  if (ua.includes('linux')) {
-    return 'linux';
-  }
-  return 'macos';
-};
-
-export const isProjectActionEnabledOnPlatform = (
-  action: OpenChamberProjectAction,
-  platform: OpenChamberProjectActionPlatform
-): boolean => {
-  if (!Array.isArray(action.platforms) || action.platforms.length === 0) {
-    return true;
-  }
-  return action.platforms.includes(platform);
 };
 
 export const toProjectActionRunKey = (directory: string, actionId: string): string => {

@@ -64,13 +64,13 @@ export interface MagicPromptOverridesPayload {
 
 const API_ENDPOINT = '/api/magic-prompts';
 
-export const MAGIC_PROMPT_DEFINITIONS: readonly MagicPromptDefinition[] = [
+const MAGIC_PROMPT_DEFINITIONS: readonly MagicPromptDefinition[] = [
   {
     id: 'git.commit.generate.visible',
     title: 'Commit Generation Visible Prompt',
     group: 'Git',
     description: 'Visible user message for commit message generation.',
-    template: 'You are generating a Conventional Commits subject line using session context and selected file paths.',
+    template: 'You are generating a Conventional Commits subject line from the diffs of the selected files.',
   },
   {
     id: 'git.commit.generate.instructions',
@@ -951,11 +951,6 @@ export const fetchMagicPromptOverrides = async (): Promise<Record<string, string
   return inFlightOverridesRequest;
 };
 
-export const invalidateMagicPromptOverridesCache = () => {
-  cachedOverrides = null;
-  inFlightOverridesRequest = null;
-};
-
 export const getMagicPromptDefinition = (id: MagicPromptId): MagicPromptDefinition => {
   const definition = MAGIC_PROMPT_DEFINITION_BY_ID.get(id);
   if (!definition) {
@@ -968,7 +963,7 @@ export const getDefaultMagicPromptTemplate = (id: MagicPromptId): string => {
   return getMagicPromptDefinition(id).template;
 };
 
-export const getEffectiveMagicPromptTemplate = async (id: MagicPromptId): Promise<string> => {
+const getEffectiveMagicPromptTemplate = async (id: MagicPromptId): Promise<string> => {
   const overrides = await fetchMagicPromptOverrides().catch((): Record<string, string> => ({}));
   const override = overrides[id];
   if (typeof override === 'string') {

@@ -14,6 +14,7 @@ import MessageList, { type MessageListHandle } from './MessageList';
 import { PermissionCard } from './PermissionCard';
 import { QuestionCard } from './QuestionCard';
 import { StatusRowContainer } from './StatusRowContainer';
+import { SessionRecapNote } from '@/components/chat/SessionRecapSpacer';
 import ScrollToBottomButton from './components/ScrollToBottomButton';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { useChatAutoFollow, type AnimationHandlers, type ContentChangeReason } from '@/hooks/useChatAutoFollow';
@@ -46,6 +47,7 @@ import { getSessionPrefetch, subscribeSessionPrefetch } from '@/sync/session-pre
 import { getSessionMaterializationStatus } from '@/sync/materialization';
 import { usePlanDetection } from '@/hooks/usePlanDetection';
 import { useI18n } from '@/lib/i18n';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { isVSCodeRuntime } from '@/lib/desktop';
 
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
@@ -157,6 +159,8 @@ type ChatViewportProps = {
     sessionQuestions: QuestionRequest[];
     sessionPermissions: PermissionRequest[];
     isProgrammaticFollowActive: boolean;
+    showLoadOlderButton: boolean;
+    onLoadOlder: () => void;
 };
 
 const ChatViewport = React.memo(({
@@ -181,7 +185,10 @@ const ChatViewport = React.memo(({
     sessionQuestions,
     sessionPermissions,
     isProgrammaticFollowActive,
+    showLoadOlderButton,
+    onLoadOlder,
 }: ChatViewportProps) => {
+    const { t } = useI18n();
     const focusScrollContainer = React.useCallback((event: React.MouseEvent<HTMLElement>) => {
         if (event.defaultPrevented || shouldIgnoreChatNavigationTarget(event.target)) {
             return;
@@ -218,6 +225,21 @@ const ChatViewport = React.memo(({
                     data-scrollbar="chat"
                 >
                     <div className="relative z-0 min-h-full">
+                        {showLoadOlderButton && (
+                            <div className="flex justify-center pt-3 pb-1">
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={onLoadOlder}
+                                    disabled={isLoadingOlder}
+                                >
+                                    {isLoadingOlder && (
+                                        <Icon name="loader-4" className="size-4 animate-spin" />
+                                    )}
+                                    {t('chat.history.loadOlder')}
+                                </Button>
+                            </div>
+                        )}
                         <MessageList
                             ref={messageListRef}
                             sessionKey={currentSessionId}
@@ -244,6 +266,8 @@ const ChatViewport = React.memo(({
                                 ))}
                             </div>
                         )}
+
+                        <SessionRecapNote sessionId={currentSessionId} directory={directory} isMobile={isMobile} />
 
                         <div className="mb-3">
                             <StatusRowContainer />
@@ -277,7 +301,9 @@ const ChatViewport = React.memo(({
         && prev.scrollToBottom === next.scrollToBottom
         && prev.sessionQuestions === next.sessionQuestions
         && prev.sessionPermissions === next.sessionPermissions
-        && prev.isProgrammaticFollowActive === next.isProgrammaticFollowActive;
+        && prev.isProgrammaticFollowActive === next.isProgrammaticFollowActive
+        && prev.showLoadOlderButton === next.showLoadOlderButton
+        && prev.onLoadOlder === next.onLoadOlder;
 });
 
 ChatViewport.displayName = 'ChatViewport';
@@ -499,10 +525,17 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     // History metadata — use sync's hasMore/isLoading
     const historyMeta = React.useMemo(() => {
         if (!currentSessionId) return null;
-        const prefetchHasMore = Boolean(sessionPrefetchInfo?.cursor) && sessionPrefetchInfo?.complete !== true;
+        // Sync's meta is authoritative once a fetch has confirmed the history
+        // is fully loaded — a stale prefetch-cache entry (cursor recorded at
+        // the initial page) must not keep the "load older" affordance alive
+        // after the user has already reached the top.
+        const syncComplete = sync.isComplete(currentSessionId);
+        const prefetchHasMore = !syncComplete
+            && Boolean(sessionPrefetchInfo?.cursor)
+            && sessionPrefetchInfo?.complete !== true;
         return {
             limit: sessionMessages.length,
-            complete: !(sync.hasMore(currentSessionId) || prefetchHasMore),
+            complete: syncComplete || !(sync.hasMore(currentSessionId) || prefetchHasMore),
             loading: sync.isLoading(currentSessionId),
         };
     }, [currentSessionId, sessionMessages.length, sessionPrefetchInfo, sync]);
@@ -512,7 +545,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     const chatSurfaceMode = useChatSurfaceMode();
     const draftOpen = Boolean(newSessionDraft?.open);
     const initError = useGlobalSyncStore((s) => s.error);
-    const isDesktopExpandedInput = isExpandedInput && !isMobile;
+    // Despite the historical name, this now covers mobile too: the mobile
+    // composer enters the same fullscreen-input mode via its drag handle.
+    const isDesktopExpandedInput = isExpandedInput;
     const useCompactDraftLayout = isMobile || isVSCode || chatSurfaceMode === 'mini-chat';
     const messageListRef = React.useRef<MessageListHandle | null>(null);
     const draftProjectLabel = React.useMemo(() => {
@@ -568,6 +603,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         notifyContentChange: handleMessageContentChange,
         getAnimationHandlers,
         goToBottom,
+        scrollToBottomOnSend,
         releaseAutoFollow,
         restoreSnapshot,
         isPinned,
@@ -598,6 +634,14 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     const resumeToLatestInstant = React.useCallback(() => {
         goToBottom('instant');
     }, [goToBottom]);
+    // Mobile loads older history via an explicit top button instead of a
+    // scroll-position trigger (see handleHistoryScroll in the controller).
+    const showLoadOlderButton = isMobileSurfaceRuntime()
+        && timelineController.historySignals.canLoadEarlier;
+    const timelineLoadEarlier = timelineController.loadEarlier;
+    const handleLoadOlderClick = React.useCallback(() => {
+        void timelineLoadEarlier({ userInitiated: true });
+    }, [timelineLoadEarlier]);
 
     React.useEffect(() => {
         activeTurnChangeRef.current = timelineController.handleActiveTurnChange;
@@ -765,9 +809,12 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 
 	if (!currentSessionId && draftOpen) {
 		return (
-			<div className="relative flex h-full flex-col bg-background transform-gpu">
+			// No transform on this root: it would become the containing block for
+			// the fullscreen composer's position:fixed visual-viewport pinning in
+			// mobile browsers (see ChatInput's composerFormRef effect).
+			<div className="relative flex h-full flex-col bg-background">
 				{useCompactDraftLayout && !isDesktopExpandedInput ? (
-					<div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
+					<div className="oc-draft-center flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
 						<h1 className="text-balance text-3xl font-normal tracking-tight text-foreground">
 							{renderDraftTitle(
 								draftProjectLabel
@@ -778,7 +825,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 						</h1>
 						<DraftPresetChips
 							onSubmit={(text) => useInputStore.getState().requestPresetSubmit(text)}
-							className="mt-8 max-w-md"
+							className="oc-draft-starters mt-8 max-w-md"
 						/>
 					</div>
 				) : null}
@@ -792,7 +839,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 								: 'flex-1 items-center justify-center bg-background px-0 pb-[6vh]'
 					)}
 				>
-						{promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={resumeToLatestInstant} />}
+						{promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={scrollToBottomOnSend} />}
 				</div>
 			</div>
         );
@@ -852,7 +899,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 							: 'bg-background'
 					)}
 				>
-					{promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={resumeToLatestInstant} />}
+					{promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={scrollToBottomOnSend} />}
 				</div>
             </div>
         );
@@ -860,7 +907,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 
 	if (sessionMessages.length === 0 && !sessionIsWorking) {
 		return (
-			<div className="relative flex flex-col h-full bg-background transform-gpu">
+			// No transform here either — same fixed-positioning constraint as the
+			// draft branch above.
+			<div className="relative flex flex-col h-full bg-background">
 				{returnToParentButton}
 				<div
 					className={cn(
@@ -885,7 +934,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 							: 'bg-background'
 					)}
 				>
-					{promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={resumeToLatestInstant} />}
+					{promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={scrollToBottomOnSend} />}
 				</div>
             </div>
         );
@@ -917,6 +966,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 sessionQuestions={sessionQuestions}
                 sessionPermissions={sessionPermissions}
                 isProgrammaticFollowActive={isFollowingProgrammatically}
+                showLoadOlderButton={showLoadOlderButton}
+                onLoadOlder={handleLoadOlderClick}
             />
 
             <div
@@ -933,7 +984,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                         onClick={navigation.resumeToLatest}
                     />
                 )}
-                {promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={resumeToLatestInstant} />}
+                {promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={scrollToBottomOnSend} />}
             </div>
 
             <TimelineDialog
@@ -942,6 +993,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 onScrollToMessage={timelineController.scrollToMessage}
                 onScrollByTurnOffset={navigation.scrollByTurnOffset}
                 onResumeToLatest={resumeToLatestInstant}
+                canLoadEarlier={timelineController.historySignals.canLoadEarlier}
+                isLoadingEarlier={timelineController.isLoadingOlder}
+                onLoadEarlier={handleLoadOlderClick}
             />
         </div>
     );

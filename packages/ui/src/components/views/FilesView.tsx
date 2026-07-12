@@ -813,6 +813,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const addOpenPath = useFilesViewTabsStore((state) => state.addOpenPath);
   const removeOpenPath = useFilesViewTabsStore((state) => state.removeOpenPath);
   const removeOpenPathsByPrefix = useFilesViewTabsStore((state) => state.removeOpenPathsByPrefix);
+  const removeExpandedPathsByPrefix = useFilesViewTabsStore((state) => state.removeExpandedPathsByPrefix);
   const setSelectedPath = useFilesViewTabsStore((state) => state.setSelectedPath);
   const toggleExpandedPath = useFilesViewTabsStore((state) => state.toggleExpandedPath);
   const expandPaths = useFilesViewTabsStore((state) => state.expandPaths);
@@ -1204,6 +1205,16 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         }
 
         const message = error instanceof Error ? error.message : String(error ?? '');
+        if (message === 'Directory not found' && root && normalizedDir !== root) {
+          removeExpandedPathsByPrefix(root, normalizedDir);
+          setLoadErrorsByDir((prev) => {
+            if (!prev[normalizedDir]) return prev;
+            const next = { ...prev };
+            delete next[normalizedDir];
+            return next;
+          });
+          return;
+        }
         console.error('Failed to load files directory:', error);
         setLoadErrorsByDir((prev) => ({
           ...prev,
@@ -1220,7 +1231,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         inFlightDirsRef.current = new Set(inFlightDirsRef.current);
         inFlightDirsRef.current.delete(normalizedDir);
       });
-  }, [files, mapDirectoryEntries]);
+  }, [files, mapDirectoryEntries, removeExpandedPathsByPrefix, root]);
 
   const refreshRoot = React.useCallback(async () => {
     if (!root) {
@@ -2874,17 +2885,19 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [canEdit, isMobile, shortcutOverrides, textViewMode]);
 
+  const editorFontSize = useUIStore((state) => state.editorFontSize);
+
   const editorExtensions = React.useMemo(() => {
     if (!selectedFile?.path) {
-      return [createFlexokiCodeMirrorTheme(currentTheme)];
+      return [createFlexokiCodeMirrorTheme(currentTheme, { fontSize: editorFontSize })];
     }
 
     // Shiki token colors (worker-backed) match the Shiki file view exactly.
     // Same language resolver as the view, so both agree on the language. When
     // Shiki is the color source, drop the lezer token colors to avoid a
-    // competing highlighter (keep the lezer language for indentation/folding).
+    // competing highlighter (Keep the lezer language for indentation/folding).
     const shikiLanguage = getLanguageFromExtension(selectedFile.path);
-    const extensions = [createFlexokiCodeMirrorTheme(currentTheme, shikiLanguage ? { syntaxColors: false } : undefined)];
+    const extensions = [createFlexokiCodeMirrorTheme(currentTheme, shikiLanguage ? { syntaxColors: false, fontSize: editorFontSize } : { fontSize: editorFontSize })];
     const language = staticLanguageExtension ?? dynamicLanguageExtension;
     if (language) {
       extensions.push(language);
@@ -2914,7 +2927,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       }));
     }
     return extensions;
-  }, [currentTheme, selectedFile?.path, staticLanguageExtension, dynamicLanguageExtension, wrapLines, isMobile, nudgeEditorSelectionAboveKeyboard]);
+  }, [currentTheme, selectedFile?.path, staticLanguageExtension, dynamicLanguageExtension, wrapLines, isMobile, nudgeEditorSelectionAboveKeyboard, editorFontSize]);
 
   const pierreTheme = React.useMemo(
     () => ({ light: lightTheme.metadata.id, dark: darkTheme.metadata.id }),

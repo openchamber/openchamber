@@ -1,13 +1,15 @@
 import { getRuntimeUrlResolver } from './runtime-url';
 import { runtimeFetch } from './runtime-fetch';
+import { openRuntimeWebSocket } from './relay/runtime-socket';
+import { type RelayTunnelWebSocket } from './relay/tunnel-client';
 
-export interface TerminalWebSocketDescriptor {
+interface TerminalWebSocketDescriptor {
   path: string;
   v?: number;
   enc?: string;
 }
 
-export interface TerminalTransportCapability {
+interface TerminalTransportCapability {
   preferred?: 'ws' | 'http' | 'sse';
   transports?: Array<'ws' | 'http' | 'sse'>;
   ws?: TerminalWebSocketDescriptor;
@@ -132,11 +134,11 @@ const createTransportError = (code: string | undefined): Error => {
 };
 
 class TerminalTransportManager {
-  private socket: WebSocket | null = null;
+  private socket: RelayTunnelWebSocket | null = null;
   private socketUrl = '';
   private boundSessionId: string | null = null;
   private requestedSessionId: string | null = null;
-  private openPromise: Promise<WebSocket | null> | null = null;
+  private openPromise: Promise<RelayTunnelWebSocket | null> | null = null;
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   private keepaliveInterval: ReturnType<typeof setInterval> | null = null;
   private closed = false;
@@ -311,7 +313,7 @@ class TerminalTransportManager {
     subscription.connectionTimeoutId = null;
   }
 
-  private async getOpenSocket(waitMs: number): Promise<WebSocket | null> {
+  private async getOpenSocket(waitMs: number): Promise<RelayTunnelWebSocket | null> {
     if (this.socket && this.socket.readyState === WS_READY_STATE_OPEN) {
       return this.socket;
     }
@@ -355,11 +357,11 @@ class TerminalTransportManager {
 
     this.clearReconnectTimeout();
 
-    this.openPromise = new Promise<WebSocket | null>((resolve) => {
+    this.openPromise = new Promise<RelayTunnelWebSocket | null>((resolve) => {
       let settled = false;
       let connectTimeout: ReturnType<typeof setTimeout> | null = null;
 
-      const settle = (value: WebSocket | null) => {
+      const settle = (value: RelayTunnelWebSocket | null) => {
         if (settled) {
           return;
         }
@@ -373,7 +375,7 @@ class TerminalTransportManager {
       };
 
       try {
-        const socket = new WebSocket(this.socketUrl);
+        const socket = openRuntimeWebSocket(this.socketUrl);
         socket.binaryType = 'arraybuffer';
 
         socket.onopen = () => {
