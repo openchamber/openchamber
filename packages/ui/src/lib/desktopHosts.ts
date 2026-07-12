@@ -371,8 +371,11 @@ export const probeRelayDesktopHost = async (
   // With `keepTunnel`, an 'ok' probe RETURNS its live tunnel (the caller owns
   // it — typically adopting it as the runtime tunnel, skipping a second
   // WebSocket connect + E2EE handshake); every other outcome closes it.
-  options?: { keepTunnel?: boolean; clientToken?: string | null },
+  optionsOrClientToken?: { keepTunnel?: boolean; clientToken?: string | null } | string | null,
 ): Promise<HostProbeResult & { tunnel?: ReturnType<typeof createRelayTunnelClient> }> => {
+  const options = typeof optionsOrClientToken === 'object'
+    ? optionsOrClientToken
+    : { clientToken: optionsOrClientToken };
   const tunnel = createRelayTunnelClient({
     relayUrl: relay.relayUrl,
     serverId: relay.serverId,
