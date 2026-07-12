@@ -10,6 +10,88 @@ import { updateDesktopSettings } from '@/lib/persistence';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
 const DEFAULT_REFRESH_INTERVAL_MS = 60000;
+let quotaRuntimeFetch: typeof runtimeFetch = runtimeFetch;
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+};
+
+const isFiniteNumberOrNull = (value: unknown): value is number | null => {
+  return value === null || (typeof value === 'number' && Number.isFinite(value));
+};
+
+const isStringOrNull = (value: unknown): value is string | null => value === null || typeof value === 'string';
+
+const isUsageWindow = (value: unknown): boolean => {
+  if (!isRecord(value)) return false;
+  const numberFields = ['usedPercent', 'remainingPercent', 'windowSeconds', 'resetAfterSeconds', 'resetAt'];
+  const stringFields = ['resetAtFormatted', 'resetAfterFormatted'];
+  if (!numberFields.every((field) => isFiniteNumberOrNull(value[field]))) return false;
+  if (!stringFields.every((field) => isStringOrNull(value[field]))) return false;
+  return value.valueLabel === undefined || isStringOrNull(value.valueLabel);
+};
+
+const isUsageWindows = (value: unknown): boolean => {
+  if (!isRecord(value) || !isRecord(value.windows)) return false;
+  return Object.values(value.windows).every(isUsageWindow);
+};
+
+const isProviderUsage = (value: unknown): value is NonNullable<ProviderResult['usage']> => {
+  if (!isUsageWindows(value) || !isRecord(value)) return false;
+  return value.models === undefined
+    || (isRecord(value.models) && Object.values(value.models).every(isUsageWindows));
+};
+
+const validateProviderResult = (payload: unknown, requestedProviderId: QuotaProviderId): ProviderResult => {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Invalid quota response: not an object');
+  }
+
+  const providerId = Reflect.get(payload, 'providerId');
+  if (providerId !== requestedProviderId) {
+    throw new Error(`Invalid quota response: providerId mismatch (expected ${requestedProviderId}, got ${providerId})`);
+  }
+
+  const providerName = Reflect.get(payload, 'providerName');
+  if (typeof providerName !== 'string') {
+    throw new Error('Invalid quota response: providerName must be a string');
+  }
+
+  const ok = Reflect.get(payload, 'ok');
+  if (typeof ok !== 'boolean') {
+    throw new Error('Invalid quota response: ok must be a boolean');
+  }
+
+  const configured = Reflect.get(payload, 'configured');
+  if (typeof configured !== 'boolean') {
+    throw new Error('Invalid quota response: configured must be a boolean');
+  }
+
+  const usage = Reflect.get(payload, 'usage');
+  if (usage !== null && !isProviderUsage(usage)) {
+    throw new Error('Invalid quota response: usage must be null or an object');
+  }
+
+  const fetchedAt = Reflect.get(payload, 'fetchedAt');
+  if (typeof fetchedAt !== 'number' || !Number.isFinite(fetchedAt)) {
+    throw new Error('Invalid quota response: fetchedAt must be a finite number');
+  }
+
+  const error = Reflect.get(payload, 'error');
+  if (error !== undefined && typeof error !== 'string') {
+    throw new Error('Invalid quota response: error must be a string when provided');
+  }
+
+  return {
+    providerId: requestedProviderId,
+    providerName,
+    ok,
+    configured,
+    ...(error !== undefined && { error }),
+    usage,
+    fetchedAt,
+  };
+};
 
 interface QuotaSettingsState {
   autoRefresh: boolean;
@@ -114,7 +196,7 @@ const loadSettingsFromRuntime = async (): Promise<QuotaSettingsState> => {
   }
 
   if (!isVSCodeRuntime()) {
-    const response = await runtimeFetch('/api/config/settings', {
+    const response = await quotaRuntimeFetch('/api/config/settings', {
       method: 'GET',
       headers: { Accept: 'application/json' }
     });
@@ -183,13 +265,13 @@ export const useQuotaStore = create<QuotaStore>()(
           isFetchingProvider: { ...state.isFetchingProvider, [providerId]: true }
         }));
         try {
-          const response = await runtimeFetch(`/api/quota/${encodeURIComponent(providerId)}`);
+          const response = await quotaRuntimeFetch(`/api/quota/${encodeURIComponent(providerId)}`);
           const payload = await response.json().catch(() => null);
           if (!response.ok) {
             throw new Error(payload?.error || 'Failed to fetch quota');
           }
 
-          const result = payload as ProviderResult;
+          const result = validateProviderResult(payload, providerId);
           set((state) => {
             const next = state.results.filter((entry) => entry.providerId !== providerId);
             next.push(result);
@@ -305,4 +387,12 @@ export const useQuotaAutoRefresh = () => {
 
     return () => window.clearInterval(interval);
   }, [autoRefresh, refreshIntervalMs, fetchAllQuotas]);
+};
+
+export const setQuotaRuntimeFetchForTests = (implementation: typeof runtimeFetch): void => {
+  quotaRuntimeFetch = implementation;
+};
+
+export const resetQuotaRuntimeFetchForTests = (): void => {
+  quotaRuntimeFetch = runtimeFetch;
 };
