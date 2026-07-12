@@ -1755,6 +1755,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.draftStarters.sectionSkills': 'Skills',
   'chat.draftStarters.remove': 'Remove',
   'chat.scrollToBottom.aria': '맨 아래로 스크롤',
+  'chat.turnOutline.open': '대화 개요 열기',
+  'chat.turnOutline.openTimeline': '전체 타임라인 열기',
   'chat.timeline.relative.justNow': '방금 전',
   'chat.timeline.relative.minutesAgo': '{count}분 전',
   'chat.timeline.relative.hoursAgo': '{count}시간 전',

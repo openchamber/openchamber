@@ -22,6 +22,8 @@ import { useChatTimelineController } from './hooks/useChatTimelineController';
 import { TimelineDialog } from './TimelineDialog';
 import { useChatTurnNavigation } from './hooks/useChatTurnNavigation';
 import { useChatSurfaceMode } from './useChatSurfaceMode';
+import { TurnHoverOutline } from './TurnHoverOutline';
+import { buildTurnOutlineItems, type TurnOutlineItem } from './turnHoverOutlineItems';
 import { useDeviceInfo } from '@/lib/device';
 import { Button } from '@/components/ui/button';
 import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
@@ -161,6 +163,11 @@ type ChatViewportProps = {
     isProgrammaticFollowActive: boolean;
     showLoadOlderButton: boolean;
     onLoadOlder: () => void;
+    isMobileRuntime: boolean;
+    turnOutlineItems: TurnOutlineItem[];
+    activeTurnId: string | null;
+    onJumpTurn: (turnId: string) => void;
+    onOpenTimeline: () => void;
 };
 
 const ChatViewport = React.memo(({
@@ -187,6 +194,11 @@ const ChatViewport = React.memo(({
     isProgrammaticFollowActive,
     showLoadOlderButton,
     onLoadOlder,
+    isMobileRuntime,
+    turnOutlineItems,
+    activeTurnId,
+    onJumpTurn,
+    onOpenTimeline,
 }: ChatViewportProps) => {
     const { t } = useI18n();
     const focusScrollContainer = React.useCallback((event: React.MouseEvent<HTMLElement>) => {
@@ -277,6 +289,16 @@ const ChatViewport = React.memo(({
                     </div>
                 </ScrollShadow>
                 <OverlayScrollbar containerRef={scrollRef} suppressVisibility={isProgrammaticFollowActive} userIntentOnly observeMutations={false} />
+                {!isMobileRuntime && turnOutlineItems.length > 1 && (
+                    <div className="hidden lg:block absolute left-3 top-[60%] -translate-y-1/2 z-10">
+                        <TurnHoverOutline
+                            items={turnOutlineItems}
+                            activeTurnId={activeTurnId}
+                            onJumpTurn={onJumpTurn}
+                            onOpenTimeline={onOpenTimeline}
+                        />
+                    </div>
+                )}
             </div>
         </div>
     );
@@ -303,7 +325,12 @@ const ChatViewport = React.memo(({
         && prev.sessionPermissions === next.sessionPermissions
         && prev.isProgrammaticFollowActive === next.isProgrammaticFollowActive
         && prev.showLoadOlderButton === next.showLoadOlderButton
-        && prev.onLoadOlder === next.onLoadOlder;
+        && prev.onLoadOlder === next.onLoadOlder
+        && prev.isMobileRuntime === next.isMobileRuntime
+        && prev.turnOutlineItems === next.turnOutlineItems
+        && prev.activeTurnId === next.activeTurnId
+        && prev.onJumpTurn === next.onJumpTurn
+        && prev.onOpenTimeline === next.onOpenTimeline;
 });
 
 ChatViewport.displayName = 'ChatViewport';
@@ -636,7 +663,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     }, [goToBottom]);
     // Mobile loads older history via an explicit top button instead of a
     // scroll-position trigger (see handleHistoryScroll in the controller).
-    const showLoadOlderButton = isMobileSurfaceRuntime()
+    const isMobileRuntime = isMobileSurfaceRuntime();
+    const showLoadOlderButton = isMobileRuntime
         && timelineController.historySignals.canLoadEarlier;
     const timelineLoadEarlier = timelineController.loadEarlier;
     const handleLoadOlderClick = React.useCallback(() => {
@@ -662,6 +690,22 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         scrollToMessage: timelineController.scrollToMessage,
         resumeToBottom: timelineController.resumeToBottomInstant,
     });
+    const { scrollToTurnId } = navigation;
+    const previousTurnOutlineItemsRef = React.useRef<TurnOutlineItem[] | null>(null);
+    const turnOutlineItems = React.useMemo(() => buildTurnOutlineItems(
+        timelineController.renderedMessages,
+        timelineController.turnWindowModel,
+        previousTurnOutlineItemsRef.current ?? undefined,
+    ), [timelineController.renderedMessages, timelineController.turnWindowModel]);
+    React.useEffect(() => {
+        previousTurnOutlineItemsRef.current = turnOutlineItems;
+    }, [turnOutlineItems]);
+    const handleOpenTimeline = React.useCallback(() => {
+        setTimelineDialogOpen(true);
+    }, [setTimelineDialogOpen]);
+    const handleOutlineJumpTurn = React.useCallback((turnId: string) => {
+        void scrollToTurnId(turnId);
+    }, [scrollToTurnId]);
 
     React.useEffect(() => {
         if (typeof window === 'undefined' || !currentSessionId) return;
@@ -968,6 +1012,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 isProgrammaticFollowActive={isFollowingProgrammatically}
                 showLoadOlderButton={showLoadOlderButton}
                 onLoadOlder={handleLoadOlderClick}
+                isMobileRuntime={isMobileRuntime}
+                turnOutlineItems={turnOutlineItems}
+                activeTurnId={timelineController.activeTurnId}
+                onJumpTurn={handleOutlineJumpTurn}
+                onOpenTimeline={handleOpenTimeline}
             />
 
             <div

@@ -1723,6 +1723,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.draftStarters.sectionSkills': 'Skills',
   'chat.draftStarters.remove': 'Remove',
   'chat.scrollToBottom.aria': '捲動到底部',
+  'chat.turnOutline.open': '開啟轉錄大綱',
+  'chat.turnOutline.openTimeline': '開啟完整時間軸',
   'chat.timeline.relative.justNow': '剛剛',
   'chat.timeline.relative.minutesAgo': '{count} 分鐘前',
   'chat.timeline.relative.hoursAgo': '{count} 小時前',

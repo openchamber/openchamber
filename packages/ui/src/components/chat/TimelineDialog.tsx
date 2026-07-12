@@ -12,10 +12,10 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionMessageRecords } from '@/sync/sync-context';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
-import type { Part } from '@opencode-ai/sdk/v2';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
+import { getMessageFullText, getMessagePreview, getSearchSnippet } from './lib/messagePreview';
 
 interface TimelineDialogProps {
     open: boolean;
@@ -84,7 +84,7 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
 
         const query = trimmedQuery.toLowerCase();
         return userMessages.filter(({ message }) => {
-            const fullText = getFullText(message.parts).toLowerCase();
+            const fullText = getMessageFullText(message.parts).toLowerCase();
             return fullText.includes(query);
         });
     }, [userMessages, searchQuery]);
@@ -285,7 +285,7 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                             const isSelected = index === selectedIndex;
 
                             const snippet = searchQuery.trim()
-                                ? getSearchSnippet(getFullText(message.parts), searchQuery)
+                                ? getSearchSnippet(getMessageFullText(message.parts), searchQuery)
                                 : null;
 
                             return (
@@ -416,27 +416,3 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
         </Dialog>
     );
 };
-
-function getFullText(parts: Part[]): string {
-    return parts
-        .filter((p): p is Part & { type: 'text'; text: string } => p.type === 'text' && typeof p.text === 'string')
-        .map((p) => p.text)
-        .join('\n');
-}
-
-function getMessagePreview(parts: Part[]): string {
-    const full = getFullText(parts);
-    const singleLine = full.replace(/\n/g, ' ');
-    return singleLine.length > 80 ? singleLine.slice(0, 80) : singleLine;
-}
-
-function getSearchSnippet(text: string, query: string, contextChars: number = 30): string | null {
-    const lowerText = text.toLowerCase();
-    const lowerQuery = query.toLowerCase();
-    const matchIndex = lowerText.indexOf(lowerQuery);
-    if (matchIndex === -1) return null;
-
-    const start = Math.max(0, matchIndex - contextChars);
-    const end = Math.min(text.length, matchIndex + query.length + contextChars);
-    return `${start > 0 ? '…' : ''}${text.slice(start, end).replace(/\n/g, ' ')}${end < text.length ? '…' : ''}`;
-}
