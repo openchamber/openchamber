@@ -6,7 +6,9 @@
  * - Uppercases lowercase Windows drive letters (e.g., "c:\\" → "C:\\")
  * - Trims trailing slashes (except for the root "/")
  *
- * Returns null for non-string or empty/whitespace-only inputs.
+ * Returns null for non-string inputs, null/undefined, empty strings,
+ * whitespace-only strings, and paths that consist only of slashes
+ * (e.g. "\\", "\\\\", "///").
  *
  * The drive letter regex is anchored (^([a-z]):) and matches only a
  * single lowercase letter, so it never affects multi-character tokens
@@ -22,5 +24,6 @@ export const normalizePath = (value?: string | null): string | null => {
     .replace(/^([a-z]):/, (_, letter: string) => letter.toUpperCase() + ":");
 
   if (replaced === "/") return "/";
-  return replaced.length > 1 ? replaced.replace(/\/+$/, "") : replaced;
+  const stripped = replaced.length > 1 ? replaced.replace(/\/+$/, "") : replaced;
+  return stripped || null;
 };
