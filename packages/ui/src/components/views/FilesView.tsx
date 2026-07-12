@@ -3318,7 +3318,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
               title={t(getMdViewMode() === 'preview' ? 'filesView.editor.switchToEditMode' : 'filesView.editor.switchToPreviewMode')}
               aria-label={t(getMdViewMode() === 'preview' ? 'filesView.editor.switchToEditMode' : 'filesView.editor.switchToPreviewMode')}
             >
-              <Icon name="eye" className="size-4" />
+              <Icon name={getMdViewMode() === 'preview' ? 'eye' : 'eye-off'} className="size-4" />
             </Button>
           )
         )}
