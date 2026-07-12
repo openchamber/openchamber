@@ -19,7 +19,7 @@ import { checkForDesktopUpdate } from './updater-check.mjs';
 import { resolveUpdaterFeed } from './updater-feed.mjs';
 import { buildStoredHostEntry as sanitizeStoredHostEntry } from './host-storage-sanitizer.mjs';
 import { writeSecureAtomicJson } from './secure-json-file.mjs';
-import { buildDesktopAdditionalArguments, resolveRuntimeBootstrap } from './runtime-bootstrap.mjs';
+import { buildDesktopAdditionalArguments, buildRuntimeBootMetadataScript, isRuntimeBootstrapSenderAllowed, resolveRuntimeBootstrap } from './runtime-bootstrap.mjs';
 import { resolveDesktopHostsForSender } from './host-public-config.mjs';
 import { decidePairingV2DeepLink } from './pairing-deep-link.mjs';
 import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
@@ -999,15 +999,6 @@ const shouldUsePackagedUi = () => {
 const packagedUiOrigin = () => `${UI_PROTOCOL}://app`;
 const buildPackagedUiUrl = (pathname = '/index.html') => new URL(pathname, `${packagedUiOrigin()}/`).toString();
 
-const injectRuntimeConfigIntoHtml = (html) => {
-  const apiBaseUrl = state.apiBaseUrl || state.sidecarUrl || '';
-  const localOrigin = state.localOrigin || state.sidecarUrl || '';
-  const initScript = `<script>if(window.__OPENCHAMBER_LOCAL_ORIGIN__===undefined){window.__OPENCHAMBER_LOCAL_ORIGIN__=${JSON.stringify(localOrigin)};}if(window.__OPENCHAMBER_API_BASE_URL__===undefined){window.__OPENCHAMBER_API_BASE_URL__=${JSON.stringify(apiBaseUrl)};}if(window.__OPENCHAMBER_CLIENT_TOKEN__===undefined&&${JSON.stringify(state.clientToken || '')}){window.__OPENCHAMBER_CLIENT_TOKEN__=${JSON.stringify(state.clientToken || '')};}</script>`;
-  if (html.includes('<head>')) return html.replace('<head>', `<head>${initScript}`);
-  if (html.includes('</head>')) return html.replace('</head>', `${initScript}</head>`);
-  return `${initScript}${html}`;
-};
-
 const registerPackagedUiProtocol = () => {
   if (!shouldUsePackagedUi()) return;
   protocol.handle(UI_PROTOCOL, async (request) => {
@@ -1029,8 +1020,7 @@ const registerPackagedUiProtocol = () => {
       if (info.isFile()) {
         if (filePath.endsWith('.html')) {
           const html = await fsp.readFile(filePath, 'utf8');
-          const body = injectRuntimeConfigIntoHtml(html);
-          return new Response(body, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+          return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
         }
         return electronNet.fetch(pathToFileURL(filePath).toString());
       }
@@ -1038,8 +1028,7 @@ const registerPackagedUiProtocol = () => {
     }
     const indexPath = path.join(distPath, 'index.html');
     const html = await fsp.readFile(indexPath, 'utf8');
-    const body = injectRuntimeConfigIntoHtml(html);
-    return new Response(body, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+    return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
   });
 };
 
@@ -1475,21 +1464,10 @@ const macosMajorVersion = () => {
   return major === 10 ? minor : major;
 };
 
-const buildInitScript = (localOrigin, bootOutcome, apiBaseUrl = '', clientToken = '', requestHeaders = {}) => {
-  const home = JSON.stringify(os.homedir() || '');
-  const local = JSON.stringify(localOrigin || '');
-  const apiBase = JSON.stringify(apiBaseUrl || '');
-  const token = JSON.stringify(clientToken || '');
-  const headers = JSON.stringify(sanitizeRuntimeRequestHeaders(requestHeaders));
-  const packagedOrigin = JSON.stringify(packagedUiOrigin());
-  const macVersion = macosMajorVersion();
-  const outcome = JSON.stringify(bootOutcome ?? null);
-  return [
-    '(function(){',
-    `try{var __oc_local=${local};var __oc_api=${apiBase};var __oc_headers=${headers};var __oc_packaged=${packagedOrigin};var __oc_origin=window.location&&window.location.origin||'';var __oc_is_packaged=__oc_origin===__oc_packaged;var __oc_is_local=__oc_local&&__oc_origin===new URL(__oc_local).origin;window.__OPENCHAMBER_MACOS_MAJOR__=${macVersion};window.__OPENCHAMBER_LOCAL_ORIGIN__=__oc_local;window.__OPENCHAMBER_API_BASE_URL__=__oc_api;if(__oc_is_local||__oc_is_packaged){window.__OPENCHAMBER_HOME__=${home};window.__OPENCHAMBER_RUNTIME_HEADERS__=__oc_headers;}if((__oc_is_local||__oc_is_packaged)&&${token}){window.__OPENCHAMBER_CLIENT_TOKEN__=${token};}var __oc_bo=${outcome};if(__oc_bo){window.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__=__oc_bo;}}catch(_e){}`,
-    '}())',
-  ].join('');
-};
+const buildInitScript = (bootOutcome) => buildRuntimeBootMetadataScript({
+  macosMajor: macosMajorVersion(),
+  bootOutcome,
+});
 
 const computeBootOutcome = ({ envTargetUrl, probe, config, localAvailable }) => {
   if (envTargetUrl) {
@@ -2161,7 +2139,6 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
     webPreferences: {
       additionalArguments: buildDesktopAdditionalArguments({
         localOrigin: desktopLocalOrigin,
-        homeDirectory: desktopHome,
         macosMajor: desktopMacosMajor,
         macVibrancy: useVibrancy,
         bootOutcome: state.bootOutcome || null,
@@ -2185,9 +2162,9 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
     apiBaseUrl: desktopApiBaseUrl,
     clientToken: desktopClientToken,
     requestHeaders: desktopRequestHeaders,
-    relayHostId: rendererRuntimeConfig.relayHostId || '',
+    homeDirectory: desktopHome,
   };
-  browserWindow.__ocInitScript = buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
+  browserWindow.__ocInitScript = buildInitScript(state.bootOutcome);
   browserWindow.__ocTitleBarOverlayEnabled = titleBarOverlayEnabled;
 
   if (useSaved && saved.maximized) {
@@ -2349,6 +2326,10 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   });
 
   browserWindow.webContents.on('dom-ready', () => {
+    if (!isRuntimeBootstrapSenderAllowed(browserWindow.webContents.getURL(), {
+      localOrigin: state.localOrigin,
+      sidecarUrl: state.sidecarUrl,
+    })) return;
     const initScript = browserWindow.__ocInitScript || state.initScript;
     if (initScript) {
       void browserWindow.webContents.executeJavaScript(initScript).catch(() => {});
@@ -2394,17 +2375,14 @@ const activateMainWindow = async (url, localOrigin, bootOutcome, runtimeConfig =
     requestHeaders: state.requestHeaders || {},
     relayHostId: typeof runtimeConfig.relayHostId === 'string' ? runtimeConfig.relayHostId : '',
   });
-  state.initScript = buildInitScript(
-    localOrigin,
-    state.bootOutcome,
-    rendererRuntimeConfig.apiBaseUrl,
-    rendererRuntimeConfig.clientToken,
-    rendererRuntimeConfig.requestHeaders,
-  );
+  state.initScript = buildInitScript(state.bootOutcome);
 
   const mainWindow = state.mainWindow;
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.__ocRuntimeConfig = rendererRuntimeConfig;
+    mainWindow.__ocRuntimeConfig = {
+      ...rendererRuntimeConfig,
+      homeDirectory: os.homedir() || '',
+    };
     mainWindow.__ocInitScript = state.initScript;
     await navigateWindow(mainWindow, url, { allowAbort: true });
     mainWindow.show();
@@ -2525,9 +2503,6 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
   }
 
   const desktopLocalOrigin = state.localOrigin || '';
-  const desktopApiBaseUrl = effectiveRuntimeConfig.apiBaseUrl || '';
-  const desktopClientToken = effectiveRuntimeConfig.clientToken || '';
-  const desktopRequestHeaders = effectiveRuntimeConfig.requestHeaders || {};
   const desktopHome = os.homedir() || '';
   const desktopMacosMajor = String(macosMajorVersion());
   const usesFramelessChrome = process.platform === 'win32' || process.platform === 'linux';
@@ -2553,7 +2528,6 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
     webPreferences: {
       additionalArguments: buildDesktopAdditionalArguments({
         localOrigin: desktopLocalOrigin,
-        homeDirectory: desktopHome,
         macosMajor: desktopMacosMajor,
       }),
       preload: isDev ? path.join(__dirname, 'preload.mjs') : path.join(app.getAppPath(), 'preload.mjs'),
@@ -2566,8 +2540,11 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
     },
   });
   browserWindow.__ocLabel = nextWindowLabel();
-  browserWindow.__ocRuntimeConfig = effectiveRuntimeConfig;
-  browserWindow.__ocInitScript = buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
+  browserWindow.__ocRuntimeConfig = {
+    ...effectiveRuntimeConfig,
+    homeDirectory: desktopHome,
+  };
+  browserWindow.__ocInitScript = buildInitScript(state.bootOutcome);
   browserWindow.__ocMiniChat = true;
   browserWindow.__ocMiniChatSessionId = sessionWindowKey;
   browserWindow.__ocPinned = false;
@@ -2621,6 +2598,10 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
     void shell.openExternal(url).catch(() => {});
   });
   browserWindow.webContents.on('dom-ready', () => {
+    if (!isRuntimeBootstrapSenderAllowed(browserWindow.webContents.getURL(), {
+      localOrigin: state.localOrigin,
+      sidecarUrl: state.sidecarUrl,
+    })) return;
     const initScript = browserWindow.__ocInitScript || state.initScript;
     if (initScript) {
       void browserWindow.webContents.executeJavaScript(initScript).catch(() => {});
@@ -3748,7 +3729,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         config: updatedConfig,
         localAvailable: Boolean(state.sidecarUrl || state.localOrigin),
       });
-      state.initScript = buildInitScript(state.localOrigin, state.bootOutcome, state.apiBaseUrl, state.clientToken, state.requestHeaders || {});
+      state.initScript = buildInitScript(state.bootOutcome);
       log.info('[electron] hosts config updated, recomputed bootOutcome', state.bootOutcome);
       return null;
     }
@@ -4847,7 +4828,7 @@ app.whenReady().then(async () => {
     state.localOrigin = localOrigin;
     state.bootOutcome = bootOutcome ?? null;
     state.requestHeaders = sanitizeRuntimeRequestHeaders(requestHeaders || {});
-    state.initScript = buildInitScript(localOrigin, state.bootOutcome, '', '', state.requestHeaders);
+    state.initScript = buildInitScript(state.bootOutcome);
     log.info('[electron] started in background without window');
     return;
   }

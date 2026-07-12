@@ -12,7 +12,6 @@ const readArgValue = (name) => {
 };
 
 const localOrigin = readArgValue('--openchamber-local-origin');
-const homeDirectory = readArgValue('--openchamber-home');
 const macosMajorRaw = readArgValue('--openchamber-macos-major');
 const macosMajor = Number.parseInt(macosMajorRaw, 10);
 const macVibrancySupported = process.platform === 'darwin';
@@ -47,6 +46,7 @@ const runtimeBootstrap = isLocalPage
   : null;
 const apiBaseUrl = typeof runtimeBootstrap?.apiBaseUrl === 'string' ? runtimeBootstrap.apiBaseUrl : '';
 const clientToken = typeof runtimeBootstrap?.clientToken === 'string' ? runtimeBootstrap.clientToken : '';
+const homeDirectory = typeof runtimeBootstrap?.homeDirectory === 'string' ? runtimeBootstrap.homeDirectory : '';
 
 // Remote pages need __OPENCHAMBER_LOCAL_ORIGIN__ so the HostSwitcher knows
 // the URL of the Local entry (isDesktopLocalOriginActive() falls back to
