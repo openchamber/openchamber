@@ -75,4 +75,30 @@ describe('relay identity', () => {
     );
     expect(ok).toBe(true);
   });
+
+  it('derives and repairs the public encryption JWK from a valid persisted private key', async () => {
+    const pair = await globalThis.crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+    const privateJwk = await globalThis.crypto.subtle.exportKey('jwk', pair.privateKey);
+    const other = await globalThis.crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+    const mismatched = await globalThis.crypto.subtle.exportKey('jwk', other.publicKey);
+    const store = makeSettingsStore({ relayEncryptionKey: { privateJwk, publicJwk: { ...mismatched, d: 'leak' } } });
+    const identity = await createRelayIdentityRuntime({ crypto, ...store }).getRelayIdentity();
+    expect(identity.hostEncPubJwk).toEqual({ kty: 'EC', crv: 'P-256', x: privateJwk.x, y: privateJwk.y });
+    expect(identity.hostEncPubJwk).not.toHaveProperty('d');
+    expect(store.peek().relayEncryptionKey.privateJwk.d).toBe(privateJwk.d);
+    expect(store.peek().relayEncryptionKey.publicJwk).toEqual(identity.hostEncPubJwk);
+  });
+
+  it('replaces an invalid persisted private encryption point', async () => {
+    const store = makeSettingsStore({
+      relayEncryptionKey: {
+        privateJwk: { kty: 'EC', crv: 'P-256', x: 'bad', y: 'bad', d: 'bad' },
+        publicJwk: { kty: 'EC', crv: 'P-256', x: 'bad', y: 'bad', d: 'leak' },
+      },
+    });
+    const identity = await createRelayIdentityRuntime({ crypto, ...store }).getRelayIdentity();
+    expect(identity.hostEncPubJwk).not.toHaveProperty('d');
+    expect(identity.hostEncPubJwk.x).not.toBe('bad');
+    expect(store.peek().relayEncryptionKey.privateJwk.d).not.toBe('bad');
+  });
 });

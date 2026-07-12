@@ -11,9 +11,18 @@ import {
   getOrCreateRelaySigningKeypair,
   signRelayMessage,
 } from './signing-key.js';
-import { exportPublicKeyJwk, generateEcdhKeyPair, importEcdhPrivateKey } from './e2ee.js';
+import { exportPublicKeyJwk, generateEcdhKeyPair, importEcdhPrivateKey, importEcdhPublicKey } from './e2ee.js';
 
-const isJwkPair = (value) => Boolean(value && typeof value === 'object' && value.privateJwk && value.publicJwk);
+const publicJwkFromPrivate = (privateJwk) => ({
+  kty: privateJwk?.kty,
+  crv: privateJwk?.crv,
+  x: privateJwk?.x,
+  y: privateJwk?.y,
+});
+
+const samePublicJwk = (left, right) =>
+  left?.kty === right.kty && left?.crv === right.crv && left?.x === right.x && left?.y === right.y
+  && Object.keys(left).every((key) => ['kty', 'crv', 'x', 'y'].includes(key));
 
 /**
  * @param {{
@@ -28,12 +37,29 @@ export const createRelayIdentityRuntime = (deps) => {
 
   let cachedIdentity = null;
 
+  const importPersistedEncryptionKeypair = async (settings) => {
+    const existing = settings?.relayEncryptionKey;
+    if (!existing?.privateJwk) return null;
+    try {
+      const privateKey = await importEcdhPrivateKey(existing.privateJwk);
+      const publicJwk = publicJwkFromPrivate(existing.privateJwk);
+      await importEcdhPublicKey(publicJwk);
+      if (!samePublicJwk(existing.publicJwk, publicJwk)) {
+        await writeSettingsToDisk({ ...settings, relayEncryptionKey: { privateJwk: existing.privateJwk, publicJwk } });
+      }
+      return { privateJwk: existing.privateJwk, publicJwk, privateKey };
+    } catch {
+      // Invalid private material cannot be repaired; replace the keypair only
+      // after the strict settings read confirms regeneration is safe.
+      return null;
+    }
+  };
+
   const getOrCreateEncryptionKeypair = async () => {
     const settings = await readSettingsFromDiskMigrated();
-    const existing = settings?.relayEncryptionKey;
-    if (isJwkPair(existing)) {
-      return existing;
-    }
+    const existing = await importPersistedEncryptionKeypair(settings);
+    if (existing) return existing;
+
     // Same regeneration gate as the signing key: never mint a replacement
     // identity key off a swallowed read failure — a new encryption key breaks
     // the E2EE trust anchor pinned by every paired device. Verify "missing" via
@@ -41,10 +67,8 @@ export const createRelayIdentityRuntime = (deps) => {
     let verifiedSettings = settings;
     if (readSettingsStrict) {
       verifiedSettings = await readSettingsStrict();
-      const verified = verifiedSettings?.relayEncryptionKey;
-      if (isJwkPair(verified)) {
-        return verified;
-      }
+      const verified = await importPersistedEncryptionKeypair(verifiedSettings);
+      if (verified) return verified;
     }
     // Loud on purpose: a new encryption key invalidates the E2EE trust anchor of
     // every paired device. Expected exactly once, on first relay use.
@@ -53,7 +77,7 @@ export const createRelayIdentityRuntime = (deps) => {
     const privateJwk = await globalThis.crypto.subtle.exportKey('jwk', keyPair.privateKey);
     const publicJwk = await exportPublicKeyJwk(keyPair.publicKey);
     await writeSettingsToDisk({ ...settings, ...(verifiedSettings || {}), relayEncryptionKey: { privateJwk, publicJwk } });
-    return { privateJwk, publicJwk };
+    return { privateJwk, publicJwk, privateKey: keyPair.privateKey };
   };
 
   /**
@@ -69,7 +93,7 @@ export const createRelayIdentityRuntime = (deps) => {
     const signing = await getOrCreateRelaySigningKeypair({ crypto, readSettingsFromDiskMigrated, writeSettingsToDisk, readSettingsStrict });
     const serverId = deriveServerId({ crypto }, signing.publicJwk);
     const encryption = await getOrCreateEncryptionKeypair();
-    const hostEncPrivateKey = await importEcdhPrivateKey(encryption.privateJwk);
+    const hostEncPrivateKey = encryption.privateKey || await importEcdhPrivateKey(encryption.privateJwk);
     const pk = Buffer.from(canonicalPublicJwkString(signing.publicJwk), 'utf8').toString('base64url');
 
     // Relay-layer auth for host-control / host-data upgrades. Signature payload
