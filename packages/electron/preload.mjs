@@ -12,9 +12,6 @@ const readArgValue = (name) => {
 };
 
 const localOrigin = readArgValue('--openchamber-local-origin');
-const apiBaseUrl = readArgValue('--openchamber-api-base-url');
-const clientToken = readArgValue('--openchamber-client-token');
-const runtimeHeadersRaw = readArgValue('--openchamber-runtime-headers');
 const homeDirectory = readArgValue('--openchamber-home');
 const macosMajorRaw = readArgValue('--openchamber-macos-major');
 const macosMajor = Number.parseInt(macosMajorRaw, 10);
@@ -45,6 +42,12 @@ const isLocalPage = currentOrigin !== 'null'
   && (currentOrigin === 'openchamber-ui://app'
   || (localOrigin && currentOrigin === localOrigin));
 
+const runtimeBootstrap = isLocalPage
+  ? ipcRenderer.sendSync('openchamber:runtime-bootstrap')
+  : null;
+const apiBaseUrl = typeof runtimeBootstrap?.apiBaseUrl === 'string' ? runtimeBootstrap.apiBaseUrl : '';
+const clientToken = typeof runtimeBootstrap?.clientToken === 'string' ? runtimeBootstrap.clientToken : '';
+
 // Remote pages need __OPENCHAMBER_LOCAL_ORIGIN__ so the HostSwitcher knows
 // the URL of the Local entry (isDesktopLocalOriginActive() falls back to
 // window.location.origin otherwise — wrong on remote). Low risk: the value
@@ -65,19 +68,13 @@ if (clientToken && isLocalPage) {
 // Which saved host this window should connect to over the relay-capable path
 // (direct probe first, E2EE tunnel fallback). Local pages only — the id is
 // only useful together with the desktop IPC channel anyway.
-const relayHostId = readArgValue('--openchamber-relay-host-id');
+const relayHostId = typeof runtimeBootstrap?.relayHostId === 'string' ? runtimeBootstrap.relayHostId : '';
 if (relayHostId && isLocalPage) {
   contextBridge.exposeInMainWorld('__OPENCHAMBER_RELAY_HOST_ID__', relayHostId);
 }
 
-if (runtimeHeadersRaw && isLocalPage) {
-  try {
-    const runtimeHeaders = JSON.parse(runtimeHeadersRaw);
-    if (runtimeHeaders && typeof runtimeHeaders === 'object') {
-      contextBridge.exposeInMainWorld('__OPENCHAMBER_RUNTIME_HEADERS__', runtimeHeaders);
-    }
-  } catch {
-  }
+if (runtimeBootstrap?.requestHeaders && typeof runtimeBootstrap.requestHeaders === 'object' && isLocalPage) {
+  contextBridge.exposeInMainWorld('__OPENCHAMBER_RUNTIME_HEADERS__', runtimeBootstrap.requestHeaders);
 }
 
 // Home directory leaks the OS username — keep local-only. Remote pages
