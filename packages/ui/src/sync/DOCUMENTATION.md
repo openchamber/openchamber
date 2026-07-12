@@ -22,6 +22,13 @@ There are **two distinct session data scopes** in the UI:
 
 These two scopes are intentionally different, but they are no longer equal peers for live UI truth.
 
+### Global SSE fallback transport
+
+The SDK global event stream must use the sync-layer fetch adapter. Exact GET requests to `/global/event` or
+`/api/global/event` are canonicalized to the relative runtime route `/api/global/event`, preserving the query and normalized
+request options. This keeps SSE fallback inside `runtimeFetch` for direct and relayed runtimes; every other SDK request passes
+through unchanged.
+
 ### Why both exist
 
 The directory-scoped sync stores are **not** a complete global view.
