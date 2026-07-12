@@ -103,6 +103,7 @@ const attachMiniHost = (endpoint: FakeEndpoint, hostPrivateKey: CryptoKey, optio
   let batchNegotiated = false;
   const assembler = createFragmentAssembler();
   const httpBodies = new Map<number, Uint8Array[]>();
+  const httpRequests = new Map<number, { method: string; path: string }>();
   const aborted = new Set<number>();
   let sendChain: Promise<void> = Promise.resolve();
   let recvChain: Promise<void> = Promise.resolve();
@@ -123,6 +124,38 @@ const attachMiniHost = (endpoint: FakeEndpoint, hostPrivateKey: CryptoKey, optio
     sendFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, streamId, new Uint8Array(0)));
   };
 
+  const respondHttp = (streamId: number, path: string, body: Uint8Array): void => {
+    if (path === '/health') {
+      respondJson(streamId, 200, { ok: true });
+    } else if (path === '/echo-body') {
+      sendFrame(encodeTunnelFrame(TunnelFrameType.HttpResponse, streamId, encodeJsonPayload({ status: 200, headers: {} })));
+      sendFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, body));
+      sendFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, streamId, new Uint8Array(0)));
+    } else if (path === '/stream') {
+      sendFrame(encodeTunnelFrame(TunnelFrameType.HttpResponse, streamId, encodeJsonPayload({ status: 200, headers: {} })));
+      const emit = (index: number): void => {
+        if (aborted.has(streamId)) return;
+        if (index >= 3) {
+          sendFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, streamId, new Uint8Array(0)));
+          return;
+        }
+        sendFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, textEncoder.encode(`chunk${index};`)));
+        setTimeout(() => emit(index + 1), 10);
+      };
+      emit(0);
+    } else if (path === '/never-ends') {
+      sendFrame(encodeTunnelFrame(TunnelFrameType.HttpResponse, streamId, encodeJsonPayload({ status: 200, headers: {} })));
+      const pump = (): void => {
+        if (aborted.has(streamId) || endpoint.closed) return;
+        sendFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, textEncoder.encode('tick;')));
+        setTimeout(pump, 10);
+      };
+      pump();
+    } else {
+      respondJson(streamId, 404, { error: 'not found' });
+    }
+  };
+
   const handleTunnelFrame = (frame: TunnelFrame): void => {
     options.recordFrame?.(frame);
     if (options.silent) return;
@@ -133,8 +166,10 @@ const attachMiniHost = (endpoint: FakeEndpoint, hostPrivateKey: CryptoKey, optio
     if (frame.frameType === TunnelFrameType.HttpRequest) {
       const req = decodeJsonPayload(frame.payload, isHttpRequestPayload);
       httpBodies.set(frame.streamId, []);
-      (endpoint as FakeEndpoint & { pendingPath?: Map<number, string> }).pendingPath ??= new Map();
-      (endpoint as FakeEndpoint & { pendingPath: Map<number, string> }).pendingPath.set(frame.streamId, req.path);
+      httpRequests.set(frame.streamId, { method: req.method, path: req.path });
+      if (req.method === 'GET' || req.method === 'HEAD') {
+        respondHttp(frame.streamId, req.path, new Uint8Array(0));
+      }
       return;
     }
     if (frame.frameType === TunnelFrameType.HttpBody) {
@@ -146,8 +181,8 @@ const attachMiniHost = (endpoint: FakeEndpoint, hostPrivateKey: CryptoKey, optio
       return;
     }
     if (frame.frameType === TunnelFrameType.StreamEnd) {
-      const paths = (endpoint as FakeEndpoint & { pendingPath?: Map<number, string> }).pendingPath;
-      const path = paths?.get(frame.streamId) ?? '';
+      const request = httpRequests.get(frame.streamId);
+      if (!request || request.method === 'GET' || request.method === 'HEAD') return;
       const bodyChunks = httpBodies.get(frame.streamId) ?? [];
       const total = bodyChunks.reduce((sum, c) => sum + c.length, 0);
       const body = new Uint8Array(total);
@@ -156,36 +191,7 @@ const attachMiniHost = (endpoint: FakeEndpoint, hostPrivateKey: CryptoKey, optio
         body.set(c, off);
         off += c.length;
       }
-      const streamId = frame.streamId;
-      if (path === '/health') {
-        respondJson(streamId, 200, { ok: true });
-      } else if (path === '/echo-body') {
-        sendFrame(encodeTunnelFrame(TunnelFrameType.HttpResponse, streamId, encodeJsonPayload({ status: 200, headers: {} })));
-        sendFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, body));
-        sendFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, streamId, new Uint8Array(0)));
-      } else if (path === '/stream') {
-        sendFrame(encodeTunnelFrame(TunnelFrameType.HttpResponse, streamId, encodeJsonPayload({ status: 200, headers: {} })));
-        const emit = (index: number): void => {
-          if (aborted.has(streamId)) return;
-          if (index >= 3) {
-            sendFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, streamId, new Uint8Array(0)));
-            return;
-          }
-          sendFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, textEncoder.encode(`chunk${index};`)));
-          setTimeout(() => emit(index + 1), 10);
-        };
-        emit(0);
-      } else if (path === '/never-ends') {
-        sendFrame(encodeTunnelFrame(TunnelFrameType.HttpResponse, streamId, encodeJsonPayload({ status: 200, headers: {} })));
-        const pump = (): void => {
-          if (aborted.has(streamId) || endpoint.closed) return;
-          sendFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, textEncoder.encode('tick;')));
-          setTimeout(pump, 10);
-        };
-        pump();
-      } else {
-        respondJson(streamId, 404, { error: 'not found' });
-      }
+      respondHttp(frame.streamId, request.path, body);
       return;
     }
     if (frame.frameType === TunnelFrameType.WsOpen) {
@@ -390,6 +396,61 @@ describe('createRelayTunnelClient', () => {
     expect(b.status).toBe(200);
     expect(await b.text()).toBe(await new Response('{"ok":true}').text());
     expect(await c.text()).toBe('payload-xyz');
+  });
+
+  test('does not send request body frames or StreamEnd for GET and HEAD', async () => {
+    const received: TunnelFrame[] = [];
+    const { client } = await setupClient({ recordFrame: (frame) => received.push(frame) });
+    track(client);
+
+    await client.fetch('/health');
+    await client.fetch('/health', { method: 'HEAD' });
+    await wait(20);
+
+    const requestStreamIds = received
+      .filter((frame) => frame.frameType === TunnelFrameType.HttpRequest)
+      .map((frame) => frame.streamId);
+    expect(requestStreamIds).toHaveLength(2);
+    expect(received.some((frame) => requestStreamIds.includes(frame.streamId) && frame.frameType === TunnelFrameType.HttpBody)).toBe(false);
+    expect(received.some((frame) => requestStreamIds.includes(frame.streamId) && frame.frameType === TunnelFrameType.StreamEnd)).toBe(false);
+  });
+
+  test('sends StreamEnd immediately after POST and DELETE requests without bodies', async () => {
+    const received: TunnelFrame[] = [];
+    const { client } = await setupClient({ recordFrame: (frame) => received.push(frame) });
+    track(client);
+
+    for (const method of ['POST', 'DELETE']) {
+      const response = await client.fetch('/echo-body', { method });
+      expect(await response.text()).toBe('');
+    }
+
+    const requests = received.filter((frame) => frame.frameType === TunnelFrameType.HttpRequest);
+    expect(requests).toHaveLength(2);
+    for (const request of requests) {
+      const streamFrames = received.filter((frame) => frame.streamId === request.streamId);
+      expect(streamFrames.map((frame) => frame.frameType)).toEqual([
+        TunnelFrameType.HttpRequest,
+        TunnelFrameType.StreamEnd,
+      ]);
+    }
+  });
+
+  test('sends streamed request body frames before StreamEnd', async () => {
+    const received: TunnelFrame[] = [];
+    const { client } = await setupClient({ recordFrame: (frame) => received.push(frame) });
+    track(client);
+
+    const response = await client.fetch('/echo-body', { method: 'POST', body: 'streamed-body' });
+    expect(await response.text()).toBe('streamed-body');
+
+    const request = received.find((frame) => frame.frameType === TunnelFrameType.HttpRequest);
+    expect(request).toBeDefined();
+    const streamFrames = received.filter((frame) => frame.streamId === request?.streamId);
+    expect(streamFrames[0]?.frameType).toBe(TunnelFrameType.HttpRequest);
+    expect(streamFrames.at(-1)?.frameType).toBe(TunnelFrameType.StreamEnd);
+    expect(streamFrames.slice(1, -1).every((frame) => frame.frameType === TunnelFrameType.HttpBody)).toBe(true);
+    expect(streamFrames.slice(1, -1).length).toBeGreaterThan(0);
   });
 
   test('streams a response body incrementally', async () => {

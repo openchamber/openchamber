@@ -878,14 +878,18 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         headers: request.headers,
       };
       channel.send(encodeTunnelFrame(TunnelFrameType.HttpRequest, streamId, encodeJsonPayload(head)));
+      if (request.method === 'GET' || request.method === 'HEAD') return;
+      if (request.body === null) {
+        channel.send(encodeTunnelFrame(TunnelFrameType.StreamEnd, streamId, EMPTY_PAYLOAD));
+        return;
+      }
+      const body = request.body;
       void (async () => {
         try {
-          if (request.body) {
-            for await (const chunk of request.body) {
-              if (finished || channel.dead) return;
-              for (const piece of chunkPayload(chunk)) {
-                channel.send(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, piece));
-              }
+          for await (const chunk of body) {
+            if (finished || channel.dead) return;
+            for (const piece of chunkPayload(chunk)) {
+              channel.send(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, piece));
             }
           }
           if (!finished && !channel.dead) {
