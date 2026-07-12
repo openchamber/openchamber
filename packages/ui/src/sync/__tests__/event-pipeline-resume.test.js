@@ -1,30 +1,29 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { createEventPipeline } from '../event-pipeline';
+import { createBrowserGlobalStubScope } from './browser-global-stubs';
 
-const savedDocument = globalThis.document;
-const savedWindow = globalThis.window;
+const browserGlobals = createBrowserGlobalStubScope();
 
 afterEach(() => {
-  globalThis.document = savedDocument;
-  globalThis.window = savedWindow;
+  browserGlobals.restore();
 });
 
 describe('createEventPipeline — system resume reconnect', () => {
   it('reconnects immediately on openchamber:system-resume event', async () => {
     const winListeners = {};
-    globalThis.document = {
+    browserGlobals.install('document', {
       visibilityState: 'visible',
       addEventListener() {},
       removeEventListener() {},
-    };
-    globalThis.window = {
+    });
+    browserGlobals.install('window', {
       location: {
         href: 'http://127.0.0.1:3000/',
         origin: 'http://127.0.0.1:3000',
       },
       addEventListener(event, handler) { winListeners[event] = handler; },
       removeEventListener(event) { delete winListeners[event]; },
-    };
+    });
 
     const disconnectReasons = [];
     let reconnectCount = 0;
