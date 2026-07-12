@@ -48,6 +48,16 @@ const waitFor = async (predicate) => {
   throw new Error('condition not reached');
 };
 
+const openHttpAndWaitCompleted = async (host, sent, streamId, method) => {
+  await host.handleFrame(encodeTunnelFrame(TunnelFrameType.HttpRequest, streamId, encodeJsonPayload({
+    method, path: '/health', query: '', headers: {},
+  })));
+  await waitFor(() => sent.some((raw) => {
+    const frame = decodeTunnelFrame(raw);
+    return frame.streamId === streamId && frame.frameType === TunnelFrameType.StreamEnd;
+  }));
+};
+
 describe('tunnel host policy seams', () => {
   it('strips untrusted forwarding and internal headers before trusted context injection', async () => {
     const origin = await startOrigin();
@@ -191,5 +201,82 @@ describe('tunnel host policy seams', () => {
     }));
     expect(host.streamCount).toBe(1);
     host.close();
+  });
+
+  it('tolerates bounded late DELETE body frames and consumes the tombstone on StreamEnd', async () => {
+    const origin = await startOrigin();
+    const sent = [];
+    const host = createTunnelHost({
+      connectionId: 'late-delete', getLocalPort: () => origin.port, getBufferedAmount: () => 0,
+      sendFrame: (frame) => sent.push(frame), limits: { maxLateHttpBodyFrames: 2, maxLateHttpBodyBytes: 4 },
+    });
+    await openHttpAndWaitCompleted(host, sent, 1, 'DELETE');
+    await host.handleFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, 1, new Uint8Array([1, 2])));
+    await host.handleFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, 1, new Uint8Array([3, 4])));
+    await host.handleFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, 1, new Uint8Array()));
+    await expect(host.handleFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, 1, new Uint8Array()))).rejects.toThrow('unsolicited stream end');
+    host.close();
+  });
+
+  it('tolerates a late GET StreamEnd but rejects a late GET body', async () => {
+    const origin = await startOrigin();
+    const sent = [];
+    const host = createTunnelHost({ connectionId: 'late-get', getLocalPort: () => origin.port, getBufferedAmount: () => 0, sendFrame: (frame) => sent.push(frame) });
+    await openHttpAndWaitCompleted(host, sent, 1, 'GET');
+    await expect(host.handleFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, 1, new Uint8Array([1])))).rejects.toThrow('unsolicited http body');
+    await host.handleFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, 1, new Uint8Array()));
+    host.close();
+  });
+
+  it('keeps unknown IDs and tombstoned ID reuse fatal', async () => {
+    const origin = await startOrigin();
+    const sent = [];
+    const host = createTunnelHost({ connectionId: 'unknown-reuse', getLocalPort: () => origin.port, getBufferedAmount: () => 0, sendFrame: (frame) => sent.push(frame) });
+    await expect(host.handleFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, 99, new Uint8Array()))).rejects.toThrow('unsolicited stream end');
+    await expect(host.handleFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, 99, new Uint8Array([1])))).rejects.toThrow('unsolicited http body');
+    await openHttpAndWaitCompleted(host, sent, 1, 'GET');
+    await expect(host.handleFrame(encodeTunnelFrame(TunnelFrameType.HttpRequest, 1, encodeJsonPayload({ method: 'GET', path: '/health', query: '', headers: {} })))).rejects.toThrow('completed stream id reused');
+    host.close();
+  });
+
+  it('expires and evicts completed HTTP tombstones deterministically', async () => {
+    const origin = await startOrigin();
+    const sent = [];
+    let now = 100;
+    const host = createTunnelHost({
+      connectionId: 'tombstone-bounds', getLocalPort: () => origin.port, getBufferedAmount: () => 0,
+      sendFrame: (frame) => sent.push(frame), limits: { completedHttpStreamTtlMs: 5, maxCompletedHttpStreams: 1, now: () => now },
+    });
+    await openHttpAndWaitCompleted(host, sent, 1, 'GET');
+    await openHttpAndWaitCompleted(host, sent, 2, 'GET');
+    await expect(host.handleFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, 1, new Uint8Array()))).rejects.toThrow('unsolicited stream end');
+    now = 106;
+    await expect(host.handleFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, 2, new Uint8Array()))).rejects.toThrow('unsolicited stream end');
+    host.close();
+  });
+
+  it('rejects late body frames that exceed frame or byte budgets', async () => {
+    const origin = await startOrigin();
+    const sent = [];
+    const host = createTunnelHost({
+      connectionId: 'late-body-budget', getLocalPort: () => origin.port, getBufferedAmount: () => 0,
+      sendFrame: (frame) => sent.push(frame), limits: { maxLateHttpBodyFrames: 1, maxLateHttpBodyBytes: 2 },
+    });
+    await openHttpAndWaitCompleted(host, sent, 1, 'DELETE');
+    await host.handleFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, 1, new Uint8Array([1, 2])));
+    await expect(host.handleFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, 1, new Uint8Array([3])))).rejects.toThrow('late http body budget exceeded');
+    await openHttpAndWaitCompleted(host, sent, 2, 'DELETE');
+    await expect(host.handleFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, 2, new Uint8Array([1, 2, 3])))).rejects.toThrow('late http body budget exceeded');
+    host.close();
+  });
+
+  it('clears completed HTTP tombstones on close', async () => {
+    const origin = await startOrigin();
+    const sent = [];
+    const host = createTunnelHost({ connectionId: 'clear-tombstones', getLocalPort: () => origin.port, getBufferedAmount: () => 0, sendFrame: (frame) => sent.push(frame) });
+    await openHttpAndWaitCompleted(host, sent, 1, 'GET');
+    expect(host.completedHttpStreamCount).toBe(1);
+    host.close();
+    expect(host.completedHttpStreamCount).toBe(0);
   });
 });

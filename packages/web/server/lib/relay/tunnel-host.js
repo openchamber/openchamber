@@ -79,6 +79,10 @@ const STRIPPED_RESPONSE_HEADERS = new Set([
 // relay socket has more than this buffered.
 const BACKPRESSURE_LIMIT_BYTES = 4 * 1024 * 1024;
 const BACKPRESSURE_POLL_MS = 20;
+const COMPLETED_HTTP_STREAM_TTL_MS = 5_000;
+const MAX_COMPLETED_HTTP_STREAMS = 256;
+const MAX_LATE_HTTP_BODY_FRAMES = 32;
+const MAX_LATE_HTTP_BODY_BYTES = 1024 * 1024;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -109,7 +113,7 @@ const isWsClosePayload = (parsed) => Boolean(parsed && typeof parsed === 'object
  *   onResponse?: (response: { kind: 'http', streamId: number, generation: number, status: number }) => void | Promise<void>,
  *   onLimitExceeded?: (reason: string) => void,
  *   onStreamClosed?: (event: { streamId: number, generation: number, kind: 'http' | 'ws', reason: string }) => void,
- *   limits?: { maxStreams?: number, maxWebSockets?: number, maxIncompleteFragments?: number, maxIncompleteFragmentBytes?: number, getMaxIncompleteFragmentBytes?: () => number, maxStreamOpens?: number, streamOpenWindowMs?: number },
+ *   limits?: { maxStreams?: number, maxWebSockets?: number, maxIncompleteFragments?: number, maxIncompleteFragmentBytes?: number, getMaxIncompleteFragmentBytes?: () => number, maxStreamOpens?: number, streamOpenWindowMs?: number, completedHttpStreamTtlMs?: number, maxCompletedHttpStreams?: number, maxLateHttpBodyFrames?: number, maxLateHttpBodyBytes?: number, now?: () => number },
  *   failClosedPolicy?: boolean,
  *   onProtocolFailure?: () => void,
  * }} deps
@@ -133,9 +137,52 @@ export const createTunnelHost = ({
   const streams = new Map();
   const assembler = createFragmentAssembler();
   const incompleteFragments = new Set();
+  /** @type {Map<number, { expiresAt: number, bodyCapable: boolean, lateBodyFrames: number, lateBodyBytes: number }>} */
+  const completedHttpStreams = new Map();
   let closed = false;
   const streamOpenTimes = [];
   let nextGeneration = 1;
+
+  const now = limits.now ?? Date.now;
+  const completedHttpStreamTtlMs = Number.isFinite(limits.completedHttpStreamTtlMs)
+    ? Math.max(0, limits.completedHttpStreamTtlMs)
+    : COMPLETED_HTTP_STREAM_TTL_MS;
+  const maxCompletedHttpStreams = Number.isFinite(limits.maxCompletedHttpStreams)
+    ? Math.max(0, Math.floor(limits.maxCompletedHttpStreams))
+    : MAX_COMPLETED_HTTP_STREAMS;
+  const maxLateHttpBodyFrames = Number.isFinite(limits.maxLateHttpBodyFrames)
+    ? Math.max(0, Math.floor(limits.maxLateHttpBodyFrames))
+    : MAX_LATE_HTTP_BODY_FRAMES;
+  const maxLateHttpBodyBytes = Number.isFinite(limits.maxLateHttpBodyBytes)
+    ? Math.max(0, limits.maxLateHttpBodyBytes)
+    : MAX_LATE_HTTP_BODY_BYTES;
+
+  const pruneCompletedHttpStreams = () => {
+    const currentTime = now();
+    for (const [streamId, tombstone] of completedHttpStreams) {
+      if (tombstone.expiresAt > currentTime) continue;
+      completedHttpStreams.delete(streamId);
+    }
+  };
+
+  const recordCompletedHttpStream = (streamId, stream) => {
+    pruneCompletedHttpStreams();
+    if (maxCompletedHttpStreams === 0 || completedHttpStreamTtlMs === 0) return;
+    while (completedHttpStreams.size >= maxCompletedHttpStreams) {
+      completedHttpStreams.delete(completedHttpStreams.keys().next().value);
+    }
+    completedHttpStreams.set(streamId, {
+      expiresAt: now() + completedHttpStreamTtlMs,
+      bodyCapable: !stream.noBody,
+      lateBodyFrames: 0,
+      lateBodyBytes: 0,
+    });
+  };
+
+  const getCompletedHttpStream = (streamId) => {
+    pruneCompletedHttpStreams();
+    return completedHttpStreams.get(streamId);
+  };
 
   const send = async (frame) => {
     if (closed) return;
@@ -151,6 +198,7 @@ export const createTunnelHost = ({
 
   const dropStream = (streamId, reason = 'completed') => {
     const stream = streams.get(streamId);
+    if (reason === 'completed' && stream?.kind === 'http') recordCompletedHttpStream(streamId, stream);
     streams.delete(streamId);
     assembler.dropStream(streamId);
     for (const key of incompleteFragments) {
@@ -327,6 +375,7 @@ export const createTunnelHost = ({
   };
 
   const handleHttpRequest = (streamId, payload) => {
+    if (getCompletedHttpStream(streamId)) throw new Error('completed stream id reused');
     if (streams.has(streamId)) {
       abortLocalStream(streamId, 'duplicate stream id');
       void sendAbort(streamId, 'duplicate stream id');
@@ -358,7 +407,19 @@ export const createTunnelHost = ({
 
   const handleHttpBody = (streamId, payload) => {
     const stream = streams.get(streamId);
-    if (!stream || stream.kind !== 'http' || stream.noBody) throw new Error('unsolicited http body');
+    if (!stream) {
+      const tombstone = getCompletedHttpStream(streamId);
+      if (!tombstone?.bodyCapable) throw new Error('unsolicited http body');
+      const nextFrames = tombstone.lateBodyFrames + 1;
+      const nextBytes = tombstone.lateBodyBytes + payload.byteLength;
+      if (nextFrames > maxLateHttpBodyFrames || nextBytes > maxLateHttpBodyBytes) {
+        throw new Error('late http body budget exceeded');
+      }
+      tombstone.lateBodyFrames = nextFrames;
+      tombstone.lateBodyBytes = nextBytes;
+      return;
+    }
+    if (stream.kind !== 'http' || stream.noBody) throw new Error('unsolicited http body');
     // The body controller attaches synchronously in runHttpStream before any
     // await, so by the time body frames arrive it is set for body-carrying
     // methods; drop stray body bytes otherwise.
@@ -371,7 +432,12 @@ export const createTunnelHost = ({
 
   const handleStreamEnd = (streamId) => {
     const stream = streams.get(streamId);
-    if (!stream || stream.kind !== 'http') throw new Error('unsolicited stream end');
+    if (!stream) {
+      if (!getCompletedHttpStream(streamId)) throw new Error('unsolicited stream end');
+      completedHttpStreams.delete(streamId);
+      return;
+    }
+    if (stream.kind !== 'http') throw new Error('unsolicited stream end');
     try {
       stream.body?.close();
     } catch {
@@ -385,6 +451,7 @@ export const createTunnelHost = ({
   // -------------------------------------------------------------------------
 
   const handleWsOpen = async (streamId, payload) => {
+    if (getCompletedHttpStream(streamId)) throw new Error('completed stream id reused');
     if (streams.has(streamId)) {
       abortLocalStream(streamId, 'duplicate stream id');
       void sendAbort(streamId, 'duplicate stream id');
@@ -598,6 +665,7 @@ export const createTunnelHost = ({
       abortLocalStream(streamId, 'connection closed');
     }
     streams.clear();
+    completedHttpStreams.clear();
     incompleteFragments.clear();
     assembler.clear();
   };
@@ -607,6 +675,10 @@ export const createTunnelHost = ({
     close,
     get streamCount() {
       return streams.size;
+    },
+    get completedHttpStreamCount() {
+      pruneCompletedHttpStreams();
+      return completedHttpStreams.size;
     },
   };
 };

@@ -58,6 +58,18 @@ terminal and drops the affected stream. Direct E2EE supplies a live fragment-byt
 budget that changes on authenticated promotion and enables
 terminal fail-closed policy; hosted-relay stream-local rejection remains compatible.
 
+### Completed HTTP stream tombstones
+
+When a loopback HTTP response completes before the client finishes uploading its
+request body, the host retains a bounded tombstone for the completed stream ID.
+The default lifetime is 5 seconds, with at most 256 tombstones per outer session;
+expired entries are pruned and the oldest entry is evicted when the capacity is
+full. A body-capable tombstone accepts at most 32 expected late body frames totaling
+at most 1 MiB, and a matching `StreamEnd` consumes it. Body frames for bodyless
+requests, frames beyond either bound, unknown IDs, and reuse of a tombstoned stream
+ID are fatal protocol errors. These bounds tolerate only expected in-flight late
+frames and do not permit a completed stream to be reopened or used indefinitely.
+
 ## Authentication model
 
 - The tunnel is **transport only**. The OpenChamber server still authenticates every tunneled request exactly as it authenticates a direct remote client. The relay path grants reachability, not authorization.
